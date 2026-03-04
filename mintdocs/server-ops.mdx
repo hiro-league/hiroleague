@@ -1,3 +1,83 @@
 ---
 title: "Server Ops"
+description: "Start, stop, and inspect workspace server processes."
+icon: "activity"
 ---
+
+Use these commands during day-to-day runtime operations.
+
+## Start
+
+```bash
+phbcli start --workspace <name>
+```
+
+Starts the workspace server in background mode by default.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--workspace`, `-W` | Target workspace name. |
+| `--foreground`, `-f` | Run in foreground with live logs. Use `Ctrl+C` to stop. |
+
+### Examples
+
+```bash
+# Start in background
+phbcli start --workspace home
+
+# Start in foreground for troubleshooting
+phbcli start --workspace home --foreground
+```
+
+## Stop
+
+```bash
+phbcli stop --workspace <name>
+```
+
+Stops the workspace server. If the workspace has a managed local gateway, that gateway is stopped too.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--workspace`, `-W` | Target workspace name. |
+
+## Status
+
+```bash
+phbcli status [--workspace <name>]
+```
+
+Shows runtime state for a workspace:
+
+- server running state and PID
+- gateway connection state
+- last connected timestamp
+- gateway URL
+- device ID
+- HTTP status URL
+- managed local gateway state (when enabled)
+
+If you do not pass `--workspace`, status uses default behavior:
+
+- if only one workspace exists, it shows that workspace
+- if multiple workspaces exist, it prints a summary for all
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--workspace`, `-W` | Optional workspace name. |
+
+### Examples
+
+```bash
+# Show status for default/all behavior
+phbcli status
+
+# Show one specific workspace
+phbcli status --workspace home
+```

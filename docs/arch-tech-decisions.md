@@ -26,6 +26,18 @@ Markdown Table:
 | VPN        | Easy to set up | Requires a new phone number |
 | Relay         | Easy to set up | Requires a new phone number |
 
+# Online Documentation
+
+- Comparing Mintlify, Docusaurus, MKDocs, unmint, pDoc.
+- We could have used Github Wiki Feature...
+https://chatgpt.com/share/69a855f4-f80c-800b-9cfa-b6567bbe9330
+
+- used by OpenClaw (Thanks OpenClaw for the hint!)
+- Mintlify has the best UI and features.
+- It has a Hobby Version, which is generous.
+- Its configuration to sync with Github was not very smooth.
+- It cannot change the main url it created at singup!
+
 
 
 # Programming Language

@@ -8,3 +8,9 @@ https://docs.astral.sh/uv/getting-started/installation/
 
 Install Flutter
 https://docs.flutter.dev/install/quick
+
+
+# Install Mintlify (Optional)
+
+npm i -g mint
+

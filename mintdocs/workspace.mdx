@@ -1,3 +1,125 @@
 ---
 title: "Workspace"
+description: "Create, inspect, and manage isolated workspace instances for phbcli."
+icon: "folder"
 ---
+
+A workspace is an isolated desktop-server instance with its own config, keys, state, channels, logs, and process IDs.
+
+Use workspace commands to create, inspect, and remove these instances.
+
+## List workspaces
+
+```bash
+phbcli workspace list
+```
+
+Shows all configured workspaces, their status, ports, and paths.
+
+- `*` marks the default workspace.
+- `Status` shows whether the workspace server is running.
+- `Gateway` shows either a managed local gateway port or `external`.
+
+## Create a workspace
+
+```bash
+phbcli workspace create <name>
+```
+
+Creates a new workspace and assigns ports from the managed port-slot range.
+
+```bash
+phbcli workspace create dev
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--path`, `-p` | Create the workspace at a custom folder path. |
+| `--with-gateway` | Enable managed local gateway lifecycle for this workspace. |
+| `--set-default` | Set this workspace as the default immediately. |
+
+### Examples
+
+```bash
+# Create with a local managed gateway
+phbcli workspace create home --with-gateway
+
+# Create in a custom folder
+phbcli workspace create work -p "D:\\PHB\\work"
+
+# Create and set default
+phbcli workspace create lab --set-default
+```
+
+<Note>
+  After creating a workspace, run `phbcli setup --workspace <name>` to initialize its server config.
+</Note>
+
+## Show workspace details
+
+```bash
+phbcli workspace show [name]
+```
+
+Displays detailed status and configuration for one workspace:
+
+- Path
+- Whether it is default
+- Server running state and PID
+- HTTP, plugin, and gateway ports
+- Local gateway running state (if managed)
+- Port slot number
+
+If `name` is omitted, the command shows the default workspace.
+
+## Set the default workspace
+
+```bash
+phbcli workspace set-default <name>
+```
+
+Sets which workspace is used when a command runs without `--workspace`.
+
+```bash
+phbcli workspace set-default home
+```
+
+## Remove a workspace
+
+```bash
+phbcli workspace remove <name>
+```
+
+Removes the workspace from the registry.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--purge` | Also delete the workspace folder from disk. |
+| `--yes`, `-y` | Skip the confirmation prompt. |
+
+### Examples
+
+```bash
+# Remove from registry only
+phbcli workspace remove dev
+
+# Remove and delete all files
+phbcli workspace remove dev --purge
+```
+
+<Warning>
+  `--purge` permanently deletes the workspace folder, including config, keys, logs, and channel settings.
+</Warning>
+
+## Workflow example
+
+```bash
+phbcli workspace create home --with-gateway --set-default
+phbcli setup --workspace home
+phbcli start --workspace home
+phbcli workspace show home
+```

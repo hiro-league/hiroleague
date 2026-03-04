@@ -16,8 +16,11 @@
           {
             "group": "CLI",
             "pages": [
+              "setup-and-uninstall",
               "server-ops",
-              "workspace"
+              "workspace",
+              "devices",
+              "channel"
             ]
           }
         ]
