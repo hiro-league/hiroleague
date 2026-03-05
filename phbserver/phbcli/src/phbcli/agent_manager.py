@@ -74,7 +74,17 @@ class AgentManager:
         from langchain.chat_models import init_chat_model
         from langgraph.checkpoint.memory import InMemorySaver
 
-        from .tools import DeviceAddTool, DeviceListTool, DeviceRevokeTool
+        from .tools import (
+            ChannelDisableTool,
+            ChannelEnableTool,
+            ChannelInstallTool,
+            ChannelListTool,
+            ChannelRemoveTool,
+            ChannelSetupTool,
+            DeviceAddTool,
+            DeviceListTool,
+            DeviceRevokeTool,
+        )
         from .tools.langchain_adapter import to_langchain_list
 
         config = load_agent_config(self._workspace_path)
@@ -97,6 +107,12 @@ class AgentManager:
             DeviceAddTool(),
             DeviceListTool(),
             DeviceRevokeTool(),
+            ChannelListTool(),
+            ChannelInstallTool(),
+            ChannelSetupTool(),
+            ChannelEnableTool(),
+            ChannelDisableTool(),
+            ChannelRemoveTool(),
         ])
 
         return create_agent(

@@ -1,9 +1,13 @@
-"""Channel subcommands for plugin lifecycle/config management."""
+"""Channel subcommands — thin CLI layer over channel tools.
+
+'channel install' and 'channel status' are CLI-only (subprocess / HTTP query)
+and are kept here as direct implementations.  All other commands delegate to
+the corresponding Tool class in tools/channel.py.
+"""
 
 from __future__ import annotations
 
 import json
-import subprocess
 import urllib.request
 from pathlib import Path
 from typing import Optional
@@ -12,17 +16,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ..channel_config import (
-    ChannelConfig,
-    delete_channel_config,
-    find_workspace_root,
-    list_channel_configs,
-    load_channel_config,
-    save_channel_config,
-    workspace_channels_dir,
-)
-from ..config import load_config, master_key_path
+from ..channel_config import load_channel_config, workspace_channels_dir
 from ..services.bootstrap import MANDATORY_CHANNEL
+from ..tools.channel import (
+    ChannelDisableTool,
+    ChannelEnableTool,
+    ChannelInstallTool,
+    ChannelListTool,
+    ChannelRemoveTool,
+    ChannelSetupTool,
+)
 from ..workspace import WorkspaceError, resolve_workspace
 
 
@@ -36,9 +39,13 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List all configured channel plugins."""
-        workspace_path = _resolve_workspace_path(workspace, console)
-        configs = list_channel_configs(workspace_path)
-        if not configs:
+        try:
+            result = ChannelListTool().execute(workspace=workspace)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+
+        if not result.channels:
             console.print(
                 "[dim]No channels configured. "
                 "Run [bold]phbcli channel setup <name>[/bold] to add one.[/dim]"
@@ -51,11 +58,10 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         table.add_column("Launch command")
         table.add_column("Config keys")
 
-        for cfg in configs:
-            enabled_str = "[green]yes[/green]" if cfg.enabled else "[red]no[/red]"
-            cmd_str = " ".join(cfg.effective_command())
-            keys_str = ", ".join(cfg.config.keys()) if cfg.config else "[dim]—[/dim]"
-            table.add_row(cfg.name, enabled_str, cmd_str, keys_str)
+        for ch in result.channels:
+            enabled_str = "[green]yes[/green]" if ch["enabled"] else "[red]no[/red]"
+            keys_str = ", ".join(ch["config_keys"]) if ch["config_keys"] else "[dim]—[/dim]"
+            table.add_row(ch["name"], enabled_str, ch["command"], keys_str)
 
         console.print(table)
 
@@ -72,21 +78,21 @@ def register(channel_app: typer.Typer, console: Console) -> None:
     ) -> None:
         """Install a channel plugin via uv tool install."""
         pkg = package or f"phb-channel-{name}"
-        cmd = ["uv", "tool", "install"]
-        if editable:
-            cmd.append("--editable")
-        cmd.append(pkg)
-
         console.print(f"Installing [bold]{pkg}[/bold]…")
-        result = subprocess.run(cmd, capture_output=False)
-        if result.returncode == 0:
-            console.print(f"[green]Installed {pkg}.[/green]")
-            console.print(
-                f"  Next: [bold]phbcli channel setup {name}[/bold] to configure it."
+        try:
+            result = ChannelInstallTool().execute(
+                channel_name=name,
+                package=package,
+                editable=editable,
             )
-        else:
-            console.print(f"[red]Install failed (exit {result.returncode}).[/red]")
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
+
+        if result.output:
+            console.print(result.output)
+        console.print(f"[green]Installed {result.package}.[/green]")
+        console.print(f"  Next: [bold]phbcli channel setup {name}[/bold] to configure it.")
 
     @channel_app.command("setup")
     def channel_setup(
@@ -107,58 +113,37 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         workspace_path = _resolve_workspace_path(workspace, console)
         existing = load_channel_config(workspace_path, name)
 
-        if name == MANDATORY_CHANNEL and not enable:
-            console.print("[yellow]Ignoring --no-enable: 'devices' is mandatory.[/yellow]")
-            enable = True
-
         if command is None and existing and existing.command:
             default_cmd = " ".join(existing.command)
         else:
             default_cmd = command or f"phb-channel-{name}"
 
-        cmd_str: str = typer.prompt(
+        # Interactive prompt — CLI concern only; tool receives the resolved value.
+        resolved_command: str = typer.prompt(
             f"Command to start the '{name}' plugin",
             default=default_cmd,
         )
-        cmd_parts = cmd_str.split()
 
-        uv_workspace = find_workspace_root()
-        workspace_dir = str(uv_workspace) if uv_workspace else (
-            existing.workspace_dir if existing else ""
-        )
-
-        channel_data = existing.config if existing else {}
-        if name == MANDATORY_CHANNEL:
-            current = load_config(workspace_path)
-            channel_data = {
-                **channel_data,
-                "gateway_url": current.gateway_url,
-                "device_id": current.device_id,
-                "master_key_path": str(master_key_path(workspace_path, current)),
-                "ping_interval": channel_data.get("ping_interval", 30),
-            }
-
-        cfg = ChannelConfig(
-            name=name,
-            enabled=enable,
-            command=cmd_parts,
-            config=channel_data,
-            workspace_dir=workspace_dir,
-        )
-        save_channel_config(workspace_path, cfg)
+        try:
+            result = ChannelSetupTool().execute(
+                channel_name=name,
+                command=resolved_command,
+                enabled=enable,
+                workspace=workspace,
+            )
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
 
         channels_dir = workspace_channels_dir(workspace_path)
         console.print(
-            f"[green]Channel '{name}' configured.[/green] "
-            f"({'[green]enabled[/green]' if enable else '[yellow]disabled[/yellow]'})"
+            f"[green]Channel '{result.name}' configured.[/green] "
+            f"({'[green]enabled[/green]' if result.enabled else '[yellow]disabled[/yellow]'})"
         )
-        console.print(f"  command  : [bold]{cmd_str}[/bold]")
-        if workspace_dir:
-            console.print(f"  workspace: [dim]{workspace_dir}[/dim]")
-            console.print(
-                f"  launcher : [dim]uv run --directory {workspace_dir} {cmd_str}[/dim]"
-            )
-        console.print(f"  config   : {channels_dir / (name + '.json')}")
+        console.print(f"  command  : [bold]{result.command}[/bold]")
+        if result.workspace_dir:
+            console.print(f"  workspace: [dim]{result.workspace_dir}[/dim]")
+        console.print(f"  config   : {channels_dir / (result.name + '.json')}")
         console.print(
             "\nRestart phbcli to activate: [bold]phbcli stop[/bold] then [bold]phbcli start[/bold]"
         )
@@ -171,17 +156,12 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Enable a configured channel plugin."""
-        workspace_path = _resolve_workspace_path(workspace, console)
-        cfg = load_channel_config(workspace_path, name)
-        if cfg is None:
-            console.print(
-                f"[red]Channel '{name}' not configured. "
-                f"Run [bold]phbcli channel setup {name}[/bold] first.[/red]"
-            )
+        try:
+            result = ChannelEnableTool().execute(channel_name=name, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
-        cfg.enabled = True
-        save_channel_config(workspace_path, cfg)
-        console.print(f"[green]Channel '{name}' enabled.[/green]")
+        console.print(f"[green]Channel '{result.name}' enabled.[/green]")
 
     @channel_app.command("disable")
     def channel_disable(
@@ -191,17 +171,12 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Disable a channel plugin without removing its configuration."""
-        workspace_path = _resolve_workspace_path(workspace, console)
-        if name == MANDATORY_CHANNEL:
-            console.print("[red]The 'devices' channel is mandatory and cannot be disabled.[/red]")
+        try:
+            result = ChannelDisableTool().execute(channel_name=name, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
-        cfg = load_channel_config(workspace_path, name)
-        if cfg is None:
-            console.print(f"[yellow]Channel '{name}' not configured.[/yellow]")
-            raise typer.Exit(1)
-        cfg.enabled = False
-        save_channel_config(workspace_path, cfg)
-        console.print(f"[yellow]Channel '{name}' disabled.[/yellow]")
+        console.print(f"[yellow]Channel '{result.name}' disabled.[/yellow]")
 
     @channel_app.command("remove")
     def channel_remove(
@@ -212,19 +187,18 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     ) -> None:
         """Remove a channel plugin's configuration."""
-        workspace_path = _resolve_workspace_path(workspace, console)
-        if name == MANDATORY_CHANNEL:
-            console.print("[red]The 'devices' channel is mandatory and cannot be removed.[/red]")
-            raise typer.Exit(1)
         if not yes:
-            typer.confirm(
-                f"Remove configuration for channel '{name}'?", abort=True
-            )
-        removed = delete_channel_config(workspace_path, name)
-        if removed:
-            console.print(f"[green]Channel '{name}' configuration removed.[/green]")
+            typer.confirm(f"Remove configuration for channel '{name}'?", abort=True)
+        try:
+            result = ChannelRemoveTool().execute(channel_name=name, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+
+        if result.removed:
+            console.print(f"[green]Channel '{result.name}' configuration removed.[/green]")
         else:
-            console.print(f"[yellow]Channel '{name}' was not configured.[/yellow]")
+            console.print(f"[yellow]Channel '{result.name}' was not configured.[/yellow]")
 
     @channel_app.command("status")
     def channel_status(
@@ -234,6 +208,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
     ) -> None:
         """Show connected channel plugins (queries the running server)."""
         workspace_path = _resolve_workspace_path(workspace, console)
+        from ..config import load_config
         config = load_config(workspace_path)
         url = f"http://{config.http_host}:{config.http_port}/channels"
         try:

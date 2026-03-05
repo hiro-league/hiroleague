@@ -78,7 +78,17 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None) ->
     from phbcli.communication_manager import CommunicationManager
     from phbcli.plugin_manager import PluginManager
     from phbcli.server import run_http_server, set_channel_info_provider, set_tool_registry, set_workspace_path
-    from phbcli.tools import DeviceAddTool, DeviceListTool, DeviceRevokeTool
+    from phbcli.tools import (
+        ChannelDisableTool,
+        ChannelEnableTool,
+        ChannelInstallTool,
+        ChannelListTool,
+        ChannelRemoveTool,
+        ChannelSetupTool,
+        DeviceAddTool,
+        DeviceListTool,
+        DeviceRevokeTool,
+    )
     from phbcli.tools.registry import ToolRegistry
 
     config = load_config(workspace_path)
@@ -98,6 +108,12 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None) ->
     tool_registry.register(DeviceAddTool())
     tool_registry.register(DeviceListTool())
     tool_registry.register(DeviceRevokeTool())
+    tool_registry.register(ChannelListTool())
+    tool_registry.register(ChannelInstallTool())
+    tool_registry.register(ChannelSetupTool())
+    tool_registry.register(ChannelEnableTool())
+    tool_registry.register(ChannelDisableTool())
+    tool_registry.register(ChannelRemoveTool())
     set_tool_registry(tool_registry)
 
     plugin_manager: PluginManager | None = None
