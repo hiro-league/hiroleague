@@ -116,11 +116,7 @@ The CLI runs as a separate process from the server. It calls tools directly by i
 The agent (`agent_manager.py`) uses LangChain. The `langchain_adapter.py` module converts any `Tool` into a `StructuredTool` automatically, using the `params` dict to build the Pydantic schema:
 
 ```python
-tools = to_langchain_list([
-    DeviceAddTool(),
-    DeviceListTool(),
-    DeviceRevokeTool(),
-])
+tools = to_langchain_list(all_tools())
 ```
 
 The adapter reads `tool.params` to generate the LLM-facing schema, and wraps `tool.execute()` as the function LangChain calls when the model selects the tool. You never write a separate LangChain tool definition — the `Tool` class is the definition.
@@ -139,9 +135,7 @@ At server startup (`_server_process.py`), the registry is built and injected int
 
 ```python
 tool_registry = ToolRegistry()
-tool_registry.register(DeviceAddTool())
-tool_registry.register(DeviceListTool())
-tool_registry.register(DeviceRevokeTool())
+tool_registry.register_all(all_tools())
 set_tool_registry(tool_registry)
 ```
 
@@ -249,38 +243,28 @@ Rules for `execute()`:
 - Return a dataclass result
 - Raise a typed exception on failure (e.g. `WorkspaceError`, `ValueError`)
 
-### Step 2 — Export from `tools/__init__.py`
+### Step 2 — Export from `tools/__init__.py` and add to `all_tools()`
+
+Add the import at the top of `tools/__init__.py`:
 
 ```python
 from .channel import ChannelAddTool, ChannelListTool
 ```
 
-### Step 3 — Register in `_server_process.py`
+Then add instances to the `all_tools()` list:
 
 ```python
-from phbcli.tools import ChannelAddTool, ChannelListTool
-
-tool_registry.register(ChannelAddTool())
-tool_registry.register(ChannelListTool())
+def all_tools() -> list[Tool]:
+    return [
+        ...
+        ChannelAddTool(),    # ← add here
+        ChannelListTool(),
+    ]
 ```
 
-This makes the tool available via `POST /invoke` and `GET /tools` immediately. No other HTTP changes needed.
+This single change automatically makes the tool available to both the HTTP registry and the AI agent. No other registration or adapter code needed.
 
-### Step 4 — Add to the agent
-
-In `agent_manager.py`, add the tool to the list passed to `to_langchain_list`:
-
-```python
-tools = to_langchain_list([
-    DeviceAddTool(),
-    DeviceListTool(),
-    DeviceRevokeTool(),
-    ChannelAddTool(),    # ← add here
-    ChannelListTool(),
-])
-```
-
-The LangChain schema is generated automatically from `params`. No additional adapter code needed.
+### Step 3 — Add the CLI command
 
 ### Step 5 — Add the CLI command
 
@@ -309,12 +293,10 @@ The CLI command contains only: argument parsing, `execute()` call, result render
 | Step | File | What you add |
 |---|---|---|
 | 1 | `tools/<domain>.py` | Tool class + result dataclass |
-| 2 | `tools/__init__.py` | Export the new class |
-| 3 | `_server_process.py` | `tool_registry.register(MyTool())` |
-| 4 | `agent_manager.py` | Add to `to_langchain_list([...])` |
-| 5 | `commands/<domain>.py` | Thin CLI wrapper |
+| 2 | `tools/__init__.py` | Export the class + add instance to `all_tools()` |
+| 3 | `commands/<domain>.py` | Thin CLI wrapper |
 
-Steps 3 and 4 are one line each. Step 5 is rendering only — no logic.
+Step 2 is the only registration step — `all_tools()` feeds both the HTTP registry and the AI agent automatically. Step 3 is rendering only — no logic.
 
 ---
 
@@ -328,4 +310,4 @@ Steps 3 and 4 are one line each. Step 5 is rendering only — no logic.
 | Easy discoverability | `GET /tools` exposes the full schema dynamically. Web UI never hardcodes tool names or params. |
 | Offline CLI | CLI imports tools directly — no server required for cold operations. |
 | In-process agent | Agent calls `execute()` directly with no HTTP boundary or serialisation overhead. |
-| Incremental growth | Adding a tool is 5 mechanical steps. No new HTTP routes, no new adapter code, no new agent plumbing. |
+| Incremental growth | Adding a tool is 3 mechanical steps. No new HTTP routes, no new adapter code, no new agent plumbing. |

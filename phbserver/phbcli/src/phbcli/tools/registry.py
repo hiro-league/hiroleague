@@ -71,6 +71,11 @@ class ToolRegistry:
         """Add a tool instance to the registry."""
         self._tools[tool.name] = tool
 
+    def register_all(self, tools: list[Tool]) -> None:
+        """Add multiple tool instances to the registry."""
+        for tool in tools:
+            self.register(tool)
+
     def names(self) -> list[str]:
         """Return all registered tool names."""
         return list(self._tools.keys())

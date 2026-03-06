@@ -78,28 +78,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None) ->
     from phbcli.runtime.communication_manager import CommunicationManager
     from phbcli.runtime.plugin_manager import PluginManager
     from phbcli.runtime.http_server import run_http_server, set_channel_info_provider, set_tool_registry, set_workspace_path
-    from phbcli.tools import (
-        ChannelDisableTool,
-        ChannelEnableTool,
-        ChannelInstallTool,
-        ChannelListTool,
-        ChannelRemoveTool,
-        ChannelSetupTool,
-        DeviceAddTool,
-        DeviceListTool,
-        DeviceRevokeTool,
-        SetupTool,
-        StartTool,
-        StatusTool,
-        StopTool,
-        TeardownTool,
-        UninstallTool,
-        WorkspaceCreateTool,
-        WorkspaceListTool,
-        WorkspaceRemoveTool,
-        WorkspaceSetDefaultTool,
-        WorkspaceShowTool,
-    )
+    from phbcli.tools import all_tools
     from phbcli.tools.registry import ToolRegistry
 
     config = load_config(workspace_path)
@@ -116,26 +95,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None) ->
     set_workspace_path(workspace_path)
 
     tool_registry = ToolRegistry()
-    tool_registry.register(DeviceAddTool())
-    tool_registry.register(DeviceListTool())
-    tool_registry.register(DeviceRevokeTool())
-    tool_registry.register(ChannelListTool())
-    tool_registry.register(ChannelInstallTool())
-    tool_registry.register(ChannelSetupTool())
-    tool_registry.register(ChannelEnableTool())
-    tool_registry.register(ChannelDisableTool())
-    tool_registry.register(ChannelRemoveTool())
-    tool_registry.register(WorkspaceListTool())
-    tool_registry.register(WorkspaceCreateTool())
-    tool_registry.register(WorkspaceRemoveTool())
-    tool_registry.register(WorkspaceSetDefaultTool())
-    tool_registry.register(WorkspaceShowTool())
-    tool_registry.register(SetupTool())
-    tool_registry.register(StartTool())
-    tool_registry.register(StopTool())
-    tool_registry.register(StatusTool())
-    tool_registry.register(TeardownTool())
-    tool_registry.register(UninstallTool())
+    tool_registry.register_all(all_tools())
     set_tool_registry(tool_registry)
 
     plugin_manager: PluginManager | None = None

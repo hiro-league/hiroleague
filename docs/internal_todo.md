@@ -6,7 +6,8 @@
 - Move all CLI commands to new tool design
 
 # Refactoring
-- Refactor phbcli into organized folders - runtime/tools/commands/services/domain
+
+# Cleanup
 
 # Add Features
 - security policy
@@ -72,4 +73,5 @@
 - introduce workspace concept for better organization of config files.
 - introduce gateway instances concept for better organization of gateway config files.
 - (tool-architecture) separate cli from functionality, and allow an api for the website.
+- - Refactor phbcli into organized folders - runtime/tools/commands/services/domain
  

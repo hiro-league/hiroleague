@@ -1,3 +1,4 @@
+from .base import Tool
 from .channel import (
     ChannelDisableTool,
     ChannelEnableTool,
@@ -23,25 +24,28 @@ from .workspace import (
     WorkspaceShowTool,
 )
 
-__all__ = [
-    "DeviceAddTool",
-    "DeviceListTool",
-    "DeviceRevokeTool",
-    "ChannelListTool",
-    "ChannelInstallTool",
-    "ChannelSetupTool",
-    "ChannelEnableTool",
-    "ChannelDisableTool",
-    "ChannelRemoveTool",
-    "WorkspaceListTool",
-    "WorkspaceCreateTool",
-    "WorkspaceRemoveTool",
-    "WorkspaceSetDefaultTool",
-    "WorkspaceShowTool",
-    "SetupTool",
-    "StartTool",
-    "StopTool",
-    "StatusTool",
-    "TeardownTool",
-    "UninstallTool",
-]
+
+def all_tools() -> list[Tool]:
+    """Return one fresh instance of every registered tool."""
+    return [
+        DeviceAddTool(),
+        DeviceListTool(),
+        DeviceRevokeTool(),
+        ChannelListTool(),
+        ChannelInstallTool(),
+        ChannelSetupTool(),
+        ChannelEnableTool(),
+        ChannelDisableTool(),
+        ChannelRemoveTool(),
+        WorkspaceListTool(),
+        WorkspaceCreateTool(),
+        WorkspaceRemoveTool(),
+        WorkspaceSetDefaultTool(),
+        WorkspaceShowTool(),
+        SetupTool(),
+        StartTool(),
+        StopTool(),
+        StatusTool(),
+        TeardownTool(),
+        UninstallTool(),
+    ]
