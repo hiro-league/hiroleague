@@ -7,7 +7,7 @@
         "request": "launch",
         "python": "${workspaceFolder}\\phbserver\\.venv\\Scripts\\python.exe",
         "module": "phbgateway.main",
-        "args": ["--desktop-pubkey", "MgHSUe5hqc9/cgCCZyh+JZ+SzrC7fPjQt0cd8CKtaOY="],
+        "args": ["-f"],
         "cwd": "${workspaceFolder}\\phbserver",
         "env": {
           "PYTHONPATH": "${workspaceFolder}\\phbserver\\gateway\\src;${workspaceFolder}\\phbserver\\phb-channel-sdk\\src"
@@ -30,10 +30,16 @@
         "justMyCode": false
       },
       {
-        "name": "Terminal Flutter device_app",
+        "name": "Terminal Flutter device_apps (web)",
         "type": "node-terminal",
         "request": "launch",
         "command": "cmd /k \"cd /d ${workspaceFolder}\\device_apps && flutter run -d chrome --web-port 63000\""
+      },
+      {
+        "name": "Terminal Flutter device_apps (android)",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cmd /k \"cd /d ${workspaceFolder}\\device_apps && flutter run -d android\""
       },
       {
         "name": "Terminal mint dev",
@@ -50,11 +56,11 @@
     ],
     "compounds": [
       {
-        "name": "Debug Gateway + phbcli + Flutter Terminal",
+        "name": "Debug Gateway + phbcli + Flutter device_apps",
         "configurations": [
           "Debug phbgateway",
           "Debug phbcli start -f",
-          "Terminal Flutter device_app"
+          "Terminal Flutter device_apps (web)"
         ]
       }
     ]

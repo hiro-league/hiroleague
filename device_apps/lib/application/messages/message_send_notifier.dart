@@ -1,0 +1,64 @@
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../application/auth/auth_notifier.dart';
+import '../../application/auth/auth_state.dart';
+import '../../application/gateway/gateway_notifier.dart';
+import '../../core/constants/app_constants.dart';
+import '../../data/repositories/message_repository_impl.dart';
+import '../../domain/models/message/message_status.dart';
+
+part 'message_send_notifier.g.dart';
+
+@riverpod
+class MessageSendNotifier extends _$MessageSendNotifier {
+  static const _uuid = Uuid();
+
+  @override
+  void build() {}
+
+  /// Sends a text message to [channelId].
+  ///
+  /// Writes optimistically to the DB with [MessageStatus.sending], broadcasts
+  /// via the gateway, then updates the status to [MessageStatus.sent].
+  Future<void> sendText({
+    required String channelId,
+    required String text,
+  }) async {
+    final authState = ref.read(authNotifierProvider).valueOrNull;
+    if (authState is! AuthAuthenticated) return;
+
+    final identity = authState.identity;
+    final messageId = _uuid.v4();
+    final now = DateTime.now().toUtc();
+
+    final repo = ref.read(messageRepositoryProvider);
+
+    await repo.insertOutbound(
+      id: messageId,
+      channelId: channelId,
+      senderId: identity.deviceId,
+      contentType: 'text',
+      body: text,
+      timestamp: now,
+    );
+
+    // Payload must match phbcli's UnifiedMessage schema — 'channel' and 'direction'
+    // are required fields. 'channel_id' is a client-side routing concept stored
+    // in metadata so that other Flutter devices can route to the right conversation.
+    ref.read(gatewayNotifierProvider.notifier).send({
+      'id': messageId,
+      'channel': AppConstants.gatewayChannelName, // required by phbcli
+      'direction': 'outbound',                    // required by phbcli
+      'content_type': 'text',
+      'body': text,
+      'sender_id': identity.deviceId,
+      'recipient_id': null,
+      'metadata': {'channel_id': channelId},
+      'timestamp': now.toIso8601String(),
+    });
+
+    // Optimistic — we don't wait for a server delivery receipt.
+    await repo.updateMessageStatus(messageId, MessageStatus.sent);
+  }
+}

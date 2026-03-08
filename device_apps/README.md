@@ -1,6 +1,6 @@
-# mobile_app
+# device_apps
 
-A new Flutter project.
+Private Home Box — Flutter client.
 
 ## Getting Started
 

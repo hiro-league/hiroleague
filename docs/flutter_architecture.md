@@ -1,8 +1,28 @@
-Good. Now I have the full picture. Here is the consolidated, final architecture document.
+# Initial Request (User)
+
+i have a flutter small demo page in device_apps
+i want to build a full flutter app, that is today going to be android and web, and later will be ios, desktop, etc...
+the app is a chat app like whatsapp, but with bots.
+the app will have:
+- onboarding with qr scan or data entry to get connected (currently with a pairing code, crpyto like private/public keys)
+- biometric/pattern/pass lock
+- list channels, show channel chats
+- send/receive messages thru websocket.
+- messages could be text, image, video, voice, location, etc...
+- i will allow watching the bot through a webview and pixel streaming from gateway/unreal.
+- ability to forward/reply
+- settings
+- side panel (split page on click) to show channel list vs message history
+- channels can also have conversation sessions.
+- add a channel, create a bot
+- notifications
+- this app will connect thru a websocket gateway to a server, either to retrieve data or send/receive messages.
+- i want to have a good UI like whatsapp, allow for dark/light themes.
+
 
 ---
 
-# PHB Flutter App — Final Architecture Guidelines
+# PHB Flutter App — Final Architecture Guidelines (AI)
 
 > **No backward compatibility required** — this is a clean-slate build. The existing `device_apps` demo code is a reference only; the new app replaces it entirely.
 
