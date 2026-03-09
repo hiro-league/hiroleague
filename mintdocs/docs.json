@@ -60,7 +60,8 @@
               "architecture/general",
               "architecture/constants",
               "architecture/tools-architecture",
-              "architecture/device-auth"
+              "architecture/device-auth",
+              "architecture/workspace-data-store"
             ]
           },
           {

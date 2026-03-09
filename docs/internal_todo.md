@@ -1,6 +1,5 @@
 
 # Daily Tasks
-- Create Flutter Android App
 - Pair using QR Code
 - Biometric/Pass/Pattern Lock
 - Clean up Message Format
@@ -42,6 +41,10 @@
 - Add Memory
 - Add RAG
 - Add Whatsapp Channel
+
+# Security
+
+- Conversations should be encrypted. in case they are stolen, they should be unreadable.
 
 # Big Design Ideas
 
@@ -101,6 +104,7 @@
 - Move Docs to Mintdocs.
 - Describe progressive Architecture in MintDocs, add Diagrams.
 - Add Home Page
+- Create Flutter Android App
 
 
 
