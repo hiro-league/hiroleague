@@ -1,6 +1,6 @@
 #!/bin/sh
 # This is a generated file; do not edit or check into version control.
-export "FLUTTER_ROOT=C:\Users\GF\fvm\versions\3.41.4"
+export "FLUTTER_ROOT=C:\Users\augr\fvm\versions\3.41.4"
 export "FLUTTER_APPLICATION_PATH=D:\projects\privatehomebox\device_apps"
 export "COCOAPODS_PARALLEL_CODE_SIGN=true"
 export "FLUTTER_TARGET=lib\main.dart"
