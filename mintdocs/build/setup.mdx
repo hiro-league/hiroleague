@@ -7,6 +7,13 @@ description: "Set up your local development environment for Private Home Box."
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) — the Python package and project manager used by the server.
 
+After cloning, install all Python dependencies (including `langgraph-checkpoint-sqlite`):
+
+```bash
+cd phbserver
+uv sync
+```
+
 ## Mobile / web app
 
 Install [Flutter](https://docs.flutter.dev/install/quick).

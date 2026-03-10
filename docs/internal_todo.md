@@ -45,6 +45,7 @@
 # Security
 
 - Conversations should be encrypted. in case they are stolen, they should be unreadable.
+- When a device is revoked, the gateway relay is not notified and it keeps accepting messages from devices. also the devices are not checked that they are still valid, not in server, not in gateway.
 
 # Big Design Ideas
 
@@ -54,6 +55,7 @@
 - Easiest User Experience Setup.
 - Win/Mac/Linux Support.
 - Automate building process (local and release)
+- Need to consider Version Upgrades and breaking changes and how data, devices are affected and how versioning can solidly handle them all.
 
 # Big Ideas
 

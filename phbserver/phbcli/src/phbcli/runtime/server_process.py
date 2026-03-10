@@ -67,13 +67,13 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None) ->
     from phb_channel_sdk import log_setup
     from phbcli.domain.config import load_config, mark_connected, mark_disconnected, resolve_log_dir
     from phbcli.domain.crypto import load_or_create_master_key
+    from phbcli.domain.db import ensure_db
     from phbcli.domain.pairing import (
         ApprovedDevice,
         clear_pairing_session,
         load_pairing_session,
         upsert_approved_device,
     )
-    from phbcli.domain.agent_config import load_agent_config, load_system_prompt
     from phbcli.runtime.agent_manager import AgentManager
     from phbcli.runtime.communication_manager import CommunicationManager
     from phbcli.runtime.channel_manager import ChannelManager
@@ -92,6 +92,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None) ->
     desktop_private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
     stop_event = asyncio.Event()
     write_pid(workspace_path, PID_FILENAME)
+    ensure_db(workspace_path)  # create/upgrade workspace.db tables and conversations/ dir
     set_workspace_path(workspace_path)
 
     tool_registry = ToolRegistry()

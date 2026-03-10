@@ -1,19 +1,23 @@
 """Channel plugin configuration management.
 
-Each enabled channel plugin has a config file at:
-    <workspace>/channels/<name>.json
-
 All functions are workspace-scoped — they accept workspace_path: Path.
+Config is stored in the channel_plugins table of workspace.db.
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .db import db_path, ensure_db
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,70 +77,109 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
-
-def workspace_channels_dir(workspace_path: Path) -> Path:
-    return workspace_path / "channels"
-
-
-def channel_config_path(workspace_path: Path, name: str) -> Path:
-    return workspace_channels_dir(workspace_path) / f"{name}.json"
-
-
-# ---------------------------------------------------------------------------
-# CRUD
+# CRUD — backed by workspace.db channel_plugins table
 # ---------------------------------------------------------------------------
 
 def load_channel_config(workspace_path: Path, name: str) -> ChannelConfig | None:
-    path = channel_config_path(workspace_path, name)
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return ChannelConfig(**data)
-    except Exception:
-        return None
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM channel_plugins WHERE name = ?", (name,)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return _row_to_config(row)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.warning("Corrupt channel_plugins row (name=%r): %s", name, exc)
+            return None
 
 
 def save_channel_config(workspace_path: Path, cfg: ChannelConfig) -> None:
-    channels_dir = workspace_channels_dir(workspace_path)
-    channels_dir.mkdir(parents=True, exist_ok=True)
-    channel_config_path(workspace_path, cfg.name).write_text(
-        json.dumps(
-            {
-                "name": cfg.name,
-                "enabled": cfg.enabled,
-                "command": cfg.command,
-                "config": cfg.config,
-                "workspace_dir": cfg.workspace_dir,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.execute(
+            """
+            INSERT INTO channel_plugins (name, enabled, command, config, workspace_dir)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                enabled       = excluded.enabled,
+                command       = excluded.command,
+                config        = excluded.config,
+                workspace_dir = excluded.workspace_dir
+            """,
+            (
+                cfg.name,
+                int(cfg.enabled),
+                json.dumps(cfg.command),
+                json.dumps(cfg.config),
+                cfg.workspace_dir,
+            ),
+        )
+        conn.commit()
 
 
 def list_channel_configs(workspace_path: Path) -> list[ChannelConfig]:
-    channels_dir = workspace_channels_dir(workspace_path)
-    channels_dir.mkdir(parents=True, exist_ok=True)
-    configs: list[ChannelConfig] = []
-    for path in sorted(channels_dir.glob("*.json")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            configs.append(ChannelConfig(**data))
-        except Exception:
-            pass
-    return configs
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM channel_plugins ORDER BY name"
+        ).fetchall()
+        configs: list[ChannelConfig] = []
+        for row in rows:
+            try:
+                configs.append(_row_to_config(row))
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Skipping corrupt channel_plugins row (name=%r): %s",
+                    row["name"],
+                    exc,
+                )
+        return configs
 
 
 def list_enabled_channels(workspace_path: Path) -> list[ChannelConfig]:
-    return [c for c in list_channel_configs(workspace_path) if c.enabled]
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM channel_plugins WHERE enabled = 1 ORDER BY name"
+        ).fetchall()
+        configs: list[ChannelConfig] = []
+        for row in rows:
+            try:
+                configs.append(_row_to_config(row))
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Skipping corrupt channel_plugins row (name=%r): %s",
+                    row["name"],
+                    exc,
+                )
+        return configs
 
 
 def delete_channel_config(workspace_path: Path, name: str) -> bool:
-    path = channel_config_path(workspace_path, name)
-    if path.exists():
-        path.unlink()
-        return True
-    return False
+    """Delete a channel_plugins row by name. Returns True if a row was removed."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        cursor = conn.execute(
+            "DELETE FROM channel_plugins WHERE name = ?", (name,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _row_to_config(row: sqlite3.Row) -> ChannelConfig:
+    return ChannelConfig(
+        name=row["name"],
+        enabled=bool(row["enabled"]),
+        command=json.loads(row["command"] or "[]"),
+        config=json.loads(row["config"] or "{}"),
+        workspace_dir=row["workspace_dir"] or "",
+    )

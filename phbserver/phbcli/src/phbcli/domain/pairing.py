@@ -1,22 +1,32 @@
 """Pairing session and approved-device persistence helpers.
 
 All functions are workspace-scoped — they accept workspace_path: Path.
-Files live at:
+
+Pairing sessions are short-lived and read at boot; they stay as a JSON file:
   <workspace>/pairing_session.json
-  <workspace>/devices.json
+
+Approved devices are durable structured records; they are stored in the
+devices table of workspace.db.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import secrets
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from phb_commons.constants.domain import DEFAULT_PAIRING_CODE_LENGTH, DEFAULT_PAIRING_CODE_TTL_SECONDS
-from phb_commons.constants.storage import APPROVED_DEVICES_FILENAME, PAIRING_SESSION_FILENAME
+from phb_commons.constants.storage import PAIRING_SESSION_FILENAME
+from phb_commons.timestamps import utc_iso
+
+from .db import db_path, ensure_db
+
+logger = logging.getLogger(__name__)
 
 
 class PairingSession(BaseModel):
@@ -58,10 +68,6 @@ def _pairing_session_file(workspace_path: Path) -> Path:
     return workspace_path / PAIRING_SESSION_FILENAME
 
 
-def _approved_devices_file(workspace_path: Path) -> Path:
-    return workspace_path / APPROVED_DEVICES_FILENAME
-
-
 # ---------------------------------------------------------------------------
 # Pairing code
 # ---------------------------------------------------------------------------
@@ -83,7 +89,7 @@ def create_pairing_session(code_length: int = DEFAULT_PAIRING_CODE_LENGTH, ttl_s
 
 
 # ---------------------------------------------------------------------------
-# Pairing session I/O
+# Pairing session I/O — file-backed (short-lived, read at boot)
 # ---------------------------------------------------------------------------
 
 def load_pairing_session(workspace_path: Path) -> PairingSession | None:
@@ -116,55 +122,92 @@ def clear_pairing_session(workspace_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Approved devices I/O
+# Approved devices I/O — backed by workspace.db devices table
 # ---------------------------------------------------------------------------
 
 def load_approved_devices(workspace_path: Path) -> list[ApprovedDevice]:
-    workspace_path.mkdir(parents=True, exist_ok=True)
-    path = _approved_devices_file(workspace_path)
-    if not path.exists():
-        return []
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    if not isinstance(raw, list):
-        return []
-
-    devices: list[ApprovedDevice] = []
-    for item in raw:
-        try:
-            devices.append(ApprovedDevice.model_validate(item))
-        except Exception:
-            continue
-    return devices
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM devices").fetchall()
+        devices: list[ApprovedDevice] = []
+        for row in rows:
+            try:
+                devices.append(
+                    ApprovedDevice(
+                        device_id=row["device_id"],
+                        device_public_key=row["device_public_key"],
+                        paired_at=datetime.fromisoformat(row["paired_at"]),
+                        expires_at=(
+                            datetime.fromisoformat(row["expires_at"])
+                            if row["expires_at"]
+                            else None
+                        ),
+                        metadata=json.loads(row["metadata"] or "{}"),
+                    )
+                )
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Skipping corrupt device row (device_id=%r): %s",
+                    row["device_id"] if row["device_id"] else "?",
+                    exc,
+                )
+        return devices
 
 
 def save_approved_devices(workspace_path: Path, devices: list[ApprovedDevice]) -> None:
-    workspace_path.mkdir(parents=True, exist_ok=True)
-    _approved_devices_file(workspace_path).write_text(
-        json.dumps(
-            [device.model_dump(mode="json") for device in devices],
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    """Replace the full device list in workspace.db."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.execute("DELETE FROM devices")
+        for device in devices:
+            conn.execute(
+                """
+                INSERT INTO devices (device_id, device_public_key, paired_at, expires_at, metadata)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    device.device_id,
+                    device.device_public_key,
+                    utc_iso(device.paired_at),
+                    utc_iso(device.expires_at) if device.expires_at else None,
+                    json.dumps(device.metadata),
+                ),
+            )
+        conn.commit()
 
 
 def upsert_approved_device(workspace_path: Path, device: ApprovedDevice) -> None:
-    devices = load_approved_devices(workspace_path)
-    by_id = {d.device_id: d for d in devices}
-    by_id[device.device_id] = device
-    save_approved_devices(
-        workspace_path,
-        sorted(by_id.values(), key=lambda d: d.device_id),
-    )
+    """Insert or update a single approved device row."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.execute(
+            """
+            INSERT INTO devices (device_id, device_public_key, paired_at, expires_at, metadata)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET
+                device_public_key = excluded.device_public_key,
+                paired_at         = excluded.paired_at,
+                expires_at        = excluded.expires_at,
+                metadata          = excluded.metadata
+            """,
+            (
+                device.device_id,
+                device.device_public_key,
+                utc_iso(device.paired_at),
+                utc_iso(device.expires_at) if device.expires_at else None,
+                json.dumps(device.metadata),
+            ),
+        )
+        conn.commit()
 
 
 def revoke_approved_device(workspace_path: Path, device_id: str) -> bool:
-    devices = load_approved_devices(workspace_path)
-    remaining = [d for d in devices if d.device_id != device_id]
-    if len(remaining) == len(devices):
-        return False
-    save_approved_devices(workspace_path, remaining)
-    return True
+    """Delete a device row by device_id. Returns True if a row was removed."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        cursor = conn.execute(
+            "DELETE FROM devices WHERE device_id = ?", (device_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0

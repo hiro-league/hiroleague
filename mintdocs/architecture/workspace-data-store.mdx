@@ -169,6 +169,58 @@ The `domain/` layer is the only code that reads from or writes to the SQLite app
 
 ---
 
+## Schema evolution policy
+
+These rules keep schema changes cheap and existing user databases safe without a migration runner.
+
+### Additive-only columns
+
+Never drop or rename a column once it exists in a deployed database. Add new columns; abandon old ones in place. An unused column costs nothing and keeps old databases readable without any upgrade step — exactly like Pydantic ignoring extra JSON keys.
+
+When a column must logically go away, stop reading it in Python and leave the SQL column untouched. Drop it only as a deliberate clean-up step on a known minimum SQLite version.
+
+### Introspection-based upgrade in `ensure_db`
+
+`ensure_db` and `init_db` run two passes on every startup:
+
+1. **`CREATE TABLE IF NOT EXISTS`** — creates all tables on a fresh database.
+2. **`PRAGMA table_info(<table>)` + `ALTER TABLE ADD COLUMN`** — adds any columns that are present in `_EXPECTED_COLUMNS` but absent from the actual table.
+
+`_EXPECTED_COLUMNS` is the authoritative list of every non-primary-key column in the schema. Adding a column means appending one entry to that list; the upgrade runs automatically on next startup for every existing database. No version counter, no migration state to track.
+
+```python
+# To add a column, append to _EXPECTED_COLUMNS — never remove existing entries.
+_EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
+    ("agents", "new_field", "TEXT NOT NULL DEFAULT ''"),
+    ...
+]
+```
+
+### JSON columns for flexible sub-fields
+
+Columns whose internal structure is likely to change (`config`, `metadata`, `command`) are stored as JSON `TEXT` blobs. Adding a sub-field costs nothing — it is a Python dict change only, with no `ALTER TABLE` required. The JSON columns are always read whole and parsed in Python; no SQLite JSON functions are used, so there is no minimum SQLite version constraint for this pattern.
+
+### Nullable or defaulted columns everywhere else
+
+Every new column must either be nullable or carry a `DEFAULT` value. This is a hard requirement for `ALTER TABLE ADD COLUMN` to succeed on existing rows. Enforce `NOT NULL` without a default only on primary keys and columns that are set at insert time by application code.
+
+### Destructive changes (rename, type change, drop)
+
+`_EXPECTED_COLUMNS` only handles additive changes.  Renames, type changes, and column drops require either a versioned one-off SQL entry (gated by `PRAGMA user_version`) or a full table rebuild.  A lightweight migration runner for these cases will be added once development stabilises and the schema reaches a stable baseline.  Until then, a `reset_db()` helper that deletes and recreates `workspace.db` is sufficient — users re-run `phbcli channel setup` and `phbcli device add` to repopulate.
+
+### SQLite version floor
+
+This project targets **Windows only with Python ≥ 3.11**. Python on Windows bundles its own SQLite (not the system library), so the version is deterministic:
+
+| Python | Bundled SQLite | Key capabilities unlocked |
+|---|---|---|
+| 3.11 | 3.39.x | `DROP COLUMN` (3.35+), `RENAME COLUMN` (3.25+) |
+| 3.12 | 3.43.x | JSON operators `->` / `->>` (3.38+) |
+
+All features described in this section are available on the minimum supported version (Python 3.11 / SQLite 3.39).
+
+---
+
 ## Flutter app relationship
 
 The Flutter app maintains its own local Drift/SQLite database. This is **not a sync** — the two databases are structurally different and serve different purposes.

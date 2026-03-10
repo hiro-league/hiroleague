@@ -18,7 +18,7 @@ from rich.table import Table
 
 from phb_commons.constants.domain import MANDATORY_CHANNEL_NAME
 
-from ..domain.channel_config import load_channel_config, workspace_channels_dir
+from ..domain.channel_config import load_channel_config
 from ..domain.workspace import WorkspaceError, resolve_workspace
 from ..tools.channel import (
     ChannelDisableTool,
@@ -135,7 +135,6 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
 
-        channels_dir = workspace_channels_dir(workspace_path)
         console.print(
             f"[green]Channel '{result.name}' configured.[/green] "
             f"({'[green]enabled[/green]' if result.enabled else '[yellow]disabled[/yellow]'})"
@@ -143,7 +142,6 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         console.print(f"  command  : [bold]{result.command}[/bold]")
         if result.workspace_dir:
             console.print(f"  workspace: [dim]{result.workspace_dir}[/dim]")
-        console.print(f"  config   : {channels_dir / (result.name + '.json')}")
         console.print(
             "\nRestart phbcli to activate: [bold]phbcli stop[/bold] then [bold]phbcli start[/bold]"
         )

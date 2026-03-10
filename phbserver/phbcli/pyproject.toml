@@ -29,8 +29,11 @@ dependencies = [
     "cryptography>=43",
     "langchain>=1.0",
     "langgraph>=1.0",
+    "langgraph-checkpoint-sqlite>=2.0",
     "langchain-openai>=0.3",
     "platformdirs>=4",
+    "aiosqlite>=0.20",
+    "sqlmodel>=0.0.21",
     "phb-channel-sdk",
     "phb-commons",
 ]

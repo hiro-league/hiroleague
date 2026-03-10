@@ -5,16 +5,16 @@ path constants exist — every helper accepts a workspace_path: Path argument.
 
 Workspace layout:
   <workspace>/
-    config.json
-    state.json
-    master_key.pem
+    config.json              ← boot config (this module)
+    state.json               ← runtime state (this module)
+    master_key.pem           ← ECDSA private key (domain/crypto.py)
+    workspace.db             ← SQLite: agents, devices, channel_plugins,
+                               conversation_channels (domain/db.py)
+    conversations/
+      <channel_id>.jsonl     ← append-only message logs (domain/conversation_log.py)
     logs/
-    channels/
-    agent/
-    pairing_session.json
-    devices.json
+    pairing_session.json     ← short-lived pairing session (domain/pairing.py)
     phbcli.pid
-    gateway instances are managed separately by phbgateway
 """
 
 from __future__ import annotations
