@@ -44,13 +44,41 @@ phbcli start --workspace home --foreground --admin
 phbcli stop --workspace <name>
 ```
 
-Stops the workspace server.
+Stops the workspace server gracefully. The server receives a shutdown signal via its HTTP endpoint, waits for channel plugins to disconnect cleanly, then exits. Falls back to a force kill if the server is unreachable.
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `--workspace`, `-W` | Target workspace name. |
+
+## Restart
+
+```bash
+phbcli restart --workspace <name>
+```
+
+Gracefully stops the running server and starts a new one. Accepts the same options as `start`, so you can change the admin UI or foreground flag on restart.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--workspace`, `-W` | Target workspace name. |
+| `--foreground`, `-f` | Run the restarted server in foreground with live logs. |
+| `--admin` | Also start the admin UI on its dedicated port (localhost only). |
+
+### Examples
+
+```bash
+# Restart in background
+phbcli restart --workspace home
+
+# Restart and bring up the admin UI
+phbcli restart --workspace home --admin
+```
+
+The `restart` tool is also available via the HTTP API (`POST /invoke` with `"tool": "restart"`), which is how the admin UI triggers it. When called from inside the running server process the shutdown is self-initiated — the server sets a restart flag, shuts down gracefully, then spawns a fresh detached process before exiting. See [Server lifecycle architecture](/architecture/server-lifecycle) for details.
 
 ## Status
 

@@ -40,10 +40,13 @@ def register(device_app: typer.Typer, console: Console) -> None:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
 
+        from ..ui.qr import render_qr_terminal
+        render_qr_terminal(result.qr_payload)
         console.print("[bold cyan]Pairing code created[/bold cyan]")
+        console.print(f"  gateway   : [bold]{result.gateway_url}[/bold]")
         console.print(f"  code      : [bold]{result.code}[/bold]")
         console.print(f"  expires_at: [bold]{result.expires_at}[/bold]")
-        console.print("Use this code in the mobile app immediately.")
+        console.print("Scan the QR code or enter the details manually in the mobile app.")
 
     @device_app.command("list")
     def device_list(

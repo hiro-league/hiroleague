@@ -20,6 +20,12 @@ Run from the repo root:
 uv run python diagram-gen/generate.py
 ```
 
+By default, only diagrams whose source changed or whose PNG is missing are rendered. To re-render everything:
+
+```bash
+uv run python diagram-gen/generate.py --force
+```
+
 ## Output
 
 | Path | What it is |

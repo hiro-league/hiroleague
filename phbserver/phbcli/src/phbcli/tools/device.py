@@ -6,6 +6,7 @@ Both the CLI (commands/device.py) and the AI agent call these directly.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,15 @@ def _resolve_path(workspace: str | None) -> Path:
 class DeviceAddResult:
     code: str
     expires_at: str
+    gateway_url: str = ""
+
+    @property
+    def qr_payload(self) -> str:
+        """JSON string to embed in the pairing QR code."""
+        return json.dumps(
+            {"gateway_url": self.gateway_url, "code": self.code, "expires_at": self.expires_at},
+            separators=(",", ":"),
+        )
 
 
 @dataclass
@@ -78,6 +88,7 @@ class DeviceAddTool(Tool):
         return DeviceAddResult(
             code=session.code,
             expires_at=session.expires_at.isoformat().replace("+00:00", "Z"),
+            gateway_url=config.gateway_url,
         )
 
 

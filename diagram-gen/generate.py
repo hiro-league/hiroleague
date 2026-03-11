@@ -3,11 +3,13 @@ Scans mintdocs/ for mermaid code blocks, extracts them to diagram-gen/sources/,
 renders each to a PNG via mmdc, and places the output in mintdocs/images/diagrams/.
 
 Usage:
-    python diagram-gen/generate.py [--check]
+    python diagram-gen/generate.py [--check] [--force]
 
     --check   Dry-run: exit with code 1 if any .mmd source is out of date
               (used by the pre-commit hook to detect stale extractions).
               Does NOT render images in check mode.
+    --force   Re-render all diagrams regardless of whether their source changed
+              or their PNG already exists.
 """
 
 from __future__ import annotations
@@ -106,50 +108,71 @@ def render_image(mmd_path: Path, png_path: Path) -> None:
         sys.exit(1)
 
 
-def run(check_only: bool = False) -> None:
+def needs_render(mmd_path: Path, png_path: Path) -> bool:
+    """Return True if the PNG is missing — content changes are tracked via write_source."""
+    return not png_path.exists()
+
+
+def run(check_only: bool = False, force: bool = False) -> None:
     ensure_dirs()
 
     mdx_files = sorted(MINTDOCS_DIR.glob("**/*.mdx"))
-    stale: list[tuple[Path, int, str]] = []  # (mdx_path, index, body)
+    # Tracks .mmd files whose source content changed this run
+    changed_mmds: set[Path] = set()
 
     for mdx_path in mdx_files:
         diagrams = extract_diagrams(mdx_path)
         for i, body in enumerate(diagrams, start=1):
             src = source_path(mdx_path, i)
-            changed = write_source(src, body)
-            if changed:
-                stale.append((mdx_path, i, body))
+            content_changed = write_source(src, body)
+            if content_changed:
+                changed_mmds.add(src)
                 print(f"  [extracted] {src.name}")
             else:
                 print(f"  [unchanged] {src.name}")
 
     if check_only:
-        if stale:
+        if changed_mmds:
             print(
-                f"\n{len(stale)} diagram source(s) are out of date. "
+                f"\n{len(changed_mmds)} diagram source(s) are out of date. "
                 "Run `python diagram-gen/generate.py` to regenerate."
             )
             sys.exit(1)
         print("\nAll diagram sources are up to date.")
         return
 
-    # Render every .mmd in sources/ (not just changed ones — mmdc is fast)
     mmd_files = sorted(SOURCES_DIR.glob("*.mmd"))
     if not mmd_files:
         print("\nNo .mmd files found — nothing to render.")
         return
 
-    print(f"\nRendering {len(mmd_files)} diagram(s)...")
+    # Determine which diagrams to render:
+    #   - force: all of them
+    #   - otherwise: only those whose source changed OR whose PNG is missing
+    to_render: list[Path] = []
+    skipped = 0
     for mmd_path in mmd_files:
-        # Derive the MDX stem and index from the filename convention
-        # e.g. architecture-overview--diagram-1.mmd
         parts = mmd_path.stem.rsplit("--diagram-", 1)
         if len(parts) != 2:
             print(f"  [skip] unexpected filename: {mmd_path.name}")
             continue
         png = IMAGES_DIR / f"{mmd_path.stem}.png"
-        render_image(mmd_path, png)
-        print(f"  [rendered] {png.name}")
+        if force or mmd_path in changed_mmds or needs_render(mmd_path, png):
+            to_render.append(mmd_path)
+        else:
+            skipped += 1
+
+    if skipped:
+        print(f"\nSkipping {skipped} unchanged diagram(s) with existing PNG(s). Use --force to re-render all.")
+
+    if not to_render:
+        print("\nAll diagrams are up to date — nothing to render.")
+    else:
+        print(f"\nRendering {len(to_render)} diagram(s)...")
+        for mmd_path in to_render:
+            png = IMAGES_DIR / f"{mmd_path.stem}.png"
+            render_image(mmd_path, png)
+            print(f"  [rendered] {png.name}")
 
     # Stage generated files so pre-commit's stash/restore cycle doesn't
     # conflict with the newly written PNGs and .mmd sources.
@@ -167,5 +190,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Dry-run: exit 1 if any .mmd source is out of date (used by pre-commit hook)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-render all diagrams regardless of whether their source changed or PNG exists",
+    )
     args = parser.parse_args()
-    run(check_only=args.check)
+    run(check_only=args.check, force=args.force)

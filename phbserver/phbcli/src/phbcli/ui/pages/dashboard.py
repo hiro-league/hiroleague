@@ -49,14 +49,14 @@ async def dashboard_page() -> None:
         pass
 
     for ws in workspaces:
-        ws_name: str | None = ws.get("name")
+        ws_id: str | None = ws.get("id")
         try:
-            devices = DeviceListTool().execute(workspace=ws_name)
+            devices = DeviceListTool().execute(workspace=ws_id)
             total_devices += len(devices.devices)
         except Exception:
             pass
         try:
-            channels = ChannelListTool().execute(workspace=ws_name)
+            channels = ChannelListTool().execute(workspace=ws_id)
             total_channels += len(channels.channels)
             enabled_channels += sum(1 for c in channels.channels if c.get("enabled"))
         except Exception:

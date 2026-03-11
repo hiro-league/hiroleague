@@ -56,4 +56,25 @@ npm i -g mint
 
 ## Diagram generator
 
-Follow the instructions in [`diagram-gen/README.md`](https://github.com/privatehomebox/privatehomebox/blob/main/diagram-gen/README.md) to install the Mermaid diagram generator.
+The diagram generator scans `mintdocs/` for mermaid code blocks, extracts them to `diagram-gen/sources/`, and renders each to a PNG in `mintdocs/images/diagrams/`.
+
+Install Node.js, then install the Mermaid CLI globally:
+
+```bash
+npm install -g @mermaid-js/mermaid-cli
+mmdc --version
+```
+
+Run from the repo root to render only changed or new diagrams:
+
+```bash
+uv run python diagram-gen/generate.py
+```
+
+To re-render all diagrams regardless of changes:
+
+```bash
+uv run python diagram-gen/generate.py --force
+```
+
+See [Diagram generator](/build/diagram-generator) for full authoring and workflow details.

@@ -4,35 +4,23 @@ Two sections:
   - Pair new device: button that calls DeviceAddTool and shows the code in a dialog.
   - Approved devices: table with device ID, paired date, expiry date, and a revoke action.
 
-A workspace selector in the header switches the active workspace.
+The active workspace is selected globally in the header and stored in
+nicegui_app.storage.user["selected_workspace"].
 """
 
 from __future__ import annotations
 
-from nicegui import ui
+from nicegui import app as nicegui_app, ui
 
 
 @ui.page("/devices")
 async def devices_page() -> None:
     from phbcli.tools.device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
-    from phbcli.tools.workspace import WorkspaceListTool
     from phbcli.ui.app import create_page_layout
 
     create_page_layout(active_path="/devices")
 
-    # ------------------------------------------------------------------ workspace state
-    workspace_names: list[str] = []
-    default_workspace: str | None = None
-    try:
-        ws_result = WorkspaceListTool().execute()
-        workspace_names = [ws["name"] for ws in ws_result.workspaces]
-        default_workspace = ws_result.default_workspace or (
-            workspace_names[0] if workspace_names else None
-        )
-    except Exception:
-        pass
-
-    selected_workspace: list[str | None] = [default_workspace]
+    ws_name: str | None = nicegui_app.storage.user.get("selected_workspace")
 
     # Mutable container for the revoke confirmation dialog
     pending_revoke_id: list[str] = [""]
@@ -40,11 +28,12 @@ async def devices_page() -> None:
     # ------------------------------------------------------------------ pairing code dialog
     with ui.dialog() as pairing_dialog, ui.card().classes("w-96 items-center text-center gap-2"):
         ui.label("Pairing code").classes("text-base font-semibold")
+        pairing_qr_html = ui.html("").classes("w-48 h-48 mx-auto my-2")
         pairing_code_label = ui.label("").classes(
             "text-5xl font-bold font-mono tracking-widest text-primary my-3"
         )
         pairing_expires_label = ui.label("").classes("text-sm opacity-60")
-        ui.label("Enter this code on your mobile device to complete pairing.").classes(
+        ui.label("Scan the QR code or enter the code manually in the mobile app.").classes(
             "text-sm opacity-70 mb-2"
         )
         ui.button("Close", on_click=pairing_dialog.close).props("flat")
@@ -58,7 +47,7 @@ async def devices_page() -> None:
             device_id = pending_revoke_id[0]
             try:
                 DeviceRevokeTool().execute(
-                    device_id=device_id, workspace=selected_workspace[0]
+                    device_id=device_id, workspace=nicegui_app.storage.user.get("selected_workspace")
                 )
                 ui.notify("Device revoked.", color="positive")
                 revoke_dialog.close()
@@ -73,7 +62,7 @@ async def devices_page() -> None:
     # ------------------------------------------------------------------ refreshable device list
     @ui.refreshable
     def device_list() -> None:
-        ws_name = selected_workspace[0]
+        ws_name = nicegui_app.storage.user.get("selected_workspace")
         if ws_name is None:
             return
 
@@ -134,12 +123,15 @@ async def devices_page() -> None:
 
     # ------------------------------------------------------------------ generate pairing code
     async def generate_pairing_code() -> None:
-        ws = selected_workspace[0]
+        from phbcli.ui.qr import render_qr_svg
+
+        ws = nicegui_app.storage.user.get("selected_workspace")
         if ws is None:
             ui.notify("No workspace selected.", color="negative")
             return
         try:
             result = DeviceAddTool().execute(workspace=ws)
+            pairing_qr_html.set_content(render_qr_svg(result.qr_payload))
             pairing_code_label.set_text(result.code)
             # Format the ISO timestamp to be more readable
             expires = result.expires_at.replace("T", " ").replace("Z", " UTC")
@@ -151,19 +143,7 @@ async def devices_page() -> None:
 
     # ------------------------------------------------------------------ page layout
     with ui.column().classes("w-full gap-6 p-6"):
-        with ui.row().classes("items-center justify-between w-full"):
-            ui.label("Devices").classes("text-2xl font-semibold")
-            if workspace_names:
-                def on_workspace_change(e) -> None:
-                    selected_workspace[0] = e.value
-                    device_list.refresh()
-
-                ui.select(
-                    workspace_names,
-                    value=selected_workspace[0],
-                    label="Workspace",
-                    on_change=on_workspace_change,
-                ).classes("min-w-40")
+        ui.label("Devices").classes("text-2xl font-semibold")
 
         # ---- Pair new device card
         with ui.card().classes("w-full"):

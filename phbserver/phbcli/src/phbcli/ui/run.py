@@ -8,6 +8,7 @@ serves that app with Uvicorn in the same event loop — identical to how
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -18,11 +19,33 @@ from phbcli.domain.config import Config
 log = Logger.get("ADMIN")
 
 
-async def run_admin_ui(config: Config, stop_event: asyncio.Event) -> None:
+async def run_admin_ui(
+    config: Config,
+    stop_event: asyncio.Event,
+    log_dir: Path | None = None,
+    workspace_path: Path | None = None,
+) -> None:
     """Start the NiceGUI admin UI and shut it down when stop_event fires."""
     from nicegui import ui
 
+    from phbcli.ui import state
     from phbcli.ui.app import register_pages
+
+    state.log_dir = log_dir
+    state.workspace_path = workspace_path
+
+    # Resolve the workspace id and name so pages can identify the current workspace.
+    if workspace_path is not None:
+        try:
+            from phbcli.domain.workspace import load_registry
+            registry = load_registry()
+            for ws_id, entry in registry.workspaces.items():
+                if Path(entry.path).resolve() == workspace_path.resolve():
+                    state.workspace_id = ws_id
+                    state.workspace_name = entry.name
+                    break
+        except Exception:
+            pass
 
     register_pages()
 

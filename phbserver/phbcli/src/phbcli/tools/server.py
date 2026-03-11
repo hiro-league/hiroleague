@@ -88,7 +88,20 @@ class StopResult:
 
 
 @dataclass
+class RestartResult:
+    workspace: str
+    workspace_path: str
+    was_running: bool
+    pid: int | None
+    new_pid: int | None
+    http_host: str
+    http_port: int
+    admin_port: int | None = None
+
+
+@dataclass
 class WorkspaceStatusEntry:
+    id: str
     name: str
     is_default: bool
     server_running: bool
@@ -166,7 +179,6 @@ def _do_start(
             python = pythonw
 
     script = str(Path(__file__).parents[1] / "runtime" / "server_process.py")
-    # Pass admin flag via env var so the detached subprocess can read it.
     env = {**os.environ, ENV_WORKSPACE_PATH: str(workspace_path)}
     if admin:
         env[ENV_ADMIN_UI] = "1"
@@ -201,18 +213,50 @@ def _do_start(
     )
 
 
+def _graceful_http_stop(http_port: int, pid: int, workspace_path: Path, timeout: float = 10.0) -> bool:
+    """POST /_shutdown to the server and wait for the process to exit.
+
+    Returns True if the process exited gracefully within the timeout.
+    This avoids Windows ``taskkill /F`` which bypasses signal handlers and
+    orphans channel-plugin subprocesses.
+    """
+    import time
+    import urllib.request
+
+    try:
+        url = f"http://127.0.0.1:{http_port}/_shutdown"
+        req = urllib.request.Request(url, method="POST", data=b"")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        return False
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_running(pid):
+            remove_pid(workspace_path, PID_FILENAME)
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def _do_stop(workspace_path: Path, console: Console) -> None:
     """Stop the server for a workspace."""
     pid = read_pid(workspace_path, PID_FILENAME)
     if pid is None or not is_running(pid):
         console.print("[yellow]Server is not running.[/yellow]")
         remove_pid(workspace_path, PID_FILENAME)
+        return
+
+    config = load_config(workspace_path)
+    if _graceful_http_stop(config.http_port, pid, workspace_path):
+        console.print(f"[green]Server stopped[/green] (was PID {pid}).")
+        return
+
+    stopped = stop_process(workspace_path, PID_FILENAME)
+    if stopped:
+        console.print(f"[green]Server stopped[/green] (was PID {pid}).")
     else:
-        stopped = stop_process(workspace_path, PID_FILENAME)
-        if stopped:
-            console.print(f"[green]Server stopped[/green] (was PID {pid}).")
-        else:
-            console.print("[red]Failed to stop server.[/red]")
+        console.print("[red]Failed to stop server.[/red]")
 
 
 # ---------------------------------------------------------------------------
@@ -260,33 +304,32 @@ def _resolve_or_create(workspace: str | None) -> tuple[Any, WorkspaceRegistry, P
         return entry, registry, Path(entry.path)
 
 
-def _register_autostart(workspace_name: str, elevated: bool) -> tuple[bool, str]:
-    """Register auto-start and return (success, method_label)."""
+def _register_autostart(workspace_id: str, elevated: bool) -> tuple[bool, str]:
+    """Register auto-start using workspace id and return (success, method_label)."""
     if elevated and sys.platform == "win32":
         try:
-            accepted = register_autostart_elevated(workspace_name)
+            accepted = register_autostart_elevated(workspace_id)
         except RuntimeError:
             accepted = False
         if accepted:
             return True, "elevated"
-        # fall through to standard
     try:
-        method = register_autostart(workspace_name)
+        method = register_autostart(workspace_id)
         return True, str(method)
     except (NotImplementedError, Exception):
         return False, "failed"
 
 
-def _unregister_autostart(workspace_name: str, elevated: bool) -> bool:
+def _unregister_autostart(workspace_id: str, elevated: bool) -> bool:
     if elevated and sys.platform == "win32":
         try:
-            accepted = unregister_autostart_elevated(workspace_name)
+            accepted = unregister_autostart_elevated(workspace_id)
         except RuntimeError:
             accepted = False
         if accepted:
             return True
     try:
-        unregister_autostart(workspace_name)
+        unregister_autostart(workspace_id)
         return True
     except (NotImplementedError, Exception):
         return False
@@ -301,13 +344,18 @@ class SetupTool(Tool):
     name = "setup"
     description = (
         "One-time setup: save gateway config, generate device key, "
-        "register auto-start, and start the server"
+        "and optionally register auto-start and start the server"
     )
     params = {
         "gateway_url": ToolParam(str, "WebSocket gateway URL, e.g. ws://myhost:8765"),
-        "workspace": ToolParam(str, "Workspace name to configure", required=False),
+        "workspace": ToolParam(str, "Workspace name or id to configure", required=False),
         "http_port": ToolParam(int, "Local HTTP server port override", required=False),
         "skip_autostart": ToolParam(bool, "Do not register auto-start", required=False),
+        "start_server": ToolParam(
+            bool,
+            "Start the server after setup completes (default: false)",
+            required=False,
+        ),
         "elevated_task": ToolParam(
             bool,
             "(Windows) Request UAC elevation for Task Scheduler entry",
@@ -321,6 +369,7 @@ class SetupTool(Tool):
         workspace: str | None = None,
         http_port: int | None = None,
         skip_autostart: bool = False,
+        start_server: bool = False,
         elevated_task: bool = False,
     ) -> SetupResult:
         entry, registry, workspace_path = _resolve_or_create(workspace)
@@ -349,11 +398,13 @@ class SetupTool(Tool):
         autostart_registered = False
         autostart_method = "skipped"
         if not skip_autostart:
+            # Autostart keyed by workspace id so renames don't break scheduled tasks
             autostart_registered, autostart_method = _register_autostart(
-                entry.name, elevated_task
+                entry.id, elevated_task
             )
 
-        _do_start(workspace_path, config, _NullConsole(), foreground=False)
+        if start_server:
+            _do_start(workspace_path, config, _NullConsole(), foreground=False)
 
         return SetupResult(
             workspace=entry.name,
@@ -365,7 +416,7 @@ class SetupTool(Tool):
             desktop_pub=public_key_b64,
             autostart_registered=autostart_registered,
             autostart_method=autostart_method,
-            server_started=True,
+            server_started=start_server,
         )
 
 
@@ -373,7 +424,7 @@ class StartTool(Tool):
     name = "start"
     description = "Start the phbcli server for a workspace (background by default)"
     params = {
-        "workspace": ToolParam(str, "Workspace name to start", required=False),
+        "workspace": ToolParam(str, "Workspace name or id to start", required=False),
         "foreground": ToolParam(
             bool,
             "Run the server in the foreground with live log output",
@@ -432,7 +483,7 @@ class StopTool(Tool):
     name = "stop"
     description = "Stop the running phbcli server for a workspace"
     params = {
-        "workspace": ToolParam(str, "Workspace name to stop", required=False),
+        "workspace": ToolParam(str, "Workspace name or id to stop", required=False),
     }
 
     def execute(self, workspace: str | None = None) -> StopResult:
@@ -445,13 +496,81 @@ class StopTool(Tool):
         return StopResult(workspace=entry.name, was_running=was_running, pid=pid)
 
 
+class RestartTool(Tool):
+    name = "restart"
+    description = "Gracefully restart the phbcli server for a workspace"
+    params = {
+        "workspace": ToolParam(str, "Workspace name or id to restart", required=False),
+        "foreground": ToolParam(
+            bool,
+            "Run the restarted server in the foreground with live log output",
+            required=False,
+        ),
+        "admin": ToolParam(
+            bool,
+            "Also start the admin UI on its dedicated port",
+            required=False,
+        ),
+    }
+
+    def execute(
+        self,
+        workspace: str | None = None,
+        foreground: bool = False,
+        admin: bool = False,
+    ) -> RestartResult:
+        entry, _, workspace_path = _resolve_or_create(workspace)
+
+        if not (workspace_path / "config.json").exists():
+            raise ValueError(
+                f"Workspace '{entry.name}' is not configured. "
+                f"Run 'phbcli setup --workspace {entry.name}' first."
+            )
+
+        config = load_config(workspace_path)
+        pid = read_pid(workspace_path, PID_FILENAME)
+        was_running = pid is not None and is_running(pid)
+
+        if was_running:
+            if os.getpid() == pid:
+                from phbcli.runtime.http_server import request_restart
+
+                request_restart(admin=admin)
+                return RestartResult(
+                    workspace=entry.name,
+                    workspace_path=str(workspace_path),
+                    was_running=True,
+                    pid=pid,
+                    new_pid=None,
+                    http_host=config.http_host,
+                    http_port=config.http_port,
+                    admin_port=config.admin_port if admin else None,
+                )
+
+            _do_stop(workspace_path, _NullConsole())
+
+        _do_start(workspace_path, config, _NullConsole(), foreground=foreground, admin=admin)
+
+        new_pid = read_pid(workspace_path, PID_FILENAME)
+        return RestartResult(
+            workspace=entry.name,
+            workspace_path=str(workspace_path),
+            was_running=was_running,
+            pid=pid,
+            new_pid=new_pid,
+            http_host=config.http_host,
+            http_port=config.http_port,
+            admin_port=config.admin_port if admin else None,
+        )
+
+
 class StatusTool(Tool):
     name = "status"
     description = "Show server and WebSocket connection status for one or all workspaces"
     params = {
         "workspace": ToolParam(
             str,
-            "Workspace name to query (omit to show all workspaces)",
+            "Workspace name or id to query (omit to show all workspaces)",
             required=False,
         ),
     }
@@ -462,17 +581,15 @@ class StatusTool(Tool):
         if not registry.workspaces:
             return StatusResult(workspaces=[])
 
-        names: list[str]
         if workspace is not None:
-            if workspace not in registry.workspaces:
-                raise WorkspaceError(f"Workspace '{workspace}' not found.")
-            names = [workspace]
+            entry, _ = resolve_workspace(workspace)
+            ids = [entry.id]
         else:
-            names = list(registry.workspaces.keys())
+            ids = list(registry.workspaces.keys())
 
         entries = []
-        for name in names:
-            ws_entry = registry.workspaces[name]
+        for ws_id in ids:
+            ws_entry = registry.workspaces[ws_id]
             ws_path = Path(ws_entry.path)
             pid = read_pid(ws_path, "phbcli.pid")
             running = is_running(pid)
@@ -480,8 +597,9 @@ class StatusTool(Tool):
             config = load_config(ws_path)
             entries.append(
                 WorkspaceStatusEntry(
-                    name=name,
-                    is_default=name == registry.default_workspace,
+                    id=ws_id,
+                    name=ws_entry.name,
+                    is_default=ws_id == registry.default_workspace,
                     server_running=running,
                     pid=pid,
                     ws_connected=state.ws_connected,
@@ -499,7 +617,7 @@ class TeardownTool(Tool):
     name = "teardown"
     description = "Stop server and remove all auto-start registrations for a workspace"
     params = {
-        "workspace": ToolParam(str, "Workspace name to tear down", required=False),
+        "workspace": ToolParam(str, "Workspace name or id to tear down", required=False),
         "purge": ToolParam(
             bool,
             "Also delete the workspace folder (config, state, keys, logs…)",
@@ -521,13 +639,13 @@ class TeardownTool(Tool):
         entry, registry, workspace_path = _resolve_or_create(workspace)
 
         _do_stop(workspace_path, _NullConsole())
-        autostart_removed = _unregister_autostart(entry.name, elevated_task)
+        autostart_removed = _unregister_autostart(entry.id, elevated_task)
 
         if purge:
             if workspace_path.exists():
                 shutil.rmtree(workspace_path, ignore_errors=True)
             try:
-                remove_workspace(entry.name, purge=False)
+                remove_workspace(entry.id, purge=False)
             except WorkspaceError:
                 pass
 
@@ -544,7 +662,7 @@ class UninstallTool(Tool):
     name = "uninstall"
     description = "Stop server, remove auto-start, and return package uninstall instructions"
     params = {
-        "workspace": ToolParam(str, "Workspace name to uninstall", required=False),
+        "workspace": ToolParam(str, "Workspace name or id to uninstall", required=False),
         "purge": ToolParam(bool, "Also delete the workspace folder", required=False),
         "elevated_task": ToolParam(
             bool,

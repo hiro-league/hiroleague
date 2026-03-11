@@ -2,10 +2,12 @@
 
 Runs concurrently with the WS client inside the same asyncio event loop.
 Endpoints:
-  GET  /status   — server and WS connection status
-  GET  /channels — connected channel plugin names and info
-  GET  /tools    — list all registered tools and their schemas
-  POST /invoke   — execute a tool by name with a flat params dict
+  GET  /status    — server and WS connection status
+  GET  /channels  — connected channel plugin names and info
+  GET  /tools     — list all registered tools and their schemas
+  POST /invoke    — execute a tool by name with a flat params dict
+  POST /_shutdown — trigger graceful server shutdown
+  POST /_restart  — trigger graceful restart (shutdown + respawn)
 """
 
 from __future__ import annotations
@@ -34,6 +36,9 @@ app = FastAPI(title=APP_NAME, version="0.1.0", docs_url=None, redoc_url=None)
 _workspace_path: Path | None = None
 _get_channel_info: Callable[[], list[dict[str, str]]] | None = None
 _tool_registry: ToolRegistry | None = None
+_stop_event: asyncio.Event | None = None
+_restart_requested: bool = False
+_restart_admin: bool = False
 
 
 def set_workspace_path(path: Path) -> None:
@@ -49,6 +54,33 @@ def set_channel_info_provider(fn: Callable[[], list[dict[str, str]]]) -> None:
 def set_tool_registry(registry: ToolRegistry) -> None:
     global _tool_registry
     _tool_registry = registry
+
+
+def set_stop_event(event: asyncio.Event) -> None:
+    global _stop_event
+    _stop_event = event
+
+
+def is_restart_requested() -> bool:
+    return _restart_requested
+
+
+def get_restart_admin() -> bool:
+    return _restart_admin
+
+
+def request_shutdown() -> None:
+    """Trigger graceful shutdown with a short delay so HTTP responses can flush."""
+    if _stop_event is not None:
+        asyncio.get_running_loop().call_later(0.5, _stop_event.set)
+
+
+def request_restart(admin: bool = False) -> None:
+    """Trigger restart: graceful shutdown + respawn on exit."""
+    global _restart_requested, _restart_admin
+    _restart_requested = True
+    _restart_admin = admin
+    request_shutdown()
 
 
 @app.get("/status")
@@ -119,6 +151,26 @@ async def invoke_tool(request: InvokeRequest) -> JSONResponse:
         result_dict = result
 
     return JSONResponse({"tool": invoke_result.tool_name, "result": result_dict})
+
+
+class _RestartBody(BaseModel):
+    admin: bool = False
+
+
+@app.post("/_shutdown")
+async def shutdown_server() -> JSONResponse:
+    if _stop_event is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+    request_shutdown()
+    return JSONResponse({"status": "shutting_down"})
+
+
+@app.post("/_restart")
+async def restart_server(body: _RestartBody) -> JSONResponse:
+    if _stop_event is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+    request_restart(admin=body.admin)
+    return JSONResponse({"status": "restarting"})
 
 
 async def run_http_server(config: Config, stop_event: asyncio.Event) -> None:

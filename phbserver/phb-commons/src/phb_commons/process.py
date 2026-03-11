@@ -50,6 +50,9 @@ def is_running(pid: int | None) -> bool:
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
                 capture_output=True,
                 text=True,
+                # Suppress the console window that Windows would otherwise flash
+                # briefly for each tasklist.exe invocation.
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             return str(pid) in result.stdout
         except Exception:
@@ -69,6 +72,7 @@ def kill_process(pid: int) -> bool:
                 ["taskkill", "/PID", str(pid), "/F"],
                 capture_output=True,
                 check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
             os.kill(pid, signal.SIGTERM)

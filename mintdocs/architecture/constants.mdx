@@ -77,7 +77,7 @@ Network addresses and workspace port allocation.
 | `PORTS_PER_SLOT` | `4` | Number of ports reserved per workspace slot |
 | `PORT_OFFSET_HTTP` | `0` | HTTP server offset within a slot |
 | `PORT_OFFSET_PLUGIN` | `1` | Plugin WebSocket server offset within a slot |
-| `PORT_OFFSET_GATEWAY` | `2` | Gateway offset within a slot |
+| *(+2 reserved)* | — | Previously used for a local gateway port; no longer allocated |
 | `PORT_OFFSET_ADMIN` | `3` | Admin UI offset within a slot |
 
 Workspace port formula:
@@ -88,7 +88,7 @@ plugin_port = PORT_RANGE_START + slot * PORTS_PER_SLOT + PORT_OFFSET_PLUGIN
 admin_port  = PORT_RANGE_START + slot * PORTS_PER_SLOT + PORT_OFFSET_ADMIN
 ```
 
-Example for slot 0: `http=18080`, `plugin=18081`, `gateway=18082`, `admin=18083`.
+Example for slot 0: `http=18080`, `plugin=18081`, `admin=18083`.
 
 ### `timing.py`
 

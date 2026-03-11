@@ -42,14 +42,15 @@ Default workspace root:
 
 ## `registry.json` format
 
-`registry.json` tracks all workspaces and their slot-based port assignment.
+`registry.json` tracks all workspaces and their slot-based port assignment. The dict key is the workspace UUID id. `default_workspace` stores the id of the default workspace.
 
 ```json
 {
-  "default_workspace": "home",
+  "default_workspace": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "port_range_start": 18080,
   "workspaces": {
-    "home": {
+    "a1b2c3d4-e5f6-7890-abcd-ef1234567890": {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "home",
       "path": "C:/Users/<user>/AppData/Local/phbcli/workspaces/home",
       "port_slot": 0
@@ -60,16 +61,19 @@ Default workspace root:
 
 ### Port derivation
 
-For a workspace with slot `s`:
+4 ports are reserved per slot. For a workspace with slot `s` and default `port_range_start = 18080`:
 
-- `http_port = port_range_start + s * 3`
-- `plugin_port = port_range_start + s * 3 + 1`
-- `gateway_port = port_range_start + s * 3 + 2`
+| Port | Formula |
+|---|---|
+| `http_port` | `port_range_start + s * 4` |
+| `plugin_port` | `port_range_start + s * 4 + 1` |
+| *(+2 reserved)* | — |
+| `admin_port` | `port_range_start + s * 4 + 3` |
 
-Example with default start `18080`:
+Example:
 
-- slot `0` -> `18080`, `18081`, `18082`
-- slot `1` -> `18083`, `18084`, `18085`
+- slot `0` → http=`18080`, plugin=`18081`, admin=`18083`
+- slot `1` → http=`18084`, plugin=`18085`, admin=`18087`
 
 ## `config.json` format
 
@@ -82,6 +86,7 @@ Example with default start `18080`:
   "http_host": "127.0.0.1",
   "http_port": 18080,
   "plugin_port": 18081,
+  "admin_port": 18083,
   "master_key_file": "master_key.pem",
   "pairing_code_length": 6,
   "pairing_code_ttl_seconds": 300,

@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..tools.server import (
+    RestartTool,
     SetupTool,
     StartTool,
     StatusTool,
@@ -38,6 +39,10 @@ def register(app: typer.Typer, console: Console) -> None:
         ),
         skip_autostart: bool = typer.Option(
             False, "--skip-autostart", help="Do not register auto-start"
+        ),
+        start_server: bool = typer.Option(
+            False, "--start-server",
+            help="Start the server immediately after setup completes.",
         ),
         elevated_task: bool = typer.Option(
             False, "--elevated-task",
@@ -70,6 +75,7 @@ def register(app: typer.Typer, console: Console) -> None:
                 workspace=workspace,
                 http_port=http_port,
                 skip_autostart=skip_autostart,
+                start_server=start_server,
                 elevated_task=elevated_task,
             )
         except WorkspaceError as exc:
@@ -105,7 +111,12 @@ def register(app: typer.Typer, console: Console) -> None:
         elif result.autostart_method == "failed":
             console.print("[yellow]Auto-start registration failed.[/yellow]")
 
-        console.print("\nStarting server…")
+        if result.server_started:
+            console.print("\n[green]Server started.[/green]")
+        else:
+            console.print(
+                f"\nRun [bold]phbcli start --workspace {result.workspace}[/bold] to start the server."
+            )
 
     @app.command()
     def start(
@@ -165,6 +176,53 @@ def register(app: typer.Typer, console: Console) -> None:
             console.print(f"[green]Server stopped[/green] (was PID {result.pid}).")
         else:
             console.print("[yellow]Server is not running.[/yellow]")
+
+    @app.command()
+    def restart(
+        workspace: Optional[str] = typer.Option(
+            None, "--workspace", "-W",
+            help="Workspace to restart (default: registry default).",
+        ),
+        foreground: bool = typer.Option(
+            False, "--foreground", "-f",
+            help=(
+                "Run the restarted server in the foreground with live log output. "
+                "Press Ctrl+C to stop."
+            ),
+        ),
+        admin: bool = typer.Option(
+            False, "--admin",
+            help="Also start the admin UI on its dedicated port (localhost only).",
+        ),
+    ) -> None:
+        """Gracefully restart the phbcli server (stop + start)."""
+        try:
+            result = RestartTool().execute(
+                workspace=workspace, foreground=foreground, admin=admin,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+
+        if result.was_running:
+            console.print(
+                f"[green]Server restarted[/green] "
+                f"(was PID {result.pid}, now PID {result.new_pid})."
+            )
+        else:
+            console.print(
+                f"[green]Server started[/green] (was not running, PID {result.new_pid})."
+            )
+        console.print(
+            f"  HTTP: http://{result.http_host}:{result.http_port}/status"
+        )
+        if result.admin_port:
+            console.print(
+                f"  Admin UI: [cyan]http://127.0.0.1:{result.admin_port}[/cyan]"
+            )
 
     @app.command()
     def status(
@@ -285,6 +343,7 @@ def _print_workspace_status_entry(
     table.add_column("Key", style="bold")
     table.add_column("Value")
 
+    table.add_row("ID", f"[dim]{ws.id}[/dim]")
     table.add_row("Server running", "[green]yes[/green]" if ws.server_running else "[red]no[/red]")
     table.add_row("PID", str(ws.pid) if ws.pid else "—")
     table.add_row(

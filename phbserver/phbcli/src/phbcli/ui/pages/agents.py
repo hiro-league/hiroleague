@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import app as nicegui_app, ui
 
 _PLACEHOLDERS = [
     ("history", "Tool call history"),
@@ -34,29 +34,14 @@ async def agents_page() -> None:
     from phbcli.domain.agent_config import load_agent_config, load_system_prompt
     from phbcli.domain.workspace import resolve_workspace
     from phbcli.tools import all_tools
-    from phbcli.tools.workspace import WorkspaceListTool
     from phbcli.ui.app import create_page_layout
 
     create_page_layout(active_path="/agents")
 
-    # ------------------------------------------------------------------ workspace state
-    workspace_names: list[str] = []
-    default_workspace: str | None = None
-    try:
-        ws_result = WorkspaceListTool().execute()
-        workspace_names = [ws["name"] for ws in ws_result.workspaces]
-        default_workspace = ws_result.default_workspace or (
-            workspace_names[0] if workspace_names else None
-        )
-    except Exception:
-        pass
-
-    selected_workspace: list[str | None] = [default_workspace]
-
     # ------------------------------------------------------------------ refreshable config
     @ui.refreshable
     def config_section() -> None:
-        ws_name = selected_workspace[0]
+        ws_name: str | None = nicegui_app.storage.user.get("selected_workspace")
         if ws_name is None:
             ui.label("No workspaces available.").classes("opacity-60 text-sm")
             return
@@ -92,19 +77,7 @@ async def agents_page() -> None:
 
     # ------------------------------------------------------------------ page layout
     with ui.column().classes("w-full gap-6 p-6"):
-        with ui.row().classes("items-center justify-between w-full"):
-            ui.label("Agents").classes("text-2xl font-semibold")
-            if workspace_names:
-                def on_workspace_change(e) -> None:
-                    selected_workspace[0] = e.value
-                    config_section.refresh()
-
-                ui.select(
-                    workspace_names,
-                    value=selected_workspace[0],
-                    label="Workspace",
-                    on_change=on_workspace_change,
-                ).classes("min-w-40")
+        ui.label("Agents").classes("text-2xl font-semibold")
 
         # ---- Agent configuration (workspace-scoped)
         config_section()

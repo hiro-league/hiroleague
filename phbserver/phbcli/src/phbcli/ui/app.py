@@ -8,6 +8,12 @@ Dark mode strategy:
   same as Tailwind's 'dark' selector.  All layout elements therefore use Quasar
   components (QHeader, QDrawer, QItem, etc.) which auto-adapt — no hardcoded
   Tailwind colors on structural elements.
+
+Workspace selection strategy:
+  The active workspace is stored in nicegui_app.storage.user["selected_workspace"]
+  (by workspace *id*) so it persists across page navigations within a browser
+  session.  The header renders a single workspace dropdown; changing it reloads
+  the current page so all page content reflects the new selection.
 """
 
 from __future__ import annotations
@@ -35,26 +41,69 @@ def create_page_layout(active_path: str = "/") -> None:
     Must be called at the top of every @ui.page function.  The drawer is
     instantiated first so the header toggle button can reference it.
     """
-    # behavior="desktop" makes the drawer push page content instead of overlaying it
+    from phbcli.ui import state as ui_state
+    from phbcli.tools.workspace import WorkspaceListTool
+
+    # NiceGUI ui.select accepts {value: label} dicts or plain lists of strings.
+    # A list-of-dicts format is NOT supported — each dict would be treated as the
+    # option value itself, causing "Invalid value" when a string id is passed.
+    workspace_options: dict[str, str] = {}  # {ws_id: display_label}
+    default_ws_id: str | None = None
+    try:
+        ws_result = WorkspaceListTool().execute()
+        for ws in ws_result.workspaces:
+            label = ws["name"]
+            if ui_state.workspace_id and ws["id"] == ui_state.workspace_id:
+                label += " (this UI)"
+            workspace_options[ws["id"]] = label
+        default_ws_id = ws_result.default_workspace or (
+            next(iter(workspace_options), None)
+        )
+    except Exception:
+        pass
+
+    ws_ids = list(workspace_options.keys())
+
+    stored = nicegui_app.storage.user.get("selected_workspace")
+    # Use a local variable so the validated id is passed directly to ui.select
+    # without re-reading from browser-backed storage (write may not propagate
+    # within the same request).
+    selected_id = stored if stored in ws_ids else default_ws_id
+    nicegui_app.storage.user["selected_workspace"] = selected_id
+
     drawer = ui.left_drawer(value=True).props('behavior="desktop" bordered')
     with drawer:
         _sidebar(active_path)
 
-    # Bind dark mode to per-user browser storage so the preference persists
-    # across page navigations.  Both this element and the header switch write
-    # to the same storage key — no extra .on() handler needed.
     ui.dark_mode().bind_value(nicegui_app.storage.user, "dark_mode")
+
+    # Build header title — include the UI workspace name when available
+    header_title = "PHB Admin"
+    if ui_state.workspace_name:
+        header_title = f"PHB Admin — {ui_state.workspace_name}"
 
     with ui.header(elevated=True).classes("items-center justify-between"):
         with ui.row().classes("items-center gap-2"):
-            # color="white" is a Quasar color role — keeps the icon visible on the primary header background
             ui.button(icon="menu", on_click=drawer.toggle).props('flat dense round color="white"')
             ui.icon("home").classes("text-primary text-xl")
-            ui.label("PHB Admin").classes("text-lg font-semibold")
+            ui.label(header_title).classes("text-lg font-semibold")
 
-        ui.switch("Dark mode").props("dense").bind_value(
-            nicegui_app.storage.user, "dark_mode"
-        )
+        with ui.row().classes("items-center gap-4"):
+            if workspace_options:
+                def on_workspace_change(e) -> None:
+                    nicegui_app.storage.user["selected_workspace"] = e.value
+                    ui.navigate.reload()
+
+                ui.select(
+                    workspace_options,
+                    value=selected_id,
+                    label="Workspace",
+                    on_change=on_workspace_change,
+                ).classes("min-w-40").props("dense outlined dark")
+
+            ui.switch("Dark mode").props("dense").bind_value(
+                nicegui_app.storage.user, "dark_mode"
+            )
 
 
 def _sidebar(active_path: str) -> None:
@@ -67,8 +116,6 @@ def _sidebar(active_path: str) -> None:
                 )
             else:
                 is_active = path == active_path
-                # ui.item() → Quasar QItem: auto-adapts background/text to dark mode.
-                # Lambda default arg (p=path) captures loop variable correctly.
                 with ui.item(on_click=lambda p=path: ui.navigate.to(p)).props(
                     "clickable v-ripple"
                 ).classes("rounded-md mx-2 " + ("text-primary" if is_active else "")):
@@ -88,6 +135,7 @@ def register_pages() -> None:
     from phbcli.ui.pages import channels as _channels  # noqa: F401 — side-effect import
     from phbcli.ui.pages import devices as _devices  # noqa: F401 — side-effect import
     from phbcli.ui.pages import agents as _agents  # noqa: F401 — side-effect import
+    from phbcli.ui.pages import logs as _logs  # noqa: F401 — side-effect import
 
     _register_stub_pages()
 
@@ -98,7 +146,6 @@ def register_pages() -> None:
 
 _STUBS: list[tuple[str, str, str]] = [
     ("/chats", "Chats", "chat"),
-    ("/logs", "Logs", "article"),
 ]
 
 

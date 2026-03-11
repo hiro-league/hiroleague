@@ -2,12 +2,12 @@
     "version": "0.2.0",
     "configurations": [
       {
-        "name": "Debug phbgateway",
+        "name": "Gateway Start",
         "type": "debugpy",
         "request": "launch",
         "python": "${workspaceFolder}\\phbserver\\.venv\\Scripts\\python.exe",
         "module": "phbgateway.main",
-        "args": ["-f"],
+        "args": ["start", "--foreground"],
         "cwd": "${workspaceFolder}\\phbserver",
         "env": {
           "PYTHONPATH": "${workspaceFolder}\\phbserver\\gateway\\src;${workspaceFolder}\\phbserver\\phb-channel-sdk\\src"
@@ -16,7 +16,7 @@
         "justMyCode": false
       },
       {
-        "name": "Debug phbcli start -f",
+        "name": "Server Start",
         "type": "debugpy",
         "request": "launch",
         "python": "${workspaceFolder}\\phbserver\\.venv\\Scripts\\python.exe",
@@ -30,25 +30,25 @@
         "justMyCode": false
       },
       {
-        "name": "Terminal Flutter device_apps (web)",
+        "name": "Flutter Web Start",
         "type": "node-terminal",
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && fvm flutter run -d chrome --web-port 63000"
       },
       {
-        "name": "Terminal Flutter device_apps (android)",
+        "name": "Flutter Android Start",
         "type": "node-terminal",
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && fvm flutter run -d android"
       },
       {
-        "name": "Terminal mint dev",
+        "name": "Mint Docs Start",
         "type": "node-terminal",
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder}\")/mintdocs\" && mint dev"
       },
       {
-        "name": "Terminal diagram-gen",
+        "name": "Diagram Generator Start",
         "type": "node-terminal",
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && uv run python diagram-gen/generate.py"
@@ -58,9 +58,9 @@
       {
         "name": "Debug Gateway + phbcli + Flutter device_apps",
         "configurations": [
-          "Debug phbgateway",
-          "Debug phbcli start -f",
-          "Terminal Flutter device_apps (web)"
+          "Gateway Start",
+          "Server Start",
+          "Flutter Web Start"
         ]
       }
     ]

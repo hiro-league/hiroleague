@@ -1,25 +1,27 @@
 ---
 title: "Workspace"
-description: "Create, inspect, and manage isolated workspace instances for phbcli."
+description: "Create, inspect, update, and manage isolated workspace instances for phbcli."
 icon: "folder"
 ---
 
 A workspace is an isolated desktop-server instance with its own config, keys, state, channels, logs, and process IDs.
 
-Use workspace commands to create, inspect, and remove these instances.
+Each workspace has an **immutable UUID id** (used as the registry key, autostart task suffix, and stable identifier) and a **mutable display name** that can be freely renamed.
+
+Use workspace commands to create, inspect, update, and remove these instances.
 
 For on-disk paths and JSON file formats, see `/cli-storage`.
 
 ## Resolution order
 
-Commands that accept `--workspace` resolve the target in this order:
+Commands that accept `--workspace` resolve the target by **id or name** in this order:
 
-1. `--workspace <name>`
+1. `--workspace <name-or-id>`
 2. `PHB_WORKSPACE` environment variable
-3. default workspace in registry
+3. default workspace in registry (stored by id)
 
 <Note>
-  `--workspace` is the primary user flow. `PHB_WORKSPACE` is optional for scripting.
+  `--workspace` accepts either the display name or the UUID id. If multiple workspaces share the same name, the CLI will prompt you to use the id instead.
 </Note>
 
 ### Environment variable examples
@@ -59,8 +61,10 @@ phbcli workspace list
 Shows all configured workspaces, their status, ports, and paths.
 
 - `*` marks the default workspace.
-- `Status` shows whether the workspace server is running.
-- `Gateway` is always external and configured via workspace `gateway_url`.
+- `ID` shows the first 8 characters of the workspace UUID.
+- `Setup` shows whether the workspace has been configured (`phbcli setup`).
+- `Server` shows whether the workspace server process is running.
+- `Gateway URL` is the external WebSocket gateway this workspace connects to.
 
 ## Create a workspace
 
@@ -68,7 +72,7 @@ Shows all configured workspaces, their status, ports, and paths.
 phbcli workspace create <name>
 ```
 
-Creates a new workspace and assigns ports from the managed port-slot range.
+Creates a new workspace with an auto-generated UUID and assigns ports from the managed port-slot range.
 
 ```bash
 phbcli workspace create dev
@@ -98,36 +102,54 @@ phbcli workspace create lab --set-default
 ## Show workspace details
 
 ```bash
-phbcli workspace show [name]
+phbcli workspace show [name-or-id]
 ```
 
 Displays detailed status and configuration for one workspace:
 
-- Path
-- Whether it is default
+- Name, UUID id, path, port slot, and whether it is the default
+- Setup status — whether `phbcli setup` has been run
 - Server running state and PID
-- HTTP, plugin, and gateway ports
-- Gateway mode (`external`)
-- Port slot number
+- Gateway URL and WebSocket connection status
+- Device ID
+- HTTP, plugin, and admin ports
 
-If `name` is omitted, the command shows the default workspace.
+If `name-or-id` is omitted, the command shows the default workspace.
 
-## Set the default workspace
+## Update a workspace
 
 ```bash
-phbcli workspace set-default <name>
+phbcli workspace update <name-or-id> [options]
 ```
 
-Sets which workspace is used when a command runs without `--workspace`.
+Updates one or more mutable workspace properties in a single command.
+
+| Option | Description |
+|--------|-------------|
+| `--name`, `-n` | New display name. The UUID id, path, and ports are unchanged. |
+| `--set-default` | Set this workspace as the default for commands run without `--workspace`. |
+| `--gateway-url`, `-g` | New gateway WebSocket URL (light update — no key regeneration). For full reconfiguration use `phbcli setup`. |
+
+### Examples
 
 ```bash
-phbcli workspace set-default home
+# Rename
+phbcli workspace update dev --name development
+
+# Set as default
+phbcli workspace update dev --set-default
+
+# Rename and set default in one go
+phbcli workspace update dev --name development --set-default
+
+# Change gateway URL
+phbcli workspace update home --gateway-url ws://newhost:8765
 ```
 
 ## Remove a workspace
 
 ```bash
-phbcli workspace remove <name>
+phbcli workspace remove <name-or-id>
 ```
 
 Removes the workspace from the registry.
@@ -157,7 +179,12 @@ phbcli workspace remove dev --purge
 
 ```bash
 phbcli workspace create home --set-default
-phbcli setup --workspace home
+phbcli setup --workspace home --gateway-url ws://myhost:8765
 phbcli start --workspace home
 phbcli workspace show home
 ```
+
+<Note>
+  `phbcli setup` saves configuration and registers auto-start but does **not** start the server by itself.
+  Add `--start-server` to start it immediately after setup, or run `phbcli start` separately.
+</Note>

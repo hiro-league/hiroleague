@@ -18,6 +18,16 @@
 - Log what really matters
 - when server time and device time are different, how would you define the timestamp, inbound to device, or ourbound to server..
 
+# Admin UI
+- Figuring out Missing parts and initial arrangement
+- Logs should be a Tool, Log should have colors.
+- Workspace should be a Global Dropdown
+- Allow Loading Local Gateways
+- Allow Reloading Workspace.
+- Add Device QR Code
+- Fine Tune Tools for better utilization
+- Work on Admin UI Security
+
 # Refactoring
 - Gateway
 
@@ -46,6 +56,7 @@
 
 - Conversations should be encrypted. in case they are stolen, they should be unreadable.
 - When a device is revoked, the gateway relay is not notified and it keeps accepting messages from devices. also the devices are not checked that they are still valid, not in server, not in gateway.
+- Need a command that is a Health/Doctor, that checks validity of the installation, latest version, status, valid file structure, etc... can be also used for debugging and sending bug reports.
 
 # Big Design Ideas
 
@@ -107,8 +118,6 @@
 - Describe progressive Architecture in MintDocs, add Diagrams.
 - Add Home Page
 - Create Flutter Android App
-
-
 
 # UI Design Ideas
 

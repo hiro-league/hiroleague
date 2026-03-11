@@ -9,6 +9,7 @@ from .channel import (
 )
 from .device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
 from .server import (
+    RestartTool,
     SetupTool,
     StartTool,
     StatusTool,
@@ -20,8 +21,8 @@ from .workspace import (
     WorkspaceCreateTool,
     WorkspaceListTool,
     WorkspaceRemoveTool,
-    WorkspaceSetDefaultTool,
     WorkspaceShowTool,
+    WorkspaceUpdateTool,
 )
 
 
@@ -40,11 +41,12 @@ def all_tools() -> list[Tool]:
         WorkspaceListTool(),
         WorkspaceCreateTool(),
         WorkspaceRemoveTool(),
-        WorkspaceSetDefaultTool(),
+        WorkspaceUpdateTool(),
         WorkspaceShowTool(),
         SetupTool(),
         StartTool(),
         StopTool(),
+        RestartTool(),
         StatusTool(),
         TeardownTool(),
         UninstallTool(),

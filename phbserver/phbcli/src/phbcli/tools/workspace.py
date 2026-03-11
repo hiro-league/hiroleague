@@ -1,7 +1,10 @@
 """Workspace management tools.
 
-Five operations: list, create, remove, set-default, show.
+Five operations: list, create, remove, update, show.
 The CLI (commands/workspace.py) and the AI agent call these directly.
+
+All tool parameters named ``workspace`` accept either a workspace name or
+a workspace UUID id for resolution.
 """
 
 from __future__ import annotations
@@ -10,15 +13,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from phb_commons.process import is_running, read_pid
+
+from ..constants import PID_FILENAME
+from ..domain.config import load_config, load_state
 from ..domain.workspace import (
     WorkspaceError,
+    admin_port_for,
     create_workspace,
-    gateway_port_for,
     http_port_for,
     load_registry,
-    next_free_slot,
     plugin_port_for,
     remove_workspace,
+    rename_workspace,
     resolve_workspace,
     set_default_workspace,
 )
@@ -38,34 +45,70 @@ class WorkspaceListResult:
 
 @dataclass
 class WorkspaceCreateResult:
+    id: str
     name: str
     path: str
     http_port: int
     plugin_port: int
-    gateway_port: int
+    admin_port: int
     is_default: bool
 
 
 @dataclass
 class WorkspaceRemoveResult:
+    id: str
     name: str
     purged: bool
 
 
 @dataclass
-class WorkspaceSetDefaultResult:
+class WorkspaceUpdateResult:
+    id: str
     name: str
+    is_default: bool
+    renamed: bool
+    default_changed: bool
+    gateway_updated: bool
 
 
 @dataclass
 class WorkspaceShowResult:
+    id: str
     name: str
     path: str
     is_default: bool
+    is_configured: bool
     http_port: int
     plugin_port: int
-    gateway_port: int
+    admin_port: int
     port_slot: int
+    gateway_url: str | None
+    device_id: str | None
+    ws_connected: bool
+    last_connected: str | None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_workspace_config_safe(workspace_path: Path) -> Any | None:
+    """Return Config if config.json exists, otherwise None."""
+    if not (workspace_path / "config.json").exists():
+        return None
+    try:
+        return load_config(workspace_path)
+    except Exception:
+        return None
+
+
+def _load_workspace_state_safe(workspace_path: Path) -> Any | None:
+    """Return State if state.json exists, otherwise None."""
+    try:
+        return load_state(workspace_path)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -81,15 +124,20 @@ class WorkspaceListTool(Tool):
     def execute(self) -> WorkspaceListResult:
         registry = load_registry()
         workspaces = []
-        for ws_name, entry in registry.workspaces.items():
+        for ws_id, entry in registry.workspaces.items():
+            ws_path = Path(entry.path)
+            config = _load_workspace_config_safe(ws_path)
             workspaces.append({
-                "name": ws_name,
+                "id": ws_id,
+                "name": entry.name,
                 "path": entry.path,
-                "is_default": ws_name == registry.default_workspace,
+                "is_default": ws_id == registry.default_workspace,
+                "is_configured": config is not None,
                 "http_port": http_port_for(registry, entry.port_slot),
                 "plugin_port": plugin_port_for(registry, entry.port_slot),
-                "gateway_port": gateway_port_for(registry, entry.port_slot),
+                "admin_port": admin_port_for(registry, entry.port_slot),
                 "port_slot": entry.port_slot,
+                "gateway_url": config.gateway_url if config else None,
             })
         return WorkspaceListResult(
             workspaces=workspaces,
@@ -116,16 +164,17 @@ class WorkspaceCreateTool(Tool):
         entry, registry = create_workspace(name, path=custom_path)
 
         if set_default:
-            set_default_workspace(name)
+            set_default_workspace(entry.id)
             registry = load_registry()
 
         return WorkspaceCreateResult(
+            id=entry.id,
             name=entry.name,
             path=entry.path,
             http_port=http_port_for(registry, entry.port_slot),
             plugin_port=plugin_port_for(registry, entry.port_slot),
-            gateway_port=gateway_port_for(registry, entry.port_slot),
-            is_default=entry.name == registry.default_workspace,
+            admin_port=admin_port_for(registry, entry.port_slot),
+            is_default=entry.id == registry.default_workspace,
         )
 
 
@@ -133,42 +182,119 @@ class WorkspaceRemoveTool(Tool):
     name = "workspace_remove"
     description = "Remove a workspace from the registry, optionally deleting its folder from disk"
     params = {
-        "name": ToolParam(str, "Workspace name to remove"),
+        "workspace": ToolParam(str, "Workspace name or id to remove"),
         "purge": ToolParam(bool, "Also delete the workspace folder from disk", required=False),
     }
 
-    def execute(self, name: str, purge: bool = False) -> WorkspaceRemoveResult:
-        remove_workspace(name, purge=purge)
-        return WorkspaceRemoveResult(name=name, purged=purge)
+    def execute(self, workspace: str, purge: bool = False) -> WorkspaceRemoveResult:
+        entry, registry = resolve_workspace(workspace)
+        ws_path = Path(entry.path)
+
+        pid = read_pid(ws_path, PID_FILENAME)
+        if is_running(pid):
+            raise WorkspaceError(
+                f"Workspace '{entry.name}' is currently running (PID {pid}). "
+                "Stop it before removing."
+            )
+
+        if registry.default_workspace == entry.id and len(registry.workspaces) > 1:
+            raise WorkspaceError(
+                f"Workspace '{entry.name}' is the default workspace. "
+                "Set another workspace as the default before removing this one."
+            )
+
+        remove_workspace(entry.id, purge=purge)
+        return WorkspaceRemoveResult(id=entry.id, name=entry.name, purged=purge)
 
 
-class WorkspaceSetDefaultTool(Tool):
-    name = "workspace_set_default"
-    description = "Set the default workspace used when --workspace is not specified"
+class WorkspaceUpdateTool(Tool):
+    name = "workspace_update"
+    description = (
+        "Update mutable workspace properties: display name, default flag, and/or gateway URL. "
+        "Only supplied fields are changed. For full reconfiguration (keys, autostart) use setup."
+    )
     params = {
-        "name": ToolParam(str, "Workspace name to set as default"),
+        "workspace": ToolParam(str, "Workspace name or id to update"),
+        "name": ToolParam(str, "New display name", required=False),
+        "set_default": ToolParam(bool, "Set this workspace as the default", required=False),
+        "gateway_url": ToolParam(str, "New gateway WebSocket URL (light update — no key regen)", required=False),
     }
 
-    def execute(self, name: str) -> WorkspaceSetDefaultResult:
-        set_default_workspace(name)
-        return WorkspaceSetDefaultResult(name=name)
+    def execute(
+        self,
+        workspace: str,
+        name: str | None = None,
+        set_default: bool = False,
+        gateway_url: str | None = None,
+    ) -> WorkspaceUpdateResult:
+        entry, registry = resolve_workspace(workspace)
+        renamed = False
+        default_changed = False
+        gateway_updated = False
+
+        if name is not None and name != entry.name:
+            rename_workspace(entry.id, name)
+            renamed = True
+            entry.name = name  # keep local ref in sync for result
+
+        if set_default and registry.default_workspace != entry.id:
+            if not (Path(entry.path) / "config.json").exists():
+                raise WorkspaceError(
+                    f"Workspace '{entry.name}' is not configured. "
+                    f"Run 'phbcli setup --workspace {entry.name}' before setting it as the default."
+                )
+            set_default_workspace(entry.id)
+            default_changed = True
+
+        if gateway_url is not None:
+            # Light update: patch only the gateway_url in config.json without regenerating keys.
+            from ..domain.config import load_config, save_config
+            ws_path = Path(entry.path)
+            if not (ws_path / "config.json").exists():
+                raise WorkspaceError(
+                    f"Workspace '{entry.name}' is not configured. "
+                    f"Run 'phbcli setup --workspace {entry.name}' first."
+                )
+            config = load_config(ws_path)
+            config.gateway_url = gateway_url
+            save_config(ws_path, config)
+            gateway_updated = True
+
+        updated_registry = load_registry()
+        return WorkspaceUpdateResult(
+            id=entry.id,
+            name=entry.name,
+            is_default=updated_registry.default_workspace == entry.id,
+            renamed=renamed,
+            default_changed=default_changed,
+            gateway_updated=gateway_updated,
+        )
 
 
 class WorkspaceShowTool(Tool):
     name = "workspace_show"
-    description = "Show details of a workspace: path, ports, and whether it is the default"
+    description = "Show details of a workspace: path, ports, configuration, and runtime state"
     params = {
-        "name": ToolParam(str, "Workspace name (omit to show the default workspace)", required=False),
+        "workspace": ToolParam(str, "Workspace name or id (omit to show the default)", required=False),
     }
 
-    def execute(self, name: str | None = None) -> WorkspaceShowResult:
-        entry, registry = resolve_workspace(name)
+    def execute(self, workspace: str | None = None) -> WorkspaceShowResult:
+        entry, registry = resolve_workspace(workspace)
+        ws_path = Path(entry.path)
+        config = _load_workspace_config_safe(ws_path)
+        state = _load_workspace_state_safe(ws_path)
         return WorkspaceShowResult(
+            id=entry.id,
             name=entry.name,
             path=entry.path,
-            is_default=entry.name == registry.default_workspace,
+            is_default=entry.id == registry.default_workspace,
+            is_configured=config is not None,
             http_port=http_port_for(registry, entry.port_slot),
             plugin_port=plugin_port_for(registry, entry.port_slot),
-            gateway_port=gateway_port_for(registry, entry.port_slot),
+            admin_port=admin_port_for(registry, entry.port_slot),
             port_slot=entry.port_slot,
+            gateway_url=config.gateway_url if config else None,
+            device_id=config.device_id if config else None,
+            ws_connected=state.ws_connected if state else False,
+            last_connected=state.last_connected if state else None,
         )

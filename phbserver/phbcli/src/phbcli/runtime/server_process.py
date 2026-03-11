@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import sys
 import uuid
 from datetime import UTC, datetime
@@ -77,7 +78,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     from phbcli.runtime.agent_manager import AgentManager
     from phbcli.runtime.communication_manager import CommunicationManager
     from phbcli.runtime.channel_manager import ChannelManager
-    from phbcli.runtime.http_server import run_http_server, set_channel_info_provider, set_tool_registry, set_workspace_path
+    from phbcli.runtime.http_server import run_http_server, set_channel_info_provider, set_stop_event, set_tool_registry, set_workspace_path
     from phbcli.tools import all_tools
     from phbcli.tools.registry import ToolRegistry
 
@@ -91,6 +92,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     )
     desktop_private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
     stop_event = asyncio.Event()
+    set_stop_event(stop_event)
     write_pid(workspace_path, PID_FILENAME)
     ensure_db(workspace_path)  # create/upgrade workspace.db tables and conversations/ dir
     set_workspace_path(workspace_path)
@@ -225,7 +227,9 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
         coros.append(_tail_plugin_logs(log_dir, stop_event))
     if admin:
         from phbcli.ui.run import run_admin_ui
-        coros.append(run_admin_ui(config, stop_event))
+        # Pass log_dir and workspace_path so the admin UI can tail logs and
+        # identify which workspace it is hosting (to protect self-destructive actions).
+        coros.append(run_admin_ui(config, stop_event, log_dir=log_dir, workspace_path=workspace_path))
 
     server_task = asyncio.ensure_future(
         asyncio.gather(*coros, return_exceptions=True)
@@ -239,8 +243,56 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     except (asyncio.CancelledError, Exception):
         pass
 
+    from phbcli.runtime.http_server import get_restart_admin, is_restart_requested
+
+    if is_restart_requested():
+        log.info("Restart requested — spawning new server process")
+        _spawn_server(workspace_path, admin=get_restart_admin())
+
     mark_disconnected(workspace_path)
     log.info("phbcli server exited")
+
+
+def _spawn_server(workspace_path: Path, admin: bool = False) -> None:
+    """Spawn a new detached server process (used for self-restart)."""
+    python = sys.executable
+    if sys.platform == "win32" and python.lower().endswith("python.exe"):
+        pythonw = str(Path(python).with_name("pythonw.exe"))
+        if Path(pythonw).exists():
+            python = pythonw
+
+    script = str(Path(__file__))
+    env = {**os.environ, ENV_WORKSPACE_PATH: str(workspace_path)}
+    if admin:
+        env[ENV_ADMIN_UI] = "1"
+    elif ENV_ADMIN_UI in env:
+        del env[ENV_ADMIN_UI]
+
+    if sys.platform == "win32":
+        proc = subprocess.Popen(
+            [python, script],
+            env=env,
+            creationflags=(
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW
+            ),
+            close_fds=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        proc = subprocess.Popen(
+            [python, script],
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    write_pid(workspace_path, PID_FILENAME, proc.pid)
+    log.info("New server process spawned", pid=proc.pid)
 
 
 if __name__ == "__main__":

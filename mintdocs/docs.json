@@ -60,6 +60,7 @@
               "architecture/general",
               "architecture/constants",
               "architecture/tools-architecture",
+              "architecture/server-lifecycle",
               "architecture/device-auth",
               "architecture/workspace-data-store",
               "architecture/admin-ui"
@@ -91,7 +92,8 @@
           {
             "group": "Local build",
             "pages": [
-              "build/setup"
+              "build/setup",
+              "build/diagram-generator"
             ]
           },
           {

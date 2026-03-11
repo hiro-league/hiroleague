@@ -35,6 +35,7 @@ dependencies = [
     "aiosqlite>=0.20",
     "sqlmodel>=0.0.21",
     "nicegui>=3.0",
+    "qrcode>=8.0",
     "phb-channel-sdk",
     "phb-commons",
 ]

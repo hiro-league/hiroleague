@@ -89,18 +89,16 @@ The `--admin` flag is a boolean on the `start` command and the `StartTool`. When
 
 ### Port allocation
 
-The admin UI runs on a **separate port** from the HTTP API. The existing port allocation scheme assigns 3 ports per workspace slot. This changes to 4:
+The admin UI runs on a **separate port** from the HTTP API. 4 ports are reserved per workspace slot:
 
 | Offset | Service | Example (slot 0) |
 |---|---|---|
 | +0 | HTTP API | 18080 |
 | +1 | Plugin WebSocket | 18081 |
-| +2 | Gateway | 18082 |
+| +2 | *(reserved)* | — |
 | +3 | Admin UI | 18083 |
 
-`PORTS_PER_SLOT` increases from `3` to `4`. A new constant `PORT_OFFSET_ADMIN = 3` is added to `phb_commons.constants.network`, and a corresponding `admin_port_for()` helper is added to `workspace.py`.
-
-The `Config` model gains an `admin_port` field with the same default pattern as `http_port` and `plugin_port`.
+`PORT_OFFSET_ADMIN = 3` and `admin_port_for()` compute the admin port from the workspace slot. The `Config` model carries an `admin_port` field set during `phbcli setup`.
 
 ### Localhost only
 
@@ -136,6 +134,49 @@ Nodes / Devices
 Configuration
 └── Logs
 ```
+
+---
+
+## Table action button rules
+
+Action buttons inside data table rows must follow these rules.
+
+### Sizing and spacing
+
+1. **Never add `dense` to action icon buttons.** `dense` reduces the touch target to ~24px — adjacent buttons become too close to tap reliably, especially on touch screens or high-density displays.
+
+2. **Add `class="q-ma-xs"` to every action button.** This applies a 4 px margin on all sides, creating visible gaps between adjacent buttons and a larger effective click area.
+
+3. **Use `size="sm"` for icon-only buttons in compact table rows.** `sm` is large enough for a comfortable tap target without inflating the row height.
+
+```python
+# Correct — adequate target, spaced apart
+'<q-btn flat size="sm" icon="play_arrow" class="q-ma-xs" @click="..." />'
+
+# Incorrect — dense kills the hit target; no margin packs buttons together
+'<q-btn flat dense size="sm" icon="play_arrow" @click="..." />'
+```
+
+### Workspace management safety rules
+
+These rules apply to the Workspaces page and must be enforced both at the tool layer (for CLI / agent callers) and at the UI layer (for context-specific restrictions).
+
+| Action | Condition | Behaviour |
+|---|---|---|
+| **Remove** | Workspace is running | Blocked. Tool raises `WorkspaceError`: stop the server first. |
+| **Remove** | Workspace is the default and others exist | Blocked. Tool raises `WorkspaceError`: set another workspace as default first. |
+| **Set default** | Workspace is not configured | Blocked. Tool raises `WorkspaceError`: run `phbcli setup` first. |
+| **Stop** | Workspace is the current Admin UI workspace | Blocked in UI only. Notification explains to use another workspace's Admin UI. |
+| **Remove** | Workspace is the current Admin UI workspace | Blocked in UI only. Delete button replaced with a lock icon; notification explains. |
+
+The "current Admin UI workspace" check is UI-context only. The workspace whose server process is running the Admin UI is identified by `ui_state.workspace_id` (immutable UUID), which is set at startup from the workspace registry. Tools have no awareness of which workspace is serving the UI — this protection lives entirely in the page layer.
+
+### Restart dialog
+
+When restarting a workspace, a confirmation dialog is shown before calling `RestartTool`. The dialog includes an **"Also start Admin UI"** checkbox:
+
+- For non-current workspaces: unchecked by default, user can toggle freely.
+- For the current Admin UI workspace: checked and **disabled** (forced on). Restarting without re-enabling the Admin UI would disconnect the browser session with no way to reconnect from the same UI.
 
 ---
 
@@ -205,16 +246,24 @@ The dashboard calls tools in-process to assemble these numbers on page load. No 
 
 ### Workspaces
 
-A table of all registered workspaces with columns: name, status (running/stopped), HTTP port, gateway port, default flag.
+A table of all registered workspaces. Columns: name, setup status, server status (running/stopped), gateway URL, HTTP port, admin port, default flag.
 
-Data source: `WorkspaceListTool` for the registry entries; `StatusTool` for the live running state of each workspace.
+Data source: `WorkspaceListTool` (includes `id`, `is_configured`, `gateway_url`, `admin_port`); running state derived from `phbcli.pid` per workspace path.
 
-Actions:
-- **Create** — dialog with workspace name and optional path. Calls `WorkspaceCreateTool`. The dialog resets and the table refreshes on success.
-- **Remove** — confirmation dialog with an optional **Delete folder from disk** checkbox. Calls `WorkspaceRemoveTool`. The current default workspace cannot be removed until another workspace is set as default.
-- **Set default** — star button per row (hidden for the current default). Calls `WorkspaceSetDefaultTool` and refreshes the table immediately.
+Actions per row:
 
-The table uses `@ui.refreshable` so all three mutation actions call `.refresh()` in-process rather than navigating away.
+| Button | Condition shown | Tool called |
+|---|---|---|
+| **Start** (play) | Configured + stopped | `StartTool` |
+| **Stop** (square) | Running, not current UI workspace | `StopTool` |
+| **Restart** | Running | `RestartTool` (via confirmation dialog) |
+| **Edit** (pencil) | Always | `WorkspaceUpdateTool` (name, gateway URL, default flag) |
+| **Remove** (trash) | Not current UI workspace | `WorkspaceRemoveTool` |
+| **Lock** icon | Current UI workspace | Disabled — visual indicator only |
+
+The table uses `@ui.refreshable` so all mutation actions call `.refresh()` in-process rather than navigating away.
+
+See [Table action button rules](#table-action-button-rules) and [Workspace management safety rules](#workspace-management-safety-rules) for the interaction constraints applied here.
 
 ### Channels
 

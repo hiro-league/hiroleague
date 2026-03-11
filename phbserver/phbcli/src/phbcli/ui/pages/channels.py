@@ -1,42 +1,28 @@
 """Channels page — list channel plugins for a workspace, with enable/disable actions.
 
-A workspace selector in the header switches between workspaces.
+The active workspace is selected globally in the header and stored in
+nicegui_app.storage.user["selected_workspace"].
 Each channel row shows name, enabled status, command, and config keys.
 The mandatory 'devices' channel cannot be disabled.
 """
 
 from __future__ import annotations
 
-from nicegui import ui
+from nicegui import app as nicegui_app, ui
 
 
 @ui.page("/channels")
 async def channels_page() -> None:
     from phbcli.tools.channel import ChannelDisableTool, ChannelEnableTool, ChannelListTool
-    from phbcli.tools.workspace import WorkspaceListTool
     from phbcli.ui.app import create_page_layout
 
     create_page_layout(active_path="/channels")
 
-    # ------------------------------------------------------------------ workspace selector state
-    workspace_names: list[str] = []
-    default_workspace: str | None = None
-    try:
-        ws_result = WorkspaceListTool().execute()
-        workspace_names = [ws["name"] for ws in ws_result.workspaces]
-        default_workspace = ws_result.default_workspace or (
-            workspace_names[0] if workspace_names else None
-        )
-    except Exception:
-        pass
-
-    # Mutable container for the active workspace selection
-    selected_workspace: list[str | None] = [default_workspace]
+    ws_name: str | None = nicegui_app.storage.user.get("selected_workspace")
 
     # ------------------------------------------------------------------ refreshable channel table
     @ui.refreshable
     def channel_table() -> None:
-        ws_name = selected_workspace[0]
         if ws_name is None:
             ui.label("No workspaces available.").classes("opacity-60 text-sm")
             return
@@ -131,18 +117,5 @@ async def channels_page() -> None:
 
     # ------------------------------------------------------------------ page layout
     with ui.column().classes("w-full gap-6 p-6"):
-        with ui.row().classes("items-center justify-between w-full"):
-            ui.label("Channels").classes("text-2xl font-semibold")
-            if workspace_names:
-                def on_workspace_change(e) -> None:
-                    selected_workspace[0] = e.value
-                    channel_table.refresh()
-
-                ui.select(
-                    workspace_names,
-                    value=selected_workspace[0],
-                    label="Workspace",
-                    on_change=on_workspace_change,
-                ).classes("min-w-40")
-
+        ui.label("Channels").classes("text-2xl font-semibold")
         channel_table()
