@@ -61,6 +61,7 @@
               "architecture/constants",
               "architecture/tools-architecture",
               "architecture/server-lifecycle",
+              "architecture/process-spawning",
               "architecture/device-auth",
               "architecture/workspace-data-store",
               "architecture/admin-ui"

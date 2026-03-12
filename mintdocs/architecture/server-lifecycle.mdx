@@ -105,4 +105,4 @@ The in-process path returns `new_pid=None` in `RestartResult` because the new pr
 | `runtime/http_server.py` | Owns `_stop_event`, `_restart_requested`, `_restart_admin`. Exposes `/_shutdown` and `/_restart` endpoints. Exposes `request_shutdown()` and `request_restart()` for direct in-process use. |
 | `runtime/server_process.py` | Sets `stop_event` on `http_server` at startup. Checks `is_restart_requested()` after shutdown and calls `_spawn_server()` if set. Owns `_spawn_server()` which mirrors the background spawn logic from `tools/server.py`. |
 | `tools/server.py` | `_do_stop()` calls `POST /_shutdown` and waits. `RestartTool` detects in-process vs external caller and dispatches accordingly. |
-| `phb_commons/process.py` | `stop_process()` / `kill_process()` — force kill fallback, used only when HTTP is unreachable. |
+| `phb_commons/process.py` | `stop_process()` / `kill_process()` — force kill fallback, used only when HTTP is unreachable. See [process spawning](/architecture/process-spawning) for background process management conventions. |
