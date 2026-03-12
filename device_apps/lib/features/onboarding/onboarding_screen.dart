@@ -1,9 +1,18 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../application/auth/auth_notifier.dart';
 import '../../application/auth/auth_state.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/constants/route_names.dart';
+import '../../core/utils/platform_utils.dart';
+import '../../domain/models/pairing/pairing_object.dart';
+import 'qr_scan_screen.dart';
 import 'widgets/gateway_url_field.dart';
 import 'widgets/pairing_code_form.dart';
 
@@ -19,27 +28,96 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _gatewayUrlController = TextEditingController();
   final _pairingCodeController = TextEditingController();
 
+  PairingObject? _parsedPairing;
+  Timer? _expiryTimer;
+  // Hidden if the device has no camera or user permanently denied permission.
+  bool _showQrButton = PlatformUtils.isMobile;
+
   @override
   void dispose() {
     _gatewayUrlController.dispose();
     _pairingCodeController.dispose();
+    _expiryTimer?.cancel();
     super.dispose();
   }
 
+  // ── Pairing object helpers ───────────────────────────────────────────────
+
+  void _applyPairingObject(PairingObject pairing) {
+    _gatewayUrlController.text = pairing.gatewayUrl;
+    _pairingCodeController.text = pairing.code;
+    _expiryTimer?.cancel();
+    setState(() {
+      _parsedPairing = pairing;
+      // Rebuild every second so the countdown stays fresh.
+      _expiryTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    });
+  }
+
+  // ── Paste from clipboard ─────────────────────────────────────────────────
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) {
+      _showSnackBar(AppStrings.pasteClipboardEmpty);
+      return;
+    }
+    _parsePairingJson(text, errorMessage: AppStrings.pasteInvalidJson);
+  }
+
+  // ── QR scanner ───────────────────────────────────────────────────────────
+
+  Future<void> _openQrScanner() async {
+    final raw = await context.push<String?>(RouteNames.qrScan);
+    if (raw == QrScanScreen.permissionDeniedMarker) {
+      // User denied camera — hide button for this session.
+      setState(() => _showQrButton = false);
+      return;
+    }
+    if (raw == null) return; // User cancelled.
+    _parsePairingJson(raw, errorMessage: AppStrings.qrInvalidJson);
+  }
+
+  // ── JSON parse ───────────────────────────────────────────────────────────
+
+  void _parsePairingJson(String raw, {required String errorMessage}) {
+    try {
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final pairing = PairingObject.fromJson(json);
+      _applyPairingObject(pairing);
+    } catch (_) {
+      _showSnackBar(errorMessage);
+    }
+  }
+
+  // ── Connect ──────────────────────────────────────────────────────────────
+
   Future<void> _connect() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    await ref.read(authNotifierProvider.notifier).pair(
+    await ref.read(authProvider.notifier).pair(
           _gatewayUrlController.text.trim(),
           _pairingCodeController.text.trim(),
         );
   }
 
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final authAsync = ref.watch(authNotifierProvider);
-    final isPairing = authAsync.valueOrNull is AuthPairing;
-    final errorMsg = authAsync.valueOrNull is AuthError
-        ? (authAsync.valueOrNull! as AuthError).message
+    final authAsync = ref.watch(authProvider);
+    final isPairing = authAsync.value is AuthPairing;
+    final errorMsg = authAsync.value is AuthError
+        ? (authAsync.value! as AuthError).message
         : null;
 
     return Scaffold(
@@ -71,6 +149,20 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  // Paste button — standalone, below the two input fields.
+                  OutlinedButton.icon(
+                    onPressed: isPairing ? null : _pasteFromClipboard,
+                    icon: const Icon(Icons.content_paste_rounded),
+                    label: const Text(AppStrings.pastePairingObject),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                  ),
+                  if (_parsedPairing != null) ...[
+                    const SizedBox(height: 10),
+                    _ExpiryBadge(pairing: _parsedPairing!),
+                  ],
                   if (errorMsg != null) ...[
                     const SizedBox(height: 16),
                     _ErrorBanner(message: errorMsg),
@@ -92,8 +184,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                           )
                         : const Text('Connect'),
                   ),
-                  const SizedBox(height: 16),
-                  _QrScanButton(enabled: !isPairing),
+                  if (_showQrButton) ...[
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: isPairing ? null : _openQrScanner,
+                      icon: const Icon(Icons.qr_code_scanner_rounded),
+                      label: const Text(AppStrings.qrScanButton),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -103,6 +204,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 }
+
+// ── Private widgets ──────────────────────────────────────────────────────────
 
 class _PhbBranding extends StatelessWidget {
   const _PhbBranding();
@@ -143,6 +246,62 @@ class _PhbBranding extends StatelessWidget {
   }
 }
 
+class _ExpiryBadge extends StatelessWidget {
+  const _ExpiryBadge({required this.pairing});
+
+  final PairingObject pairing;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now().toUtc();
+    final diff = pairing.expiresAt.toUtc().difference(now);
+    final isExpired = diff.isNegative;
+
+    final cs = Theme.of(context).colorScheme;
+    final bgColor = isExpired ? cs.errorContainer : cs.secondaryContainer;
+    final fgColor = isExpired ? cs.onErrorContainer : cs.onSecondaryContainer;
+    final icon = isExpired ? Icons.timer_off_rounded : Icons.timer_rounded;
+
+    final String label;
+    if (isExpired) {
+      final ago = now.difference(pairing.expiresAt.toUtc());
+      label = '${AppStrings.pairingExpired} ${_formatDuration(ago)} ago';
+    } else {
+      label = '${AppStrings.pairingExpiresIn} ${_formatDuration(diff)}';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: fgColor),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: fgColor),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes.remainder(60)}m';
+    if (d.inMinutes > 0) {
+      return '${d.inMinutes}m ${d.inSeconds.remainder(60)}s';
+    }
+    return '${d.inSeconds}s';
+  }
+}
+
 class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({required this.message});
 
@@ -171,31 +330,6 @@ class _ErrorBanner extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _QrScanButton extends StatelessWidget {
-  const _QrScanButton({required this.enabled});
-
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: enabled
-          ? () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('QR scanning coming in a future update'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              )
-          : null,
-      icon: const Icon(Icons.qr_code_scanner_rounded),
-      label: const Text('Scan QR Code'),
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(48),
       ),
     );
   }

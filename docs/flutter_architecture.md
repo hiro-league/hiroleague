@@ -59,7 +59,7 @@ These terms must be used consistently everywhere — in code, comments, and AI p
 
 ---
 
-## State Management: Riverpod v2 (with code generation)
+## State Management: Riverpod v3 (with code generation)
 
 **Why Riverpod over Provider:**
 - Provider requires `BuildContext` to read state — Riverpod does not. This matters for services, repositories, and background tasks.
@@ -386,14 +386,14 @@ On wide screens (tablet/desktop/web): `StatefulShellRoute` renders both panels s
 ```yaml
 dependencies:
   # State
-  flutter_riverpod: ^2.x
-  riverpod_annotation: ^2.x
+  flutter_riverpod: ^3.x
+  riverpod_annotation: ^4.x
 
   # Navigation
   go_router: ^14.x
 
   # Models
-  freezed_annotation: ^2.x
+  freezed_annotation: ^3.x
   json_annotation: ^4.x
 
   # Local DB
@@ -430,9 +430,9 @@ dependencies:
 
 dev_dependencies:
   build_runner: ^2.x
-  freezed: ^2.x
+  freezed: ^3.x
   json_serializable: ^6.x
-  riverpod_generator: ^2.x
+  riverpod_generator: ^4.x
   drift_dev: ^2.x
 ```
 
@@ -453,7 +453,7 @@ dev_dependencies:
 11. "Adaptive layout breakpoints use `AdaptiveLayout.isWide(context)` only. No inline `MediaQuery` width checks scattered across widgets."
 12. "A Bot is not a Channel. They are separate domain models with separate providers and separate screens."
 13. "Message bubble rendering uses a dispatcher widget that switches on `MessageType` and delegates to a typed sub-widget. No monolithic bubble widget."
-14. "State management is Riverpod v2 with code generation (`@riverpod`). Do not introduce Provider, Bloc, or GetX anywhere."
+14. "State management is Riverpod v3 with code generation (`@riverpod`). Do not introduce Provider, Bloc, or GetX anywhere."
 
 ---
 

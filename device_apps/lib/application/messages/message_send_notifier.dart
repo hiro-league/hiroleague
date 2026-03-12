@@ -12,7 +12,9 @@ import '../../domain/models/message/message_status.dart';
 
 part 'message_send_notifier.g.dart';
 
-@riverpod
+// keepAlive: action service with no reactive state — must not be auto-disposed
+// mid-send since sendText() crosses async gaps and uses ref after awaits.
+@Riverpod(keepAlive: true)
 class MessageSendNotifier extends _$MessageSendNotifier {
   static const _uuid = Uuid();
   static final _log = Logger.get('MessageSendNotifier');
@@ -29,14 +31,17 @@ class MessageSendNotifier extends _$MessageSendNotifier {
     required String channelId,
     required String text,
   }) async {
-    final authState = ref.read(authNotifierProvider).valueOrNull;
+    final authState = ref.read(authProvider).value;
     if (authState is! AuthAuthenticated) return;
 
     final identity = authState.identity;
     final messageId = _uuid.v4();
     final now = DateTime.now().toUtc();
 
+    // Capture all refs before the first await — ref must not be read after an
+    // async gap in case the provider is rebuilt between awaits (Riverpod v3).
     final repo = ref.read(messageRepositoryProvider);
+    final gateway = ref.read(gatewayProvider.notifier);
 
     try {
       await repo.insertOutbound(
@@ -51,7 +56,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
       // Payload must match phbcli's UnifiedMessage schema — 'channel' and 'direction'
       // are required fields. 'channel_id' is a client-side routing concept stored
       // in metadata so that other Flutter devices can route to the right conversation.
-      ref.read(gatewayNotifierProvider.notifier).send({
+      gateway.send({
         'id': messageId,
         'channel': AppConstants.gatewayChannelName, // required by phbcli
         'direction': 'outbound',                    // required by phbcli

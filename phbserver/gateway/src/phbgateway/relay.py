@@ -22,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict
 
 import websockets
@@ -42,6 +44,7 @@ from phb_channel_sdk.constants import (
 from phb_commons.constants.timing import DEFAULT_AUTH_TIMEOUT_SECONDS, DEFAULT_PAIRING_WAIT_SECONDS
 
 from .auth import GatewayAuthManager
+from .config import GatewayState, load_state, save_state
 from .constants import PAIRING_REQUEST_ID_BYTES, WS_REASON_MAX_LENGTH
 
 log = Logger.get("RELAY")
@@ -57,6 +60,8 @@ _pairing_pending: Dict[str, ServerConnection] = {}
 _pairing_lock = asyncio.Lock()
 PAIRING_WAIT_SECONDS = DEFAULT_PAIRING_WAIT_SECONDS
 
+_instance_path: "Path | None" = None
+
 
 def _message_id(msg: dict[str, object]) -> str | None:
     payload = msg.get("payload")
@@ -70,6 +75,39 @@ def configure_auth(auth_manager: GatewayAuthManager) -> None:
     """Inject the auth manager configured at gateway startup."""
     global _auth_manager
     _auth_manager = auth_manager
+
+
+def configure_instance_path(instance_path: Path) -> None:
+    """Inject the instance path so relay can persist connection state."""
+    global _instance_path
+    _instance_path = instance_path
+
+
+def _write_desktop_connected() -> None:
+    if _instance_path is None:
+        return
+    state = load_state(_instance_path)
+    state.desktop_connected = True
+    state.last_connected = datetime.now(timezone.utc).isoformat()
+    state.last_auth_error = None
+    save_state(_instance_path, state)
+
+
+def _write_desktop_disconnected() -> None:
+    if _instance_path is None:
+        return
+    state = load_state(_instance_path)
+    state.desktop_connected = False
+    save_state(_instance_path, state)
+
+
+def _write_auth_error(reason: str) -> None:
+    if _instance_path is None:
+        return
+    state = load_state(_instance_path)
+    state.desktop_connected = False
+    state.last_auth_error = reason
+    save_state(_instance_path, state)
 
 
 async def register(device_id: str, ws: ServerConnection) -> bool:
@@ -197,6 +235,7 @@ async def _register_desktop_ws(ws: ServerConnection) -> None:
     global _desktop_ws
     async with _pairing_lock:
         _desktop_ws = ws
+    _write_desktop_connected()
 
 
 async def _unregister_desktop_ws(ws: ServerConnection) -> None:
@@ -204,6 +243,7 @@ async def _unregister_desktop_ws(ws: ServerConnection) -> None:
     async with _pairing_lock:
         if _desktop_ws is ws:
             _desktop_ws = None
+    _write_desktop_disconnected()
 
 
 async def _get_desktop_ws() -> ServerConnection | None:
@@ -319,6 +359,9 @@ async def handle_connection(ws: ServerConnection) -> None:
     ok, device_id, reason, role = await _authenticate_connection(nonce, first_msg)
     if not ok or not device_id:
         log.warning("Auth rejected", reason=reason)
+        # Record auth errors for desktop role so the dashboard can surface them.
+        if first_msg.get("auth_mode") == AUTH_ROLE_DESKTOP:
+            _write_auth_error(reason)
         await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=reason[:WS_REASON_MAX_LENGTH])
         return
 

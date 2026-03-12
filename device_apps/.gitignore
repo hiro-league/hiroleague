@@ -32,6 +32,9 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Generated Dart files (code-gen output, not hand-authored)
+**/*.g.dart
+**/*.freezed.dart
 
 # Symbolication related
 app.*.symbols

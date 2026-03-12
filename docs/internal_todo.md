@@ -1,37 +1,43 @@
 
-# Daily Tasks
-- Pair using QR Code
-- Biometric/Pass/Pattern Lock
+# Priority
+- Admin/Mobile/Web - Pair using QR Code
+- add Device Name in Device Paring.
+- Fix Flutter Package Versions.
 - Clean up Message Format
-- Add ability to send Voice, Image.
 - Add ability to send Commands.
-- Add ability to respond in Voice.
-- Allow showing Agent Execution, Tools, $ Consumption.
 - Allow creating channels/conversations.
+- Admin UI - List Devices
+- Admin UI - Revoke Devices
+
+# Flutter App/Web
+- Upgrade Flutter Packages to latest!
+- Biometric/Pass/Pattern Lock
+- Add ability to send Voice, Image.
+- Add ability to respond in Voice.
+
+# Daily Tasks
+- Allow showing Agent Execution, Tools, $ Consumption.
 - Allow creating Bots/Selecting them.
-- Add Permission system.
-- Add Tool Plugins.
-- Add Bot Plugins.
-- Add Memory Plugins.
-- Add Plugin Discovery, Plugin Submission, rating, reviews, scanning, ecosystem...
-- add versioning.
+
+# Server/CLI
 - Log what really matters
+- Upgrade Python Packages to latest!
 - when server time and device time are different, how would you define the timestamp, inbound to device, or ourbound to server..
 - Better formatting of CLI UI, showing waiting animation, showing Colors, 
 - Refactor CLI UI to be more consistent and easier to use.
+- cli uninstall will teardown a single workspace, and uninstall cli - I think uninstall should teardown all workspaces first.
+- workspace remove doesnt check if auto start is removed first (teardown) - so some services will stay orphaned.
 
 # Admin UI
 - Admin UI - Figuring out Missing parts and initial arrangement
+- Admin UI - Workspace Restart not working - Deep Issue with Python Spawning.
 - cleaning up orphaned channel processes, what is the best approach?
 - Admin UI - Logs should be a Tool, Log should have colors.
 - Fine Tune Tools for better utilization
 - Work on Admin UI Security
 - Show Scheduled Tasks schtasks
-- cli uninstall will teardown a single workspace, and uninstall cli - I think uninstall should teardown all workspaces first.
-- workspace remove doesnt check if auto start is removed first (teardown) - so some services will stay orphaned.
 - clicking long actions in admin ui should show a progress bar. like start, delete workspaces, etc...
 - show a message back online when restarting admin ui.
-- when adding a workspace in admin ui, show public key ONCE.
 - calling http on gateway ws causes an error in gateway code in terminal.
 - allow gateway to edit instance name like workspace.
 
@@ -42,7 +48,7 @@
 - setup branches.
 - Add Releases
 
-# Doc Related
+# Mint Docs
 - Keep polishing the docs as you build the features.
 - Add Change Log to Mintdocs.
 - Need the final domain name.
@@ -50,7 +56,7 @@
 - Versions
 - Languages
 
-# Add Features
+# General Features
 - Resource Usage (CPU/Memory/Disk/Network/LLM$)
 - security policy
 - add browser tool
@@ -58,6 +64,12 @@
 - Add Memory
 - Add RAG
 - Add Whatsapp Channel
+- Add Permission system.
+- Add Tool Plugins.
+- Add Bot Plugins.
+- Add Memory Plugins.
+- Add Plugin Discovery, Plugin Submission, rating, reviews, scanning, ecosystem...
+- add versioning.
 
 # Security
 
@@ -98,6 +110,11 @@
 	- Easy to Install
 	- Many Common Features by default
 	- Loosely coupled Interfaces (Plugin Architecture)
+- Design
+    - Make very flexible design
+    - Ability to Extend without breaking
+    - Self Modifying Code, Prompt to Code
+    - Build Pages with Prompts - Like Lego Blocks
 
 # Use Cases:
 - Find information in my chats, files
@@ -129,7 +146,13 @@
 - Admin UI - Allow Reloading Workspace.
 - Admin UI - Add Device QR Code
 - Admin UI - Allow Loading Local Gateways
+- when adding a workspace in admin ui, show public key ONCE.
 
+
+# Quick Links
+
+- LLM Fit - Find which Models run on your machine.
+https://github.com/AlexsJones/llmfit/tree/main
 
 
 # UI Design Ideas

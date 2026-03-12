@@ -33,7 +33,7 @@ class GatewayNotifier extends _$GatewayNotifier {
     // fireImmediately triggers once with the current auth state so the gateway
     // connects immediately if the user is already authenticated on startup.
     ref.listen<AsyncValue<AuthState>>(
-      authNotifierProvider,
+      authProvider,
       _onAuthChanged,
       fireImmediately: true,
     );
@@ -45,8 +45,8 @@ class GatewayNotifier extends _$GatewayNotifier {
     AsyncValue<AuthState>? prev,
     AsyncValue<AuthState> next,
   ) {
-    final auth = next.valueOrNull;
-    final prevAuth = prev?.valueOrNull;
+    final auth = next.value;
+    final prevAuth = prev?.value;
 
     if (auth is AuthAuthenticated && prevAuth is! AuthAuthenticated) {
       // Dart promotes auth to AuthAuthenticated here — no cast needed.

@@ -23,7 +23,9 @@ async def workspaces_page() -> None:
     from phbcli.tools.server import RestartTool, StartTool, StopTool
     from phbcli.tools.workspace import (
         WorkspaceCreateTool,
+        WorkspaceGetPublicKeyTool,
         WorkspaceListTool,
+        WorkspaceRegenerateKeyTool,
         WorkspaceRemoveTool,
         WorkspaceUpdateTool,
     )
@@ -40,6 +42,7 @@ async def workspaces_page() -> None:
     pending_edit: list[dict] = [{}]
     pending_restart: list[dict] = [{}]
     pending_setup: list[dict] = [{}]
+    pending_pubkey: list[dict] = [{}]
 
     # ------------------------------------------------------------------ create dialog
     with ui.dialog() as create_dialog, ui.card().classes("w-96"):
@@ -169,6 +172,57 @@ async def workspaces_page() -> None:
         with ui.row().classes("justify-end gap-2 w-full mt-4"):
             ui.button("Cancel", on_click=restart_dialog.close).props("flat")
             ui.button("Restart", on_click=do_restart).props('color="warning"')
+
+    # ------------------------------------------------------------------ public key dialog (DEV)
+    with ui.dialog() as pubkey_dialog, ui.card().classes("w-[520px]"):
+        pubkey_title = ui.label("").classes("text-lg font-semibold mb-1")
+
+        with ui.card().classes("w-full bg-amber-50 dark:bg-amber-900/30 border border-amber-400 mb-3"):
+            with ui.row().classes("items-start gap-2 p-1"):
+                ui.icon("warning").classes("text-amber-500 text-xl mt-0.5 shrink-0")
+                ui.label(
+                    "This key must be registered in every gateway instance that trusts this "
+                    "workspace. Regenerating it invalidates all existing gateway trust relationships."
+                ).classes("text-sm text-amber-800 dark:text-amber-200")
+
+        ui.label("Workspace public key (Ed25519, base64):").classes(
+            "text-xs font-semibold opacity-70"
+        )
+        with ui.row().classes("w-full items-start gap-2"):
+            pubkey_display = ui.textarea().classes("w-full font-mono text-xs").props(
+                "readonly rows=3 outlined"
+            )
+
+            async def _copy_pubkey_dialog() -> None:
+                await ui.clipboard.write(pubkey_display.value)
+                ui.notify("Public key copied to clipboard.", color="positive", timeout=2500)
+
+            ui.button(icon="content_copy", on_click=_copy_pubkey_dialog).props(
+                "flat dense"
+            ).classes("mt-1 shrink-0").tooltip("Copy to clipboard")
+
+        async def do_regenerate_key() -> None:
+            row = pending_pubkey[0]
+            ws_id = row.get("id", "")
+            ws_name = row.get("name", "")
+            try:
+                result = WorkspaceRegenerateKeyTool().execute(workspace=ws_id)
+                pubkey_display.set_value(result.public_key_b64)
+                ui.notify(
+                    f"New key generated for '{ws_name}'. Update your gateway instance.",
+                    color="warning",
+                    timeout=6000,
+                )
+            except Exception as exc:
+                ui.notify(str(exc), color="negative")
+
+        with ui.row().classes("justify-between w-full mt-4"):
+            ui.button(
+                "Regenerate key",
+                icon="autorenew",
+                on_click=do_regenerate_key,
+            ).props('color="warning" outline')
+            ui.button("Close", on_click=pubkey_dialog.close).props("flat")
 
     # ------------------------------------------------------------------ setup dialog
     # persistent=True prevents accidental dismissal by clicking outside the dialog.
@@ -501,6 +555,12 @@ async def workspaces_page() -> None:
                        title="Run setup" class="q-ma-xs"
                        @click="() => $parent.$emit('setup', props.row)" />
 
+                <!-- Public key: only for configured workspaces (DEV) -->
+                <q-btn v-if="props.row.is_configured"
+                       flat size="sm" icon="key" color="secondary"
+                       title="View / regenerate public key" class="q-ma-xs"
+                       @click="() => $parent.$emit('pubkey', props.row)" />
+
                 <!-- Start: only for configured + stopped workspaces -->
                 <q-btn v-if="props.row.is_configured && !props.row.running"
                        flat size="sm" icon="play_arrow" color="positive"
@@ -631,6 +691,21 @@ async def workspaces_page() -> None:
             setup_form_panel.set_visibility(True)
             setup_dialog.open()
 
+        def handle_pubkey(e) -> None:
+            row = e.args if isinstance(e.args, dict) else {}
+            pending_pubkey[0] = row
+            ws_name = row.get("name", "")
+            ws_id = row.get("id", "")
+            pubkey_title.set_text(f"Public key — '{ws_name}'")
+            pubkey_display.set_value("")
+            try:
+                result = WorkspaceGetPublicKeyTool().execute(workspace=ws_id)
+                pubkey_display.set_value(result.public_key_b64)
+            except Exception as exc:
+                ui.notify(str(exc), color="negative")
+                return
+            pubkey_dialog.open()
+
         def handle_open_folder(e) -> None:
             import platform
             import subprocess
@@ -671,6 +746,7 @@ async def workspaces_page() -> None:
             remove_dialog.open()
 
         table.on("setup", handle_setup)
+        table.on("pubkey", handle_pubkey)
         table.on("open-folder", handle_open_folder)
         table.on("start", handle_start)
         table.on("stop", handle_stop)

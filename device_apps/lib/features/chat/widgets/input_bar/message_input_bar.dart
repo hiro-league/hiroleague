@@ -31,7 +31,7 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar> {
     if (text.isEmpty) return;
     _controller.clear();
     try {
-      await ref.read(messageSendNotifierProvider.notifier).sendText(
+      await ref.read(messageSendProvider.notifier).sendText(
             channelId: widget.channelId,
             text: text,
           );
@@ -57,7 +57,7 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final gatewayState = ref.watch(gatewayNotifierProvider);
+    final gatewayState = ref.watch(gatewayProvider);
     final isConnected = gatewayState is GatewayConnected;
 
     return SafeArea(

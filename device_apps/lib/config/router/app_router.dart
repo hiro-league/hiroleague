@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -7,6 +6,7 @@ import '../../core/constants/route_names.dart';
 import '../../features/channels/channel_list_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
+import '../../features/onboarding/qr_scan_screen.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../features/shell/app_shell.dart';
 
@@ -15,7 +15,7 @@ part 'app_router.g.dart';
 @Riverpod(keepAlive: true)
 GoRouter appRouter(Ref ref) {
   // Read (not watch) — the ChangeNotifier interface handles refresh.
-  final notifier = ref.read(routerNotifierProvider.notifier);
+  final notifier = ref.read(routerProvider.notifier);
 
   final router = GoRouter(
     initialLocation: RouteNames.channels,
@@ -25,6 +25,12 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: RouteNames.onboarding,
         builder: (context, state) => const OnboardingScreen(),
+        routes: [
+          GoRoute(
+            path: 'scan',
+            builder: (context, state) => const QrScanScreen(),
+          ),
+        ],
       ),
       // Chat lives outside the ShellRoute so the nav bar is hidden during conversation.
       GoRoute(

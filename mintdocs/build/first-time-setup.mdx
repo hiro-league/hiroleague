@@ -1,0 +1,111 @@
+---
+title: "First Time Setup"
+description: "Everything you need to install once on a new machine before you can build or run the project."
+---
+
+This page covers one-time installation steps for a fresh clone. You only need to do these once per machine. For day-to-day build and run commands, see [Building](/build/building).
+
+## PHBServer (phbcli + phbgateway)
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) — the Python package and project manager used by the server.
+
+After cloning, run from the repo root:
+
+```bash
+cd phbserver
+uv sync
+uv tool install --editable phbcli
+```
+
+`uv sync` installs all workspace dependencies (shared by both `phbcli` and `phbgateway`). `uv tool install --editable phbcli` installs both the `phbcli` and `phb-channel-devices` binaries — the mandatory channel is declared as a script in `phbcli`'s `pyproject.toml`, so a single tool install covers both.
+
+`phbgateway` does not need a separate tool install — it runs directly from the workspace via `uv run phbgateway`.
+
+## Mobile / web app
+
+Install [Flutter](https://docs.flutter.dev/install/quick).
+
+Then install [FVM](https://fvm.app) (Flutter Version Manager) to use the exact Flutter version pinned in the repo:
+
+```bash
+dart pub global activate fvm
+```
+
+On **Windows (Git Bash)**, add the following to `~/.bashrc`:
+
+```bash
+export PATH="$PATH:/c/Users/<YOU>/AppData/Local/Pub/Cache/bin"
+alias fvm='fvm.bat'
+```
+
+On **Windows**, also enable **Developer Mode** (Settings → System → For developers) so FVM can create the symlinks it needs.
+
+Once inside the `device_apps` folder, install the pinned Flutter version:
+
+```bash
+cd device_apps
+fvm install
+```
+
+## Documentation (optional)
+
+Install the [Mintlify CLI](https://www.mintlify.com/docs/quickstart) to preview the docs site locally and to set up AI tools in Cursor.
+
+```bash
+npm i -g mint
+```
+
+## Diagram generator
+
+The diagram generator scans `mintdocs/` for mermaid code blocks and renders each to a PNG in `mintdocs/images/diagrams/`.
+
+Install Node.js, then install the Mermaid CLI globally:
+
+```bash
+npm install -g @mermaid-js/mermaid-cli
+mmdc --version
+```
+
+See [Diagram generator](/build/diagram-generator) for authoring and workflow details.
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="uv: command not found">
+    `uv` was not installed or is not on your PATH. Install it from [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) and restart your terminal.
+  </Accordion>
+
+  <Accordion title="fvm: command not found in Git Bash on Windows">
+    After running `dart pub global activate fvm`, the `fvm.bat` binary lands in the Dart pub cache bin directory which is not on the Git Bash PATH by default. Add the following two lines to `~/.bashrc` and restart your terminal:
+
+    ```bash
+    export PATH="$PATH:/c/Users/<YOU>/AppData/Local/Pub/Cache/bin"
+    alias fvm='fvm.bat'
+    ```
+
+    Replace `<YOU>` with your Windows username.
+  </Accordion>
+
+  <Accordion title="fvm install fails with a permission or symlink error on Windows">
+    FVM needs to create directory symlinks, which requires **Developer Mode** on Windows. Go to **Settings → System → For developers** and enable it, then re-run `fvm install`.
+  </Accordion>
+
+  <Accordion title="fvm install reports no Flutter version is pinned">
+    There is no `.fvm/fvm_config.json` in `device_apps/` yet. Run the following inside `device_apps/` to pin the version first, then install:
+
+    ```bash
+    fvm use <version>   # e.g. fvm use 3.41.4
+    fvm install
+    ```
+  </Accordion>
+
+  <Accordion title="uv sync installs dependencies but phbcli command is still not found">
+    `uv sync` only installs the workspace virtual environment — it does not install tool entry-point scripts. You must also run the tool install step:
+
+    ```bash
+    uv tool install --editable phbcli
+    ```
+  </Accordion>
+</AccordionGroup>

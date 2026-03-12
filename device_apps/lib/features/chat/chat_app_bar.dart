@@ -14,7 +14,7 @@ class ChatAppBar extends ConsumerWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final channelsAsync = ref.watch(channelsProvider);
-    final gatewayState = ref.watch(gatewayNotifierProvider);
+    final gatewayState = ref.watch(gatewayProvider);
 
     final channelName = channelsAsync.whenOrNull(
           data: (list) =>

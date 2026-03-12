@@ -1,6 +1,7 @@
 """Workspace management tools.
 
-Five operations: list, create, remove, update, show.
+Seven operations: list, create, remove, update, show, get_public_key,
+regenerate_key.
 The CLI (commands/workspace.py) and the AI agent call these directly.
 
 All tool parameters named ``workspace`` accept either a workspace name or
@@ -13,10 +14,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from phb_commons.keys import generate_private_key, private_key_to_pem, public_key_to_b64
 from phb_commons.process import is_running, read_pid
 
 from ..constants import PID_FILENAME
 from ..domain.config import load_config, load_state
+from ..domain.crypto import load_or_create_master_key, MASTER_KEY_FILE
 from ..domain.workspace import (
     WorkspaceError,
     admin_port_for,
@@ -300,4 +303,85 @@ class WorkspaceShowTool(Tool):
             ws_connected=state.ws_connected if state else False,
             last_connected=state.last_connected if state else None,
             autostart_method=config.autostart_method if config else None,
+        )
+
+
+@dataclass
+class WorkspacePublicKeyResult:
+    id: str
+    name: str
+    public_key_b64: str
+
+
+class WorkspaceGetPublicKeyTool(Tool):
+    name = "workspace_get_public_key"
+    description = "Return the current Ed25519 public key (base64) for a workspace"
+    params = {
+        "workspace": ToolParam(str, "Workspace name or id (omit to use the default)", required=False),
+    }
+
+    def execute(self, workspace: str | None = None) -> WorkspacePublicKeyResult:
+        entry, _ = resolve_workspace(workspace)
+        ws_path = Path(entry.path)
+        config = _load_workspace_config_safe(ws_path)
+        if config is None:
+            raise WorkspaceError(
+                f"Workspace '{entry.name}' is not configured. "
+                f"Run setup first."
+            )
+        key_filename = config.master_key_file or MASTER_KEY_FILE
+        key_path = ws_path / key_filename
+        if not key_path.exists():
+            raise WorkspaceError(
+                f"Master key file not found for workspace '{entry.name}'. "
+                f"Run setup to generate it."
+            )
+        private_key = load_or_create_master_key(ws_path, filename=key_filename)
+        public_key_b64 = public_key_to_b64(private_key.public_key())
+        return WorkspacePublicKeyResult(
+            id=entry.id,
+            name=entry.name,
+            public_key_b64=public_key_b64,
+        )
+
+
+# DEV-ONLY: regenerating the master key invalidates all existing gateway trust
+# relationships — the new public key must be re-registered in every gateway
+# instance that trusts this workspace.
+class WorkspaceRegenerateKeyTool(Tool):
+    name = "workspace_regenerate_key"
+    description = (
+        "DEV-ONLY: Regenerate the Ed25519 master key for a workspace. "
+        "The old key is permanently replaced; the new public key must be "
+        "re-registered in every gateway instance that trusts this workspace."
+    )
+    params = {
+        "workspace": ToolParam(str, "Workspace name or id (omit to use the default)", required=False),
+    }
+
+    def execute(self, workspace: str | None = None) -> WorkspacePublicKeyResult:
+        entry, _ = resolve_workspace(workspace)
+        ws_path = Path(entry.path)
+        config = _load_workspace_config_safe(ws_path)
+        if config is None:
+            raise WorkspaceError(
+                f"Workspace '{entry.name}' is not configured. "
+                f"Run setup first."
+            )
+        key_filename = config.master_key_file or MASTER_KEY_FILE
+        key_path = ws_path / key_filename
+
+        new_private_key = generate_private_key()
+        key_path.write_bytes(private_key_to_pem(new_private_key))
+        try:
+            key_path.chmod(0o600)
+        except OSError:
+            # Windows doesn't fully support POSIX perms via chmod.
+            pass
+
+        public_key_b64 = public_key_to_b64(new_private_key.public_key())
+        return WorkspacePublicKeyResult(
+            id=entry.id,
+            name=entry.name,
+            public_key_b64=public_key_b64,
         )

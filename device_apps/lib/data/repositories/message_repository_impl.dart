@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -161,11 +160,11 @@ class MessageRepositoryImpl implements MessageRepository {
 MessageRepository messageRepository(Ref ref) {
   final db = ref.watch(appDatabaseProvider);
   final gatewayNotifier =
-      ref.read(gatewayNotifierProvider.notifier);
+      ref.read(gatewayProvider.notifier);
 
   // Capture device ID lazily so we always check the current identity.
   String? myDeviceId() {
-    final auth = ref.read(authNotifierProvider).valueOrNull;
+    final auth = ref.read(authProvider).value;
     return auth is AuthAuthenticated ? auth.identity.deviceId : null;
   }
 

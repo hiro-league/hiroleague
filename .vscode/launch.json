@@ -56,7 +56,14 @@
     ],
     "compounds": [
       {
-        "name": "Debug Gateway + phbcli + Flutter device_apps",
+        "name": "Server + Gateway",
+        "configurations": [
+          "Gateway Start",
+          "Server Start",
+        ]
+      },
+      {
+        "name": "Server + Gateway + Flutter device_apps",
         "configurations": [
           "Gateway Start",
           "Server Start",

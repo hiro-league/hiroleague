@@ -42,6 +42,8 @@ def create_page_layout(active_path: str = "/") -> None:
     Must be called at the top of every @ui.page function.  The drawer is
     instantiated first so the header toggle button can reference it.
     """
+    import asyncio
+    
     from phbcli.ui import state as ui_state
     from phbcli.tools.workspace import WorkspaceListTool
 
@@ -125,6 +127,41 @@ def create_page_layout(active_path: str = "/") -> None:
             ui.switch("Dark mode").props("dense").bind_value(
                 nicegui_app.storage.user, "dark_mode"
             )
+    
+    # Capture the client NOW (in the page-request context) before spawning a background task.
+    # context.client reads the slot stack which is empty inside asyncio.create_task.
+    from nicegui import context as _ctx
+    _current_client = _ctx.client
+
+    async def _check_reconnect() -> None:
+        """Show a 'Back Online' toast if this page load follows a server-restart reconnect.
+
+        sessionStorage.phb_admin_connected is set on every page load. A fresh tab
+        load finds it absent; a reload-after-server-restart finds it set (because
+        sessionStorage survives page reloads within the same tab).
+        """
+        try:
+            is_reconnect = await _current_client.run_javascript(
+                """
+                const was = sessionStorage.getItem('phb_admin_connected');
+                sessionStorage.setItem('phb_admin_connected', '1');
+                return was !== null;
+                """,
+                timeout=5,
+            )
+            if is_reconnect:
+                # ui.notify uses context.client (slot stack) which is empty in a background
+                # task — call the client outbox directly with the captured client instead.
+                _current_client.outbox.enqueue_message(
+                    "notify",
+                    {"message": "Back Online", "color": "positive", "icon": "check_circle",
+                     "position": "bottom", "timeout": 3000},
+                    _current_client.id,
+                )
+        except Exception:
+            pass
+
+    asyncio.create_task(_check_reconnect())
 
 
 def _sidebar(active_path: str) -> None:

@@ -13,7 +13,7 @@ class ChannelListScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final gateway = ref.watch(gatewayNotifierProvider);
+    final gateway = ref.watch(gatewayProvider);
     final channelsAsync = ref.watch(channelsProvider);
 
     return Scaffold(

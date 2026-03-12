@@ -92,7 +92,10 @@
           {
             "group": "Local build",
             "pages": [
-              "build/setup",
+              "build/first-time-setup",
+              "build/building",
+              "build/packaging-releases",
+              "build/device-network-troubleshooting",
               "build/diagram-generator"
             ]
           },

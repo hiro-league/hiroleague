@@ -4,7 +4,7 @@ part 'attestation.freezed.dart';
 part 'attestation.g.dart';
 
 @freezed
-class DeviceAttestation with _$DeviceAttestation {
+abstract class DeviceAttestation with _$DeviceAttestation {
   // fieldRename: snake maps desktopSignature → desktop_signature (matches server protocol).
   @JsonSerializable(fieldRename: FieldRename.snake)
   const factory DeviceAttestation({

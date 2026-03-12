@@ -33,7 +33,7 @@ from .instance import (
     resolve_instance,
     set_default_instance,
 )
-from .relay import configure_auth, get_connected_devices, handle_connection
+from .relay import configure_auth, configure_instance_path, get_connected_devices, handle_connection
 from .service import (
     GatewayInstanceStatusEntry,
     get_status,
@@ -93,6 +93,7 @@ def _run_gateway(
     log = Logger.get("GATEWAY")
     auth_manager = GatewayAuthManager(desktop_public_key_b64=config.desktop_public_key)
     configure_auth(auth_manager)
+    configure_instance_path(instance_path)
     log.info("Gateway trust root configured", instance=entry.name)
     asyncio.run(_serve(entry.host, entry.port))
 

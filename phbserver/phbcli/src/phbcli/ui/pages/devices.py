@@ -24,6 +24,8 @@ async def devices_page() -> None:
 
     # Mutable container for the revoke confirmation dialog
     pending_revoke_id: list[str] = [""]
+    # Stores the full QR payload JSON for the copy button
+    pending_qr_payload: list[str] = [""]
 
     # ------------------------------------------------------------------ pairing code dialog
     with ui.dialog() as pairing_dialog, ui.card().classes("w-96 items-center text-center gap-2"):
@@ -36,6 +38,25 @@ async def devices_page() -> None:
         ui.label("Scan the QR code or enter the code manually in the mobile app.").classes(
             "text-sm opacity-70 mb-2"
         )
+
+        # Gateway URL display
+        with ui.row().classes("w-full items-center justify-center gap-1 mb-1"):
+            ui.icon("cable").classes("text-xs opacity-50")
+            pairing_gateway_label = ui.label("").classes("text-xs font-mono opacity-60")
+
+        # Copy full QR message (JSON payload) for pasting into the Flutter app
+        async def _copy_qr_payload() -> None:
+            await ui.clipboard.write(pending_qr_payload[0])
+            ui.notify("Pairing message copied to clipboard.", color="positive", timeout=2500)
+
+        ui.button(
+            "Copy pairing message",
+            icon="content_copy",
+            on_click=_copy_qr_payload,
+        ).props("flat dense size=sm").classes("mb-1").tooltip(
+            "Copy the full pairing JSON — paste it as a single field in the mobile app"
+        )
+
         ui.button("Close", on_click=pairing_dialog.close).props("flat")
 
     # ------------------------------------------------------------------ revoke dialog
@@ -136,6 +157,8 @@ async def devices_page() -> None:
             # Format the ISO timestamp to be more readable
             expires = result.expires_at.replace("T", " ").replace("Z", " UTC")
             pairing_expires_label.set_text(f"Expires: {expires}")
+            pairing_gateway_label.set_text(result.gateway_url or "no gateway configured")
+            pending_qr_payload[0] = result.qr_payload
             pairing_dialog.open()
             device_list.refresh()
         except Exception as exc:

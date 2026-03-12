@@ -6,7 +6,7 @@ part 'device_identity.freezed.dart';
 part 'device_identity.g.dart';
 
 @freezed
-class DeviceIdentity with _$DeviceIdentity {
+abstract class DeviceIdentity with _$DeviceIdentity {
   // fieldRename: snake maps all camelCase fields to snake_case for storage and protocol.
   // e.g. deviceId ↔ device_id, desktopDeviceId ↔ desktop_device_id
   @JsonSerializable(fieldRename: FieldRename.snake)

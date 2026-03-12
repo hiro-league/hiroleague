@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Required by mobile_scanner for QR code scanning -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="device_apps"
         android:name="${applicationName}"

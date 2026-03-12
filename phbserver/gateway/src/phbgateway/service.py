@@ -28,7 +28,7 @@ from .autostart import (
     unregister_autostart,
     unregister_autostart_elevated,
 )
-from .config import GatewayConfig, load_config, save_config
+from .config import GatewayConfig, load_config, load_state, save_config
 from .constants import PID_FILENAME
 from .instance import (
     GatewayInstanceError,
@@ -81,6 +81,8 @@ class GatewayInstanceStatusEntry:
     host: str
     port: int
     path: str
+    desktop_connected: bool = False
+    last_auth_error: str | None = None
 
 
 @dataclass
@@ -289,15 +291,22 @@ def get_status(instance: str | None = None) -> GatewayStatusResult:
         reg_entry = registry.instances[name]
         inst_path = Path(reg_entry.path)
         pid = read_pid(inst_path, PID_FILENAME)
+        running = is_running(pid)
+        state = load_state(inst_path)
+        # If the process is no longer running, desktop_connected must be false
+        # regardless of what state.json says (stale file from a crash).
+        desktop_connected = running and state.desktop_connected
         entries.append(
             GatewayInstanceStatusEntry(
                 name=name,
                 is_default=(name == registry.default_instance),
-                running=is_running(pid),
+                running=running,
                 pid=pid,
                 host=reg_entry.host,
                 port=reg_entry.port,
                 path=reg_entry.path,
+                desktop_connected=desktop_connected,
+                last_auth_error=state.last_auth_error if not desktop_connected else None,
             )
         )
 

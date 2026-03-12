@@ -6,7 +6,7 @@ import 'message_status.dart';
 part 'message.freezed.dart';
 
 @freezed
-class Message with _$Message {
+abstract class Message with _$Message {
   const factory Message({
     required String id,
     required String channelId,
