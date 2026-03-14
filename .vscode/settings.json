@@ -1,3 +1,5 @@
 {
-    "markdown.validate.enabled": true
+    "markdown.validate.enabled": true,
+    // Pinned so renaming the workspace folder does not lose the interpreter selection
+    "python.defaultInterpreterPath": "${workspaceFolder}\\phbserver\\.venv\\Scripts\\python.exe"
 }

@@ -1,4 +1,4 @@
-package com.privatehomebox.device_apps
+package com.hiroleague.device_apps
 
 import io.flutter.embedding.android.FlutterActivity
 

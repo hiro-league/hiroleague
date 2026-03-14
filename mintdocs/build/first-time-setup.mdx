@@ -61,6 +61,12 @@ See [Diagram generator](/build/diagram-generator) for authoring and workflow det
     The installed Flutter version does not match the version pinned in `device_apps/.fvmrc`. Download the exact required version from the [Flutter releases archive](https://docs.flutter.dev/release/archive) and point your PATH to it, or run `flutter upgrade` if the required version is newer than what you have.
   </Accordion>
 
+  <Accordion title="Cursor asks to select a Python interpreter after renaming or moving the folder">
+    Cursor stores the interpreter selection internally by workspace path. Renaming or moving the folder creates a new workspace identity and loses the previous selection.
+
+    The repo's `.vscode/settings.json` already pins the interpreter to `${workspaceFolder}\phbserver\.venv\Scripts\python.exe`, so simply opening the renamed folder in Cursor should pick it up automatically. If the prompt still appears, click **Select Interpreter** and choose the venv Python at that path, or run **Python: Select Interpreter** from the command palette and point it to `phbserver\.venv\Scripts\python.exe` inside the repo.
+  </Accordion>
+
   <Accordion title="uv sync installs dependencies but phbcli command is still not found">
     `uv sync` only installs the workspace virtual environment — it does not install tool entry-point scripts. You must also run the tool install step:
 

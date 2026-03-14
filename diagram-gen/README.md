@@ -46,7 +46,7 @@ For example, the second diagram in `architecture-overview.mdx` produces:
 The `.pre-commit-config.yaml` at the repo root runs `generate.py` automatically
 before every commit that touches `.mdx` files. Install the hook once:
 
-Run both from the repo root (`d:\projects\privatehomebox`):
+Run both from the repo root (`d:\projects\hiroleague`):
 
 ```bash
 uv tool install pre-commit
