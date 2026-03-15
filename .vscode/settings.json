@@ -1,5 +1,8 @@
 {
     "markdown.validate.enabled": true,
     // Pinned so renaming the workspace folder does not lose the interpreter selection
-    "python.defaultInterpreterPath": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\python.exe"
+    "python.defaultInterpreterPath": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\python.exe",
+    "git.autoRepositoryDetection": "subFolders",
+    "git.repositoryScanMaxDepth": 4,
+    "scm.alwaysShowRepositories": true
 }

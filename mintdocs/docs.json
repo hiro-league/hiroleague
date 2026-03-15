@@ -101,6 +101,13 @@
             ]
           },
           {
+            "group": "Website",
+            "pages": [
+              "build/website",
+              "build/website-overview"
+            ]
+          },
+          {
             "group": "Contribution",
             "pages": [
               "build/contributing"

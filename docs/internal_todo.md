@@ -1,4 +1,20 @@
 
+
+# Website
+- Create Astro Website
+- Create Social Media Pages
+- Link Mintlify Docs to Astro Website
+- Show Only Ready Docs - Hide the rest.
+- Add First Blog Post
+- Start Sharing on LinkedIn
+- Make a Progress Bar
+- add telegram
+- how to hide some of the docs that are not ready?
+- 
+
+#
+
+
 # Priority
 - add Device Name in Device Paring.
 - Clean up Message Format
@@ -74,6 +90,11 @@
 - Conversations should be encrypted. in case they are stolen, they should be unreadable.
 - When a device is revoked, the gateway relay is not notified and it keeps accepting messages from devices. also the devices are not checked that they are still valid, not in server, not in gateway.
 - Need a command that is a Health/Doctor, that checks validity of the installation, latest version, status, valid file structure, etc... can be also used for debugging and sending bug reports.
+
+
+# General Ideas
+
+- PROVIDE AN OPTION FOR YOUTUBERS AND CASUAL USERS TO CONNECT APP DIRECTLY TO AN EXISTING ONLINE SERVER, MAYBE WITH A SPECIAL CODE TO TRY IT.
 
 # Big Design Ideas
 
@@ -154,6 +175,9 @@
 - LLM Fit - Find which Models run on your machine.
 https://github.com/AlexsJones/llmfit/tree/main
 
+
+- Astro Docs has cool example for deploying on Tons of Servers - we might need a similar thing.
+https://docs.astro.build/en/guides/deploy/cloudflare/?utm_source=chatgpt.com#cloudflare-workers
 
 # UI Design Ideas
 
