@@ -32,19 +32,21 @@ GoRouter appRouter(Ref ref) {
           ),
         ],
       ),
-      // Chat lives outside the ShellRoute so the nav bar is hidden during conversation.
-      GoRoute(
-        path: RouteNames.chat,
-        builder: (context, state) => ChatScreen(
-          channelId: state.pathParameters['channelId']!,
-        ),
-      ),
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
           GoRoute(
             path: RouteNames.channels,
             builder: (context, state) => const ChannelListScreen(),
+            routes: [
+              // Chat is nested under channels so the nav bar always stays visible.
+              GoRoute(
+                path: ':channelId',
+                builder: (context, state) => ChatScreen(
+                  channelId: state.pathParameters['channelId']!,
+                ),
+              ),
+            ],
           ),
           GoRoute(
             path: RouteNames.settings,

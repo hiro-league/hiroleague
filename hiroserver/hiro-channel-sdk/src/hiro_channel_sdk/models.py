@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
-from .constants import JSONRPC_VERSION, MESSAGE_TYPE_MESSAGE
+from .constants import JSONRPC_VERSION, MESSAGE_TYPE_EVENT, MESSAGE_TYPE_MESSAGE
 
 
 class MessageRouting(BaseModel):
@@ -31,6 +31,23 @@ class MessageRouting(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class EventPayload(BaseModel):
+    """Payload for a UnifiedMessage with message_type 'event'.
+
+    Events are fire-and-forget signals sent from the server to a device (or
+    vice versa) to notify about activities without producing a chat message.
+
+    ``type`` is a dotted event name, e.g. ``"message.received"``.
+    ``ref_id`` links the event to the entity it is about — typically the
+    ``routing.id`` of the message that triggered the event.
+    ``data`` carries event-specific values (e.g. a transcript string).
+    """
+
+    type: str
+    ref_id: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class ContentItem(BaseModel):
     """A single piece of content within a UnifiedMessage.
 
@@ -49,26 +66,50 @@ class UnifiedMessage(BaseModel):
     Structured as two distinct concerns:
       - ``routing``      — who/where/when: channel, direction, sender, recipient, timestamp
       - ``content``      — ordered list of content items (text, images, audio, files, …)
+      - ``event``        — present only when message_type is "event"; carries event type,
+                           ref_id linking to the triggering entity, and event data
 
     ``version`` allows future parsers to handle multiple schema generations.
-    ``message_type`` identifies the communication intent. Currently only
-    ``"message"`` (content exchange) is implemented; ``"request"``,
-    ``"response"``, and ``"stream"`` are reserved for future use.
+    ``message_type`` identifies the communication intent:
+      - ``"message"``  — content exchange (implemented); requires at least one ContentItem
+      - ``"event"``    — fire-and-forget signal (implemented); requires EventPayload, content empty
+      - ``"request"``  — expects a response; request_id required
+      - ``"response"`` — answer to a request; request_id echoes the request's
+      - ``"stream"``   — reserved — streaming chunks
+
+    ``request_id`` is a protocol-level correlation ID set by the requester and echoed
+    by the responder. None for "message" and "event" types.
     """
 
     version: str = "0.1"
     message_type: str = MESSAGE_TYPE_MESSAGE
+    request_id: str | None = None
     routing: MessageRouting
     content: list[ContentItem] = Field(default_factory=list)
+    event: EventPayload | None = None
 
     @model_validator(mode="after")
-    def _require_content_for_message_type(self) -> Self:
-        # "message" type must carry at least one content item; future types
-        # (request, response, stream) may have different requirements.
-        if self.message_type == MESSAGE_TYPE_MESSAGE and len(self.content) < 1:
-            raise ValueError(
-                "message_type 'message' requires at least one content item"
-            )
+    def _validate_message_type_constraints(self) -> Self:
+        if self.message_type == MESSAGE_TYPE_MESSAGE:
+            # Content exchange must carry at least one content item and no event payload.
+            if len(self.content) < 1:
+                raise ValueError(
+                    "message_type 'message' requires at least one content item"
+                )
+            if self.event is not None:
+                raise ValueError(
+                    "message_type 'message' must not carry an event payload"
+                )
+        elif self.message_type == MESSAGE_TYPE_EVENT:
+            # Events must carry an event payload; content must be empty.
+            if self.event is None:
+                raise ValueError(
+                    "message_type 'event' requires an event payload"
+                )
+            if len(self.content) > 0:
+                raise ValueError(
+                    "message_type 'event' must not carry content items"
+                )
         return self
 
 

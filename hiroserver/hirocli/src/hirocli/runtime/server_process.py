@@ -75,9 +75,23 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
         upsert_approved_device,
     )
     from hirocli.runtime.agent_manager import AgentManager
-    from hirocli.runtime.communication_manager import CommunicationManager
+    from hirocli.runtime.channel_event_handler import ChannelEventHandler
     from hirocli.runtime.channel_manager import ChannelManager
-    from hirocli.runtime.http_server import run_http_server, set_channel_info_provider, set_stop_event, set_tool_registry, set_workspace_path
+    from hirocli.runtime.communication_manager import CommunicationManager
+    from hirocli.runtime.event_handler import EventHandler
+    from hirocli.runtime.http_server import (
+        run_http_server,
+        set_channel_info_provider,
+        set_stop_event,
+        set_tool_registry,
+        set_workspace_path,
+    )
+    from hirocli.runtime.message_adapter import MessageAdapterPipeline
+    from hirocli.runtime.request_handler import RequestHandler
+    from hirocli.runtime.adapters.audio_adapter import AudioTranscriptionAdapter
+    from hirocli.runtime.adapters.image_adapter import ImageUnderstandingAdapter
+    from hirocli.services.transcription_service import TranscriptionService
+    from hirocli.services.vision_service import VisionService
     from hirocli.tools import all_tools
     from hirocli.tools.registry import ToolRegistry
 
@@ -100,7 +114,150 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     tool_registry.register_all(all_tools())
     set_tool_registry(tool_registry)
 
-    channel_manager: ChannelManager | None = None
+    # ------------------------------------------------------------------
+    # Shared media services — one instance each, used by both the adapter
+    # pipeline and the agent/tool layer via TranscribeTool / DescribeImageTool.
+    # ------------------------------------------------------------------
+    transcription_service = TranscriptionService()
+    vision_service = VisionService()
+
+    # ------------------------------------------------------------------
+    # Adapter pipeline
+    # ------------------------------------------------------------------
+    adapter_pipeline = MessageAdapterPipeline([
+        AudioTranscriptionAdapter(service=transcription_service),
+        ImageUnderstandingAdapter(service=vision_service),
+    ])
+
+    # ------------------------------------------------------------------
+    # Message handlers (constructed before CommunicationManager so they
+    # can be injected at construction time)
+    # ------------------------------------------------------------------
+    event_handler = EventHandler()
+
+    # CommunicationManager is created first; RequestHandler receives a ref
+    # so it can enqueue responses via comm_manager.enqueue_outbound.
+    comm_manager = CommunicationManager(
+        adapter_pipeline=adapter_pipeline,
+        event_handler=event_handler,
+    )
+
+    request_handler = RequestHandler(comm_manager, workspace_path)
+    comm_manager._request_handler = request_handler  # inject after both are constructed
+
+    # ------------------------------------------------------------------
+    # Channel event handler (infrastructure: pairing, connectivity)
+    # ------------------------------------------------------------------
+    channel_manager_ref: ChannelManager | None = None
+
+    async def _handle_pairing_request(data: dict) -> None:
+        if channel_manager_ref is None:
+            return
+        request_id = data.get("request_id")
+        pairing_code = data.get("pairing_code")
+        device_public_key = data.get("device_public_key")
+        device_name_raw = data.get("device_name")
+        device_name = device_name_raw if isinstance(device_name_raw, str) and device_name_raw else None
+
+        if not isinstance(request_id, str) or not request_id:
+            return
+        if not isinstance(pairing_code, str) or not pairing_code:
+            await channel_manager_ref.send_event_to_channel(
+                "devices", "pairing_response",
+                {"request_id": request_id, "status": "rejected", "reason": "invalid_pairing_code"},
+            )
+            return
+        if not isinstance(device_public_key, str) or not device_public_key:
+            await channel_manager_ref.send_event_to_channel(
+                "devices", "pairing_response",
+                {"request_id": request_id, "status": "rejected", "reason": "invalid_device_public_key"},
+            )
+            return
+
+        session = load_pairing_session(workspace_path)
+        if session is None:
+            await channel_manager_ref.send_event_to_channel(
+                "devices", "pairing_response",
+                {"request_id": request_id, "status": "rejected", "reason": "no_active_pairing_session"},
+            )
+            return
+
+        if (not session.is_valid()) or (session.code != pairing_code):
+            await channel_manager_ref.send_event_to_channel(
+                "devices", "pairing_response",
+                {"request_id": request_id, "status": "rejected", "reason": "pairing_code_invalid_or_expired"},
+            )
+            return
+
+        from hiro_commons.attestation import create_device_attestation
+
+        device_id = f"{DEVICE_ID_PREFIX}{uuid.uuid4().hex[:DEVICE_ID_SUFFIX_LENGTH]}"
+        attestation = create_device_attestation(
+            desktop_private_key,
+            device_id=device_id,
+            device_public_key_b64=device_public_key,
+            expires_days=config.attestation_expires_days,
+        )
+        blob = json.loads(attestation["blob"])
+        expires_at_raw = blob.get("expires_at")
+        expires_at = None
+        if isinstance(expires_at_raw, str):
+            try:
+                expires_at = datetime.fromisoformat(
+                    expires_at_raw.replace("Z", "+00:00")
+                ).astimezone(UTC)
+            except Exception:
+                expires_at = None
+
+        upsert_approved_device(
+            workspace_path,
+            ApprovedDevice(
+                device_id=device_id,
+                device_public_key=device_public_key,
+                paired_at=datetime.now(UTC),
+                expires_at=expires_at,
+                metadata={"source": "gateway_pairing"},
+                device_name=device_name,
+            ),
+        )
+        clear_pairing_session(workspace_path)
+        await channel_manager_ref.send_event_to_channel(
+            "devices", "pairing_response",
+            {
+                "request_id": request_id,
+                "status": "approved",
+                "device_id": device_id,
+                "attestation": attestation,
+            },
+        )
+
+    async def _handle_gateway_connected(data: dict) -> None:
+        gateway_url = str(data.get("gateway_url") or config.gateway_url)
+        mark_connected(workspace_path, gateway_url)
+
+    async def _handle_gateway_disconnected(data: dict) -> None:
+        mark_disconnected(workspace_path)
+
+    channel_event_handler = ChannelEventHandler()
+    channel_event_handler.register("pairing_request", _handle_pairing_request)
+    channel_event_handler.register("gateway_connected", _handle_gateway_connected)
+    channel_event_handler.register("gateway_disconnected", _handle_gateway_disconnected)
+
+    # ------------------------------------------------------------------
+    # Channel and communication managers
+    # ------------------------------------------------------------------
+    channel_manager = ChannelManager(
+        config,
+        workspace_path,
+        stop_event,
+        on_message=comm_manager.receive,
+        on_event=channel_event_handler.handle,
+    )
+    channel_manager_ref = channel_manager
+    comm_manager.set_channel_manager(channel_manager)
+    set_channel_info_provider(channel_manager.get_channel_info)
+
+    agent_manager = AgentManager(comm_manager, workspace_path)
 
     def _shutdown(*_: object) -> None:
         log.info("Shutdown signal received")
@@ -111,106 +268,6 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     signal.signal(signal.SIGTERM, _shutdown)
     if hasattr(signal, "SIGINT"):
         signal.signal(signal.SIGINT, _shutdown)
-
-    async def _on_channel_event(event: str, data: dict[str, object]) -> None:
-        nonlocal channel_manager
-        if event == "gateway_connected":
-            gateway_url = str(data.get("gateway_url") or config.gateway_url)
-            mark_connected(workspace_path, gateway_url)
-        elif event == "gateway_disconnected":
-            mark_disconnected(workspace_path)
-        elif event == "pairing_request":
-            if channel_manager is None:
-                return
-            request_id = data.get("request_id")
-            pairing_code = data.get("pairing_code")
-            device_public_key = data.get("device_public_key")
-            device_name_raw = data.get("device_name")
-            # device_name is optional; coerce to str or None.
-            device_name = device_name_raw if isinstance(device_name_raw, str) and device_name_raw else None
-            if not isinstance(request_id, str) or not request_id:
-                return
-            if not isinstance(pairing_code, str) or not pairing_code:
-                await channel_manager.send_event_to_channel(
-                    "devices", "pairing_response",
-                    {"request_id": request_id, "status": "rejected", "reason": "invalid_pairing_code"},
-                )
-                return
-            if not isinstance(device_public_key, str) or not device_public_key:
-                await channel_manager.send_event_to_channel(
-                    "devices", "pairing_response",
-                    {"request_id": request_id, "status": "rejected", "reason": "invalid_device_public_key"},
-                )
-                return
-
-            session = load_pairing_session(workspace_path)
-            if session is None:
-                await channel_manager.send_event_to_channel(
-                    "devices", "pairing_response",
-                    {"request_id": request_id, "status": "rejected", "reason": "no_active_pairing_session"},
-                )
-                return
-
-            if (not session.is_valid()) or (session.code != pairing_code):
-                await channel_manager.send_event_to_channel(
-                    "devices", "pairing_response",
-                    {"request_id": request_id, "status": "rejected", "reason": "pairing_code_invalid_or_expired"},
-                )
-                return
-
-            from hiro_commons.attestation import create_device_attestation
-
-            device_id = f"{DEVICE_ID_PREFIX}{uuid.uuid4().hex[:DEVICE_ID_SUFFIX_LENGTH]}"
-            attestation = create_device_attestation(
-                desktop_private_key,
-                device_id=device_id,
-                device_public_key_b64=device_public_key,
-                expires_days=config.attestation_expires_days,
-            )
-            blob = json.loads(attestation["blob"])
-            expires_at_raw = blob.get("expires_at")
-            expires_at = None
-            if isinstance(expires_at_raw, str):
-                try:
-                    expires_at = datetime.fromisoformat(
-                        expires_at_raw.replace("Z", "+00:00")
-                    ).astimezone(UTC)
-                except Exception:
-                    expires_at = None
-
-            upsert_approved_device(
-                workspace_path,
-                ApprovedDevice(
-                    device_id=device_id,
-                    device_public_key=device_public_key,
-                    paired_at=datetime.now(UTC),
-                    expires_at=expires_at,
-                    metadata={"source": "gateway_pairing"},
-                    device_name=device_name,
-                ),
-            )
-            clear_pairing_session(workspace_path)
-            await channel_manager.send_event_to_channel(
-                "devices", "pairing_response",
-                {
-                    "request_id": request_id,
-                    "status": "approved",
-                    "device_id": device_id,
-                    "attestation": attestation,
-                },
-            )
-
-    comm_manager = CommunicationManager()
-    channel_manager = ChannelManager(
-        config,
-        workspace_path,
-        stop_event,
-        on_message=comm_manager.receive,
-        on_event=_on_channel_event,
-    )
-    comm_manager.set_channel_manager(channel_manager)
-    set_channel_info_provider(channel_manager.get_channel_info)
-    agent_manager = AgentManager(comm_manager, workspace_path)
 
     log.info(
         "Starting hirocli server",
@@ -230,8 +287,6 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
         coros.append(_tail_plugin_logs(log_dir, stop_event))
     if admin:
         from hirocli.ui.run import run_admin_ui
-        # Pass log_dir and workspace_path so the admin UI can tail logs and
-        # identify which workspace it is hosting (to protect self-destructive actions).
         coros.append(run_admin_ui(config, stop_event, log_dir=log_dir, workspace_path=workspace_path))
 
     server_task = asyncio.ensure_future(
@@ -280,6 +335,5 @@ def _spawn_server(workspace_path: Path, admin: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    # Read admin flag from env var set by tools/server.py for background spawns.
     _admin = os.environ.get(ENV_ADMIN_UI) == "1"
     asyncio.run(_main(admin=_admin))

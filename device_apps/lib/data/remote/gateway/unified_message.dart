@@ -30,6 +30,47 @@ Map<String, dynamic> _asStringMap(dynamic value) {
 }
 
 // ---------------------------------------------------------------------------
+// EventPayload
+// ---------------------------------------------------------------------------
+
+/// Payload for a [UnifiedMessage] with [UnifiedMessage.messageType] == `"event"`.
+///
+/// Events are fire-and-forget signals sent from the server to the device (or
+/// vice versa) to notify about activities without producing a chat message.
+///
+/// [type] is a dotted event name, e.g. `"message.received"`.
+/// [refId] links the event to the entity it is about — typically the
+/// [MessageRouting.id] of the message that triggered the event.
+/// [data] carries event-specific values (e.g. `{"transcript": "..."}` for
+/// `"message.transcribed"`).
+class EventPayload {
+  const EventPayload({
+    required this.type,
+    this.refId,
+    this.data = const {},
+  });
+
+  final String type;
+  final String? refId;
+  final Map<String, dynamic> data;
+
+  factory EventPayload.fromJson(Map<String, dynamic> json) {
+    _requireString(json, 'type', 'EventPayload');
+    return EventPayload(
+      type: json['type'] as String,
+      refId: json['ref_id'] as String?,
+      data: _asStringMap(json['data']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        if (refId != null) 'ref_id': refId,
+        'data': data,
+      };
+}
+
+// ---------------------------------------------------------------------------
 // ContentItem
 // ---------------------------------------------------------------------------
 
@@ -131,10 +172,11 @@ class MessageRouting {
 ///
 /// Structure:
 ///   - [version]      — schema version for forward compatibility
-///   - [messageType]  — communication intent: "message" now; "request" /
-///                      "response" / "stream" reserved for future use
+///   - [messageType]  — communication intent: "message" or "event" (implemented);
+///                      "request" / "response" / "stream" reserved for future use
 ///   - [routing]      — who/where/when
-///   - [content]      — ordered list of content items
+///   - [content]      — ordered list of content items (present for "message" type)
+///   - [event]        — event payload (present only for "event" type)
 ///
 /// See architecture/unified-message in mintdocs for full field reference.
 class UnifiedMessage {
@@ -143,12 +185,14 @@ class UnifiedMessage {
     this.messageType = 'message',
     required this.routing,
     required this.content,
+    this.event,
   });
 
   final String version;
   final String messageType;
   final MessageRouting routing;
   final List<ContentItem> content;
+  final EventPayload? event;
 
   /// Parses a [UnifiedMessage] from a decoded JSON map.
   ///
@@ -173,6 +217,17 @@ class UnifiedMessage {
       );
     }
 
+    final eventRaw = json['event'];
+    EventPayload? event;
+    if (eventRaw != null) {
+      if (eventRaw is! Map) {
+        throw FormatException(
+          '$ctx: "event" must be a JSON object, got ${eventRaw.runtimeType}',
+        );
+      }
+      event = EventPayload.fromJson(Map<String, dynamic>.from(eventRaw));
+    }
+
     return UnifiedMessage(
       version: json['version'] as String,
       messageType: json['message_type'] as String,
@@ -188,6 +243,7 @@ class UnifiedMessage {
             return ContentItem.fromJson(Map<String, dynamic>.from(item));
           })
           .toList(),
+      event: event,
     );
   }
 
@@ -196,5 +252,6 @@ class UnifiedMessage {
         'message_type': messageType,
         'routing': routing.toJson(),
         'content': content.map((c) => c.toJson()).toList(),
+        if (event != null) 'event': event!.toJson(),
       };
 }

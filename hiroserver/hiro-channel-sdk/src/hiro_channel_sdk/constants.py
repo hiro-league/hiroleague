@@ -51,9 +51,17 @@ AUTH_ROLE_DEVICE: str = "device"
 # ---------------------------------------------------------------------------
 
 MESSAGE_TYPE_MESSAGE: str = "message"    # content exchange (text, images, files…)
+MESSAGE_TYPE_EVENT: str = "event"        # fire-and-forget server→device (or device→server) signal
 MESSAGE_TYPE_REQUEST: str = "request"    # reserved — expects a response
 MESSAGE_TYPE_RESPONSE: str = "response"  # reserved — answer to a request
 MESSAGE_TYPE_STREAM: str = "stream"      # reserved — streaming chunks
+
+# ---------------------------------------------------------------------------
+# Event types — type values used in EventPayload
+# ---------------------------------------------------------------------------
+
+EVENT_TYPE_MESSAGE_RECEIVED: str = "message.received"      # server acknowledged receipt of a message
+EVENT_TYPE_MESSAGE_TRANSCRIBED: str = "message.transcribed"  # transcript is ready for a voice message
 
 # ---------------------------------------------------------------------------
 # Message content types — content_type values used in ContentItem

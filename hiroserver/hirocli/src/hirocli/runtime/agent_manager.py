@@ -2,17 +2,14 @@
 
 Responsibilities:
   - Reads inbound messages from CommunicationManager.inbound_queue.
-  - Skips messages that contain no text content items; only the first text
-    item (or a concatenation of all text items) is passed to the agent.
-  - Passes each text message to a LangChain v1 create_agent instance.
+  - Builds agent input from text ContentItems and from metadata["description"]
+    on non-text items (audio transcripts, image descriptions set by adapters).
+  - Skips messages that yield no input text after checking both sources.
+  - Passes each message to a LangChain v1 create_agent instance.
   - Maintains per-conversation persistent memory keyed by conversation_channels.id
     (a UUID) using LangGraph's AsyncSqliteSaver checkpointer backed by workspace.db.
   - Constructs a reply UnifiedMessage and places it on the outbound queue.
   - On LLM errors, enqueues a human-readable fallback reply instead.
-
-Messages with no text content items (image-only, audio-only, etc.) are silently
-ignored. They are consumed from the queue so they don't block it, but no reply
-is produced. Future workers can be added as additional consumers.
 """
 
 from __future__ import annotations
@@ -111,10 +108,27 @@ class AgentManager:
         thread_id = self._resolve_thread_id(msg)
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Concatenate all text content items into a single input string.
-        text_body = " ".join(
-            item.body for item in msg.content if item.content_type == "text"
-        )
+        # Build agent input from all content items:
+        # - text items contribute their body directly.
+        # - non-text items (audio, image, …) contribute their adapter-set
+        #   metadata["description"] when present (e.g. transcript, image description).
+        parts = []
+        for item in msg.content:
+            if item.content_type == "text":
+                if item.body:
+                    parts.append(item.body)
+            elif "description" in item.metadata:
+                parts.append(f"[{item.content_type}]: {item.metadata['description']}")
+
+        text_body = "\n".join(parts)
+
+        if not text_body:
+            log.info(
+                "Ignoring message with no usable text input",
+                msg_id=msg.routing.id,
+                sender=msg.routing.sender_id,
+            )
+            return
 
         log.info(
             "Processing message",
@@ -164,15 +178,6 @@ class AgentManager:
             while True:
                 msg: UnifiedMessage = await self._comm.inbound_queue.get()
                 try:
-                    # Only process messages that contain at least one text content item.
-                    has_text = any(item.content_type == "text" for item in msg.content)
-                    if not has_text:
-                        log.info(
-                            "Ignoring message with no text content",
-                            msg_id=msg.routing.id,
-                            sender=msg.routing.sender_id,
-                        )
-                        continue
                     await self._process(msg)
                 finally:
                     self._comm.inbound_queue.task_done()

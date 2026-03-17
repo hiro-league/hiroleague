@@ -20,22 +20,44 @@ class _ChatScreenState extends State<ChatScreen> {
   // DotMatrixGame constructor, including any config changes made in code.
   late final DotMatrixGame _dotMatrixGame = DotMatrixGame();
 
+  // Dot-matrix panel starts collapsed; user can reveal it with the arrow.
+  bool _flameExpanded = false;
+
+  void _toggleFlame() => setState(() => _flameExpanded = !_flameExpanded);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: ChatAppBar(channelId: widget.channelId),
       body: Column(
         children: [
-          // --- Dot matrix display: top ~1/3 of the body ---
-          Expanded(
-            flex: 1,
-            child: ClipRect(
-              child: GameWidget(game: _dotMatrixGame),
+          // --- Dot matrix panel: collapsible ---
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: _flameExpanded
+                ? SizedBox(
+                    height: MediaQuery.sizeOf(context).height * 0.28,
+                    child: ClipRect(child: GameWidget(game: _dotMatrixGame)),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          // Arrow toggle button
+          GestureDetector(
+            onTap: _toggleFlame,
+            child: Container(
+              width: double.infinity,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: AnimatedRotation(
+                turns: _flameExpanded ? 0.5 : 0.0,
+                duration: const Duration(milliseconds: 300),
+                child: const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+              ),
             ),
           ),
-          // --- Message list: bottom ~2/3 ---
+          // --- Message list ---
           Expanded(
-            flex: 2,
             child: MessageList(channelId: widget.channelId),
           ),
           MessageInputBar(channelId: widget.channelId),

@@ -15,6 +15,7 @@ from .gateway import (
     GatewayStopTool,
     GatewayTeardownTool,
 )
+from .media import DescribeImageTool, TranscribeTool
 from .server import (
     RestartTool,
     SetupTool,
@@ -62,4 +63,6 @@ def all_tools() -> list[Tool]:
         GatewayStopTool(),
         GatewaySetupTool(),
         GatewayTeardownTool(),
+        TranscribeTool(),
+        DescribeImageTool(),
     ]
