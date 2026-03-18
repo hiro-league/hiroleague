@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +12,8 @@ import '../../core/utils/logger.dart';
 import '../../data/remote/gateway/unified_message.dart';
 import '../../data/repositories/message_repository_impl.dart';
 import '../../domain/models/message/message_status.dart';
+import '../../domain/services/audio_recording_service.dart';
+import '../../platform/storage/audio_storage_service.dart';
 
 part 'message_send_notifier.g.dart';
 
@@ -19,6 +23,7 @@ part 'message_send_notifier.g.dart';
 class MessageSendNotifier extends _$MessageSendNotifier {
   static const _uuid = Uuid();
   static final _log = Logger.get('MessageSendNotifier');
+  final _audioStorage = AudioStorageService();
 
   @override
   void build() {}
@@ -79,6 +84,94 @@ class MessageSendNotifier extends _$MessageSendNotifier {
       rethrow;
     } catch (e) {
       _log.error('Failed to send message (unexpected)', error: e);
+      throw UnknownException(e.toString());
+    }
+  }
+
+  /// Records an audio message, persists locally, and sends to the server.
+  ///
+  /// Inserts an optimistic DB row with [MessageStatus.sending], broadcasts the
+  /// audio as a base64-encoded [ContentItem] via the gateway, then updates the
+  /// status to [MessageStatus.sent]. Throws [AppException] on failure.
+  Future<void> sendAudio({
+    required String channelId,
+    required AudioRecordingResult recordingResult,
+  }) async {
+    final authState = ref.read(authProvider).value;
+    if (authState is! AuthAuthenticated) return;
+
+    final identity = authState.identity;
+    final messageId = _uuid.v4();
+    final now = DateTime.now().toUtc();
+
+    final repo = ref.read(messageRepositoryProvider);
+    final gateway = ref.read(gatewayProvider.notifier);
+
+    try {
+      // 1. Persist audio locally.
+      final localPath = await _audioStorage.save(
+        messageId: messageId,
+        bytes: recordingResult.bytes,
+        tempPath: recordingResult.tempPath,
+        blobUrl: recordingResult.tempPath, // on web tempPath IS the blob URL
+      );
+
+      // 2. Read bytes for base64 (on mobile we use what we have; on web re-read blob).
+      final bytes = recordingResult.bytes.isNotEmpty
+          ? recordingResult.bytes
+          : (await _audioStorage.loadBytes(localPath)) ?? recordingResult.bytes;
+
+      final base64Body = base64Encode(bytes);
+
+      // 3. Build metadata JSON stored in the DB.
+      final metadataJson = jsonEncode({
+        'duration_ms': recordingResult.durationMs,
+        'mime_type': 'audio/m4a',
+        'local_path': localPath,
+      });
+
+      // 4. Insert optimistic row.
+      await repo.insertOutbound(
+        id: messageId,
+        channelId: channelId,
+        senderId: identity.deviceId,
+        contentType: 'audio',
+        body: '',
+        metadata: metadataJson,
+        timestamp: now,
+      );
+
+      // 5. Send over WebSocket.
+      gateway.send(
+        UnifiedMessage(
+          routing: MessageRouting(
+            id: messageId,
+            channel: AppConstants.gatewayChannelName,
+            direction: 'outbound',
+            senderId: identity.deviceId,
+            timestamp: now.toIso8601String(),
+            metadata: {'channel_id': channelId},
+          ),
+          content: [
+            ContentItem(
+              contentType: 'audio',
+              body: base64Body,
+              metadata: {
+                'duration_ms': recordingResult.durationMs,
+                'mime_type': 'audio/m4a',
+              },
+            ),
+          ],
+        ).toJson(),
+      );
+
+      // 6. Mark as sent (single gray check).
+      await repo.updateMessageStatus(messageId, MessageStatus.sent);
+    } on AppException {
+      _log.error('Failed to send audio — DB or storage error');
+      rethrow;
+    } catch (e) {
+      _log.error('Failed to send audio (unexpected)', error: e);
       throw UnknownException(e.toString());
     }
   }

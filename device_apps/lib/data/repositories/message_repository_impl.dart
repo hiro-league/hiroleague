@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -14,6 +17,7 @@ import '../../domain/models/message/message.dart';
 import '../../domain/models/message/message_content.dart';
 import '../../domain/models/message/message_status.dart';
 import '../../domain/repositories/message_repository.dart';
+import '../../platform/storage/audio_storage_service.dart';
 import '../local/database/app_database.dart';
 import '../local/database/daos/channels_dao.dart';
 import '../local/database/daos/messages_dao.dart';
@@ -30,13 +34,15 @@ class MessageRepositoryImpl implements MessageRepository {
     required String? Function() myDeviceIdGetter,
   })  : _messagesDao = messagesDao,
         _channelsDao = channelsDao,
-        _myDeviceIdGetter = myDeviceIdGetter {
+        _myDeviceIdGetter = myDeviceIdGetter,
+        _audioStorage = AudioStorageService() {
     _sub = frameStream.listen(_onInboundFrame);
   }
 
   final MessagesDao _messagesDao;
   final ChannelsDao _channelsDao;
   final String? Function() _myDeviceIdGetter;
+  final AudioStorageService _audioStorage;
   StreamSubscription<GatewayInboundFrame>? _sub;
 
   @override
@@ -54,6 +60,7 @@ class MessageRepositoryImpl implements MessageRepository {
     required String contentType,
     required String body,
     required DateTime timestamp,
+    String? metadata,
   }) async {
     await _messagesDao.insertMessage(
       MessagesCompanion.insert(
@@ -65,6 +72,7 @@ class MessageRepositoryImpl implements MessageRepository {
         timestampMs: timestamp.millisecondsSinceEpoch,
         status: MessageStatus.sending.name,
         isOutbound: Value(true),
+        metadata: Value(metadata),
       ),
     );
   }
@@ -81,10 +89,6 @@ class MessageRepositoryImpl implements MessageRepository {
   void dispose() => _sub?.cancel();
 
   Future<void> _onInboundFrame(GatewayInboundFrame frame) async {
-    // --- Fix 2: version guard ---
-    // Check version before any field access. Unknown versions likely have a
-    // different structure and would either misparse silently or throw confusing
-    // errors further down. Fail fast and visibly here instead.
     final version = frame.payload['version']?.toString();
     if (version != '0.1') {
       _log.warning(
@@ -94,10 +98,6 @@ class MessageRepositoryImpl implements MessageRepository {
       return;
     }
 
-    // --- Fix 3: typed parse with throwing fromJson ---
-    // Any missing or wrong-typed required field throws a FormatException with
-    // the exact field name. Caught here and logged as a WARNING so schema
-    // mismatches are immediately visible in the log rather than silent drops.
     late UnifiedMessage msg;
     try {
       msg = UnifiedMessage.fromJson(frame.payload);
@@ -109,8 +109,12 @@ class MessageRepositoryImpl implements MessageRepository {
       return;
     }
 
-    // Only process content-exchange messages. Future types (request, response,
-    // stream) will be handled by their own consumers.
+    // Handle event frames (delivery acks, transcription results).
+    if (msg.messageType == 'event' && msg.event != null) {
+      await _handleEvent(msg);
+      return;
+    }
+
     if (msg.messageType != 'message') {
       _log.debug(
         'Ignoring non-message frame',
@@ -119,62 +123,176 @@ class MessageRepositoryImpl implements MessageRepository {
       return;
     }
 
-    // Find the first text content item to store and display.
-    final textItem = msg.content.where((c) => c.contentType == 'text').firstOrNull;
-    if (textItem == null || textItem.body.isEmpty) {
+    // Route to the appropriate content handler.
+    final audioItem =
+        msg.content.where((c) => c.contentType == 'audio').firstOrNull;
+    final textItem =
+        msg.content.where((c) => c.contentType == 'text').firstOrNull;
+
+    if (audioItem != null) {
+      await _handleInboundAudio(msg, audioItem);
+    } else if (textItem != null && textItem.body.isNotEmpty) {
+      await _handleInboundText(msg, textItem);
+    } else {
       _log.warning(
-        'Dropping frame — no text content item',
+        'Dropping frame — no usable content item',
         fields: {
           'message_id': msg.routing.id,
           'content_types': msg.content.map((c) => c.contentType).toList(),
         },
       );
-      return;
     }
+  }
 
+  // ---------------------------------------------------------------------------
+  // Event handling
+  // ---------------------------------------------------------------------------
+
+  Future<void> _handleEvent(UnifiedMessage msg) async {
+    final event = msg.event!;
+    final refId = event.refId;
+    if (refId == null || refId.isEmpty) return;
+
+    switch (event.type) {
+      case 'message.received':
+        // Server acknowledged our message — double gray checks.
+        await _messagesDao.updateStatus(refId, MessageStatus.delivered.name);
+        _log.debug('Message marked delivered', fields: {'ref_id': refId});
+
+      case 'message.transcribed':
+        // Server finished transcribing — double blue checks + store transcript.
+        await _messagesDao.updateStatus(refId, MessageStatus.read.name);
+        final transcript = event.data['transcript'] as String?;
+        if (transcript != null && transcript.isNotEmpty) {
+          final row = await _messagesDao.getById(refId);
+          if (row != null) {
+            // Merge transcript into existing metadata JSON.
+            final existing = row.metadata != null
+                ? Map<String, dynamic>.from(
+                    jsonDecode(row.metadata!) as Map)
+                : <String, dynamic>{};
+            existing['transcript'] = transcript;
+            await _messagesDao.updateMetadata(refId, jsonEncode(existing));
+          }
+        }
+        _log.debug('Message transcribed', fields: {'ref_id': refId});
+
+      default:
+        _log.debug(
+          'Ignoring unknown event type',
+          fields: {'event_type': event.type},
+        );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inbound audio message
+  // ---------------------------------------------------------------------------
+
+  Future<void> _handleInboundAudio(
+    UnifiedMessage msg,
+    ContentItem audioItem,
+  ) async {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
-    final contentType = textItem.contentType;
-    final body = textItem.body;
-
-    // channel_id is stored in routing.metadata by the sender.
-    // If absent (e.g. replies from the hirocli agent), route to the default channel.
-    final channelId =
-        msg.routing.metadata['channel_id']?.toString() ?? AppConstants.defaultChannelId;
-
-    // Use the local receive time for ordering, NOT the sender's timestamp.
-    // Sender clocks can drift or be misconfigured — we have no control over them.
-    // Ordering by receive time guarantees messages always appear in the order
-    // this device received them, regardless of what clock the sender runs.
-    // The sender's original timestamp (payload['timestamp']) is available in the
-    // payload for display purposes if ever needed, but is not used for DB ordering.
+    final channelId = msg.routing.metadata['channel_id']?.toString() ??
+        AppConstants.defaultChannelId;
     final timestamp = DateTime.now().toUtc();
-
     final myDeviceId = _myDeviceIdGetter();
-    // A message is outbound if we sent it from this device.
-    final isOutbound =
-        myDeviceId != null && senderId == myDeviceId;
+    final isOutbound = myDeviceId != null && senderId == myDeviceId;
+
+    // Decode base64 audio and save locally.
+    String? localPath;
+    if (audioItem.body.isNotEmpty) {
+      try {
+        final bytes = base64Decode(audioItem.body);
+        if (!kIsWeb) {
+          localPath = await _audioStorage.saveBytes(
+            messageId: id,
+            bytes: Uint8List.fromList(bytes),
+          );
+        } else {
+          localPath = await _audioStorage.saveBytes(
+            messageId: id,
+            bytes: Uint8List.fromList(bytes),
+          );
+        }
+      } catch (e) {
+        _log.warning('Failed to save inbound audio', fields: {'error': e.toString()});
+      }
+    }
+
+    final durationMs =
+        (audioItem.metadata['duration_ms'] as num?)?.toInt() ?? 0;
+    final mimeType =
+        audioItem.metadata['mime_type'] as String? ?? 'audio/m4a';
+
+    final metadataJson = jsonEncode({
+      'duration_ms': durationMs,
+      'mime_type': mimeType,
+      'local_path': localPath,
+    });
 
     await _messagesDao.insertMessage(
       MessagesCompanion.insert(
         id: id,
         channelId: channelId,
         senderId: senderId,
-        contentType: contentType,
-        body: body,
+        contentType: 'audio',
+        body: '',
+        timestampMs: timestamp.millisecondsSinceEpoch,
+        status: MessageStatus.delivered.name,
+        isOutbound: Value(isOutbound),
+        metadata: Value(metadataJson),
+      ),
+    );
+
+    await _touchChannelTimestamp(channelId, timestamp);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inbound text message
+  // ---------------------------------------------------------------------------
+
+  Future<void> _handleInboundText(
+    UnifiedMessage msg,
+    ContentItem textItem,
+  ) async {
+    final id = msg.routing.id;
+    final senderId = msg.routing.senderId;
+    final channelId = msg.routing.metadata['channel_id']?.toString() ??
+        AppConstants.defaultChannelId;
+    final timestamp = DateTime.now().toUtc();
+    final myDeviceId = _myDeviceIdGetter();
+    final isOutbound = myDeviceId != null && senderId == myDeviceId;
+
+    await _messagesDao.insertMessage(
+      MessagesCompanion.insert(
+        id: id,
+        channelId: channelId,
+        senderId: senderId,
+        contentType: textItem.contentType,
+        body: textItem.body,
         timestampMs: timestamp.millisecondsSinceEpoch,
         status: MessageStatus.delivered.name,
         isOutbound: Value(isOutbound),
       ),
     );
 
-    // Touch channel lastMessageAt for list ordering.
+    await _touchChannelTimestamp(channelId, timestamp);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  Future<void> _touchChannelTimestamp(
+      String channelId, DateTime timestamp) async {
     final existingChannel = await _channelsDao.getById(channelId);
     if (existingChannel != null) {
       await _channelsDao.insertOrUpdate(
         existingChannel.toCompanion(true).copyWith(
-              lastMessageAt:
-                  Value(timestamp.millisecondsSinceEpoch),
+              lastMessageAt: Value(timestamp.millisecondsSinceEpoch),
             ),
       );
     } else {
@@ -185,6 +303,7 @@ class MessageRepositoryImpl implements MessageRepository {
   Message _rowToMessage(MessageRecord row) {
     final MessageContent content = switch (row.contentType) {
       'text' => TextContent(row.body),
+      'audio' => _parseAudioContent(row),
       final other => UnsupportedContent(other),
     };
     return Message(
@@ -197,6 +316,23 @@ class MessageRepositoryImpl implements MessageRepository {
       status: MessageStatus.fromName(row.status),
       isOutbound: row.isOutbound,
     );
+  }
+
+  AudioContent _parseAudioContent(MessageRecord row) {
+    if (row.metadata == null || row.metadata!.isEmpty) {
+      return const AudioContent(durationMs: 0);
+    }
+    try {
+      final meta = jsonDecode(row.metadata!) as Map<String, dynamic>;
+      return AudioContent(
+        durationMs: (meta['duration_ms'] as num?)?.toInt() ?? 0,
+        localPath: meta['local_path'] as String?,
+        transcript: meta['transcript'] as String?,
+        mimeType: meta['mime_type'] as String? ?? 'audio/m4a',
+      );
+    } catch (_) {
+      return const AudioContent(durationMs: 0);
+    }
   }
 }
 

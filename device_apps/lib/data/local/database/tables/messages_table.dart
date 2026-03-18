@@ -21,6 +21,10 @@ class Messages extends Table {
   BoolColumn get isOutbound =>
       boolean().withDefault(const Constant(false))();
 
+  /// JSON-encoded metadata for non-text content.
+  /// Audio: {"duration_ms": int, "mime_type": str, "local_path": str?, "transcript": str?}
+  TextColumn get metadata => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

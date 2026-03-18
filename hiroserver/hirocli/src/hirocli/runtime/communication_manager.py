@@ -28,6 +28,7 @@ from uuid import uuid4
 from hiro_channel_sdk.constants import (
     CONTENT_TYPE_JSON,
     EVENT_TYPE_MESSAGE_RECEIVED,
+    EVENT_TYPE_MESSAGE_TRANSCRIBED,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_REQUEST,
@@ -180,6 +181,33 @@ class CommunicationManager:
         try:
             if self._adapter_pipeline is not None:
                 msg = await self._adapter_pipeline.process(msg)
+
+            # Emit message.transcribed events for any audio items that were
+            # successfully transcribed by the adapter pipeline.
+            for item in msg.content:
+                if item.content_type == "audio" and "description" in item.metadata:
+                    transcript_event = UnifiedMessage(
+                        message_type=MESSAGE_TYPE_EVENT,
+                        routing=MessageRouting(
+                            channel=msg.routing.channel,
+                            direction="outbound",
+                            sender_id="server",
+                            recipient_id=msg.routing.sender_id,
+                            metadata=msg.routing.metadata,
+                        ),
+                        event=EventPayload(
+                            type=EVENT_TYPE_MESSAGE_TRANSCRIBED,
+                            ref_id=msg.routing.id,
+                            data={"transcript": item.metadata["description"]},
+                        ),
+                    )
+                    await self.enqueue_outbound(transcript_event)
+                    log.info(
+                        "Transcript event enqueued",
+                        msg_id=msg.routing.id,
+                        transcript_len=len(item.metadata["description"]),
+                    )
+
             self.inbound_queue.put_nowait(msg)
             log.info(
                 "Inbound message queued after adaptation",

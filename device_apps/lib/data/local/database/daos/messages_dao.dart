@@ -30,4 +30,14 @@ class MessagesDao extends DatabaseAccessor<AppDatabase>
     await (update(messages)..where((m) => m.id.equals(messageId)))
         .write(MessagesCompanion(status: Value(status)));
   }
+
+  Future<void> updateMetadata(String messageId, String metadata) async {
+    await (update(messages)..where((m) => m.id.equals(messageId)))
+        .write(MessagesCompanion(metadata: Value(metadata)));
+  }
+
+  Future<MessageRecord?> getById(String messageId) async {
+    return (select(messages)..where((m) => m.id.equals(messageId)))
+        .getSingleOrNull();
+  }
 }

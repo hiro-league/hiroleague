@@ -41,13 +41,13 @@ class ChannelEventHandler:
     def register(self, event: str, handler: ChannelEventHandlerFn) -> None:
         """Register an async handler for the given channel event name."""
         self._handlers[event] = handler
-        log.info("Registered channel event handler", event=event)
+        log.info("Registered channel event handler", event_type=event)
 
     async def handle(self, event: str, data: dict[str, Any]) -> None:
         """Dispatch a channel event to its registered handler."""
         handler = self._handlers.get(event)
         if handler is None:
-            log.debug("No handler registered for channel event", event=event)
+            log.debug("No handler registered for channel event", event_type=event)
             return
 
         try:
@@ -55,7 +55,7 @@ class ChannelEventHandler:
         except Exception as exc:
             log.error(
                 "Channel event handler error",
-                event=event,
+                event_type=event,
                 error=str(exc),
                 exc_info=True,
             )

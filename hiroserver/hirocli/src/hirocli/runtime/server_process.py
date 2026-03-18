@@ -90,7 +90,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     from hirocli.runtime.request_handler import RequestHandler
     from hirocli.runtime.adapters.audio_adapter import AudioTranscriptionAdapter
     from hirocli.runtime.adapters.image_adapter import ImageUnderstandingAdapter
-    from hirocli.services.transcription_service import TranscriptionService
+    from hirocli.services.stt import GeminiSTTProvider, OpenAISTTProvider, STTService
     from hirocli.services.vision_service import VisionService
     from hirocli.tools import all_tools
     from hirocli.tools.registry import ToolRegistry
@@ -118,14 +118,17 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     # Shared media services — one instance each, used by both the adapter
     # pipeline and the agent/tool layer via TranscribeTool / DescribeImageTool.
     # ------------------------------------------------------------------
-    transcription_service = TranscriptionService()
+    stt_service = STTService(providers=[
+        OpenAISTTProvider(),
+        GeminiSTTProvider(),
+    ])
     vision_service = VisionService()
 
     # ------------------------------------------------------------------
     # Adapter pipeline
     # ------------------------------------------------------------------
     adapter_pipeline = MessageAdapterPipeline([
-        AudioTranscriptionAdapter(service=transcription_service),
+        AudioTranscriptionAdapter(service=stt_service),
         ImageUnderstandingAdapter(service=vision_service),
     ])
 

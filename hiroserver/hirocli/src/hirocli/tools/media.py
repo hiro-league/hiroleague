@@ -29,39 +29,44 @@ class DescribeImageResult:
 
 
 class TranscribeTool(Tool):
-    """Transcribe an audio file to text using OpenAI Whisper.
+    """Transcribe an audio file to text.
 
     Accepts a URL, a ``data:<mime>;base64,...`` data URI, or a raw
-    base64-encoded audio string.
+    base64-encoded audio string. Optionally specify a model to use.
     """
 
     name = "transcribe_audio"
     description = (
         "Transcribe an audio file to text. "
-        "Provide the audio as a URL, a data URI, or a base64-encoded string."
+        "Provide the audio as a URL, a data URI, or a base64-encoded string. "
+        "Optionally specify a model (e.g. 'gpt-4o-transcribe', 'gemini-3.1-flash-lite')."
     )
     params = {
         "source": ToolParam(
             type_=str,
             description="Audio source — URL, data URI, or base64 string",
         ),
+        "model": ToolParam(
+            type_=str,
+            description="STT model to use (optional — defaults to STT_DEFAULT_MODEL or first available)",
+            required=False,
+        ),
     }
 
     def execute(self, **kwargs: Any) -> TranscribeResult:
-        from ..services.transcription_service import TranscriptionService
+        from ..services.stt import GeminiSTTProvider, OpenAISTTProvider, STTService
 
         source: str = kwargs["source"]
-        service = TranscriptionService()
+        model: str | None = kwargs.get("model")
+        service = STTService(providers=[OpenAISTTProvider(), GeminiSTTProvider()])
 
         if not service.is_available():
             raise RuntimeError(
-                "Transcription service is not available. "
-                "Set OPENAI_API_KEY to enable it."
+                "No STT providers are available. "
+                "Set OPENAI_API_KEY or GOOGLE_API_KEY to enable transcription."
             )
 
-        # transcribe_sync() runs async code in a dedicated thread so it is
-        # safe to call from within or outside an event loop.
-        transcript = service.transcribe_sync(source)
+        transcript = service.transcribe_sync(source, model=model) if model else service.transcribe_sync(source)
         return TranscribeResult(transcript=transcript)
 
 

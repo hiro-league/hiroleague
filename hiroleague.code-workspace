@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../hiro-docs"
+		},
+		{
+			"path": "../emoapi"
 		}
 	],
 	"settings": {

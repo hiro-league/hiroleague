@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/ui/theme/app_text_styles.dart';
 import '../../../../domain/models/message/message.dart';
 import '../../../../domain/models/message/message_content.dart';
+import 'delivery_indicator.dart';
 
 class TextBubble extends StatelessWidget {
   const TextBubble({
@@ -67,13 +68,27 @@ class TextBubble extends StatelessWidget {
                 style: AppTextStyles.messageBody.copyWith(color: textColor),
               ),
               const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Text(
-                  _formatTime(message.timestamp),
-                  style: AppTextStyles.messageTimestamp
-                      .copyWith(color: metaColor),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const Spacer(),
+                  Text(
+                    _formatTime(message.timestamp),
+                    style: AppTextStyles.messageTimestamp
+                        .copyWith(color: metaColor),
+                  ),
+                  if (message.isOutbound) ...[
+                    const SizedBox(width: 3),
+                    DeliveryIndicator(
+                      status: message.status,
+                      readColor: isOut ? Colors.white : null,
+                      defaultColor: isOut
+                          ? Colors.white.withValues(alpha: 0.6)
+                          : null,
+                    ),
+                  ],
+                ],
               ),
             ],
           ),

@@ -19,7 +19,19 @@ class AppDatabase extends _$AppDatabase {
 
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      // Dev mode: destructive recreate on any schema change.
+      for (final table in allTables) {
+        await m.deleteTable(table.actualTableName);
+      }
+      await m.createAll();
+    },
+  );
 }
 
 /// Picks the correct QueryExecutor for the current platform.

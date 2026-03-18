@@ -1,7 +1,7 @@
-"""AudioTranscriptionAdapter — bridges TranscriptionService into the adapter pipeline.
+"""AudioTranscriptionAdapter — bridges STTService into the adapter pipeline.
 
-Delegates all LangChain/Whisper logic to TranscriptionService. The adapter's
-only job is to read item.body and write the transcript into item.metadata.
+Delegates all transcription logic to STTService. The adapter's only job is to
+read item.body and write the transcript into item.metadata.
 """
 
 from __future__ import annotations
@@ -9,17 +9,17 @@ from __future__ import annotations
 from hiro_channel_sdk.models import ContentItem, UnifiedMessage
 from hiro_commons.log import Logger
 
-from ...services.transcription_service import TranscriptionService
+from ...services.stt import STTService
 from ..message_adapter import ContentTypeAdapter
 
 log = Logger.get("ADAPTER.AUDIO")
 
 
 class AudioTranscriptionAdapter(ContentTypeAdapter):
-    """Transcribes audio ContentItems using TranscriptionService."""
+    """Transcribes audio ContentItems using STTService."""
 
-    def __init__(self, service: TranscriptionService | None = None) -> None:
-        self._service = service or TranscriptionService()
+    def __init__(self, service: STTService | None = None) -> None:
+        self._service = service or STTService()
 
     @property
     def target_content_type(self) -> str:

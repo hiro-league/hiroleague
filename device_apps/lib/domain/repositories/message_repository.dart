@@ -12,6 +12,7 @@ abstract class MessageRepository {
     required String contentType,
     required String body,
     required DateTime timestamp,
+    String? metadata,
   });
 
   Future<void> updateMessageStatus(String messageId, MessageStatus status);

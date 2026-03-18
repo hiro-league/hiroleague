@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../domain/models/message/message.dart';
 import '../../../../domain/models/message/message_content.dart';
+import 'audio_bubble.dart';
 import 'text_bubble.dart';
 
 /// Dispatcher — selects the correct bubble widget for the message content type.
@@ -14,6 +15,7 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     return switch (message.content) {
       final TextContent c => TextBubble(message: message, content: c),
+      final AudioContent c => AudioBubble(message: message, content: c),
       final UnsupportedContent c => _UnsupportedBubble(rawType: c.rawType),
     };
   }
