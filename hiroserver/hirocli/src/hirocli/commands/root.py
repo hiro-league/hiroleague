@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from hiro_commons.log import Logger
 from rich.console import Console
 from rich.table import Table
 
+from ..domain.workspace import WorkspaceError, resolve_workspace
 from ..tools.server import (
     RestartTool,
     SetupTool,
@@ -18,8 +20,8 @@ from ..tools.server import (
     TeardownTool,
     UninstallTool,
 )
-from ..domain.workspace import WorkspaceError
 
+log = Logger.get("CLI.SERVER")
 
 def register(app: typer.Typer, console: Console) -> None:
     """Register root-level commands on the provided app."""
@@ -52,14 +54,13 @@ def register(app: typer.Typer, console: Console) -> None:
         """One-time setup: configure gateway, generate device ID, register auto-start."""
         console.print("[bold cyan]hirocli setup[/bold cyan]")
 
-        from ..domain.workspace import WorkspaceError as _WE, resolve_workspace as _resolve
         from ..domain.config import load_config as _load_config
 
         try:
-            entry, _ = _resolve(workspace)
+            entry, _ = resolve_workspace(workspace)
             existing = _load_config(Path(entry.path))
             default_gw = existing.gateway_url
-        except _WE:
+        except (WorkspaceError, Exception):
             default_gw = "ws://localhost:8765"
 
         effective_gateway_url = gateway_url
@@ -81,6 +82,25 @@ def register(app: typer.Typer, console: Console) -> None:
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
+
+        # Setup creates the workspace — open routed sinks after so the path exists.
+        try:
+            from ..domain.config import load_config, resolve_log_dir
+            ws_path = Path(result.workspace_path)
+            Logger.open_log_dir(resolve_log_dir(ws_path, load_config(ws_path)))
+        except Exception:
+            pass
+        log.info(
+            "hirocli setup",
+            workspace=result.workspace,
+            gateway_url=result.gateway_url,
+            http_port=result.http_port,
+            skip_autostart=skip_autostart,
+            elevated_task=elevated_task,
+            start_server=start_server,
+            device_id=result.device_id,
+            autostart=result.autostart_method,
+        )
 
         console.print(f"[green]Config saved to[/green] {result.workspace_path}/config.json")
         console.print(f"  workspace  : [bold]{result.workspace}[/bold]")
@@ -137,6 +157,8 @@ def register(app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Start the hirocli server (background by default, foreground with -f)."""
+        log.info("hirocli start", foreground=foreground, admin=admin)
+
         try:
             result = StartTool().execute(workspace=workspace, foreground=foreground, admin=admin)
         except ValueError as exc:
@@ -166,6 +188,8 @@ def register(app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Stop the running hirocli server."""
+        log.info("hirocli stop")
+
         try:
             result = StopTool().execute(workspace=workspace)
         except WorkspaceError as exc:
@@ -196,6 +220,8 @@ def register(app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Gracefully restart the hirocli server (stop + start)."""
+        log.info("hirocli restart", foreground=foreground, admin=admin)
+
         try:
             result = RestartTool().execute(
                 workspace=workspace, foreground=foreground, admin=admin,
@@ -260,6 +286,7 @@ def register(app: typer.Typer, console: Console) -> None:
     ) -> None:
         """Stop server and remove all auto-start registrations for a workspace."""
         console.print("[bold cyan]hirocli teardown[/bold cyan]")
+        log.info("hirocli teardown", purge=purge)
 
         try:
             result = TeardownTool().execute(
@@ -290,7 +317,8 @@ def register(app: typer.Typer, console: Console) -> None:
         purge: bool = typer.Option(False, "--purge", help="Also delete the workspace folder."),
     ) -> None:
         """Stop server, remove auto-start, then print package uninstall commands."""
-        console.print("[bold cyan]hirocli teardown[/bold cyan]")
+        console.print("[bold cyan]hirocli uninstall[/bold cyan]")
+        log.info("hirocli uninstall", purge=purge)
 
         try:
             result = UninstallTool().execute(

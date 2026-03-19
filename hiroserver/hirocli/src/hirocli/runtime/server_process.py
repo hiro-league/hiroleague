@@ -24,17 +24,17 @@ from pathlib import Path
 from hiro_commons.log import Logger
 from hiro_commons.process import write_pid
 
-from hirocli.constants import DEVICE_ID_PREFIX, DEVICE_ID_SUFFIX_LENGTH, ENV_ADMIN_UI, ENV_WORKSPACE_PATH, PID_FILENAME
+from hirocli.constants import DEVICE_ID_PREFIX, DEVICE_ID_SUFFIX_LENGTH, ENV_ADMIN_UI, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 
 log = Logger.get("SERVER")
 
 
 async def _tail_plugin_logs(log_dir: Path, stop_event: asyncio.Event) -> None:
-    """Forward new lines from plugin-*.log files to stdout in foreground mode."""
+    """Forward new lines from channel-*.log files to stdout in foreground mode."""
     positions: dict[str, int] = {}
     while not stop_event.is_set():
         await asyncio.sleep(0.5)
-        for log_file in sorted(log_dir.glob("plugin-*.log")):
+        for log_file in sorted(log_dir.glob("channel-*.log")):
             key = str(log_file)
             if key not in positions:
                 try:
@@ -54,7 +54,12 @@ async def _tail_plugin_logs(log_dir: Path, stop_event: asyncio.Event) -> None:
                 pass
 
 
-async def _main(foreground: bool = False, workspace_path: Path | None = None, admin: bool = False) -> None:
+async def _main(
+    foreground: bool = False,
+    workspace_path: Path | None = None,
+    workspace_name: str | None = None,
+    admin: bool = False,
+) -> None:
     if workspace_path is None:
         ws_str = os.environ.get(ENV_WORKSPACE_PATH)
         if not ws_str:
@@ -63,8 +68,9 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
                 "The server process must be started via 'hirocli start'."
             )
         workspace_path = Path(ws_str)
+    if workspace_name is None:
+        workspace_name = os.environ.get(ENV_WORKSPACE) or workspace_path.name
 
-    from hiro_channel_sdk import log_setup
     from hirocli.domain.config import load_config, mark_connected, mark_disconnected, resolve_log_dir
     from hirocli.domain.crypto import load_or_create_master_key
     from hirocli.domain.db import ensure_db
@@ -97,15 +103,14 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
 
     config = load_config(workspace_path)
     log_dir = resolve_log_dir(workspace_path, config)
-    log_setup.init(
-        "server",
-        log_dir,
-        foreground=foreground,
-        log_levels=config.log_levels or None,
-    )
+    # Centralised routed sinks: server.log (exclude CLI.*) + cli.log (include CLI.*)
+    Logger.configure(level="INFO", console=foreground)
+    Logger.open_log_dir(log_dir, level="INFO")
+    if config.log_levels:
+        Logger.apply_level_overrides(config.log_levels)
+    log.info("Hiro Server starting...", workspace=workspace_name, foreground=foreground, admin=admin)
     log.info(
-        "Config loaded",
-        workspace=str(workspace_path),
+        f"Loaded workspace '{workspace_name}' config",
         http_port=config.http_port,
         plugin_port=config.plugin_port,
         admin_port=config.admin_port,
@@ -123,7 +128,7 @@ async def _main(foreground: bool = False, workspace_path: Path | None = None, ad
     tool_registry = ToolRegistry()
     tool_registry.register_all(all_tools())
     set_tool_registry(tool_registry)
-    log.info("Tool registry ready", tools=len(tool_registry._tools))
+    log.info("Loaded Tool Definitions", tools=len(tool_registry._tools))
 
     # ------------------------------------------------------------------
     # Shared media services — one instance each, used by both the adapter
@@ -370,4 +375,5 @@ def _spawn_server(workspace_path: Path, admin: bool = False) -> None:
 
 if __name__ == "__main__":
     _admin = os.environ.get(ENV_ADMIN_UI) == "1"
-    asyncio.run(_main(admin=_admin))
+    _ws_name = os.environ.get(ENV_WORKSPACE) or None
+    asyncio.run(_main(workspace_name=_ws_name, admin=_admin))

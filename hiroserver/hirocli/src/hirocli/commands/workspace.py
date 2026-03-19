@@ -17,6 +17,8 @@ from hiro_commons.process import is_running, read_pid
 from rich.console import Console
 from rich.table import Table
 
+from hiro_commons.log import Logger
+
 from ..domain.workspace import WorkspaceError
 from ..tools.workspace import (
     WorkspaceCreateTool,
@@ -26,6 +28,7 @@ from ..tools.workspace import (
     WorkspaceUpdateTool,
 )
 
+log = Logger.get("CLI.WORKSPACE")
 
 def register(workspace_app: typer.Typer, console: Console) -> None:
     """Register workspace management commands."""
@@ -105,6 +108,10 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
 
+        # workspace create makes the workspace — open sinks after so the path exists.
+        Logger.open_log_dir(Path(result.path) / "logs")
+        log.info("hirocli workspace create", name=result.name, path=result.path, set_default=make_default)
+
         console.print(f"[green]Workspace '[bold]{result.name}[/bold]' created.[/green]")
         console.print(f"  id          : [dim]{result.id}[/dim]")
         console.print(f"  path        : [bold]{result.path}[/bold]")
@@ -132,6 +139,9 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             typer.confirm(
                 f"Are you sure you want to {action} workspace '{workspace}'?", abort=True
             )
+
+        log.info("hirocli workspace remove", workspace_arg=workspace, purge=purge)
+
         try:
             result = WorkspaceRemoveTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
@@ -163,6 +173,9 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         if new_name is None and not make_default and gateway_url is None:
             console.print("[yellow]Nothing to update. Pass --name, --set-default, or --gateway-url.[/yellow]")
             raise typer.Exit(0)
+
+        log.info("hirocli workspace update", name=new_name, set_default=make_default, gateway_url=gateway_url)
+
         try:
             result = WorkspaceUpdateTool().execute(
                 workspace=workspace,

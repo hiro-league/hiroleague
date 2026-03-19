@@ -1,15 +1,33 @@
-"""Shared Hiro structured logging."""
+"""Shared Hiro structured logging.
+
+Module-prefix routing
+---------------------
+File sinks support ``include_prefix`` / ``exclude_prefix`` filters so that
+events are routed to the correct log file without any per-call boilerplate:
+
+* ``CLI.*`` modules  →  ``cli.log``
+* Everything else    →  ``server.log``
+
+Channel plugins run in separate processes, each with their own
+``channel-<name>.log`` created by ``log_setup.init()``.
+
+``Logger.open_log_dir(log_dir)`` opens both routed sinks in one call
+and is idempotent — safe to call from both the CLI callback and the
+server startup path.
+"""
 
 from __future__ import annotations
 
 import contextvars
 import csv
+import datetime
 import io
 import logging
 import logging.handlers
 import sys
 import traceback
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Mapping
 
 import colorama
@@ -56,7 +74,10 @@ _INDENT_LEVEL: contextvars.ContextVar[int] = contextvars.ContextVar(
 )
 _INDENT_UNIT: str = "--"
 
-_FILE_SINKS: list[tuple[int, logging.Handler, object]] = []
+# (min_level, handler, renderer, include_prefix, exclude_prefixes)
+# include_prefix: only events whose module starts with this string pass through.
+# exclude_prefixes: events whose module starts with any of these are skipped.
+_FILE_SINKS: list[tuple[int, logging.Handler, object, str | None, tuple[str, ...] | None]] = []
 _LEVEL_OVERRIDES: dict[str, int] = {}
 
 
@@ -67,9 +88,17 @@ def _pick_module_color(name: str) -> str:
     return _MODULE_PALETTE[index]
 
 
+def _epoch_to_time_str(epoch: float | str) -> str:
+    """Format an epoch float as HH:MM:SS for terminal display."""
+    try:
+        return datetime.datetime.fromtimestamp(float(epoch)).strftime("%H:%M:%S")
+    except Exception:
+        return str(epoch)
+
+
 class _ColourRenderer:
     def __call__(self, logger, method_name, event_dict):
-        ts = event_dict.pop("ts", "")
+        ts = _epoch_to_time_str(event_dict.pop("ts", 0))
         level = event_dict.pop("level", "").upper()
         module = event_dict.pop("module", "")
         module_raw = module
@@ -104,7 +133,7 @@ class _ColourRenderer:
 
 class _PlainRenderer:
     def __call__(self, logger, method_name, event_dict):
-        ts = event_dict.pop("ts", "")
+        ts = _epoch_to_time_str(event_dict.pop("ts", 0))
         level = event_dict.pop("level", "").upper()
         module = event_dict.pop("module", "")
         module_raw = module
@@ -137,6 +166,8 @@ class _CsvRenderer:
     """Renders log events as CSV rows for structured file logging.
 
     Columns: timestamp,level,module,message,extra
+    timestamp is a Unix epoch float (e.g. 1742312005.437821) — gives
+    sub-second precision for correct ordering of same-second events.
     Extra contains remaining key=value pairs joined by spaces.
     A CSV header line is written once when the file sink is first opened.
     """
@@ -144,7 +175,7 @@ class _CsvRenderer:
     HEADER = "timestamp,level,module,message,extra"
 
     def __call__(self, logger, method_name, event_dict):
-        ts = event_dict.pop("ts", "")
+        ts = event_dict.pop("ts", 0)
         level = event_dict.pop("level", "").upper()
         module = event_dict.pop("module", "")
         message = event_dict.pop("event", "")
@@ -183,6 +214,7 @@ def _module_level_filter(logger, method_name, event_dict):
 def _emit_to_file_sinks(logger, method_name, event_dict):
     level_name = str(event_dict.get("level", "")).upper()
     event_level = logging._nameToLevel.get(level_name, logging.INFO)
+    module = str(event_dict.get("module", ""))
 
     exc_info = None
     try:
@@ -200,34 +232,40 @@ def _emit_to_file_sinks(logger, method_name, event_dict):
     except Exception:
         exc_info = None
 
-    for min_level, handler, renderer in list(_FILE_SINKS):
-        if event_level >= min_level:
-            try:
-                copy_for_file = dict(event_dict)
-                rendered = renderer(None, method_name, copy_for_file)
-                if event_level >= logging.ERROR and exc_info is not None:
-                    try:
-                        tb_lines = traceback.format_exception(*exc_info)
-                        tb_one_line = " | ".join(
-                            line.strip() for line in tb_lines if line and line.strip()
-                        )
-                        if tb_one_line:
-                            rendered = f"{rendered} exception={tb_one_line}"
-                    except Exception:
-                        pass
+    for min_level, handler, renderer, include_pfx, exclude_pfxs in list(_FILE_SINKS):
+        if event_level < min_level:
+            continue
+        # Prefix-based routing filters
+        if include_pfx is not None and not module.startswith(include_pfx):
+            continue
+        if exclude_pfxs is not None and any(module.startswith(p) for p in exclude_pfxs):
+            continue
+        try:
+            copy_for_file = dict(event_dict)
+            rendered = renderer(None, method_name, copy_for_file)
+            if event_level >= logging.ERROR and exc_info is not None:
+                try:
+                    tb_lines = traceback.format_exception(*exc_info)
+                    tb_one_line = " | ".join(
+                        line.strip() for line in tb_lines if line and line.strip()
+                    )
+                    if tb_one_line:
+                        rendered = f"{rendered} exception={tb_one_line}"
+                except Exception:
+                    pass
 
-                record = logging.LogRecord(
-                    name=str(event_dict.get("module", "")),
-                    level=event_level,
-                    pathname="",
-                    lineno=0,
-                    msg=rendered,
-                    args=(),
-                    exc_info=None,
-                )
-                handler.handle(record)
-            except Exception:
-                pass
+            record = logging.LogRecord(
+                name=module,
+                level=event_level,
+                pathname="",
+                lineno=0,
+                msg=rendered,
+                args=(),
+                exc_info=None,
+            )
+            handler.handle(record)
+        except Exception:
+            pass
     return event_dict
 
 
@@ -289,7 +327,10 @@ class Logger:
             return event_dict
 
         processors = [
-            structlog.processors.TimeStamper(fmt="%H:%M:%S", utc=False, key="ts"),
+            # Raw epoch float (UTC) for sub-second sort precision across all logs.
+            # structlog requires utc=True when fmt=None.
+            # Renderers convert to local time for display.
+            structlog.processors.TimeStamper(fmt=None, utc=True, key="ts"),
             structlog.processors.add_log_level,
             _add_module,
             _module_level_filter,
@@ -355,12 +396,18 @@ class Logger:
         backup_count: int = LOG_ROTATION_BACKUP_COUNT,
         use_json: bool = False,
         use_csv: bool = False,
+        include_prefix: str | None = None,
+        exclude_prefix: str | tuple[str, ...] | None = None,
     ) -> logging.Handler:
         """Mirror log events at or above *level* into a file.
 
         use_csv=True writes CSV rows (timestamp,level,module,message,extra).
         A header line is written when a new file is created (not when appending).
         use_json takes precedence over use_csv if both are set.
+
+        include_prefix / exclude_prefix control module-based routing:
+        - include_prefix="CLI." → only CLI.* events reach this sink.
+        - exclude_prefix=("CLI.",) → CLI.* events are skipped.
         """
         if not cls._configured:
             cls.configure()
@@ -371,7 +418,6 @@ class Logger:
         if directory and not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
 
-        # Write CSV header when creating a new file (mode "w" or file does not yet exist).
         is_new_file = mode == "w" or not os.path.exists(path)
 
         min_level = cls._determine_level(level)
@@ -393,7 +439,6 @@ class Logger:
             renderer = structlog.processors.JSONRenderer()
         elif use_csv:
             renderer = _CsvRenderer()
-            # Write header line only when starting a fresh file.
             if is_new_file:
                 try:
                     with open(path, mode, encoding="utf-8") as fh:
@@ -403,7 +448,11 @@ class Logger:
         else:
             renderer = _PlainRenderer()
 
-        _FILE_SINKS.append((min_level, handler, renderer))
+        # Normalise exclude_prefix to a tuple (or None).
+        if isinstance(exclude_prefix, str):
+            exclude_prefix = (exclude_prefix,)
+
+        _FILE_SINKS.append((min_level, handler, renderer, include_prefix, exclude_prefix))
         logging.getLogger().addHandler(handler)
         return handler
 
@@ -414,7 +463,45 @@ class Logger:
         except Exception:
             pass
         global _FILE_SINKS
-        _FILE_SINKS = [(lvl, h, r) for (lvl, h, r) in _FILE_SINKS if h is not handler]
+        _FILE_SINKS = [entry for entry in _FILE_SINKS if entry[1] is not handler]
+
+    # Tracks the log directory opened by open_log_dir for idempotency.
+    _log_dir: Path | None = None
+
+    @classmethod
+    def open_log_dir(cls, log_dir: Path, *, level: str | int = "INFO") -> None:
+        """Open routed file sinks for a workspace log directory (idempotent).
+
+        Creates two CSV sinks with module-prefix routing:
+        - ``server.log``  — all events *except* ``CLI.*`` modules.
+        - ``cli.log``     — only ``CLI.*`` modules.
+
+        Channel plugins run in separate processes and create their own
+        ``channel-<name>.log`` via ``log_setup.init()`` — no routing
+        needed here.
+
+        Safe to call from both the CLI callback (``commands/app.py``) and
+        the server startup path (``runtime/server_process.py``). The second
+        call with the same *log_dir* is a no-op.
+        """
+        log_dir = Path(log_dir)
+        if cls._log_dir == log_dir:
+            return
+        log_dir.mkdir(parents=True, exist_ok=True)
+        cls._log_dir = log_dir
+
+        cls.add_file_sink(
+            str(log_dir / "server.log"),
+            level=level,
+            use_csv=True,
+            exclude_prefix=("CLI.",),
+        )
+        cls.add_file_sink(
+            str(log_dir / "cli.log"),
+            level=level,
+            use_csv=True,
+            include_prefix="CLI.",
+        )
 
     @classmethod
     def set_indent_unit(cls, unit: str):

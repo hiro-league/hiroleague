@@ -1,15 +1,18 @@
-"""Log reading tools: search and tail server, plugin, and gateway log files.
+"""Log reading tools: search and tail server, channel, and gateway log files.
 
-These tools read CSV log files written by log_setup.init() (use_csv=True).
+These tools read CSV log files written by log_setup.init() / Logger.open_log_dir().
 They are available to the AI agent (for natural-language log queries),
 the CLI (hirocli logs search/tail), and the admin UI (direct import).
 
 CSV log format: timestamp,level,module,message,extra
+timestamp is a Unix epoch float (e.g. 1742312005.437821).
 """
 
 from __future__ import annotations
 
 import csv
+import datetime
+import html as _html
 import io
 import json
 from dataclasses import dataclass, field
@@ -92,15 +95,20 @@ def _collect_log_files(
         if f.exists():
             files.append((f, "server"))
 
-    if src in ("all", "plugins"):
-        for f in sorted(log_dir.glob("plugin-*.log")):
-            plugin_name = f.stem.removeprefix("plugin-")
-            files.append((f, f"plugin-{plugin_name}"))
+    if src in ("all", "channels"):
+        for f in sorted(log_dir.glob("channel-*.log")):
+            channel_name = f.stem.removeprefix("channel-")
+            files.append((f, f"channel-{channel_name}"))
 
     if src in ("all", "gateway") and gateway_log_dir is not None:
         f = gateway_log_dir / "gateway.log"
         if f.exists():
             files.append((f, "gateway"))
+
+    if src in ("all", "cli"):
+        f = log_dir / "cli.log"
+        if f.exists():
+            files.append((f, "cli"))
 
     return files
 
@@ -119,12 +127,40 @@ def _module_color_idx(module: str) -> int:
     return sum(ord(c) for c in module) % 4
 
 
+def _epoch_to_dt(ts_str: str) -> datetime.datetime | None:
+    """Parse a CSV timestamp field (epoch float) into a datetime, or None."""
+    try:
+        return datetime.datetime.fromtimestamp(float(ts_str))
+    except Exception:
+        return None
+
+
+def _format_date(ts_str: str) -> str:
+    """Format epoch float as 'Mar 18'. Returns '' if not parseable."""
+    dt = _epoch_to_dt(ts_str)
+    if dt is None:
+        return ""
+    # %#d on Windows, %-d on Unix — use manual formatting to stay portable.
+    return f"{dt.strftime('%b')} {dt.day}"
+
+
+def _to_12h(ts_str: str) -> str:
+    """Format epoch float as 'H:MM:SS AM/PM'. Returns ts_str unchanged if not parseable."""
+    dt = _epoch_to_dt(ts_str)
+    if dt is None:
+        return ts_str
+    hour = dt.hour
+    suffix = "AM" if hour < 12 else "PM"
+    hour12 = hour % 12 or 12
+    return f"{hour12}:{dt.minute:02d}:{dt.second:02d} {suffix}"
+
+
 def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
     """Parse a CSV row into a log record dict. Returns None for header/empty rows.
 
-    Includes ``level_html`` / ``module_html`` fields with ``<span>`` wrappers
-    for colour rendering via AG Grid ``html_columns``. Raw ``level`` and
-    ``module`` are kept for filtering and sorting.
+    Includes ``level_html`` / ``module_html`` / ``message_html`` fields with
+    ``<span>`` wrappers for colour rendering via AG Grid ``html_columns``.
+    Raw ``level``, ``module``, and ``message`` are kept for filtering and sorting.
     """
     if not row or row[0] == "timestamp":
         return None  # skip header and blank lines
@@ -133,15 +169,37 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
         module = row[2]
         lvl_cls = _LEVEL_CSS_CLASS.get(level, "")
         mod_cls = f"log-mod-{_module_color_idx(module)}"
+        try:
+            ts_num = float(row[0])
+        except (ValueError, TypeError):
+            ts_num = 0.0
+        message = row[3]
+        # Startup rows get a styled span so the Message cell is highlighted via
+        # html_columns — rowClassRules/cellClassRules expression strings are not
+        # evaluated by NiceGUI's AG Grid serialisation, so html_columns is the
+        # only reliable per-row visual distinction mechanism.
+        is_startup = message.startswith("Hiro Server starting")
+        message_html = (
+            f'<span class="log-startup-msg">{_html.escape(message)}</span>'
+            if is_startup
+            else _html.escape(message)
+        )
         return {
-            "timestamp": row[0],
+            "id": f"{source}:{ts_num}",             # deterministic row key for AG Grid selection persistence
+            "timestamp": ts_num,                    # epoch float — AG Grid numeric sort key
+            "timestamp_display": _to_12h(row[0]),   # "2:32:05 PM" for Time column
+            "date_display": _format_date(row[0]),   # "Mar 18" for Date column
             "level": level,
             "level_html": f'<span class="{lvl_cls}">{level}</span>',
             "module": module,
             "module_html": f'<span class="{mod_cls}">{module}</span>',
-            "message": row[3],
+            "message": message,
+            "message_html": message_html,
             "extra": row[4] if len(row) >= 5 else "",
             "source": source,
+            # rowClassRules in AG Grid evaluates expression strings using `data.*` variables,
+            # so this boolean drives the "log-startup-row" class applied to the full row.
+            "is_startup": is_startup,
         }
     return None
 
@@ -271,13 +329,13 @@ class LogTailResult:
 class LogSearchTool(Tool):
     name = "log_search"
     description = (
-        "Search server, plugin, and gateway log files for entries matching "
+        "Search server, channel, gateway, and CLI log files for entries matching "
         "the given filters. Rows are returned sorted by timestamp."
     )
     params = {
         "source": ToolParam(
             str,
-            "Log source: 'server', 'plugins', 'gateway', or 'all' (default: 'all')",
+            "Log source: 'server', 'channels', 'gateway', 'cli', or 'all' (default: 'all')",
             required=False,
         ),
         "level": ToolParam(
@@ -328,7 +386,7 @@ class LogSearchTool(Tool):
         all_rows = _apply_level_filter(all_rows, level)
         all_rows = _apply_module_filter(all_rows, module)
         all_rows = _apply_query_filter(all_rows, query)
-        all_rows.sort(key=lambda r: r.get("timestamp", ""))
+        all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
 
         total = len(all_rows)
         truncated = total > effective_limit
@@ -349,7 +407,7 @@ class LogTailTool(Tool):
     params = {
         "source": ToolParam(
             str,
-            "Log source: 'server', 'plugins', 'gateway', or 'all' (default: 'all')",
+            "Log source: 'server', 'channels', 'gateway', 'cli', or 'all' (default: 'all')",
             required=False,
         ),
         "lines": ToolParam(
@@ -403,5 +461,5 @@ class LogTailTool(Tool):
             all_rows.extend(rows)
             new_offsets[key] = offset
 
-        all_rows.sort(key=lambda r: r.get("timestamp", ""))
+        all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
         return LogTailResult(rows=all_rows, file_offsets=new_offsets)

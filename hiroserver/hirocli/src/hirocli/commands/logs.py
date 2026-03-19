@@ -24,7 +24,7 @@ def register(logs_app: typer.Typer, console: Console) -> None:
             None,
             "--source",
             "-s",
-            help="Log source: server, plugins, gateway, or all (default: all).",
+            help="Log source: server, channels, gateway, cli, or all (default: all).",
         ),
         level: Optional[str] = typer.Option(
             None,
@@ -117,7 +117,7 @@ def register(logs_app: typer.Typer, console: Console) -> None:
             None,
             "--source",
             "-s",
-            help="Log source: server, plugins, gateway, or all (default: all).",
+            help="Log source: server, channels, gateway, cli, or all (default: all).",
         ),
         workspace: Optional[str] = typer.Option(
             None,

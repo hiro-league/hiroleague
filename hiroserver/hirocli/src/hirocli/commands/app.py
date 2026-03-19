@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 from rich.console import Console
 
@@ -16,6 +18,29 @@ app = typer.Typer(
     help="Hiro — desktop server CLI.",
     add_completion=False,
 )
+
+
+@app.callback(invoke_without_command=True)
+def _cli_init(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        return
+
+    # Open routed log sinks (server.log + cli.log) for the default workspace
+    # so CLI commands can write to cli.log via Logger.get("CLI.*").
+    # Silently ignored when no workspace exists yet (e.g. first-ever run).
+    try:
+        from hiro_commons.log import Logger
+        from ..domain.config import load_config, resolve_log_dir
+        from ..domain.workspace import resolve_workspace
+
+        entry, _ = resolve_workspace(None)
+        config = load_config(Path(entry.path))
+        Logger.open_log_dir(resolve_log_dir(Path(entry.path), config))
+    except Exception:
+        pass
+
+
 console = Console()
 
 channel_app = typer.Typer(
@@ -30,7 +55,7 @@ device_app = typer.Typer(
 )
 logs_app = typer.Typer(
     name="logs",
-    help="Search and tail server, plugin, and gateway log files.",
+    help="Search and tail server, channel, and gateway log files.",
     add_completion=False,
 )
 workspace_app = typer.Typer(

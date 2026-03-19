@@ -216,3 +216,14 @@ def revoke_approved_device(workspace_path: Path, device_id: str) -> bool:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def get_device_name(workspace_path: Path, device_id: str) -> str | None:
+    """Return the device_name for a given device_id, or None if not found or unset."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT device_name FROM devices WHERE device_id = ?", (device_id,)
+        ).fetchone()
+        return row["device_name"] if row and row["device_name"] else None

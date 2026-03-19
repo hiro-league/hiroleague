@@ -21,8 +21,8 @@ def init(
     Parameters
     ----------
     component:
-        Short label used as the log-file stem, e.g. ``"server"``,
-        ``"plugin-devices"``, ``"gateway"``.
+        Short label used as the log-file stem, e.g. ``"gateway"``,
+        ``"channel-devices"``, ``"channel-echo"``.
     log_dir:
         Directory where the rotating log file is written.  Created if absent.
     level:

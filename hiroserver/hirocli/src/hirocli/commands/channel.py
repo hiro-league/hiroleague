@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from hiro_commons.log import Logger
 from rich.console import Console
 from rich.table import Table
 
@@ -29,6 +30,7 @@ from ..tools.channel import (
     ChannelSetupTool,
 )
 
+log = Logger.get("CLI.CHANNEL")
 
 def register(channel_app: typer.Typer, console: Console) -> None:
     """Register channel management commands."""
@@ -79,6 +81,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
     ) -> None:
         """Install a channel plugin via uv tool install."""
         pkg = package or f"hiro-channel-{name}"
+        log.info("hirocli channel install", channel=name, package=pkg, editable=editable)
+
         console.print(f"Installing [bold]{pkg}[/bold]…")
         try:
             result = ChannelInstallTool().execute(
@@ -124,6 +128,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             default=default_cmd,
         )
 
+        log.info("hirocli channel setup", channel=name, command=resolved_command, enabled=enable)
+
         try:
             result = ChannelSetupTool().execute(
                 channel_name=name,
@@ -154,6 +160,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Enable a configured channel plugin."""
+        log.info("hirocli channel enable", channel=name)
+
         try:
             result = ChannelEnableTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
@@ -169,6 +177,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Disable a channel plugin without removing its configuration."""
+        log.info("hirocli channel disable", channel=name)
+
         try:
             result = ChannelDisableTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
@@ -187,6 +197,9 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         """Remove a channel plugin's configuration."""
         if not yes:
             typer.confirm(f"Remove configuration for channel '{name}'?", abort=True)
+
+        log.info("hirocli channel remove", channel=name)
+
         try:
             result = ChannelRemoveTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:

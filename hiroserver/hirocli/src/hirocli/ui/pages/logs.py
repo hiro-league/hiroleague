@@ -1,7 +1,7 @@
 """Logs page — unified AG Grid log viewer.
 
-Single table merging server.log, plugin-*.log, and gateway.log.
-Filtering: source chips (Server / Plugins / Gateway) with plugin
+Single table merging server.log, channel-*.log, cli.log, and gateway.log.
+Filtering: source chips (Server / Channels / CLI / Gateway) with channel
 multi-select, level chips, full-text search (server-side via LogSearchTool).
 Live tailing: LogTailTool with incremental byte-offset polling.
 
@@ -59,9 +59,28 @@ _LOG_COLORS_CSS = """
 .body--dark .log-mod-2 { color: #fde047 !important; }
 .body--dark .log-mod-3 { color: #86efac !important; }
 
+/* Startup row — neutral slate tint applied to every cell in the row.
+   rowClassRules adds "log-startup-row" to the AG Grid row element when
+   data.is_startup is true; targeting .ag-cell fills all columns. */
+.log-startup-row .ag-cell { background-color: rgba(203, 213, 225, 0.35) !important; }
+.body--dark .log-startup-row .ag-cell { background-color: rgba(71, 85, 105, 0.35) !important; }
+
+/* Message text in startup rows — semi-bold for extra visual weight */
+.log-startup-msg { font-weight: 600; }
+
 /* Extra column — muted debug colour */
 :root  { --log-debug: #3b82f6; }
 .body--dark { --log-debug: #60a5fa; }
+
+/* Tooltip styling — wrap long cell values nicely */
+.ag-tooltip {
+    max-width: 500px !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+}
 </style>
 """
 
@@ -77,19 +96,30 @@ _LOG_COLORS_CSS = """
 # ---------------------------------------------------------------------------
 _COL_DEFS = [
     {
-        "headerName": "Time",
+        # Hidden sort key — epoch float (e.g. 1742312005.437821) stored as a
+        # number in rowData so AG Grid's default numeric comparator applies.
+        # Sub-second precision ensures correct ordering even within the same
+        # second. _apply_sort() targets colId "timestamp".
         "field": "timestamp",
-        "width": 90,
+        "hide": True,
         "sortable": True,
+    },
+    {
+        "headerName": "Date",
+        "field": "date_display",
+        "width": 72,
+        "sortable": False,
         "filter": True,
         "resizable": True,
     },
     {
-        "headerName": "Lvl",
-        "field": "level_html",
-        "width": 80,
-        "sortable": True,
+        "headerName": "Time",
+        "field": "timestamp_display",
+        "width": 110,
+        "sortable": False,             # sort driven by hidden timestamp column
+        "filter": True,
         "resizable": True,
+        "cellStyle": {"textAlign": "right"},
     },
     {
         "headerName": "Source",
@@ -107,16 +137,28 @@ _COL_DEFS = [
         "resizable": True,
     },
     {
-        "headerName": "Message",
-        "field": "message",
-        "width": 400,
+        "headerName": "Lvl",
+        "field": "level_html",
+        "width": 80,
         "sortable": True,
-        "filter": True,
+        "resizable": True,
+    },
+    {
+        "headerName": "Message",
+        # message_html renders startup rows with a neutral highlight via html_columns.
+        # Raw `message` field is kept for server-side search; AG Grid column filter
+        # is disabled here because it would match against HTML markup.
+        "field": "message_html",
+        "tooltipField": "message",  # tooltip shows raw text, not HTML markup
+        "width": 400,
+        "sortable": False,
+        "filter": False,
         "resizable": True,
     },
     {
         "headerName": "Extra",
         "field": "extra",
+        "tooltipField": "extra",
         "flex": 1,          # fills remaining table width; safe with autoSizeStrategy: null
         "minWidth": 150,
         "sortable": True,
@@ -163,18 +205,23 @@ def logs_page() -> None:
         log_dir = state.log_dir
         gw_log_dir = state.gateway_log_dir
 
-        available_plugins: list[str] = [
-            f.stem.removeprefix("plugin-")
-            for f in sorted(log_dir.glob("plugin-*.log"))
+        available_channels: list[str] = [
+            f.stem.removeprefix("channel-")
+            for f in sorted(log_dir.glob("channel-*.log"))
         ]
         has_gateway = gw_log_dir is not None and (gw_log_dir / "gateway.log").exists()
+        has_cli = (log_dir / "cli.log").exists()
 
         # -------------------------------------------------------------------
         # Restore persisted preferences (fall back to sensible defaults).
         # -------------------------------------------------------------------
         prefs = nicegui_app.storage.user
-        _default_sources = ["server", "plugins"] + (["gateway"] if has_gateway else [])
-        _default_plugins = available_plugins[:]
+        _default_sources = (
+            ["server", "channels"]
+            + (["gateway"] if has_gateway else [])
+            + (["cli"] if has_cli else [])
+        )
+        _default_channels = available_channels[:]
 
         _s: dict = {
             "file_offsets": {},
@@ -183,10 +230,11 @@ def logs_page() -> None:
             "paused": prefs.get("logs_paused", False),
             "sort_order": prefs.get("logs_sort_order", "newest"),
             "active_sources": list(prefs.get("logs_sources", _default_sources)),
-            "active_plugins": list(prefs.get("logs_plugins", _default_plugins)),
+            "active_channels": list(prefs.get("logs_channels", _default_channels)),
             "level_filter": list(prefs.get("logs_level_filter", _LEVELS[:])),
             "search_text": prefs.get("logs_search_text", ""),
             "auto_scroll": True,
+            "selected_ids": set(),
         }
 
         from hirocli.tools.logs import LogSearchTool, LogTailTool
@@ -202,13 +250,15 @@ def logs_page() -> None:
             active = _s["active_sources"]
             if src == "server" and "server" not in active:
                 return False
-            if src.startswith("plugin-"):
-                if "plugins" not in active:
+            if src.startswith("channel-"):
+                if "channels" not in active:
                     return False
-                plugin_name = src.removeprefix("plugin-")
-                if _s["active_plugins"] and plugin_name not in _s["active_plugins"]:
+                channel_name = src.removeprefix("channel-")
+                if _s["active_channels"] and channel_name not in _s["active_channels"]:
                     return False
             if src == "gateway" and "gateway" not in active:
+                return False
+            if src == "cli" and "cli" not in active:
                 return False
             if _s["level_filter"] and row.get("level") not in _s["level_filter"]:
                 return False
@@ -231,10 +281,10 @@ def logs_page() -> None:
         except Exception:
             pass
 
-        # plugin filter elements are placed in the controls row below;
+        # Channel filter elements are placed in the controls row below;
         # declare references here so source-chip closures can reach them.
-        _plugin_label: ui.label | None = None
-        _plugin_select: ui.select | None = None
+        _channel_label: ui.label | None = None
+        _channel_select: ui.select | None = None
 
         # -------------------------------------------------------------------
         # Source filter row
@@ -258,19 +308,21 @@ def logs_page() -> None:
                         _s["active_sources"].append(n)
                         _set_chip_on(b)
                     prefs["logs_sources"] = _s["active_sources"]
-                    plugins_visible = "plugins" in _s["active_sources"]
-                    if _plugin_label:
-                        _plugin_label.set_visibility(plugins_visible)
-                    if _plugin_select:
-                        _plugin_select.set_visibility(plugins_visible)
+                    channels_visible = "channels" in _s["active_sources"]
+                    if _channel_label:
+                        _channel_label.set_visibility(channels_visible)
+                    if _channel_select:
+                        _channel_select.set_visibility(channels_visible)
                     _schedule_reload()
 
                 btn.on_click(_on_click)
 
             _make_source_btn("server", "Server")
-            _make_source_btn("plugins", "Plugins")
+            _make_source_btn("channels", "Channels")
             if has_gateway:
                 _make_source_btn("gateway", "Gateway")
+            if has_cli:
+                _make_source_btn("cli", "CLI")
 
         # -------------------------------------------------------------------
         # Level filter row
@@ -303,7 +355,7 @@ def logs_page() -> None:
                 _make_level_btn(_lvl)
 
         # -------------------------------------------------------------------
-        # Controls row: search | sort | pause | auto-scroll | plugin filter
+        # Controls row: search | sort | pause | auto-scroll | channel filter
         # -------------------------------------------------------------------
         with ui.row().classes("items-center gap-3 flex-wrap"):
             search_input = (
@@ -328,30 +380,30 @@ def logs_page() -> None:
             ).props("flat dense outlined")
             auto_scroll_btn.classes("text-positive" if _s["auto_scroll"] else "opacity-50")
 
-            # Plugin filter inline — only shown when Plugins source is active.
-            if available_plugins:
-                _plugin_label = ui.label("Plugin:").classes("text-sm opacity-50 self-center")
-                _plugin_select = (
+            # Channel filter inline — only shown when Channels source is active.
+            if available_channels:
+                _channel_label = ui.label("Channel:").classes("text-sm opacity-50 self-center")
+                _channel_select = (
                     ui.select(
-                        available_plugins,
+                        available_channels,
                         multiple=True,
-                        value=_s["active_plugins"] or available_plugins,
+                        value=_s["active_channels"] or available_channels,
                         label="",
                     )
                     .classes("min-w-32 max-w-60")
                     .props("dense outlined")
                 )
 
-                def _on_plugin_change(e) -> None:
-                    _s["active_plugins"] = list(e.value or [])
-                    prefs["logs_plugins"] = _s["active_plugins"]
+                def _on_channel_change(e) -> None:
+                    _s["active_channels"] = list(e.value or [])
+                    prefs["logs_channels"] = _s["active_channels"]
                     _schedule_reload()
 
-                _plugin_select.on_value_change(_on_plugin_change)
+                _channel_select.on_value_change(_on_channel_change)
 
-                plugins_on = "plugins" in _s["active_sources"]
-                _plugin_label.set_visibility(plugins_on)
-                _plugin_select.set_visibility(plugins_on)
+                channels_on = "channels" in _s["active_sources"]
+                _channel_label.set_visibility(channels_on)
+                _channel_select.set_visibility(channels_on)
 
         # -------------------------------------------------------------------
         # AG Grid — created with pre-loaded rowData.
@@ -360,8 +412,8 @@ def logs_page() -> None:
             "columnDefs": _COL_DEFS,
             "rowData": initial_rows,
             "defaultColDef": {"resizable": True, "sortable": True, "filter": True},
+            "rowSelection": "multiple",
             "animateRows": False,
-            "suppressCellFocus": True,
             "rowHeight": 24,
             "headerHeight": 28,
             "suppressHorizontalScroll": False,
@@ -369,10 +421,39 @@ def logs_page() -> None:
             # grid.update() call and causes columns to resize on each new row/filter.
             # Columns use explicit width values so auto-sizing is not needed.
             "autoSizeStrategy": None,
+            # AG Grid evaluates expression strings in rowClassRules using `data.*`
+            # variables from the row's data object — this is native AG Grid behaviour
+            # and works without any JS function wrapper.
+            "rowClassRules": {"log-startup-row": "data.is_startup"},
+            "tooltipShowDelay": 300,
+            "tooltipInteraction": True,
         }
         grid = ui.aggrid(
-            grid_opts, html_columns=[1, 3],
+            grid_opts, html_columns=[4, 5, 6],
         ).classes("w-full h-[calc(100vh-340px)] min-h-48")
+
+        # -------------------------------------------------------------------
+        # Selection persistence — track selected row IDs so they survive
+        # grid.update() calls (which reset AG Grid's internal selection).
+        # -------------------------------------------------------------------
+
+        async def _on_selection_changed(_e) -> None:
+            selected = await grid.get_selected_rows()
+            _s["selected_ids"] = {r["id"] for r in selected} if selected else set()
+
+        grid.on("selectionChanged", _on_selection_changed)
+
+        def _restore_selection(ids: set[str]) -> None:
+            """Re-select rows by id after a grid.update() that cleared selection."""
+            if not ids:
+                return
+            ids_json = json.dumps(list(ids))
+            ui.run_javascript(
+                f"const ids = new Set({ids_json});"
+                f"getElement({grid.id}).api.forEachNode(n => {{"
+                f"  if (ids.has(n.data.id)) n.setSelected(true);"
+                f"}});"
+            )
 
         # -------------------------------------------------------------------
         # Data helpers
@@ -413,11 +494,14 @@ def logs_page() -> None:
                 pass
 
         def _set_grid_data(rows: list[dict]) -> None:
+            # Snapshot selected IDs before grid.update() clears selection.
+            saved_ids = set(_s["selected_ids"])
             _s["row_data"] = rows
             grid.options["rowData"] = rows
             grid.update()
             # grid.update() resets AG Grid column state — re-apply sort.
             _apply_sort()
+            _restore_selection(saved_ids)
             if _s["auto_scroll"]:
                 _scroll_to_edge()
 
@@ -425,10 +509,12 @@ def logs_page() -> None:
             if not rows:
                 return
             _s["row_data"].extend(rows)
-            grid.options["rowData"] = _s["row_data"]
-            grid.update()
-            # grid.update() resets AG Grid column state — re-apply sort.
-            _apply_sort()
+            # applyTransaction adds rows without replacing existing data,
+            # so AG Grid column state, sort order, and selection are preserved.
+            # Do NOT assign grid.options["rowData"] here — NiceGUI's reactive
+            # sync would push a full rowData replace to the client, duplicating
+            # the rows and resetting sort. _set_grid_data handles the full sync.
+            grid.run_grid_method("applyTransaction", {"add": rows})
             if _s["auto_scroll"]:
                 _scroll_to_edge()
 

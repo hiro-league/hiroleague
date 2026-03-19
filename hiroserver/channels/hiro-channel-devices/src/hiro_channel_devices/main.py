@@ -37,7 +37,7 @@ def run(
     ),
 ) -> None:
     plugin = DevicesChannel()
-    log_setup.init(f"plugin-{plugin.info.name}", Path(log_dir))
+    log_setup.init(f"channel-{plugin.info.name}", Path(log_dir))
     transport = PluginTransport(plugin, hiro_ws)
     asyncio.run(transport.run())
 

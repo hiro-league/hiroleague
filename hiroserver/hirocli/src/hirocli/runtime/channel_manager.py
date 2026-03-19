@@ -49,9 +49,10 @@ from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
 
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
 from ..domain.config import Config, resolve_log_dir
+from ..domain.pairing import get_device_name
 from .. import rpc_helpers as rpc
 
-log = Logger.get("PLUGINS")
+log = Logger.get("CHANNEL_MAN")
 
 
 @dataclass
@@ -81,6 +82,8 @@ class ChannelManager:
         self._on_event = on_event
         self._channels: dict[str, _ConnectedChannel] = {}
         self._subprocesses: list[subprocess.Popen[bytes]] = []
+        # Cache device_id → device_name to avoid repeated DB hits per log call.
+        self._device_name_cache: dict[str, str | None] = {}
         self._host = DEFAULT_LOCALHOST
         self._port = config.plugin_port
 
@@ -93,12 +96,12 @@ class ChannelManager:
         async with websockets.serve(
             self._handle_connection, self._host, self._port
         ):
-            log.info("Plugin server listening", url=f"ws://{self._host}:{self._port}")
+            log.info(f"Channel Manager listening at ws://{self._host}:{self._port}")
             await self._spawn_channels()
             await self._stop_event.wait()
             await self._shutdown_channels()
 
-        log.info("Plugin server stopped")
+        log.info("Channel Manager shut down")
 
     # ------------------------------------------------------------------
     # Subprocess management
@@ -107,7 +110,7 @@ class ChannelManager:
     async def _spawn_channels(self) -> None:
         channels = list_enabled_channels(self._workspace_path)
         if not channels:
-            log.info("No enabled channel plugins configured")
+            log.warning("No enabled channel plugins configured")
             return
 
         hiro_ws = f"ws://{self._host}:{self._port}"
@@ -121,7 +124,7 @@ class ChannelManager:
             "--log-dir", str(log_dir),
         ]
         self._kill_previous_channel(ch.name)
-        log.info("Spawning channel plugin", channel=ch.name, cmd=cmd)
+        log.info(f"Spawning channel plugin: {ch.name}", cmd=cmd)
         try:
             if sys.platform == "win32":
                 proc = subprocess.Popen(
@@ -151,14 +154,14 @@ class ChannelManager:
                 hint=f"hirocli channel install {ch.name}",
             )
         except Exception as exc:
-            log.error("Failed to spawn channel plugin", channel=ch.name, error=str(exc))
+            log.error(f"Failed to spawn channel plugin: {ch.name}", error=str(exc))
 
     def _kill_previous_channel(self, channel_name: str) -> None:
         pid = read_channel_pid(self._workspace_path, channel_name)
         if pid is None:
             return
         if is_running(pid):
-            log.info("Stopping previous channel plugin", channel=channel_name, pid=pid)
+            log.info(f"Stopping previous channel plugin: {channel_name}", pid=pid)
             kill_process(pid)
         remove_channel_pid(self._workspace_path, channel_name)
 
@@ -180,6 +183,19 @@ class ChannelManager:
         channels = list_enabled_channels(self._workspace_path)
         for ch in channels:
             remove_channel_pid(self._workspace_path, ch.name)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _device_label(self, device_id: str) -> str:
+        """Return 'DeviceName (device_id)' when a name is known, else just device_id."""
+        if device_id not in self._device_name_cache:
+            self._device_name_cache[device_id] = get_device_name(
+                self._workspace_path, device_id
+            )
+        name = self._device_name_cache[device_id]
+        return f"{name} ({device_id})" if name else device_id
 
     # ------------------------------------------------------------------
     # WebSocket connection handler
@@ -210,7 +226,7 @@ class ChannelManager:
                         if prev is not None and prev.ws is not ws:
                             log.warning(
                                 "Duplicate channel registration detected, replacing previous",
-                                channel=channel_name,
+                                channel=channel_name, previous_channel=prev.name if prev else "unknown"
                             )
                             try:
                                 await prev.ws.send(rpc.build_notification(METHOD_STOP, {}))
@@ -227,13 +243,20 @@ class ChannelManager:
                             ws=ws,
                         )
                         log.info(
-                            "Channel registered",
+                            f"Channel ({channel_name}) registered",
                             channel=channel_name,
                             version=params.get("version", "?"),
                         )
                         await self._push_config(channel_name)
 
                     case _ if method == METHOD_RECEIVE:
+                        sender_id = params.get("routing", {}).get("sender_id", "")
+                        device = self._device_label(sender_id) if sender_id else "unknown"
+                        log.info(
+                            f"Message received via channel ({channel_name})",
+                            channel=channel_name,
+                            device=device,
+                        )
                         if self._on_message:
                             try:
                                 await self._on_message(params)
@@ -241,34 +264,30 @@ class ChannelManager:
                                 log.error(
                                     "on_message handler error",
                                     channel=channel_name,
+                                    device=device,
                                     error=str(exc),
                                     exc_info=True,
                                 )
 
                     case _ if method == METHOD_EVENT:
                         event_name = params.get("event")
-                        event_data = params.get("data", {})
+                        event_data = params.get("data", {})                        
                         log.info(
-                            "Channel event received",
-                            channel=channel_name or "?",
-                            event_name=event_name,
-                            data=event_data,
+                            f"Channel ({channel_name}) event received: {event_name}",
+                            event_data=event_data,
                         )
                         if self._on_event and isinstance(event_name, str):
                             try:
                                 await self._on_event(event_name, event_data)
                             except Exception as exc:
                                 log.error(
-                                    "on_event handler error",
-                                    channel=channel_name or "?",
+                                    f"on_event handler error for channel ({channel_name})",
                                     error=str(exc),
                                     exc_info=True,
                                 )
-
                     case _:
                         log.warning(
-                            "Unknown method from channel plugin",
-                            channel=channel_name or "?",
+                            f"Unknown method from channel ({channel_name})",
                             method=method,
                         )
                         if req_id is not None:
@@ -281,18 +300,17 @@ class ChannelManager:
                             )
 
         except ConnectionClosed:
-            pass
+            log.warning(f"Channel ({channel_name}) connection closed")
         except Exception as exc:
             log.error(
-                "Error in plugin connection",
-                channel=channel_name or "?",
+                f"Error in channel ({channel_name}) connection",
                 error=str(exc),
             )
         finally:
             if channel_name and channel_name in self._channels:
                 if self._channels[channel_name].ws is ws:
                     del self._channels[channel_name]
-                    log.info("Channel disconnected", channel=channel_name)
+                    log.info(f"Channel ({channel_name}) disconnected")
 
     async def _handle_response(
         self, channel_name: str | None, data: dict[str, Any]
@@ -329,19 +347,22 @@ class ChannelManager:
     ) -> None:
         ch = self._channels.get(channel_name)
         if ch is None:
-            log.warning("Cannot send to channel — not connected", channel=channel_name)
+            log.warning(f"Cannot send to channel ({channel_name}) — not connected")
             return
         await ch.ws.send(rpc.build_notification(METHOD_SEND, message))
-        # Log the message ID if present for end-to-end tracing.
-        msg_id = message.get("routing", {}).get("id", "-") if isinstance(message, dict) else "-"
-        log.info("Message sent to channel", channel=channel_name, msg_id=msg_id)
+        # Log the message ID and recipient device for end-to-end tracing.
+        routing = message.get("routing", {}) if isinstance(message, dict) else {}
+        msg_id = routing.get("id", "-")
+        recipient_id = routing.get("recipient_id", "")
+        device = self._device_label(recipient_id) if recipient_id else "unknown"
+        log.info(f"Message sent to channel ({channel_name})", msg_id=msg_id, device=device)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         for ch in list(self._channels.values()):
             try:
                 await ch.ws.send(rpc.build_notification(METHOD_SEND, message))
             except Exception as exc:
-                log.warning("Failed to broadcast to channel", channel=ch.name, error=str(exc))
+                log.warning(f"Failed to broadcast to channel ({ch.name})", error=str(exc))
 
     async def configure_channel(
         self, channel_name: str, config: dict[str, Any]
@@ -359,7 +380,7 @@ class ChannelManager:
         ch = self._channels.get(channel_name)
         if ch is None:
             log.warning(
-                "Cannot send event to channel — not connected", channel=channel_name
+                f"Cannot send event to channel ({channel_name}) — not connected"
             )
             return
         await ch.ws.send(

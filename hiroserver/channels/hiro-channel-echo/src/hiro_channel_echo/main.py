@@ -44,7 +44,7 @@ def run(
 ) -> None:
     """Connect to hirocli and start the echo channel."""
     plugin = EchoChannel()
-    log_setup.init(f"plugin-{plugin.info.name}", Path(log_dir))
+    log_setup.init(f"channel-{plugin.info.name}", Path(log_dir))
     transport = PluginTransport(plugin, hiro_ws)
     asyncio.run(transport.run())
 

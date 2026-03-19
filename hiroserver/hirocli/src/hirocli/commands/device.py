@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Optional
 
 import typer
+from hiro_commons.log import Logger
 from rich.console import Console
 from rich.table import Table
 
-from ..tools.device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
 from ..domain.workspace import WorkspaceError
+from ..tools.device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
 
+log = Logger.get("CLI.DEVICE")
 
 def register(device_app: typer.Typer, console: Console) -> None:
     """Register device management commands."""
@@ -30,6 +32,8 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Generate a short-lived pairing code for onboarding a mobile device."""
+        log.info("hirocli device add", ttl_seconds=ttl_seconds, code_length=code_length)
+
         try:
             result = DeviceAddTool().execute(
                 workspace=workspace,
@@ -88,6 +92,8 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Revoke a previously approved paired device."""
+        log.info("hirocli device revoke", device_id=device_id)
+
         try:
             result = DeviceRevokeTool().execute(device_id=device_id, workspace=workspace)
         except WorkspaceError as exc:

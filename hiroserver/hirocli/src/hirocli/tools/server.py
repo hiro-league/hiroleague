@@ -53,7 +53,7 @@ from ..domain.workspace import (
     remove_workspace,
     resolve_workspace,
 )
-from ..constants import ENV_ADMIN_UI, ENV_WORKSPACE_PATH, PID_FILENAME
+from ..constants import ENV_ADMIN_UI, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from .base import Tool, ToolParam
 
 
@@ -150,6 +150,7 @@ def _do_start(
     config: Config,
     console: Console,
     *,
+    workspace_name: str,
     foreground: bool = False,
     admin: bool = False,
 ) -> None:
@@ -173,7 +174,7 @@ def _do_start(
             "[dim](Ctrl+C to stop)[/dim]"
         )
         try:
-            _asyncio.run(_main(foreground=True, workspace_path=workspace_path, admin=admin))
+            _asyncio.run(_main(foreground=True, workspace_path=workspace_path, workspace_name=workspace_name, admin=admin))
         except KeyboardInterrupt:
             pass
         console.print("[green]Server stopped.[/green]")
@@ -183,7 +184,7 @@ def _do_start(
     remove_pid(workspace_path, PID_FILENAME)
 
     script = str(Path(__file__).parents[1] / "runtime" / "server_process.py")
-    env = {**os.environ, ENV_WORKSPACE_PATH: str(workspace_path)}
+    env = {**os.environ, ENV_WORKSPACE_PATH: str(workspace_path), ENV_WORKSPACE: workspace_name}
     if admin:
         env[ENV_ADMIN_UI] = "1"
 
@@ -400,7 +401,7 @@ class SetupTool(Tool):
         save_config(workspace_path, config)
 
         if start_server:
-            _do_start(workspace_path, config, _NullConsole(), foreground=False)
+            _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=False)
 
         return SetupResult(
             workspace=entry.name,
@@ -461,7 +462,7 @@ class StartTool(Tool):
                 admin_port=config.admin_port if admin else None,
             )
 
-        _do_start(workspace_path, config, _NullConsole(), foreground=foreground, admin=admin)
+        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin)
 
         new_pid = read_pid(workspace_path, PID_FILENAME)
         return StartResult(
@@ -545,7 +546,7 @@ class RestartTool(Tool):
 
             _do_stop(workspace_path, _NullConsole())
 
-        _do_start(workspace_path, config, _NullConsole(), foreground=foreground, admin=admin)
+        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin)
 
         new_pid = read_pid(workspace_path, PID_FILENAME)
         return RestartResult(
