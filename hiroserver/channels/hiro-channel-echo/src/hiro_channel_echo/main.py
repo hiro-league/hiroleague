@@ -41,10 +41,15 @@ def run(
         "--log-dir",
         help="Directory for rotating log files.",
     ),
+    log_level: str = typer.Option(
+        "INFO",
+        "--log-level",
+        help="Root log level (DEBUG, INFO, WARNING, ERROR).",
+    ),
 ) -> None:
     """Connect to hirocli and start the echo channel."""
     plugin = EchoChannel()
-    log_setup.init(f"channel-{plugin.info.name}", Path(log_dir))
+    log_setup.init(f"channel-{plugin.info.name}", Path(log_dir), level=log_level)
     transport = PluginTransport(plugin, hiro_ws)
     asyncio.run(transport.run())
 

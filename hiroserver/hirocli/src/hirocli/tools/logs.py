@@ -115,6 +115,7 @@ def _collect_log_files(
 
 _LEVEL_CSS_CLASS = {
     "DEBUG": "log-lvl-debug",
+    "FINEINFO": "log-lvl-fineinfo",
     "INFO": "log-lvl-info",
     "WARNING": "log-lvl-warning",
     "ERROR": "log-lvl-error",
@@ -178,7 +179,7 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
         # html_columns — rowClassRules/cellClassRules expression strings are not
         # evaluated by NiceGUI's AG Grid serialisation, so html_columns is the
         # only reliable per-row visual distinction mechanism.
-        is_startup = message.startswith("Hiro Server starting")
+        is_startup = message.startswith("🚀 Hiro Server starting")
         message_html = (
             f'<span class="log-startup-msg">{_html.escape(message)}</span>'
             if is_startup

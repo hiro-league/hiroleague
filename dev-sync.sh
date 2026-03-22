@@ -34,3 +34,5 @@ echo "Done. All tool binaries are up to date."
 echo "  hirocli              -> run: hirocli --help"
 echo "  hiro-channel-devices -> run: hiro-channel-devices --help  (bundled with hirocli)"
 echo "  hirogateway          -> run: hirogateway --help"
+
+hirocli start --admin -f

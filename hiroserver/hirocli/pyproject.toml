@@ -39,6 +39,7 @@ dependencies = [
     "sqlmodel>=0.0.21",
     "nicegui>=3.0",
     "qrcode>=8.0",
+    "psutil>=7.0",
     "hiro-channel-sdk",
     "hiro-commons",
     "hiro-channel-devices",

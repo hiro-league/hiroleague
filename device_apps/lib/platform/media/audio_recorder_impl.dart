@@ -14,12 +14,12 @@ part 'audio_recorder_impl.g.dart';
 
 /// Concrete [AudioRecorder] backed by the `record` package.
 ///
-/// Records in AAC/m4a format (~128 kbps), accepted by both OpenAI and Gemini
-/// STT APIs. Enforces a 60-second maximum and auto-stops when reached.
-///
 /// Platform behaviour:
-/// - Mobile (iOS/Android): records to a temp file in the system temp dir.
-/// - Web: records to in-memory bytes via MediaRecorder.
+/// - Mobile (iOS/Android): AAC-LC in M4A container (~128 kbps). Natively
+///   supported on both platforms, compact, and accepted by all major STT APIs.
+/// - Web: opus/webm preferred (Chrome/Firefox/Edge), falls back to AAC then WAV.
+///
+/// Enforces a 60-second maximum and auto-stops when reached.
 class AudioRecorderImpl implements AudioRecorder {
   AudioRecorderImpl() : _recorder = rec.AudioRecorder();
 
@@ -37,6 +37,20 @@ class AudioRecorderImpl implements AudioRecorder {
   // Cached after the first probe so subsequent recordings skip the async
   // isEncoderSupported() round-trips (codec support doesn't change mid-session).
   rec.AudioEncoder? _cachedEncoder;
+
+  /// Maps the active encoder to the MIME type of the produced audio.
+  static String _mimeTypeForEncoder(rec.AudioEncoder encoder) {
+    return switch (encoder) {
+      rec.AudioEncoder.aacLc ||
+      rec.AudioEncoder.aacEld ||
+      rec.AudioEncoder.aacHe =>
+        'audio/mp4',
+      rec.AudioEncoder.opus => 'audio/webm',
+      rec.AudioEncoder.wav || rec.AudioEncoder.pcm16bits => 'audio/wav',
+      rec.AudioEncoder.flac => 'audio/flac',
+      _ => 'audio/mp4',
+    };
+  }
 
   @override
   Future<MicPermissionStatus> checkPermissionStatus() async {
@@ -178,6 +192,7 @@ class AudioRecorderImpl implements AudioRecorder {
 
   Future<AudioRecordingResult?> _doStop() async {
     final durationMs = elapsedMs;
+    final mimeType = _mimeTypeForEncoder(_cachedEncoder ?? rec.AudioEncoder.aacLc);
     final path = await _recorder.stop();
     _startTime = null;
 
@@ -186,6 +201,7 @@ class AudioRecorderImpl implements AudioRecorder {
         bytes: Uint8List(0),
         durationMs: durationMs,
         tempPath: path ?? '',
+        mimeType: mimeType,
       );
     }
 
@@ -197,6 +213,7 @@ class AudioRecorderImpl implements AudioRecorder {
       bytes: bytes,
       durationMs: durationMs,
       tempPath: path,
+      mimeType: mimeType,
     );
   }
 

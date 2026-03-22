@@ -41,7 +41,6 @@ class ChannelEventHandler:
     def register(self, event: str, handler: ChannelEventHandlerFn) -> None:
         """Register an async handler for the given channel event name."""
         self._handlers[event] = handler
-        log.info("Registered channel event handler", event_type=event)
 
     async def handle(self, event: str, data: dict[str, Any]) -> None:
         """Dispatch a channel event to its registered handler."""

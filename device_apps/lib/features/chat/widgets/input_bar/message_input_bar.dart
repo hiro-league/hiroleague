@@ -2,6 +2,7 @@ import 'dart:async' show unawaited;
 
 import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../application/providers.dart';
@@ -21,6 +22,7 @@ class MessageInputBar extends ConsumerStatefulWidget {
 class _MessageInputBarState extends ConsumerState<MessageInputBar>
     with SingleTickerProviderStateMixin {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   bool _hasText = false;
 
   // Purely UI: pulse animation drives both the mic scale and the recording dot.
@@ -38,6 +40,9 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
   @override
   void initState() {
     super.initState();
+    // Single FocusNode owner: TextField's internal Focus uses this node; key
+    // handling lives on the node so we do not wrap an extra Focus with the same node.
+    _focusNode.onKeyEvent = _onMessageKeyEvent;
     _controller.addListener(_onTextChanged);
     _pulseCtrl = AnimationController(
       vsync: this,
@@ -69,6 +74,20 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
     } catch (_) {
       if (mounted) _showError(AppStrings.messageSendFailed);
     }
+  }
+
+  /// Desktop / hardware keyboard: Enter sends, Shift+Enter keeps multiline newline.
+  KeyEventResult _onMessageKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    final isEnter =
+        key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter;
+    if (!isEnter) return KeyEventResult.ignored;
+    if (HardwareKeyboard.instance.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    unawaited(_sendText());
+    return KeyEventResult.handled;
   }
 
   // ---------------------------------------------------------------------------
@@ -247,6 +266,7 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
                     )
                   : TextField(
                       controller: _controller,
+                      focusNode: _focusNode,
                       enabled: isConnected,
                       maxLines: 5,
                       minLines: 1,
@@ -333,6 +353,8 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
   void dispose() {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _focusNode.onKeyEvent = null;
+    _focusNode.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }

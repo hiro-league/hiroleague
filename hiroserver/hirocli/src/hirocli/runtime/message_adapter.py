@@ -15,6 +15,9 @@ import asyncio
 from abc import ABC, abstractmethod
 
 from hiro_channel_sdk.models import ContentItem, UnifiedMessage
+from hiro_commons.log import Logger
+
+log = Logger.get("ADAPTER")
 
 
 class MessageAdapter(ABC):
@@ -57,6 +60,12 @@ class ContentTypeAdapter(MessageAdapter):
                     item.metadata["description"] = await self.process_item(item)
                 except Exception as exc:
                     item.metadata["adapter_error"] = str(exc)
+                    log.error(
+                        "Adapter failed for content item",
+                        adapter=self.target_content_type,
+                        error=str(exc),
+                        exc_info=True,
+                    )
         return msg
 
 

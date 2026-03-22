@@ -10,7 +10,8 @@ even when the openai package is not installed (provider will report unavailable)
 
 Enabled when: OPENAI_API_KEY environment variable is set.
 
-Supported audio formats: mp3, mp4, mpeg, mpga, m4a, wav, webm (max 25 MB).
+Supported audio formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm (max 25 MB).
+The API infers the format from the filename extension on the uploaded BytesIO.
 """
 
 from __future__ import annotations
@@ -25,6 +26,21 @@ from .provider import ModelInfo, STTProvider
 log = Logger.get("STT.OPENAI")
 
 _DEFAULT_MODEL = "gpt-4o-mini-transcribe"
+
+_MIME_TO_EXT: dict[str, str] = {
+    "audio/mp4": ".m4a",
+    "audio/m4a": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".m4a",
+    "audio/x-aac": ".m4a",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/flac": ".flac",
+}
 
 _MODELS: list[ModelInfo] = [
     ModelInfo(
@@ -73,10 +89,10 @@ class OpenAISTTProvider(STTProvider):
         audio_bytes: bytes,
         *,
         model: str | None = None,
+        mime_type: str = "audio/mp4",
         language: str | None = None,
         prompt: str | None = None,
         temperature: float = 0.0,
-        filename: str = "audio.wav",
         **kwargs: object,
     ) -> str:
         """Transcribe audio bytes via the OpenAI transcriptions endpoint.
@@ -85,12 +101,12 @@ class OpenAISTTProvider(STTProvider):
             audio_bytes: Raw audio data.
             model:       One of the model_ids from supported_models(). Defaults to
                          gpt-4o-mini-transcribe.
+            mime_type:   MIME type of the audio data. Mapped to a filename extension
+                         so OpenAI can infer the format correctly.
             language:    Optional ISO-639-1 language hint (e.g. "en") to improve
                          accuracy and reduce latency.
             prompt:      Optional free-text prompt to guide transcription style.
             temperature: Sampling temperature (0.0 = deterministic).
-            filename:    Hint for the audio format via file extension. The OpenAI
-                         API uses the filename extension to infer format.
         """
         from openai import AsyncOpenAI, APIError, RateLimitError
         from tenacity import retry, stop_after_attempt, wait_exponential
@@ -99,10 +115,17 @@ class OpenAISTTProvider(STTProvider):
         api_key = os.environ.get("OPENAI_API_KEY")
         client = AsyncOpenAI(api_key=api_key)
 
+        ext = _MIME_TO_EXT.get(mime_type, ".m4a")
         audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = filename
+        audio_file.name = f"audio{ext}"
 
-        log.info("Transcribing via OpenAI", model=effective_model, bytes=len(audio_bytes))
+        log.info(
+            "Transcribing via OpenAI",
+            model=effective_model,
+            mime_type=mime_type,
+            filename=audio_file.name,
+            bytes=len(audio_bytes),
+        )
 
         @retry(
             reraise=True,

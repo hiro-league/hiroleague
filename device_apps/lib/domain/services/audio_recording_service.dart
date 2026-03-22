@@ -12,6 +12,7 @@ class AudioRecordingResult {
     required this.bytes,
     required this.durationMs,
     required this.tempPath,
+    required this.mimeType,
   });
 
   final Uint8List bytes;
@@ -19,6 +20,9 @@ class AudioRecordingResult {
 
   /// Temporary file path (mobile) or blob URL (web — bytes are in memory).
   final String tempPath;
+
+  /// Actual MIME type of the recorded audio (e.g. "audio/mp4", "audio/webm").
+  final String mimeType;
 }
 
 /// Pure-Dart contract for audio recording — no Flutter/platform imports.

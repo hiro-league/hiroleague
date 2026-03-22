@@ -34,13 +34,14 @@ _FALLBACK_ERROR_BODY = (
 
 
 def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
+    # Preserve routing metadata (e.g. device_name injected by ChannelManager) for logs and downstream.
     return UnifiedMessage(
         routing=MessageRouting(
             channel=inbound.routing.channel,
             direction="outbound",
             sender_id="server",
             recipient_id=inbound.routing.sender_id,
-            metadata={},
+            metadata=dict(inbound.routing.metadata or {}),
         ),
         content=[ContentItem(content_type="text", body=body)],
     )
@@ -60,40 +61,44 @@ class AgentManager:
         self._workspace_path = workspace_path
         self._agent = None  # built inside run() once the async checkpointer is ready
 
-    def _build_agent(self, checkpointer):
-        from langchain.agents import create_agent
-        from langchain.chat_models import init_chat_model
+    def _build_agent(self, checkpointer):        
+        try:
+            from langchain.agents import create_agent
+            from langchain.chat_models import init_chat_model
 
-        from ..domain.agent_config import load_agent_config, load_system_prompt
-        from ..tools import all_tools
-        from ..tools.langchain_adapter import to_langchain_list
+            from ..domain.agent_config import load_agent_config, load_system_prompt
+            from ..tools import all_tools
+            from ..tools.langchain_adapter import to_langchain_list
 
-        config = load_agent_config(self._workspace_path)
-        system_prompt = load_system_prompt(self._workspace_path)
-        tools = to_langchain_list(all_tools())
+            config = load_agent_config(self._workspace_path)
+            system_prompt = load_system_prompt(self._workspace_path)
+            tools = to_langchain_list(all_tools())
 
-        log.info(
-            "Building agent",
-            model=config.model,
-            provider=config.provider,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-            tools=len(tools),
-        )
+            log.fineinfo(
+                "Building agent",
+                model=config.model,
+                provider=config.provider,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                tools=len(tools),
+            )
 
-        model = init_chat_model(
-            model=config.model,
-            model_provider=config.provider,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-        )
+            model = init_chat_model(
+                model=config.model,
+                model_provider=config.provider,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
 
-        return create_agent(
-            model=model,
-            tools=tools,
-            system_prompt=system_prompt,
-            checkpointer=checkpointer,
-        )
+            return create_agent(
+                model=model,
+                tools=tools,
+                system_prompt=system_prompt,
+                checkpointer=checkpointer,
+            )
+        except Exception as exc:
+            log.error("Error building agent", error=str(exc), exc_info=True)
+            raise
 
     def _resolve_thread_id(self, msg: UnifiedMessage) -> str:
         """Return the conversation_channels.id UUID for this channel+sender pair.
@@ -108,60 +113,100 @@ class AgentManager:
         return channel.id
 
     async def _process(self, msg: UnifiedMessage) -> None:
+        device = msg.routing.metadata.get("device_name", msg.routing.sender_id)
         thread_id = self._resolve_thread_id(msg)
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Build agent input from all content items:
-        # - text items contribute their body directly.
-        # - non-text items (audio, image, …) contribute their adapter-set
-        #   metadata["description"] when present (e.g. transcript, image description).
+        # Build agent input from all content items.
+        # Audio transcripts are treated as canonical user text (the user spoke
+        # these words) — no prefix, so the agent reasons about what was said,
+        # not about the fact that it was audio.
+        # Other non-text items (image, etc.) keep a descriptive prefix.
         parts = []
         for item in msg.content:
             if item.content_type == "text":
                 if item.body:
                     parts.append(item.body)
             elif "description" in item.metadata:
-                parts.append(f"[{item.content_type}]: {item.metadata['description']}")
+                desc = item.metadata["description"]
+                if item.content_type == "audio":
+                    parts.append(desc)
+                else:
+                    parts.append(f"[{item.content_type}]: {desc}")
+            else:
+                log.warning(
+                    "Skipping content item — no description available",
+                    device=device,
+                    content_type=item.content_type,
+                    adapter_error=item.metadata.get("adapter_error"),
+                    msg_id=msg.routing.id,
+                )
 
         text_body = "\n".join(parts)
 
         if not text_body:
-            log.info(
+            log.warning(
                 "Ignoring message with no usable text input",
+                device=device,
                 msg_id=msg.routing.id,
-                sender=msg.routing.sender_id,
+                content_types=[i.content_type for i in msg.content],
+                adapter_errors=[
+                    i.metadata["adapter_error"]
+                    for i in msg.content
+                    if "adapter_error" in i.metadata
+                ],
             )
             return
 
         log.info(
             "Processing message",
+            device=device,
             msg_id=msg.routing.id,
             thread=thread_id,
-            sender=msg.routing.sender_id,
+            text_preview=text_body[:200],
             body_length=len(text_body),
         )
         try:
-            log.info(
-                "Agent model invoked",
+            agent_input = {"messages": [{"role": "user", "content": text_body}]}
+
+            # Log the full conversation state the LLM will see (checkpoint + new message).
+            state = await self._agent.aget_state(config)
+            history = state.values.get("messages", []) if state.values else []
+            log.debug(
+                "Agent invocation context",
+                device=device,
                 thread=thread_id,
-                input_length=len(text_body),
+                history_len=len(history),
+                history_summary=[
+                    {
+                        "role": getattr(m, "type", "?"),
+                        "len": len(m.content) if isinstance(m.content, str) else "tool_calls",
+                        "preview": (m.content[:80] if isinstance(m.content, str) else str(m.content)[:80]),
+                    }
+                    for m in history[-10:]  # last 10 messages for brevity
+                ],
+                new_input=text_body[:200],
             )
+
             _t0 = time.perf_counter()
             result = await self._agent.ainvoke(
-                {"messages": [{"role": "user", "content": text_body}]},
+                agent_input,
                 config=config,
             )
             _elapsed_ms = int((time.perf_counter() - _t0) * 1000)
             reply_body: str = result["messages"][-1].content
             log.info(
-                "Agent model returned",
+                "Agent replied",
+                device=device,
                 thread=thread_id,
+                reply_preview=reply_body[:200],
                 output_length=len(reply_body),
                 elapsed_ms=_elapsed_ms,
             )
         except Exception as exc:
             log.error(
                 "Agent invocation error",
+                device=device,
                 thread=thread_id,
                 error=str(exc),
                 exc_info=True,
@@ -172,10 +217,9 @@ class AgentManager:
         await self._comm.enqueue_outbound(reply)
         log.info(
             "Agent reply enqueued",
+            device=device,
             in_reply_to=msg.routing.id,
-            reply_msg_id=reply.routing.id,
             thread=thread_id,
-            content_length=len(reply_body),
         )
 
     async def run(self) -> None:

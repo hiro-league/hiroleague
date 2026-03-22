@@ -53,8 +53,14 @@ class Config(BaseModel):
     pairing_code_length: int = DEFAULT_PAIRING_CODE_LENGTH
     pairing_code_ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS
     attestation_expires_days: int = DEFAULT_ATTESTATION_EXPIRY_DAYS
+    log_level: str = "INFO"
     log_dir: str = ""
-    log_levels: dict[str, str] = Field(default_factory=dict)
+    module_log_levels: dict[str, str] = Field(default_factory=dict)
+    # Metrics collection — disabled by default; enable via config.json or POST /metrics/configure
+    metrics_enabled: bool = False
+    metrics_interval: float = 2.0
+    metrics_history_size: int = 1800
+
     # Set by setup; used by teardown to pick the correct removal path without user input.
     # Values: "elevated" | "schtasks" | "registry" | "skipped" | "failed" | None
     autostart_method: str | None = None

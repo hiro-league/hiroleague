@@ -36,6 +36,7 @@ _LOG_COLORS_CSS = """
 <style>
 /* Level colours — light mode */
 .log-lvl-debug    { color: #3b82f6 !important; }
+.log-lvl-fineinfo { color: #0891b2 !important; }
 .log-lvl-info     { color: #16a34a !important; }
 .log-lvl-warning  { color: #ca8a04 !important; font-weight: bold; }
 .log-lvl-error    { color: #dc2626 !important; font-weight: bold; }
@@ -49,6 +50,7 @@ _LOG_COLORS_CSS = """
 
 /* Dark-mode overrides */
 .body--dark .log-lvl-debug    { color: #60a5fa !important; }
+.body--dark .log-lvl-fineinfo { color: #22d3ee !important; }
 .body--dark .log-lvl-info     { color: #4ade80 !important; }
 .body--dark .log-lvl-warning  { color: #facc15 !important; }
 .body--dark .log-lvl-error    { color: #f87171 !important; }
@@ -168,9 +170,10 @@ _COL_DEFS = [
     },
 ]
 
-_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+_LEVELS = ["DEBUG", "FINEINFO", "INFO", "WARNING", "ERROR", "CRITICAL"]
 _LEVEL_CHIP_COLORS = {
     "DEBUG": "blue",
+    "FINEINFO": "cyan",
     "INFO": "positive",
     "WARNING": "warning",
     "ERROR": "negative",

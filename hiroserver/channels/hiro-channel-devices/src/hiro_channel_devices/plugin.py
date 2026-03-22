@@ -62,7 +62,7 @@ class DevicesChannel(ChannelPlugin):
             str(config.get("master_key_path", str(self._master_key_path)))
         )
         log.info(
-            "Devices channel configured",
+            "⚙️ Devices channel configured",
             gateway=self._gateway_url,
             device_id=self._device_id,
             master_key=str(self._master_key_path),
@@ -97,7 +97,7 @@ class DevicesChannel(ChannelPlugin):
     async def send(self, message: UnifiedMessage) -> None:
         """UnifiedMessage -> gateway envelope."""
         if self._gateway_ws is None:
-            log.warning("Gateway not connected — dropping outbound message")
+            log.warning("⚠️ Gateway not connected — dropping outbound message")
             return
         out: dict = {
             "payload": message.model_dump(mode="json"),
@@ -105,7 +105,7 @@ class DevicesChannel(ChannelPlugin):
         if message.routing.recipient_id:
             out["target_device_id"] = message.routing.recipient_id
         log.info(
-            "Forwarding message to gateway",
+            "📤 Forwarding message to gateway",
             msg_id=message.routing.id,
             recipient=message.routing.recipient_id or "*",
             items=len(message.content),
@@ -119,11 +119,11 @@ class DevicesChannel(ChannelPlugin):
         while True:
             try:
                 await self._run_gateway_connection(url)
-                log.warning("Gateway disconnected, reconnecting", delay=f"{backoff:.0f}s")
+                log.warning("🔁 Gateway disconnected, reconnecting", delay=f"{backoff:.0f}s")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.warning("Gateway error, reconnecting", error=str(exc), delay=f"{backoff:.0f}s")
+                log.warning("⚠️ Gateway error, reconnecting", error=str(exc), delay=f"{backoff:.0f}s")
 
             await self.emit_event(
                 "gateway_disconnected",
@@ -133,7 +133,7 @@ class DevicesChannel(ChannelPlugin):
             backoff = min(backoff * 2, BACKOFF_MAX)
 
     async def _run_gateway_connection(self, url: str) -> None:
-        log.info("Connecting to gateway", url=url)
+        log.info("🔌 Connecting to gateway", url=url)
         async with websockets.connect(url, ping_interval=self._ping_interval) as ws:
             await self._authenticate_with_gateway(ws)
             self._gateway_ws = ws
@@ -141,7 +141,7 @@ class DevicesChannel(ChannelPlugin):
                 "gateway_connected",
                 {"gateway_url": self._gateway_url, "device_id": self._device_id},
             )
-            log.info("Connected to gateway", device_id=self._device_id)
+            log.info("✅ Connected to gateway", device_id=self._device_id)
 
             try:
                 async for raw in ws:
@@ -195,13 +195,13 @@ class DevicesChannel(ChannelPlugin):
         if auth_ack.get("type") != "auth_ok":
             raise RuntimeError(f"gateway rejected auth: {auth_ack}")
 
-        log.info("Gateway auth successful", device_id=self._device_id)
+        log.info("🔐 Gateway auth successful", device_id=self._device_id)
 
     async def _handle_gateway_message(self, raw: str) -> None:
         try:
             msg = json.loads(raw)
         except json.JSONDecodeError:
-            log.warning("Invalid JSON from gateway", raw=raw[:200])
+            log.warning("⚠️ Invalid JSON from gateway", raw=raw[:200])
             return
 
         msg_type = msg.get("type")
@@ -211,13 +211,13 @@ class DevicesChannel(ChannelPlugin):
 
         payload = msg.get("payload")
         if not isinstance(payload, dict):
-            log.warning("Gateway payload is not an object", payload=payload)
+            log.warning("⚠️ Gateway payload is not an object", payload=payload)
             return
 
         try:
             unified = UnifiedMessage.model_validate(payload)
         except Exception as exc:
-            log.warning("Invalid UnifiedMessage from gateway", error=str(exc))
+            log.warning("⚠️ Invalid UnifiedMessage from gateway", error=str(exc))
             return
 
         # Override the sender's timestamp with the server's receive time.
@@ -238,7 +238,7 @@ class DevicesChannel(ChannelPlugin):
         unified.routing.channel = MANDATORY_CHANNEL_NAME
         unified.routing.direction = "inbound"
         log.info(
-            "Inbound message from gateway",
+            "📥 Inbound message from gateway",
             msg_id=unified.routing.id,
             sender=unified.routing.sender_id,
             items=len(unified.content),
@@ -250,19 +250,19 @@ class DevicesChannel(ChannelPlugin):
         pairing_code = msg.get("pairing_code")
         device_public_key = msg.get("device_public_key")
         if not isinstance(request_id, str) or not request_id:
-            log.warning("Pairing request missing request_id")
+            log.warning("⚠️ Pairing request missing request_id")
             return
         if not isinstance(pairing_code, str) or not pairing_code:
-            log.warning("Pairing request missing pairing_code")
+            log.warning("⚠️ Pairing request missing pairing_code")
             return
         if not isinstance(device_public_key, str) or not device_public_key:
-            log.warning("Pairing request missing device_public_key")
+            log.warning("⚠️ Pairing request missing device_public_key")
             return
 
         device_name_raw = msg.get("device_name")
         device_name = device_name_raw if isinstance(device_name_raw, str) and device_name_raw else None
 
-        log.info("Pairing request received", request_id=request_id)
+        log.info("🔗 Pairing request received", request_id=request_id)
         event_data: dict[str, object] = {
             "request_id": request_id,
             "pairing_code": pairing_code,
@@ -277,19 +277,19 @@ class DevicesChannel(ChannelPlugin):
             return
         ws = self._gateway_ws
         if ws is None:
-            log.warning("Gateway not connected — cannot send pairing_response")
+            log.warning("⚠️ Gateway not connected — cannot send pairing_response")
             return
 
         request_id = data.get("request_id")
         status = data.get("status")
         if not isinstance(request_id, str) or not request_id:
-            log.warning("Pairing response missing request_id")
+            log.warning("⚠️ Pairing response missing request_id")
             return
         if not isinstance(status, str) or status not in {"approved", "rejected"}:
-            log.warning("Pairing response invalid status", status=status)
+            log.warning("⚠️ Pairing response invalid status", status=status)
             return
 
-        log.info("Sending pairing response to gateway", request_id=request_id, status=status)
+        log.info("📤 Sending pairing response to gateway", request_id=request_id, status=status)
 
         outbound: dict[str, object] = {
             "type": "pairing_response",

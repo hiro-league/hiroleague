@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 from hiro_channel_sdk.constants import (
+    CONTENT_TYPE_AUDIO,
     CONTENT_TYPE_JSON,
+    CONTENT_TYPE_TEXT,
     EVENT_TYPE_MESSAGE_RECEIVED,
     EVENT_TYPE_MESSAGE_TRANSCRIBED,
     MESSAGE_TYPE_EVENT,
@@ -50,6 +51,64 @@ if TYPE_CHECKING:
 
 log = Logger.get("COMM_MAN")
 
+# Shared comm log fragments: one place for routing + content_hint so every COMM_MAN line
+# stays scannable (direction, device, kind).
+_LOG_IN = "⬇️"   # inbound (into hirocli)
+_LOG_OUT = "⬆️"  # outbound (to channel / device)
+_TEXT_SNIPPET_MAX = 120
+
+
+def _comm_kind(msg: UnifiedMessage) -> str:
+    """Short type summary: message[text,audio], event:message.received, request, …"""
+    mt = msg.message_type
+    if mt == MESSAGE_TYPE_MESSAGE:
+        if not msg.content:
+            return "message[]"
+        return f"message[{','.join(c.content_type for c in msg.content)}]"
+    if mt == MESSAGE_TYPE_EVENT:
+        et = msg.event.type if msg.event else "?"
+        return f"event:{et}"
+    if mt == MESSAGE_TYPE_REQUEST:
+        return "request"
+    if mt == MESSAGE_TYPE_RESPONSE:
+        return "response"
+    return str(mt)
+
+
+def _snippet_text(body: str, max_len: int = _TEXT_SNIPPET_MAX) -> str:
+    t = " ".join(body.split())
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1] + "…"
+
+
+def _comm_content_hint(msg: UnifiedMessage) -> str | None:
+    """Text snippet per item, or labels like audio/json/image for non-text bodies."""
+    if msg.message_type != MESSAGE_TYPE_MESSAGE or not msg.content:
+        return None
+    parts: list[str] = []
+    for item in msg.content:
+        ct = item.content_type
+        if ct == CONTENT_TYPE_TEXT:
+            parts.append(_snippet_text(item.body) if item.body.strip() else "text:(empty)")
+        elif ct == CONTENT_TYPE_AUDIO:
+            parts.append("audio")
+        elif ct == CONTENT_TYPE_JSON:
+            parts.append(_snippet_text(item.body, 80) if item.body.strip() else "json:(empty)")
+        else:
+            parts.append(ct)
+    return " | ".join(parts) if parts else None
+
+
+def _comm_extras(msg: UnifiedMessage, **kwargs: Any) -> dict[str, Any]:
+    # content_hint first, then caller fields (matches “snippet then rest” preference).
+    hint = _comm_content_hint(msg)
+    out: dict[str, Any] = {}
+    if hint:
+        out["content_hint"] = hint
+    out.update(kwargs)
+    return out
+
 
 def _check_permissions(msg: UnifiedMessage) -> None:
     """Placeholder for user/channel permission checks.
@@ -72,6 +131,7 @@ class CommunicationManager:
             adapter_pipeline=pipeline,
             request_handler=request_handler,
             event_handler=event_handler,
+            workspace_path=workspace_path,
         )
         channel_manager = ChannelManager(..., on_message=comm.receive)
         comm.set_channel_manager(channel_manager)
@@ -85,17 +145,61 @@ class CommunicationManager:
         adapter_pipeline: MessageAdapterPipeline | None = None,
         request_handler: RequestHandler | None = None,
         event_handler: EventHandler | None = None,
+        *,
+        workspace_path: Path | None = None,
     ) -> None:
         self._channel_manager: ChannelManager | None = None
         self._adapter_pipeline = adapter_pipeline
         self._request_handler = request_handler
         self._event_handler = event_handler
+        # Same resolution as ChannelManager._device_label when metadata lacks device_name
+        # (e.g. replies used to use empty metadata — see AgentManager._make_reply). Both use
+        # friendly name only when paired — no redundant id suffix in log lines.
+        self._workspace_path = workspace_path
+        self._device_name_cache: dict[str, str | None] = {}
         self.inbound_queue: asyncio.Queue[UnifiedMessage] = asyncio.Queue()
         self.outbound_queue: asyncio.Queue[UnifiedMessage] = asyncio.Queue()
+
+    def _peer_label(self, msg: UnifiedMessage) -> str:
+        """Short peer label for logs: friendly name only when known, else device_id."""
+        if msg.routing.direction == "outbound":
+            device_id = (msg.routing.recipient_id or msg.routing.sender_id or "").strip()
+        else:
+            device_id = (msg.routing.sender_id or "").strip()
+
+        meta = msg.routing.metadata or {}
+        dn = meta.get("device_name")
+        if isinstance(dn, str) and dn.strip():
+            s = dn.strip()
+            # Legacy "Name (device_id)" from older servers — drop id when it matches this peer.
+            if device_id and s.endswith(f" ({device_id})"):
+                return s[: -len(f" ({device_id})")]
+            return s
+
+        if not device_id or device_id == "server":
+            return device_id or "?"
+        if self._workspace_path is not None:
+            if device_id not in self._device_name_cache:
+                from hirocli.domain.pairing import get_device_name
+
+                self._device_name_cache[device_id] = get_device_name(
+                    self._workspace_path, device_id
+                )
+            name = self._device_name_cache[device_id]
+            return name if name else device_id
+        return device_id
+
+    def _routing_tag(self, msg: UnifiedMessage) -> str:
+        # Omit inbound/outbound here — ⬆️/⬇️ on the line already encode direction.
+        return f"{self._peer_label(msg)} · {_comm_kind(msg)}"
 
     def set_channel_manager(self, channel_manager: ChannelManager) -> None:
         """Bind the ChannelManager after both objects have been constructed."""
         self._channel_manager = channel_manager
+
+    def set_request_handler(self, handler: RequestHandler) -> None:
+        """Bind the RequestHandler after both objects have been constructed."""
+        self._request_handler = handler
 
     # ------------------------------------------------------------------
     # Inbound path  (channel plugin → hirocli core)
@@ -110,17 +214,15 @@ class CommunicationManager:
         try:
             msg = UnifiedMessage.model_validate(data)
         except Exception as exc:
-            log.warning("Dropping malformed inbound message", error=str(exc))
+            log.warning(f"⚠️ {_LOG_IN} Dropping malformed message", error=str(exc))
             return
 
         try:
             _check_permissions(msg)
         except PermissionError as exc:
             log.warning(
-                "Inbound message blocked by permission check",
-                channel=msg.routing.channel,
-                sender=msg.routing.sender_id,
-                error=str(exc),
+                f"⚠️ {_LOG_IN} Blocked by permission — {self._routing_tag(msg)}",
+                **_comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
             )
             return
 
@@ -135,7 +237,10 @@ class CommunicationManager:
                         name=f"request-{msg.routing.id}",
                     )
                 else:
-                    log.warning("No RequestHandler configured, dropping request", msg_id=msg.routing.id)
+                    log.warning(
+                        f"⚠️ {_LOG_IN} No RequestHandler, dropping — {self._routing_tag(msg)}",
+                        **_comm_extras(msg, msg_id=msg.routing.id),
+                    )
 
             case _ if msg.message_type == MESSAGE_TYPE_EVENT:
                 if self._event_handler is not None:
@@ -145,16 +250,15 @@ class CommunicationManager:
                     )
                 else:
                     log.info(
-                        "Inbound event dropped (no EventHandler)",
+                        f"{_LOG_IN} Event dropped (no EventHandler) — {self._routing_tag(msg)}",
                         msg_id=msg.routing.id,
                         event_type=msg.event.type if msg.event else None,
                     )
 
             case _:
                 log.warning(
-                    "Unknown message_type, dropping",
-                    message_type=msg.message_type,
-                    msg_id=msg.routing.id,
+                    f"⚠️ {_LOG_IN} Unknown message_type, dropping — {self._routing_tag(msg)}",
+                    **_comm_extras(msg, message_type=msg.message_type, msg_id=msg.routing.id),
                 )
                 await self._enqueue_error_response(
                     msg, f"Unknown message_type: {msg.message_type}"
@@ -168,24 +272,43 @@ class CommunicationManager:
             self._adapt_and_queue(msg),
             name=f"adapt-{msg.routing.id}",
         )
+        content_types = [item.content_type for item in msg.content]
         log.info(
-            "Message acked, adapter task spawned",
-            msg_id=msg.routing.id,
-            channel=msg.routing.channel,
-            sender=msg.routing.sender_id,
-            items=len(msg.content),
+            f"{_LOG_IN} Message acked, adapter spawned — {self._routing_tag(msg)}",
+            **_comm_extras(
+                msg,
+                msg_id=msg.routing.id,
+                channel=msg.routing.channel,
+                content_types=content_types,
+            ),
         )
 
     async def _adapt_and_queue(self, msg: UnifiedMessage) -> None:
         """Run the adapter pipeline then place the enriched message on inbound_queue."""
+        device = msg.routing.metadata.get("device_name", msg.routing.sender_id)
         try:
             if self._adapter_pipeline is not None:
                 msg = await self._adapter_pipeline.process(msg)
 
-            # Emit message.transcribed events for any audio items that were
-            # successfully transcribed by the adapter pipeline.
             for item in msg.content:
+                if "adapter_error" in item.metadata:
+                    log.warning(
+                        f"⚠️ {_LOG_IN} Content item adaptation failed — {self._routing_tag(msg)}",
+                        **_comm_extras(
+                            msg,
+                            content_type=item.content_type,
+                            error=item.metadata["adapter_error"],
+                            msg_id=msg.routing.id,
+                        ),
+                    )
+
                 if item.content_type == "audio" and "description" in item.metadata:
+                    transcript = item.metadata["description"]
+                    if not transcript.strip():
+                        log.warning(
+                            f"⚠️ {_LOG_IN} Empty audio transcription (silence?) — {self._routing_tag(msg)}",
+                            **_comm_extras(msg, msg_id=msg.routing.id),
+                        )
                     transcript_event = UnifiedMessage(
                         message_type=MESSAGE_TYPE_EVENT,
                         routing=MessageRouting(
@@ -198,28 +321,29 @@ class CommunicationManager:
                         event=EventPayload(
                             type=EVENT_TYPE_MESSAGE_TRANSCRIBED,
                             ref_id=msg.routing.id,
-                            data={"transcript": item.metadata["description"]},
+                            data={"transcript": transcript},
                         ),
                     )
                     await self.enqueue_outbound(transcript_event)
                     log.info(
-                        "Transcript event enqueued",
-                        msg_id=msg.routing.id,
-                        transcript_len=len(item.metadata["description"]),
+                        f"{_LOG_OUT} Transcript event enqueued — {self._routing_tag(transcript_event)}",
+                        **_comm_extras(
+                            transcript_event,
+                            ref_msg_id=msg.routing.id,
+                            transcript_preview=transcript[:150],
+                            transcript_len=len(transcript),
+                        ),
                     )
 
             self.inbound_queue.put_nowait(msg)
             log.info(
-                "Inbound message queued after adaptation",
-                msg_id=msg.routing.id,
-                channel=msg.routing.channel,
-                sender=msg.routing.sender_id,
+                f"{_LOG_IN} Queued after adaptation — {self._routing_tag(msg)}",
+                **_comm_extras(msg, msg_id=msg.routing.id, channel=msg.routing.channel),
             )
         except Exception as exc:
             log.error(
-                "Adapter pipeline failed",
-                msg_id=msg.routing.id,
-                error=str(exc),
+                f"❌ {_LOG_IN} Adapter pipeline failed — {self._routing_tag(msg)}",
+                **_comm_extras(msg, msg_id=msg.routing.id, error=str(exc)),
                 exc_info=True,
             )
             await self._enqueue_error_response(msg, f"Adapter pipeline error: {exc}")
@@ -228,13 +352,21 @@ class CommunicationManager:
         try:
             await self._request_handler.handle(msg)
         except Exception as exc:
-            log.error("RequestHandler raised unexpectedly", error=str(exc), exc_info=True)
+            log.error(
+                f"❌ {_LOG_IN} RequestHandler failed — {self._routing_tag(msg)}",
+                **_comm_extras(msg, error=str(exc)),
+                exc_info=True,
+            )
 
     async def _safe_handle_event(self, msg: UnifiedMessage) -> None:
         try:
             await self._event_handler.handle(msg)
         except Exception as exc:
-            log.error("EventHandler raised unexpectedly", error=str(exc), exc_info=True)
+            log.error(
+                f"❌ {_LOG_IN} EventHandler failed — {self._routing_tag(msg)}",
+                **_comm_extras(msg, error=str(exc)),
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Ack / error helpers
@@ -283,11 +415,8 @@ class CommunicationManager:
         """Place a message on the outbound queue to be sent to its channel."""
         await self.outbound_queue.put(msg)
         log.info(
-            "Outbound message queued",
-            msg_id=msg.routing.id,
-            channel=msg.routing.channel,
-            recipient=msg.routing.recipient_id,
-            items=len(msg.content),
+            f"{_LOG_OUT} Queued — {self._routing_tag(msg)}",
+            **_comm_extras(msg, msg_id=msg.routing.id, channel=msg.routing.channel, items=len(msg.content)),
         )
 
     async def _outbound_worker(self) -> None:
@@ -299,23 +428,21 @@ class CommunicationManager:
                     _check_permissions(msg)
                 except PermissionError as exc:
                     log.warning(
-                        "Outbound message blocked by permission check",
-                        channel=msg.routing.channel,
-                        recipient=msg.routing.recipient_id,
-                        error=str(exc),
+                        f"⚠️ {_LOG_OUT} Blocked by permission — {self._routing_tag(msg)}",
+                        **_comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
                     )
                     continue
 
                 if self._channel_manager is None:
-                    log.warning("Outbound message dropped — no ChannelManager set")
+                    log.warning(
+                        f"⚠️ {_LOG_OUT} Dropped (no ChannelManager) — {self._routing_tag(msg)}",
+                        **_comm_extras(msg, msg_id=msg.routing.id),
+                    )
                     continue
 
                 log.info(
-                    "Dispatching outbound message",
-                    msg_id=msg.routing.id,
-                    channel=msg.routing.channel,
-                    recipient=msg.routing.recipient_id,
-                    items=len(msg.content),
+                    f"{_LOG_OUT} Dispatching — {self._routing_tag(msg)}",
+                    **_comm_extras(msg, msg_id=msg.routing.id, channel=msg.routing.channel, items=len(msg.content)),
                 )
                 await self._channel_manager.send_to_channel(
                     msg.routing.channel, msg.model_dump(mode="json")
@@ -329,5 +456,5 @@ class CommunicationManager:
 
     async def run(self) -> None:
         """Run the outbound worker. Add to asyncio.gather alongside ChannelManager."""
-        log.info("CommunicationManager started")
+        log.info("✅ Communication Manager started")
         await self._outbound_worker()

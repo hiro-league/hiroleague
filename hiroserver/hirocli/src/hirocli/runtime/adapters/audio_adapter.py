@@ -35,15 +35,23 @@ class AudioTranscriptionAdapter(ContentTypeAdapter):
     async def process_item(self, item: ContentItem) -> str:
         if not item.body:
             raise ValueError("Audio ContentItem has no body to transcribe")
-        audio_bytes = len(item.body)
-        provider = type(self._service).__name__
-        log.info("Transcribing audio", audio_bytes=audio_bytes, provider=provider)
+        source_len = len(item.body)
+        mime_type = item.metadata.get("mime_type", "audio/mp4")
+        log.info("Transcribing audio", source_len=source_len, mime_type=mime_type)
         _t0 = time.perf_counter()
-        transcript = await self._service.transcribe(item.body)
+        transcript = await self._service.transcribe(item.body, mime_type=mime_type)
         _elapsed_ms = int((time.perf_counter() - _t0) * 1000)
-        log.info(
-            "Transcription complete",
-            transcript_len=len(transcript),
-            elapsed_ms=_elapsed_ms,
-        )
+        if not transcript.strip():
+            log.warning(
+                "Transcription returned empty text",
+                source_len=source_len,
+                elapsed_ms=_elapsed_ms,
+            )
+        else:
+            log.info(
+                "Transcription complete",
+                transcript_preview=transcript[:150],
+                transcript_len=len(transcript),
+                elapsed_ms=_elapsed_ms,
+            )
         return transcript

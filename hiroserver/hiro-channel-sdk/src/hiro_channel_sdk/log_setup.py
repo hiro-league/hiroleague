@@ -14,7 +14,7 @@ def init(
     *,
     level: str = "INFO",
     foreground: bool = False,
-    log_levels: dict[str, str] | None = None,
+    module_log_levels: dict[str, str] | None = None,
 ) -> None:
     """Initialise logging for one Hiro process.
 
@@ -30,22 +30,22 @@ def init(
     foreground:
         If *True*, colourised output is also written to stdout.
         Use for ``hirocli start --foreground`` and direct gateway runs.
-    log_levels:
-        Optional per-logger level overrides, e.g.
+    module_log_levels:
+        Optional per-module level overrides, e.g.
         ``{"AGENT": "DEBUG", "COMM": "WARNING"}``.
     """
     log_dir = Path(log_dir)
 
-    Logger.configure(level=level, console=foreground)
+    Logger.set_level(level)
+    Logger.setup(console=foreground)
 
     Logger.add_file_sink(
         str(log_dir / f"{component}.log"),
-        level=level,
         rotate=True,
         max_bytes=LOG_ROTATION_MAX_BYTES,
         backup_count=LOG_ROTATION_BACKUP_COUNT,
         use_csv=True,
     )
 
-    if log_levels:
-        Logger.apply_level_overrides(log_levels)
+    if module_log_levels:
+        Logger.set_module_levels(module_log_levels)

@@ -50,6 +50,14 @@ def register(app: typer.Typer, console: Console) -> None:
             False, "--elevated-task",
             help="(Windows) Request UAC elevation to create a high-privilege Task Scheduler entry.",
         ),
+        metrics: Optional[bool] = typer.Option(
+            None, "--metrics/--no-metrics",
+            help="Enable or disable system metrics collection (persisted to config).",
+        ),
+        metrics_interval: Optional[float] = typer.Option(
+            None, "--metrics-interval",
+            help="Metrics sampling interval in seconds (min 1.0, persisted to config).",
+        ),
     ) -> None:
         """One-time setup: configure gateway, generate device ID, register auto-start."""
         console.print("[bold cyan]hirocli setup[/bold cyan]")
@@ -78,16 +86,18 @@ def register(app: typer.Typer, console: Console) -> None:
                 skip_autostart=skip_autostart,
                 start_server=start_server,
                 elevated_task=elevated_task,
+                metrics_enabled=metrics,
+                metrics_interval=metrics_interval,
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
 
-        # Setup creates the workspace — open routed sinks after so the path exists.
         try:
             from ..domain.config import load_config, resolve_log_dir
             ws_path = Path(result.workspace_path)
-            Logger.open_log_dir(resolve_log_dir(ws_path, load_config(ws_path)))
+            cfg = load_config(ws_path)
+            Logger.open_log_dir(resolve_log_dir(ws_path, cfg))
         except Exception:
             pass
         log.info(
@@ -155,12 +165,16 @@ def register(app: typer.Typer, console: Console) -> None:
             False, "--admin",
             help="Also start the admin UI on its dedicated port (localhost only).",
         ),
+        metrics: bool = typer.Option(
+            False, "--metrics",
+            help="Enable system metrics collection for this run (not persisted).",
+        ),
     ) -> None:
         """Start the hirocli server (background by default, foreground with -f)."""
-        log.info("hirocli start", foreground=foreground, admin=admin)
+        log.info("hirocli start", foreground=foreground, admin=admin, metrics=metrics)
 
         try:
-            result = StartTool().execute(workspace=workspace, foreground=foreground, admin=admin)
+            result = StartTool().execute(workspace=workspace, foreground=foreground, admin=admin, metrics=metrics)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
@@ -218,13 +232,17 @@ def register(app: typer.Typer, console: Console) -> None:
             False, "--admin",
             help="Also start the admin UI on its dedicated port (localhost only).",
         ),
+        metrics: bool = typer.Option(
+            False, "--metrics",
+            help="Enable system metrics collection for this run (not persisted).",
+        ),
     ) -> None:
         """Gracefully restart the hirocli server (stop + start)."""
-        log.info("hirocli restart", foreground=foreground, admin=admin)
+        log.info("hirocli restart", foreground=foreground, admin=admin, metrics=metrics)
 
         try:
             result = RestartTool().execute(
-                workspace=workspace, foreground=foreground, admin=admin,
+                workspace=workspace, foreground=foreground, admin=admin, metrics=metrics,
             )
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")

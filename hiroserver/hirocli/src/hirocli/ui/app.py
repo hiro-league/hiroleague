@@ -31,6 +31,8 @@ _NAV: list[tuple[str | None, str, str | None, str | None]] = [
     (None, "Nodes / Devices", None, None),
     ("Nodes / Devices", "Devices", "devices", "/devices"),
     ("Nodes / Devices", "Chats", "chat", "/chats"),
+    (None, "Monitoring", None, None),
+    ("Monitoring", "Metrics", "monitoring", "/metrics"),
     (None, "Configuration", None, None),
     ("Configuration", "Logs", "article", "/logs"),
 ]
@@ -203,6 +205,7 @@ def register_pages() -> None:
     from hirocli.ui.pages import gateways as _gateways  # noqa: F401 — side-effect import
     from hirocli.ui.pages import agents as _agents  # noqa: F401 — side-effect import
     from hirocli.ui.pages import logs as _logs  # noqa: F401 — side-effect import
+    from hirocli.ui.pages import metrics as _metrics  # noqa: F401 — side-effect import
 
     _register_stub_pages()
 

@@ -53,7 +53,7 @@ from ..domain.workspace import (
     remove_workspace,
     resolve_workspace,
 )
-from ..constants import ENV_ADMIN_UI, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
+from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from .base import Tool, ToolParam
 
 
@@ -153,6 +153,7 @@ def _do_start(
     workspace_name: str,
     foreground: bool = False,
     admin: bool = False,
+    metrics: bool = False,
 ) -> None:
     """Start the hirocli server for a workspace."""
     load_or_create_master_key(workspace_path, filename=config.master_key_file)
@@ -174,7 +175,7 @@ def _do_start(
             "[dim](Ctrl+C to stop)[/dim]"
         )
         try:
-            _asyncio.run(_main(foreground=True, workspace_path=workspace_path, workspace_name=workspace_name, admin=admin))
+            _asyncio.run(_main(foreground=True, workspace_path=workspace_path, workspace_name=workspace_name, admin=admin, metrics=metrics))
         except KeyboardInterrupt:
             pass
         console.print("[green]Server stopped.[/green]")
@@ -187,6 +188,9 @@ def _do_start(
     env = {**os.environ, ENV_WORKSPACE_PATH: str(workspace_path), ENV_WORKSPACE: workspace_name}
     if admin:
         env[ENV_ADMIN_UI] = "1"
+    # --metrics on start is an ephemeral override (like --admin), passed via env var
+    if metrics:
+        env[ENV_METRICS] = "1"
 
     stderr_log = workspace_path / "stderr.log"
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
@@ -353,6 +357,8 @@ class SetupTool(Tool):
             "(Windows) Request UAC elevation for Task Scheduler entry",
             required=False,
         ),
+        "metrics_enabled": ToolParam(bool, "Enable system metrics collection", required=False),
+        "metrics_interval": ToolParam(float, "Metrics sampling interval in seconds", required=False),
     }
 
     def execute(
@@ -363,6 +369,8 @@ class SetupTool(Tool):
         skip_autostart: bool = False,
         start_server: bool = False,
         elevated_task: bool = False,
+        metrics_enabled: bool | None = None,
+        metrics_interval: float | None = None,
     ) -> SetupResult:
         entry, registry, workspace_path = _resolve_or_create(workspace)
         existing = load_config(workspace_path)
@@ -381,6 +389,9 @@ class SetupTool(Tool):
             pairing_code_length=existing.pairing_code_length,
             pairing_code_ttl_seconds=existing.pairing_code_ttl_seconds,
             attestation_expires_days=existing.attestation_expires_days,
+            metrics_enabled=metrics_enabled if metrics_enabled is not None else existing.metrics_enabled,
+            metrics_interval=metrics_interval if metrics_interval is not None else existing.metrics_interval,
+            metrics_history_size=existing.metrics_history_size,
         )
         save_config(workspace_path, config)
         private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
@@ -432,6 +443,11 @@ class StartTool(Tool):
             "Also start the admin UI on its dedicated port",
             required=False,
         ),
+        "metrics": ToolParam(
+            bool,
+            "Enable system metrics collection for this run",
+            required=False,
+        ),
     }
 
     def execute(
@@ -439,6 +455,7 @@ class StartTool(Tool):
         workspace: str | None = None,
         foreground: bool = False,
         admin: bool = False,
+        metrics: bool = False,
     ) -> StartResult:
         entry, registry, workspace_path = _resolve_or_create(workspace)
 
@@ -462,7 +479,7 @@ class StartTool(Tool):
                 admin_port=config.admin_port if admin else None,
             )
 
-        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin)
+        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin, metrics=metrics)
 
         new_pid = read_pid(workspace_path, PID_FILENAME)
         return StartResult(
@@ -508,6 +525,11 @@ class RestartTool(Tool):
             "Also start the admin UI on its dedicated port",
             required=False,
         ),
+        "metrics": ToolParam(
+            bool,
+            "Enable system metrics collection for this run",
+            required=False,
+        ),
     }
 
     def execute(
@@ -515,6 +537,7 @@ class RestartTool(Tool):
         workspace: str | None = None,
         foreground: bool = False,
         admin: bool = False,
+        metrics: bool = False,
     ) -> RestartResult:
         entry, _, workspace_path = _resolve_or_create(workspace)
 
@@ -546,7 +569,7 @@ class RestartTool(Tool):
 
             _do_stop(workspace_path, _NullConsole())
 
-        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin)
+        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin, metrics=metrics)
 
         new_pid = read_pid(workspace_path, PID_FILENAME)
         return RestartResult(

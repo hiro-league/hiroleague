@@ -80,8 +80,6 @@ async def run_admin_ui(
         storage_secret=f"hiro-admin-{config.device_id}",
     )
 
-    log.info("Admin UI starting", url=f"http://127.0.0.1:{config.admin_port}")
-
     uv_config = uvicorn.Config(
         app=admin_app,
         host="127.0.0.1",
@@ -93,6 +91,8 @@ async def run_admin_ui(
 
     serve_task = asyncio.create_task(server.serve())
     stop_task = asyncio.create_task(stop_event.wait())
+
+    log.info(f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{config.admin_port}")
 
     done, pending = await asyncio.wait(
         [serve_task, stop_task],

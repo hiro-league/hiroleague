@@ -1,5 +1,13 @@
 """Shared Hiro structured logging.
 
+Two-step initialisation
+-----------------------
+1. ``Logger.set_level("DEBUG")``  — store the desired level (idempotent).
+2. ``Logger.setup(console=True)`` — wire the structlog pipeline (one-time).
+
+Order matters: *set_level before setup*.  Calling ``set_level`` multiple
+times is harmless — last call wins.
+
 Module-prefix routing
 ---------------------
 File sinks support ``include_prefix`` / ``exclude_prefix`` filters so that
@@ -37,17 +45,55 @@ from .constants.timing import LOG_ROTATION_BACKUP_COUNT, LOG_ROTATION_MAX_BYTES
 
 colorama.init(autoreset=True)
 
+# ---------------------------------------------------------------------------
+# Custom FINEINFO level (15) — between DEBUG (10) and INFO (20).
+# Registered early so both stdlib and structlog see it before any logger
+# is created.
+# ---------------------------------------------------------------------------
+FINEINFO = 15
+logging.addLevelName(FINEINFO, "FINEINFO")
+
+# Patch structlog's internal level dicts so make_filtering_bound_logger
+# generates a .fineinfo() / .afineinfo() method and the level is recognised
+# everywhere inside the structlog pipeline.
+import structlog._log_levels as _sl_levels  # noqa: E402
+import structlog._native as _sl_native  # noqa: E402
+
+_sl_levels.NAME_TO_LEVEL["fineinfo"] = FINEINFO
+_sl_levels.LEVEL_TO_NAME[FINEINFO] = "fineinfo"
+
+# Rebuild ALL filtering logger classes so every min_level variant
+# (Debug, Info, …) gains the new .fineinfo() / .afineinfo() methods.
+for _lvl in list(_sl_native.LEVEL_TO_FILTERING_LOGGER):
+    _sl_native.LEVEL_TO_FILTERING_LOGGER[_lvl] = (
+        _sl_native._make_filtering_bound_logger(_lvl)
+    )
+# Also add the new level's own entry.
+_sl_native.LEVEL_TO_FILTERING_LOGGER[FINEINFO] = (
+    _sl_native._make_filtering_bound_logger(FINEINFO)
+)
+
+# PrintLogger (structlog's default logger factory) dispatches via
+# getattr(self, method_name) — it only defines msg/debug/info/warning/
+# error/critical/fatal as aliases for msg.  Custom levels need an
+# explicit alias so _proxy_to_logger("fineinfo", ...) doesn't raise
+# AttributeError on the underlying PrintLogger instance.
+structlog.PrintLogger.fineinfo = structlog.PrintLogger.msg  # type: ignore[attr-defined]
+
 __all__ = [
+    "FINEINFO",
     "Logger",
-    "configure",
+    "setup",
     "get_logger",
     "set_level",
+    "set_module_levels",
     "disable",
     "enable",
 ]
 
 _LEVEL_ABBREV = {
     "DEBUG": "DBG",
+    "FINEINFO": "FNI",
     "INFO": "INF",
     "WARNING": "WRN",
     "ERROR": "ERR",
@@ -56,6 +102,7 @@ _LEVEL_ABBREV = {
 
 _LEVEL_COLORS = {
     "DEBUG": colorama.Fore.BLUE,
+    "FINEINFO": colorama.Fore.CYAN,
     "INFO": colorama.Fore.GREEN,
     "WARNING": colorama.Fore.YELLOW,
     "ERROR": colorama.Fore.RED,
@@ -74,11 +121,21 @@ _INDENT_LEVEL: contextvars.ContextVar[int] = contextvars.ContextVar(
 )
 _INDENT_UNIT: str = "--"
 
+_LEVELS: Mapping[str, int] = {
+    name: level for name, level in logging._nameToLevel.items()
+}
+
 # (min_level, handler, renderer, include_prefix, exclude_prefixes)
-# include_prefix: only events whose module starts with this string pass through.
-# exclude_prefixes: events whose module starts with any of these are skipped.
 _FILE_SINKS: list[tuple[int, logging.Handler, object, str | None, tuple[str, ...] | None]] = []
-_LEVEL_OVERRIDES: dict[str, int] = {}
+_MODULE_OVERRIDES: dict[str, int] = {}
+
+
+def _resolve_level(level: str | int | None) -> int:
+    if level is None:
+        return logging.INFO
+    if isinstance(level, int):
+        return level
+    return _LEVELS.get(str(level).upper(), logging.INFO)
 
 
 def _pick_module_color(name: str) -> str:
@@ -89,7 +146,6 @@ def _pick_module_color(name: str) -> str:
 
 
 def _epoch_to_time_str(epoch: float | str) -> str:
-    """Format an epoch float as HH:MM:SS for terminal display."""
     try:
         return datetime.datetime.fromtimestamp(float(epoch)).strftime("%H:%M:%S")
     except Exception:
@@ -197,9 +253,8 @@ class _NullRenderer:
 class _StdlibBridge(logging.Handler):
     """Bridge stdlib logging records into the Hiro structured logger.
 
-    Attached to third-party stdlib loggers (e.g. ``websockets``) so their
-    warnings/errors flow through the structlog pipeline with proper
-    timestamps, module tags, and file-sink routing.
+    Used by ``silence_stdlib()`` for per-library overrides with a fixed
+    module tag.
     """
 
     def __init__(self, module: str, level: int = logging.WARNING):
@@ -208,7 +263,28 @@ class _StdlibBridge(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            log = structlog.get_logger(self._module).bind(module=self._module)
+            log = structlog.get_logger(module=self._module)
+            level = record.levelname.lower()
+            log_method = getattr(log, level, log.warning)
+            log_method(record.getMessage(), stdlib_logger=record.name)
+        except Exception:
+            pass
+
+
+class _StdlibCatchAll(logging.Handler):
+    """Catch-all bridge on the stdlib root logger.
+
+    Installed by ``Logger.setup()`` to capture WARNING+ from *any*
+    third-party library and re-emit through the structlog pipeline with
+    proper formatting and file-sink routing.  The module tag is derived
+    from the top-level package name (e.g. ``httpcore.connection`` →
+    ``HTTPCORE``).
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            module = record.name.split(".")[0].upper()
+            log = structlog.get_logger(module=module)
             level = record.levelname.lower()
             log_method = getattr(log, level, log.warning)
             log_method(record.getMessage(), stdlib_logger=record.name)
@@ -218,16 +294,16 @@ class _StdlibBridge(logging.Handler):
 
 def _module_level_filter(logger, method_name, event_dict):
     """Drop events below configured per-module level overrides."""
-    if not _LEVEL_OVERRIDES:
+    if not _MODULE_OVERRIDES:
         return event_dict
 
     module = str(event_dict.get("module", ""))
     level_name = str(event_dict.get("level", "")).upper()
     event_level = logging._nameToLevel.get(level_name, logging.INFO)
 
-    for prefix in sorted(_LEVEL_OVERRIDES.keys(), key=len, reverse=True):
+    for prefix in sorted(_MODULE_OVERRIDES.keys(), key=len, reverse=True):
         if module == prefix or module.startswith(prefix + ".") or module.startswith(prefix):
-            if event_level < _LEVEL_OVERRIDES[prefix]:
+            if event_level < _MODULE_OVERRIDES[prefix]:
                 raise structlog.DropEvent()
             break
     return event_dict
@@ -257,7 +333,6 @@ def _emit_to_file_sinks(logger, method_name, event_dict):
     for min_level, handler, renderer, include_pfx, exclude_pfxs in list(_FILE_SINKS):
         if event_level < min_level:
             continue
-        # Prefix-based routing filters
         if include_pfx is not None and not module.startswith(include_pfx):
             continue
         if exclude_pfxs is not None and any(module.startswith(p) for p in exclude_pfxs):
@@ -302,56 +377,91 @@ def _strip_exception_for_console(logger, method_name, event_dict):
     return event_dict
 
 
+# ---------------------------------------------------------------------------
+# Logger — public API
+# ---------------------------------------------------------------------------
+
+
 class Logger:
-    """Central logging facility for Hiro."""
+    """Central logging facility for Hiro.
 
-    _DEFAULT_LEVEL = "INFO"
-    _configured: bool = False
-    _LEVELS: Mapping[str, int] = {
-        name: level for name, level in logging._nameToLevel.items()
-    }
+    Usage::
+
+        Logger.set_level("DEBUG")        # 1. set level (idempotent)
+        Logger.setup(console=True)       # 2. wire pipeline (one-time)
+        Logger.open_log_dir(log_dir)     # 3. open file sinks (idempotent)
+
+    ``Logger.get("MODULE")`` returns a lazy proxy and can be called at
+    module level before any of the above — the proxy resolves on first
+    actual log call, using whatever configuration is active at that point.
+    """
+
+    _level: int = logging.INFO
+    _setup_done: bool = False
+
+    # -- Level ---------------------------------------------------------------
 
     @classmethod
-    def _determine_level(cls, level: str | int | None):
-        if level is None:
-            return cls._LEVELS.get(cls._DEFAULT_LEVEL, logging.INFO)
-        if isinstance(level, int):
-            return level
-        return cls._LEVELS.get(str(level).upper(), logging.INFO)
+    def set_level(cls, level: str | int) -> None:
+        """Set the global log level.  Idempotent; last call wins.
+
+        Call *before* ``setup()`` for guaranteed correctness.  If called
+        after ``setup()``, file sink thresholds are updated immediately.
+        """
+        cls._level = _resolve_level(level)
+        if cls._setup_done:
+            global _FILE_SINKS
+            _FILE_SINKS = [
+                (cls._level, handler, renderer, inc, exc)
+                for (_, handler, renderer, inc, exc) in _FILE_SINKS
+            ]
+            for entry in _FILE_SINKS:
+                entry[1].setLevel(cls._level)
 
     @classmethod
-    def configure(
-        cls,
-        *,
-        level: str | int | None = None,
-        json: bool = False,
-        enabled: bool = True,
-        console: bool = True,
-    ):
-        """One-time global logger configuration."""
-        if cls._configured:
+    def set_module_levels(cls, overrides: dict[str, str]) -> None:
+        """Per-module level overrides (e.g. ``{"AGENT": "DEBUG"}``).
+
+        Modules matching a prefix are held to the specified minimum level,
+        independent of the global level.
+        """
+        for name, level_str in overrides.items():
+            _MODULE_OVERRIDES[name] = _resolve_level(level_str)
+
+    # -- Pipeline setup ------------------------------------------------------
+
+    @classmethod
+    def setup(cls, *, console: bool = True, json: bool = False) -> None:
+        """One-time processor pipeline setup.
+
+        Reads the current ``_level`` (set via ``set_level``).  Safe to call
+        multiple times — second and subsequent calls are no-ops.
+        """
+        if cls._setup_done:
             return
 
-        numeric_level = cls._determine_level(level)
-        if not enabled:
-            numeric_level = logging.CRITICAL + 1
-
+        # The stdlib root logger stays at WARNING so third-party
+        # DEBUG/INFO chatter is suppressed at the source.  A catch-all
+        # bridge re-emits WARNING+ through structlog with proper
+        # formatting and file-sink routing.  The default stdout handler
+        # is removed — only our structlog pipeline writes to the console.
         logging.basicConfig(
-            level=numeric_level,
+            level=logging.WARNING,
             format="%(message)s",
             stream=sys.stdout,
             force=True,
         )
+        root = logging.getLogger()
+        for h in root.handlers[:]:
+            root.removeHandler(h)
+        root.addHandler(_StdlibCatchAll(level=logging.WARNING))
 
         def _add_module(logger, method_name, event_dict):
-            if logger and getattr(logger, "name", None):
+            if "module" not in event_dict and logger and getattr(logger, "name", None):
                 event_dict["module"] = logger.name
             return event_dict
 
         processors = [
-            # Raw epoch float (UTC) for sub-second sort precision across all logs.
-            # structlog requires utc=True when fmt=None.
-            # Renderers convert to local time for display.
             structlog.processors.TimeStamper(fmt=None, utc=True, key="ts"),
             structlog.processors.add_log_level,
             _add_module,
@@ -371,47 +481,38 @@ class Logger:
 
         structlog.configure(
             processors=processors,
-            wrapper_class=structlog.make_filtering_bound_logger(numeric_level),
+            wrapper_class=structlog.make_filtering_bound_logger(cls._level),
             context_class=dict,
             cache_logger_on_first_use=True,
         )
-        cls._configured = True
+        cls._setup_done = True
+
+    # -- Logger retrieval ----------------------------------------------------
 
     @classmethod
     def get(cls, name: str | None = None):
-        """Return a bound logger, auto-configuring with defaults if needed."""
-        if not cls._configured:
-            cls.configure()
+        """Return a structlog lazy proxy.
+
+        Safe to call at module level before ``setup()``.  The proxy
+        resolves on the first actual log call, using whatever configuration
+        is active at that point.
+        """
         if name is None:
             return structlog.get_logger()
-        return structlog.get_logger(name).bind(module=name)
+        # Pass module as a keyword initial value — NOT .bind() — so the
+        # proxy stays lazy until the first real log call.  .bind() eagerly
+        # resolves the proxy, which would lock in the DEFAULT structlog
+        # config when get() is called at module-import time (before setup).
+        return structlog.get_logger(module=name)
 
-    @classmethod
-    def apply_level_overrides(cls, overrides: dict[str, str]) -> None:
-        """Apply per-logger level overrides."""
-        for name, level_str in overrides.items():
-            _LEVEL_OVERRIDES[name] = cls._determine_level(level_str)
-
-    @classmethod
-    def set_level(cls, name: str, level: str | int):
-        logging.getLogger(name).setLevel(cls._determine_level(level))
-
-    @classmethod
-    def disable(cls):
-        logging.disable(logging.CRITICAL)
-
-    @classmethod
-    def enable(cls, level: str | int | None = None):
-        logging.disable(logging.NOTSET)
-        if level is not None:
-            cls.set_level("", level)
+    # -- File sinks ----------------------------------------------------------
 
     @classmethod
     def add_file_sink(
         cls,
         path: str,
         *,
-        level: str | int = "ERROR",
+        level: str | int | None = None,
         rotate: bool = True,
         mode: str = "a",
         max_bytes: int = LOG_ROTATION_MAX_BYTES,
@@ -421,19 +522,12 @@ class Logger:
         include_prefix: str | None = None,
         exclude_prefix: str | tuple[str, ...] | None = None,
     ) -> logging.Handler:
-        """Mirror log events at or above *level* into a file.
+        """Mirror log events into a file.
 
-        use_csv=True writes CSV rows (timestamp,level,module,message,extra).
-        A header line is written when a new file is created (not when appending).
-        use_json takes precedence over use_csv if both are set.
-
-        include_prefix / exclude_prefix control module-based routing:
-        - include_prefix="CLI." → only CLI.* events reach this sink.
-        - exclude_prefix=("CLI.",) → CLI.* events are skipped.
+        *level* defaults to the global level set by ``set_level()``.
+        Pass an explicit level only for sinks that should be MORE
+        restrictive (e.g. an error-only file).
         """
-        if not cls._configured:
-            cls.configure()
-
         import os
 
         directory = os.path.dirname(path)
@@ -442,7 +536,7 @@ class Logger:
 
         is_new_file = mode == "w" or not os.path.exists(path)
 
-        min_level = cls._determine_level(level)
+        min_level = _resolve_level(level) if level is not None else cls._level
         if rotate:
             handler: logging.Handler = logging.handlers.RotatingFileHandler(
                 path,
@@ -470,41 +564,32 @@ class Logger:
         else:
             renderer = _PlainRenderer()
 
-        # Normalise exclude_prefix to a tuple (or None).
         if isinstance(exclude_prefix, str):
             exclude_prefix = (exclude_prefix,)
 
         _FILE_SINKS.append((min_level, handler, renderer, include_prefix, exclude_prefix))
-        logging.getLogger().addHandler(handler)
+        # File sink handlers are NOT attached to the stdlib root logger.
+        # _emit_to_file_sinks calls handler.handle() directly from the
+        # structlog pipeline, keeping third-party stdlib noise out of our
+        # CSV log files.
         return handler
 
     @classmethod
     def remove_file_sink(cls, handler: logging.Handler):
-        try:
-            logging.getLogger().removeHandler(handler)
-        except Exception:
-            pass
         global _FILE_SINKS
         _FILE_SINKS = [entry for entry in _FILE_SINKS if entry[1] is not handler]
 
-    # Tracks the log directory opened by open_log_dir for idempotency.
     _log_dir: Path | None = None
 
     @classmethod
-    def open_log_dir(cls, log_dir: Path, *, level: str | int = "INFO") -> None:
+    def open_log_dir(cls, log_dir: Path) -> None:
         """Open routed file sinks for a workspace log directory (idempotent).
 
         Creates two CSV sinks with module-prefix routing:
         - ``server.log``  — all events *except* ``CLI.*`` modules.
         - ``cli.log``     — only ``CLI.*`` modules.
 
-        Channel plugins run in separate processes and create their own
-        ``channel-<name>.log`` via ``log_setup.init()`` — no routing
-        needed here.
-
-        Safe to call from both the CLI callback (``commands/app.py``) and
-        the server startup path (``runtime/server_process.py``). The second
-        call with the same *log_dir* is a no-op.
+        Both sinks inherit the global level from ``set_level()``.
         """
         log_dir = Path(log_dir)
         if cls._log_dir == log_dir:
@@ -514,16 +599,16 @@ class Logger:
 
         cls.add_file_sink(
             str(log_dir / "server.log"),
-            level=level,
             use_csv=True,
             exclude_prefix=("CLI.",),
         )
         cls.add_file_sink(
             str(log_dir / "cli.log"),
-            level=level,
             use_csv=True,
             include_prefix="CLI.",
         )
+
+    # -- Stdlib bridging -----------------------------------------------------
 
     @classmethod
     def silence_stdlib(
@@ -542,13 +627,23 @@ class Logger:
         Propagation is disabled to prevent bare-text duplicates on the
         root logger.
         """
-        if not cls._configured:
-            cls.configure()
-        numeric = cls._determine_level(level)
+        numeric = _resolve_level(level)
         stdlib_logger = logging.getLogger(logger_name)
         stdlib_logger.setLevel(numeric)
         stdlib_logger.addHandler(_StdlibBridge(module, numeric))
         stdlib_logger.propagate = False
+
+    # -- On/off --------------------------------------------------------------
+
+    @classmethod
+    def disable(cls):
+        logging.disable(logging.CRITICAL)
+
+    @classmethod
+    def enable(cls):
+        logging.disable(logging.NOTSET)
+
+    # -- Indentation helpers -------------------------------------------------
 
     @classmethod
     def set_indent_unit(cls, unit: str):
@@ -573,8 +668,13 @@ class Logger:
             _INDENT_LEVEL.reset(token)
 
 
-configure = Logger.configure
+# ---------------------------------------------------------------------------
+# Module-level convenience aliases
+# ---------------------------------------------------------------------------
+
+setup = Logger.setup
 get_logger = Logger.get
 set_level = Logger.set_level
+set_module_levels = Logger.set_module_levels
 disable = Logger.disable
 enable = Logger.enable

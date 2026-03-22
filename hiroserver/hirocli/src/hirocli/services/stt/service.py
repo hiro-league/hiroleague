@@ -68,7 +68,7 @@ class STTService:
                 self._model_to_provider[model_info.model_id] = provider
                 self._models.append(model_info)
             log.info(
-                f"STT provider loaded: {provider.name}",                
+                f"✅ STT provider loaded: {provider.name}",                
                 models=[m.model_id for m in provider.supported_models()],
             )
 
@@ -106,6 +106,7 @@ class STTService:
         source: str,
         *,
         model: str | None = None,
+        mime_type: str = "audio/mp4",
         **kwargs: object,
     ) -> str:
         """Transcribe audio and return the transcript text.
@@ -118,8 +119,12 @@ class STTService:
         ``model`` selects a specific model (must be one from list_models()).
         When omitted, the default model is used.
 
+        ``mime_type`` declares the audio format (e.g. ``"audio/mp4"``,
+        ``"audio/webm"``). Forwarded to the provider so it can inform the
+        upstream API about the actual encoding.
+
         Extra keyword arguments are forwarded to the provider (e.g. ``language``,
-        ``prompt``, ``temperature`` for OpenAI; ``mime_type`` for Gemini).
+        ``prompt``, ``temperature`` for OpenAI).
         """
         if not source:
             raise ValueError("Audio source is empty")
@@ -139,8 +144,25 @@ class STTService:
                 f"Available: {available}"
             )
 
+        log.info(
+            "Transcribe request",
+            model=effective_model,
+            provider=provider.name,
+            mime_type=mime_type,
+            source_len=len(source),
+        )
         audio_bytes = _resolve_audio_bytes(source)
-        return await provider.transcribe(audio_bytes, model=effective_model, **kwargs)
+        log.debug("Audio bytes resolved", byte_count=len(audio_bytes))
+        transcript = await provider.transcribe(
+            audio_bytes, model=effective_model, mime_type=mime_type, **kwargs,
+        )
+        log.info(
+            "Transcribe result",
+            model=effective_model,
+            transcript_len=len(transcript),
+            is_empty=not transcript.strip(),
+        )
+        return transcript
 
     def transcribe_sync(self, source: str, **kwargs: object) -> str:
         """Synchronous wrapper — safe to call from a tool or non-async context.
@@ -166,4 +188,10 @@ def _resolve_audio_bytes(source: str) -> bytes:
         import urllib.request
         with urllib.request.urlopen(source, timeout=30) as resp:  # noqa: S310
             return resp.read()
-    return base64.b64decode(source)
+    try:
+        return base64.b64decode(source)
+    except Exception as exc:
+        raise ValueError(
+            f"Audio source is not a valid data URI, URL, or base64 string "
+            f"(got {len(source)} chars, starts with {source[:40]!r})"
+        ) from exc

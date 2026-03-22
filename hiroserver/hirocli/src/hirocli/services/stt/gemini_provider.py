@@ -85,7 +85,7 @@ class GeminiSTTProvider(STTProvider):
         audio_bytes: bytes,
         *,
         model: str | None = None,
-        mime_type: str = "audio/wav",
+        mime_type: str = "audio/mp4",
         prompt: str | None = None,
         **kwargs: object,
     ) -> str:
@@ -95,8 +95,8 @@ class GeminiSTTProvider(STTProvider):
             audio_bytes: Raw audio data.
             model:       One of the model_ids from supported_models(). Defaults to
                          gemini-3.1-flash-lite.
-            mime_type:   MIME type hint for the audio data (e.g. "audio/mp3",
-                         "audio/wav", "audio/webm"). Defaults to "audio/wav".
+            mime_type:   MIME type of the audio data (e.g. "audio/mp4",
+                         "audio/webm"). Passed to Gemini's Part.from_bytes().
             prompt:      Custom transcription instruction. Defaults to the built-in
                          verbatim transcription prompt.
         """
@@ -109,7 +109,12 @@ class GeminiSTTProvider(STTProvider):
 
         client = genai.Client(api_key=_api_key())
 
-        log.info("Transcribing via Gemini", model=effective_model, bytes=len(audio_bytes))
+        log.info(
+            "Transcribing via Gemini",
+            model=effective_model,
+            mime_type=mime_type,
+            bytes=len(audio_bytes),
+        )
 
         @retry(
             reraise=True,

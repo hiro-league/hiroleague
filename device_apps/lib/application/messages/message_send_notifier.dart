@@ -127,7 +127,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
       // 3. Build metadata JSON stored in the DB.
       final metadataJson = jsonEncode({
         'duration_ms': recordingResult.durationMs,
-        'mime_type': 'audio/m4a',
+        'mime_type': recordingResult.mimeType,
         'local_path': localPath,
       });
 
@@ -159,7 +159,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
               body: base64Body,
               metadata: {
                 'duration_ms': recordingResult.durationMs,
-                'mime_type': 'audio/m4a',
+                'mime_type': recordingResult.mimeType,
               },
             ),
           ],
