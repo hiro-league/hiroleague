@@ -12,6 +12,7 @@ import '../../application/auth/auth_state.dart';
 import '../../application/gateway/gateway_notifier.dart';
 import '../../data/remote/gateway/gateway_inbound_frame.dart';
 import '../../data/remote/gateway/unified_message.dart';
+import '../../domain/models/message/audio_attachment.dart';
 import '../../domain/models/message/message.dart';
 import '../../domain/models/message/message_content.dart';
 import '../../domain/models/message/message_status.dart';
@@ -177,6 +178,47 @@ class MessageRepositoryImpl implements MessageRepository {
         }
         _log.debug('Message transcribed', fields: {'ref_id': refId});
 
+      case 'message.voiced':
+        // Server generated a voice reply for a text message (text → audio modality mirror).
+        final audioB64 = event.data['audio'] as String?;
+        final mimeType =
+            event.data['mime_type'] as String? ?? 'audio/mp3';
+        final durationMs =
+            (event.data['duration_ms'] as num?)?.toInt() ?? 0;
+
+        if (audioB64 != null && audioB64.isNotEmpty) {
+          try {
+            final bytes = Uint8List.fromList(base64Decode(audioB64));
+            final localPath = await _audioStorage.saveBytes(
+              messageId: refId,
+              bytes: bytes,
+              mimeType: mimeType,
+            );
+
+            final row = await _messagesDao.getById(refId);
+            if (row != null) {
+              final existing = row.metadata != null
+                  ? Map<String, dynamic>.from(
+                      jsonDecode(row.metadata!) as Map)
+                  : <String, dynamic>{};
+              // Nested "voice" object — same keys as audio message metadata.
+              existing['voice'] = {
+                'duration_ms': durationMs,
+                'mime_type': mimeType,
+                'local_path': localPath,
+              };
+              await _messagesDao.updateMetadata(
+                  refId, jsonEncode(existing));
+            }
+          } catch (e) {
+            _log.warning(
+              'Failed to save voice reply audio',
+              fields: {'ref_id': refId, 'error': e.toString()},
+            );
+          }
+        }
+        _log.debug('Message voiced', fields: {'ref_id': refId});
+
       default:
         _log.debug(
           'Ignoring unknown event type',
@@ -207,7 +249,11 @@ class MessageRepositoryImpl implements MessageRepository {
     if (audioItem.body.isNotEmpty) {
       try {
         final bytes = Uint8List.fromList(base64Decode(audioItem.body));
-        localPath = await _audioStorage.saveBytes(messageId: id, bytes: bytes);
+        localPath = await _audioStorage.saveBytes(
+          messageId: id,
+          bytes: bytes,
+          mimeType: audioItem.metadata['mime_type'] as String? ?? 'audio/m4a',
+        );
       } catch (e) {
         _log.warning('Failed to save inbound audio', fields: {'error': e.toString()});
       }
@@ -293,7 +339,7 @@ class MessageRepositoryImpl implements MessageRepository {
 
   Message _rowToMessage(MessageRecord row) {
     final MessageContent content = switch (row.contentType) {
-      'text' => TextContent(row.body),
+      'text' => _parseTextContent(row),
       'audio' => _parseAudioContent(row),
       final other => UnsupportedContent(other),
     };
@@ -309,20 +355,46 @@ class MessageRepositoryImpl implements MessageRepository {
     );
   }
 
+  /// Constructs an [AudioAttachment] from a metadata JSON map.
+  /// Shared by both [_parseAudioContent] and [_parseTextContent] — one
+  /// parser for the same three fields, keeping all JSON logic in data/.
+  static AudioAttachment _audioAttachmentFromMap(Map<String, dynamic> meta) {
+    return AudioAttachment(
+      durationMs: (meta['duration_ms'] as num?)?.toInt() ?? 0,
+      localPath: meta['local_path'] as String?,
+      mimeType: meta['mime_type'] as String? ?? 'audio/m4a',
+    );
+  }
+
+  TextContent _parseTextContent(MessageRecord row) {
+    if (row.metadata == null || row.metadata!.isEmpty) {
+      return TextContent(row.body);
+    }
+    try {
+      final meta = jsonDecode(row.metadata!) as Map<String, dynamic>;
+      final voiceMeta = meta['voice'] as Map<String, dynamic>?;
+      return TextContent(
+        row.body,
+        voiceReply:
+            voiceMeta != null ? _audioAttachmentFromMap(voiceMeta) : null,
+      );
+    } catch (_) {
+      return TextContent(row.body);
+    }
+  }
+
   AudioContent _parseAudioContent(MessageRecord row) {
     if (row.metadata == null || row.metadata!.isEmpty) {
-      return const AudioContent(durationMs: 0);
+      return const AudioContent(audio: AudioAttachment(durationMs: 0));
     }
     try {
       final meta = jsonDecode(row.metadata!) as Map<String, dynamic>;
       return AudioContent(
-        durationMs: (meta['duration_ms'] as num?)?.toInt() ?? 0,
-        localPath: meta['local_path'] as String?,
+        audio: _audioAttachmentFromMap(meta),
         transcript: meta['transcript'] as String?,
-        mimeType: meta['mime_type'] as String? ?? 'audio/m4a',
       );
     } catch (_) {
-      return const AudioContent(durationMs: 0);
+      return const AudioContent(audio: AudioAttachment(durationMs: 0));
     }
   }
 }

@@ -6,6 +6,8 @@ path constants exist — every helper accepts a workspace_path: Path argument.
 Workspace layout:
   <workspace>/
     config.json              ← boot config (this module)
+    preferences.json         ← single source of truth for LLM, voice, and
+                               audio settings (domain/preferences.py)
     state.json               ← runtime state (this module)
     master_key.pem           ← ECDSA private key (domain/crypto.py)
     workspace.db             ← SQLite: agents, devices, channel_plugins,

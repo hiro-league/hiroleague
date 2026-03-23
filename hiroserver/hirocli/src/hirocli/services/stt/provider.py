@@ -21,7 +21,7 @@ class ModelInfo:
     """Metadata for a single STT model offered by a provider.
 
     Attributes:
-        model_id:     Canonical identifier used in API calls and as the STT_DEFAULT_MODEL value.
+        model_id:     Canonical identifier used in API calls and preferences-based default resolution.
         provider:     Provider name (matches STTProvider.name), e.g. "openai", "gemini".
         display_name: Human-readable label for UIs / logs.
     """

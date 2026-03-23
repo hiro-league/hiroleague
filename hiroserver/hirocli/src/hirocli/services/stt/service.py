@@ -22,9 +22,10 @@ Usage
 
 Configuration
 -------------
-    STT_DEFAULT_MODEL   Model ID to use when no model is specified.
-                        Falls back to the first model from the first
-                        available provider if unset.
+    The default STT model is resolved from preferences.json via resolve_llm().
+    Callers that construct STTService pass default_model explicitly;
+    the service itself does not read env vars or config files.
+
     OPENAI_API_KEY      Enables OpenAISTTProvider.
     GOOGLE_API_KEY /
     GEMINI_API_KEY      Enables GeminiSTTProvider.
@@ -34,7 +35,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import os
 from concurrent.futures import ThreadPoolExecutor
 
 from hiro_commons.log import Logger
@@ -72,9 +72,10 @@ class STTService:
                 models=[m.model_id for m in provider.supported_models()],
             )
 
-        env_default = default_model or os.environ.get("STT_DEFAULT_MODEL")
-        if env_default and env_default in self._model_to_provider:
-            self._default_model: str | None = env_default
+        # Default model is passed in by the caller (resolved from preferences.json).
+        # No env var lookup — preferences is the single source of truth.
+        if default_model and default_model in self._model_to_provider:
+            self._default_model: str | None = default_model
         elif self._models:
             self._default_model = self._models[0].model_id
         else:

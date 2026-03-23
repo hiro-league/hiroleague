@@ -1,8 +1,8 @@
 """Agents page — view agent configuration, registered tools, and coming-soon sections.
 
 Implemented sections:
-  - Configuration: provider, model, temperature, max_tokens, system prompt (read-only).
-    Source: load_agent_config() and load_system_prompt() from the workspace DB.
+  - Configuration: provider, model, temperature, max_tokens from preferences.json
+    (single source of truth for LLM selection) and system prompt from workspace DB.
   - Registered tools: expandable list of all tools the agent can invoke, with their
     description and parameter schemas. Source: all_tools().
 
@@ -31,7 +31,8 @@ _PLACEHOLDERS = [
 
 @ui.page("/agents")
 async def agents_page() -> None:
-    from hirocli.domain.agent_config import load_agent_config, load_system_prompt
+    from hirocli.domain.agent_config import load_system_prompt
+    from hirocli.domain.preferences import load_preferences, resolve_llm
     from hirocli.domain.workspace import resolve_workspace
     from hirocli.tools import all_tools
     from hirocli.ui.app import create_page_layout
@@ -47,12 +48,13 @@ async def agents_page() -> None:
             return
 
         error: str | None = None
-        agent_cfg = None
+        llm_entry = None
         system_prompt = ""
         try:
             entry, _ = resolve_workspace(ws_name)
             ws_path = Path(entry.path)
-            agent_cfg = load_agent_config(ws_path)
+            prefs = load_preferences(ws_path)
+            llm_entry = resolve_llm(prefs, "chat")
             system_prompt = load_system_prompt(ws_path)
         except Exception as exc:
             error = str(exc)
@@ -63,11 +65,14 @@ async def agents_page() -> None:
 
         with ui.card().classes("w-full"):
             ui.label("Configuration").classes("text-base font-semibold mb-3")
-            with ui.grid(columns=2).classes("gap-x-6 gap-y-1 w-full max-w-lg"):
-                _config_row("Provider", agent_cfg.provider)
-                _config_row("Model", agent_cfg.model)
-                _config_row("Temperature", str(agent_cfg.temperature))
-                _config_row("Max tokens", str(agent_cfg.max_tokens))
+            if llm_entry:
+                with ui.grid(columns=2).classes("gap-x-6 gap-y-1 w-full max-w-lg"):
+                    _config_row("Provider", llm_entry.provider)
+                    _config_row("Model", llm_entry.model)
+                    _config_row("Temperature", str(llm_entry.temperature))
+                    _config_row("Max tokens", str(llm_entry.max_tokens))
+            else:
+                ui.label("No chat LLM configured in preferences.json").classes("text-warning")
 
             ui.separator().classes("my-3")
             ui.label("System prompt").classes("text-sm font-medium opacity-70 mb-1")

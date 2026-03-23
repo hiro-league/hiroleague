@@ -51,12 +51,8 @@ _DDL = [
         id            TEXT PRIMARY KEY,
         name          TEXT NOT NULL UNIQUE,
         is_default    INTEGER NOT NULL DEFAULT 0,
-        provider      TEXT NOT NULL,
-        model         TEXT NOT NULL,
-        temperature   REAL NOT NULL DEFAULT 0.7,
-        max_tokens    INTEGER NOT NULL DEFAULT 1024,
         system_prompt TEXT NOT NULL DEFAULT '',
-        created_at    TEXT NOT NULL
+        created_at    TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -107,13 +103,10 @@ _DDL = [
 # ---------------------------------------------------------------------------
 
 _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
-    # agents
+    # agents — LLM fields (provider, model, temperature, max_tokens) removed;
+    # they live in preferences.json LLMEntry now.
     ("agents", "name",          "TEXT NOT NULL DEFAULT ''"),
     ("agents", "is_default",    "INTEGER NOT NULL DEFAULT 0"),
-    ("agents", "provider",      "TEXT NOT NULL DEFAULT 'openai'"),
-    ("agents", "model",         "TEXT NOT NULL DEFAULT 'gpt-4.1-mini'"),
-    ("agents", "temperature",   "REAL NOT NULL DEFAULT 0.7"),
-    ("agents", "max_tokens",    "INTEGER NOT NULL DEFAULT 1024"),
     ("agents", "system_prompt", "TEXT NOT NULL DEFAULT ''"),
     ("agents", "created_at",    "TEXT NOT NULL DEFAULT ''"),
     # conversation_channels

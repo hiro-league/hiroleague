@@ -52,18 +52,27 @@ class AudioStorageService {
   Future<String> saveBytes({
     required String messageId,
     required Uint8List bytes,
+    String mimeType = 'audio/m4a',
   }) async {
     if (kIsWeb) {
-      // On web, create a data URI for immediate playback (no persistent storage).
       final b64 = base64Encode(bytes);
-      return 'data:audio/m4a;base64,$b64';
+      return 'data:$mimeType;base64,$b64';
     }
 
+    final ext = _extensionForMime(mimeType);
     final dir = await _audioDir();
-    final file = File('${dir.path}/$messageId.m4a');
+    final file = File('${dir.path}/$messageId$ext');
     await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }
+
+  static String _extensionForMime(String mimeType) => switch (mimeType) {
+        'audio/mp3' || 'audio/mpeg' => '.mp3',
+        'audio/ogg' || 'audio/opus' => '.ogg',
+        'audio/webm' => '.webm',
+        'audio/wav' => '.wav',
+        _ => '.m4a',
+      };
 
   /// Returns the bytes of a stored audio file.
   ///

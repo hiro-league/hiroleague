@@ -19,7 +19,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hiro_commons.log import Logger
+
 from .base import Tool, ToolParam
+
+log = Logger.get("LOG_TOOLS")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -72,7 +76,8 @@ def _resolve_gateway_log_dir() -> Path | None:
         instance_path = Path(entry.path)
         config = gw_load_config(instance_path)
         return gw_resolve_log_dir(instance_path, config)
-    except Exception:
+    except Exception as exc:
+        log.warning("Failed to resolve gateway log dir", error=str(exc))
         return None
 
 

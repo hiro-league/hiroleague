@@ -48,7 +48,7 @@ class TranscribeTool(Tool):
         ),
         "model": ToolParam(
             type_=str,
-            description="STT model to use (optional — defaults to STT_DEFAULT_MODEL or first available)",
+            description="STT model to use (optional — defaults to the model configured in preferences)",
             required=False,
         ),
     }

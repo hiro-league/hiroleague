@@ -38,6 +38,7 @@ from hirocli.runtime.adapters.audio_adapter import AudioTranscriptionAdapter
 from hirocli.runtime.adapters.image_adapter import ImageUnderstandingAdapter
 from hirocli.services.metrics import MetricsCollector
 from hirocli.services.stt import GeminiSTTProvider, OpenAISTTProvider, STTService
+from hirocli.services.tts import GeminiTTSProvider, OpenAITTSProvider, TTSService
 from hirocli.services.vision_service import VisionService
 from hirocli.tools import all_tools
 from hirocli.tools.registry import ToolRegistry
@@ -49,15 +50,84 @@ log = Logger.get("SERVER")
 # Setup helpers — each creates one logical subsystem and returns it.
 # ---------------------------------------------------------------------------
 
+# Maps preference provider names to STT provider constructors.
+_STT_PROVIDER_MAP: dict[str, type] = {
+    "openai": OpenAISTTProvider,
+    "google_genai": GeminiSTTProvider,
+    "gemini": GeminiSTTProvider,
+}
 
-def _create_adapter_pipeline() -> MessageAdapterPipeline:
+
+def _stt_providers_for(provider_name: str | None) -> list:
+    """Return STT provider instances for the given preference provider name.
+
+    If provider_name is None (no STT configured), returns an empty list
+    so STTService starts with transcription disabled.
+    """
+    if provider_name is None:
+        return []
+    cls = _STT_PROVIDER_MAP.get(provider_name)
+    if cls is None:
+        log.warning("Unknown STT provider in preferences, loading none", provider=provider_name)
+        return []
+    return [cls()]
+
+
+_TTS_PROVIDER_MAP: dict[str, type] = {
+    "openai": OpenAITTSProvider,
+    "google_genai": GeminiTTSProvider,
+    "gemini": GeminiTTSProvider,
+}
+
+
+def _tts_providers_for(provider_name: str | None) -> list:
+    """Return TTS provider instances for the given preference provider name.
+
+    If provider_name is None (no TTS voice configured), returns an empty list
+    so TTSService starts with synthesis disabled.
+    """
+    if provider_name is None:
+        return []
+    cls = _TTS_PROVIDER_MAP.get(provider_name)
+    if cls is None:
+        log.warning("Unknown TTS provider in preferences, loading none", provider=provider_name)
+        return []
+    return [cls()]
+
+
+def _create_tts_service(workspace_path: Path) -> TTSService | None:
+    """Create a TTSService from workspace preferences, or None if TTS is disabled."""
+    from hirocli.domain.preferences import load_preferences, resolve_voice
+
+    prefs = load_preferences(workspace_path)
+    if not prefs.audio.agent_replies_in_voice:
+        log.info("TTS disabled in preferences (agent_replies_in_voice=false)")
+        return None
+    voice = resolve_voice(prefs)
+    if not voice:
+        log.warning("TTS enabled but no voice configured — TTS disabled")
+        return None
+    providers = _tts_providers_for(voice.provider)
+    return TTSService(providers=providers, default_model=voice.model)
+
+
+def _create_adapter_pipeline(workspace_path: Path) -> MessageAdapterPipeline:
     """Create the media services and message adapter pipeline."""
+    from hirocli.domain.preferences import load_preferences, resolve_llm
+
     log.info("🕒 Loading Media Services")
     log.info("➡️ Loading Speech to Text Services")
-    stt_service = STTService(providers=[
-        OpenAISTTProvider(),
-        GeminiSTTProvider(),
-    ])
+
+    # Only load STT providers that match what's configured in preferences.
+    prefs = load_preferences(workspace_path)
+    stt_llm = resolve_llm(prefs, "stt")
+    stt_default = stt_llm.model if stt_llm else None
+    stt_providers = _stt_providers_for(stt_llm.provider if stt_llm else None)
+
+    stt_service = STTService(
+        providers=stt_providers,
+        default_model=stt_default,
+    )
     log.info("➡️ Loading Vision Services")
     vision_service = VisionService()
 
@@ -124,19 +194,27 @@ def _register_signal_handlers(stop_event: asyncio.Event) -> None:
 
 
 def _log_agent_config(workspace_path: Path) -> None:
-    """Best-effort log of the agent model configuration."""
+    """Log the agent model configuration from preferences."""
     try:
-        from hirocli.domain.agent_config import load_agent_config
-        cfg = load_agent_config(workspace_path)
-        log.info(
-            "✅ AI Agent config loaded",
-            model=cfg.model,
-            provider=cfg.provider,
-            temperature=cfg.temperature,
-            max_tokens=cfg.max_tokens,
-        )
-    except Exception:
-        log.info("AI Agent config loaded (using defaults)")
+        from hirocli.domain.preferences import load_preferences, resolve_llm
+        prefs = load_preferences(workspace_path)
+        llm = resolve_llm(prefs, "chat")
+        if llm:
+            log.info(
+                "✅ AI Agent config loaded from preferences",
+                model=llm.model,
+                provider=llm.provider,
+                temperature=llm.temperature,
+                max_tokens=llm.max_tokens,
+            )
+        else:
+            log.error(
+                "⚠️  No chat LLM configured. The server will run but the agent "
+                "cannot process messages. Register at least one LLM in "
+                "preferences.json (in your workspace directory)."
+            )
+    except Exception as exc:
+        log.error("Failed to load agent config from preferences", error=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +287,7 @@ async def _main(
         interval=config.metrics_interval,
     )
 
-    adapter_pipeline = _create_adapter_pipeline()
+    adapter_pipeline = _create_adapter_pipeline(workspace_path)
     comm_manager = _create_communication_stack(adapter_pipeline, workspace_path)
     channel_manager = _create_channel_stack(
         config, workspace_path, stop_event, desktop_private_key, comm_manager,
@@ -217,7 +295,9 @@ async def _main(
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
-    agent_manager = AgentManager(comm_manager, workspace_path)
+    log.info("➡️ Loading Text to Speech Services")
+    tts_service = _create_tts_service(workspace_path)
+    agent_manager = AgentManager(comm_manager, workspace_path, tts_service=tts_service)
     _log_agent_config(workspace_path)
     _register_signal_handlers(stop_event)
 

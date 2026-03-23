@@ -60,8 +60,10 @@ MESSAGE_TYPE_STREAM: str = "stream"      # reserved — streaming chunks
 # Event types — type values used in EventPayload
 # ---------------------------------------------------------------------------
 
-EVENT_TYPE_MESSAGE_RECEIVED: str = "message.received"      # server acknowledged receipt of a message
-EVENT_TYPE_MESSAGE_TRANSCRIBED: str = "message.transcribed"  # transcript is ready for a voice message
+EVENT_TYPE_MESSAGE_RECEIVED: str = "message.received"          # server acknowledged receipt of a message
+EVENT_TYPE_MESSAGE_TRANSCRIBED: str = "message.transcribed"    # transcript is ready for a voice message (audio → text modality mirror)
+EVENT_TYPE_MESSAGE_VOICED: str = "message.voiced"              # spoken audio of a text reply (text → audio modality mirror)
+EVENT_TYPE_MESSAGE_CONTENT_ADDED: str = "message.content_added"  # new supplementary content attached to a message (photos, docs, etc.)
 
 # ---------------------------------------------------------------------------
 # Message content types — content_type values used in ContentItem

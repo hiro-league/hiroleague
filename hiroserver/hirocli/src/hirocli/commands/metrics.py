@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -28,7 +29,8 @@ from ..domain.config import load_config
 def _api_url(workspace: str | None, path: str) -> str:
     """Build a full HTTP URL for a metrics endpoint."""
     entry, _ = resolve_workspace(workspace)
-    config = load_config(entry.path)
+    # entry.path is str; load_config expects Path
+    config = load_config(Path(entry.path))
     return f"http://127.0.0.1:{config.http_port}{path}"
 
 

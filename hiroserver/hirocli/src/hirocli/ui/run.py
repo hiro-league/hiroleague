@@ -47,8 +47,8 @@ async def run_admin_ui(
                 _gw_instance_path = Path(_gw_entry.path)
                 _gw_config = _load_gw_config(_gw_instance_path)
                 state.gateway_log_dir = _gw_resolve_log_dir(_gw_instance_path, _gw_config)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Failed to resolve gateway log dir for admin UI", error=str(exc))
 
     # Resolve the workspace id and name so pages can identify the current workspace.
     if workspace_path is not None:

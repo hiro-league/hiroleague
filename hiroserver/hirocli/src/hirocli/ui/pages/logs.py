@@ -206,7 +206,13 @@ def logs_page() -> None:
             return
 
         log_dir = state.log_dir
+        # state.gateway_log_dir is set once at startup in run_admin_ui; fall back
+        # to dynamic resolution so gateway logs still appear if the startup
+        # resolution failed silently.
         gw_log_dir = state.gateway_log_dir
+        if gw_log_dir is None:
+            from hirocli.tools.logs import _resolve_gateway_log_dir
+            gw_log_dir = _resolve_gateway_log_dir()
 
         available_channels: list[str] = [
             f.stem.removeprefix("channel-")

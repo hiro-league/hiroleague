@@ -63,6 +63,11 @@ abstract final class AppStrings {
 
   // Chat — audio bubble
   static const String transcriptLabel = 'Transcript';
+  static const String viewMessage = 'View message';
+
+  // Settings — voice replies
+  static const String voiceRepliesTitle = 'Voice replies';
+  static const String voiceRepliesSubtitle = 'Agent responds with voice audio';
 
   // Chat — unsupported content
   static const String unsupportedContent = 'Unsupported content';

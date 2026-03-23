@@ -1,3 +1,4 @@
+import 'audio_attachment.dart';
 import 'message_type.dart';
 
 /// Sealed hierarchy of message content variants.
@@ -9,9 +10,14 @@ sealed class MessageContent {
 }
 
 final class TextContent extends MessageContent {
-  const TextContent(this.text);
+  const TextContent(this.text, {this.voiceReply});
 
   final String text;
+
+  /// Voice reply attached after receiving a message.voiced event from the server.
+  final AudioAttachment? voiceReply;
+
+  bool get hasVoice => voiceReply != null;
 
   @override
   MessageType get type => MessageType.text;
@@ -19,37 +25,15 @@ final class TextContent extends MessageContent {
 
 final class AudioContent extends MessageContent {
   const AudioContent({
-    required this.durationMs,
-    this.localPath,
+    required this.audio,
     this.transcript,
-    this.mimeType = 'audio/m4a',
   });
 
-  /// Duration of the audio recording in milliseconds.
-  final int durationMs;
-
-  /// Platform-specific playback source: file path on mobile, blob URL on web.
-  /// Null for inbound messages still being saved.
-  final String? localPath;
+  /// Audio data (duration, local path, MIME type).
+  final AudioAttachment audio;
 
   /// Transcript set after receiving a message.transcribed event from the server.
   final String? transcript;
-
-  final String mimeType;
-
-  AudioContent copyWithTranscript(String transcript) => AudioContent(
-        durationMs: durationMs,
-        localPath: localPath,
-        transcript: transcript,
-        mimeType: mimeType,
-      );
-
-  AudioContent copyWithLocalPath(String localPath) => AudioContent(
-        durationMs: durationMs,
-        localPath: localPath,
-        transcript: transcript,
-        mimeType: mimeType,
-      );
 
   @override
   MessageType get type => MessageType.voice;

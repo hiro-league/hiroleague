@@ -13,6 +13,14 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text(AppStrings.navSettings)),
       body: ListView(
         children: [
+          const SwitchListTile(
+            secondary: Icon(Icons.record_voice_over_rounded),
+            title: Text(AppStrings.voiceRepliesTitle),
+            subtitle: Text(AppStrings.voiceRepliesSubtitle),
+            value: false,
+            onChanged: null,
+          ),
+          const Divider(height: 1),
           _DisconnectTile(ref: ref),
         ],
       ),

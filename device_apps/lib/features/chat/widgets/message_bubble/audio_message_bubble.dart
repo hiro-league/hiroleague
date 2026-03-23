@@ -3,36 +3,43 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../../../application/audio/active_audio_notifier.dart';
-import '../../../../core/constants/app_strings.dart';
 import '../../../../core/ui/theme/app_text_styles.dart';
 import '../../../../core/utils/message_formatters.dart';
+import '../../../../domain/models/message/audio_attachment.dart';
 import '../../../../domain/models/message/message.dart';
-import '../../../../domain/models/message/message_content.dart';
 import '../../../../domain/models/message/message_status.dart';
 import 'delivery_indicator.dart';
 
-class AudioBubble extends ConsumerStatefulWidget {
-  const AudioBubble({
+/// Unified audio message bubble used for both user voice recordings
+/// (with optional expandable transcript) and bot voiced text replies
+/// (with optional expandable message text). One widget, parameterized.
+class AudioMessageBubble extends ConsumerStatefulWidget {
+  const AudioMessageBubble({
     super.key,
     required this.message,
-    required this.content,
+    required this.audio,
+    this.expandableText,
+    this.expandableLabel = '',
   });
 
   final Message message;
-  final AudioContent content;
+  final AudioAttachment audio;
+  final String? expandableText;
+  final String expandableLabel;
 
   @override
-  ConsumerState<AudioBubble> createState() => _AudioBubbleState();
+  ConsumerState<AudioMessageBubble> createState() =>
+      _AudioMessageBubbleState();
 }
 
-class _AudioBubbleState extends ConsumerState<AudioBubble>
+class _AudioMessageBubbleState extends ConsumerState<AudioMessageBubble>
     with WidgetsBindingObserver {
   late final AudioPlayer _player;
   bool _isPlaying = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   double _speed = 1.0;
-  bool _transcriptExpanded = false;
+  bool _sectionExpanded = false;
 
   static const _speeds = [0.5, 1.0, 1.5, 2.0];
 
@@ -45,7 +52,7 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
   }
 
   Future<void> _initPlayer() async {
-    final path = widget.content.localPath;
+    final path = widget.audio.localPath;
     if (path == null || path.isEmpty) return;
 
     try {
@@ -72,7 +79,6 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
       if (!mounted) return;
       setState(() => _isPlaying = state.playing);
       if (state.processingState == ProcessingState.completed) {
-        // stop() sets playing=false before the seek, preventing auto-restart
         _player.stop();
         _player.seek(Duration.zero);
         setState(() {
@@ -84,10 +90,10 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
   }
 
   @override
-  void didUpdateWidget(AudioBubble oldWidget) {
+  void didUpdateWidget(AudioMessageBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.content.localPath != widget.content.localPath &&
-        widget.content.localPath != null) {
+    if (oldWidget.audio.localPath != widget.audio.localPath &&
+        widget.audio.localPath != null) {
       _initPlayer();
     }
   }
@@ -96,7 +102,6 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
     if (_isPlaying) {
       await _player.pause();
     } else {
-      // Pause any other playing audio before starting this one.
       ref.read(activeAudioProvider).claim(_player);
       await _player.play();
     }
@@ -144,7 +149,11 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
         ? MessageFormatters.formatDuration(remaining)
         : MessageFormatters.formatDuration(_duration > Duration.zero
             ? _duration
-            : Duration(milliseconds: widget.content.durationMs));
+            : Duration(milliseconds: widget.audio.durationMs));
+
+    final expandText = widget.expandableText;
+    final showExpandable =
+        expandText != null && expandText.isNotEmpty;
 
     return Align(
       alignment: isOut ? Alignment.centerRight : Alignment.centerLeft,
@@ -186,7 +195,7 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
               ],
               _PlayerRow(
                 isPlaying: _isPlaying,
-                hasSource: widget.content.localPath != null,
+                hasSource: widget.audio.isPlayable,
                 contentColor: contentColor,
                 sliderActiveColor: sliderActiveColor,
                 sliderInactiveColor: sliderInactiveColor,
@@ -206,15 +215,15 @@ class _AudioBubbleState extends ConsumerState<AudioBubble>
                 isOutbound: isOut,
                 status: widget.message.status,
               ),
-              if (widget.content.transcript != null &&
-                  widget.content.transcript!.isNotEmpty)
-                _ExpandableTranscript(
-                  transcript: widget.content.transcript!,
-                  isExpanded: _transcriptExpanded,
+              if (showExpandable)
+                _ExpandableSection(
+                  text: expandText,
+                  label: widget.expandableLabel,
+                  isExpanded: _sectionExpanded,
                   metaColor: metaColor,
                   contentColor: contentColor,
-                  onToggle: () => setState(
-                      () => _transcriptExpanded = !_transcriptExpanded),
+                  onToggle: () =>
+                      setState(() => _sectionExpanded = !_sectionExpanded),
                 ),
             ],
           ),
@@ -369,16 +378,20 @@ class _MetaRow extends StatelessWidget {
   }
 }
 
-class _ExpandableTranscript extends StatelessWidget {
-  const _ExpandableTranscript({
-    required this.transcript,
+/// Generic expandable text section — used for both transcript (on audio
+/// messages) and message body (on voiced text messages).
+class _ExpandableSection extends StatelessWidget {
+  const _ExpandableSection({
+    required this.text,
+    required this.label,
     required this.isExpanded,
     required this.metaColor,
     required this.contentColor,
     required this.onToggle,
   });
 
-  final String transcript;
+  final String text;
+  final String label;
   final bool isExpanded;
   final Color metaColor;
   final Color contentColor;
@@ -405,7 +418,7 @@ class _ExpandableTranscript extends StatelessWidget {
               ),
               const SizedBox(width: 2),
               Text(
-                AppStrings.transcriptLabel,
+                label,
                 style: AppTextStyles.messageTimestamp.copyWith(
                   color: metaColor,
                   decoration: TextDecoration.underline,
@@ -422,7 +435,7 @@ class _ExpandableTranscript extends StatelessWidget {
           firstChild: Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              transcript,
+              text,
               style: AppTextStyles.messageBody
                   .copyWith(color: contentColor.withValues(alpha: 0.85)),
             ),

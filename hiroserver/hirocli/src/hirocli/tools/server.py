@@ -41,6 +41,7 @@ from ..domain.channel_config import (
     save_channel_config,
 )
 from ..domain.config import Config, load_config, load_state, master_key_path, resolve_log_dir, save_config
+from ..domain.preferences import load_preferences, save_preferences
 from ..domain.crypto import load_or_create_master_key
 from ..domain.workspace import (
     WorkspaceError,
@@ -277,6 +278,27 @@ def _ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> N
     save_channel_config(workspace_path, channel_cfg)
 
 
+def _ensure_default_preferences(workspace_path: Path) -> None:
+    """Create preferences.json with structural defaults if it doesn't exist yet.
+
+    No LLMs are seeded — the user must register at least one.  If they don't,
+    the server starts but warns clearly that it cannot function without an LLM.
+
+    No voice options are seeded either — consistent with STT, which also requires
+    explicit user configuration.  TTS will log a clear warning if enabled without
+    a voice configured.
+    """
+    from ..domain.preferences import preferences_file
+
+    if preferences_file(workspace_path).exists():
+        return
+
+    # Structural defaults only (accept_voice_from_user, etc.)
+    # No hardcoded LLM entries or voice options — single source of truth means the user decides.
+    prefs = load_preferences(workspace_path)
+    save_preferences(workspace_path, prefs)
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -397,6 +419,7 @@ class SetupTool(Tool):
         private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
         public_key_b64 = public_key_to_b64(private_key.public_key())
         _ensure_mandatory_devices_channel(workspace_path, config)
+        _ensure_default_preferences(workspace_path)
 
         autostart_registered = False
         autostart_method = "skipped"
