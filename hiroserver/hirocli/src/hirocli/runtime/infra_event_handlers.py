@@ -9,15 +9,13 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hiro_commons.attestation import create_device_attestation
 from hiro_commons.log import Logger
 
 from hirocli.constants import DEVICE_ID_PREFIX, DEVICE_ID_SUFFIX_LENGTH
-from hirocli.domain.config import Config, mark_connected, mark_disconnected
+from hirocli.domain.config import mark_connected, mark_disconnected
 from hirocli.domain.pairing import (
     ApprovedDevice,
     clear_pairing_session,
@@ -28,6 +26,7 @@ from hirocli.domain.pairing import (
 if TYPE_CHECKING:
     from hirocli.runtime.channel_event_handler import ChannelEventHandler
     from hirocli.runtime.channel_manager import ChannelManager
+    from hirocli.runtime.server_context import ServerContext
 
 log = Logger.get("INFRA")
 
@@ -35,15 +34,8 @@ log = Logger.get("INFRA")
 class InfraEventHandlers:
     """Handles infrastructure channel events: pairing, gateway connectivity."""
 
-    def __init__(
-        self,
-        workspace_path: Path,
-        config: Config,
-        desktop_private_key: Ed25519PrivateKey,
-    ) -> None:
-        self._workspace_path = workspace_path
-        self._config = config
-        self._desktop_private_key = desktop_private_key
+    def __init__(self, ctx: ServerContext) -> None:
+        self._ctx = ctx
         self._channel_manager: ChannelManager | None = None
 
     def set_channel_manager(self, cm: ChannelManager) -> None:
@@ -78,7 +70,7 @@ class InfraEventHandlers:
             )
             return
 
-        session = load_pairing_session(self._workspace_path)
+        session = load_pairing_session(self._ctx.workspace_path)
         if session is None:
             await self._channel_manager.send_event_to_channel(
                 "devices", "pairing_response",
@@ -95,10 +87,10 @@ class InfraEventHandlers:
 
         device_id = f"{DEVICE_ID_PREFIX}{uuid.uuid4().hex[:DEVICE_ID_SUFFIX_LENGTH]}"
         attestation = create_device_attestation(
-            self._desktop_private_key,
+            self._ctx.desktop_private_key,
             device_id=device_id,
             device_public_key_b64=device_public_key,
-            expires_days=self._config.attestation_expires_days,
+            expires_days=self._ctx.config.attestation_expires_days,
         )
         blob = json.loads(attestation["blob"])
         expires_at_raw = blob.get("expires_at")
@@ -112,7 +104,7 @@ class InfraEventHandlers:
                 expires_at = None
 
         upsert_approved_device(
-            self._workspace_path,
+            self._ctx.workspace_path,
             ApprovedDevice(
                 device_id=device_id,
                 device_public_key=device_public_key,
@@ -122,7 +114,7 @@ class InfraEventHandlers:
                 device_name=device_name,
             ),
         )
-        clear_pairing_session(self._workspace_path)
+        clear_pairing_session(self._ctx.workspace_path)
         await self._channel_manager.send_event_to_channel(
             "devices", "pairing_response",
             {
@@ -134,8 +126,8 @@ class InfraEventHandlers:
         )
 
     async def handle_gateway_connected(self, data: dict[str, Any]) -> None:
-        gateway_url = str(data.get("gateway_url") or self._config.gateway_url)
-        mark_connected(self._workspace_path, gateway_url)
+        gateway_url = str(data.get("gateway_url") or self._ctx.config.gateway_url)
+        mark_connected(self._ctx.workspace_path, gateway_url)
 
     async def handle_gateway_disconnected(self, data: dict[str, Any]) -> None:
-        mark_disconnected(self._workspace_path)
+        mark_disconnected(self._ctx.workspace_path)

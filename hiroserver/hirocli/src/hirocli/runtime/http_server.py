@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -28,44 +28,54 @@ from hiro_commons.log import Logger
 from hiro_commons.process import is_running, read_pid
 from pydantic import BaseModel
 
-from ..domain.config import Config, load_state
+from ..domain.config import load_state
 from ..constants import APP_NAME, PID_FILENAME
 from ..tools.registry import ToolExecutionError, ToolNotFoundError
+
+if TYPE_CHECKING:
+    from .server_context import ServerContext
 
 log = Logger.get("HTTP")
 
 app = FastAPI(title=APP_NAME, version="0.1.0", docs_url=None, redoc_url=None)
 
 # Defaults — overwritten by server_process.py before the server starts.
-app.state.workspace_path = None
-app.state.stop_event = None
+# ctx holds the ServerContext; tool_registry, channel_info_provider, and
+# metrics_collector are runtime services wired separately.
+app.state.ctx = None
 app.state.tool_registry = None
 app.state.channel_info_provider = None
 app.state.metrics_collector = None
-app.state.restart_requested = False
-app.state.restart_admin = False
+
+
+def _ctx(request: Request) -> ServerContext:
+    """Retrieve the ServerContext from app state (convenience for endpoints)."""
+    ctx = request.app.state.ctx
+    assert ctx is not None, "ServerContext not initialised"
+    return ctx
 
 
 def request_shutdown() -> None:
     """Trigger graceful shutdown with a short delay so HTTP responses can flush."""
-    stop_event = app.state.stop_event
-    if stop_event is not None:
-        asyncio.get_running_loop().call_later(0.5, stop_event.set)
+    ctx = app.state.ctx
+    if ctx is not None:
+        asyncio.get_running_loop().call_later(0.5, ctx.stop_event.set)
 
 
 def request_restart(admin: bool = False) -> None:
     """Trigger restart: graceful shutdown + respawn on exit."""
-    app.state.restart_requested = True
-    app.state.restart_admin = admin
+    ctx = app.state.ctx
+    if ctx is not None:
+        ctx.restart_requested = True
+        ctx.restart_admin = admin
     request_shutdown()
 
 
 @app.get("/status")
 async def get_status(request: Request) -> JSONResponse:
-    workspace_path = request.app.state.workspace_path
-    assert workspace_path is not None, "workspace_path not initialised"
-    state = load_state(workspace_path)
-    pid = read_pid(workspace_path, PID_FILENAME)
+    ctx = _ctx(request)
+    state = load_state(ctx.workspace_path)
+    pid = read_pid(ctx.workspace_path, PID_FILENAME)
     return JSONResponse(
         {
             "running": is_running(pid),
@@ -139,7 +149,7 @@ class _RestartBody(BaseModel):
 
 @app.post("/_shutdown")
 async def shutdown_server(request: Request) -> JSONResponse:
-    if request.app.state.stop_event is None:
+    if request.app.state.ctx is None:
         raise HTTPException(status_code=503, detail="Server not initialized")
     request_shutdown()
     return JSONResponse({"status": "shutting_down"})
@@ -147,7 +157,7 @@ async def shutdown_server(request: Request) -> JSONResponse:
 
 @app.post("/_restart")
 async def restart_server(body: _RestartBody, request: Request) -> JSONResponse:
-    if request.app.state.stop_event is None:
+    if request.app.state.ctx is None:
         raise HTTPException(status_code=503, detail="Server not initialized")
     request_restart(admin=body.admin)
     return JSONResponse({"status": "restarting"})
@@ -211,19 +221,19 @@ async def configure_metrics(body: _MetricsConfigureBody, request: Request) -> JS
 # ---------------------------------------------------------------------------
 
 
-async def run_http_server(config: Config, stop_event: asyncio.Event) -> None:
+async def run_http_server(ctx: ServerContext) -> None:
     """Start uvicorn and shut it down when stop_event is set."""
     uv_config = uvicorn.Config(
         app=app,
-        host=config.http_host,
-        port=config.http_port,
+        host=ctx.config.http_host,
+        port=ctx.config.http_port,
         log_level="warning",
         loop="none",
     )
     server = uvicorn.Server(uv_config)
 
     serve_task = asyncio.create_task(server.serve())
-    stop_task = asyncio.create_task(stop_event.wait())
+    stop_task = asyncio.create_task(ctx.stop_event.wait())
 
     done, pending = await asyncio.wait(
         [serve_task, stop_task],

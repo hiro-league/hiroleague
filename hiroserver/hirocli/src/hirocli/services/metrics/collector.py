@@ -161,7 +161,7 @@ class MetricsCollector:
     async def run(self) -> None:
         """Main collection loop — add to asyncio.gather in server_process."""
         log.info(
-            "Metrics collector started",
+            "✅ Metrics collector started",
             enabled=self._enabled,
             interval=self._interval,
         )

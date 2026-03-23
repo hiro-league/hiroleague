@@ -1,5 +1,5 @@
 ---
-description: Always verify latest stable package versions online before adding dependencies
+description: 
 alwaysApply: true
 ---
 
@@ -8,27 +8,3 @@ alwaysApply: true
 Before adding **any** new package dependency — regardless of ecosystem — use WebSearch to verify the current latest stable version. Never assume versions from training data, documentation, or prior conversations, as they go stale quickly.
 
 ## Applies to all ecosystems
-
-| Ecosystem | Registry |
-|---|---|
-| Flutter / Dart | pub.dev |
-| Python (uv / pip) | pypi.org |
-| Node.js | npmjs.com |
-| Any other | check the official registry |
-
-## Process
-
-1. Search: `<package-name> <registry> latest version <current-year>`
-2. Confirm the version is **stable** (not alpha/beta/rc) unless a pre-release is explicitly needed
-3. Use the exact verified version in `pubspec.yaml`, `pyproject.toml`, `package.json`, etc.
-4. Update the relevant docs page (e.g. `mintdocs/build/flutter-app.mdx`) to reflect the new version
-
-## Example
-
-```
-# ❌ BAD — assumes training data is current
-mobile_scanner: ^6.0.0
-
-# ✅ GOOD — verified via WebSearch before writing
-mobile_scanner: ^7.2.0
-```

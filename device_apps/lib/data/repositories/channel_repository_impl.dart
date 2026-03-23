@@ -1,7 +1,6 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../core/constants/app_constants.dart';
 import '../../domain/models/channel/channel.dart';
 import '../../domain/repositories/channel_repository.dart';
 import '../local/database/app_database.dart';
@@ -30,18 +29,23 @@ class ChannelRepositoryImpl implements ChannelRepository {
         lastMessageAt: Value(
           channel.lastMessageAt?.millisecondsSinceEpoch,
         ),
+        serverId: Value(channel.serverId),
       ),
     );
   }
 
   @override
-  Future<void> ensureDefaultChannel() async {
-    final total = await _dao.count();
-    if (total == 0) {
+  Future<void> syncFromServer(List<Map<String, dynamic>> serverChannels) async {
+    for (final sc in serverChannels) {
+      final serverId = sc['id'] as int;
+      final name = sc['name'] as String? ?? 'Channel $serverId';
+      // Use server id as part of the local id for stable identity
+      final localId = 'server-$serverId';
       await _dao.insertOrUpdate(
         ChannelsCompanion.insert(
-          id: AppConstants.defaultChannelId,
-          name: AppConstants.defaultChannelName,
+          id: localId,
+          name: name,
+          serverId: Value(serverId),
         ),
       );
     }
@@ -54,6 +58,7 @@ class ChannelRepositoryImpl implements ChannelRepository {
       lastMessageAt: row.lastMessageAt != null
           ? DateTime.fromMillisecondsSinceEpoch(row.lastMessageAt!, isUtc: true)
           : null,
+      serverId: row.serverId,
     );
   }
 }

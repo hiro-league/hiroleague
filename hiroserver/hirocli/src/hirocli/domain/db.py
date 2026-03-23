@@ -1,7 +1,8 @@
 """Workspace database module.
 
-Manages workspace.db (SQLite) — the single authoritative store for all
-structured entity data: agents, conversation_channels, devices, channel_plugins.
+Manages workspace.db (SQLite) — the authoritative store for system config
+entities: agents, devices, channel_plugins. User content (channels, messages)
+lives in data.db — see domain/data_store.py.
 
 Two interfaces are provided:
 - ensure_db / db_path — synchronous helpers used by domain functions and CLI
@@ -35,7 +36,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from hiro_commons.constants.storage import CONVERSATIONS_DIR, WORKSPACE_DB_FILENAME
+from hiro_commons.constants.storage import WORKSPACE_DB_FILENAME
 
 # Per-process cache: paths for which ensure_db has already run successfully.
 # Keyed by the resolved string workspace path.
@@ -55,19 +56,6 @@ _DDL = [
         created_at    TEXT NOT NULL DEFAULT ''
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS conversation_channels (
-        id              TEXT PRIMARY KEY,
-        name            TEXT NOT NULL UNIQUE,
-        type            TEXT NOT NULL DEFAULT 'direct',
-        agent_id        TEXT REFERENCES agents(id),
-        created_at      TEXT NOT NULL,
-        last_message_at TEXT
-    )
-    """,
-    # Unique index on conversation_channels.name for existing databases that
-    # were created before the UNIQUE constraint was added to the DDL above.
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_cc_name ON conversation_channels(name)",
     """
     CREATE TABLE IF NOT EXISTS devices (
         device_id          TEXT PRIMARY KEY,
@@ -109,12 +97,6 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("agents", "is_default",    "INTEGER NOT NULL DEFAULT 0"),
     ("agents", "system_prompt", "TEXT NOT NULL DEFAULT ''"),
     ("agents", "created_at",    "TEXT NOT NULL DEFAULT ''"),
-    # conversation_channels
-    ("conversation_channels", "name",            "TEXT NOT NULL DEFAULT ''"),
-    ("conversation_channels", "type",            "TEXT NOT NULL DEFAULT 'direct'"),
-    ("conversation_channels", "agent_id",        "TEXT"),
-    ("conversation_channels", "created_at",      "TEXT NOT NULL DEFAULT ''"),
-    ("conversation_channels", "last_message_at", "TEXT"),
     # devices
     ("devices", "device_public_key", "TEXT NOT NULL DEFAULT ''"),
     ("devices", "paired_at",         "TEXT NOT NULL DEFAULT ''"),
@@ -158,7 +140,6 @@ def ensure_db(workspace_path: Path) -> None:
         return
 
     workspace_path.mkdir(parents=True, exist_ok=True)
-    (workspace_path / CONVERSATIONS_DIR).mkdir(exist_ok=True)
 
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         for ddl in _DDL:

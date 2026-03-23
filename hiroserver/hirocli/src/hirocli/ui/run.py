@@ -9,30 +9,27 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI
 from hiro_commons.log import Logger
 
-from hirocli.domain.config import Config
+if TYPE_CHECKING:
+    from hirocli.runtime.server_context import ServerContext
 
 log = Logger.get("ADMIN")
 
 
-async def run_admin_ui(
-    config: Config,
-    stop_event: asyncio.Event,
-    log_dir: Path | None = None,
-    workspace_path: Path | None = None,
-) -> None:
+async def run_admin_ui(ctx: ServerContext) -> None:
     """Start the NiceGUI admin UI and shut it down when stop_event fires."""
     from nicegui import ui
 
     from hirocli.ui import state
     from hirocli.ui.app import register_pages
 
-    state.log_dir = log_dir
-    state.workspace_path = workspace_path
+    state.log_dir = ctx.log_dir
+    state.workspace_path = ctx.workspace_path
 
     # Resolve gateway log dir from the default gateway instance so the logs page
     # can display gateway.log alongside server and plugin logs.
@@ -51,17 +48,16 @@ async def run_admin_ui(
         log.warning("Failed to resolve gateway log dir for admin UI", error=str(exc))
 
     # Resolve the workspace id and name so pages can identify the current workspace.
-    if workspace_path is not None:
-        try:
-            from hirocli.domain.workspace import load_registry
-            registry = load_registry()
-            for ws_id, entry in registry.workspaces.items():
-                if Path(entry.path).resolve() == workspace_path.resolve():
-                    state.workspace_id = ws_id
-                    state.workspace_name = entry.name
-                    break
-        except Exception:
-            pass
+    try:
+        from hirocli.domain.workspace import load_registry
+        registry = load_registry()
+        for ws_id, entry in registry.workspaces.items():
+            if Path(entry.path).resolve() == ctx.workspace_path.resolve():
+                state.workspace_id = ws_id
+                state.workspace_name = entry.name
+                break
+    except Exception:
+        pass
 
     register_pages()
 
@@ -77,22 +73,22 @@ async def run_admin_ui(
         admin_app,
         title="Hiro Admin",
         show_welcome_message=False,
-        storage_secret=f"hiro-admin-{config.device_id}",
+        storage_secret=f"hiro-admin-{ctx.config.device_id}",
     )
 
     uv_config = uvicorn.Config(
         app=admin_app,
         host="127.0.0.1",
-        port=config.admin_port,
+        port=ctx.config.admin_port,
         log_level="warning",
         loop="none",
     )
     server = uvicorn.Server(uv_config)
 
     serve_task = asyncio.create_task(server.serve())
-    stop_task = asyncio.create_task(stop_event.wait())
+    stop_task = asyncio.create_task(ctx.stop_event.wait())
 
-    log.info(f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{config.admin_port}")
+    log.info(f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{ctx.config.admin_port}")
 
     done, pending = await asyncio.wait(
         [serve_task, stop_task],

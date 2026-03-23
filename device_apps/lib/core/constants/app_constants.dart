@@ -15,9 +15,4 @@ abstract final class AppConstants {
   // Messaging — wire format (must match hirocli UnifiedMessage schema)
   /// Transport channel name registered on hirocli.
   static const String gatewayChannelName = 'devices';
-
-  // Local channel IDs (client-side only, not known to the server)
-  /// The default "General" channel seeded on first launch.
-  static const String defaultChannelId = 'default-general-v1';
-  static const String defaultChannelName = 'General';
 }

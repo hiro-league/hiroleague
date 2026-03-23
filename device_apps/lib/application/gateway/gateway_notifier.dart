@@ -6,6 +6,7 @@ import '../../data/remote/gateway/gateway_auth_handler.dart';
 import '../../data/remote/gateway/gateway_client.dart';
 import '../../data/remote/gateway/gateway_inbound_frame.dart';
 import '../../data/remote/gateway/gateway_protocol.dart';
+import '../../data/remote/gateway/gateway_request_client.dart';
 import '../../data/remote/gateway/reconnect_policy.dart';
 import '../../domain/models/identity/device_identity.dart';
 import '../../domain/services/crypto_service.dart';
@@ -25,6 +26,9 @@ class GatewayNotifier extends _$GatewayNotifier {
   final _frameController = StreamController<GatewayInboundFrame>.broadcast();
 
   Stream<GatewayInboundFrame> get frameStream => _frameController.stream;
+
+  GatewayRequestClient? _requestClient;
+  GatewayRequestClient? get requestClient => _requestClient;
 
   @override
   GatewayState build() {
@@ -67,8 +71,17 @@ class GatewayNotifier extends _$GatewayNotifier {
       reconnectPolicy: const ReconnectPolicy(),
     );
 
+    _requestClient = GatewayRequestClient(sendFn: (payload) => client.send(payload));
+
     _stateSub = client.updates.listen(_onClientUpdate);
-    _frameSub = client.frames.listen(_frameController.add);
+    _frameSub = client.frames.listen((frame) {
+      // Intercept response frames and route to the request client before
+      // broadcasting — the broadcast stream may have no subscribers yet.
+      if (frame.payload['message_type'] == 'response') {
+        _routeResponse(frame.payload);
+      }
+      _frameController.add(frame);
+    });
 
     client.start(gatewayUrl: identity.gatewayUrl, identity: identity);
     _client = client;
@@ -84,9 +97,28 @@ class GatewayNotifier extends _$GatewayNotifier {
     _frameSub?.cancel();
     _stateSub = null;
     _frameSub = null;
+    _requestClient?.cancelAll();
+    _requestClient = null;
     _client?.stop();
     _client?.dispose();
     _client = null;
+  }
+
+  /// Complete a pending request/response completer from the raw frame payload.
+  void _routeResponse(Map<String, dynamic> payload) {
+    final rid = payload['request_id'] as String?;
+    if (rid == null || _requestClient == null) return;
+
+    // Find the JSON content item that carries the response body
+    final contentRaw = payload['content'];
+    if (contentRaw is! List || contentRaw.isEmpty) return;
+
+    for (final item in contentRaw) {
+      if (item is Map && item['content_type'] == 'json') {
+        _requestClient!.completeRequest(rid, item['body'] as String);
+        return;
+      }
+    }
   }
 
   void _onClientUpdate(GatewayClientUpdate update) {

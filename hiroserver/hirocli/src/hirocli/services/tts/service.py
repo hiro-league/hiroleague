@@ -79,7 +79,7 @@ class TTSService:
             self._default_model = None
 
         if self._default_model:
-            log.info(f"TTS default model: {self._default_model}")
+            log.info(f"👍 TTS default model: {self._default_model}")
         else:
             log.warning("No TTS providers available — synthesis disabled")
 

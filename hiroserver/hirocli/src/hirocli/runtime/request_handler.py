@@ -14,8 +14,7 @@ Response content format (content_type "json"):
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from hiro_channel_sdk.constants import CONTENT_TYPE_JSON, MESSAGE_TYPE_RESPONSE
 from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
@@ -23,6 +22,7 @@ from hiro_commons.log import Logger
 
 if TYPE_CHECKING:
     from .communication_manager import CommunicationManager
+    from .server_context import ServerContext
 
 log = Logger.get("REQUEST")
 
@@ -30,9 +30,10 @@ log = Logger.get("REQUEST")
 class RequestContext:
     """Context passed to method handlers."""
 
-    def __init__(self, workspace_path: Path, msg: UnifiedMessage) -> None:
-        self.workspace_path = workspace_path
+    def __init__(self, ctx: ServerContext, msg: UnifiedMessage) -> None:
+        self.workspace_path = ctx.workspace_path
         self.msg = msg
+        self.server_ctx = ctx
 
 
 MethodHandler = Callable[[dict[str, Any], RequestContext], Awaitable[dict[str, Any]]]
@@ -43,7 +44,7 @@ class RequestHandler:
 
     Usage::
 
-        handler = RequestHandler(comm_manager, workspace_path)
+        handler = RequestHandler(ctx, comm_manager)
         handler.register("channels.list", channels_list_handler)
         # wire into CommunicationManager at startup
 
@@ -52,16 +53,16 @@ class RequestHandler:
     """
 
     def __init__(
-        self, comm_manager: CommunicationManager, workspace_path: Path
+        self, ctx: ServerContext, comm_manager: CommunicationManager,
     ) -> None:
+        self._ctx = ctx
         self._comm = comm_manager
-        self._workspace_path = workspace_path
         self._methods: dict[str, MethodHandler] = {}
 
     def register(self, method: str, handler: MethodHandler) -> None:
         """Register an async handler for the given method name."""
         self._methods[method] = handler
-        log.info("Registered request method", method=method)
+        log.info(f"✅ Registered request method: {method}")
 
     async def handle(self, msg: UnifiedMessage) -> None:
         """Dispatch a request message and enqueue the response."""
@@ -94,7 +95,7 @@ class RequestHandler:
             return
 
         try:
-            ctx = RequestContext(self._workspace_path, msg)
+            ctx = RequestContext(self._ctx, msg)
             result = await handler(params, ctx)
             response = _build_response(msg, status="ok", payload=result)
         except Exception as exc:

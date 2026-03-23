@@ -1,356 +1,43 @@
 """Server lifecycle tools: setup, start, stop, status, teardown.
 
-These tools own the logic for managing the hirocli server process and
-auto-start registrations.  CLI commands in commands/root.py are thin
-wrappers that parse flags, call execute(), and render the result.
+These tools own the CLI/agent-facing schema and delegate all heavy lifting
+to ``server_control`` (process management, bootstrap) and return dataclasses
+from ``server_models``.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from hiro_commons.keys import public_key_to_b64
-from hiro_commons.process import (
-    find_workspace_root,
-    is_running,
-    read_pid,
-    remove_pid,
-    spawn_detached,
-    stop_process,
-    uv_python_cmd,
-    wait_for_pid,
-)
-from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
-from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
-from rich.console import Console
+from hiro_commons.process import is_running, read_pid
 
-from ..autostart import (
-    register_autostart,
-    register_autostart_elevated,
-    unregister_autostart,
-    unregister_autostart_elevated,
-)
-from ..domain.channel_config import (
-    ChannelConfig,
-    load_channel_config,
-    save_channel_config,
-)
-from ..domain.config import Config, load_config, load_state, master_key_path, resolve_log_dir, save_config
-from ..domain.preferences import load_preferences, save_preferences
+from ..domain.config import Config, load_config, load_state, master_key_path, save_config
 from ..domain.crypto import load_or_create_master_key
 from ..domain.workspace import (
-    WorkspaceError,
-    WorkspaceRegistry,
     admin_port_for,
-    create_workspace,
     http_port_for,
     load_registry,
     plugin_port_for,
     remove_workspace,
     resolve_workspace,
+    WorkspaceError,
 )
-from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
+from ..constants import PID_FILENAME
 from .base import Tool, ToolParam
-
-
-# ---------------------------------------------------------------------------
-# Result types
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SetupResult:
-    workspace: str
-    workspace_path: str
-    device_id: str
-    gateway_url: str
-    http_port: int
-    master_key: str
-    desktop_pub: str
-    autostart_registered: bool
-    autostart_method: str  # "schtasks" | "registry" | "elevated" | "skipped" | "failed"
-    server_started: bool
-
-
-@dataclass
-class StartResult:
-    workspace: str
-    workspace_path: str
-    already_running: bool
-    pid: int | None
-    http_host: str
-    http_port: int
-    admin_port: int | None = None
-
-
-@dataclass
-class StopResult:
-    workspace: str
-    was_running: bool
-    pid: int | None
-
-
-@dataclass
-class RestartResult:
-    workspace: str
-    workspace_path: str
-    was_running: bool
-    pid: int | None
-    new_pid: int | None
-    http_host: str
-    http_port: int
-    admin_port: int | None = None
-
-
-@dataclass
-class WorkspaceStatusEntry:
-    id: str
-    name: str
-    is_default: bool
-    server_running: bool
-    pid: int | None
-    ws_connected: bool
-    last_connected: str | None
-    gateway_url: str | None
-    device_id: str
-    http_host: str
-    http_port: int
-
-
-@dataclass
-class StatusResult:
-    workspaces: list[WorkspaceStatusEntry] = field(default_factory=list)
-
-
-@dataclass
-class TeardownResult:
-    workspace: str
-    workspace_path: str
-    server_stopped: bool
-    autostart_removed: bool
-    purged: bool
-
-
-@dataclass
-class UninstallResult:
-    teardown: TeardownResult
-
-
-# ---------------------------------------------------------------------------
-# Server process helpers (absorbed from services/server_control.py)
-# ---------------------------------------------------------------------------
-
-
-def _do_start(
-    workspace_path: Path,
-    config: Config,
-    console: Console,
-    *,
-    workspace_name: str,
-    foreground: bool = False,
-    admin: bool = False,
-    metrics: bool = False,
-) -> None:
-    """Start the hirocli server for a workspace."""
-    load_or_create_master_key(workspace_path, filename=config.master_key_file)
-    _ensure_mandatory_devices_channel(workspace_path, config)
-
-    pid = read_pid(workspace_path, PID_FILENAME)
-    if pid and is_running(pid):
-        console.print(f"[yellow]Server already running (PID {pid}).[/yellow]")
-        return
-
-    if foreground:
-        import asyncio as _asyncio
-
-        from hirocli.runtime.server_process import _main
-
-        console.print(
-            f"[green]Server starting[/green] in foreground. "
-            f"HTTP: http://{config.http_host}:{config.http_port}/status  "
-            "[dim](Ctrl+C to stop)[/dim]"
-        )
-        try:
-            _asyncio.run(_main(foreground=True, workspace_path=workspace_path, workspace_name=workspace_name, admin=admin, metrics=metrics))
-        except KeyboardInterrupt:
-            pass
-        console.print("[green]Server stopped.[/green]")
-        return
-
-    # Clear stale PID so wait_for_pid starts from a clean slate.
-    remove_pid(workspace_path, PID_FILENAME)
-
-    script = str(Path(__file__).parents[1] / "runtime" / "server_process.py")
-    env = {**os.environ, ENV_WORKSPACE_PATH: str(workspace_path), ENV_WORKSPACE: workspace_name}
-    if admin:
-        env[ENV_ADMIN_UI] = "1"
-    # --metrics on start is an ephemeral override (like --admin), passed via env var
-    if metrics:
-        env[ENV_METRICS] = "1"
-
-    stderr_log = workspace_path / "stderr.log"
-    spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
-
-    # Wait for the child to write its own PID and confirm it is alive.
-    child_pid = wait_for_pid(workspace_path, PID_FILENAME)
-    console.print(
-        f"[green]Server started[/green] (PID {child_pid}). "
-        f"HTTP: http://{config.http_host}:{config.http_port}/status"
-    )
-
-
-def _graceful_http_stop(http_port: int, pid: int, workspace_path: Path, timeout: float = 10.0) -> bool:
-    """POST /_shutdown to the server and wait for the process to exit.
-
-    Returns True if the process exited gracefully within the timeout.
-    This avoids Windows ``taskkill /F`` which bypasses signal handlers and
-    orphans channel-plugin subprocesses.
-    """
-    import time
-    import urllib.request
-
-    try:
-        url = f"http://127.0.0.1:{http_port}/_shutdown"
-        req = urllib.request.Request(url, method="POST", data=b"")
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        return False
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not is_running(pid):
-            remove_pid(workspace_path, PID_FILENAME)
-            return True
-        time.sleep(0.5)
-    return False
-
-
-def _do_stop(workspace_path: Path, console: Console) -> None:
-    """Stop the server for a workspace."""
-    pid = read_pid(workspace_path, PID_FILENAME)
-    if pid is None or not is_running(pid):
-        console.print("[yellow]Server is not running.[/yellow]")
-        remove_pid(workspace_path, PID_FILENAME)
-        return
-
-    config = load_config(workspace_path)
-    if _graceful_http_stop(config.http_port, pid, workspace_path):
-        console.print(f"[green]Server stopped[/green] (was PID {pid}).")
-        return
-
-    stopped = stop_process(workspace_path, PID_FILENAME)
-    if stopped:
-        console.print(f"[green]Server stopped[/green] (was PID {pid}).")
-    else:
-        console.print("[red]Failed to stop server.[/red]")
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap helper (absorbed from services/bootstrap.py)
-# ---------------------------------------------------------------------------
-
-
-def _ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> None:
-    """Create/update the mandatory `devices` channel config inside the workspace."""
-    existing = load_channel_config(workspace_path, MANDATORY_CHANNEL_NAME)
-    uv_workspace = find_workspace_root()
-    workspace_dir = str(uv_workspace) if uv_workspace else (
-        existing.workspace_dir if existing else ""
-    )
-    channel_cfg = ChannelConfig(
-        name=MANDATORY_CHANNEL_NAME,
-        enabled=True,
-        command=existing.command if existing and existing.command else [f"hiro-channel-{MANDATORY_CHANNEL_NAME}"],
-        config={
-            **(existing.config if existing else {}),
-            "gateway_url": config.gateway_url,
-            "device_id": config.device_id,
-            "master_key_path": str(master_key_path(workspace_path, config)),
-            "ping_interval": (existing.config.get("ping_interval", DEFAULT_PING_INTERVAL_SECONDS) if existing else DEFAULT_PING_INTERVAL_SECONDS),
-        },
-        workspace_dir=workspace_dir,
-    )
-    save_channel_config(workspace_path, channel_cfg)
-
-
-def _ensure_default_preferences(workspace_path: Path) -> None:
-    """Create preferences.json with structural defaults if it doesn't exist yet.
-
-    No LLMs are seeded — the user must register at least one.  If they don't,
-    the server starts but warns clearly that it cannot function without an LLM.
-
-    No voice options are seeded either — consistent with STT, which also requires
-    explicit user configuration.  TTS will log a clear warning if enabled without
-    a voice configured.
-    """
-    from ..domain.preferences import preferences_file
-
-    if preferences_file(workspace_path).exists():
-        return
-
-    # Structural defaults only (accept_voice_from_user, etc.)
-    # No hardcoded LLM entries or voice options — single source of truth means the user decides.
-    prefs = load_preferences(workspace_path)
-    save_preferences(workspace_path, prefs)
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_or_create(workspace: str | None) -> tuple[Any, WorkspaceRegistry, Path]:
-    """Resolve a workspace entry, auto-creating 'default' if none exist."""
-    try:
-        entry, registry = resolve_workspace(workspace)
-        return entry, registry, Path(entry.path)
-    except WorkspaceError:
-        if workspace is not None:
-            raise
-        entry, registry = create_workspace("default")
-        return entry, registry, Path(entry.path)
-
-
-def _register_autostart(workspace_id: str, elevated: bool) -> tuple[bool, str]:
-    """Register auto-start using workspace id and return (success, method_label)."""
-    if elevated and sys.platform == "win32":
-        try:
-            accepted = register_autostart_elevated(workspace_id)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True, "elevated"
-    try:
-        method = register_autostart(workspace_id)
-        return True, str(method)
-    except (NotImplementedError, Exception):
-        return False, "failed"
-
-
-def _unregister_autostart(workspace_id: str, stored_method: str | None) -> bool:
-    # "elevated" was registered via UAC Task Scheduler (HIGHEST run-level) — needs elevated removal.
-    # "schtasks" / "registry" use the standard path which tries both schtasks delete + registry delete.
-    # "skipped" / "failed" / None — nothing was registered, nothing to remove.
-    if stored_method in (None, "skipped", "failed"):
-        return False
-    if stored_method == "elevated" and sys.platform == "win32":
-        try:
-            accepted = unregister_autostart_elevated(workspace_id)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True
-        # Fall through to standard removal if UAC was declined
-    try:
-        unregister_autostart(workspace_id)
-        return True
-    except (NotImplementedError, Exception):
-        return False
+from . import server_control as ctrl
+from .server_models import (
+    RestartResult,
+    SetupResult,
+    StartResult,
+    StatusResult,
+    StopResult,
+    TeardownResult,
+    UninstallResult,
+    WorkspaceStatusEntry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -394,18 +81,15 @@ class SetupTool(Tool):
         metrics_enabled: bool | None = None,
         metrics_interval: float | None = None,
     ) -> SetupResult:
-        entry, registry, workspace_path = _resolve_or_create(workspace)
+        entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
         existing = load_config(workspace_path)
-
-        effective_http_port = http_port or http_port_for(registry, entry.port_slot)
-        effective_plugin_port = plugin_port_for(registry, entry.port_slot)
 
         config = Config(
             device_id=existing.device_id,
             gateway_url=gateway_url,
             http_host=existing.http_host,
-            http_port=effective_http_port,
-            plugin_port=effective_plugin_port,
+            http_port=http_port or http_port_for(registry, entry.port_slot),
+            plugin_port=plugin_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),
             master_key_file=existing.master_key_file,
             pairing_code_length=existing.pairing_code_length,
@@ -418,24 +102,21 @@ class SetupTool(Tool):
         save_config(workspace_path, config)
         private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
         public_key_b64 = public_key_to_b64(private_key.public_key())
-        _ensure_mandatory_devices_channel(workspace_path, config)
-        _ensure_default_preferences(workspace_path)
+        ctrl.ensure_mandatory_devices_channel(workspace_path, config)
+        ctrl.ensure_default_preferences(workspace_path)
 
         autostart_registered = False
         autostart_method = "skipped"
         if not skip_autostart:
-            # Autostart keyed by workspace id so renames don't break scheduled tasks
-            autostart_registered, autostart_method = _register_autostart(
-                entry.id, elevated_task
+            autostart_registered, autostart_method = ctrl.register_autostart_for_workspace(
+                entry.id, elevated_task,
             )
 
-        # Persist the autostart method in config.json so teardown can use it
-        # without requiring the user to re-specify --elevated-task.
         config.autostart_method = autostart_method
         save_config(workspace_path, config)
 
         if start_server:
-            _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=False)
+            ctrl.start_server(workspace_path, config, workspace_name=entry.name, foreground=False)
 
         return SetupResult(
             workspace=entry.name,
@@ -480,7 +161,7 @@ class StartTool(Tool):
         admin: bool = False,
         metrics: bool = False,
     ) -> StartResult:
-        entry, registry, workspace_path = _resolve_or_create(workspace)
+        entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
 
         if not (workspace_path / "config.json").exists():
             raise ValueError(
@@ -502,7 +183,10 @@ class StartTool(Tool):
                 admin_port=config.admin_port if admin else None,
             )
 
-        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin, metrics=metrics)
+        ctrl.start_server(
+            workspace_path, config,
+            workspace_name=entry.name, foreground=foreground, admin=admin, metrics=metrics,
+        )
 
         new_pid = read_pid(workspace_path, PID_FILENAME)
         return StartResult(
@@ -524,12 +208,10 @@ class StopTool(Tool):
     }
 
     def execute(self, workspace: str | None = None) -> StopResult:
-        entry, _, workspace_path = _resolve_or_create(workspace)
-
+        entry, _, workspace_path = ctrl.resolve_or_create(workspace)
         pid = read_pid(workspace_path, PID_FILENAME)
         was_running = pid is not None and is_running(pid)
-
-        _do_stop(workspace_path, _NullConsole())
+        ctrl.stop_server(workspace_path)
         return StopResult(workspace=entry.name, was_running=was_running, pid=pid)
 
 
@@ -562,7 +244,7 @@ class RestartTool(Tool):
         admin: bool = False,
         metrics: bool = False,
     ) -> RestartResult:
-        entry, _, workspace_path = _resolve_or_create(workspace)
+        entry, _, workspace_path = ctrl.resolve_or_create(workspace)
 
         if not (workspace_path / "config.json").exists():
             raise ValueError(
@@ -590,9 +272,12 @@ class RestartTool(Tool):
                     admin_port=config.admin_port if admin else None,
                 )
 
-            _do_stop(workspace_path, _NullConsole())
+            ctrl.stop_server(workspace_path)
 
-        _do_start(workspace_path, config, _NullConsole(), workspace_name=entry.name, foreground=foreground, admin=admin, metrics=metrics)
+        ctrl.start_server(
+            workspace_path, config,
+            workspace_name=entry.name, foreground=foreground, admin=admin, metrics=metrics,
+        )
 
         new_pid = read_pid(workspace_path, PID_FILENAME)
         return RestartResult(
@@ -673,12 +358,12 @@ class TeardownTool(Tool):
         workspace: str | None = None,
         purge: bool = False,
     ) -> TeardownResult:
-        entry, registry, workspace_path = _resolve_or_create(workspace)
+        entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
 
-        _do_stop(workspace_path, _NullConsole())
-        # Read the autostart method stored in config.json at setup time — no flag needed from caller.
+        ctrl.stop_server(workspace_path)
+
         stored_config = load_config(workspace_path)
-        autostart_removed = _unregister_autostart(entry.id, stored_config.autostart_method)
+        autostart_removed = ctrl.unregister_autostart_for_workspace(entry.id, stored_config.autostart_method)
 
         if purge:
             if workspace_path.exists():
@@ -710,20 +395,5 @@ class UninstallTool(Tool):
         workspace: str | None = None,
         purge: bool = False,
     ) -> UninstallResult:
-        teardown_result = TeardownTool().execute(
-            workspace=workspace,
-            purge=purge,
-        )
+        teardown_result = TeardownTool().execute(workspace=workspace, purge=purge)
         return UninstallResult(teardown=teardown_result)
-
-
-# ---------------------------------------------------------------------------
-# Internal: null console for _do_start / _do_stop (output handled by CLI layer)
-# ---------------------------------------------------------------------------
-
-
-class _NullConsole:
-    """Drop-in for rich.Console that discards all output."""
-
-    def print(self, *args: object, **kwargs: object) -> None:  # noqa: A003
-        pass

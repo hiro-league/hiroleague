@@ -4,6 +4,10 @@ Runs the FastAPI HTTP server and ChannelManager concurrently inside a single
 asyncio event loop.  Gateway connectivity is owned by the mandatory
 `devices` channel plugin.
 
+This module is a **composition root** — it creates a ServerContext, calls
+factory functions owned by each subsystem, wires the components together,
+and starts the event loop.  No business logic or provider maps live here.
+
 Workspace path resolution:
   - Foreground mode: workspace_path is passed directly by tools/server.py.
   - Background mode: workspace_path is read from the HIRO_WORKSPACE_PATH env var
@@ -22,24 +26,21 @@ from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
 
 from hirocli.constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
-from hirocli.domain.config import Config, load_config, mark_disconnected, resolve_log_dir
+from hirocli.domain.config import load_config, mark_disconnected
 from hirocli.domain.crypto import load_or_create_master_key
+from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
-from hirocli.runtime.agent_manager import AgentManager
 from hirocli.runtime.channel_event_handler import ChannelEventHandler
 from hirocli.runtime.channel_manager import ChannelManager
 from hirocli.runtime.communication_manager import CommunicationManager
 from hirocli.runtime.event_handler import EventHandler
 from hirocli.runtime.http_server import app as http_app, run_http_server
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
-from hirocli.runtime.message_adapter import MessageAdapterPipeline
+from hirocli.runtime.message_adapter import create_adapter_pipeline
 from hirocli.runtime.request_handler import RequestHandler
-from hirocli.runtime.adapters.audio_adapter import AudioTranscriptionAdapter
-from hirocli.runtime.adapters.image_adapter import ImageUnderstandingAdapter
+from hirocli.runtime.server_context import ServerContext
 from hirocli.services.metrics import MetricsCollector
-from hirocli.services.stt import GeminiSTTProvider, OpenAISTTProvider, STTService
-from hirocli.services.tts import GeminiTTSProvider, OpenAITTSProvider, TTSService
-from hirocli.services.vision_service import VisionService
+from hirocli.services.tts import create_tts_service
 from hirocli.tools import all_tools
 from hirocli.tools.registry import ToolRegistry
 
@@ -47,134 +48,60 @@ log = Logger.get("SERVER")
 
 
 # ---------------------------------------------------------------------------
-# Setup helpers — each creates one logical subsystem and returns it.
+# Composition root
 # ---------------------------------------------------------------------------
 
-# Maps preference provider names to STT provider constructors.
-_STT_PROVIDER_MAP: dict[str, type] = {
-    "openai": OpenAISTTProvider,
-    "google_genai": GeminiSTTProvider,
-    "gemini": GeminiSTTProvider,
-}
 
-
-def _stt_providers_for(provider_name: str | None) -> list:
-    """Return STT provider instances for the given preference provider name.
-
-    If provider_name is None (no STT configured), returns an empty list
-    so STTService starts with transcription disabled.
-    """
-    if provider_name is None:
-        return []
-    cls = _STT_PROVIDER_MAP.get(provider_name)
-    if cls is None:
-        log.warning("Unknown STT provider in preferences, loading none", provider=provider_name)
-        return []
-    return [cls()]
-
-
-_TTS_PROVIDER_MAP: dict[str, type] = {
-    "openai": OpenAITTSProvider,
-    "google_genai": GeminiTTSProvider,
-    "gemini": GeminiTTSProvider,
-}
-
-
-def _tts_providers_for(provider_name: str | None) -> list:
-    """Return TTS provider instances for the given preference provider name.
-
-    If provider_name is None (no TTS voice configured), returns an empty list
-    so TTSService starts with synthesis disabled.
-    """
-    if provider_name is None:
-        return []
-    cls = _TTS_PROVIDER_MAP.get(provider_name)
-    if cls is None:
-        log.warning("Unknown TTS provider in preferences, loading none", provider=provider_name)
-        return []
-    return [cls()]
-
-
-def _create_tts_service(workspace_path: Path) -> TTSService | None:
-    """Create a TTSService from workspace preferences, or None if TTS is disabled."""
-    from hirocli.domain.preferences import load_preferences, resolve_voice
-
-    prefs = load_preferences(workspace_path)
-    if not prefs.audio.agent_replies_in_voice:
-        log.info("TTS disabled in preferences (agent_replies_in_voice=false)")
-        return None
-    voice = resolve_voice(prefs)
-    if not voice:
-        log.warning("TTS enabled but no voice configured — TTS disabled")
-        return None
-    providers = _tts_providers_for(voice.provider)
-    return TTSService(providers=providers, default_model=voice.model)
-
-
-def _create_adapter_pipeline(workspace_path: Path) -> MessageAdapterPipeline:
-    """Create the media services and message adapter pipeline."""
-    from hirocli.domain.preferences import load_preferences, resolve_llm
-
-    log.info("🕒 Loading Media Services")
-    log.info("➡️ Loading Speech to Text Services")
-
-    # Only load STT providers that match what's configured in preferences.
-    prefs = load_preferences(workspace_path)
-    stt_llm = resolve_llm(prefs, "stt")
-    stt_default = stt_llm.model if stt_llm else None
-    stt_providers = _stt_providers_for(stt_llm.provider if stt_llm else None)
-
-    stt_service = STTService(
-        providers=stt_providers,
-        default_model=stt_default,
-    )
-    log.info("➡️ Loading Vision Services")
-    vision_service = VisionService()
-
-    pipeline = MessageAdapterPipeline([
-        AudioTranscriptionAdapter(service=stt_service),
-        ImageUnderstandingAdapter(service=vision_service),
-    ])
-    log.info("✅ Adapter pipeline ready", adapters=["audio_transcription", "image_understanding"])
-    return pipeline
-
-
-def _create_communication_stack(
-    adapter_pipeline: MessageAdapterPipeline,
+def _build_context(
     workspace_path: Path,
-) -> CommunicationManager:
-    """Create the EventHandler, CommunicationManager, and RequestHandler."""
+    workspace_name: str,
+    stop_event: asyncio.Event,
+) -> ServerContext:
+    """Load config, keys, and build the shared ServerContext."""
+    config = load_config(workspace_path)
+    desktop_private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
+    return ServerContext(
+        workspace_path=workspace_path,
+        workspace_name=workspace_name,
+        config=config,
+        stop_event=stop_event,
+        desktop_private_key=desktop_private_key,
+    )
+
+
+def _wire_communication_stack(ctx: ServerContext):
+    """Create the adapter pipeline, event handler, CommunicationManager, and RequestHandler."""
+    adapter_pipeline = create_adapter_pipeline(ctx.workspace_path)
     event_handler = EventHandler()
     comm_manager = CommunicationManager(
+        ctx=ctx,
         adapter_pipeline=adapter_pipeline,
         event_handler=event_handler,
-        workspace_path=workspace_path,
     )
-    request_handler = RequestHandler(comm_manager, workspace_path)
+    request_handler = RequestHandler(ctx, comm_manager)
+
+    from hirocli.runtime.request_methods import register_request_methods
+    register_request_methods(request_handler)
+
     comm_manager.set_request_handler(request_handler)
     return comm_manager
 
 
-def _create_channel_stack(
-    config: Config,
-    workspace_path: Path,
-    stop_event: asyncio.Event,
-    desktop_private_key: object,
-    comm_manager: CommunicationManager,
-) -> ChannelManager:
-    """Create infra handlers, channel event handler, and channel manager."""
-    infra_handlers = InfraEventHandlers(workspace_path, config, desktop_private_key)
+def _wire_channel_stack(ctx: ServerContext, comm_manager: CommunicationManager):
+    """Create infra handlers, channel event handler, and ChannelManager."""
+    infra_handlers = InfraEventHandlers(ctx)
     channel_event_handler = ChannelEventHandler()
     infra_handlers.register_all(channel_event_handler)
-    log.info("✅ Registered special channel event handlers")
+    log.info("Registered special channel event handlers")
 
     channel_manager = ChannelManager(
-        config,
-        workspace_path,
-        stop_event,
+        ctx,
         on_message=comm_manager.receive,
         on_event=channel_event_handler.handle,
     )
+    # Setter injection: InfraEventHandlers needs ChannelManager for pairing
+    # responses, and CommunicationManager needs it for outbound delivery.
+    # Both are constructed before ChannelManager exists.
     infra_handlers.set_channel_manager(channel_manager)
     comm_manager.set_channel_manager(channel_manager)
     return channel_manager
@@ -191,30 +118,6 @@ def _register_signal_handlers(stop_event: asyncio.Event) -> None:
     signal.signal(signal.SIGTERM, _on_signal)
     if hasattr(signal, "SIGINT"):
         signal.signal(signal.SIGINT, _on_signal)
-
-
-def _log_agent_config(workspace_path: Path) -> None:
-    """Log the agent model configuration from preferences."""
-    try:
-        from hirocli.domain.preferences import load_preferences, resolve_llm
-        prefs = load_preferences(workspace_path)
-        llm = resolve_llm(prefs, "chat")
-        if llm:
-            log.info(
-                "✅ AI Agent config loaded from preferences",
-                model=llm.model,
-                provider=llm.provider,
-                temperature=llm.temperature,
-                max_tokens=llm.max_tokens,
-            )
-        else:
-            log.error(
-                "⚠️  No chat LLM configured. The server will run but the agent "
-                "cannot process messages. Register at least one LLM in "
-                "preferences.json (in your workspace directory)."
-            )
-    except Exception as exc:
-        log.error("Failed to load agent config from preferences", error=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -240,77 +143,73 @@ async def _main(
     if workspace_name is None:
         workspace_name = os.environ.get(ENV_WORKSPACE) or workspace_path.name
 
-    config = load_config(workspace_path)
-    log_dir = resolve_log_dir(workspace_path, config)
+    # --- Build context ---
+    stop_event = asyncio.Event()
+    ctx = _build_context(workspace_path, workspace_name, stop_event)
 
-    Logger.set_level(config.log_level)
+    Logger.set_level(ctx.config.log_level)
     Logger.setup(console=foreground)
-    Logger.open_log_dir(log_dir)
-    # Third-party WARNING+ is captured automatically by the catch-all
-    # bridge installed in Logger.setup().  No per-library silence_stdlib
-    # calls needed.
-    if config.module_log_levels:
-        Logger.set_module_levels(config.module_log_levels)
+    Logger.open_log_dir(ctx.log_dir)
+    if ctx.config.module_log_levels:
+        Logger.set_module_levels(ctx.config.module_log_levels)
+
     log.info("🚀 Hiro Server starting...", workspace=workspace_name, foreground=foreground, admin=admin)
     log.info(
         f"✅ Loaded workspace '{workspace_name}' config",
-        http_port=config.http_port,
-        plugin_port=config.plugin_port,
-        admin_port=config.admin_port,
-        gateway_url=config.gateway_url,
-        log_dir=str(log_dir),
+        http_port=ctx.config.http_port,
+        plugin_port=ctx.config.plugin_port,
+        admin_port=ctx.config.admin_port,
+        gateway_url=ctx.config.gateway_url,
+        log_dir=str(ctx.log_dir),
     )
 
-    desktop_private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
-    stop_event = asyncio.Event()
-    http_app.state.stop_event = stop_event
     write_pid(workspace_path, PID_FILENAME)
     ensure_db(workspace_path)
-    http_app.state.workspace_path = workspace_path
+    ensure_data_db(workspace_path)
 
+    # --- Wire HTTP + tools ---
+    http_app.state.ctx = ctx
     tool_registry = ToolRegistry()
     tool_registry.register_all(all_tools())
     http_app.state.tool_registry = tool_registry
     log.info(f"✅ Loaded Tool Definitions: ({len(tool_registry._tools)})")
 
-    # --metrics flag (via env var or direct param) overrides config for this run
-    effective_metrics = config.metrics_enabled or metrics or os.environ.get(ENV_METRICS) == "1"
+    # --- Metrics ---
+    effective_metrics = ctx.config.metrics_enabled or metrics or os.environ.get(ENV_METRICS) == "1"
     metrics_collector = MetricsCollector(
         enabled=effective_metrics,
-        interval=config.metrics_interval,
-        history_size=config.metrics_history_size,
+        interval=ctx.config.metrics_interval,
+        history_size=ctx.config.metrics_history_size,
     )
     http_app.state.metrics_collector = metrics_collector
-    log.info(
-        "Metrics collector configured",
-        enabled=effective_metrics,
-        interval=config.metrics_interval,
-    )
+    log.info("Metrics collector configured", enabled=effective_metrics, interval=ctx.config.metrics_interval)
 
-    adapter_pipeline = _create_adapter_pipeline(workspace_path)
-    comm_manager = _create_communication_stack(adapter_pipeline, workspace_path)
-    channel_manager = _create_channel_stack(
-        config, workspace_path, stop_event, desktop_private_key, comm_manager,
-    )
+    # --- Wire communication + channel stacks ---
+    comm_manager = _wire_communication_stack(ctx)
+    channel_manager = _wire_channel_stack(ctx, comm_manager)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
-    log.info("➡️ Loading Text to Speech Services")
-    tts_service = _create_tts_service(workspace_path)
-    agent_manager = AgentManager(comm_manager, workspace_path, tts_service=tts_service)
-    _log_agent_config(workspace_path)
+    # --- Wire agent ---
+    from hirocli.runtime.agent_manager import AgentManager
+
+    log.info("🕒 Loading Text-to-Speech services")
+    tts_service = create_tts_service(workspace_path)
+    agent_manager = AgentManager(ctx, comm_manager, tts_service=tts_service)
+
     _register_signal_handlers(stop_event)
 
     log.info(
-        "✅ Server Config Done — launching components",
+        "Server ready — launching components",
         workspace=str(workspace_path),
-        http=f"http://{config.http_host}:{config.http_port}/status",
-        plugin_ws=f"ws://127.0.0.1:{config.plugin_port}",
-        device_id=config.device_id,
+        http=f"http://{ctx.config.http_host}:{ctx.config.http_port}/status",
+        plugin_ws=f"ws://127.0.0.1:{ctx.config.plugin_port}",
+        device_id=ctx.config.device_id,
     )
 
+    # --- Launch all coroutines ---
     coros = [
-        run_http_server(config, stop_event),
+        run_http_server(ctx),
         channel_manager.run(),
         comm_manager.run(),
         agent_manager.run(),
@@ -318,7 +217,7 @@ async def _main(
     ]
     if admin:
         from hirocli.ui.run import run_admin_ui
-        coros.append(run_admin_ui(config, stop_event, log_dir=log_dir, workspace_path=workspace_path))
+        coros.append(run_admin_ui(ctx))
 
     server_task = asyncio.ensure_future(
         asyncio.gather(*coros, return_exceptions=True)
@@ -332,9 +231,9 @@ async def _main(
     except (asyncio.CancelledError, Exception):
         pass
 
-    if http_app.state.restart_requested:
+    if ctx.restart_requested:
         log.info("Restart requested — spawning new server process")
-        _spawn_server(workspace_path, admin=http_app.state.restart_admin)
+        _spawn_server(workspace_path, admin=ctx.restart_admin)
 
     mark_disconnected(workspace_path)
     log.info("hirocli server exited")
@@ -353,7 +252,6 @@ def _spawn_server(workspace_path: Path, admin: bool = False) -> None:
     elif ENV_ADMIN_UI in env:
         del env[ENV_ADMIN_UI]
 
-    # Clear stale PID so the new child starts clean.
     remove_pid(workspace_path, PID_FILENAME)
 
     stderr_log = workspace_path / "stderr.log"

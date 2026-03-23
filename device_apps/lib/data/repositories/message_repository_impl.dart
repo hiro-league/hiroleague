@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:drift/drift.dart' show Value;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../core/constants/app_constants.dart';
 import '../../core/utils/logger.dart';
 import '../../application/auth/auth_notifier.dart';
 import '../../application/auth/auth_state.dart';
@@ -109,6 +108,9 @@ class MessageRepositoryImpl implements MessageRepository {
       );
       return;
     }
+
+    // Response frames are routed in GatewayNotifier before broadcast — skip here
+    if (msg.messageType == 'response') return;
 
     // Handle event frames (delivery acks, transcription results).
     if (msg.messageType == 'event' && msg.event != null) {
@@ -238,7 +240,7 @@ class MessageRepositoryImpl implements MessageRepository {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
     final channelId = msg.routing.metadata['channel_id']?.toString() ??
-        AppConstants.defaultChannelId;
+        await _resolveDefaultChannelId();
     final timestamp = DateTime.now().toUtc();
     final myDeviceId = _myDeviceIdGetter();
     final isOutbound = myDeviceId != null && senderId == myDeviceId;
@@ -298,7 +300,7 @@ class MessageRepositoryImpl implements MessageRepository {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
     final channelId = msg.routing.metadata['channel_id']?.toString() ??
-        AppConstants.defaultChannelId;
+        await _resolveDefaultChannelId();
     final timestamp = DateTime.now().toUtc();
     final myDeviceId = _myDeviceIdGetter();
     final isOutbound = myDeviceId != null && senderId == myDeviceId;
@@ -322,6 +324,13 @@ class MessageRepositoryImpl implements MessageRepository {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /// Resolve the first available local channel id as a fallback when
+  /// the server doesn't include channel_id in routing metadata.
+  Future<String> _resolveDefaultChannelId() async {
+    final first = await _channelsDao.getFirst();
+    return first?.id ?? 'unknown';
+  }
 
   Future<void> _touchChannelTimestamp(
       String channelId, DateTime timestamp) async {

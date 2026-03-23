@@ -8,5 +8,6 @@ abstract class Channel with _$Channel {
     required String id,
     required String name,
     DateTime? lastMessageAt,
+    int? serverId,
   }) = _Channel;
 }

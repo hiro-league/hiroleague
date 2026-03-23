@@ -10,10 +10,10 @@ Workspace layout:
                                audio settings (domain/preferences.py)
     state.json               ← runtime state (this module)
     master_key.pem           ← ECDSA private key (domain/crypto.py)
-    workspace.db             ← SQLite: agents, devices, channel_plugins,
-                               conversation_channels (domain/db.py)
-    conversations/
-      <channel_id>.jsonl     ← append-only message logs (domain/conversation_log.py)
+    workspace.db             ← SQLite: agents, devices, channel_plugins (domain/db.py)
+    data/
+      data.db                ← SQLite: users, channels, messages (domain/data_store.py)
+      media/<channel_id>/    ← binary content files (domain/media_store.py)
     logs/
     pairing_session.json     ← short-lived pairing session (domain/pairing.py)
     hirocli.pid

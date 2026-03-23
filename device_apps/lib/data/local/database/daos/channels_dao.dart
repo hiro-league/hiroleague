@@ -36,4 +36,8 @@ class ChannelsDao extends DatabaseAccessor<AppDatabase>
   Future<void> insertOrUpdate(ChannelsCompanion companion) async {
     await into(channels).insertOnConflictUpdate(companion);
   }
+
+  Future<ChannelRecord?> getFirst() {
+    return (select(channels)..limit(1)).getSingleOrNull();
+  }
 }

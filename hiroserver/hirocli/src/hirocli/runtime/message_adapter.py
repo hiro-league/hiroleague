@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from hiro_channel_sdk.models import ContentItem, UnifiedMessage
 from hiro_commons.log import Logger
@@ -87,3 +88,34 @@ class MessageAdapterPipeline:
             return msg
         await asyncio.gather(*(a.adapt(msg) for a in applicable))
         return msg
+
+
+# ---------------------------------------------------------------------------
+# Factory — builds the pipeline from workspace preferences
+# ---------------------------------------------------------------------------
+
+
+def create_adapter_pipeline(workspace_path: Path) -> MessageAdapterPipeline:
+    """Create the media adapter pipeline (STT + Vision) for a workspace.
+
+    Moved here from server_process.py so the adapter module owns its own
+    construction logic.
+    """
+    from hirocli.runtime.adapters.audio_adapter import AudioTranscriptionAdapter
+    from hirocli.runtime.adapters.image_adapter import ImageUnderstandingAdapter
+    from hirocli.services.stt import create_stt_service
+    from hirocli.services.vision_service import VisionService
+
+    log.info("🕒 Loading media services")
+    log.info("🕒 Loading Speech-to-Text services")
+    stt_service = create_stt_service(workspace_path)
+
+    log.info("🕒 Loading Vision services")
+    vision_service = VisionService()
+
+    pipeline = MessageAdapterPipeline([
+        AudioTranscriptionAdapter(service=stt_service),
+        ImageUnderstandingAdapter(service=vision_service),
+    ])
+    log.info("Adapter pipeline ready", adapters=["audio_transcription", "image_understanding"])
+    return pipeline

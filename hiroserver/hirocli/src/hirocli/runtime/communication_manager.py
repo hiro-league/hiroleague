@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import (
@@ -48,6 +47,7 @@ if TYPE_CHECKING:
     from .event_handler import EventHandler
     from .message_adapter import MessageAdapterPipeline
     from .request_handler import RequestHandler
+    from .server_context import ServerContext
 
 log = Logger.get("COMM_MAN")
 
@@ -58,8 +58,19 @@ _LOG_OUT = "⬆️"  # outbound (to channel / device)
 _TEXT_SNIPPET_MAX = 120
 
 
+def _parse_req_resp_body(msg: UnifiedMessage) -> dict[str, Any]:
+    """Parse the first JSON content item for request/response detail fields."""
+    for item in msg.content:
+        if item.content_type == CONTENT_TYPE_JSON:
+            try:
+                return json.loads(item.body)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    return {}
+
+
 def _comm_kind(msg: UnifiedMessage) -> str:
-    """Short type summary: message[text,audio], event:message.received, request, …"""
+    """Short type summary: message[text,audio], event:message.received, request:method, …"""
     mt = msg.message_type
     if mt == MESSAGE_TYPE_MESSAGE:
         if not msg.content:
@@ -69,9 +80,11 @@ def _comm_kind(msg: UnifiedMessage) -> str:
         et = msg.event.type if msg.event else "?"
         return f"event:{et}"
     if mt == MESSAGE_TYPE_REQUEST:
-        return "request"
+        method = _parse_req_resp_body(msg).get("method")
+        return f"request:{method}" if method else "request"
     if mt == MESSAGE_TYPE_RESPONSE:
-        return "response"
+        status = _parse_req_resp_body(msg).get("status", "?")
+        return f"response[{status}]"
     return str(mt)
 
 
@@ -100,10 +113,36 @@ def _comm_content_hint(msg: UnifiedMessage) -> str | None:
     return " | ".join(parts) if parts else None
 
 
-def _comm_extras(msg: UnifiedMessage, **kwargs: Any) -> dict[str, Any]:
-    # content_hint first, then caller fields (matches “snippet then rest” preference).
-    hint = _comm_content_hint(msg)
+def _req_resp_extras(msg: UnifiedMessage) -> dict[str, Any]:
+    """Extract request/response-specific fields for log extras."""
+    if msg.message_type not in (MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE):
+        return {}
+    body = _parse_req_resp_body(msg)
+    if not body:
+        return {}
     out: dict[str, Any] = {}
+    if msg.message_type == MESSAGE_TYPE_REQUEST:
+        if "method" in body:
+            out["method"] = body["method"]
+        if body.get("params"):
+            out["params"] = body["params"]
+    else:
+        if "status" in body:
+            out["status"] = body["status"]
+        if "error" in body:
+            out["error"] = body["error"]
+        if "data" in body:
+            out["data"] = body["data"]
+    return out
+
+
+def _comm_extras(msg: UnifiedMessage, **kwargs: Any) -> dict[str, Any]:
+    # Request/response details first, then content_hint, then caller fields.
+    out: dict[str, Any] = {}
+    rr = _req_resp_extras(msg)
+    if rr:
+        out.update(rr)
+    hint = _comm_content_hint(msg)
     if hint:
         out["content_hint"] = hint
     out.update(kwargs)
@@ -124,16 +163,16 @@ class CommunicationManager:
     Usage::
 
         pipeline = MessageAdapterPipeline([AudioTranscriptionAdapter(), ...])
-        request_handler = RequestHandler(comm, workspace_path)
         event_handler = EventHandler()
 
         comm = CommunicationManager(
+            ctx=ctx,
             adapter_pipeline=pipeline,
-            request_handler=request_handler,
             event_handler=event_handler,
-            workspace_path=workspace_path,
         )
-        channel_manager = ChannelManager(..., on_message=comm.receive)
+        request_handler = RequestHandler(ctx, comm)
+        comm.set_request_handler(request_handler)
+        channel_manager = ChannelManager(ctx, ..., on_message=comm.receive)
         comm.set_channel_manager(channel_manager)
 
         await asyncio.gather(..., comm.run())
@@ -142,21 +181,15 @@ class CommunicationManager:
 
     def __init__(
         self,
+        ctx: ServerContext,
         adapter_pipeline: MessageAdapterPipeline | None = None,
-        request_handler: RequestHandler | None = None,
         event_handler: EventHandler | None = None,
-        *,
-        workspace_path: Path | None = None,
     ) -> None:
+        self._ctx = ctx
         self._channel_manager: ChannelManager | None = None
         self._adapter_pipeline = adapter_pipeline
-        self._request_handler = request_handler
+        self._request_handler: RequestHandler | None = None
         self._event_handler = event_handler
-        # Same resolution as ChannelManager._device_label when metadata lacks device_name
-        # (e.g. replies used to use empty metadata — see AgentManager._make_reply). Both use
-        # friendly name only when paired — no redundant id suffix in log lines.
-        self._workspace_path = workspace_path
-        self._device_name_cache: dict[str, str | None] = {}
         self.inbound_queue: asyncio.Queue[UnifiedMessage] = asyncio.Queue()
         self.outbound_queue: asyncio.Queue[UnifiedMessage] = asyncio.Queue()
 
@@ -176,18 +209,8 @@ class CommunicationManager:
                 return s[: -len(f" ({device_id})")]
             return s
 
-        if not device_id or device_id == "server":
-            return device_id or "?"
-        if self._workspace_path is not None:
-            if device_id not in self._device_name_cache:
-                from hirocli.domain.pairing import get_device_name
-
-                self._device_name_cache[device_id] = get_device_name(
-                    self._workspace_path, device_id
-                )
-            name = self._device_name_cache[device_id]
-            return name if name else device_id
-        return device_id
+        # Use the shared DeviceNameResolver from ServerContext instead of a private cache.
+        return self._ctx.device_names.resolve(device_id)
 
     def _routing_tag(self, msg: UnifiedMessage) -> str:
         # Omit inbound/outbound here — ⬆️/⬇️ on the line already encode direction.
@@ -335,6 +358,9 @@ class CommunicationManager:
                         ),
                     )
 
+            # Persist the inbound message to data.db before queuing for the agent.
+            await self._persist_inbound(msg)
+
             self.inbound_queue.put_nowait(msg)
             log.info(
                 f"{_LOG_IN} Queued after adaptation — {self._routing_tag(msg)}",
@@ -347,6 +373,18 @@ class CommunicationManager:
                 exc_info=True,
             )
             await self._enqueue_error_response(msg, f"Adapter pipeline error: {exc}")
+
+    async def _persist_inbound(self, msg: UnifiedMessage) -> None:
+        """Save an inbound message to data.db and persist any media files."""
+        try:
+            from ..domain.message_store import persist_inbound
+            await persist_inbound(self._ctx.workspace_path, msg)
+        except Exception as exc:
+            log.warning(
+                f"⚠️ {_LOG_IN} Message persistence failed (non-fatal) — {self._routing_tag(msg)}",
+                error=str(exc),
+                msg_id=msg.routing.id,
+            )
 
     async def _safe_handle_request(self, msg: UnifiedMessage) -> None:
         try:

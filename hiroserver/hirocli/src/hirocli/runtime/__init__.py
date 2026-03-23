@@ -1,6 +1,8 @@
 """Runtime server components for hirocli.
 
-These five modules run together as the background server daemon.
-They are wired together in server_process.py and never imported
-by the CLI commands or tools layer directly.
+All runtime modules receive a shared ``ServerContext`` (defined in
+``server_context.py``) instead of individual workspace_path / config
+parameters.  The composition root in ``server_process.py`` creates the
+context, calls factory functions owned by each subsystem, and starts
+the asyncio event loop.
 """

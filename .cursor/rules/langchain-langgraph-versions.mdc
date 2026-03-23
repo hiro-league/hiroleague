@@ -1,38 +1,12 @@
 ---
-description: LangChain and LangGraph V1+ API conventions for this project
+description: 
 alwaysApply: true
 ---
 
 # LangChain / LangGraph V1+ API
 
-This project targets **LangChain ≥ 1.0** and **LangGraph ≥ 1.0**. Never suggest
-APIs from older versions.
-
-## Key package locations
-
-| Functionality | Correct import (V1+) |
-|---|---|
-| Build a ReAct agent | `from langchain.agents import create_agent` |
-| Chat model factory | `from langchain.chat_models import init_chat_model` |
-| LangGraph in-memory saver | `from langgraph.checkpoint.memory import MemorySaver` |
-| LangGraph async SQLite saver | `from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver` |
-| LangGraph sync SQLite saver | `from langgraph.checkpoint.sqlite import SqliteSaver` |
-
-Note: `AsyncSqliteSaver` lives in `langgraph.checkpoint.sqlite.aio` — this namespace
-is populated by the **separate** `langgraph-checkpoint-sqlite` package which must be
-declared as a dependency alongside `langgraph`.
+This project targets **LangChain ≥ 1.0** and **LangGraph ≥ 1.0**. Never suggest APIs from older versions.
 
 ## Common mistakes to avoid
 
 - `create_react_agent` — pre-V1 name; use `create_agent` instead
-- Assuming `langgraph.checkpoint.sqlite` is bundled — it is NOT; always declare
-  `langgraph-checkpoint-sqlite>=2.0` as an explicit dependency
-
-## Dependency declaration
-
-```toml
-"langchain>=1.0",
-"langgraph>=1.0",
-"langgraph-checkpoint-sqlite>=2.0",
-"langchain-openai>=0.3",
-```

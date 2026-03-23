@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_EVENT
@@ -27,6 +26,7 @@ from hiro_commons.log import Logger
 if TYPE_CHECKING:
     from ..services.tts.service import TTSService
     from .communication_manager import CommunicationManager
+    from .server_context import ServerContext
 
 log = Logger.get("AGENT")
 
@@ -54,18 +54,18 @@ class AgentManager:
 
     Usage::
 
-        agent_mgr = AgentManager(comm_manager, workspace_path)
+        agent_mgr = AgentManager(ctx, comm_manager, tts_service=tts)
         await asyncio.gather(..., agent_mgr.run())
     """
 
     def __init__(
         self,
+        ctx: ServerContext,
         comm_manager: CommunicationManager,
-        workspace_path: Path,
         tts_service: TTSService | None = None,
     ) -> None:
+        self._ctx = ctx
         self._comm = comm_manager
-        self._workspace_path = workspace_path
         self._tts_service = tts_service
         self._agent = None  # built inside run() once the async checkpointer is ready
 
@@ -73,7 +73,7 @@ class AgentManager:
         """Build the LangChain agent from preferences.  Returns None if no chat LLM is configured."""
         from ..domain.preferences import load_preferences, resolve_llm
 
-        prefs = load_preferences(self._workspace_path)
+        prefs = load_preferences(self._ctx.workspace_path)
         llm_entry = resolve_llm(prefs, "chat")
         if llm_entry is None:
             log.error(
@@ -91,7 +91,7 @@ class AgentManager:
             from ..tools import all_tools
             from ..tools.langchain_adapter import to_langchain_list
 
-            system_prompt = load_system_prompt(self._workspace_path)
+            system_prompt = load_system_prompt(self._ctx.workspace_path)
             tools = to_langchain_list(all_tools())
 
             log.fineinfo(
@@ -124,7 +124,7 @@ class AgentManager:
     def _tts_enabled(self) -> bool:
         """Check if TTS is enabled in workspace preferences."""
         from ..domain.preferences import load_preferences
-        prefs = load_preferences(self._workspace_path)
+        prefs = load_preferences(self._ctx.workspace_path)
         return prefs.audio.agent_replies_in_voice
 
     async def _synthesize_and_send(
@@ -141,7 +141,7 @@ class AgentManager:
         try:
             from ..domain.preferences import load_preferences, resolve_voice
 
-            voice = resolve_voice(load_preferences(self._workspace_path))
+            voice = resolve_voice(load_preferences(self._ctx.workspace_path))
             if not voice:
                 return
 
@@ -153,7 +153,7 @@ class AgentManager:
             )
 
             # DEBUG: save MP3 to workspace for manual playback testing
-            tts_debug_dir = self._workspace_path / "tts_debug"
+            tts_debug_dir = self._ctx.workspace_path / "tts_debug"
             tts_debug_dir.mkdir(exist_ok=True)
             debug_file = tts_debug_dir / f"{text_reply.routing.id}.mp3"
             debug_file.write_bytes(result.audio_bytes)
@@ -197,17 +197,25 @@ class AgentManager:
                 exc_info=True,
             )
 
-    def _resolve_thread_id(self, msg: UnifiedMessage) -> str:
-        """Return the conversation_channels.id UUID for this channel+sender pair.
+    def _resolve_thread_id(self, msg: UnifiedMessage) -> tuple[str, int]:
+        """Return (thread_id, channel_id) for this channel+sender pair.
 
         The channel name used as the lookup key is channel:sender_id so that
         each unique sender on each plugin channel gets its own persistent thread.
-        A new conversation_channels row is created on first contact.
+        If the requested channel does not exist, the seeded General channel is used.
+        thread_id is str(channel.id) — LangGraph uses it as a string key.
         """
-        from ..domain.conversation_channel import get_or_create_channel
+        from ..tools.conversation import ConversationChannelGetTool
+
         channel_name = f"{msg.routing.channel}:{msg.routing.sender_id}"
-        channel = get_or_create_channel(self._workspace_path, channel_name)
-        return channel.id
+        channel_result = ConversationChannelGetTool().execute(
+            channel_name=channel_name,
+            workspace_path=self._ctx.workspace_path,
+        )
+        if channel_result.channel is None:
+            raise RuntimeError("No conversation channel available for agent thread resolution")
+        channel_id = int(channel_result.channel["id"])
+        return str(channel_id), channel_id
 
     async def _process(self, msg: UnifiedMessage) -> None:
         if self._agent is None:
@@ -220,7 +228,7 @@ class AgentManager:
             return
 
         device = msg.routing.metadata.get("device_name", msg.routing.sender_id)
-        thread_id = self._resolve_thread_id(msg)
+        thread_id, channel_id = self._resolve_thread_id(msg)
         config = {"configurable": {"thread_id": thread_id}}
 
         # Build agent input from all content items.
@@ -320,6 +328,26 @@ class AgentManager:
             reply_body = _FALLBACK_ERROR_BODY
 
         reply = _make_reply(msg, reply_body)
+
+        # Persist the outbound reply to data.db
+        try:
+            from ..domain.message_store import save_message
+            await save_message(
+                self._ctx.workspace_path,
+                external_id=reply.routing.id,
+                channel_id=channel_id,
+                sender_type="agent",
+                sender_id="server",
+                content_type="text",
+                body=reply_body,
+            )
+        except Exception as exc:
+            log.warning(
+                "Reply persistence failed (non-fatal)",
+                error=str(exc),
+                thread=thread_id,
+            )
+
         await self._comm.enqueue_outbound(reply)
         log.info(
             "Agent reply enqueued",
@@ -338,22 +366,49 @@ class AgentManager:
                 name=f"tts-{reply.routing.id}",
             )
 
+    def _log_agent_config(self) -> None:
+        """Log the agent model configuration from preferences.
+
+        Absorbed from server_process.py — this is an AgentManager concern.
+        """
+        try:
+            from ..domain.preferences import load_preferences, resolve_llm
+            prefs = load_preferences(self._ctx.workspace_path)
+            llm = resolve_llm(prefs, "chat")
+            if llm:
+                log.info(
+                    "AI Agent config loaded from preferences",
+                    model=llm.model,
+                    provider=llm.provider,
+                    temperature=llm.temperature,
+                    max_tokens=llm.max_tokens,
+                )
+            else:
+                log.error(
+                    "No chat LLM configured. The server will run but the agent "
+                    "cannot process messages. Register at least one LLM in "
+                    "preferences.json (in your workspace directory)."
+                )
+        except Exception as exc:
+            log.error("Failed to load agent config from preferences", error=str(exc))
+
     async def run(self) -> None:
         """Build the agent with a persistent SQLite checkpointer then drain inbound_queue."""
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
         from ..domain.db import db_path
 
-        db = str(db_path(self._workspace_path))
+        self._log_agent_config()
+        db = str(db_path(self._ctx.workspace_path))
 
         # AsyncSqliteSaver manages its own checkpoint tables inside workspace.db.
         # They coexist with the application tables without conflict.
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
             self._agent = self._build_agent(checkpointer)
             if self._agent is None:
-                log.warning("AgentManager started WITHOUT an agent — messages will get a 'not configured' reply")
+                log.warning("⚠️ AgentManager started WITHOUT an agent — messages will get a 'not configured' reply")
             else:
-                log.info("AgentManager started", db=db)
+                log.info("✅ AgentManager started", db=db)
             while True:
                 msg: UnifiedMessage = await self._comm.inbound_queue.get()
                 try:

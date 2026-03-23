@@ -1,0 +1,6 @@
+---
+globs: **/hiroserver/**/*.py
+alwaysApply: false
+---
+
+for the server side, most of its functionality is exposable to the user as CLI command, AI Agent Tool, HTTP Request or Admin UI feature. Before building functionality exposed to any of these, consider using the Tools Architecture (Check MintDocs) and notify the user that you're using it.

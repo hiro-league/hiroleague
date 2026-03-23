@@ -17,8 +17,7 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import websockets
 from websockets.asyncio.server import ServerConnection
@@ -49,12 +48,13 @@ from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
 from hiro_channel_sdk.models import UnifiedMessage
 
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
-from ..domain.config import Config, resolve_log_dir
-from ..domain.pairing import get_device_name
 from .. import rpc_helpers as rpc
 
 # Shared with CommunicationManager: same arrows, kind string, and content_hint for humans.
 from .communication_manager import _LOG_IN, _LOG_OUT, _comm_extras, _comm_kind
+
+if TYPE_CHECKING:
+    from .server_context import ServerContext
 
 log = Logger.get("CHANNEL_MAN")
 
@@ -73,23 +73,17 @@ class ChannelManager:
 
     def __init__(
         self,
-        config: Config,
-        workspace_path: Path,
-        stop_event: asyncio.Event,
+        ctx: ServerContext,
         on_message: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
-        self._config = config
-        self._workspace_path = workspace_path
-        self._stop_event = stop_event
+        self._ctx = ctx
         self._on_message = on_message
         self._on_event = on_event
         self._channels: dict[str, _ConnectedChannel] = {}
         self._subprocesses: dict[str, subprocess.Popen[bytes]] = {}
-        # Cache device_id → device_name to avoid repeated DB hits per log call.
-        self._device_name_cache: dict[str, str | None] = {}
         self._host = DEFAULT_LOCALHOST
-        self._port = config.plugin_port
+        self._port = ctx.config.plugin_port
 
     # ------------------------------------------------------------------
     # Main coroutine
@@ -104,7 +98,7 @@ class ChannelManager:
                 f"✅ Channel Manager listening at ws://{self._host}:{self._port}"
             )
             await self._spawn_channels()
-            await self._stop_event.wait()
+            await self._ctx.stop_event.wait()
             await self._shutdown_channels()
 
         log.info("Channel Manager shut down")
@@ -114,7 +108,7 @@ class ChannelManager:
     # ------------------------------------------------------------------
 
     async def _spawn_channels(self) -> None:
-        channels = list_enabled_channels(self._workspace_path)
+        channels = list_enabled_channels(self._ctx.workspace_path)
         if not channels:
             log.warning("No enabled channel plugins configured")
             return
@@ -124,11 +118,10 @@ class ChannelManager:
             await self._spawn_one(ch, hiro_ws)
 
     async def _spawn_one(self, ch: ChannelConfig, hiro_ws: str) -> None:
-        log_dir = resolve_log_dir(self._workspace_path, self._config)
         cmd = ch.effective_command() + [
             "--hiro-ws", hiro_ws,
-            "--log-dir", str(log_dir),
-            "--log-level", self._config.log_level,
+            "--log-dir", str(self._ctx.log_dir),
+            "--log-level", self._ctx.config.log_level,
         ]
         self._kill_previous_channel(ch.name)
         log.info(f"🔌 Spawning channel plugin: {ch.name}", cmd=cmd)
@@ -153,7 +146,7 @@ class ChannelManager:
                     stderr=subprocess.DEVNULL,
                 )
             self._subprocesses[ch.name] = proc
-            write_channel_pid(self._workspace_path, ch.name, proc.pid)
+            write_channel_pid(self._ctx.workspace_path, ch.name, proc.pid)
         except FileNotFoundError:
             log.error(
                 "❌ Channel command not found",
@@ -166,13 +159,13 @@ class ChannelManager:
             )
 
     def _kill_previous_channel(self, channel_name: str) -> None:
-        pid = read_channel_pid(self._workspace_path, channel_name)
+        pid = read_channel_pid(self._ctx.workspace_path, channel_name)
         if pid is None:
             return
         if is_running(pid):
             log.info(f"Stopping previous channel plugin: {channel_name}", pid=pid)
             kill_process(pid)
-        remove_channel_pid(self._workspace_path, channel_name)
+        remove_channel_pid(self._ctx.workspace_path, channel_name)
 
     async def _shutdown_channels(self) -> None:
         for ch in list(self._channels.values()):
@@ -189,22 +182,21 @@ class ChannelManager:
                 except Exception:
                     pass
 
-        channels = list_enabled_channels(self._workspace_path)
+        channels = list_enabled_channels(self._ctx.workspace_path)
         for ch in channels:
-            remove_channel_pid(self._workspace_path, ch.name)
+            remove_channel_pid(self._ctx.workspace_path, ch.name)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     def _device_label(self, device_id: str) -> str:
-        """Return paired device_name when set, else device_id (compact for narrow log UIs)."""
-        if device_id not in self._device_name_cache:
-            self._device_name_cache[device_id] = get_device_name(
-                self._workspace_path, device_id
-            )
-        name = self._device_name_cache[device_id]
-        return name if name else device_id
+        """Return paired device_name when set, else device_id (compact for narrow log UIs).
+
+        Uses the shared DeviceNameResolver from ServerContext instead of a
+        per-manager cache (previously duplicated in CommunicationManager).
+        """
+        return self._ctx.device_names.resolve(device_id)
 
     def _event_peer_label(self, event_data: dict[str, Any]) -> str | None:
         """Friendly device label from channel.event payloads when an id field is present."""
@@ -375,11 +367,11 @@ class ChannelManager:
                 fut.set_result(data.get("result"))
 
     async def _push_config(self, channel_name: str) -> None:
-        cfg = load_channel_config(self._workspace_path, channel_name)
+        cfg = load_channel_config(self._ctx.workspace_path, channel_name)
         payload = dict(cfg.config) if cfg else {}
         if channel_name == MANDATORY_CHANNEL_NAME:
-            payload.setdefault("gateway_url", self._config.gateway_url)
-            payload.setdefault("device_id", self._config.device_id)
+            payload.setdefault("gateway_url", self._ctx.config.gateway_url)
+            payload.setdefault("device_id", self._ctx.config.device_id)
             payload.setdefault("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
         if payload:
             await self.configure_channel(channel_name, payload)

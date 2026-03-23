@@ -9,4 +9,7 @@ PAIRING_SESSION_FILENAME: str = "pairing_session.json"
 MASTER_KEY_FILENAME: str = "master_key.pem"
 WORKSPACE_DB_FILENAME: str = "workspace.db"
 PREFERENCES_FILENAME: str = "preferences.json"
-CONVERSATIONS_DIR: str = "conversations"
+
+DATA_DIR: str = "data"
+DATA_DB_FILENAME: str = "data.db"
+MEDIA_DIR: str = "media"

@@ -1,0 +1,6 @@
+---
+globs: **/device_apps/**
+alwaysApply: false
+---
+
+When creating new flutter features, consider reviewing Fluter Architecture documentation in mintdocs for consistency.

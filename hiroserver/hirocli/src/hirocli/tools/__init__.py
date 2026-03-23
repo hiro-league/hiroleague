@@ -1,4 +1,9 @@
 from .base import Tool
+from .conversation import (
+    ConversationChannelGetTool,
+    ConversationChannelListTool,
+    MessageHistoryTool,
+)
 from .logs import LogSearchTool, LogTailTool
 from .channel import (
     ChannelDisableTool,
@@ -47,6 +52,9 @@ def all_tools() -> list[Tool]:
         ChannelEnableTool(),
         ChannelDisableTool(),
         ChannelRemoveTool(),
+        ConversationChannelListTool(),
+        ConversationChannelGetTool(),
+        MessageHistoryTool(),
         WorkspaceListTool(),
         WorkspaceCreateTool(),
         WorkspaceRemoveTool(),

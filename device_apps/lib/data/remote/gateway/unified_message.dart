@@ -183,6 +183,7 @@ class UnifiedMessage {
   const UnifiedMessage({
     this.version = '0.1',
     this.messageType = 'message',
+    this.requestId,
     required this.routing,
     required this.content,
     this.event,
@@ -190,6 +191,7 @@ class UnifiedMessage {
 
   final String version;
   final String messageType;
+  final String? requestId;
   final MessageRouting routing;
   final List<ContentItem> content;
   final EventPayload? event;
@@ -231,6 +233,7 @@ class UnifiedMessage {
     return UnifiedMessage(
       version: json['version'] as String,
       messageType: json['message_type'] as String,
+      requestId: json['request_id'] as String?,
       routing: MessageRouting.fromJson(Map<String, dynamic>.from(routingRaw)),
       content: contentRaw.indexed
           .map((entry) {
@@ -250,6 +253,7 @@ class UnifiedMessage {
   Map<String, dynamic> toJson() => {
         'version': version,
         'message_type': messageType,
+        if (requestId != null) 'request_id': requestId,
         'routing': routing.toJson(),
         'content': content.map((c) => c.toJson()).toList(),
         if (event != null) 'event': event!.toJson(),

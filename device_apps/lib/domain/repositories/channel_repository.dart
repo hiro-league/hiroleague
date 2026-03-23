@@ -5,6 +5,6 @@ abstract class ChannelRepository {
 
   Future<void> insertChannel(Channel channel);
 
-  /// Creates the default "General" channel if no channels exist yet.
-  Future<void> ensureDefaultChannel();
+  /// Sync local channel DB from server-provided channel list.
+  Future<void> syncFromServer(List<Map<String, dynamic>> serverChannels);
 }

@@ -107,26 +107,26 @@ def create_page_layout(active_path: str = "/") -> None:
     if ui_state.workspace_name:
         header_title = f"Hiro Admin — {ui_state.workspace_name}"
 
-    with ui.header(elevated=True).classes("items-center justify-between"):
-        with ui.row().classes("items-center gap-2"):
-            ui.button(icon="menu", on_click=toggle_sidebar_mini).props('flat dense round color="white"')
-            ui.icon("home").classes("text-primary text-xl")
-            ui.label(header_title).classes("text-lg font-semibold")
+    with ui.header(elevated=True).classes("items-center justify-between q-py-none").style("min-height:40px"):
+        with ui.row().classes("items-center gap-1"):
+            ui.button(icon="menu", on_click=toggle_sidebar_mini).props('flat dense round color="white" size="sm"')
+            ui.icon("home").classes("text-primary text-lg")
+            ui.label(header_title).classes("text-sm font-semibold")
 
-        with ui.row().classes("items-center gap-4"):
+        with ui.row().classes("items-center gap-2"):
             if workspace_options:
                 def on_workspace_change(e) -> None:
                     nicegui_app.storage.user["selected_workspace"] = e.value
                     ui.navigate.reload()
 
+                # hide-bottom-space removes the validation-message gap below the select
                 ui.select(
                     workspace_options,
                     value=selected_id,
-                    label="Workspace",
                     on_change=on_workspace_change,
-                ).classes("min-w-40").props("dense outlined dark")
+                ).classes("min-w-36").props("dense outlined dark hide-bottom-space").style("font-size:0.8rem")
 
-            ui.switch("Dark mode").props("dense").bind_value(
+            ui.switch("Dark mode").props("dense size=sm").bind_value(
                 nicegui_app.storage.user, "dark_mode"
             )
     

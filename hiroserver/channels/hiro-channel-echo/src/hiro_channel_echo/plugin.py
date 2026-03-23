@@ -31,7 +31,7 @@ class EchoChannel(ChannelPlugin):
         log.info("EchoChannel configured", config=config)
 
     async def on_start(self) -> None:
-        log.info("EchoChannel started")
+        log.info("✅ EchoChannel started")
 
     async def on_stop(self) -> None:
         log.info("EchoChannel stopped")
