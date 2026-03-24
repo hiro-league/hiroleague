@@ -194,7 +194,8 @@ async def workspaces_page() -> None:
             )
 
             async def _copy_pubkey_dialog() -> None:
-                await ui.clipboard.write(pubkey_display.value)
+                # ui.clipboard.write() returns None in this NiceGUI version — do not await it.
+                ui.clipboard.write(pubkey_display.value)
                 ui.notify("Public key copied to clipboard.", color="positive", timeout=2500)
 
             ui.button(icon="content_copy", on_click=_copy_pubkey_dialog).props(
@@ -303,7 +304,8 @@ async def workspaces_page() -> None:
                 )
 
                 async def _copy_pubkey() -> None:
-                    await ui.clipboard.write(setup_pubkey_display.value)
+                    # ui.clipboard.write() returns None in this NiceGUI version — do not await it.
+                    ui.clipboard.write(setup_pubkey_display.value)
                     ui.notify("Public key copied to clipboard.", color="positive", timeout=2500)
 
                 ui.button(icon="content_copy", on_click=_copy_pubkey).props(

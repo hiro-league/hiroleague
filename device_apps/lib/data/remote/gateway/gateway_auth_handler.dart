@@ -46,12 +46,15 @@ class GatewayAuthHandler {
 
     // 2 — Sign nonce and send auth_response
     final nonceSignature = await _cryptoService.signNonce(identity.seedBase64, nonce);
+    // device_name is included outside the signed attestation blob — it is cosmetic
+    // metadata for gateway logs and has no effect on access control decisions.
     sink.add(
       jsonEncode(<String, dynamic>{
         'type': 'auth_response',
         'auth_mode': 'device',
         'attestation': identity.attestation!.toJson(),
         'nonce_signature': nonceSignature,
+        if (identity.deviceName != null) 'device_name': identity.deviceName,
       }),
     );
     _log.debug('Sent auth_response');

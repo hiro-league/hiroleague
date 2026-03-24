@@ -94,7 +94,7 @@ def _run_gateway(
     auth_manager = GatewayAuthManager(desktop_public_key_b64=config.desktop_public_key)
     configure_auth(auth_manager)
     configure_instance_path(instance_path)
-    log.info("Gateway trust root configured", instance=entry.name)
+    log.info("✅ Gateway trust root configured", instance=entry.name)
     asyncio.run(_serve(entry.host, entry.port))
 
 
@@ -103,7 +103,7 @@ async def _serve(host: str, port: int) -> None:
     stop_event = asyncio.Event()
 
     def _shutdown(*_: object) -> None:
-        log.info("Shutdown signal received")
+        log.info("🛑 Shutdown signal received")
         stop_event.set()
 
     loop = asyncio.get_running_loop()
@@ -118,11 +118,11 @@ async def _serve(host: str, port: int) -> None:
         signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(stop_event.set))
 
     async with websockets.serve(handle_connection, host, port, reuse_address=True) as server:
-        log.info("Gateway listening", url=f"ws://{host}:{port}")
+        log.info(f"✅ Gateway listening at ws://{host}:{port}")
         await stop_event.wait()
-        log.info("Shutting down", connected_devices=get_connected_devices())
+        log.info("🛑 Shutting down", connected_devices=get_connected_devices())
 
-    log.info("Gateway stopped")
+    log.info("🛑 Gateway stopped")
 
 
 # ---------------------------------------------------------------------------

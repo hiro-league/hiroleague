@@ -23,6 +23,15 @@ from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_E
 from hiro_channel_sdk.models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
 from hiro_commons.log import Logger
 
+# Reuse COMM_MAN helpers so log lines share peer, kind, and content_hint ordering.
+from .communication_manager import (
+    _LOG_IN,
+    _LOG_OUT,
+    _comm_extras,
+    _comm_kind,
+    comm_peer_label,
+)
+
 if TYPE_CHECKING:
     from ..services.tts.service import TTSService
     from .communication_manager import CommunicationManager
@@ -77,7 +86,7 @@ class AgentManager:
         llm_entry = resolve_llm(prefs, "chat")
         if llm_entry is None:
             log.error(
-                "⚠️  No chat LLM configured in preferences.json. "
+                "❌ No chat LLM configured — preferences · chat\n"
                 "The agent cannot process messages until an LLM is registered. "
                 "Edit preferences.json in your workspace directory to add one."
             )
@@ -95,9 +104,7 @@ class AgentManager:
             tools = to_langchain_list(all_tools())
 
             log.fineinfo(
-                "Building agent",
-                model=llm_entry.model,
-                provider=llm_entry.provider,
+                f"Building agent — chat · {llm_entry.provider}/{llm_entry.model}",
                 temperature=llm_entry.temperature,
                 max_tokens=llm_entry.max_tokens,
                 tools=len(tools),
@@ -117,7 +124,12 @@ class AgentManager:
                 checkpointer=checkpointer,
             )
         except Exception as exc:
-            log.error("Error building agent", error=str(exc), exc_info=True)
+            # Human-first: error before opaque fields; kind in the message line.
+            log.error(
+                "❌ Agent build failed — HiroServer · chat",
+                error=str(exc),
+                exc_info=True,
+            )
             raise
 
     @property
@@ -145,6 +157,8 @@ class AgentManager:
             if not voice:
                 return
 
+            peer = comm_peer_label(inbound, self._ctx)
+
             result = await self._tts_service.synthesize(
                 text,
                 model=voice.model,
@@ -157,7 +171,10 @@ class AgentManager:
             tts_debug_dir.mkdir(exist_ok=True)
             debug_file = tts_debug_dir / f"{text_reply.routing.id}.mp3"
             debug_file.write_bytes(result.audio_bytes)
-            log.debug("TTS debug file saved", path=str(debug_file))
+            log.debug(
+                f"🔧 TTS debug file written — {peer}",
+                path=str(debug_file),
+            )
 
             audio_b64 = base64.b64encode(result.audio_bytes).decode()
             voiced_event = UnifiedMessage(
@@ -181,19 +198,21 @@ class AgentManager:
             )
             await self._comm.enqueue_outbound(voiced_event)
             log.info(
-                "TTS voiced event enqueued",
-                ref_id=text_reply.routing.id,
+                f"{_LOG_OUT} Voiced event enqueued — {peer} · event:{EVENT_TYPE_MESSAGE_VOICED}",
+                duration_ms=result.duration_ms,
+                mime_type=result.mime_type,
+                audio_bytes=len(result.audio_bytes),
                 model=result.model,
                 voice=result.voice,
-                audio_bytes=len(result.audio_bytes),
-                duration_ms=result.duration_ms,
+                ref_id=text_reply.routing.id,
             )
         except Exception as exc:
             # Graceful degradation: text was already delivered, just log
+            peer = comm_peer_label(inbound, self._ctx)
             log.error(
-                "TTS synthesis failed — text reply already sent",
-                ref_id=text_reply.routing.id,
+                f"❌ TTS synthesis failed — {peer} · text reply already sent",
                 error=str(exc),
+                ref_id=text_reply.routing.id,
                 exc_info=True,
             )
 
@@ -219,15 +238,20 @@ class AgentManager:
 
     async def _process(self, msg: UnifiedMessage) -> None:
         if self._agent is None:
+            peer = comm_peer_label(msg, self._ctx)
             reply = _make_reply(
                 msg,
                 "The agent is not available — no chat LLM is configured. "
                 "Please register an LLM in preferences.json.",
             )
             await self._comm.enqueue_outbound(reply)
+            log.info(
+                f"{_LOG_OUT} Fallback reply enqueued — {peer} · {_comm_kind(msg)}",
+                **_comm_extras(msg, reason="no_chat_llm"),
+            )
             return
 
-        device = msg.routing.metadata.get("device_name", msg.routing.sender_id)
+        peer = comm_peer_label(msg, self._ctx)
         thread_id, channel_id = self._resolve_thread_id(msg)
         config = {"configurable": {"thread_id": thread_id}}
 
@@ -249,9 +273,7 @@ class AgentManager:
                     parts.append(f"[{item.content_type}]: {desc}")
             else:
                 log.warning(
-                    "Skipping content item — no description available",
-                    device=device,
-                    content_type=item.content_type,
+                    f"⚠️ Skipping content item — {peer} · {item.content_type}",
                     adapter_error=item.metadata.get("adapter_error"),
                     msg_id=msg.routing.id,
                 )
@@ -259,26 +281,29 @@ class AgentManager:
         text_body = "\n".join(parts)
 
         if not text_body:
+            adapter_errors = [
+                i.metadata["adapter_error"]
+                for i in msg.content
+                if "adapter_error" in i.metadata
+            ]
             log.warning(
-                "Ignoring message with no usable text input",
-                device=device,
-                msg_id=msg.routing.id,
-                content_types=[i.content_type for i in msg.content],
-                adapter_errors=[
-                    i.metadata["adapter_error"]
-                    for i in msg.content
-                    if "adapter_error" in i.metadata
-                ],
+                f"{_LOG_IN} No usable input — {peer} · {_comm_kind(msg)}",
+                **_comm_extras(
+                    msg,
+                    content_types=[i.content_type for i in msg.content],
+                    adapter_errors=adapter_errors or None,
+                ),
             )
             return
 
         log.info(
-            "Processing message",
-            device=device,
-            msg_id=msg.routing.id,
-            thread=thread_id,
-            text_preview=text_body[:200],
-            body_length=len(text_body),
+            f"{_LOG_IN} Agent processing — {peer} · {_comm_kind(msg)}",
+            **_comm_extras(
+                msg,
+                thread_id=thread_id,
+                text_preview=text_body[:200],
+                body_length=len(text_body),
+            ),
         )
         try:
             agent_input = {"messages": [{"role": "user", "content": text_body}]}
@@ -287,19 +312,25 @@ class AgentManager:
             state = await self._agent.aget_state(config)
             history = state.values.get("messages", []) if state.values else []
             log.debug(
-                "Agent invocation context",
-                device=device,
-                thread=thread_id,
-                history_len=len(history),
-                history_summary=[
-                    {
-                        "role": getattr(m, "type", "?"),
-                        "len": len(m.content) if isinstance(m.content, str) else "tool_calls",
-                        "preview": (m.content[:80] if isinstance(m.content, str) else str(m.content)[:80]),
-                    }
-                    for m in history[-10:]  # last 10 messages for brevity
-                ],
-                new_input=text_body[:200],
+                f"{_LOG_IN} Agent invocation context — {peer} · {_comm_kind(msg)}",
+                **_comm_extras(
+                    msg,
+                    thread_id=thread_id,
+                    history_len=len(history),
+                    history_summary=[
+                        {
+                            "role": getattr(m, "type", "?"),
+                            "len": len(m.content) if isinstance(m.content, str) else "tool_calls",
+                            "preview": (
+                                m.content[:80]
+                                if isinstance(m.content, str)
+                                else str(m.content)[:80]
+                            ),
+                        }
+                        for m in history[-10:]  # last 10 messages for brevity
+                    ],
+                    new_input=text_body[:200],
+                ),
             )
 
             _t0 = time.perf_counter()
@@ -310,19 +341,20 @@ class AgentManager:
             _elapsed_ms = int((time.perf_counter() - _t0) * 1000)
             reply_body: str = result["messages"][-1].content
             log.info(
-                "Agent replied",
-                device=device,
-                thread=thread_id,
-                reply_preview=reply_body[:200],
-                output_length=len(reply_body),
-                elapsed_ms=_elapsed_ms,
+                f"✅ Agent reply — {peer} · {_comm_kind(msg)}",
+                **_comm_extras(
+                    msg,
+                    reply_preview=reply_body[:200],
+                    output_length=len(reply_body),
+                    elapsed_ms=_elapsed_ms,
+                    thread_id=thread_id,
+                ),
             )
         except Exception as exc:
             log.error(
-                "Agent invocation error",
-                device=device,
-                thread=thread_id,
+                f"❌ Agent invocation failed — {peer} · {_comm_kind(msg)}",
                 error=str(exc),
+                **_comm_extras(msg, thread_id=thread_id),
                 exc_info=True,
             )
             reply_body = _FALLBACK_ERROR_BODY
@@ -343,17 +375,20 @@ class AgentManager:
             )
         except Exception as exc:
             log.warning(
-                "Reply persistence failed (non-fatal)",
+                f"⚠️ Reply save failed — {peer}",
                 error=str(exc),
-                thread=thread_id,
+                in_reply_to=msg.routing.id,
+                thread_id=thread_id,
             )
 
         await self._comm.enqueue_outbound(reply)
         log.info(
-            "Agent reply enqueued",
-            device=device,
-            in_reply_to=msg.routing.id,
-            thread=thread_id,
+            f"{_LOG_OUT} Text reply enqueued — {comm_peer_label(reply, self._ctx)} · {_comm_kind(reply)}",
+            **_comm_extras(
+                reply,
+                in_reply_to=msg.routing.id,
+                thread_id=thread_id,
+            ),
         )
 
         # TTS post-processing: fire-and-forget so it never blocks the next message.
@@ -377,20 +412,21 @@ class AgentManager:
             llm = resolve_llm(prefs, "chat")
             if llm:
                 log.info(
-                    "AI Agent config loaded from preferences",
-                    model=llm.model,
-                    provider=llm.provider,
+                    f"✅ Agent config loaded — preferences · {llm.provider}/{llm.model}",
                     temperature=llm.temperature,
                     max_tokens=llm.max_tokens,
                 )
             else:
                 log.error(
-                    "No chat LLM configured. The server will run but the agent "
-                    "cannot process messages. Register at least one LLM in "
-                    "preferences.json (in your workspace directory)."
+                    "❌ No chat LLM configured — HiroServer will run without agent · preferences\n"
+                    "Register at least one LLM in preferences.json (in your workspace directory)."
                 )
         except Exception as exc:
-            log.error("Failed to load agent config from preferences", error=str(exc))
+            log.error(
+                "❌ Failed to load agent config — preferences",
+                error=str(exc),
+                exc_info=True,
+            )
 
     async def run(self) -> None:
         """Build the agent with a persistent SQLite checkpointer then drain inbound_queue."""
@@ -406,9 +442,15 @@ class AgentManager:
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
             self._agent = self._build_agent(checkpointer)
             if self._agent is None:
-                log.warning("⚠️ AgentManager started WITHOUT an agent — messages will get a 'not configured' reply")
+                log.warning(
+                    "⚠️ AgentManager started — workspace · no chat LLM (fallback replies only)",
+                    db=db,
+                )
             else:
-                log.info("✅ AgentManager started", db=db)
+                log.info(
+                    "✅ AgentManager started — workspace · chat agent",
+                    db=db,
+                )
             while True:
                 msg: UnifiedMessage = await self._comm.inbound_queue.get()
                 try:

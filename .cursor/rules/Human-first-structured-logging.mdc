@@ -1,0 +1,14 @@
+---
+alwaysApply: true
+---
+
+# Human-first logging
+For **operational / message-flow** logs: the **first argument** (message string) must carry **what happened**, **who** (human-readable label when known), and **what kind** (short summary). Optional emoji: `✅` `❌` `⚠️` `🔌` `⬇️` `⬆️`. Typical shape: `{emoji} {action} — {peer} · {kind}`.
+
+**Structured extras** (keyword args / `fields`): put **readable** fields first — e.g. `content_hint`, `error`, short status text — then **opaque** fields last (`msg_id`, `device_id`, `sender_id`, `target_id`, etc.). Use `exc_info=True` on errors when useful.
+
+**Direction (server-centric):** `⬇️` **inbound** = traffic that **ends up at the server** (hirocli / HiroServer). `⬆️` **outbound** = traffic that **leaves the server** toward clients, devices, channels, or upstream services — whatever the hop, the arrow matches the path **relative to the server**.
+
+**Kind helpers:** Reuse shared helpers where they exist (e.g. `_comm_kind` / `_comm_content_hint` / `_comm_extras` in hirocli; `_relay_kind` / `_relay_content_hint` on the gateway). **Kind** belongs in the message string; rich detail belongs in extras, ordered as above.
+
+**Label the server** as **HiroServer** in gateway logs when referring to the desktop/hirocli side.

@@ -47,7 +47,8 @@ if TYPE_CHECKING:
     from .event_handler import EventHandler
     from .message_adapter import MessageAdapterPipeline
     from .request_handler import RequestHandler
-    from .server_context import ServerContext
+
+from .server_context import ServerContext
 
 log = Logger.get("COMM_MAN")
 
@@ -149,6 +150,29 @@ def _comm_extras(msg: UnifiedMessage, **kwargs: Any) -> dict[str, Any]:
     return out
 
 
+def comm_peer_label(msg: UnifiedMessage, ctx: ServerContext) -> str:
+    """Short peer label for logs: friendly name when known, else device_id.
+
+    Extracted from CommunicationManager._peer_label so AgentManager can reuse the same
+    label for human-first logging (AGENT lines stay consistent with COMM_MAN).
+    """
+    if msg.routing.direction == "outbound":
+        device_id = (msg.routing.recipient_id or msg.routing.sender_id or "").strip()
+    else:
+        device_id = (msg.routing.sender_id or "").strip()
+
+    meta = msg.routing.metadata or {}
+    dn = meta.get("device_name")
+    if isinstance(dn, str) and dn.strip():
+        s = dn.strip()
+        # Legacy "Name (device_id)" from older servers — drop id when it matches this peer.
+        if device_id and s.endswith(f" ({device_id})"):
+            return s[: -len(f" ({device_id})")]
+        return s
+
+    return ctx.device_names.resolve(device_id)
+
+
 def _check_permissions(msg: UnifiedMessage) -> None:
     """Placeholder for user/channel permission checks.
 
@@ -195,22 +219,7 @@ class CommunicationManager:
 
     def _peer_label(self, msg: UnifiedMessage) -> str:
         """Short peer label for logs: friendly name only when known, else device_id."""
-        if msg.routing.direction == "outbound":
-            device_id = (msg.routing.recipient_id or msg.routing.sender_id or "").strip()
-        else:
-            device_id = (msg.routing.sender_id or "").strip()
-
-        meta = msg.routing.metadata or {}
-        dn = meta.get("device_name")
-        if isinstance(dn, str) and dn.strip():
-            s = dn.strip()
-            # Legacy "Name (device_id)" from older servers — drop id when it matches this peer.
-            if device_id and s.endswith(f" ({device_id})"):
-                return s[: -len(f" ({device_id})")]
-            return s
-
-        # Use the shared DeviceNameResolver from ServerContext instead of a private cache.
-        return self._ctx.device_names.resolve(device_id)
+        return comm_peer_label(msg, self._ctx)
 
     def _routing_tag(self, msg: UnifiedMessage) -> str:
         # Omit inbound/outbound here — ⬆️/⬇️ on the line already encode direction.
