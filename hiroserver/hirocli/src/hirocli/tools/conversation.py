@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..domain.conversation_channel import (
+    create_channel,
     _get_channel_by_id,
     _get_channel_by_name,
     _get_default_channel,
@@ -30,12 +31,14 @@ def _resolve_channel(
 ) -> dict[str, Any] | None:
     if channel_id is None and channel_name is None:
         raise ValueError("channel_id or channel_name is required")
+    if channel_name is not None and user_id is None:
+        raise ValueError("user_id is required when resolving a channel by name")
 
     channel = None
     if channel_id is not None:
         channel = _get_channel_by_id(workspace_path, channel_id)
     elif channel_name is not None:
-        channel = _get_channel_by_name(workspace_path, channel_name)
+        channel = _get_channel_by_name(workspace_path, channel_name, user_id=user_id)
 
     if channel is None:
         channel = _get_default_channel(workspace_path, user_id=user_id)
@@ -51,6 +54,11 @@ class ConversationChannelListResult:
 @dataclass
 class ConversationChannelGetResult:
     channel: dict[str, Any] | None = None
+
+
+@dataclass
+class ConversationChannelCreateResult:
+    channel: dict[str, Any]
 
 
 @dataclass
@@ -76,10 +84,11 @@ class ConversationChannelListTool(Tool):
 
 class ConversationChannelGetTool(Tool):
     name = "conversation_channel_get"
-    description = "Get a conversation channel by id or name; falls back to General if not found"
+    description = "Get a conversation channel by id or by user-scoped name; falls back to that user's General channel if not found"
     params = {
         "channel_id": ToolParam(int, "Channel integer id", required=False),
         "channel_name": ToolParam(str, "Channel name", required=False),
+        "user_id": ToolParam(int, "Owning user id; required when channel_name is provided", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
@@ -100,6 +109,38 @@ class ConversationChannelGetTool(Tool):
             user_id=user_id,
         )
         return ConversationChannelGetResult(channel=channel)
+
+
+class ConversationChannelCreateTool(Tool):
+    name = "conversation_channel_create"
+    description = "Create a conversation channel for a specific user and agent"
+    params = {
+        "channel_name": ToolParam(str, "Channel name"),
+        "user_id": ToolParam(int, "Owning user id"),
+        "agent_id": ToolParam(str, "Owning agent id"),
+        "channel_type": ToolParam(str, "Channel type (default: direct)", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(
+        self,
+        channel_name: str,
+        user_id: int,
+        agent_id: str,
+        channel_type: str = "direct",
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+    ) -> ConversationChannelCreateResult:
+        resolved_workspace_path = workspace_path or _resolve_path(workspace)
+        channel = create_channel(
+            resolved_workspace_path,
+            name=channel_name,
+            agent_id=agent_id,
+            user_id=user_id,
+            channel_type=channel_type,
+        )
+        return ConversationChannelCreateResult(channel=channel.model_dump())
 
 
 class MessageHistoryTool(Tool):

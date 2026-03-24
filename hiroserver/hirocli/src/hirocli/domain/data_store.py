@@ -41,10 +41,10 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS channels (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL UNIQUE,
+        name            TEXT NOT NULL,
         type            TEXT NOT NULL DEFAULT 'direct',
-        agent_id        TEXT,
-        user_id         INTEGER REFERENCES users(id),
+        agent_id        TEXT NOT NULL,
+        user_id         INTEGER NOT NULL REFERENCES users(id),
         created_at      TEXT NOT NULL,
         last_message_at TEXT
     )
@@ -66,6 +66,7 @@ _DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel_id, created_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_ext_id ON messages(external_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_user_name ON channels(user_id, name)",
 ]
 
 _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
@@ -75,8 +76,8 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     # channels
     ("channels", "name",            "TEXT NOT NULL DEFAULT ''"),
     ("channels", "type",            "TEXT NOT NULL DEFAULT 'direct'"),
-    ("channels", "agent_id",        "TEXT"),
-    ("channels", "user_id",         "INTEGER"),
+    ("channels", "agent_id",        "TEXT NOT NULL DEFAULT ''"),
+    ("channels", "user_id",         "INTEGER NOT NULL DEFAULT 0"),
     ("channels", "created_at",      "TEXT NOT NULL DEFAULT ''"),
     ("channels", "last_message_at", "TEXT"),
     # messages
@@ -162,7 +163,7 @@ def _seed_defaults(conn: sqlite3.Connection, workspace_path: Path) -> None:
     user_id = user_row[0]
 
     # Resolve the default agent from workspace.db
-    agent_id = _resolve_default_agent_id(workspace_path)
+    agent_id = get_default_agent_id(workspace_path)
 
     # Default channel — linked to default user and default agent
     conn.execute(
@@ -175,16 +176,28 @@ def _seed_defaults(conn: sqlite3.Connection, workspace_path: Path) -> None:
     conn.commit()
 
 
-def _resolve_default_agent_id(workspace_path: Path) -> str | None:
+def get_default_user_id(workspace_path: Path) -> int:
+    """Return the seeded default user id."""
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        row = conn.execute(
+            "SELECT id FROM users WHERE name = ?",
+            (_DEFAULT_USER_NAME,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Default user is missing from data.db")
+        return int(row[0])
+
+
+def get_default_agent_id(workspace_path: Path) -> str:
     """Read the default agent id from workspace.db (cross-DB reference)."""
     from .db import db_path, ensure_db
 
     ensure_db(workspace_path)
-    try:
-        with sqlite3.connect(str(db_path(workspace_path))) as ws_conn:
-            row = ws_conn.execute(
-                "SELECT id FROM agents WHERE is_default = 1 LIMIT 1"
-            ).fetchone()
-            return row[0] if row else None
-    except Exception:
-        return None
+    with sqlite3.connect(str(db_path(workspace_path))) as ws_conn:
+        row = ws_conn.execute(
+            "SELECT id FROM agents WHERE is_default = 1 LIMIT 1"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise RuntimeError("Default agent is missing from workspace.db")
+        return str(row[0])

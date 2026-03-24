@@ -224,12 +224,15 @@ class AgentManager:
         If the requested channel does not exist, the seeded General channel is used.
         thread_id is str(channel.id) — LangGraph uses it as a string key.
         """
+        from ..domain.data_store import get_default_user_id
         from ..tools.conversation import ConversationChannelGetTool
 
         channel_name = f"{msg.routing.channel}:{msg.routing.sender_id}"
+        user_id = get_default_user_id(self._ctx.workspace_path)
         channel_result = ConversationChannelGetTool().execute(
             channel_name=channel_name,
             workspace_path=self._ctx.workspace_path,
+            user_id=user_id,
         )
         if channel_result.channel is None:
             raise RuntimeError("No conversation channel available for agent thread resolution")
