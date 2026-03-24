@@ -18,8 +18,8 @@ class ConversationChannel(BaseModel):
     id: int
     name: str
     type: str = "direct"
-    agent_id: str | None = None
-    user_id: int | None = None
+    agent_id: str
+    user_id: int
     created_at: str
     last_message_at: str | None = None
 
@@ -60,14 +60,16 @@ def _get_channel_by_id(
 def _get_channel_by_name(
     workspace_path: Path,
     name: str,
+    *,
+    user_id: int,
 ) -> ConversationChannel | None:
-    """Return a channel by exact name, or None if not found."""
+    """Return a user-scoped channel by exact name, or None if not found."""
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT * FROM channels WHERE name = ?",
-            (name,),
+            "SELECT * FROM channels WHERE user_id = ? AND name = ?",
+            (user_id, name),
         ).fetchone()
         return _row_to_channel(row) if row else None
 
@@ -120,6 +122,44 @@ def update_last_message_at(
             (timestamp, channel_id),
         )
         conn.commit()
+
+
+def create_channel(
+    workspace_path: Path,
+    *,
+    name: str,
+    agent_id: str,
+    user_id: int,
+    channel_type: str = "direct",
+    created_at: str | None = None,
+) -> ConversationChannel:
+    """Create a new conversation channel scoped to a user."""
+    ensure_data_db(workspace_path)
+    timestamp = created_at or utc_iso(utc_now())
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        existing = conn.execute(
+            "SELECT * FROM channels WHERE user_id = ? AND name = ?",
+            (user_id, name),
+        ).fetchone()
+        if existing is not None:
+            raise ValueError(f"Conversation channel '{name}' already exists for user {user_id}.")
+
+        cursor = conn.execute(
+            """
+            INSERT INTO channels (name, type, agent_id, user_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (name, channel_type, agent_id, user_id, timestamp),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM channels WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Conversation channel creation succeeded but row could not be reloaded.")
+        return _row_to_channel(row)
 
 
 def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:
