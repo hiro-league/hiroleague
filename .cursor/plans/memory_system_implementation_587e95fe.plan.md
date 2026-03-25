@@ -4,7 +4,7 @@ overview: Implement a 7-step memory system for Hiro League agents, starting from
 todos:
   - id: step-0
     content: "Step 0: Wire conversation saving -- call append_message in AgentManager._process() for inbound and outbound, call update_last_message_at"
-    status: pending
+    status: completed
   - id: step-2
     content: "Step 2: Install Mem0 + Qdrant -- add deps, create MemoryService protocol, Mem0MemoryService, MemoryPreferences, wire in server_process.py"
     status: pending
@@ -16,7 +16,7 @@ todos:
     status: pending
   - id: step-1
     content: "Step 1: Short-term summarization -- add message window trimming and running summary to prevent unbounded context growth"
-    status: pending
+    status: completed
   - id: step-5
     content: "Step 5: Memory domain model -- define four quadrants (world facts, experiences, observations, agent identity) with metadata categories"
     status: pending
@@ -77,6 +77,8 @@ flowchart TD
 
 ## Step 0 -- Save conversations
 
+**Status:** Completed (plan checklist).
+
 **Goal**: Wire the existing `conversation_log.append_message()` into the message flow so every inbound/outbound message is persisted as JSONL.
 
 **Hook point**: [agent_manager.py](hiroserver/hirocli/src/hirocli/runtime/agent_manager.py) `_process()` method, lines 212-339. This is where both the inbound message and the outbound reply are available with the resolved `thread_id`.
@@ -115,6 +117,8 @@ flowchart TD
 ---
 
 ## Step 1 -- Short-term memory window with summarization
+
+**Status:** Completed — `summarizing_agent_graph.py` (LangMem `SummarizationNode`), `MemoryPreferences` + `_build_agent` branch; debug logs on logger `AGENT` in `call_model` for post-summarization token/message counts and `running_summary` when present.
 
 **Goal**: Bound the conversation context sent to the LLM and summarize older turns, preventing unbounded token growth.
 

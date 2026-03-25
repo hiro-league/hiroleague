@@ -5,7 +5,9 @@ Responsibilities:
   - Builds agent input from text ContentItems and from metadata["description"]
     on non-text items (audio transcripts, image descriptions set by adapters).
   - Skips messages that yield no input text after checking both sources.
-  - Passes each message to a LangChain v1 create_agent instance.
+  - Passes each message to a LangChain v1 agent (create_agent, or when
+    ``preferences.memory.summarization_enabled`` is true, a custom LangGraph
+    graph with LangMem SummarizationNode — see summarizing_agent_graph).
   - Maintains per-conversation persistent memory keyed by conversation_channels.id
     (a UUID) using LangGraph's AsyncSqliteSaver checkpointer backed by workspace.db.
   - Constructs a reply UnifiedMessage and places it on the outbound queue.
@@ -97,8 +99,10 @@ class AgentManager:
             from langchain.chat_models import init_chat_model
 
             from ..domain.agent_config import load_system_prompt
+            from ..domain.preferences import resolve_summarization_llm
             from ..tools import all_tools
             from ..tools.langchain_adapter import to_langchain_list
+            from .summarizing_agent_graph import build_summarizing_agent_graph
 
             system_prompt = load_system_prompt(self._ctx.workspace_path)
             tools = to_langchain_list(all_tools())
@@ -116,6 +120,44 @@ class AgentManager:
                 temperature=llm_entry.temperature,
                 max_tokens=llm_entry.max_tokens,
             )
+
+            # Step 1 memory: LangMem summarization inside the graph (token thresholds in prefs.memory).
+            if prefs.memory.summarization_enabled:
+                sum_entry = resolve_summarization_llm(prefs)
+                if sum_entry is None:
+                    log.warning(
+                        "⚠️ Summarization on but no LLM resolved — HiroServer · falling back to agent without summarization",
+                    )
+                    return create_agent(
+                        model=model,
+                        tools=tools,
+                        system_prompt=system_prompt,
+                        checkpointer=checkpointer,
+                    )
+                summarization_model = init_chat_model(
+                    model=sum_entry.model,
+                    model_provider=sum_entry.provider,
+                    temperature=sum_entry.temperature,
+                    max_tokens=sum_entry.max_tokens,
+                )
+                log.info(
+                    "✅ Agent summarization — preferences · LangMem SummarizationNode",
+                    max_context_tokens=prefs.memory.max_context_tokens,
+                    max_tokens_before_summary=(
+                        prefs.memory.max_tokens_before_summary
+                        or prefs.memory.max_context_tokens
+                    ),
+                    max_summary_tokens=prefs.memory.max_summary_tokens,
+                    summarizer=f"{sum_entry.provider}/{sum_entry.model}",
+                )
+                return build_summarizing_agent_graph(
+                    model=model,
+                    summarization_model=summarization_model,
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    checkpointer=checkpointer,
+                    memory=prefs.memory,
+                )
 
             return create_agent(
                 model=model,

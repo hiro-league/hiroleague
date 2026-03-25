@@ -70,11 +70,32 @@ _LOG_COLORS_CSS = """
 /* Message text in startup rows — semi-bold for extra visual weight */
 .log-startup-msg { font-weight: 600; }
 
-/* Extra column — muted debug colour */
-:root  { --log-debug: #3b82f6; }
-.body--dark { --log-debug: #60a5fa; }
+/* Extra column — key / = / value hues (cell + custom HTML tooltip) */
+:root {
+    --log-extra-key: #64748b;
+    --log-extra-eq: #94a3b8;
+    --log-extra-val: #2563eb;
+}
+.body--dark {
+    --log-extra-key: #94a3b8;
+    --log-extra-eq: #cbd5e1;
+    --log-extra-val: #93c5fd;
+}
 
-/* Tooltip styling — wrap long cell values nicely */
+.log-extra-key { color: var(--log-extra-key) !important; }
+.log-extra-eq { color: var(--log-extra-eq) !important; margin: 0 1px; }
+.log-extra-val { color: var(--log-extra-val) !important; }
+
+/* Extra tooltip: one block per key=value (innerHTML tooltip, not textContent) */
+.log-extra-tooltip-row {
+    display: block;
+    line-height: 1.45;
+}
+.log-extra-tooltip-row + .log-extra-tooltip-row {
+    margin-top: 4px;
+}
+
+/* Tooltip styling — wrap long cell values nicely (Message column uses plain text + newlines) */
 .ag-tooltip {
     max-width: 500px !important;
     white-space: pre-wrap !important;
@@ -159,14 +180,31 @@ _COL_DEFS = [
     },
     {
         "headerName": "Extra",
-        "field": "extra",
-        "tooltipField": "extra",
+        "field": "extra_html",
+        "tooltipField": "extra_tooltip_html",
         "flex": 1,          # fills remaining table width; safe with autoSizeStrategy: null
         "minWidth": 150,
         "sortable": True,
-        "filter": True,
+        # Sort/filter use raw ``extra``; html field would compare markup / match tags.
+        ":comparator": (
+            "(valueA, valueB, nodeA, nodeB) => { "
+            "const ax = String(nodeA.data.extra ?? ''); "
+            "const bx = String(nodeB.data.extra ?? ''); "
+            "if (ax < bx) return -1; if (ax > bx) return 1; return 0; "
+            "}"
+        ),
+        # Default AG Grid tooltip uses textContent, so HTML would show as escaped text.
+        # This component renders pre-escaped markup from the server (log CSV only).
+        ":tooltipComponent": (
+            "(class { init(params) { "
+            "this.eGui = document.createElement('div'); "
+            "this.eGui.className = 'ag-tooltip'; "
+            "const v = params.value; "
+            "this.eGui.innerHTML = (v == null || v === '') ? '' : String(v); "
+            "} getGui() { return this.eGui; } })"
+        ),
+        "filter": False,
         "resizable": True,
-        "cellStyle": {"color": "var(--log-debug)", "opacity": "0.75"},
     },
 ]
 
@@ -438,7 +476,7 @@ def logs_page() -> None:
             "tooltipInteraction": True,
         }
         grid = ui.aggrid(
-            grid_opts, html_columns=[4, 5, 6],
+            grid_opts, html_columns=[4, 5, 6, 7],
         ).classes("w-full h-[calc(100vh-340px)] min-h-48")
 
         # -------------------------------------------------------------------

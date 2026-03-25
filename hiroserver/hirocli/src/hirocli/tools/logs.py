@@ -15,6 +15,7 @@ import datetime
 import html as _html
 import io
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -133,6 +134,63 @@ def _module_color_idx(module: str) -> int:
     return sum(ord(c) for c in module) % 4
 
 
+# Space-separated "key=value" pairs in CSV extra (see _CsvRenderer). Split on
+# spaces that start a new "word=" token so values may contain spaces.
+_EXTRA_PAIR_BOUNDARY = re.compile(r" (?=[\w][\w.]*=)")
+
+
+def _split_extra_segments(extra: str) -> list[str]:
+    s = (extra or "").strip()
+    if not s:
+        return []
+    return _EXTRA_PAIR_BOUNDARY.split(s)
+
+
+def _segment_to_key_value(seg: str) -> tuple[str, str]:
+    if "=" not in seg:
+        return ("", seg)
+    k, _, v = seg.partition("=")
+    return (k, v)
+
+
+def _format_extra_html(extra: str) -> str:
+    """Single-line coloured key=value spans for AG Grid ``html_columns`` cells."""
+    segs = _split_extra_segments(extra)
+    if not segs:
+        return ""
+    parts: list[str] = []
+    for seg in segs:
+        k, v = _segment_to_key_value(seg)
+        if k:
+            parts.append(
+                f'<span class="log-extra-key">{_html.escape(k)}</span>'
+                f'<span class="log-extra-eq">=</span>'
+                f'<span class="log-extra-val">{_html.escape(v)}</span>'
+            )
+        else:
+            parts.append(f'<span class="log-extra-val">{_html.escape(seg)}</span>')
+    return " ".join(parts)
+
+
+def _format_extra_tooltip_html(extra: str) -> str:
+    """Multi-line coloured tooltip: one row per key=value (custom tooltip uses innerHTML)."""
+    segs = _split_extra_segments(extra)
+    if not segs:
+        return ""
+    rows: list[str] = []
+    for seg in segs:
+        k, v = _segment_to_key_value(seg)
+        inner = (
+            f'<span class="log-extra-key">{_html.escape(k)}</span>'
+            f'<span class="log-extra-eq">=</span>'
+            f'<span class="log-extra-val">{_html.escape(v)}</span>'
+            if k
+            else f'<span class="log-extra-val">{_html.escape(seg)}</span>'
+        )
+        rows.append(f'<div class="log-extra-tooltip-row">{inner}</div>')
+    return "".join(rows)
+
+
 def _epoch_to_dt(ts_str: str) -> datetime.datetime | None:
     """Parse a CSV timestamp field (epoch float) into a datetime, or None."""
     try:
@@ -190,6 +248,7 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
             if is_startup
             else _html.escape(message)
         )
+        raw_extra = row[4] if len(row) >= 5 else ""
         return {
             "id": f"{source}:{ts_num}",             # deterministic row key for AG Grid selection persistence
             "timestamp": ts_num,                    # epoch float — AG Grid numeric sort key
@@ -201,7 +260,9 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
             "module_html": f'<span class="{mod_cls}">{module}</span>',
             "message": message,
             "message_html": message_html,
-            "extra": row[4] if len(row) >= 5 else "",
+            "extra": raw_extra,
+            "extra_html": _format_extra_html(raw_extra),
+            "extra_tooltip_html": _format_extra_tooltip_html(raw_extra),
             "source": source,
             # rowClassRules in AG Grid evaluates expression strings using `data.*` variables,
             # so this boolean drives the "log-startup-row" class applied to the full row.

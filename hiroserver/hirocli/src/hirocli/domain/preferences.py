@@ -1,7 +1,8 @@
 """Workspace preferences — single source of truth for all configurable choices.
 
 preferences.json is the sole authority for which LLMs are available, which is
-default for each purpose (chat, STT, TTS), voice settings, and audio behavior.
+default for each purpose (chat, STT, TTS), voice settings, audio behavior, and
+short-term memory / summarization (``memory``).
 No other code path provides a backup answer.  Services call resolve_llm() and
 use what they get; if the result is None the service fails clearly.
 
@@ -71,6 +72,27 @@ class AudioPreferences(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Short-term memory (LangGraph + LangMem summarization)
+# ---------------------------------------------------------------------------
+
+
+class MemoryPreferences(BaseModel):
+    """Token-bounded conversation context before the chat LLM (see summarizing_agent_graph)."""
+
+    summarization_enabled: bool = True
+    max_context_tokens: int = Field(default=4096, ge=512)
+    max_tokens_before_summary: int | None = Field(
+        default=None,
+        description="None = same as max_context_tokens",
+    )
+    max_summary_tokens: int = Field(default=256, ge=64)
+    summarization_llm_id: str | None = Field(
+        default=None,
+        description="Registered LLM id for summaries; None = use default chat model",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level model
 # ---------------------------------------------------------------------------
 
@@ -81,6 +103,7 @@ class WorkspacePreferences(BaseModel):
     version: int = 1
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     audio: AudioPreferences = Field(default_factory=AudioPreferences)
+    memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +164,16 @@ def resolve_llm(prefs: WorkspacePreferences, purpose: LLMPurpose = "chat") -> LL
 
     # 3. First registered
     return pool[0]
+
+
+def resolve_summarization_llm(prefs: WorkspacePreferences) -> LLMEntry | None:
+    """LLM used for conversation summarization; falls back to chat when unset or id missing."""
+    mem = prefs.memory
+    if mem.summarization_llm_id:
+        for entry in prefs.llm.registered:
+            if entry.id == mem.summarization_llm_id:
+                return entry
+    return resolve_llm(prefs, "chat")
 
 
 def resolve_voice(prefs: WorkspacePreferences) -> VoiceOption | None:

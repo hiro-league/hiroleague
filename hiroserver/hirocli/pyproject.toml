@@ -45,6 +45,7 @@ dependencies = [
     "hiro-commons",
     "hiro-channel-devices",
     "hirogateway",
+    "langmem>=0.0.30",
 ]
 
 [project.scripts]
