@@ -61,6 +61,16 @@ async def run_admin_ui(ctx: ServerContext) -> None:
 
     register_pages()
 
+    # HiroAdmin v2 shares the same NiceGUI core.app; mount under /v2/ so routes do not
+    # overwrite legacy @ui.page handlers (a second ui.run_with still mounts core.app).
+    from hirocli.admin.context import set_runtime_context
+    from hirocli.admin.run import build_admin_context, register_v2_routes
+    from hirocli.admin.shared.theme import apply_theme
+
+    set_runtime_context(build_admin_context(ctx))
+    register_v2_routes()
+    apply_theme()
+
     # Dedicated FastAPI app so NiceGUI gets its own port, separate from the
     # HTTP API.  ui.run_with() sets has_run_config and mounts NiceGUI's
     # routes/static assets onto this app.
@@ -88,7 +98,10 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     serve_task = asyncio.create_task(server.serve())
     stop_task = asyncio.create_task(ctx.stop_event.wait())
 
-    log.info(f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{ctx.config.admin_port}")
+    log.info(
+        f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{ctx.config.admin_port}",
+        admin_v2_preview=f"http://127.0.0.1:{ctx.config.admin_port}/v2/",
+    )
 
     done, pending = await asyncio.wait(
         [serve_task, stop_task],

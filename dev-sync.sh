@@ -13,8 +13,8 @@ echo "==> Stopping hiro-channel-devices (if running)..."
 MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hiro-channel-devices.exe 2>/dev/null || true
 
 echo "==> Stopping hirogateway (if running)..."
-# Stop gateway process so Windows releases the file lock on hirogateway.exe before reinstalling.
-MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hirogateway.exe 2>/dev/null || true
+# Stop via CLI / PID file (same idea as hirocli stop), not image-wide taskkill, so Windows releases the lock on hirogateway.exe before reinstalling.
+hirogateway stop 2>/dev/null || true
 
 echo "==> Syncing hiroserver workspace dependencies..."
 cd hiroserver
@@ -35,4 +35,6 @@ echo "  hirocli              -> run: hirocli --help"
 echo "  hiro-channel-devices -> run: hiro-channel-devices --help  (bundled with hirocli)"
 echo "  hirogateway          -> run: hirogateway --help"
 
+# Foreground gateway in a shell background job so hirocli can keep the terminal (both use -f).
+hirogateway start -f &
 hirocli start --admin -f

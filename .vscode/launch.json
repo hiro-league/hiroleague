@@ -36,6 +36,42 @@
         "justMyCode": false
       },
       {
+        "name": "hirocli: pytest (admin)",
+        "type": "debugpy",
+        "request": "launch",
+        "python": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\python.exe",
+        "module": "pytest",
+        "args": [
+          "src/hirocli/admin/",
+          "-v",
+          "--tb=short"
+        ],
+        "cwd": "${workspaceFolder}\\hiroserver\\hirocli",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}\\hiroserver\\hirocli\\src;${workspaceFolder}\\hiroserver\\hiro-channel-sdk\\src"
+        },
+        "console": "integratedTerminal",
+        "justMyCode": false
+      },
+      {
+        "name": "hirocli: pytest (current file)",
+        "type": "debugpy",
+        "request": "launch",
+        "python": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\python.exe",
+        "module": "pytest",
+        "args": [
+          "${file}",
+          "-v",
+          "--tb=short"
+        ],
+        "cwd": "${workspaceFolder}\\hiroserver\\hirocli",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}\\hiroserver\\hirocli\\src;${workspaceFolder}\\hiroserver\\hiro-channel-sdk\\src"
+        },
+        "console": "integratedTerminal",
+        "justMyCode": false
+      },
+      {
         "name": "Flutter - Codegen",
         "type": "node-terminal",
         "request": "launch",

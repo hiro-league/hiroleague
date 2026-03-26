@@ -48,13 +48,16 @@ def logs_page() -> None:
     create_page_layout(active_path="/logs")
     ui.add_head_html(LOG_COLORS_CSS)
 
-    # Top-level row: [content column | detail panel] — full page height minus admin header.
+    # Top-level row: [content column | detail panel] — height set in logs_styles
+    # (calc(100vh - 40px - 2rem); see logs_styles layout comment).
     # Elements are created inside a content column, then .move()'d into page_row
     # so the detail panel becomes a page-level sibling spanning the full height.
     page_row = ui.row().classes(
-        "w-full items-stretch flex-nowrap gap-0 h-[calc(100vh-40px)]"
+        "logs-main-row w-full items-stretch flex-nowrap gap-0"
     )
-    with ui.column().classes("flex-1 min-w-0 gap-3 p-6 overflow-y-auto") as content_col:
+    with ui.column().classes(
+        "logs-content-col flex-1 min-w-0 gap-3 p-6"
+    ) as content_col:
         if state.log_dir is None:
             ui.label("Logs").classes("text-2xl font-semibold")
             with ui.card().classes("w-full max-w-sm"):
@@ -173,7 +176,7 @@ def logs_page() -> None:
         # -------------------------------------------------------------------
         # AG Grid — fills available width inside the content column.
         # -------------------------------------------------------------------
-        _grid_h = "h-[calc(100vh-340px)] min-h-48"
+        _grid_h = "logs-grid-host w-full min-h-0 flex-1"
         grid_opts: dict = {
             "columnDefs": COL_DEFS,
             "rowData": initial_rows,

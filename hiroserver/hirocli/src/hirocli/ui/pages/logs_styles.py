@@ -82,6 +82,54 @@ LOG_COLORS_CSS = """
     line-height: 1.4 !important;
 }
 
+/*
+ * Logs page layout — scoped with :has(.logs-main-row) so other admin pages keep
+ * NiceGUI's default .nicegui-content padding.
+ *
+ * Document scroll fix: strip q-pa-md on .nicegui-content for this page only.
+ * Row height subtracts an extra 2rem: with .nicegui-content padding already 0,
+ * document scrollHeight still exceeded innerHeight by 32px when the row used
+ * 100vh - 40px only — remaining inset from Quasar/NiceGUI wrappers below header.
+ *
+ * Do NOT use flex: 1 1 0 on .logs-main-row: NiceGUI/Quasar wraps the page in
+ * intermediate divs that often have no definite height, so flex-grow resolves
+ * to 0px and the whole logs UI collapses (height=0).
+ */
+.q-page:has(.logs-main-row) {
+    overflow: hidden !important;
+    padding: 0 !important;
+}
+.q-page:has(.logs-main-row) .nicegui-content {
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+/* app.py header min-height 40px + ~2rem wrapper inset (measured 32px doc overflow). */
+.logs-main-row {
+    height: calc(100vh - 40px - 2rem) !important;
+    max-height: calc(100vh - 40px - 2rem) !important;
+    min-height: 12rem !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+.logs-content-col {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: auto !important;
+}
+.logs-grid-host {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+}
+.logs-grid-host > * {
+    height: 100% !important;
+    min-height: 0 !important;
+}
+
 /* Log detail panel — page-level sibling of content column, fills full height */
 .log-detail-panel {
     display: flex;
