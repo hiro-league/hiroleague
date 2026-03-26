@@ -6,4 +6,5 @@ abstract final class RouteNames {
   static const String channels = '/app/channels';
   static const String chat = '/app/channels/:channelId';
   static const String settings = '/app/settings';
+  static const String appLogs = '/app/logs';
 }

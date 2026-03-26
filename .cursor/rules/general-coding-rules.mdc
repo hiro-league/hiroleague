@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+
+- do not create functions inside functions unless completely necessary, they reduce readability. move them outside.
+- do not create try catch exception pass if another try catch block exist, or add the correct exception handling.
+-  Any code that could fail/break, such as calling external services, database dependency, etc.. must have correct exception handling/raising and proper logging.

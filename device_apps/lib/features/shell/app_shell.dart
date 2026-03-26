@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/constants/route_names.dart';
 import '../../core/ui/adaptive_layout.dart';
 import 'nav_destinations.dart';
 
@@ -19,6 +20,10 @@ class AppShell extends StatelessWidget {
 
 int _selectedIndex(BuildContext context) {
   final location = GoRouterState.of(context).uri.path;
+  // Logs screen lives under shell but is opened from Settings — keep Settings selected in the rail/bar.
+  if (location.startsWith(RouteNames.appLogs)) {
+    return appNavDestinations.indexWhere((d) => d.route == RouteNames.settings);
+  }
   final index = appNavDestinations.indexWhere(
     (d) => location.startsWith(d.route),
   );

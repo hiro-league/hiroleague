@@ -10,6 +10,7 @@ timestamp is a Unix epoch float (e.g. 1742312005.437821).
 
 from __future__ import annotations
 
+import ast
 import csv
 import datetime
 import html as _html
@@ -151,6 +152,32 @@ def _segment_to_key_value(seg: str) -> tuple[str, str]:
         return ("", seg)
     k, _, v = seg.partition("=")
     return (k, v)
+
+
+def pretty_print_log_value(value: str) -> tuple[bool, str]:
+    """Try to format a log field as indented JSON for the admin detail panel.
+
+    CSV ``extra`` values usually come from ``_CsvRenderer`` in hiro_commons, which
+    builds ``key=value`` with ``f\"{k}={v}\"`` — so dicts/lists are Python
+    ``repr`` (single quotes, ``True``/``None``), not strict JSON. ``json.loads``
+    fails on those; we fall back to :func:`ast.literal_eval` for dict/list/tuple
+    and then :func:`json.dumps` for display.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return (False, value)
+    try:
+        obj = json.loads(raw)
+        return (True, json.dumps(obj, indent=2, ensure_ascii=False))
+    except (json.JSONDecodeError, TypeError):
+        pass
+    try:
+        obj = ast.literal_eval(raw)
+    except (ValueError, SyntaxError, TypeError):
+        return (False, value)
+    if isinstance(obj, (dict, list, tuple)):
+        return (True, json.dumps(obj, indent=2, ensure_ascii=False))
+    return (False, value)
 
 
 def _format_extra_html(extra: str) -> str:

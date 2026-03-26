@@ -1,6 +1,8 @@
-import 'dart:developer' as dev;
+import 'package:talker/talker.dart';
 
-/// Structured logger wrapping dart:developer.
+import '../logging/app_talker.dart';
+
+/// Structured logger backed by [Talker] (console, in-app log UI, file on mobile/desktop).
 /// Usage:
 ///   final _log = Logger.get('GatewayClient');
 ///   _log.info('Connected', fields: {'url': url});
@@ -11,11 +13,13 @@ class Logger {
 
   static Logger get(String tag) => Logger._(tag);
 
+  Talker get _t => appTalker;
+
   void info(String message, {Map<String, Object?> fields = const {}}) =>
-      _emit('INFO', message, fields: fields);
+      _emit(LogLevel.info, message, fields: fields);
 
   void warning(String message, {Map<String, Object?> fields = const {}}) =>
-      _emit('WARN', message, fields: fields);
+      _emit(LogLevel.warning, message, fields: fields);
 
   void error(
     String message, {
@@ -23,17 +27,18 @@ class Logger {
     StackTrace? stackTrace,
     Map<String, Object?> fields = const {},
   }) =>
-      _emit('ERROR', message, fields: fields, error: error, stackTrace: stackTrace);
+      _emit(LogLevel.error, message,
+          fields: fields, error: error, stackTrace: stackTrace);
 
   void debug(String message, {Map<String, Object?> fields = const {}}) {
     assert(() {
-      _emit('DEBUG', message, fields: fields);
+      _emit(LogLevel.debug, message, fields: fields);
       return true;
     }());
   }
 
   void _emit(
-    String level,
+    LogLevel level,
     String message, {
     Map<String, Object?> fields = const {},
     Object? error,
@@ -46,6 +51,11 @@ class Logger {
         ..write(fields.entries.map((e) => '${e.key}=${e.value}').join(', '))
         ..write('}');
     }
-    dev.log(buf.toString(), name: level, error: error, stackTrace: stackTrace);
+    _t.log(
+      buf.toString(),
+      logLevel: level,
+      exception: error,
+      stackTrace: stackTrace,
+    );
   }
 }

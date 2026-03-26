@@ -34,6 +34,9 @@ class AudioMessageBubble extends ConsumerStatefulWidget {
 
 class _AudioMessageBubbleState extends ConsumerState<AudioMessageBubble>
     with WidgetsBindingObserver {
+  /// Cached in [initState]: [ref] must not be used in [dispose] (element already unmounted).
+  late final ActiveAudioController _activeAudio;
+
   late final AudioPlayer _player;
   bool _isPlaying = false;
   Duration _position = Duration.zero;
@@ -46,6 +49,7 @@ class _AudioMessageBubbleState extends ConsumerState<AudioMessageBubble>
   @override
   void initState() {
     super.initState();
+    _activeAudio = ref.read(activeAudioProvider);
     WidgetsBinding.instance.addObserver(this);
     _player = AudioPlayer();
     _initPlayer();
@@ -102,7 +106,7 @@ class _AudioMessageBubbleState extends ConsumerState<AudioMessageBubble>
     if (_isPlaying) {
       await _player.pause();
     } else {
-      ref.read(activeAudioProvider).claim(_player);
+      _activeAudio.claim(_player);
       await _player.play();
     }
   }
@@ -125,7 +129,7 @@ class _AudioMessageBubbleState extends ConsumerState<AudioMessageBubble>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    ref.read(activeAudioProvider).release(_player);
+    _activeAudio.release(_player);
     _player.dispose();
     super.dispose();
   }

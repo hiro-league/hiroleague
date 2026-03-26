@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../application/auth/auth_notifier.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/constants/route_names.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -13,6 +15,13 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text(AppStrings.navSettings)),
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(Icons.article_outlined),
+            title: const Text(AppStrings.navAppLogs),
+            subtitle: const Text(AppStrings.appLogsSubtitle),
+            onTap: () => context.push(RouteNames.appLogs),
+          ),
+          const Divider(height: 1),
           const SwitchListTile(
             secondary: Icon(Icons.record_voice_over_rounded),
             title: Text(AppStrings.voiceRepliesTitle),

@@ -7,6 +7,7 @@ import '../../features/channels/channel_list_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/onboarding/qr_scan_screen.dart';
+import '../../features/debug/app_logs_screen.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../features/shell/app_shell.dart';
 
@@ -51,6 +52,10 @@ GoRouter appRouter(Ref ref) {
           GoRoute(
             path: RouteNames.settings,
             builder: (context, state) => const SettingsScreen(),
+          ),
+          GoRoute(
+            path: RouteNames.appLogs,
+            builder: (context, state) => const AppLogsScreen(),
           ),
         ],
       ),

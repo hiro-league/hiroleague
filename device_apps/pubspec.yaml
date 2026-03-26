@@ -56,6 +56,8 @@ dependencies:
   just_audio: ^0.10.5
   path_provider: ^2.1.5
   web: ^1.1.1
+  talker: ^5.1.16
+  talker_flutter: ^5.1.16
 
 dev_dependencies:
   flutter_test:

@@ -6,6 +6,8 @@ abstract final class AppStrings {
   // Navigation labels
   static const String navChannels = 'Channels';
   static const String navSettings = 'Settings';
+  static const String navAppLogs = 'App logs';
+  static const String appLogsSubtitle = 'Errors and diagnostic output';
 
   // Placeholder text (Foundation phase)
   static const String channelsPlaceholder = 'Channels — coming in Chat phase';
