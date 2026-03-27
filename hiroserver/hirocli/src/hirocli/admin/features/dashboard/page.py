@@ -1,4 +1,4 @@
-"""Dashboard — thin page: service Result, loading/error/empty/data (guidelines §1.2, §2.4)."""
+"""Dashboard — thin page: service Result, loading/error/empty/data (guidelines 1.2, 2.4)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from hirocli.admin.features.dashboard.components import (
     render_dashboard_overview,
 )
 from hirocli.admin.features.dashboard.service import DashboardService
-from hirocli.admin.router import V2_ROOT, v2_router
+from hirocli.admin.router import ADMIN_ROOT, admin_router
 from hirocli.admin.shared.ui.error_banner import error_banner
 from hirocli.admin.shared.ui.loading_state import loading_state
 from hirocli.admin.shell.layout import create_page_layout
@@ -20,9 +20,9 @@ def _load_dashboard_overview():
     return DashboardService().get_overview()
 
 
-@v2_router.page("/")
+@admin_router.page("/")
 async def dashboard_page() -> None:
-    create_page_layout(active_path=V2_ROOT)
+    create_page_layout(active_path=ADMIN_ROOT)
 
     with ui.column().classes("w-full gap-6 p-6"):
         ui.label("Dashboard").classes("text-2xl font-semibold")

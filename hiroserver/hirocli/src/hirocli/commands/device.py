@@ -44,7 +44,8 @@ def register(device_app: typer.Typer, console: Console) -> None:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
 
-        from ..ui.qr import render_qr_terminal
+        from ..qr_rendering import render_qr_terminal
+
         render_qr_terminal(result.qr_payload)
         console.print("[bold cyan]Pairing code created[/bold cyan]")
         console.print(f"  gateway   : [bold]{result.gateway_url}[/bold]")

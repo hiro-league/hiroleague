@@ -8,10 +8,14 @@ import typer
 from rich.console import Console
 
 from .channel import register as register_channel_commands
+from .character import register as register_character_commands
 from .device import register as register_device_commands
 from .logs import register as register_logs_commands
 from .metrics import register as register_metrics_commands
 from .root import register as register_root_commands
+from .catalog import register as register_catalog_commands
+from .provider import register as register_provider_commands
+from .provider import register_models_command
 from .workspace import register as register_workspace_commands
 
 app = typer.Typer(
@@ -56,6 +60,11 @@ device_app = typer.Typer(
     help="Manage paired device approvals.",
     add_completion=False,
 )
+character_app = typer.Typer(
+    name="character",
+    help="Manage characters (personas, prompts, photos).",
+    add_completion=False,
+)
 logs_app = typer.Typer(
     name="logs",
     help="Search and tail server, channel, and gateway log files.",
@@ -71,16 +80,33 @@ workspace_app = typer.Typer(
     help="Manage workspaces (isolated server instances).",
     add_completion=False,
 )
+catalog_app = typer.Typer(
+    name="catalog",
+    help="Browse the bundled LLM provider and model catalog.",
+    add_completion=False,
+)
+provider_app = typer.Typer(
+    name="provider",
+    help="Manage workspace provider credentials (API keys, local endpoints).",
+    add_completion=False,
+)
 
 app.add_typer(channel_app, name="channel")
+app.add_typer(character_app, name="character")
 app.add_typer(device_app, name="device")
 app.add_typer(logs_app, name="logs")
 app.add_typer(metrics_app, name="metrics")
 app.add_typer(workspace_app, name="workspace")
+app.add_typer(catalog_app, name="catalog")
+app.add_typer(provider_app, name="provider")
 
 register_root_commands(app, console)
+register_models_command(app, console)
 register_channel_commands(channel_app, console)
+register_character_commands(character_app, console)
 register_device_commands(device_app, console)
 register_logs_commands(logs_app, console)
 register_metrics_commands(metrics_app, console)
 register_workspace_commands(workspace_app, console)
+register_catalog_commands(catalog_app, console)
+register_provider_commands(provider_app, console)

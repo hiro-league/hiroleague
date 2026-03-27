@@ -21,7 +21,7 @@ class AdminContext:
 
 
 def set_runtime_context(ctx: AdminContext) -> None:
-    """Called from `hirocli.ui.run.run_admin_ui` before v2 routes are registered."""
+    """Called from `hirocli.admin.run.run_admin_ui` before routes are registered."""
     global _runtime
     _runtime = ctx
 

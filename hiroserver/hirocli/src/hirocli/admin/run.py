@@ -1,14 +1,16 @@
-"""HiroAdmin v2 — register routes on the shared NiceGUI app under /v2/.
+"""HiroAdmin — route registration and NiceGUI bootstrap on admin_port.
 
-Called from legacy `hirocli.ui.run.run_admin_ui` after legacy `register_pages()` so both
-UIs are served on the same admin_port (legacy at `/`, v2 at `/v2/...`).
+Entry point: `run_admin_ui` (used by `hirocli.runtime.server_process` when `--admin`).
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import uvicorn
+from fastapi import FastAPI
 from hiro_commons.log import Logger
 
 if TYPE_CHECKING:
@@ -17,11 +19,11 @@ if TYPE_CHECKING:
 
 log = Logger.get("ADMIN")
 
-_v2_admin_initialized = False
+_admin_routes_initialized = False
 
 
 def build_admin_context(ctx: ServerContext) -> "AdminContext":
-    """Build frozen context for v2 shell (same resolution as legacy ui/state)."""
+    """Build frozen context for the admin shell (workspace + log paths)."""
     from hirocli.admin.context import AdminContext
 
     gateway_log_dir: Path | None = None
@@ -38,7 +40,7 @@ def build_admin_context(ctx: ServerContext) -> "AdminContext":
                 _gw_config = _load_gw_config(_gw_instance_path)
                 gateway_log_dir = _gw_resolve_log_dir(_gw_instance_path, _gw_config)
     except Exception as exc:
-        log.warning("Failed to resolve gateway log dir for admin v2 UI", error=str(exc))
+        log.warning("Failed to resolve gateway log dir for admin UI", error=str(exc))
 
     workspace_id: str | None = None
     workspace_name: str | None = None
@@ -63,25 +65,85 @@ def build_admin_context(ctx: ServerContext) -> "AdminContext":
     )
 
 
-def register_v2_routes() -> None:
-    """Import v2 page modules (side effects on v2_router), then mount router on core.app once."""
-    global _v2_admin_initialized
-    if _v2_admin_initialized:
+def register_admin_routes() -> None:
+    """Import page modules (side effects on admin_router), then mount router on core.app once."""
+    global _admin_routes_initialized
+    if _admin_routes_initialized:
         return
-    _v2_admin_initialized = True
+    _admin_routes_initialized = True
 
     from nicegui import core
 
-    from hirocli.admin.router import v2_router
+    from hirocli.admin.router import admin_router
     from hirocli.admin.shell.layout import register_shell_shared_styles
 
     register_shell_shared_styles()
 
-    # Decorators register on v2_router when modules load.
+    from hirocli.admin.features.channels import page as _channels  # noqa: F401
+    from hirocli.admin.features.characters import page as _characters  # noqa: F401
     from hirocli.admin.features.dashboard import page as _dashboard  # noqa: F401
+    from hirocli.admin.features.devices import page as _devices  # noqa: F401
+    from hirocli.admin.features.gateways import page as _gateways  # noqa: F401
+    from hirocli.admin.features.logs import page as _logs  # noqa: F401
+    from hirocli.admin.features.metrics import page as _metrics  # noqa: F401
     from hirocli.admin.features.workspaces import page as _workspaces  # noqa: F401
     from hirocli.admin.stubs import register_stub_pages
 
-    register_stub_pages(v2_router)
-    core.app.include_router(v2_router)
-    log.info("Hiro Admin v2 routes mounted", base_path="/v2/")
+    register_stub_pages(admin_router)
+    core.app.include_router(admin_router)
+    log.info("Hiro Admin routes mounted", base_path="/")
+
+
+async def run_admin_ui(ctx: ServerContext) -> None:
+    """Start the NiceGUI admin UI and shut it down when stop_event fires."""
+    from nicegui import ui
+
+    from hirocli.admin.context import set_runtime_context
+    from hirocli.admin.shared.theme import apply_theme
+
+    set_runtime_context(build_admin_context(ctx))
+    register_admin_routes()
+    apply_theme()
+
+    admin_app = FastAPI(title="Hiro Admin")
+    ui.run_with(
+        admin_app,
+        title="Hiro Admin",
+        show_welcome_message=False,
+        storage_secret=f"hiro-admin-{ctx.config.device_id}",
+    )
+
+    uv_config = uvicorn.Config(
+        app=admin_app,
+        host="127.0.0.1",
+        port=ctx.config.admin_port,
+        log_level="warning",
+        loop="none",
+    )
+    server = uvicorn.Server(uv_config)
+
+    serve_task = asyncio.create_task(server.serve())
+    stop_task = asyncio.create_task(ctx.stop_event.wait())
+
+    log.info(
+        f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{ctx.config.admin_port}",
+        admin_url=f"http://127.0.0.1:{ctx.config.admin_port}/",
+    )
+
+    done, pending = await asyncio.wait(
+        [serve_task, stop_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    if stop_task in done:
+        server.should_exit = True
+        await serve_task
+
+    for task in pending:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    log.info("Admin UI stopped")

@@ -28,37 +28,37 @@ todos:
     status: completed
   - id: p1-dashboard
     content: "Phase 1: Dashboard feature — service, components, page on v2_router, tests; guidelines gate"
-    status: pending
+    status: completed
   - id: p2-workspaces
     content: "Phase 2: Workspaces feature — service, components, page, tests; guidelines gate"
-    status: pending
+    status: completed
   - id: p3-channels
     content: "Phase 3: Channels feature — service, components, page; guidelines gate"
-    status: pending
+    status: completed
   - id: p3-devices
     content: "Phase 3: Devices feature — service, components, page; guidelines gate"
-    status: pending
+    status: completed
   - id: p3-tests
     content: "Phase 3: Tests for channel and device services; guidelines gate"
-    status: pending
+    status: completed
   - id: p4-gateways
     content: "Phase 4: Gateways feature; guidelines gate"
-    status: pending
+    status: completed
   - id: p4-agents
     content: "Phase 4: Agents feature; guidelines gate"
-    status: pending
+    status: cancelled
   - id: p4-tests
     content: "Phase 4: Tests for gateway and agent services; guidelines gate"
-    status: pending
+    status: completed
   - id: p5-logs
     content: "Phase 5: Logs feature; guidelines gate"
-    status: pending
+    status: completed
   - id: p6-metrics
     content: "Phase 6: Metrics feature + formatters; guidelines gate"
-    status: pending
+    status: completed
   - id: p7-cutover
     content: "Phase 7: Cutover — parity, single UI at /, remove ui/, update docs; guidelines gate"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -177,9 +177,8 @@ hirocli/admin/
 
 ## Phase 7 — Cutover
 
-- Parity vs legacy at same port.
-- Remove legacy `hirocli/ui/` (or strip routes), **either** mount v2 at `/` **or** keep `/v2` and redirect — document choice; update NAV and all registrations in one pass.
-- Update mintdocs; archive superseded admin docs if desired.
-- **Guidelines gate** (full app matches guidelines with no legacy split).
+- **Done (partial)**: HiroAdmin owns `/` via `admin_router` (empty prefix); `server_process` calls `hirocli.admin.run.run_admin_ui`. Legacy `hirocli/ui/` tree kept on disk but `register_pages()` is not run — nothing under `hirocli.ui` is linked from production startup. `hirocli/ui/run.py` holds `_legacy_run_admin_ui_reference` only.
+- Optional follow-up: delete `hirocli/ui/`, update mintdocs / website guidelines URLs.
+- **Guidelines gate**: full app is HiroAdmin-only at root.
 
 No backward compatibility required (initial development mode).

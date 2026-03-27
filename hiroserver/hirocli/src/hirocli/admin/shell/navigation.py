@@ -1,13 +1,13 @@
 """Sidebar navigation entries: (group, label, icon, path). group=None => section header.
 
-Paths are full browser paths under the v2 mount (see admin/router.py).
+Paths are full browser paths on the admin router (see admin/router.py).
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
-from hirocli.admin.router import V2_ROOT
+from hirocli.admin.router import ADMIN_ROOT
 
 
 class NavItem(NamedTuple):
@@ -21,16 +21,16 @@ class NavItem(NamedTuple):
 
 NAV: list[NavItem] = [
     NavItem(None, "Dashboard", None, None),
-    NavItem("Dashboard", "Dashboard", "dashboard", V2_ROOT),
-    NavItem("Dashboard", "Metrics", "analytics", "/v2/metrics"),
+    NavItem("Dashboard", "Dashboard", "dashboard", ADMIN_ROOT),
+    NavItem("Dashboard", "Metrics", "analytics", "/metrics"),
     NavItem(None, "Server", None, None),
-    NavItem("Server", "Workspaces", "storage", "/v2/workspaces"),
-    NavItem("Server", "Channels", "cable", "/v2/channels"),
-    NavItem("Server", "Gateways", "router", "/v2/gateways"),
-    NavItem("Server", "Agents", "smart_toy", "/v2/agents"),
+    NavItem("Server", "Workspaces", "storage", "/workspaces"),
+    NavItem("Server", "Channels", "cable", "/channels"),
+    NavItem("Server", "Gateways", "router", "/gateways"),
+    NavItem("Server", "Characters", "face", "/characters"),
     NavItem(None, "Nodes / Devices", None, None),
-    NavItem("Nodes / Devices", "Devices", "devices", "/v2/devices"),
-    NavItem("Nodes / Devices", "Chats", "chat", "/v2/chats"),
+    NavItem("Nodes / Devices", "Devices", "devices", "/devices"),
+    NavItem("Nodes / Devices", "Chats", "chat", "/chats"),
     NavItem(None, "Configuration", None, None),
-    NavItem("Configuration", "Logs", "article", "/v2/logs"),
+    NavItem("Configuration", "Logs", "article", "/logs"),
 ]

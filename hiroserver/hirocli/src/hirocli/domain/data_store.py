@@ -190,14 +190,11 @@ def get_default_user_id(workspace_path: Path) -> int:
 
 
 def get_default_agent_id(workspace_path: Path) -> str:
-    """Read the default agent id from workspace.db (cross-DB reference)."""
-    from .db import db_path, ensure_db
+    """Read the default character id from workspace.db (cross-DB reference).
 
-    ensure_db(workspace_path)
-    with sqlite3.connect(str(db_path(workspace_path))) as ws_conn:
-        row = ws_conn.execute(
-            "SELECT id FROM agents WHERE is_default = 1 LIMIT 1"
-        ).fetchone()
-        if row is None or not row[0]:
-            raise RuntimeError("Default agent is missing from workspace.db")
-        return str(row[0])
+    Kept name ``get_default_agent_id`` until channel schema uses ``character_id``
+    (Phase 4); value is the character slug (e.g. ``hiro``).
+    """
+    from .character import default_character_id
+
+    return default_character_id(workspace_path)

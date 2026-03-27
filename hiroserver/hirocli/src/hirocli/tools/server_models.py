@@ -17,6 +17,7 @@ class SetupResult:
     autostart_registered: bool
     autostart_method: str  # "schtasks" | "registry" | "elevated" | "skipped" | "failed"
     server_started: bool
+    providers_imported: int = 0
 
 
 @dataclass

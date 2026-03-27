@@ -1,0 +1,9 @@
+{
+  "id": "hiro",
+  "name": "Hiro",
+  "description": "Your personal AI assistant running on Hiro League.",
+  "llm_models": [],
+  "voice_models": [],
+  "emotions_enabled": false,
+  "extras": {}
+}

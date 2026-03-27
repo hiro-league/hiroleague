@@ -141,6 +141,12 @@ def register(app: typer.Typer, console: Console) -> None:
         elif result.autostart_method == "failed":
             console.print("[yellow]Auto-start registration failed.[/yellow]")
 
+        if result.providers_imported:
+            console.print(
+                f"[green]Imported[/green] {result.providers_imported} provider credential(s) "
+                "from environment into the workspace store."
+            )
+
         if result.server_started:
             console.print("\n[green]Server started.[/green]")
         else:

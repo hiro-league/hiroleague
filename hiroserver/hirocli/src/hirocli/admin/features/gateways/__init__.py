@@ -1,1 +1,1 @@
-"""Gateways feature — Phase 4."""
+"""Gateway instances — setup / lifecycle via GatewayService (`/gateways`)."""

@@ -113,6 +113,7 @@ def test_setup_success_returns_setup_result() -> None:
         autostart_registered=True,
         autostart_method="skipped",
         server_started=False,
+        providers_imported=0,
     )
     with patch("hirocli.admin.features.workspaces.service.SetupTool") as T:
         T.return_value.execute.return_value = setup

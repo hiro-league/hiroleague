@@ -1,1 +1,1 @@
-"""Channels feature — Phase 3."""
+"""Channel plugins — list and enable/disable via ChannelService (`/channels`)."""

@@ -1,8 +1,7 @@
-"""Shared chrome: header, drawer (nav + bottom workspace selector), dark mode, reconnect toast."""
+"""Shared chrome: header, drawer (nav + bottom workspace selector), dark mode."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from nicegui import app as nicegui_app, ui
@@ -11,18 +10,54 @@ from hirocli.admin.context import ensure_selected_workspace_storage, get_runtime
 from hirocli.admin.shell.navigation import NAV
 from hirocli.admin.shell.workspace_service import WorkspaceSelectService
 
-# Shell-only: show full select when drawer expanded, icon+menu when mini (Quasar sets q-drawer--mini).
-WORKSPACE_DRAWER_MINI_CSS = """
-.q-drawer--mini .admin-v2-workspace-select-wrap { display: none !important; }
-.q-drawer:not(.q-drawer--mini) .admin-v2-workspace-mini-wrap { display: none !important; }
+# Shell-only: mini drawer polish when Quasar applies .q-drawer--mini.
+# Workspace blocks used display:none, which reflowed instantly while drawer width still animated;
+# opacity + max-height transitions align better with QDrawer's width transition (~300ms).
+# overflow:hidden is on the base rule so content stays clipped in BOTH transition directions
+# (overflow is not animatable — it would snap to visible mid-expand otherwise).
+SHELL_DRAWER_MINI_CSS = """
+.admin-v2-workspace-select-wrap,
+.admin-v2-workspace-mini-wrap {
+  overflow: hidden;
+  transition: opacity 0.28s ease, max-height 0.28s ease, margin 0.28s ease, padding 0.28s ease;
+}
+/* Collapsed state (shared shape for whichever block is inactive). */
+.q-drawer--mini .admin-v2-workspace-select-wrap,
+.q-drawer:not(.q-drawer--mini) .admin-v2-workspace-mini-wrap {
+  opacity: 0;
+  max-height: 0;
+  pointer-events: none;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+/* Expanded state. */
+.q-drawer:not(.q-drawer--mini) .admin-v2-workspace-select-wrap {
+  opacity: 1;
+  max-height: 8rem;
+  pointer-events: auto;
+}
+.q-drawer--mini .admin-v2-workspace-mini-wrap {
+  opacity: 1;
+  max-height: 4rem;
+  pointer-events: auto;
+}
+/* Center icon-only rows in mini rail; avoids a horizontal snap when label sections hide. */
+.q-drawer--mini .admin-v2-nav-item {
+  justify-content: center;
+}
+.q-drawer--mini .admin-v2-nav-item .q-item__section--avatar {
+  min-width: unset;
+  padding-left: 0;
+  padding-right: 0;
+}
 """
 
 
 def register_shell_shared_styles() -> None:
-    """Register once from admin v2 bootstrap (NiceGUI shared CSS for all clients)."""
-    from nicegui import ui
-
-    ui.add_css(WORKSPACE_DRAWER_MINI_CSS.strip(), shared=True)
+    """Register once from admin bootstrap (NiceGUI shared CSS for all clients)."""
+    ui.add_css(SHELL_DRAWER_MINI_CSS.strip(), shared=True)
 
 
 def create_page_layout(active_path: str = "/") -> None:
@@ -47,7 +82,7 @@ def create_page_layout(active_path: str = "/") -> None:
 
     with drawer:
         with ui.column().classes("w-full h-full flex flex-col"):
-            with ui.column().classes("w-full flex-1 min-h-0 overflow-y-auto py-0"):
+            with ui.column().classes("w-full flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-0"):
                 _sidebar_nav(active_path)
             if workspace_options:
                 _sidebar_workspace_footer(
@@ -96,11 +131,6 @@ def create_page_layout(active_path: str = "/") -> None:
                 "Switch to light mode" if initial_dark else "Switch to dark mode"
             )
 
-    from nicegui import context as _ctx
-
-    _current_client = _ctx.client
-    asyncio.create_task(_reconnect_toast(_current_client))
-
 
 def _toggle_sidebar_mini(drawer: Any) -> None:
     nicegui_app.storage.user["sidebar_mini"] = not nicegui_app.storage.user["sidebar_mini"]
@@ -125,7 +155,7 @@ def _sidebar_workspace_footer(
     workspace_options: dict[str, str],
     selected_id: str | None,
 ) -> None:
-    """Bottom of drawer: full select (expanded) or icon+menu (mini); CSS swaps visibility."""
+    """Bottom of drawer: full select (expanded) or icon+menu (mini); CSS cross-fades (see SHELL_DRAWER_MINI_CSS)."""
     with ui.column().classes("w-full shrink-0 gap-1 pt-1 pb-2"):
         ui.separator()
         ui.label("Workspace").classes(
@@ -163,7 +193,10 @@ def _sidebar_nav(active_path: str) -> None:
                 is_active = path == active_path
                 with ui.item(on_click=lambda p=path: ui.navigate.to(p)).props(
                     "clickable v-ripple dense"
-                ).classes("rounded-md mx-2 my-0" + (" text-primary" if is_active else "")):
+                ).classes(
+                    "admin-v2-nav-item rounded-md mx-2 my-0"
+                    + (" text-primary" if is_active else "")
+                ):
                     with ui.item_section().props("avatar").classes("min-w-0 px-2 py-2"):
                         if icon:
                             icon_elem = ui.icon(icon).classes(
@@ -172,29 +205,3 @@ def _sidebar_nav(active_path: str) -> None:
                             icon_elem.tooltip(label)
                     with ui.item_section().classes("q-mini-drawer-hide"):
                         ui.label(label).classes("text-sm")
-
-
-async def _reconnect_toast(client) -> None:
-    try:
-        is_reconnect = await client.run_javascript(
-            """
-            const was = sessionStorage.getItem('hiro_admin_v2_connected');
-            sessionStorage.setItem('hiro_admin_v2_connected', '1');
-            return was !== null;
-            """,
-            timeout=5,
-        )
-        if is_reconnect:
-            client.outbox.enqueue_message(
-                "notify",
-                {
-                    "message": "Back Online",
-                    "color": "positive",
-                    "icon": "check_circle",
-                    "position": "bottom",
-                    "timeout": 3000,
-                },
-                client.id,
-            )
-    except Exception:
-        pass

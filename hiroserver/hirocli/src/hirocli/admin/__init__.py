@@ -1,1 +1,1 @@
-"""HiroAdmin v2 — NiceGUI control plane (parallel to legacy hirocli.ui)."""
+"""HiroAdmin — NiceGUI control plane (default UI; legacy `hirocli.ui` not mounted)."""

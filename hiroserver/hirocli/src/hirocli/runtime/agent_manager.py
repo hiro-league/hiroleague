@@ -80,23 +80,28 @@ class AgentManager:
         self._tts_service = tts_service
         self._agent = None  # built inside run() once the async checkpointer is ready
 
-    def _build_agent(self, checkpointer):
+    def _build_agent(self, checkpointer, credential_store=None):
         """Build the LangChain agent from preferences.  Returns None if no chat LLM is configured."""
+        from ..domain.model_factory import create_chat_model
         from ..domain.preferences import load_preferences, resolve_llm
 
         prefs = load_preferences(self._ctx.workspace_path)
-        llm_entry = resolve_llm(prefs, "chat")
+        llm_entry = resolve_llm(
+            prefs,
+            self._ctx.workspace_path,
+            "chat",
+            credential_store=credential_store,
+        )
         if llm_entry is None:
             log.error(
-                "❌ No chat LLM configured — preferences · chat\n"
-                "The agent cannot process messages until an LLM is registered. "
-                "Edit preferences.json in your workspace directory to add one."
+                "❌ No chat LLM configured — preferences · default_chat\n"
+                "Set llm.default_chat to a canonical catalog id (e.g. openai:gpt-5.4), "
+                "configure the provider (hirocli provider add), and ensure the model is available."
             )
             return None
 
         try:
             from langchain.agents import create_agent
-            from langchain.chat_models import init_chat_model
 
             from ..domain.agent_config import load_system_prompt
             from ..domain.preferences import resolve_summarization_llm
@@ -108,22 +113,27 @@ class AgentManager:
             tools = to_langchain_list(all_tools())
 
             log.fineinfo(
-                f"Building agent — chat · {llm_entry.provider}/{llm_entry.model}",
+                f"Building agent — chat · {llm_entry.model_id}",
                 temperature=llm_entry.temperature,
                 max_tokens=llm_entry.max_tokens,
                 tools=len(tools),
             )
 
-            model = init_chat_model(
-                model=llm_entry.model,
-                model_provider=llm_entry.provider,
+            model = create_chat_model(
+                llm_entry.model_id,
+                workspace_path=self._ctx.workspace_path,
                 temperature=llm_entry.temperature,
                 max_tokens=llm_entry.max_tokens,
+                credential_store=credential_store,
             )
 
             # Step 1 memory: LangMem summarization inside the graph (token thresholds in prefs.memory).
             if prefs.memory.summarization_enabled:
-                sum_entry = resolve_summarization_llm(prefs)
+                sum_entry = resolve_summarization_llm(
+                    prefs,
+                    self._ctx.workspace_path,
+                    credential_store=credential_store,
+                )
                 if sum_entry is None:
                     log.warning(
                         "⚠️ Summarization on but no LLM resolved — HiroServer · falling back to agent without summarization",
@@ -134,11 +144,12 @@ class AgentManager:
                         system_prompt=system_prompt,
                         checkpointer=checkpointer,
                     )
-                summarization_model = init_chat_model(
-                    model=sum_entry.model,
-                    model_provider=sum_entry.provider,
+                summarization_model = create_chat_model(
+                    sum_entry.model_id,
+                    workspace_path=self._ctx.workspace_path,
                     temperature=sum_entry.temperature,
                     max_tokens=sum_entry.max_tokens,
+                    credential_store=credential_store,
                 )
                 log.info(
                     "✅ Agent summarization — preferences · LangMem SummarizationNode",
@@ -148,7 +159,7 @@ class AgentManager:
                         or prefs.memory.max_context_tokens
                     ),
                     max_summary_tokens=prefs.memory.max_summary_tokens,
-                    summarizer=f"{sum_entry.provider}/{sum_entry.model}",
+                    summarizer=sum_entry.model_id,
                 )
                 return build_summarizing_agent_graph(
                     model=model,
@@ -446,7 +457,7 @@ class AgentManager:
                 name=f"tts-{reply.routing.id}",
             )
 
-    def _log_agent_config(self) -> None:
+    def _log_agent_config(self, credential_store=None) -> None:
         """Log the agent model configuration from preferences.
 
         Absorbed from server_process.py — this is an AgentManager concern.
@@ -454,17 +465,22 @@ class AgentManager:
         try:
             from ..domain.preferences import load_preferences, resolve_llm
             prefs = load_preferences(self._ctx.workspace_path)
-            llm = resolve_llm(prefs, "chat")
+            llm = resolve_llm(
+                prefs,
+                self._ctx.workspace_path,
+                "chat",
+                credential_store=credential_store,
+            )
             if llm:
                 log.info(
-                    f"✅ Agent config loaded — preferences · {llm.provider}/{llm.model}",
+                    f"✅ Agent config loaded — preferences · {llm.model_id}",
                     temperature=llm.temperature,
                     max_tokens=llm.max_tokens,
                 )
             else:
                 log.error(
                     "❌ No chat LLM configured — HiroServer will run without agent · preferences\n"
-                    "Register at least one LLM in preferences.json (in your workspace directory)."
+                    "Set llm.default_chat and configure providers (hirocli provider add / scan-env)."
                 )
         except Exception as exc:
             log.error(
@@ -477,15 +493,21 @@ class AgentManager:
         """Build the agent with a persistent SQLite checkpointer then drain inbound_queue."""
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+        from ..domain.credential_store import CredentialStore
         from ..domain.db import db_path
+        from ..domain.workspace import workspace_id_for_path
 
-        self._log_agent_config()
+        wid = workspace_id_for_path(self._ctx.workspace_path)
+        credential_store = (
+            CredentialStore(self._ctx.workspace_path, wid) if wid is not None else None
+        )
+        self._log_agent_config(credential_store=credential_store)
         db = str(db_path(self._ctx.workspace_path))
 
         # AsyncSqliteSaver manages its own checkpoint tables inside workspace.db.
         # They coexist with the application tables without conflict.
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
-            self._agent = self._build_agent(checkpointer)
+            self._agent = self._build_agent(checkpointer, credential_store=credential_store)
             if self._agent is None:
                 log.warning(
                     "⚠️ AgentManager started — workspace · no chat LLM (fallback replies only)",

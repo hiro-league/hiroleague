@@ -19,3 +19,17 @@ def apply_theme() -> None:
             info="#31ccec",
             warning="#f2c037",
         )
+
+
+# ECharts line/area series colors (not Quasar widgets — hex lives here per admin guidelines).
+METRICS_ECHART_COLORS: dict[str, str] = {
+    "proc_cpu": "#f2c037",
+    "proc_rss": "#e91e63",
+    "proc_threads": "#9c27b0",
+    "disk_write": "#26a69a",
+    "disk_read": "#31ccec",
+    "net_sent": "#5898d4",
+    "net_recv": "#8bc34a",
+    "sys_cpu": "#5898d4",
+    "sys_mem": "#21ba45",
+}

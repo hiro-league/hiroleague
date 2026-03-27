@@ -1,1 +1,1 @@
-"""Logs feature — Phase 5."""
+"""HiroAdmin v2 — unified log viewer (tail + search)."""

@@ -16,7 +16,7 @@ from hirocli.admin.shared.ui.warning_callout import warning_callout
 
 
 class WorkspacesPageController:
-    """Owns v2 workspaces UI state and wires the table to WorkspaceService."""
+    """Owns workspaces UI state and wires the table to WorkspaceService."""
 
     def __init__(self, hosting_workspace_id: str | None) -> None:
         self._hosting = hosting_workspace_id

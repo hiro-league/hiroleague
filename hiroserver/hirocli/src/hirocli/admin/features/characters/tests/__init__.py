@@ -1,0 +1,1 @@
+# Character admin service tests

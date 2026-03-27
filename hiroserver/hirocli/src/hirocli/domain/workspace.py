@@ -263,3 +263,19 @@ def set_default_workspace(ws_id: str) -> None:
         raise WorkspaceError(f"Workspace id '{ws_id}' not found.")
     registry.default_workspace = ws_id
     save_registry(registry)
+
+
+def workspace_id_for_path(workspace_path: Path) -> str | None:
+    """Return the registry workspace id for an on-disk path, or None if unknown."""
+    registry = load_registry()
+    try:
+        resolved = workspace_path.resolve()
+    except OSError:
+        return None
+    for entry in registry.workspaces.values():
+        try:
+            if Path(entry.path).resolve() == resolved:
+                return entry.id
+        except OSError:
+            continue
+    return None

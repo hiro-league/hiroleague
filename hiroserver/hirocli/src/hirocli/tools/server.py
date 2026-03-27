@@ -105,6 +105,18 @@ class SetupTool(Tool):
         ctrl.ensure_mandatory_devices_channel(workspace_path, config)
         ctrl.ensure_default_preferences(workspace_path)
 
+        from ..domain.credential_store import CredentialStore
+
+        providers_imported = CredentialStore(workspace_path, entry.id).import_detected_env_keys()
+        if providers_imported:
+            from hiro_commons.log import Logger
+
+            Logger.get("TOOLS.SETUP").info(
+                "✅ Imported provider API keys from environment — HiroServer · setup",
+                count=providers_imported,
+                workspace=entry.name,
+            )
+
         autostart_registered = False
         autostart_method = "skipped"
         if not skip_autostart:
@@ -129,6 +141,7 @@ class SetupTool(Tool):
             autostart_registered=autostart_registered,
             autostart_method=autostart_method,
             server_started=start_server,
+            providers_imported=providers_imported,
         )
 
 

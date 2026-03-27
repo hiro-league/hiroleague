@@ -28,6 +28,7 @@ from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, writ
 from hirocli.constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from hirocli.domain.config import load_config, mark_disconnected
 from hirocli.domain.crypto import load_or_create_master_key
+from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
 from hirocli.runtime.channel_event_handler import ChannelEventHandler
@@ -165,6 +166,8 @@ async def _main(
 
     write_pid(workspace_path, PID_FILENAME)
     ensure_db(workspace_path)
+    # Characters must exist before data.db seeds the default channel (FK by id string).
+    seed_default_characters(workspace_path)
     ensure_data_db(workspace_path)
 
     # --- Wire HTTP + tools ---
@@ -216,7 +219,7 @@ async def _main(
         metrics_collector.run(),
     ]
     if admin:
-        from hirocli.ui.run import run_admin_ui
+        from hirocli.admin.run import run_admin_ui
 
         coros.append(run_admin_ui(ctx))
 

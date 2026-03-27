@@ -6,6 +6,25 @@ from .conversation import (
     MessageHistoryTool,
 )
 from .logs import LogSearchTool, LogTailTool
+from .llm_catalog import (
+    LlmCatalogGetModelTool,
+    LlmCatalogListModelsTool,
+    LlmCatalogListProvidersTool,
+)
+from .provider import (
+    AvailableModelsListTool,
+    ProviderAddApiKeyTool,
+    ProviderListConfiguredTool,
+    ProviderRemoveTool,
+)
+from .character import (
+    CharacterCreateTool,
+    CharacterDeleteTool,
+    CharacterGetTool,
+    CharacterListTool,
+    CharacterUpdateTool,
+    CharacterUploadPhotoTool,
+)
 from .channel import (
     ChannelDisableTool,
     ChannelEnableTool,
@@ -44,6 +63,12 @@ from .workspace import (
 def all_tools() -> list[Tool]:
     """Return one fresh instance of every registered tool."""
     return [
+        CharacterListTool(),
+        CharacterGetTool(),
+        CharacterCreateTool(),
+        CharacterUpdateTool(),
+        CharacterDeleteTool(),
+        CharacterUploadPhotoTool(),
         DeviceAddTool(),
         DeviceListTool(),
         DeviceRevokeTool(),
@@ -78,4 +103,11 @@ def all_tools() -> list[Tool]:
         DescribeImageTool(),
         LogSearchTool(),
         LogTailTool(),
+        LlmCatalogListProvidersTool(),
+        LlmCatalogListModelsTool(),
+        LlmCatalogGetModelTool(),
+        ProviderAddApiKeyTool(),
+        ProviderRemoveTool(),
+        ProviderListConfiguredTool(),
+        AvailableModelsListTool(),
     ]

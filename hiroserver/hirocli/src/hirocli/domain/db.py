@@ -1,7 +1,7 @@
 """Workspace database module.
 
 Manages workspace.db (SQLite) — the authoritative store for system config
-entities: agents, devices, channel_plugins. User content (channels, messages)
+entities: characters, devices, channel_plugins. User content (channels, messages)
 lives in data.db — see domain/data_store.py.
 
 Two interfaces are provided:
@@ -48,12 +48,13 @@ _initialized: set[str] = set()
 
 _DDL = [
     """
-    CREATE TABLE IF NOT EXISTS agents (
-        id            TEXT PRIMARY KEY,
-        name          TEXT NOT NULL UNIQUE,
-        is_default    INTEGER NOT NULL DEFAULT 0,
-        system_prompt TEXT NOT NULL DEFAULT '',
-        created_at    TEXT NOT NULL DEFAULT ''
+    CREATE TABLE IF NOT EXISTS characters (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        is_default  INTEGER NOT NULL DEFAULT 0,
+        folder_path TEXT NOT NULL,
+        created_at  TEXT NOT NULL DEFAULT '',
+        updated_at  TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -91,12 +92,12 @@ _DDL = [
 # ---------------------------------------------------------------------------
 
 _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
-    # agents — LLM fields (provider, model, temperature, max_tokens) removed;
-    # they live in preferences.json LLMEntry now.
-    ("agents", "name",          "TEXT NOT NULL DEFAULT ''"),
-    ("agents", "is_default",    "INTEGER NOT NULL DEFAULT 0"),
-    ("agents", "system_prompt", "TEXT NOT NULL DEFAULT ''"),
-    ("agents", "created_at",    "TEXT NOT NULL DEFAULT ''"),
+    # characters — relational index; persona text lives in workspace characters/<id>/
+    ("characters", "name",        "TEXT NOT NULL DEFAULT ''"),
+    ("characters", "is_default",  "INTEGER NOT NULL DEFAULT 0"),
+    ("characters", "folder_path", "TEXT NOT NULL DEFAULT ''"),
+    ("characters", "created_at",  "TEXT NOT NULL DEFAULT ''"),
+    ("characters", "updated_at",  "TEXT NOT NULL DEFAULT ''"),
     # devices
     ("devices", "device_public_key", "TEXT NOT NULL DEFAULT ''"),
     ("devices", "paired_at",         "TEXT NOT NULL DEFAULT ''"),

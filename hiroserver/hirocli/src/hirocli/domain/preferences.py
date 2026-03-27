@@ -1,21 +1,17 @@
-"""Workspace preferences — single source of truth for all configurable choices.
+"""Workspace preferences — single source of truth for configurable choices.
 
-preferences.json is the sole authority for which LLMs are available, which is
-default for each purpose (chat, STT, TTS), voice settings, audio behavior, and
-short-term memory / summarization (``memory``).
-No other code path provides a backup answer.  Services call resolve_llm() and
-use what they get; if the result is None the service fails clearly.
+``preferences.json`` holds LLM default selections (canonical catalog ids), per-model
+tuning, voice/audio, and memory settings. Provider secrets live in the credential
+store (``providers.json`` + OS keyring), not here.
 
 Storage: ``<workspace>/preferences.json`` — Pydantic model serialised to JSON.
-The I/O layer (load_preferences / save_preferences) is the only code that
-touches the file.  Swapping to SQLite JSONB later means changing only those two
-functions; the model, resolvers, and all consumers stay untouched.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -23,32 +19,32 @@ from pydantic import BaseModel, Field
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
+from .credential_store import CredentialStore
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# LLM registry
+# LLM selection (canonical catalog ids: ``openai:gpt-5.4``)
 # ---------------------------------------------------------------------------
 
 LLMPurpose = Literal["chat", "stt", "tts"]
 
 
-class LLMEntry(BaseModel):
-    """A registered LLM that the workspace can use."""
+class ModelTuning(BaseModel):
+    """Per-model runtime overrides keyed by canonical model id."""
 
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    provider: str
-    model: str
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
-    capabilities: list[str] = Field(default_factory=list)
 
 
 class LLMPreferences(BaseModel):
-    registered: list[LLMEntry] = Field(default_factory=list)
+    """Which catalog models to use when the workspace has credentials for them."""
+
     default_chat: str | None = None
     default_stt: str | None = None
     default_tts: str | None = None
+    default_summarization: str | None = None
+    tuning: dict[str, ModelTuning] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +73,7 @@ class AudioPreferences(BaseModel):
 
 
 class MemoryPreferences(BaseModel):
-    """Token-bounded conversation context before the chat LLM (see summarizing_agent_graph)."""
+    """Token-bounded conversation context before the chat LLM."""
 
     summarization_enabled: bool = True
     max_context_tokens: int = Field(default=4096, ge=512)
@@ -88,7 +84,7 @@ class MemoryPreferences(BaseModel):
     max_summary_tokens: int = Field(default=256, ge=64)
     summarization_llm_id: str | None = Field(
         default=None,
-        description="Registered LLM id for summaries; None = use default chat model",
+        description="Optional canonical model id for summaries; overrides default_summarization when set.",
     )
 
 
@@ -100,7 +96,7 @@ class MemoryPreferences(BaseModel):
 class WorkspacePreferences(BaseModel):
     """Root preferences object persisted as preferences.json."""
 
-    version: int = 1
+    version: int = 2
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     audio: AudioPreferences = Field(default_factory=AudioPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
@@ -130,57 +126,122 @@ def save_preferences(workspace_path: Path, prefs: WorkspacePreferences) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Resolver — THE single function that answers "which LLM for this purpose?"
-#
-# All selection logic lives here.  Consuming code MUST NOT add its own
-# fallback, env-var lookup, or hardcoded default.
+# Resolution — which canonical model id + tuning for a purpose?
 # ---------------------------------------------------------------------------
 
 
-def resolve_llm(prefs: WorkspacePreferences, purpose: LLMPurpose = "chat") -> LLMEntry | None:
-    """Deterministic LLM resolution for a given purpose.
+@dataclass(frozen=True)
+class ResolvedModel:
+    """Resolved chat/STT/TTS model from preferences + availability."""
 
-    Resolution order (all within this function, nowhere else):
-      1. Explicit default ID for the purpose (default_chat, default_stt, …).
-      2. First registered LLM with a matching capability tag.
-      3. First registered LLM (if only one, it answers for everything).
-      4. None — means "not configured"; caller raises a clear error.
+    model_id: str
+    temperature: float
+    max_tokens: int
+
+
+def resolve_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    purpose: LLMPurpose = "chat",
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Return the default model for ``purpose`` if set, in catalog, and available.
+
+    Availability requires the model's provider to be configured in the credential store.
+    When ``credential_store`` is provided (e.g. AgentManager), it is reused to avoid
+    repeated keyring/doc loads.
     """
-    pool = prefs.llm.registered
-    if not pool:
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    attr = f"default_{purpose}"
+    model_id: str | None = getattr(prefs.llm, attr, None)
+    if not model_id:
         return None
 
-    # 1. Explicit default
-    default_id: str | None = getattr(prefs.llm, f"default_{purpose}", None)
-    if default_id:
-        for entry in pool:
-            if entry.id == default_id:
-                return entry
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None:
+        return None
+    expected_kind = {"chat": "chat", "stt": "stt", "tts": "tts"}[purpose]
+    if spec.model_kind != expected_kind:
+        return None
 
-    # 2. First with matching capability
-    for entry in pool:
-        if purpose in entry.capabilities:
-            return entry
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            logger.debug("resolve_llm: workspace path not in registry — %s", workspace_path)
+            return None
+        store = CredentialStore(workspace_path, wid)
 
-    # 3. First registered
-    return pool[0]
+    ams = AvailableModelsService(cat, store)
+    if not ams.is_model_available(model_id):
+        return None
+
+    tuning = prefs.llm.tuning.get(model_id, ModelTuning())
+    return ResolvedModel(
+        model_id=model_id,
+        temperature=tuning.temperature,
+        max_tokens=tuning.max_tokens,
+    )
 
 
-def resolve_summarization_llm(prefs: WorkspacePreferences) -> LLMEntry | None:
-    """LLM used for conversation summarization; falls back to chat when unset or id missing."""
-    mem = prefs.memory
-    if mem.summarization_llm_id:
-        for entry in prefs.llm.registered:
-            if entry.id == mem.summarization_llm_id:
-                return entry
-    return resolve_llm(prefs, "chat")
+def resolve_summarization_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Summarization model: memory override, then default_summarization, then chat default.
+
+    Order matches ``MemoryPreferences.summarization_llm_id`` (per-conversation summarizer)
+    overriding the LLM-section default.
+    """
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            return None
+        store = CredentialStore(workspace_path, wid)
+
+    ams = AvailableModelsService(get_model_catalog(), store)
+
+    # Memory-specific id wins over llm.default_summarization, then chat default.
+    candidates: list[str | None] = [
+        prefs.memory.summarization_llm_id,
+        prefs.llm.default_summarization,
+        prefs.llm.default_chat,
+    ]
+    cat = get_model_catalog()
+    for mid in candidates:
+        if not mid:
+            continue
+        spec = cat.get_model(mid)
+        if spec is None or spec.model_kind != "chat":
+            continue
+        if ams.is_model_available(mid):
+            tuning = prefs.llm.tuning.get(mid, ModelTuning())
+            return ResolvedModel(
+                model_id=mid,
+                temperature=tuning.temperature,
+                max_tokens=tuning.max_tokens,
+            )
+    return None
 
 
 def resolve_voice(prefs: WorkspacePreferences) -> VoiceOption | None:
-    """Resolve the active voice option.
-
-    Same philosophy: selected_voice ID > first option > None.
-    """
+    """Resolve the active voice option (selected_voice id > first option > None)."""
     options = prefs.audio.voice_options
     if not options:
         return None

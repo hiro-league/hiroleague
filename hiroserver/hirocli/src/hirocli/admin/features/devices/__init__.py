@@ -1,1 +1,1 @@
-"""Devices feature — Phase 3."""
+"""Paired devices — pairing codes and revoke via DeviceService (`/devices`)."""
