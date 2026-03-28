@@ -144,6 +144,104 @@ def test_model_id_must_match_provider_prefix(tmp_path: Path) -> None:
         ModelCatalog.load_from_path(path)
 
 
+def test_recommended_models_validated(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": 1,
+        "providers": [
+            {
+                "id": "other",
+                "display_name": "Other",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+            },
+            {
+                "id": "p",
+                "display_name": "P",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+                "recommended_models": {"chat": "other:x"},
+            },
+        ],
+        "models": [
+            {
+                "id": "other:x",
+                "provider_id": "other",
+                "display_name": "X",
+                "model_kind": "chat",
+            },
+            {
+                "id": "p:y",
+                "provider_id": "p",
+                "display_name": "Y",
+                "model_kind": "chat",
+            },
+        ],
+    }
+    path = tmp_path / "rec.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="belongs to provider"):
+        ModelCatalog.load_from_path(path)
+
+
+def test_recommended_models_wrong_kind(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": 1,
+        "providers": [
+            {
+                "id": "p",
+                "display_name": "P",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+                "recommended_models": {"chat": "p:tts1"},
+            }
+        ],
+        "models": [
+            {
+                "id": "p:tts1",
+                "provider_id": "p",
+                "display_name": "T",
+                "model_kind": "tts",
+            },
+        ],
+    }
+    path = tmp_path / "rec2.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="model_kind"):
+        ModelCatalog.load_from_path(path)
+
+
+def test_suggested_defaults_empty_and_populated(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": 1,
+        "providers": [
+            {
+                "id": "p",
+                "display_name": "P",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+                "recommended_models": {"chat": "p:one"},
+            }
+        ],
+        "models": [
+            {
+                "id": "p:one",
+                "provider_id": "p",
+                "display_name": "One",
+                "model_kind": "chat",
+            },
+        ],
+    }
+    path = tmp_path / "sd.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cat = ModelCatalog.load_from_path(path)
+    assert cat.suggested_defaults("missing") == {}
+    assert cat.suggested_defaults("p") == {"chat": "p:one"}
+
+
 def test_replacement_id_must_exist(tmp_path: Path) -> None:
     doc = {
         "catalog_version": 1,

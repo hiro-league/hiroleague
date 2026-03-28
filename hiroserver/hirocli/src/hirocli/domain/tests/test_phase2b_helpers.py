@@ -13,7 +13,7 @@ from hirocli.commands.provider import (
 )
 from hirocli.domain.available_models import CharacterModelValidation
 from hirocli.domain.model_catalog import DeprecatedModelInfo
-from hirocli.domain.preferences import AudioPreferences, VoiceOption, WorkspacePreferences
+from hirocli.domain.preferences import AudioPreferences, WorkspacePreferences
 from hirocli.services.tts import create_tts_service
 from hirocli.services.tts.openai_provider import OpenAITTSProvider
 from hirocli.tools.character import character_model_validation_warnings
@@ -104,22 +104,29 @@ def test_interactive_credential_provisioning_imports_selected(tmp_path: Path) ->
 
 
 def test_create_tts_service_injects_credential_store_key(tmp_path: Path) -> None:
-    vo = VoiceOption(id="v1", provider="openai", model="gpt-4o-mini-tts", voice="alloy")
+    from hirocli.domain.preferences import LLMPreferences, ResolvedModel
+
+    mock_spec = MagicMock()
+    mock_spec.provider_id = "openai"
     prefs = WorkspacePreferences(
-        audio=AudioPreferences(
-            agent_replies_in_voice=True,
-            selected_voice="v1",
-            voice_options=[vo],
-        )
+        audio=AudioPreferences(agent_replies_in_voice=True),
+        llm=LLMPreferences(default_tts="openai:gpt-4o-mini-tts"),
+    )
+    resolved = ResolvedModel(
+        model_id="openai:gpt-4o-mini-tts",
+        temperature=0.7,
+        max_tokens=1024,
     )
     mock_store = MagicMock()
     mock_store.get_api_key.return_value = "sk-from-store"
     with (
         patch("hirocli.domain.preferences.load_preferences", return_value=prefs),
-        patch("hirocli.domain.preferences.resolve_voice", return_value=vo),
         patch("hirocli.domain.workspace.workspace_id_for_path", return_value="w1"),
-        patch("hirocli.services.tts.CredentialStore", return_value=mock_store),
+        patch("hirocli.domain.preferences.resolve_llm", return_value=resolved),
+        patch("hirocli.domain.model_catalog.get_model_catalog") as gmc,
+        patch("hirocli.domain.credential_store.CredentialStore", return_value=mock_store),
     ):
+        gmc.return_value.get_model.return_value = mock_spec
         svc = create_tts_service(tmp_path)
     assert svc is not None
     mock_store.get_api_key.assert_called_once_with("openai")

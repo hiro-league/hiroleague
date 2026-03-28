@@ -112,16 +112,31 @@ class SetupTool(Tool):
         ctrl.ensure_default_preferences(workspace_path)
 
         from ..domain.credential_store import CredentialStore
+        from ..domain.onboarding_defaults import apply_onboarding_defaults_to_preferences
 
         providers_imported = 0
         if not skip_env_import:
-            providers_imported = CredentialStore(workspace_path, entry.id).import_detected_env_keys()
+            cred_store = CredentialStore(workspace_path, entry.id)
+            providers_imported = cred_store.import_detected_env_keys()
             if providers_imported:
                 from hiro_commons.log import Logger
 
                 Logger.get("TOOLS.SETUP").info(
                     "✅ Imported provider API keys from environment — HiroServer · setup",
                     count=providers_imported,
+                    workspace=entry.name,
+                )
+            # Phase 3c: fill empty default_* slots from catalog (non-interactive — no prompt).
+            ordered = [m.provider_id for m in cred_store.list_configured()]
+            applied = apply_onboarding_defaults_to_preferences(
+                workspace_path, entry.id, ordered,
+            )
+            if applied:
+                from hiro_commons.log import Logger
+
+                Logger.get("TOOLS.SETUP").info(
+                    "✅ Applied catalog default models — HiroServer · setup · onboarding",
+                    models=", ".join(f"{s.catalog_kind}={s.model_id}" for s in applied),
                     workspace=entry.name,
                 )
 

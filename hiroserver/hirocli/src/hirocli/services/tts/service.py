@@ -7,7 +7,7 @@ Usage
 -----
     from hirocli.services.tts import TTSService, OpenAITTSProvider, GeminiTTSProvider
 
-    tts = TTSService(providers=[OpenAITTSProvider(), GeminiTTSProvider()])
+    tts = TTSService(providers=[OpenAITTSProvider(api_key=key)], default_model="gpt-4o-mini-tts")
 
     # Async (agent post-processing, adapters):
     result = await tts.synthesize("Hello world")
@@ -22,13 +22,9 @@ Usage
 
 Configuration
 -------------
-    The default TTS model is resolved from preferences.json via resolve_voice().
-    Callers that construct TTSService pass default_model explicitly;
-    the service itself does not read env vars or config files.
-
-    OPENAI_API_KEY        Enables OpenAITTSProvider.
-    GOOGLE_API_KEY /
-    GEMINI_API_KEY        Enables GeminiTTSProvider.
+    The default TTS model is resolved from ``preferences.llm.default_tts``
+    (a canonical catalog ID) through the catalog + credential store by
+    ``create_tts_service``. The service itself does not read config files.
 """
 
 from __future__ import annotations
@@ -124,7 +120,7 @@ class TTSService:
         if not effective_model:
             raise RuntimeError(
                 "No TTS providers are available. "
-                "Set OPENAI_API_KEY or GOOGLE_API_KEY to enable speech synthesis."
+                "Configure a provider and set llm.default_tts in preferences."
             )
 
         provider = self._model_to_provider.get(effective_model)

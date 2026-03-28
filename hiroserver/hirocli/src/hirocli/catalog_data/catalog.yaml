@@ -10,6 +10,11 @@ providers:
     hosting: cloud
     credential_env_keys: [OPENAI_API_KEY]
     docs_url: https://platform.openai.com/docs
+    recommended_models:
+      chat: openai:gpt-5.4
+      tts: openai:gpt-4o-mini-tts
+      stt: openai:gpt-4o-transcribe
+      embedding: openai:text-embedding-3-small
     metadata_updated_at: "2026-03-27"
 
   - id: google
@@ -17,6 +22,9 @@ providers:
     hosting: cloud
     credential_env_keys: [GOOGLE_API_KEY]
     docs_url: https://ai.google.dev/gemini-api/docs
+    recommended_models:
+      chat: google:gemini-2.5-flash
+      embedding: google:gemini-embedding-001
     metadata_updated_at: "2026-03-27"
 
   - id: anthropic
@@ -24,6 +32,8 @@ providers:
     hosting: cloud
     credential_env_keys: [ANTHROPIC_API_KEY]
     docs_url: https://platform.claude.com/docs
+    recommended_models:
+      chat: anthropic:claude-sonnet-4-6
     metadata_updated_at: "2026-03-27"
 
   - id: ollama
@@ -32,6 +42,9 @@ providers:
     credential_env_keys: []
     default_base_url: http://localhost:11434
     docs_url: https://github.com/ollama/ollama
+    recommended_models:
+      chat: ollama:llama3.3
+      embedding: ollama:nomic-embed-text
     metadata_updated_at: "2026-03-27"
 
   - id: lm_studio
@@ -40,6 +53,8 @@ providers:
     credential_env_keys: []
     default_base_url: http://localhost:1234
     docs_url: https://lmstudio.ai/docs
+    recommended_models:
+      chat: lm_studio:local-model
     metadata_updated_at: "2026-03-27"
 
   - id: jan
@@ -48,6 +63,8 @@ providers:
     credential_env_keys: []
     default_base_url: http://localhost:1337
     docs_url: https://jan.ai/docs
+    recommended_models:
+      chat: jan:local-model
     metadata_updated_at: "2026-03-27"
     notes: Default port varies by install; check Jan settings.
 

@@ -42,6 +42,8 @@ class Provider(BaseModel):
     credential_env_keys: list[str] = Field(default_factory=list)
     docs_url: str | None = None
     default_base_url: str | None = None
+    # Phase 3c: editorial defaults per model kind for onboarding (kind -> canonical id).
+    recommended_models: dict[str, str] | None = None
     metadata_updated_at: str
     notes: str | None = None
 
@@ -90,6 +92,37 @@ class CatalogDocument(BaseModel):
                 if m.replacement_id not in known:
                     raise ValueError(
                         f"model {m.id!r} replacement_id {m.replacement_id!r} not in catalog"
+                    )
+        models_by_id = {m.id: m for m in self.models}
+        for prov in self.providers:
+            if not prov.recommended_models:
+                continue
+            for kind, mid in prov.recommended_models.items():
+                if kind not in (
+                    "chat",
+                    "tts",
+                    "stt",
+                    "embedding",
+                    "image_gen",
+                ):
+                    raise ValueError(
+                        f"provider {prov.id!r} recommended_models has unknown kind {kind!r}"
+                    )
+                spec = models_by_id.get(mid)
+                if spec is None:
+                    raise ValueError(
+                        f"provider {prov.id!r} recommended_models[{kind!r}] = {mid!r} "
+                        "not found in catalog models"
+                    )
+                if spec.provider_id != prov.id:
+                    raise ValueError(
+                        f"provider {prov.id!r} recommended model {mid!r} belongs to "
+                        f"provider {spec.provider_id!r}, not {prov.id!r}"
+                    )
+                if spec.model_kind != kind:
+                    raise ValueError(
+                        f"provider {prov.id!r} recommended_models[{kind!r}] points to "
+                        f"{mid!r} but that model has model_kind {spec.model_kind!r}, not {kind!r}"
                     )
         return self
 
@@ -210,6 +243,16 @@ class ModelCatalog:
             unknown=sorted(unknown),
             deprecated=sorted(deprecated, key=lambda d: d.model_id),
         )
+
+    def suggested_defaults(self, provider_id: str) -> dict[str, str]:
+        """Return the provider's ``recommended_models`` map (kind -> canonical id).
+
+        Empty dict if the provider is missing or has no recommendations.
+        """
+        prov = self._providers_by_id.get(provider_id)
+        if prov is None or not prov.recommended_models:
+            return {}
+        return dict(prov.recommended_models)
 
 
 @lru_cache(maxsize=1)

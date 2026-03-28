@@ -17,9 +17,6 @@ from pathlib import Path
 
 from hiro_commons.log import Logger
 
-from hirocli.domain.credential_store import CredentialStore
-from hirocli.domain.workspace import workspace_id_for_path
-
 from .gemini_provider import GeminiTTSProvider
 from .openai_provider import OpenAITTSProvider
 from .provider import TTSModelInfo, TTSProvider, TTSResult
@@ -37,61 +34,53 @@ __all__ = [
 
 _log = Logger.get("TTS")
 
-# Provider name (from preferences.json VoiceOption.provider) → provider class.
+# Catalog provider_id → TTS implementation (API key from credential store).
 _PROVIDER_MAP: dict[str, type[TTSProvider]] = {
     "openai": OpenAITTSProvider,
-    "google_genai": GeminiTTSProvider,
-    "gemini": GeminiTTSProvider,
+    "google": GeminiTTSProvider,
 }
-
-
-def _tts_catalog_provider_id(voice_provider: str) -> str | None:
-    """Map audio preference provider string to catalog ``provider_id`` for credential lookup."""
-    if voice_provider == "openai":
-        return "openai"
-    if voice_provider in ("google_genai", "gemini"):
-        return "google"
-    return None
 
 
 def create_tts_service(workspace_path: Path) -> TTSService | None:
     """Build a TTSService from workspace preferences, or None if TTS is disabled.
 
-    Moved here from server_process.py so the TTS package owns its own
-    construction logic.
+    Resolves the TTS model from ``preferences.llm.default_tts`` through the
+    catalog and credential store — same pattern as ``create_stt_service``.
     """
-    from hirocli.domain.preferences import load_preferences, resolve_voice
+    from hirocli.domain.credential_store import CredentialStore
+    from hirocli.domain.model_catalog import get_model_catalog
+    from hirocli.domain.preferences import load_preferences, resolve_llm
+    from hirocli.domain.workspace import workspace_id_for_path
 
     prefs = load_preferences(workspace_path)
     if not prefs.audio.agent_replies_in_voice:
         _log.info("TTS disabled in preferences (agent_replies_in_voice=false)")
         return None
-    voice = resolve_voice(prefs)
-    if not voice:
-        _log.warning("TTS enabled but no voice configured — TTS disabled")
-        return None
-    cls = _PROVIDER_MAP.get(voice.provider)
-    if cls is None:
-        _log.warning("Unknown TTS provider in preferences, loading none", provider=voice.provider)
-        return None
+
     wid = workspace_id_for_path(workspace_path)
-    catalog_pid = _tts_catalog_provider_id(voice.provider)
-    if wid is None:
-        _log.warning(
-            "TTS disabled — workspace has no registry id for path (cannot open credential store)",
-            workspace_path=str(workspace_path),
-            voice_provider=voice.provider,
-        )
-        return None
-    if catalog_pid is None:
-        # Keep returning None (same as missing wid); extend _tts_catalog_provider_id when adding prefs providers.
-        _log.warning(
-            "TTS voice provider has no catalog credential id mapping — add _tts_catalog_provider_id entry",
-            voice_provider=voice.provider,
-            workspace_path=str(workspace_path),
-        )
-        return None
-    store = CredentialStore(workspace_path, wid)
-    api_key = store.get_api_key(catalog_pid)
-    providers: list[TTSProvider] = [cls(api_key=api_key)]
-    return TTSService(providers=providers, default_model=voice.model)
+    store = CredentialStore(workspace_path, wid) if wid is not None else None
+    # Resolve TTS model through catalog + credential store (canonical ID path)
+    tts_resolved = resolve_llm(prefs, workspace_path, "tts", credential_store=store)
+
+    default_model: str | None = None
+    providers: list[TTSProvider] = []
+
+    if tts_resolved is not None:
+        spec = get_model_catalog().get_model(tts_resolved.model_id)
+        if spec is None:
+            _log.warning("TTS model id not in catalog", model_id=tts_resolved.model_id)
+        else:
+            cls = _PROVIDER_MAP.get(spec.provider_id)
+            if cls is None:
+                _log.warning(
+                    "Unknown TTS provider in catalog for preferences",
+                    provider_id=spec.provider_id,
+                )
+            else:
+                default_model = tts_resolved.model_id.split(":", 1)[1]
+                key = store.get_api_key(spec.provider_id) if store else None
+                providers = [cls(api_key=key)]
+    else:
+        _log.warning("TTS enabled but no TTS model resolved — set llm.default_tts in preferences")
+
+    return TTSService(providers=providers, default_model=default_model)

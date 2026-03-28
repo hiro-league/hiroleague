@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -11,9 +13,19 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from ..domain.available_models import AvailableModelsService
 from ..domain.credential_store import CredentialStore
 from ..domain.model_catalog import Provider, get_model_catalog
+from ..domain.onboarding_defaults import (
+    DefaultSuggestion,
+    apply_onboarding_defaults_to_preferences,
+    apply_suggested_defaults,
+    compute_suggested_defaults,
+)
+from ..domain.preferences import load_preferences, save_preferences
 from ..domain.workspace import WorkspaceError, resolve_workspace
+
+logger = logging.getLogger(__name__)
 from ..tools.provider import (
     AvailableModelsListTool,
     ProviderAddApiKeyTool,
@@ -96,6 +108,149 @@ def parse_index_selection(raw: str, upper: int) -> set[int] | None:
     return out
 
 
+def _print_default_suggestions_block(
+    console: Console, suggestions: list[DefaultSuggestion],
+) -> None:
+    console.print("\n[bold]Suggested default models[/bold] (from catalog recommendations)")
+    for s in suggestions:
+        console.print(
+            f"  [bold]{s.catalog_kind}[/bold]:  {s.model_id}  ({s.display_name})"
+            f"  [dim]← {s.provider_display_name}[/dim]"
+        )
+
+
+def _pick_defaults_interactive(
+    workspace_path: Path,
+    workspace_id: str,
+    console: Console,
+    initial: list[DefaultSuggestion],
+) -> list[DefaultSuggestion]:
+    """Replace suggestions with user-picked models per kind (from available list)."""
+    cat = get_model_catalog()
+    store = CredentialStore(workspace_path, workspace_id)
+    ams = AvailableModelsService(cat, store)
+    picked: list[DefaultSuggestion] = []
+    seen_kinds: set[str] = set()
+    for s in initial:
+        if s.catalog_kind in seen_kinds:
+            continue
+        seen_kinds.add(s.catalog_kind)
+        models = ams.list_available_models(model_kind=s.catalog_kind)
+        if not models:
+            console.print(f"[yellow]No available {s.catalog_kind} models — skip.[/yellow]")
+            continue
+        console.print(f"\n[bold]{s.catalog_kind}[/bold] — pick a model (0 = skip)")
+        for i, m in enumerate(models, start=1):
+            mark = " *" if m.id == s.model_id else ""
+            console.print(
+                f"  [bold]{i}[/bold]  {m.id}  ({m.display_name}){mark}"
+            )
+        raw = Prompt.ask("Choice", default="1", console=console)
+        try:
+            num = int(raw.strip())
+        except ValueError:
+            console.print("[dim]Skipped.[/dim]")
+            continue
+        if num == 0:
+            continue
+        if num < 1 or num > len(models):
+            console.print("[yellow]Out of range — skipped.[/yellow]")
+            continue
+        chosen = models[num - 1]
+        prov = cat.get_provider(chosen.provider_id)
+        picked.append(
+            DefaultSuggestion(
+                catalog_kind=s.catalog_kind,
+                model_id=chosen.id,
+                display_name=chosen.display_name,
+                provider_id=chosen.provider_id,
+                provider_display_name=prov.display_name if prov else chosen.provider_id,
+            )
+        )
+    return picked
+
+
+def run_onboarding_defaults_flow(
+    workspace_path: Path,
+    workspace_id: str,
+    console: Console,
+    *,
+    provider_ids_ordered: list[str],
+    interactive: bool,
+) -> list[DefaultSuggestion]:
+    """Compute catalog defaults, optionally prompt, apply to preferences, return what applied."""
+    if not provider_ids_ordered:
+        return []
+
+    prefs = load_preferences(workspace_path)
+    cat = get_model_catalog()
+    store = CredentialStore(workspace_path, workspace_id)
+    ams = AvailableModelsService(cat, store)
+    suggestions = compute_suggested_defaults(
+        provider_ids_ordered, cat, ams, prefs.llm,
+    )
+    if not suggestions:
+        return []
+
+    if interactive:
+        _print_default_suggestions_block(console, suggestions)
+        choice = Prompt.ask(
+            "Accept these defaults?",
+            default="Y",
+            console=console,
+        ).strip().lower()
+        if choice in ("n", "no"):
+            console.print("[dim]Skipped default model setup.[/dim]")
+            return []
+        if choice in ("p", "pick"):
+            suggestions = _pick_defaults_interactive(
+                workspace_path, workspace_id, console, suggestions,
+            )
+            if not suggestions:
+                console.print("[dim]No defaults selected.[/dim]")
+                return []
+
+    applied = apply_suggested_defaults(prefs, suggestions)
+    if applied:
+        save_preferences(workspace_path, prefs)
+        if not interactive:
+            logger.info(
+                "✅ Applied catalog default models — HiroServer · onboarding defaults · %s",
+                ", ".join(f"{s.catalog_kind}={s.model_id}" for s in applied),
+            )
+        if interactive:
+            console.print("\n[green]Default models (saved to preferences):[/green]")
+            for s in applied:
+                label = {"chat": "Chat", "tts": "TTS", "stt": "STT"}.get(
+                    s.catalog_kind, s.catalog_kind,
+                )
+                extra = ""
+                if s.catalog_kind == "chat" and prefs.llm.default_summarization == s.model_id:
+                    extra = "  [dim](summarization same as chat)[/dim]"
+                console.print(
+                    f"  [bold]{label}[/bold]:  {s.model_id}  ({s.display_name}){extra}"
+                )
+    return applied
+
+
+def run_onboarding_defaults_non_interactive(
+    workspace_path: Path,
+    workspace_id: str,
+) -> list[DefaultSuggestion]:
+    """Apply catalog defaults for empty preference slots; log at INFO. No console output."""
+    store = CredentialStore(workspace_path, workspace_id)
+    ordered = [m.provider_id for m in store.list_configured()]
+    applied = apply_onboarding_defaults_to_preferences(
+        workspace_path, workspace_id, ordered,
+    )
+    if applied:
+        logger.info(
+            "✅ Applied catalog default models — HiroServer · onboarding defaults · %s",
+            ", ".join(f"{s.catalog_kind}={s.model_id}" for s in applied),
+        )
+    return applied
+
+
 def interactive_credential_provisioning(
     workspace_path: Path,
     workspace_id: str,
@@ -111,6 +266,7 @@ def interactive_credential_provisioning(
     """
     store = CredentialStore(workspace_path, workspace_id)
     cat = get_model_catalog()
+    session_order: list[str] = []
 
     discovered = discovered_env_keys_rows()
     if discovered and Confirm.ask(
@@ -143,6 +299,7 @@ def interactive_credential_provisioning(
                     continue
                 try:
                     store.set_api_key(prov.id, val)
+                    session_order.append(prov.id)
                     console.print(f"[green]Imported[/green] API key for [bold]{prov.id}[/bold]")
                 except RuntimeError as exc:
                     console.print(f"[red]Could not store key for {prov.id}: {exc}[/red]")
@@ -183,11 +340,20 @@ def interactive_credential_provisioning(
             continue
         try:
             store.set_api_key(chosen.id, key.strip())
+            session_order.append(chosen.id)
             console.print(f"[green]Stored[/green] API key for [bold]{chosen.id}[/bold]")
         except RuntimeError as exc:
             console.print(f"[red]Could not store key: {exc}[/red]")
 
     print_provider_summary_table(console, workspace=workspace_name)
+    if session_order:
+        run_onboarding_defaults_flow(
+            workspace_path,
+            workspace_id,
+            console,
+            provider_ids_ordered=session_order,
+            interactive=True,
+        )
     return len(store.list_configured())
 
 
@@ -223,6 +389,17 @@ def register(provider_app: typer.Typer, console: Console) -> None:
             f"[green]Stored API key for[/green] [bold]{result.provider_id}[/bold] "
             f"in workspace [bold]{result.workspace}[/bold]."
         )
+        try:
+            entry, _ = resolve_workspace(workspace)
+            run_onboarding_defaults_flow(
+                Path(entry.path),
+                entry.id,
+                console,
+                provider_ids_ordered=[result.provider_id.strip()],
+                interactive=sys.stdin.isatty(),
+            )
+        except WorkspaceError:
+            pass
 
     @provider_app.command("remove")
     def provider_remove(
@@ -318,9 +495,61 @@ def register(provider_app: typer.Typer, console: Console) -> None:
                 except WorkspaceError as exc:
                     console.print(f"[red]{exc}[/red]")
                     raise typer.Exit(1)
+            before_ids = {p.provider_id for p in store.list_configured()}
             n = store.import_detected_env_keys()
             console.print(f"[green]Imported[/green] {n} provider credential(s) from the environment.")
+            new_ordered = [
+                p.id
+                for p in cat.list_providers()
+                if p.id not in before_ids and store.is_configured(p.id)
+            ]
+            if new_ordered:
+                try:
+                    entry, _ = resolve_workspace(workspace)
+                    run_onboarding_defaults_flow(
+                        Path(entry.path),
+                        entry.id,
+                        console,
+                        provider_ids_ordered=new_ordered,
+                        interactive=sys.stdin.isatty(),
+                    )
+                except WorkspaceError:
+                    pass
 
+    @provider_app.command("suggest-defaults")
+    def provider_suggest_defaults(
+        workspace: Optional[str] = typer.Option(
+            None, "--workspace", "-W", help="Workspace name or id"
+        ),
+    ) -> None:
+        """Offer catalog default models for empty preference slots (any configured providers)."""
+        try:
+            entry, _ = resolve_workspace(workspace)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        store = CredentialStore(Path(entry.path), entry.id)
+        ordered = [m.provider_id for m in store.list_configured()]
+        if not ordered:
+            console.print("[dim]No providers configured — add keys first.[/dim]")
+            raise typer.Exit(0)
+        prefs = load_preferences(Path(entry.path))
+        cat = get_model_catalog()
+        ams = AvailableModelsService(cat, store)
+        preview = compute_suggested_defaults(ordered, cat, ams, prefs.llm)
+        if not preview:
+            console.print(
+                "[dim]Nothing to suggest — empty slots already filled or "
+                "recommended models unavailable for this workspace.[/dim]"
+            )
+            raise typer.Exit(0)
+        run_onboarding_defaults_flow(
+            Path(entry.path),
+            entry.id,
+            console,
+            provider_ids_ordered=ordered,
+            interactive=sys.stdin.isatty(),
+        )
 
     @provider_app.command("endpoint")
     def provider_endpoint(

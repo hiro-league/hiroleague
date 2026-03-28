@@ -212,9 +212,10 @@ class AgentManager:
 
             peer = comm_peer_label(inbound, self._ctx)
 
+            # Model is already resolved from the catalog at service creation time;
+            # voice and instructions come from audio preferences.
             result = await self._tts_service.synthesize(
                 text,
-                model=voice.model,
                 voice=voice.voice,
                 instructions=voice.instructions,
             )
