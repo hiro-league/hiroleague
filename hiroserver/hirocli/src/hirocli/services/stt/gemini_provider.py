@@ -13,12 +13,10 @@ only the spoken text.
 The google-genai SDK is imported lazily inside methods so this module can be
 imported even when the SDK is not installed (provider will report unavailable).
 
-Enabled when: GOOGLE_API_KEY or GEMINI_API_KEY environment variable is set.
+API key is injected by ``create_stt_service`` (credential store).
 """
 
 from __future__ import annotations
-
-import os
 
 from hiro_commons.log import Logger
 
@@ -55,10 +53,6 @@ _MODELS: list[ModelInfo] = [
 ]
 
 
-def _api_key() -> str | None:
-    return os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-
-
 class GeminiSTTProvider(STTProvider):
     """Speech-to-text via Google Gemini multimodal generate_content().
 
@@ -66,12 +60,15 @@ class GeminiSTTProvider(STTProvider):
     Retries on transient errors with exponential backoff.
     """
 
+    def __init__(self, *, api_key: str | None = None) -> None:
+        self._api_key = api_key
+
     @property
     def name(self) -> str:
         return "gemini"
 
     def is_available(self) -> bool:
-        if not _api_key():
+        if not self._api_key:
             return False
         try:
             import google.genai  # noqa: F401
@@ -109,7 +106,7 @@ class GeminiSTTProvider(STTProvider):
         effective_model = model or _DEFAULT_MODEL
         effective_prompt = prompt or _TRANSCRIPTION_PROMPT
 
-        client = genai.Client(api_key=_api_key())
+        client = genai.Client(api_key=self._api_key)
 
         log.info(
             "Transcribing via Gemini",

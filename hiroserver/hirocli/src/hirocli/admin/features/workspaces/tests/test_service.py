@@ -104,6 +104,7 @@ def test_setup_requires_gateway() -> None:
 def test_setup_success_returns_setup_result() -> None:
     setup = SetupResult(
         workspace="w",
+        workspace_id="w1",
         workspace_path="/p",
         device_id="d",
         gateway_url="ws://x",

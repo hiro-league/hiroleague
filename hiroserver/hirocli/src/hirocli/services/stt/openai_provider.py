@@ -8,7 +8,7 @@ Models offered:
 The openai SDK is imported lazily inside methods so this module can be imported
 even when the openai package is not installed (provider will report unavailable).
 
-Enabled when: OPENAI_API_KEY environment variable is set.
+API key is injected by ``create_stt_service`` (credential store).
 
 Supported audio formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm (max 25 MB).
 The API infers the format from the filename extension on the uploaded BytesIO.
@@ -17,7 +17,6 @@ The API infers the format from the filename extension on the uploaded BytesIO.
 from __future__ import annotations
 
 import io
-import os
 
 from hiro_commons.log import Logger
 
@@ -68,12 +67,15 @@ class OpenAISTTProvider(STTProvider):
     Retries on transient RateLimitError / APIError with exponential backoff.
     """
 
+    def __init__(self, *, api_key: str | None = None) -> None:
+        self._api_key = api_key
+
     @property
     def name(self) -> str:
         return "openai"
 
     def is_available(self) -> bool:
-        if not os.environ.get("OPENAI_API_KEY"):
+        if not self._api_key:
             return False
         try:
             import openai  # noqa: F401
@@ -112,8 +114,7 @@ class OpenAISTTProvider(STTProvider):
         from tenacity import retry, stop_after_attempt, wait_exponential
 
         effective_model = model or _DEFAULT_MODEL
-        api_key = os.environ.get("OPENAI_API_KEY")
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=self._api_key)
 
         ext = _MIME_TO_EXT.get(mime_type, ".m4a")
         audio_file = io.BytesIO(audio_bytes)

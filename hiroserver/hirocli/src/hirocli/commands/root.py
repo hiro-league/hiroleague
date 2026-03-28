@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -58,6 +59,11 @@ def register(app: typer.Typer, console: Console) -> None:
             None, "--metrics-interval",
             help="Metrics sampling interval in seconds (min 1.0, persisted to config).",
         ),
+        non_interactive: bool = typer.Option(
+            False,
+            "--non-interactive",
+            help="Skip interactive API key provisioning; auto-import env keys in the tool when possible.",
+        ),
     ) -> None:
         """One-time setup: configure gateway, generate device ID, register auto-start."""
         console.print("[bold cyan]hirocli setup[/bold cyan]")
@@ -73,11 +79,17 @@ def register(app: typer.Typer, console: Console) -> None:
 
         effective_gateway_url = gateway_url
         if effective_gateway_url is None:
-            effective_gateway_url = typer.prompt(
-                "Gateway WebSocket URL",
-                default=default_gw,
-            )
+            if non_interactive:
+                effective_gateway_url = default_gw
+            else:
+                effective_gateway_url = typer.prompt(
+                    "Gateway WebSocket URL",
+                    default=default_gw,
+                )
 
+        use_interactive_credentials = (
+            sys.stdin.isatty() and not non_interactive
+        )
         try:
             result = SetupTool().execute(
                 gateway_url=effective_gateway_url,
@@ -88,6 +100,7 @@ def register(app: typer.Typer, console: Console) -> None:
                 elevated_task=elevated_task,
                 metrics_enabled=metrics,
                 metrics_interval=metrics_interval,
+                skip_env_import=use_interactive_credentials,
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -145,6 +158,21 @@ def register(app: typer.Typer, console: Console) -> None:
             console.print(
                 f"[green]Imported[/green] {result.providers_imported} provider credential(s) "
                 "from environment into the workspace store."
+            )
+        elif use_interactive_credentials:
+            console.print(
+                "[dim]Automatic environment key import was skipped for this run; "
+                "use the prompts below or `hirocli provider add` later.[/dim]"
+            )
+
+        if use_interactive_credentials:
+            from .provider import interactive_credential_provisioning
+
+            interactive_credential_provisioning(
+                Path(result.workspace_path),
+                result.workspace_id,
+                result.workspace,
+                console,
             )
 
         if result.server_started:

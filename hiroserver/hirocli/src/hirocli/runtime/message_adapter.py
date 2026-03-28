@@ -111,7 +111,7 @@ def create_adapter_pipeline(workspace_path: Path) -> MessageAdapterPipeline:
     stt_service = create_stt_service(workspace_path)
 
     log.info("🕒 Loading Vision services")
-    vision_service = VisionService()
+    vision_service = VisionService(workspace_path=workspace_path)
 
     pipeline = MessageAdapterPipeline([
         AudioTranscriptionAdapter(service=stt_service),

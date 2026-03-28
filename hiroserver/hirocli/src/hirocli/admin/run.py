@@ -79,6 +79,7 @@ def register_admin_routes() -> None:
 
     register_shell_shared_styles()
 
+    from hirocli.admin.features.catalog import page as _catalog  # noqa: F401
     from hirocli.admin.features.channels import page as _channels  # noqa: F401
     from hirocli.admin.features.characters import page as _characters  # noqa: F401
     from hirocli.admin.features.dashboard import page as _dashboard  # noqa: F401
@@ -86,6 +87,7 @@ def register_admin_routes() -> None:
     from hirocli.admin.features.gateways import page as _gateways  # noqa: F401
     from hirocli.admin.features.logs import page as _logs  # noqa: F401
     from hirocli.admin.features.metrics import page as _metrics  # noqa: F401
+    from hirocli.admin.features.providers import page as _providers  # noqa: F401
     from hirocli.admin.features.workspaces import page as _workspaces  # noqa: F401
     from hirocli.admin.stubs import register_stub_pages
 

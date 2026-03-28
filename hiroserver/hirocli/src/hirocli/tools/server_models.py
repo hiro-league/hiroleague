@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 @dataclass
 class SetupResult:
     workspace: str
+    workspace_id: str
     workspace_path: str
     device_id: str
     gateway_url: str

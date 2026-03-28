@@ -28,9 +28,11 @@ NAV: list[NavItem] = [
     NavItem("Server", "Channels", "cable", "/channels"),
     NavItem("Server", "Gateways", "router", "/gateways"),
     NavItem("Server", "Characters", "face", "/characters"),
+    NavItem("Server", "Providers", "vpn_key", "/providers"),
     NavItem(None, "Nodes / Devices", None, None),
     NavItem("Nodes / Devices", "Devices", "devices", "/devices"),
     NavItem("Nodes / Devices", "Chats", "chat", "/chats"),
     NavItem(None, "Configuration", None, None),
     NavItem("Configuration", "Logs", "article", "/logs"),
+    NavItem("Configuration", "Catalog", "menu_book", "/catalog"),
 ]

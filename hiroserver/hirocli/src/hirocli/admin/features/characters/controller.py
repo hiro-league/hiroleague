@@ -212,6 +212,11 @@ class CharactersPageController:
         if not res.ok:
             ui.notify(res.error or "Save failed", color="negative")
             return
+        if res.data is None:
+            ui.notify("Save returned no data.", color="negative")
+            return
+        for w in res.data.warnings:
+            ui.notify(w, color="warning")
         ui.notify("Character saved.", color="positive", timeout=2000)
         assert self._editor_dialog is not None
         self._editor_dialog.close()

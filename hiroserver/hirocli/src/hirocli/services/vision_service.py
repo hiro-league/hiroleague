@@ -1,8 +1,11 @@
 """VisionService — image understanding via a LangChain multimodal vision model.
 
-Default provider: OpenAI gpt-4o-mini (override with IMAGE_VISION_MODEL env var).
-Default prompt: generic description (override with IMAGE_ANALYSIS_PROMPT env var).
-The service is disabled when OPENAI_API_KEY is not set.
+Default model: ``openai:gpt-4o-mini`` (override with ``IMAGE_VISION_MODEL`` env var).
+Default prompt: generic description (override with ``IMAGE_ANALYSIS_PROMPT`` env var).
+
+With ``workspace_path``, the vision model is built via ``create_chat_model()`` and
+availability follows the workspace credential store. Without a workspace (legacy
+callers), availability falls back to ``OPENAI_API_KEY`` in the environment.
 
 Two interfaces:
   - async describe(source, prompt?)  — for the adapter pipeline and async callers
@@ -14,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from hiro_commons.log import Logger
 
@@ -33,11 +37,39 @@ class VisionService:
     LangChain model resources are lazy-initialised on first use.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, workspace_path: Path | None = None) -> None:
+        self._workspace_path = workspace_path
         self._model = None
+        self._credential_store = None  # Lazily built when workspace_path is set (avoids repeated disk reads).
+
+    def _workspace_credential_store(self):
+        """Return ``(store, workspace_id)`` or None if workspace is not registry-backed."""
+        if self._workspace_path is None:
+            return None
+        from ..domain.credential_store import CredentialStore
+        from ..domain.workspace import workspace_id_for_path
+
+        wid = workspace_id_for_path(self._workspace_path)
+        if wid is None:
+            return None
+        if self._credential_store is None:
+            self._credential_store = CredentialStore(self._workspace_path, wid)
+        return self._credential_store, wid
 
     def is_available(self) -> bool:
-        """Return True when a supported provider API key is configured."""
+        """Return True when the configured vision model can run in this context."""
+        model_id = os.environ.get("IMAGE_VISION_MODEL", _DEFAULT_MODEL)
+        if self._workspace_path is not None:
+            from ..domain.model_catalog import get_model_catalog
+
+            spec = get_model_catalog().get_model(model_id)
+            if spec is None or spec.model_kind != "chat":
+                return False
+            pair = self._workspace_credential_store()
+            if pair is None:
+                return False
+            store, _wid = pair
+            return store.is_configured(spec.provider_id)
         return bool(os.environ.get("OPENAI_API_KEY"))
 
     async def describe(self, source: str, prompt: str | None = None) -> str:
@@ -85,16 +117,33 @@ class VisionService:
 
     def _get_model(self):
         if self._model is None:
-            from langchain.chat_models import init_chat_model
-
             model_id = os.environ.get("IMAGE_VISION_MODEL", _DEFAULT_MODEL)
-            self._model = init_chat_model(model_id)
+            if self._workspace_path is not None:
+                from ..domain.model_factory import create_chat_model
+
+                try:
+                    self._model = create_chat_model(
+                        model_id,
+                        workspace_path=self._workspace_path,
+                        temperature=0.7,
+                        max_tokens=4096,
+                    )
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"Vision model {model_id!r} cannot be built for this workspace "
+                        f"(check IMAGE_VISION_MODEL and provider credentials): {exc}"
+                    ) from exc
+            else:
+                from langchain.chat_models import init_chat_model
+
+                try:
+                    self._model = init_chat_model(model_id)
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"Vision model {model_id!r} is invalid for env-based init: {exc}"
+                    ) from exc
         return self._model
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 def _resolve_image_url(source: str) -> str:
     """Return a URL or data URI suitable for the vision API."""

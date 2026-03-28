@@ -12,7 +12,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from ..domain.credential_store import CredentialStore
-from ..domain.model_catalog import get_model_catalog
+from ..domain.model_catalog import Provider, get_model_catalog
 from ..domain.workspace import WorkspaceError, resolve_workspace
 from ..tools.provider import (
     AvailableModelsListTool,
@@ -20,6 +20,175 @@ from ..tools.provider import (
     ProviderListConfiguredTool,
     ProviderRemoveTool,
 )
+
+
+def _mask_env_value(value: str, tail: int = 4) -> str:
+    if len(value) <= tail + 3:
+        return "***"
+    return f"{value[:3]}...{value[-tail:]}"
+
+
+def print_provider_summary_table(console: Console, *, workspace: str | None) -> None:
+    """Print the same configured-provider table as ``hirocli provider list``."""
+    result = ProviderListConfiguredTool().execute(workspace=workspace)
+    if not result.providers:
+        console.print("[dim]No providers configured for this workspace.[/dim]")
+        return
+    table = Table(title=f"Configured providers — {result.workspace}")
+    table.add_column("id", style="bold")
+    table.add_column("display")
+    table.add_column("hosting")
+    table.add_column("auth")
+    table.add_column("models")
+    for p in result.providers:
+        kinds = []
+        if p.get("has_chat"):
+            kinds.append("chat")
+        if p.get("has_tts"):
+            kinds.append("tts")
+        if p.get("has_stt"):
+            kinds.append("stt")
+        kind_str = ", ".join(kinds) if kinds else "—"
+        table.add_row(
+            p["provider_id"],
+            p["display_name"],
+            p["hosting"],
+            p["auth_method"],
+            f"{p['available_model_count']} ({kind_str})",
+        )
+    console.print(table)
+
+
+def discovered_env_keys_rows() -> list[tuple[Provider, str, str]]:
+    """One row per catalog cloud provider: first credential env var that is set in the process.
+
+    Avoids duplicate rows when a provider lists several env keys (e.g. GOOGLE_API_KEY and GEMINI_API_KEY).
+    """
+    cat = get_model_catalog()
+    rows: list[tuple[Provider, str, str]] = []
+    for prov in cat.list_providers():
+        for env_name in prov.credential_env_keys:
+            val = os.environ.get(env_name)
+            if val:
+                rows.append((prov, env_name, val))
+                break
+    return rows
+
+
+def parse_index_selection(raw: str, upper: int) -> set[int] | None:
+    """Parse 'all', 'none', or comma-separated 1-based indices. Returns None if invalid."""
+    s = raw.strip().lower()
+    if s in ("", "none", "n"):
+        return set()
+    if s in ("all", "a", "*"):
+        return set(range(upper))
+    out: set[int] = set()
+    for part in raw.replace(" ", "").split(","):
+        if not part:
+            continue
+        try:
+            i = int(part)
+        except ValueError:
+            return None
+        if i < 1 or i > upper:
+            return None
+        out.add(i - 1)
+    return out
+
+
+def interactive_credential_provisioning(
+    workspace_path: Path,
+    workspace_id: str,
+    workspace_name: str,
+    console: Console,
+) -> int:
+    """Interactive import from environment + manual API key entry; prints provider summary.
+
+    Uses one ``CredentialStore`` for this flow. When ``hirocli setup`` runs interactively,
+    ``SetupTool`` skips ``import_detected_env_keys`` so the same keys are not imported twice.
+
+    Returns the number of configured providers in the store after the flow.
+    """
+    store = CredentialStore(workspace_path, workspace_id)
+    cat = get_model_catalog()
+
+    discovered = discovered_env_keys_rows()
+    if discovered and Confirm.ask(
+        "Would you like to import API keys from your environment?",
+        default=True,
+        console=console,
+    ):
+        console.print(
+            "[dim]Discovered keys (masked). Enter indices to import (e.g. 1,3), "
+            "'all', or 'none':[/dim]"
+        )
+        for i, (prov, env_name, val) in enumerate(discovered, start=1):
+            console.print(
+                f"  [bold]{i}[/bold]  {prov.display_name} ({prov.id})  "
+                f"{env_name} = {_mask_env_value(val)}"
+            )
+        choice = Prompt.ask(
+            "Import which",
+            default="all",
+            console=console,
+        )
+        picked = parse_index_selection(choice, len(discovered))
+        if picked is None:
+            console.print("[yellow]Invalid selection — skipping env import.[/yellow]")
+        else:
+            for idx in sorted(picked):
+                prov, _env_name, val = discovered[idx]
+                if store.is_configured(prov.id):
+                    console.print(f"[dim]Skip {prov.id} (already configured).[/dim]")
+                    continue
+                try:
+                    store.set_api_key(prov.id, val)
+                    console.print(f"[green]Imported[/green] API key for [bold]{prov.id}[/bold]")
+                except RuntimeError as exc:
+                    console.print(f"[red]Could not store key for {prov.id}: {exc}[/red]")
+
+    while Confirm.ask(
+        "Would you like to add an API key for another provider?",
+        default=False,
+        console=console,
+    ):
+        candidates = [
+            p
+            for p in cat.list_providers()
+            if p.hosting == "cloud"
+            and p.credential_env_keys
+            and not store.is_configured(p.id)
+        ]
+        if not candidates:
+            console.print("[dim]No unconfigured cloud providers left in the catalog.[/dim]")
+            break
+        console.print("[dim]Unconfigured cloud providers:[/dim]")
+        for i, p in enumerate(candidates, start=1):
+            console.print(f"  [bold]{i}[/bold]  {p.display_name} ({p.id})")
+        raw = Prompt.ask("Choose provider number (or 0 to cancel)", console=console)
+        try:
+            num = int(raw.strip())
+        except ValueError:
+            console.print("[yellow]Invalid number.[/yellow]")
+            continue
+        if num == 0:
+            break
+        if num < 1 or num > len(candidates):
+            console.print("[yellow]Out of range.[/yellow]")
+            continue
+        chosen = candidates[num - 1]
+        key = Prompt.ask("API key", password=True, console=console)
+        if not key.strip():
+            console.print("[yellow]Empty key — skipped.[/yellow]")
+            continue
+        try:
+            store.set_api_key(chosen.id, key.strip())
+            console.print(f"[green]Stored[/green] API key for [bold]{chosen.id}[/bold]")
+        except RuntimeError as exc:
+            console.print(f"[red]Could not store key: {exc}[/red]")
+
+    print_provider_summary_table(console, workspace=workspace_name)
+    return len(store.list_configured())
 
 
 def register(provider_app: typer.Typer, console: Console) -> None:
@@ -91,36 +260,10 @@ def register(provider_app: typer.Typer, console: Console) -> None:
     ) -> None:
         """List configured providers for the workspace."""
         try:
-            result = ProviderListConfiguredTool().execute(workspace=workspace)
+            print_provider_summary_table(console, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
-        if not result.providers:
-            console.print("[dim]No providers configured for this workspace.[/dim]")
-            return
-        table = Table(title=f"Configured providers — {result.workspace}")
-        table.add_column("id", style="bold")
-        table.add_column("display")
-        table.add_column("hosting")
-        table.add_column("auth")
-        table.add_column("models")
-        for p in result.providers:
-            kinds = []
-            if p.get("has_chat"):
-                kinds.append("chat")
-            if p.get("has_tts"):
-                kinds.append("tts")
-            if p.get("has_stt"):
-                kinds.append("stt")
-            kind_str = ", ".join(kinds) if kinds else "—"
-            table.add_row(
-                p["provider_id"],
-                p["display_name"],
-                p["hosting"],
-                p["auth_method"],
-                f"{p['available_model_count']} ({kind_str})",
-            )
-        console.print(table)
 
     @provider_app.command("scan-env")
     def provider_scan_env(

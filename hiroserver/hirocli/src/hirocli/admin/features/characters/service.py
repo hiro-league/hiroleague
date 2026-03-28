@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,14 @@ from hirocli.tools.character import (
 from hirocli.admin.shared.result import Result
 
 _MAX_INLINE_PHOTO_BYTES = 2_000_000
+
+
+@dataclass
+class CharacterSavePayload:
+    """Result of create/update including post-save model validation warnings."""
+
+    character: dict[str, Any]
+    warnings: list[str]
 
 
 def _mime_for_character_photo(filename: str) -> str:
@@ -130,7 +139,7 @@ class CharacterService:
         voice_models_json: str = "",
         emotions_enabled: bool = False,
         extras_json: str = "",
-    ) -> Result[dict[str, Any]]:
+    ) -> Result[CharacterSavePayload]:
         if not workspace_id:
             return Result.failure("No workspace selected.")
         try:
@@ -148,7 +157,9 @@ class CharacterService:
             )
         except Exception as exc:
             return Result.failure(str(exc))
-        return Result.success(dict(raw.character))
+        return Result.success(
+            CharacterSavePayload(character=dict(raw.character), warnings=list(raw.warnings))
+        )
 
     def update_character(
         self,
@@ -163,7 +174,7 @@ class CharacterService:
         voice_models_json: str | None = None,
         emotions_enabled: bool | None = None,
         extras_json: str | None = None,
-    ) -> Result[dict[str, Any]]:
+    ) -> Result[CharacterSavePayload]:
         if not workspace_id:
             return Result.failure("No workspace selected.")
         kwargs: dict[str, Any] = {
@@ -190,7 +201,9 @@ class CharacterService:
             raw = CharacterUpdateTool().execute(**kwargs)
         except Exception as exc:
             return Result.failure(str(exc))
-        return Result.success(dict(raw.character))
+        return Result.success(
+            CharacterSavePayload(character=dict(raw.character), warnings=list(raw.warnings))
+        )
 
     def delete_character(self, workspace_id: str | None, character_id: str) -> Result[bool]:
         if not workspace_id:

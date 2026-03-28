@@ -68,6 +68,11 @@ class SetupTool(Tool):
         ),
         "metrics_enabled": ToolParam(bool, "Enable system metrics collection", required=False),
         "metrics_interval": ToolParam(float, "Metrics sampling interval in seconds", required=False),
+        "skip_env_import": ToolParam(
+            bool,
+            "Skip auto-import of API keys from environment (CLI will provision interactively)",
+            required=False,
+        ),
     }
 
     def execute(
@@ -80,6 +85,7 @@ class SetupTool(Tool):
         elevated_task: bool = False,
         metrics_enabled: bool | None = None,
         metrics_interval: float | None = None,
+        skip_env_import: bool = False,
     ) -> SetupResult:
         entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
         existing = load_config(workspace_path)
@@ -107,15 +113,17 @@ class SetupTool(Tool):
 
         from ..domain.credential_store import CredentialStore
 
-        providers_imported = CredentialStore(workspace_path, entry.id).import_detected_env_keys()
-        if providers_imported:
-            from hiro_commons.log import Logger
+        providers_imported = 0
+        if not skip_env_import:
+            providers_imported = CredentialStore(workspace_path, entry.id).import_detected_env_keys()
+            if providers_imported:
+                from hiro_commons.log import Logger
 
-            Logger.get("TOOLS.SETUP").info(
-                "✅ Imported provider API keys from environment — HiroServer · setup",
-                count=providers_imported,
-                workspace=entry.name,
-            )
+                Logger.get("TOOLS.SETUP").info(
+                    "✅ Imported provider API keys from environment — HiroServer · setup",
+                    count=providers_imported,
+                    workspace=entry.name,
+                )
 
         autostart_registered = False
         autostart_method = "skipped"
@@ -132,6 +140,7 @@ class SetupTool(Tool):
 
         return SetupResult(
             workspace=entry.name,
+            workspace_id=entry.id,
             workspace_path=str(workspace_path),
             device_id=config.device_id,
             gateway_url=config.gateway_url,

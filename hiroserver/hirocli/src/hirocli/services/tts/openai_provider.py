@@ -8,12 +8,11 @@ Output format: MP3 (universally playable on iOS, Android, and web including Fire
 The openai SDK is imported lazily inside methods so this module can be imported
 even when the openai package is not installed (provider will report unavailable).
 
-Enabled when: OPENAI_API_KEY environment variable is set.
+API key is passed in by the TTS factory (credential store); optional for tests.
 """
 
 from __future__ import annotations
 
-import os
 import time
 
 from hiro_commons.log import Logger
@@ -49,12 +48,15 @@ class OpenAITTSProvider(TTSProvider):
     Retries on transient RateLimitError / APIError with exponential backoff.
     """
 
+    def __init__(self, *, api_key: str | None = None) -> None:
+        self._api_key = api_key
+
     @property
     def name(self) -> str:
         return "openai"
 
     def is_available(self) -> bool:
-        if not os.environ.get("OPENAI_API_KEY"):
+        if not self._api_key:
             return False
         try:
             import openai  # noqa: F401
@@ -89,7 +91,7 @@ class OpenAITTSProvider(TTSProvider):
         effective_model = model or _DEFAULT_MODEL
         effective_voice = voice or _DEFAULT_VOICE
 
-        client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        client = AsyncOpenAI(api_key=self._api_key)
 
         log.info(
             "Synthesizing via OpenAI",

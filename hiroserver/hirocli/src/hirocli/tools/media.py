@@ -7,9 +7,16 @@ making them available to the agent, CLI, and HTTP server.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from ..domain.workspace import WorkspaceError, resolve_workspace
 from .base import Tool, ToolParam
+
+
+def _media_workspace_path(workspace: str | None) -> Path:
+    entry, _ = resolve_workspace(workspace)
+    return Path(entry.path)
 
 
 @dataclass
@@ -51,19 +58,28 @@ class TranscribeTool(Tool):
             description="STT model to use (optional — defaults to the model configured in preferences)",
             required=False,
         ),
+        "workspace": ToolParam(
+            str,
+            "Workspace name (default: registry default); used for credential store",
+            required=False,
+        ),
     }
 
     def execute(self, **kwargs: Any) -> TranscribeResult:
-        from ..services.stt import GeminiSTTProvider, OpenAISTTProvider, STTService
+        from ..services.stt import create_stt_service
 
         source: str = kwargs["source"]
         model: str | None = kwargs.get("model")
-        service = STTService(providers=[OpenAISTTProvider(), GeminiSTTProvider()])
+        try:
+            workspace_path = _media_workspace_path(kwargs.get("workspace"))
+        except WorkspaceError as exc:
+            raise RuntimeError(str(exc)) from exc
+        service = create_stt_service(workspace_path)
 
         if not service.is_available():
             raise RuntimeError(
-                "No STT providers are available. "
-                "Set OPENAI_API_KEY or GOOGLE_API_KEY to enable transcription."
+                "No STT providers are available for this workspace. "
+                "Configure a provider: hirocli provider add openai (or google)."
             )
 
         transcript = service.transcribe_sync(source, model=model) if model else service.transcribe_sync(source)
@@ -94,6 +110,11 @@ class DescribeImageTool(Tool):
             description="Custom instruction for the image analysis (optional)",
             required=False,
         ),
+        "workspace": ToolParam(
+            str,
+            "Workspace name (default: registry default); used for credential store",
+            required=False,
+        ),
     }
 
     def execute(self, **kwargs: Any) -> DescribeImageResult:
@@ -101,12 +122,17 @@ class DescribeImageTool(Tool):
 
         source: str = kwargs["source"]
         prompt: str | None = kwargs.get("prompt")
-        service = VisionService()
+        try:
+            workspace_path = _media_workspace_path(kwargs.get("workspace"))
+        except WorkspaceError as exc:
+            raise RuntimeError(str(exc)) from exc
+        service = VisionService(workspace_path=workspace_path)
 
         if not service.is_available():
             raise RuntimeError(
-                "Vision service is not available. "
-                "Set OPENAI_API_KEY to enable it."
+                "Vision service is not available for this workspace. "
+                "Configure the vision model's provider (see IMAGE_VISION_MODEL) via "
+                "`hirocli provider add`."
             )
 
         description = service.describe_sync(source, prompt)

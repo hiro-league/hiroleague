@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from ..domain import character as character_domain
-from ..domain.workspace import resolve_workspace
+from ..domain.available_models import CharacterModelValidation, build_available_models_service
+from ..domain.workspace import resolve_workspace, workspace_id_for_path
 from .base import Tool, ToolParam
 
 
@@ -31,6 +32,66 @@ def _parse_json_string_list(label: str, raw: str | None) -> list[str] | None:
     if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
         raise ValueError(f"{label} must be a JSON array of strings.")
     return data
+
+
+def character_model_validation_warnings(v: CharacterModelValidation) -> list[str]:
+    """Human-readable lines for tool/CLI/admin consumers (non-blocking)."""
+    lines: list[str] = []
+    for mid in v.unknown_llm:
+        lines.append(f'LLM model "{mid}" is not in the catalog.')
+    for mid in v.unknown_voice:
+        lines.append(f'Voice model "{mid}" is not in the catalog.')
+    for d in v.deprecated_llm:
+        hint = f' Consider "{d.replacement_id}".' if d.replacement_id else ""
+        lines.append(
+            f'LLM model "{d.model_id}" is deprecated (since {d.deprecated_since}).{hint}'
+        )
+    for d in v.deprecated_voice:
+        hint = f' Consider "{d.replacement_id}".' if d.replacement_id else ""
+        lines.append(
+            f'Voice model "{d.model_id}" is deprecated (since {d.deprecated_since}).{hint}'
+        )
+    for mid in v.wrong_kind_llm:
+        lines.append(
+            f'LLM model "{mid}" is not a chat model (wrong model_kind for llm_models).'
+        )
+    for mid in v.wrong_kind_voice:
+        lines.append(
+            f'Voice model "{mid}" is not a TTS/STT model (wrong model_kind for voice_models).'
+        )
+    for mid in v.unavailable_llm:
+        lines.append(
+            f'LLM model "{mid}" is in the catalog but its provider is not configured for this workspace.'
+        )
+    for mid in v.unavailable_voice:
+        lines.append(
+            f'Voice model "{mid}" is in the catalog but its provider is not configured for this workspace.'
+        )
+    return lines
+
+
+def _coerce_str_list(value: object | None) -> list[str]:
+    """Normalize detail dict fields so corrupt on-disk JSON does not break validation."""
+    if value is None:
+        return []
+    if isinstance(value, list) and all(isinstance(x, str) for x in value):
+        return list(value)
+    return []
+
+
+def _validate_character_model_warnings(
+    workspace_path: Path,
+    llm_models: object | None,
+    voice_models: object | None,
+) -> list[str]:
+    wid = workspace_id_for_path(workspace_path)
+    if wid is None:
+        return []
+    lm = _coerce_str_list(llm_models)
+    vm = _coerce_str_list(voice_models)
+    svc = build_available_models_service(workspace_path, wid)
+    v = svc.validate_character_models(lm, vm)
+    return character_model_validation_warnings(v)
 
 
 def _parse_json_object(label: str, raw: str | None) -> dict[str, Any] | None:
@@ -63,11 +124,13 @@ class CharacterGetResult:
 @dataclass
 class CharacterCreateResult:
     character: dict[str, Any]
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
 class CharacterUpdateResult:
     character: dict[str, Any]
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -171,7 +234,12 @@ class CharacterCreateTool(Tool):
             emotions_enabled=bool(emotions_enabled) if emotions_enabled is not None else False,
             extras=extras,
         )
-        return CharacterCreateResult(character=detail)
+        warn = _validate_character_model_warnings(
+            workspace_path,
+            detail.get("llm_models"),
+            detail.get("voice_models"),
+        )
+        return CharacterCreateResult(character=detail, warnings=warn)
 
 
 class CharacterUpdateTool(Tool):
@@ -219,7 +287,12 @@ class CharacterUpdateTool(Tool):
             emotions_enabled=emotions_enabled,
             extras=extras,
         )
-        return CharacterUpdateResult(character=detail)
+        warn = _validate_character_model_warnings(
+            workspace_path,
+            detail.get("llm_models"),
+            detail.get("voice_models"),
+        )
+        return CharacterUpdateResult(character=detail, warnings=warn)
 
 
 class CharacterDeleteTool(Tool):

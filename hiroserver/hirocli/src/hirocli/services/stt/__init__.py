@@ -32,7 +32,7 @@ __all__ = [
 
 _log = Logger.get("STT")
 
-# Catalog provider_id → STT implementation (API keys still from env until full factory wiring).
+# Catalog provider_id → STT implementation (API key from credential store via factory).
 _PROVIDER_MAP: dict[str, type[STTProvider]] = {
     "openai": OpenAISTTProvider,
     "google": GeminiSTTProvider,
@@ -73,6 +73,7 @@ def create_stt_service(workspace_path: Path) -> STTService:
                 )
             else:
                 default_model = stt_resolved.model_id.split(":", 1)[1]
-                providers = [cls()]
+                key = store.get_api_key(spec.provider_id) if store else None
+                providers = [cls(api_key=key)]
 
     return STTService(providers=providers, default_model=default_model)

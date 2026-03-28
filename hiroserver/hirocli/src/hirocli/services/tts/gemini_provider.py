@@ -14,13 +14,12 @@ The google-genai SDK and lameenc are imported lazily inside methods so this
 module can be imported even when those packages are not installed (provider
 will report unavailable).
 
-Enabled when: GOOGLE_API_KEY or GEMINI_API_KEY environment variable is set,
-and both google-genai and lameenc are importable.
+Enabled when: a Google API key is supplied by the factory and both google-genai
+and lameenc are importable.
 """
 
 from __future__ import annotations
 
-import os
 import time
 
 from hiro_commons.log import Logger
@@ -42,10 +41,6 @@ _MODELS: list[TTSModelInfo] = [
         display_name="Gemini 2.5 Flash TTS (preview)",
     ),
 ]
-
-
-def _api_key() -> str | None:
-    return os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 
 def _pcm_duration_ms(pcm_bytes: bytes) -> int:
@@ -75,12 +70,15 @@ class GeminiTTSProvider(TTSProvider):
     Retries on transient errors with exponential backoff.
     """
 
+    def __init__(self, *, api_key: str | None = None) -> None:
+        self._api_key = api_key
+
     @property
     def name(self) -> str:
         return "gemini"
 
     def is_available(self) -> bool:
-        if not _api_key():
+        if not self._api_key:
             return False
         try:
             import google.genai  # noqa: F401
@@ -117,7 +115,7 @@ class GeminiTTSProvider(TTSProvider):
         effective_model = model or _DEFAULT_MODEL
         effective_voice = voice or _DEFAULT_VOICE
 
-        client = genai.Client(api_key=_api_key())
+        client = genai.Client(api_key=self._api_key)
 
         # Gemini has no separate instructions parameter — prepend to text.
         # Always wrap in an explicit TTS instruction to prevent the model from

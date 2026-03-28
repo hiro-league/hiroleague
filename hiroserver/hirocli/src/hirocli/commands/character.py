@@ -136,6 +136,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1)
 
         console.print(f"[green]Created character[/green] [bold]{result.character['id']}[/bold]")
+        for w in result.warnings:
+            console.print(f"[yellow]Warning: {w}[/yellow]")
 
     @character_app.command("update")
     def character_update(
@@ -189,6 +191,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1)
 
         console.print(f"[green]Updated character[/green] [bold]{result.character['id']}[/bold]")
+        for w in result.warnings:
+            console.print(f"[yellow]Warning: {w}[/yellow]")
 
     @character_app.command("delete")
     def character_delete(
