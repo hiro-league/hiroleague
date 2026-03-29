@@ -75,7 +75,7 @@ def create_page_layout(active_path: str = "/") -> None:
     sidebar_mini = nicegui_app.storage.user["sidebar_mini"]
 
     drawer = ui.left_drawer(value=True).props(
-        'behavior="desktop" bordered :width="210" :mini-width="88"'
+        'behavior="desktop" bordered :width="250" :mini-width="88"'
     )
     if sidebar_mini:
         drawer.props(add="mini")
@@ -181,7 +181,7 @@ def _sidebar_workspace_footer(
 
 def _sidebar_nav(active_path: str) -> None:
     """Nav links only (workspace selector lives in footer)."""
-    with ui.column().classes("w-full py-0"):
+    with ui.column().classes("w-full py-0 gap-2"):
         for item in NAV:
             group, label, icon, path = item
             if group is None:

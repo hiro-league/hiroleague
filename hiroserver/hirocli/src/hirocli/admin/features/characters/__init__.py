@@ -1,4 +1,4 @@
-"""Character personas — CharacterService + `/characters` (tools-backed)."""
+"""Character personas — CharacterService + tabbed `/characters` (Browse + Detail; tools-backed)."""
 
 from hirocli.admin.features.characters.service import CharacterSavePayload, CharacterService
 

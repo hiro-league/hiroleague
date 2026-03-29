@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from nicegui import ui
@@ -61,13 +62,33 @@ CATALOG_MODEL_COLUMNS: list[dict[str, Any]] = [
 ]
 
 
-def catalog_providers_table(rows: list[dict[str, Any]]) -> ui.table:
-    """Providers summary table with env keys as comma-separated string in rows."""
-    return data_table(
+def catalog_providers_table(
+    rows: list[dict[str, Any]],
+    on_select_provider: Callable[[str], None],
+) -> ui.table | None:
+    """Providers table; click the provider name to open the Models tab for that provider."""
+    if not rows:
+        return None
+
+    tbl = data_table(
         columns=CATALOG_PROVIDER_COLUMNS,
         rows=rows,
         row_key="id",
     )
+    # Clickable name column — mirrors tabbed_demo row actions (guidelines §1.6, §4).
+    tbl.add_slot(
+        "body-cell-display_name",
+        """
+        <q-td :props="props">
+          <span class="text-primary cursor-pointer text-weight-medium"
+                @click.stop="() => $parent.$emit('select_provider', props.row)">
+            {{ props.value }}
+          </span>
+        </q-td>
+        """,
+    )
+    tbl.on("select_provider", lambda e: on_select_provider(e.args["id"]))
+    return tbl
 
 
 def catalog_models_table(rows: list[dict[str, Any]]) -> ui.table:

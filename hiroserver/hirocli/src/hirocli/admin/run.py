@@ -1,6 +1,6 @@
 """HiroAdmin — route registration and NiceGUI bootstrap on admin_port.
 
-Entry point: `run_admin_ui` (used by `hirocli.runtime.server_process` when `--admin`).
+Entry point: `run_admin_ui_logged` (used by `server_process` when `--admin`; wraps `run_admin_ui`).
 """
 
 from __future__ import annotations
@@ -70,7 +70,6 @@ def register_admin_routes() -> None:
     global _admin_routes_initialized
     if _admin_routes_initialized:
         return
-    _admin_routes_initialized = True
 
     from nicegui import core
 
@@ -80,6 +79,7 @@ def register_admin_routes() -> None:
     register_shell_shared_styles()
 
     from hirocli.admin.features.catalog import page as _catalog  # noqa: F401
+    from hirocli.admin.features.chat_channels import page as _chat_channels  # noqa: F401
     from hirocli.admin.features.channels import page as _channels  # noqa: F401
     from hirocli.admin.features.characters import page as _characters  # noqa: F401
     from hirocli.admin.features.dashboard import page as _dashboard  # noqa: F401
@@ -88,12 +88,15 @@ def register_admin_routes() -> None:
     from hirocli.admin.features.logs import page as _logs  # noqa: F401
     from hirocli.admin.features.metrics import page as _metrics  # noqa: F401
     from hirocli.admin.features.providers import page as _providers  # noqa: F401
+    from hirocli.admin.features.tabbed_demo import page as _tabbed_demo  # noqa: F401
     from hirocli.admin.features.workspaces import page as _workspaces  # noqa: F401
     from hirocli.admin.stubs import register_stub_pages
 
     register_stub_pages(admin_router)
     core.app.include_router(admin_router)
     log.info("Hiro Admin routes mounted", base_path="/")
+    # Only mark complete after imports + mount succeed so a failed attempt can retry (e.g. REPL).
+    _admin_routes_initialized = True
 
 
 async def run_admin_ui(ctx: ServerContext) -> None:
@@ -149,3 +152,14 @@ async def run_admin_ui(ctx: ServerContext) -> None:
             pass
 
     log.info("Admin UI stopped")
+
+
+async def run_admin_ui_logged(ctx: ServerContext) -> None:
+    """Run NiceGUI admin; log failures (gather(return_exceptions=True) would otherwise hide them)."""
+    try:
+        await run_admin_ui(ctx)
+    except Exception as exc:
+        log.error(
+            f"❌ Admin UI failed — {type(exc).__name__}: {exc}",
+            exc_info=True,
+        )

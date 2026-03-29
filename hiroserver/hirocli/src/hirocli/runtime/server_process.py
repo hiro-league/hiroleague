@@ -219,9 +219,10 @@ async def _main(
         metrics_collector.run(),
     ]
     if admin:
-        from hirocli.admin.run import run_admin_ui
+        from hirocli.admin.run import run_admin_ui_logged
 
-        coros.append(run_admin_ui(ctx))
+        # run_admin_ui_logged: startup errors must not disappear inside gather(return_exceptions=True).
+        coros.append(run_admin_ui_logged(ctx))
 
     server_task = asyncio.ensure_future(
         asyncio.gather(*coros, return_exceptions=True)

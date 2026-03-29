@@ -8,6 +8,8 @@ from typing import Any
 
 from ..domain.conversation_channel import (
     create_channel,
+    delete_channel,
+    update_channel,
     _get_channel_by_id,
     _get_channel_by_name,
     _get_default_channel,
@@ -59,6 +61,16 @@ class ConversationChannelGetResult:
 @dataclass
 class ConversationChannelCreateResult:
     channel: dict[str, Any]
+
+
+@dataclass
+class ConversationChannelUpdateResult:
+    channel: dict[str, Any]
+
+
+@dataclass
+class ConversationChannelDeleteResult:
+    deleted_channel_id: int
 
 
 @dataclass
@@ -143,13 +155,85 @@ class ConversationChannelCreateTool(Tool):
         return ConversationChannelCreateResult(channel=channel.model_dump())
 
 
+class ConversationChannelUpdateTool(Tool):
+    name = "conversation_channel_update"
+    description = "Update an existing conversation channel; only provided fields are changed"
+    params = {
+        "channel_id": ToolParam(int, "Channel integer id"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+        "channel_name": ToolParam(str, "Channel display name", required=False),
+        "channel_type": ToolParam(str, "Channel type (e.g. direct)", required=False),
+        "agent_id": ToolParam(str, "Owning agent id", required=False),
+        "user_id": ToolParam(int, "Owning user id", required=False),
+    }
+
+    def execute(
+        self,
+        channel_id: int,
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+        channel_name: str | None = None,
+        channel_type: str | None = None,
+        agent_id: str | None = None,
+        user_id: int | None = None,
+    ) -> ConversationChannelUpdateResult:
+        if (
+            channel_name is None
+            and channel_type is None
+            and agent_id is None
+            and user_id is None
+        ):
+            raise ValueError(
+                "At least one of channel_name, channel_type, agent_id, or user_id must be provided."
+            )
+        resolved = workspace_path or _resolve_path(workspace)
+        channel = update_channel(
+            resolved,
+            channel_id,
+            name=channel_name,
+            channel_type=channel_type,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        return ConversationChannelUpdateResult(channel=channel.model_dump())
+
+
+class ConversationChannelDeleteTool(Tool):
+    name = "conversation_channel_delete"
+    description = "Delete a conversation channel and all messages in it"
+    params = {
+        "channel_id": ToolParam(int, "Channel integer id"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(
+        self,
+        channel_id: int,
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+    ) -> ConversationChannelDeleteResult:
+        resolved = workspace_path or _resolve_path(workspace)
+        delete_channel(resolved, channel_id)
+        return ConversationChannelDeleteResult(deleted_channel_id=channel_id)
+
+
 class MessageHistoryTool(Tool):
     name = "message_history"
-    description = "Retrieve message history for a conversation channel, with optional pagination"
+    description = (
+        "Retrieve message history for a conversation channel. "
+        "Use all_messages=true for no row limit; otherwise limit defaults to 50."
+    )
     params = {
         "channel_id": ToolParam(int, "Channel integer id"),
         "after": ToolParam(str, "ISO 8601 timestamp - return only messages after this time", required=False),
-        "limit": ToolParam(int, "Max messages to return (default 50)", required=False),
+        "limit": ToolParam(int, "Max messages when all_messages is false (default 50)", required=False),
+        "all_messages": ToolParam(
+            bool,
+            "If true, return every message in the channel (ignores limit)",
+            required=False,
+        ),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
@@ -158,10 +242,12 @@ class MessageHistoryTool(Tool):
         channel_id: int,
         after: str | None = None,
         limit: int = 50,
+        all_messages: bool = False,
         workspace: str | None = None,
     ) -> MessageHistoryResult:
         from ..domain.message_store import _sync_list
 
         workspace_path = _resolve_path(workspace)
-        messages = _sync_list(workspace_path, channel_id, after=after, limit=limit)
+        eff_limit: int | None = None if all_messages else limit
+        messages = _sync_list(workspace_path, channel_id, after=after, limit=eff_limit)
         return MessageHistoryResult(messages=messages, channel_id=channel_id)

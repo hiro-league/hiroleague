@@ -32,10 +32,23 @@ def get_runtime_context() -> AdminContext | None:
 
 
 def get_selected_workspace() -> str | None:
-    """Current header workspace id from per-browser storage (valid during a page request)."""
-    from nicegui import app as nicegui_app
+    """Current header workspace id from per-browser storage (valid during a page request).
 
-    return nicegui_app.storage.user.get("selected_workspace")
+    NiceGUI only allows ``app.storage.user`` while a client UI context is active. Async
+    ``@ui.refreshable`` coroutines can resume after ``await`` without that context; fall back to
+    the process ``AdminContext.hosting_workspace_id`` (desktop admin single-workspace case).
+    """
+    from nicegui import app as nicegui_app
+    from nicegui import ui
+
+    if ui.context.client is None:
+        rt = get_runtime_context()
+        return rt.hosting_workspace_id if rt else None
+    try:
+        return nicegui_app.storage.user.get("selected_workspace")
+    except RuntimeError:
+        rt = get_runtime_context()
+        return rt.hosting_workspace_id if rt else None
 
 
 def ensure_selected_workspace_storage(valid_ids: list[str], default_id: str | None) -> str | None:

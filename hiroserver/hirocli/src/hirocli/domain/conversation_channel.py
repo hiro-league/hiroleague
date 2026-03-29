@@ -162,6 +162,68 @@ def create_channel(
         return _row_to_channel(row)
 
 
+def update_channel(
+    workspace_path: Path,
+    channel_id: int,
+    *,
+    name: str | None = None,
+    channel_type: str | None = None,
+    agent_id: str | None = None,
+    user_id: int | None = None,
+) -> ConversationChannel:
+    """Update editable fields on a conversation channel row.
+
+    Enforces unique (user_id, name) per workspace when name or user_id changes.
+    """
+    existing = _get_channel_by_id(workspace_path, channel_id)
+    if existing is None:
+        raise ValueError(f"No conversation channel with id {channel_id}.")
+
+    new_name = name if name is not None else existing.name
+    new_type = channel_type if channel_type is not None else existing.type
+    new_agent = agent_id if agent_id is not None else existing.agent_id
+    new_user = user_id if user_id is not None else existing.user_id
+
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        if (new_user, new_name) != (existing.user_id, existing.name):
+            conflict = conn.execute(
+                "SELECT id FROM channels WHERE user_id = ? AND name = ? AND id != ?",
+                (new_user, new_name, channel_id),
+            ).fetchone()
+            if conflict is not None:
+                raise ValueError(
+                    f"Conversation channel '{new_name}' already exists for user {new_user}."
+                )
+
+        conn.execute(
+            """
+            UPDATE channels
+            SET name = ?, type = ?, agent_id = ?, user_id = ?
+            WHERE id = ?
+            """,
+            (new_name, new_type, new_agent, new_user, channel_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("Conversation channel update succeeded but row could not be reloaded.")
+        return _row_to_channel(row)
+
+
+def delete_channel(workspace_path: Path, channel_id: int) -> None:
+    """Remove a conversation channel and all of its messages (FK-safe)."""
+    if _get_channel_by_id(workspace_path, channel_id) is None:
+        raise ValueError(f"No conversation channel with id {channel_id}.")
+
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
+        conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+        conn.commit()
+
+
 def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:
     return ConversationChannel(
         id=row["id"],

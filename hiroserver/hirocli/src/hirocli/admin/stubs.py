@@ -11,7 +11,7 @@ _STUBS: list[tuple[str, str, str, str] | tuple[str, str, str, str, str]] = [
     # /workspaces implemented in features/workspaces/page.py
     # /channels, /characters, /devices — features/*/page.py
     # /gateways — features/gateways/page.py
-    ("/chats", "/chats", "Chats", "chat"),
+    # /chats — features/chat_channels/page.py
 ]
 
 

@@ -152,9 +152,12 @@ async def list_messages(
     channel_id: int,
     *,
     after: str | None = None,
-    limit: int = 50,
+    limit: int | None = 50,
 ) -> list[dict[str, Any]]:
-    """Return messages for a channel, optionally after a timestamp, newest last."""
+    """Return messages for a channel, optionally after a timestamp, oldest first.
+
+    ``limit`` None means no cap (all matching rows). Default 50.
+    """
     return await asyncio.to_thread(
         _sync_list, workspace_path, channel_id, after=after, limit=limit
     )
@@ -216,20 +219,40 @@ def _sync_list(
     channel_id: int,
     *,
     after: str | None = None,
-    limit: int = 50,
+    limit: int | None = 50,
 ) -> list[dict[str, Any]]:
+    """List messages oldest-first. ``limit`` None omits SQL LIMIT (all rows)."""
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
         if after:
+            if limit is None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM messages
+                    WHERE channel_id = ? AND created_at > ?
+                    ORDER BY created_at ASC
+                    """,
+                    (channel_id, after),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM messages
+                    WHERE channel_id = ? AND created_at > ?
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                    """,
+                    (channel_id, after, limit),
+                ).fetchall()
+        elif limit is None:
             rows = conn.execute(
                 """
                 SELECT * FROM messages
-                WHERE channel_id = ? AND created_at > ?
+                WHERE channel_id = ?
                 ORDER BY created_at ASC
-                LIMIT ?
                 """,
-                (channel_id, after, limit),
+                (channel_id,),
             ).fetchall()
         else:
             rows = conn.execute(
