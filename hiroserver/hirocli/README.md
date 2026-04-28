@@ -31,7 +31,11 @@ Run from the repo root every time you pull changes or switch environments:
 ## Quick Start
 
 ```bash
-# One-time setup: configure gateway, generate device ID, register auto-start
+# If you want a named workspace (not required — plain `setup` creates `default`)
+hirocli workspace create home --set-default
+hirocli setup --workspace home
+
+# One-time setup with auto-created default workspace: configure gateway, device ID, auto-start
 hirocli setup
 
 # If needed on Windows, request UAC to create elevated scheduled task

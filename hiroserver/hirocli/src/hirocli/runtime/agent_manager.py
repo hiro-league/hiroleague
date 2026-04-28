@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_EVENT
 from hiro_channel_sdk.models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
@@ -46,7 +46,45 @@ _FALLBACK_ERROR_BODY = (
 )
 
 
+def _reply_content_type(content: Any) -> str:
+    if isinstance(content, list):
+        return f"list[{len(content)}]"
+    return type(content).__name__
+
+
+def _normalize_reply_content(content: Any) -> str:
+    """Convert LangChain/provider message content into Hiro's plain text body."""
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if not isinstance(content, list):
+        return str(content)
+
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+            continue
+        if not isinstance(block, dict):
+            parts.append(str(block))
+            continue
+
+        text = block.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+            continue
+
+        content_value = block.get("content")
+        if isinstance(content_value, str):
+            parts.append(content_value)
+
+    return "\n".join(p for p in parts if p)
+
+
 def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
+    if not isinstance(body, str):
+        raise TypeError(f"reply body must be str, got {type(body).__name__}")
     # Preserve routing metadata (e.g. device_name injected by ChannelManager) for logs and downstream.
     return UnifiedMessage(
         routing=MessageRouting(
@@ -396,13 +434,18 @@ class AgentManager:
                 config=config,
             )
             _elapsed_ms = int((time.perf_counter() - _t0) * 1000)
-            reply_body: str = result["messages"][-1].content
+            raw_reply_content = result["messages"][-1].content
+            # LangChain can preserve provider-native content blocks; Hiro replies require text.
+            reply_body = _normalize_reply_content(raw_reply_content)
+            if not reply_body:
+                raise ValueError("agent returned empty reply content")
             log.info(
                 f"✅ Agent reply — {peer} · {_comm_kind(msg)}",
                 **_comm_extras(
                     msg,
                     reply_preview=reply_body[:200],
                     output_length=len(reply_body),
+                    raw_content_type=_reply_content_type(raw_reply_content),
                     elapsed_ms=_elapsed_ms,
                     thread_id=thread_id,
                 ),
@@ -416,7 +459,17 @@ class AgentManager:
             )
             reply_body = _FALLBACK_ERROR_BODY
 
-        reply = _make_reply(msg, reply_body)
+        try:
+            reply = _make_reply(msg, reply_body)
+        except Exception as exc:
+            log.error(
+                f"❌ Reply construction failed — {peer} · {_comm_kind(msg)}",
+                error=str(exc),
+                reply_body_type=type(reply_body).__name__,
+                **_comm_extras(msg, thread_id=thread_id),
+                exc_info=True,
+            )
+            raise
 
         # Persist the outbound reply to data.db
         try:
@@ -438,7 +491,16 @@ class AgentManager:
                 thread_id=thread_id,
             )
 
-        await self._comm.enqueue_outbound(reply)
+        try:
+            await self._comm.enqueue_outbound(reply)
+        except Exception as exc:
+            log.error(
+                f"❌ Reply enqueue failed — {comm_peer_label(reply, self._ctx)} · {_comm_kind(reply)}",
+                error=str(exc),
+                **_comm_extras(reply, in_reply_to=msg.routing.id, thread_id=thread_id),
+                exc_info=True,
+            )
+            raise
         log.info(
             f"{_LOG_OUT} Text reply enqueued — {comm_peer_label(reply, self._ctx)} · {_comm_kind(reply)}",
             **_comm_extras(
@@ -450,12 +512,21 @@ class AgentManager:
 
         # TTS post-processing: fire-and-forget so it never blocks the next message.
         # Text reply is already delivered — if TTS fails, the user still has the text.
-        per_request = msg.routing.metadata.get("request_voice_reply")
-        tts_for_this_msg = per_request if per_request is not None else self._tts_enabled
-        if tts_for_this_msg and self._tts_service:
-            asyncio.create_task(
-                self._synthesize_and_send(msg, reply, reply_body),
-                name=f"tts-{reply.routing.id}",
+        try:
+            per_request = msg.routing.metadata.get("request_voice_reply")
+            tts_for_this_msg = per_request if per_request is not None else self._tts_enabled
+            if tts_for_this_msg and self._tts_service:
+                asyncio.create_task(
+                    self._synthesize_and_send(msg, reply, reply_body),
+                    name=f"tts-{reply.routing.id}",
+                )
+        except Exception as exc:
+            log.error(
+                f"❌ TTS scheduling failed — {peer} · text reply already sent",
+                error=str(exc),
+                ref_id=reply.routing.id,
+                **_comm_extras(msg, thread_id=thread_id),
+                exc_info=True,
             )
 
     def _log_agent_config(self, credential_store=None) -> None:
@@ -523,5 +594,13 @@ class AgentManager:
                 msg: UnifiedMessage = await self._comm.inbound_queue.get()
                 try:
                     await self._process(msg)
+                except Exception as exc:
+                    # Keep the worker alive so one malformed provider response cannot block later messages.
+                    log.error(
+                        f"❌ Agent message handling failed — {comm_peer_label(msg, self._ctx)} · {_comm_kind(msg)}",
+                        error=str(exc),
+                        **_comm_extras(msg),
+                        exc_info=True,
+                    )
                 finally:
                     self._comm.inbound_queue.task_done()
