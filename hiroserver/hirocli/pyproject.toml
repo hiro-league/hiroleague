@@ -65,6 +65,7 @@ hirogateway = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hirocli"]
+artifacts = ["src/hirocli/admin_svelte/static/**"]
 
 [dependency-groups]
 dev = [

@@ -35,3 +35,10 @@ Thumbs.db
 # NiceGUI
 .nicegui/
 .VSCodeCounter/
+
+# HiroAdmin Svelte POC
+admin_frontend/node_modules/
+admin_frontend/.svelte-kit/
+admin_frontend/.vite/
+admin_frontend/dist/
+hiroserver/hirocli/src/hirocli/admin_svelte/static/

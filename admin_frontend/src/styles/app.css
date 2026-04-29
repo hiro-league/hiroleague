@@ -1,0 +1,158 @@
+@import url("https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --font-sans: var(--font-title);
+  --font-serif: var(--font-text);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-mid: var(--brand-mid);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-rose: var(--brand-rose);
+  --color-brand-pink: var(--brand-pink);
+}
+
+:root {
+  color-scheme: dark;
+  --font-text: "Lora", Georgia, serif;
+  --font-title: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --background: #15100f;
+  --foreground: #f5eceb;
+  --card: #1c1817;
+  --card-foreground: #f5eceb;
+  --popover: #150f0e;
+  --popover-foreground: #f5eceb;
+  --primary: #1687b8;
+  --primary-foreground: #faf8f0;
+  --secondary: #21323a;
+  --secondary-foreground: #f5eceb;
+  --muted: #1a1414;
+  --muted-foreground: #a59d9c;
+  --accent: #127b72;
+  --accent-foreground: #f5eceb;
+  --destructive: #db0000;
+  --border: #393232;
+  --input: var(--border);
+  --ring: #1687b8;
+  --brand: #fbbf24;
+  --brand-mid: #fb913b;
+  --brand-deep: #f87171;
+  --brand-rose: #fb7185;
+  --brand-pink: #f975d2;
+  --brand-blue: #1687b8;
+  --brand-green: #00a889;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #fff6f5;
+  --foreground: #3c0608;
+  --card: #fceae8;
+  --card-foreground: #150f0e;
+  --popover: #f2e9e8;
+  --popover-foreground: #201918;
+  --primary: #006bb3;
+  --primary-foreground: #faf8f0;
+  --secondary: #dceef5;
+  --secondary-foreground: #123849;
+  --muted: #f8e5e3;
+  --muted-foreground: #605252;
+  --accent: #d8f0eb;
+  --accent-foreground: #143d3d;
+  --destructive: #db0000;
+  --border: #f2d7d4;
+  --input: var(--border);
+  --ring: #0f68a3;
+  --brand: #f59e0b;
+  --brand-mid: #f97316;
+  --brand-deep: #ef4444;
+  --brand-rose: #e11d48;
+  --brand-pink: #ec4ab0;
+  --brand-blue: #006bb3;
+  --brand-green: #00a889;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-background text-foreground font-serif antialiased;
+    background:
+      linear-gradient(
+        145deg,
+        color-mix(in oklch, var(--background) 90%, var(--brand-deep)) 0%,
+        var(--background) 42%,
+        color-mix(in oklch, var(--background) 91%, var(--secondary)) 100%
+      );
+    background-attachment: fixed;
+  }
+
+  button,
+  input,
+  textarea,
+  select,
+  a {
+    font: inherit;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  .brand-text-gradient {
+    background-image: linear-gradient(90deg, var(--brand-deep), var(--brand-mid) 48%, var(--brand));
+    background-clip: text;
+    color: transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .accent-text-gradient {
+    background-image: linear-gradient(90deg, var(--brand-blue), var(--brand-green));
+    background-clip: text;
+    color: transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .brand-surface {
+    background:
+      linear-gradient(135deg, color-mix(in oklch, var(--card) 90%, var(--brand-blue)), var(--card) 46%),
+      var(--card);
+  }
+}

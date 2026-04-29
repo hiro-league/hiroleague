@@ -59,7 +59,7 @@ def request_shutdown() -> None:
     """Trigger graceful shutdown with a short delay so HTTP responses can flush."""
     ctx = app.state.ctx
     if ctx is not None:
-        asyncio.get_running_loop().call_later(0.5, ctx.stop_event.set)
+        ctx.loop.call_soon_threadsafe(lambda: ctx.loop.call_later(0.5, ctx.stop_event.set))
 
 
 def request_restart(admin: bool = False) -> None:

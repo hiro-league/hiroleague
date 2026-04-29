@@ -111,6 +111,23 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     apply_theme()
 
     admin_app = FastAPI(title="Hiro Admin")
+    from hirocli.admin_svelte.api import include_admin_svelte_api
+    from hirocli.admin_svelte.static_server import ADMIN_NEXT_PATH, mount_admin_svelte_static
+
+    # Register Svelte routes before NiceGUI mounts its app at root; otherwise NiceGUI's
+    # catch-all handler shadows /admin-next/* and the API/static routes return 404.
+    include_admin_svelte_api(admin_app)
+    svelte_mounted = mount_admin_svelte_static(admin_app, require_built=False)
+    if svelte_mounted:
+        log.info(
+            "Hiro Admin Next POC mounted",
+            admin_next_url=f"http://127.0.0.1:{ctx.config.admin_port}{ADMIN_NEXT_PATH}/",
+        )
+    else:
+        log.warning(
+            "Hiro Admin Next POC assets not found; skipping static mount",
+            build_command="npm --prefix admin_frontend run package:python",
+        )
     ui.run_with(
         admin_app,
         title="Hiro Admin",

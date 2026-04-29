@@ -64,6 +64,7 @@ class ServerContext:
     config: Config
     stop_event: asyncio.Event
     desktop_private_key: Ed25519PrivateKey
+    loop: asyncio.AbstractEventLoop = field(init=False)
     log_dir: Path = field(init=False)
     device_names: DeviceNameResolver = field(init=False)
 
@@ -72,5 +73,6 @@ class ServerContext:
     restart_admin: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
+        self.loop = asyncio.get_running_loop()
         self.log_dir = resolve_log_dir(self.workspace_path, self.config)
         self.device_names = DeviceNameResolver(self.workspace_path)

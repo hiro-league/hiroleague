@@ -107,29 +107,11 @@ def create_page_layout(active_path: str = "/") -> None:
             ui.label(header_title).classes("text-sm font-semibold")
 
         with ui.row().classes("items-center gap-2"):
-            _theme_toggle_btn: list[Any] = []
-
-            def _toggle_dark_mode() -> None:
-                storage = nicegui_app.storage.user
-                storage["dark_mode"] = not storage.get("dark_mode", False)
-                is_dark = storage["dark_mode"]
-                # Icon-only: label + switch track were low-contrast on primary header in dark theme.
-                _theme_toggle_btn[0].props(
-                    f'icon={"light_mode" if is_dark else "dark_mode"}'
-                )
-                _theme_toggle_btn[0].tooltip(
-                    "Switch to light mode" if is_dark else "Switch to dark mode"
-                )
-
-            initial_dark = nicegui_app.storage.user.get("dark_mode", False)
-            theme_btn = ui.button(
-                icon="light_mode" if initial_dark else "dark_mode",
-                on_click=_toggle_dark_mode,
-            ).props('flat dense round color="white" size="sm"')
-            _theme_toggle_btn.append(theme_btn)
-            theme_btn.tooltip(
-                "Switch to light mode" if initial_dark else "Switch to dark mode"
-            )
+            ui.button(
+                "Svelte Home",
+                icon="auto_awesome",
+                on_click=lambda: ui.navigate.to("/admin-next/"),
+            ).props('flat dense color="white" size="sm"')
 
 
 def _toggle_sidebar_mini(drawer: Any) -> None:
