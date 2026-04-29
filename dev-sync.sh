@@ -17,6 +17,14 @@ echo "==> Stopping hirogateway (if running)..."
 # Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogateway.exe before reinstalling.
 hirogateway stop 2>/dev/null || true
 
+if [ -f admin_frontend/package.json ]; then
+  echo "==> Syncing Svelte admin frontend dependencies..."
+  npm --prefix admin_frontend install
+
+  echo "==> Building Svelte admin static assets..."
+  npm --prefix admin_frontend run package:python
+fi
+
 echo "==> Syncing hiroserver workspace dependencies..."
 cd hiroserver
 uv sync
