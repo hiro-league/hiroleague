@@ -28,14 +28,14 @@ class ChannelConfig:
     name: str
     enabled: bool = True
     # Shell command used to start the plugin process.
-    # hirocli appends ["--hiro-ws", <url>] automatically.
+    # Hiro appends ["--hiro-ws", <url>] automatically.
     # Defaults to ["hiro-channel-<name>"] if empty.
     command: list[str] = field(default_factory=list)
     # Arbitrary channel-specific settings (API keys, etc.).
     # Pushed to the plugin via channel.configure on connect.
     config: dict[str, Any] = field(default_factory=dict)
     # If set, the command is run via `uv run --directory <workspace_dir>`.
-    # Populated automatically by `hirocli channel setup` when it detects
+    # Populated automatically by `hiro channel setup` when it detects
     # a uv workspace in the current directory tree.  Leave empty for
     # plugins installed as uv tools (they are already on PATH).
     workspace_dir: str = ""

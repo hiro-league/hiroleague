@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hiroleague.local/protocol/gateway-envelope.schema.json",
+  "title": "GatewayRelayEnvelope",
+  "type": "object",
+  "required": ["payload"],
+  "properties": {
+    "sender_device_id": { "type": "string", "minLength": 1 },
+    "target_device_id": { "type": "string", "minLength": 1 },
+    "payload": { "$ref": "./unified-message.schema.json" }
+  }
+}

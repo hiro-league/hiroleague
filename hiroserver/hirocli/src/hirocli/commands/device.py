@@ -32,7 +32,7 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Generate a short-lived pairing code for onboarding a mobile device."""
-        log.info("hirocli device add", ttl_seconds=ttl_seconds, code_length=code_length)
+        log.info("hiro device add", ttl_seconds=ttl_seconds, code_length=code_length)
 
         try:
             result = DeviceAddTool().execute(
@@ -93,7 +93,7 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Revoke a previously approved paired device."""
-        log.info("hirocli device revoke", device_id=device_id)
+        log.info("hiro device revoke", device_id=device_id)
 
         try:
             result = DeviceRevokeTool().execute(device_id=device_id, workspace=workspace)

@@ -5,7 +5,7 @@ Shared SDK and contract for Hiro channel plugins.
 ## Overview
 
 Every channel plugin (Telegram, WhatsApp, mobile app, etc.) is a standalone Python
-package that implements `ChannelPlugin` and communicates with `hirocli` over a local
+package that implements `ChannelPlugin` and communicates with the Hiro server over a local
 WebSocket using JSON-RPC 2.0.
 
 This package provides:
@@ -15,7 +15,7 @@ This package provides:
 | `models.py` | `UnifiedMessage`, `RpcRequest`, `RpcResponse`, `ChannelInfo` |
 | `base.py` | `ChannelPlugin` abstract base class |
 | `rpc.py` | JSON-RPC 2.0 helpers (build / parse) |
-| `transport.py` | `PluginTransport` — WS client that connects to hirocli |
+| `transport.py` | `PluginTransport` — WS client that connects to the Hiro server |
 
 ## Writing a channel plugin
 
@@ -70,10 +70,10 @@ if __name__ == "__main__":
 
 | Direction | Method | Params | Notes |
 |---|---|---|---|
-| plugin → hirocli | `channel.register` | `{name, version, description}` | First frame after connect |
-| plugin → hirocli | `channel.receive` | `UnifiedMessage` dict | Inbound message from third party |
-| plugin → hirocli | `channel.event` | `{event, data}` | Status, errors, receipts |
-| hirocli → plugin | `channel.send` | `UnifiedMessage` dict | Send outbound message |
-| hirocli → plugin | `channel.configure` | `{config: {...}}` | Push credentials |
-| hirocli → plugin | `channel.status` | — | Health probe |
-| hirocli → plugin | `channel.stop` | — | Graceful shutdown |
+| plugin → Hiro | `channel.register` | `{name, version, description}` | First frame after connect |
+| plugin → Hiro | `channel.receive` | `UnifiedMessage` dict | Inbound message from third party |
+| plugin → Hiro | `channel.event` | `{event, data}` | Status, errors, receipts |
+| Hiro → plugin | `channel.send` | `UnifiedMessage` dict | Send outbound message |
+| Hiro → plugin | `channel.configure` | `{config: {...}}` | Push credentials |
+| Hiro → plugin | `channel.status` | — | Health probe |
+| Hiro → plugin | `channel.stop` | — | Graceful shutdown |

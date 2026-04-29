@@ -1,4 +1,4 @@
-"""Base Tool abstraction for hirocli.
+"""Base Tool abstraction for Hiro.
 
 A Tool is the single unit of functionality — it owns its schema and execution
 logic.  Both CLI commands and the AI agent are thin callers that invoke
@@ -22,7 +22,7 @@ class ToolParam:
 
 
 class Tool(ABC):
-    """Base class for all hirocli tools.
+    """Base class for all Hiro tools.
 
     Subclasses declare:
       - name:        unique snake_case identifier used by the agent and CLI

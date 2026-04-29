@@ -4,6 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../data/remote/gateway/gateway_auth_handler.dart';
 import '../../data/remote/gateway/gateway_client.dart';
+import '../../data/remote/gateway/gateway_contract.dart';
 import '../../data/remote/gateway/gateway_inbound_frame.dart';
 import '../../data/remote/gateway/gateway_protocol.dart';
 import '../../data/remote/gateway/gateway_request_client.dart';
@@ -45,10 +46,7 @@ class GatewayNotifier extends _$GatewayNotifier {
     return const GatewayState.disconnected();
   }
 
-  void _onAuthChanged(
-    AsyncValue<AuthState>? prev,
-    AsyncValue<AuthState> next,
-  ) {
+  void _onAuthChanged(AsyncValue<AuthState>? prev, AsyncValue<AuthState> next) {
     final auth = next.value;
     final prevAuth = prev?.value;
 
@@ -71,13 +69,15 @@ class GatewayNotifier extends _$GatewayNotifier {
       reconnectPolicy: const ReconnectPolicy(),
     );
 
-    _requestClient = GatewayRequestClient(sendFn: (payload) => client.send(payload));
+    _requestClient = GatewayRequestClient(
+      sendFn: (payload) => client.send(payload),
+    );
 
     _stateSub = client.updates.listen(_onClientUpdate);
     _frameSub = client.frames.listen((frame) {
       // Intercept response frames and route to the request client before
       // broadcasting — the broadcast stream may have no subscribers yet.
-      if (frame.payload['message_type'] == 'response') {
+      if (frame.payload['message_type'] == UnifiedMessageWire.typeResponse) {
         _routeResponse(frame.payload);
       }
       _frameController.add(frame);
@@ -114,7 +114,7 @@ class GatewayNotifier extends _$GatewayNotifier {
     if (contentRaw is! List || contentRaw.isEmpty) return;
 
     for (final item in contentRaw) {
-      if (item is Map && item['content_type'] == 'json') {
+      if (item is Map && item['content_type'] == ContentWire.json) {
         _requestClient!.completeRequest(rid, item['body'] as String);
         return;
       }
@@ -124,7 +124,9 @@ class GatewayNotifier extends _$GatewayNotifier {
   void _onClientUpdate(GatewayClientUpdate update) {
     state = switch (update) {
       GatewayClientConnecting() => const GatewayState.connecting(),
-      GatewayClientConnected(:final deviceId) => GatewayState.connected(deviceId: deviceId),
+      GatewayClientConnected(:final deviceId) => GatewayState.connected(
+        deviceId: deviceId,
+      ),
       GatewayClientDisconnected() => const GatewayState.disconnected(),
       GatewayClientError(:final message) => GatewayState.error(message),
     };

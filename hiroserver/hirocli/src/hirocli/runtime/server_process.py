@@ -1,4 +1,4 @@
-"""Entry point for the detached server process spawned by `hirocli start`.
+"""Entry point for the detached server process spawned by `hiro start`.
 
 Runs the FastAPI HTTP server and ChannelManager concurrently inside a single
 asyncio event loop.  Gateway connectivity is owned by the mandatory
@@ -70,42 +70,45 @@ def _build_context(
     )
 
 
-def _wire_communication_stack(ctx: ServerContext):
-    """Create the adapter pipeline, event handler, CommunicationManager, and RequestHandler."""
+def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelManager]:
+    """Build adapter pipeline, handlers, ChannelManager, and CommunicationManager.
+
+    Construction order is now: leaf collaborators → ChannelManager (no upstream
+    callbacks yet) → CommunicationManager (gets ChannelManager as its
+    OutboundSink and the RequestHandler/EventHandler at construction). Then we
+    install the upstream callbacks on ChannelManager via set_message_handler /
+    set_event_handler. This replaces the old set_request_handler /
+    set_channel_manager pair on CommunicationManager.
+    """
     adapter_pipeline = create_adapter_pipeline(ctx.workspace_path)
     event_handler = EventHandler()
-    comm_manager = CommunicationManager(
-        ctx=ctx,
-        adapter_pipeline=adapter_pipeline,
-        event_handler=event_handler,
-    )
-    request_handler = RequestHandler(ctx, comm_manager)
+    request_handler = RequestHandler(ctx)
 
     from hirocli.runtime.request_methods import register_request_methods
     register_request_methods(request_handler)
 
-    comm_manager.set_request_handler(request_handler)
-    return comm_manager
-
-
-def _wire_channel_stack(ctx: ServerContext, comm_manager: CommunicationManager):
-    """Create infra handlers, channel event handler, and ChannelManager."""
     infra_handlers = InfraEventHandlers(ctx)
     channel_event_handler = ChannelEventHandler()
     infra_handlers.register_all(channel_event_handler)
     log.info("Registered special channel event handlers")
 
-    channel_manager = ChannelManager(
-        ctx,
-        on_message=comm_manager.receive,
-        on_event=channel_event_handler.handle,
+    channel_manager = ChannelManager(ctx)
+
+    comm_manager = CommunicationManager(
+        ctx=ctx,
+        sink=channel_manager,
+        adapter_pipeline=adapter_pipeline,
+        event_handler=event_handler,
+        request_handler=request_handler,
     )
-    # Setter injection: InfraEventHandlers needs ChannelManager for pairing
-    # responses, and CommunicationManager needs it for outbound delivery.
-    # Both are constructed before ChannelManager exists.
+
+    channel_manager.set_message_handler(comm_manager.receive)
+    channel_manager.set_event_handler(channel_event_handler.handle)
+    # InfraEventHandlers still needs the ChannelManager for pairing responses.
+    # That cycle is out of scope for this PR — see communication-manager-refactor.md §6.
     infra_handlers.set_channel_manager(channel_manager)
-    comm_manager.set_channel_manager(channel_manager)
-    return channel_manager
+
+    return comm_manager, channel_manager
 
 
 def _register_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -138,7 +141,7 @@ async def _main(
         if not ws_str:
             raise RuntimeError(
                 "HIRO_WORKSPACE_PATH environment variable is not set. "
-                "The server process must be started via 'hirocli start'."
+                "The server process must be started via 'hiro start'."
             )
         workspace_path = Path(ws_str)
     if workspace_name is None:
@@ -188,8 +191,7 @@ async def _main(
     log.info("Metrics collector configured", enabled=effective_metrics, interval=ctx.config.metrics_interval)
 
     # --- Wire communication + channel stacks ---
-    comm_manager = _wire_communication_stack(ctx)
-    channel_manager = _wire_channel_stack(ctx, comm_manager)
+    comm_manager, channel_manager = _wire_runtime(ctx)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
@@ -214,7 +216,7 @@ async def _main(
     coros = [
         run_http_server(ctx),
         channel_manager.run(),
-        comm_manager.run(),
+        comm_manager.serve(),
         agent_manager.run(),
         metrics_collector.run(),
     ]
@@ -241,7 +243,7 @@ async def _main(
         _spawn_server(workspace_path, admin=ctx.restart_admin)
 
     mark_disconnected(workspace_path)
-    log.info("hirocli server exited")
+    log.info("hiro server exited")
 
 
 def _spawn_server(workspace_path: Path, admin: bool = False) -> None:

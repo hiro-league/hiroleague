@@ -15,6 +15,6 @@ DATA_DIR: str = "data"
 DATA_DB_FILENAME: str = "data.db"
 MEDIA_DIR: str = "media"
 
-# Character entities (workspace-relative `characters/<id>/`; see hirocli domain/character.py)
+# Character entities (workspace-relative `characters/<id>/`; see Hiro domain/character.py)
 CHARACTERS_DIR: str = "characters"
 DEFAULT_CHARACTER_ID: str = "hiro"

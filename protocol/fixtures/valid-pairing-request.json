@@ -1,0 +1,6 @@
+{
+  "type": "pairing_request",
+  "pairing_code": "123456",
+  "device_public_key": "device-public-key",
+  "device_name": "Phone"
+}

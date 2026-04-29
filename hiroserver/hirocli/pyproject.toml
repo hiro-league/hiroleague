@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hirocli"
+name = "hiroleague"
 version = "0.1.0"
 description = "Hiro - desktop server CLI with WebSocket gateway client"
 readme = "README.md"
@@ -54,7 +54,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hirocli = "hirocli.commands.app:app"
+hiro = "hirocli.commands.app:app"
 hiro-channel-devices = "hiro_channel_devices.main:app"
 
 [tool.uv.sources]

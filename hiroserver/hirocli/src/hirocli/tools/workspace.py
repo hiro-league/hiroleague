@@ -246,7 +246,7 @@ class WorkspaceUpdateTool(Tool):
             if not (Path(entry.path) / "config.json").exists():
                 raise WorkspaceError(
                     f"Workspace '{entry.name}' is not configured. "
-                    f"Run 'hirocli setup --workspace {entry.name}' before setting it as the default."
+                    f"Run 'hiro workspace setup {entry.name}' before setting it as the default."
                 )
             set_default_workspace(entry.id)
             default_changed = True
@@ -258,7 +258,7 @@ class WorkspaceUpdateTool(Tool):
             if not (ws_path / "config.json").exists():
                 raise WorkspaceError(
                     f"Workspace '{entry.name}' is not configured. "
-                    f"Run 'hirocli setup --workspace {entry.name}' first."
+                    f"Run 'hiro workspace setup {entry.name}' first."
                 )
             config = load_config(ws_path)
             config.gateway_url = gateway_url

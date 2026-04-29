@@ -1,1 +1,1 @@
-"""CLI command modules for hirocli."""
+"""CLI command modules for Hiro."""

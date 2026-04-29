@@ -1,7 +1,10 @@
 """RequestHandler — method registry for request/response messages.
 
 Dispatches inbound UnifiedMessages with message_type "request" to registered
-method handlers, builds a response UnifiedMessage, and enqueues it outbound.
+method handlers and **returns** the response UnifiedMessage so the caller
+(CommunicationManager) can enqueue it. Returning the response — instead of
+calling back into the manager via a back-reference — breaks the previous
+``Comm ↔ Request`` cycle.
 
 Request content format (content_type "json"):
     {"method": "channels.list", "params": {}}
@@ -16,12 +19,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from hiro_channel_sdk.constants import CONTENT_TYPE_JSON, MESSAGE_TYPE_RESPONSE
-from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
+from hiro_channel_sdk.constants import CONTENT_TYPE_JSON
+from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger
 
+from .envelope_factory import EnvelopeFactory
+
 if TYPE_CHECKING:
-    from .communication_manager import CommunicationManager
     from .server_context import ServerContext
 
 log = Logger.get("REQUEST")
@@ -44,19 +48,16 @@ class RequestHandler:
 
     Usage::
 
-        handler = RequestHandler(ctx, comm_manager)
+        handler = RequestHandler(ctx)
         handler.register("channels.list", channels_list_handler)
-        # wire into CommunicationManager at startup
+        # CommunicationManager awaits handler.handle(msg) and enqueues the result.
 
     Method handlers are async functions with signature:
         async def my_handler(params: dict, ctx: RequestContext) -> dict
     """
 
-    def __init__(
-        self, ctx: ServerContext, comm_manager: CommunicationManager,
-    ) -> None:
+    def __init__(self, ctx: ServerContext) -> None:
         self._ctx = ctx
-        self._comm = comm_manager
         self._methods: dict[str, MethodHandler] = {}
 
     def register(self, method: str, handler: MethodHandler) -> None:
@@ -64,8 +65,8 @@ class RequestHandler:
         self._methods[method] = handler
         log.info(f"✅ Registered request method: {method}")
 
-    async def handle(self, msg: UnifiedMessage) -> None:
-        """Dispatch a request message and enqueue the response."""
+    async def handle(self, msg: UnifiedMessage) -> UnifiedMessage:
+        """Dispatch a request message and return the response envelope."""
         method, params = _parse_request(msg)
         log.info(
             "Handling request",
@@ -75,29 +76,25 @@ class RequestHandler:
         )
 
         if method is None:
-            response = _build_response(
+            return EnvelopeFactory.response(
                 msg,
                 status="error",
                 payload={"code": "invalid_request", "message": "Cannot parse request body"},
             )
-            await self._comm.enqueue_outbound(response)
-            return
 
         handler = self._methods.get(method)
         if handler is None:
             log.warning("Unknown request method", method=method)
-            response = _build_response(
+            return EnvelopeFactory.response(
                 msg,
                 status="error",
                 payload={"code": "method_not_found", "message": f"Unknown method: {method}"},
             )
-            await self._comm.enqueue_outbound(response)
-            return
 
         try:
             ctx = RequestContext(self._ctx, msg)
             result = await handler(params, ctx)
-            response = _build_response(msg, status="ok", payload=result)
+            return EnvelopeFactory.response(msg, status="ok", payload=result)
         except Exception as exc:
             log.error(
                 "Request handler error",
@@ -105,13 +102,11 @@ class RequestHandler:
                 error=str(exc),
                 exc_info=True,
             )
-            response = _build_response(
+            return EnvelopeFactory.response(
                 msg,
                 status="error",
                 payload={"code": "internal_error", "message": str(exc)},
             )
-
-        await self._comm.enqueue_outbound(response)
 
 
 # ---------------------------------------------------------------------------
@@ -131,31 +126,3 @@ def _parse_request(msg: UnifiedMessage) -> tuple[str | None, dict[str, Any]]:
             except (json.JSONDecodeError, AttributeError):
                 pass
     return None, {}
-
-
-def _build_response(
-    request: UnifiedMessage,
-    *,
-    status: str,
-    payload: dict[str, Any],
-) -> UnifiedMessage:
-    body: dict[str, Any]
-    if status == "ok":
-        body = {"status": "ok", "data": payload}
-    else:
-        body = {"status": "error", "error": payload}
-
-    return UnifiedMessage(
-        message_type=MESSAGE_TYPE_RESPONSE,
-        request_id=request.request_id,
-        routing=MessageRouting(
-            channel=request.routing.channel,
-            direction="outbound",
-            sender_id="server",
-            recipient_id=request.routing.sender_id,
-            # Preserve metadata (e.g. channel_id) so the channel plugin can
-            # route the response back to the originating device/conversation.
-            metadata=request.routing.metadata,
-        ),
-        content=[ContentItem(content_type=CONTENT_TYPE_JSON, body=json.dumps(body))],
-    )

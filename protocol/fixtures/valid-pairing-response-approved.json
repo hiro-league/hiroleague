@@ -1,0 +1,10 @@
+{
+  "type": "pairing_response",
+  "request_id": "pairing-req-1",
+  "status": "approved",
+  "attestation": {
+    "blob": "signed-device-blob",
+    "desktop_signature": "desktop-signature"
+  },
+  "device_id": "device-1"
+}

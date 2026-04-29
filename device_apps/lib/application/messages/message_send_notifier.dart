@@ -9,6 +9,7 @@ import '../../application/gateway/gateway_notifier.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_exception.dart';
 import '../../core/utils/logger.dart';
+import '../../data/remote/gateway/gateway_contract.dart';
 import '../../data/remote/gateway/unified_message.dart';
 import '../../data/repositories/message_repository_impl.dart';
 import '../../domain/models/message/message_status.dart';
@@ -53,7 +54,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
         id: messageId,
         channelId: channelId,
         senderId: identity.deviceId,
-        contentType: 'text',
+        contentType: ContentWire.text,
         body: text,
         timestamp: now,
       );
@@ -67,12 +68,12 @@ class MessageSendNotifier extends _$MessageSendNotifier {
           routing: MessageRouting(
             id: messageId,
             channel: AppConstants.gatewayChannelName,
-            direction: 'outbound',
+            direction: UnifiedMessageWire.directionOutbound,
             senderId: identity.deviceId,
             timestamp: now.toIso8601String(),
-            metadata: {'channel_id': channelId},
+            metadata: {MetadataWire.channelId: channelId},
           ),
-          content: [ContentItem(contentType: 'text', body: text)],
+          content: [ContentItem(contentType: ContentWire.text, body: text)],
         ).toJson(),
       );
 
@@ -136,7 +137,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
         id: messageId,
         channelId: channelId,
         senderId: identity.deviceId,
-        contentType: 'audio',
+        contentType: ContentWire.audio,
         body: '',
         metadata: metadataJson,
         timestamp: now,
@@ -148,14 +149,14 @@ class MessageSendNotifier extends _$MessageSendNotifier {
           routing: MessageRouting(
             id: messageId,
             channel: AppConstants.gatewayChannelName,
-            direction: 'outbound',
+            direction: UnifiedMessageWire.directionOutbound,
             senderId: identity.deviceId,
             timestamp: now.toIso8601String(),
-            metadata: {'channel_id': channelId},
+            metadata: {MetadataWire.channelId: channelId},
           ),
           content: [
             ContentItem(
-              contentType: 'audio',
+              contentType: ContentWire.audio,
               body: base64Body,
               metadata: {
                 'duration_ms': recordingResult.durationMs,

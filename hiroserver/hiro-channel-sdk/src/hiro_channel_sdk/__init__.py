@@ -6,7 +6,7 @@ Exports the key building blocks every plugin author needs:
   - ContentItem      — single content piece within UnifiedMessage
   - EventPayload     — event payload for message_type "event"
   - ChannelPlugin    — abstract base class to implement
-  - PluginTransport  — handles WS connection to hirocli, JSON-RPC dispatch
+  - PluginTransport  — handles WS connection to the Hiro server, JSON-RPC dispatch
   - rpc              — JSON-RPC 2.0 helpers (build / parse)
   - constants        — protocol constants (RPC methods, WS close codes, etc.)
 """

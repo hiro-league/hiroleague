@@ -1,0 +1,10 @@
+{
+  "type": "auth_response",
+  "auth_mode": "device",
+  "attestation": {
+    "blob": "signed-device-blob",
+    "desktop_signature": "desktop-signature"
+  },
+  "nonce_signature": "device-signature",
+  "device_name": "Phone"
+}

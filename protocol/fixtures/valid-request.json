@@ -1,0 +1,20 @@
+{
+  "version": "0.1",
+  "message_type": "request",
+  "request_id": "req-1",
+  "routing": {
+    "id": "req-1",
+    "channel": "devices",
+    "direction": "inbound",
+    "sender_id": "device-1",
+    "timestamp": "2026-04-28T18:00:05Z",
+    "metadata": {}
+  },
+  "content": [
+    {
+      "content_type": "json",
+      "body": "{\"method\":\"channels.list\",\"params\":{}}",
+      "metadata": {}
+    }
+  ]
+}

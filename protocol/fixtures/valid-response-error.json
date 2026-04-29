@@ -1,0 +1,21 @@
+{
+  "version": "0.1",
+  "message_type": "response",
+  "request_id": "req-2",
+  "routing": {
+    "id": "resp-2",
+    "channel": "devices",
+    "direction": "outbound",
+    "sender_id": "server",
+    "recipient_id": "device-1",
+    "timestamp": "2026-04-28T18:00:07Z",
+    "metadata": {}
+  },
+  "content": [
+    {
+      "content_type": "json",
+      "body": "{\"status\":\"error\",\"error\":{\"code\":\"method_not_found\",\"message\":\"Unknown method\"}}",
+      "metadata": {}
+    }
+  ]
+}

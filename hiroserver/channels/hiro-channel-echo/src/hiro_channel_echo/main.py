@@ -1,6 +1,6 @@
 """Entry point for the hiro-channel-echo plugin process.
 
-Invoked by hirocli's ChannelManager as:
+Invoked by Hiro's ChannelManager as:
     hiro-channel-echo --hiro-ws ws://127.0.0.1:18081
 """
 
@@ -18,7 +18,7 @@ from hiro_commons.constants.storage import LOGS_DIR
 
 from .plugin import EchoChannel
 
-_DEFAULT_LOG_DIR = str(Path.home() / ".hirocli" / LOGS_DIR)
+_DEFAULT_LOG_DIR = str(Path.home() / ".hiro" / LOGS_DIR)
 _DEFAULT_PLUGIN_WS = f"ws://{DEFAULT_LOCALHOST}:{PORT_RANGE_START + PORT_OFFSET_PLUGIN}"
 
 app = typer.Typer(
@@ -33,7 +33,7 @@ def run(
     hiro_ws: str = typer.Option(
         _DEFAULT_PLUGIN_WS,
         "--hiro-ws",
-        help="WebSocket URL of hirocli's plugin server.",
+        help="WebSocket URL of Hiro's plugin server.",
         envvar="HIRO_WS",
     ),
     log_dir: str = typer.Option(
@@ -47,7 +47,7 @@ def run(
         help="Root log level (DEBUG, INFO, WARNING, ERROR).",
     ),
 ) -> None:
-    """Connect to hirocli and start the echo channel."""
+    """Connect to Hiro and start the echo channel."""
     plugin = EchoChannel()
     log_setup.init(f"channel-{plugin.info.name}", Path(log_dir), level=log_level)
     transport = PluginTransport(plugin, hiro_ws)

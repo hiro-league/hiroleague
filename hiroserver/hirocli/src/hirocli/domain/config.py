@@ -1,4 +1,4 @@
-"""Config and state file management for hirocli.
+"""Config and state file management for Hiro.
 
 All files live under the resolved workspace directory.  No module-level
 path constants exist — every helper accepts a workspace_path: Path argument.
@@ -16,7 +16,7 @@ Workspace layout:
       media/<channel_id>/    ← binary content files (domain/media_store.py)
     logs/
     pairing_session.json     ← short-lived pairing session (domain/pairing.py)
-    hirocli.pid
+    hiro.pid
 """
 
 from __future__ import annotations

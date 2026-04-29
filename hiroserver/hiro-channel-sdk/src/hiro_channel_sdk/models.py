@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Self
+from typing import Any, Literal, Self
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
-from .constants import JSONRPC_VERSION, MESSAGE_TYPE_EVENT, MESSAGE_TYPE_MESSAGE
+from .constants import (
+    CONTENT_TYPE_JSON,
+    JSONRPC_VERSION,
+    MESSAGE_TYPE_EVENT,
+    MESSAGE_TYPE_MESSAGE,
+    MESSAGE_TYPE_REQUEST,
+    MESSAGE_TYPE_RESPONSE,
+    MESSAGE_TYPE_STREAM,
+)
 
 
 class MessageRouting(BaseModel):
     """Routing and identification envelope for a UnifiedMessage.
 
     Carries who sent the message, where it came from, and where it should go.
-    ``direction`` is always from the perspective of hirocli:
+    ``direction`` is always from the perspective of the Hiro server:
       - "inbound"  — arriving FROM the third party (e.g., user sent a Telegram msg)
       - "outbound" — to be SENT TO the third party (e.g., send a Telegram reply)
     """
@@ -81,8 +89,10 @@ class UnifiedMessage(BaseModel):
     by the responder. None for "message" and "event" types.
     """
 
-    version: str = "0.1"
-    message_type: str = MESSAGE_TYPE_MESSAGE
+    version: Literal["0.1"] = "0.1"
+    message_type: Literal["message", "event", "request", "response", "stream"] = (
+        MESSAGE_TYPE_MESSAGE
+    )
     request_id: str | None = None
     routing: MessageRouting
     content: list[ContentItem] = Field(default_factory=list)
@@ -110,6 +120,21 @@ class UnifiedMessage(BaseModel):
                 raise ValueError(
                     "message_type 'event' must not carry content items"
                 )
+        elif self.message_type in (MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE):
+            if not self.request_id:
+                raise ValueError(
+                    f"message_type '{self.message_type}' requires request_id"
+                )
+            if self.event is not None:
+                raise ValueError(
+                    f"message_type '{self.message_type}' must not carry an event payload"
+                )
+            if not any(item.content_type == CONTENT_TYPE_JSON for item in self.content):
+                raise ValueError(
+                    f"message_type '{self.message_type}' requires a json content item"
+                )
+        elif self.message_type == MESSAGE_TYPE_STREAM:
+            pass
         return self
 
 

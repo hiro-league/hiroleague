@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../../core/utils/logger.dart';
+import 'gateway_contract.dart';
 import 'gateway_inbound_frame.dart';
 
 /// Handles frame serialization and deserialization for the gateway relay protocol.
@@ -23,17 +24,20 @@ class GatewayProtocol {
     try {
       map = (jsonDecode(raw) as Map).cast<String, dynamic>();
     } catch (e) {
-      _log.warning('Dropping frame — JSON parse failed', fields: {'error': '$e'});
+      _log.warning(
+        'Dropping frame — JSON parse failed',
+        fields: {'error': '$e'},
+      );
       return null;
     }
 
     // System messages (auth_challenge, auth_ok, pairing_*, etc.) are handled
     // upstream by GatewayAuthHandler and the server process — not application frames.
-    if (map.containsKey('type')) return null;
+    if (map.containsKey(GatewayAuthWire.type)) return null;
 
     // From this point on, the frame is expected to be a relayed application
     // message. Missing fields below are unexpected and warrant a warning.
-    final senderDeviceId = map['sender_device_id']?.toString();
+    final senderDeviceId = map[GatewayEnvelopeWire.senderDeviceId]?.toString();
     if (senderDeviceId == null || senderDeviceId.isEmpty) {
       _log.warning(
         'Dropping frame — missing sender_device_id',
@@ -42,11 +46,14 @@ class GatewayProtocol {
       return null;
     }
 
-    final rawPayload = map['payload'];
+    final rawPayload = map[GatewayEnvelopeWire.payload];
     if (rawPayload is! Map || rawPayload.isEmpty) {
       _log.warning(
         'Dropping frame — payload missing or not an object',
-        fields: {'sender': senderDeviceId, 'payload_type': rawPayload?.runtimeType},
+        fields: {
+          'sender': senderDeviceId,
+          'payload_type': rawPayload?.runtimeType,
+        },
       );
       return null;
     }
@@ -62,9 +69,9 @@ class GatewayProtocol {
     required Map<String, dynamic> payload,
     String? targetDeviceId,
   }) {
-    final envelope = <String, dynamic>{'payload': payload};
+    final envelope = <String, dynamic>{GatewayEnvelopeWire.payload: payload};
     if (targetDeviceId != null && targetDeviceId.isNotEmpty) {
-      envelope['target_device_id'] = targetDeviceId;
+      envelope[GatewayEnvelopeWire.targetDeviceId] = targetDeviceId;
     }
     return jsonEncode(envelope);
   }

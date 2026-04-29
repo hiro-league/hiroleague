@@ -1,4 +1,4 @@
-"""Convert hirocli Tool objects into LangChain StructuredTool instances.
+"""Convert Hiro Tool objects into LangChain StructuredTool instances.
 
 Kept as a separate module so importing tools/base.py and tools/device.py
 never pulls in LangChain as a hard import-time dependency.
@@ -12,7 +12,7 @@ from .base import Tool
 
 
 def to_langchain(tool: Tool) -> Any:
-    """Convert a single hirocli Tool into a LangChain StructuredTool."""
+    """Convert a single Hiro Tool into a LangChain StructuredTool."""
     from langchain_core.tools import StructuredTool
     from pydantic import Field, create_model
 
@@ -42,5 +42,5 @@ def to_langchain(tool: Tool) -> Any:
 
 
 def to_langchain_list(tools: list[Tool]) -> list[Any]:
-    """Convert a list of hirocli Tools to LangChain tools."""
+    """Convert a list of Hiro Tools to LangChain tools."""
     return [to_langchain(t) for t in tools]

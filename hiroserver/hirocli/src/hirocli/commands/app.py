@@ -19,7 +19,7 @@ from .provider import register_models_command
 from .workspace import register as register_workspace_commands
 
 app = typer.Typer(
-    name="hirocli",
+    name="hiro",
     help="Hiro — desktop server CLI.",
     add_completion=False,
 )

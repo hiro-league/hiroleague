@@ -1,0 +1,23 @@
+{
+  "version": "0.1",
+  "message_type": "event",
+  "routing": {
+    "id": "invalid-event-1",
+    "channel": "devices",
+    "direction": "outbound",
+    "sender_id": "server",
+    "timestamp": "2026-04-28T18:00:08Z",
+    "metadata": {}
+  },
+  "content": [
+    {
+      "content_type": "text",
+      "body": "events cannot carry content"
+    }
+  ],
+  "event": {
+    "type": "message.received",
+    "ref_id": "msg-text-1",
+    "data": {}
+  }
+}

@@ -1,4 +1,4 @@
-"""Domain models and persistence for hirocli.
+"""Domain models and persistence for Hiro.
 
 Pure data layer — config, workspace registry, channel config, agent config,
 pairing sessions, approved devices, and crypto key management.

@@ -1,1 +1,1 @@
-"""Bundled package data for hirocli (e.g. LLM catalog YAML)."""
+"""Bundled package data for Hiro (e.g. LLM catalog YAML)."""

@@ -51,14 +51,14 @@ def create_chat_model(
     if wid is None:
         raise ValueError(
             "Workspace path is not registered; cannot resolve credential scope. "
-            "Pass workspace_id explicitly or add this folder via hirocli workspace."
+            "Pass workspace_id explicitly or add this folder via hiro workspace."
         )
 
     store = credential_store or CredentialStore(workspace_path, wid)
     if not store.is_configured(spec.provider_id):
         raise ValueError(
             f"Provider {spec.provider_id!r} is not configured for this workspace. "
-            f"Run: hirocli provider add {spec.provider_id}"
+            f"Run: hiro provider add {spec.provider_id}"
         )
 
     api_model = _api_model_id(model_id)
@@ -108,7 +108,7 @@ def create_chat_model(
         )
         if not base_url:
             raise ValueError(
-                "Ollama base_url missing; run: hirocli provider endpoint ollama http://localhost:11434"
+                "Ollama base_url missing; run: hiro provider endpoint ollama http://localhost:11434"
             )
         logger.debug("Building ChatOllama — HiroServer · base_url=%s · model=%s", base_url, api_model)
         return ChatOllama(

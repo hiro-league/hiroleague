@@ -26,7 +26,7 @@
         "type": "debugpy",
         "request": "launch",
         "python": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\python.exe",
-        "program": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\hirocli.exe",
+        "program": "${workspaceFolder}\\hiroserver\\.venv\\Scripts\\hiro.exe",
         "args": ["start", "--foreground", "--admin"],
         "cwd": "${workspaceFolder}\\hiroserver",
         "env": {

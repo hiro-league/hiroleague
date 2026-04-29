@@ -1,4 +1,4 @@
-"""AgentManager — LLM agent worker for hirocli.
+"""AgentManager — LLM agent worker for Hiro.
 
 Responsibilities:
   - Reads inbound messages from CommunicationManager.inbound_queue.
@@ -25,14 +25,8 @@ from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_E
 from hiro_channel_sdk.models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
 from hiro_commons.log import Logger
 
-# Reuse COMM_MAN helpers so log lines share peer, kind, and content_hint ordering.
-from .communication_manager import (
-    _LOG_IN,
-    _LOG_OUT,
-    _comm_extras,
-    _comm_kind,
-    comm_peer_label,
-)
+# Reuse comm-log helpers so AGENT lines share peer, kind, and content_hint ordering with COMM_MAN.
+from .comm_log import LOG_IN, LOG_OUT, comm_extras, comm_kind, comm_peer_label
 
 if TYPE_CHECKING:
     from ..services.tts.service import TTSService
@@ -134,7 +128,7 @@ class AgentManager:
             log.error(
                 "❌ No chat LLM configured — preferences · default_chat\n"
                 "Set llm.default_chat to a canonical catalog id (e.g. openai:gpt-5.4), "
-                "configure the provider (hirocli provider add), and ensure the model is available."
+                "configure the provider (hiro provider add), and ensure the model is available."
             )
             return None
 
@@ -290,7 +284,7 @@ class AgentManager:
             )
             await self._comm.enqueue_outbound(voiced_event)
             log.info(
-                f"{_LOG_OUT} Voiced event enqueued — {peer} · event:{EVENT_TYPE_MESSAGE_VOICED}",
+                f"{LOG_OUT} Voiced event enqueued — {peer} · event:{EVENT_TYPE_MESSAGE_VOICED}",
                 duration_ms=result.duration_ms,
                 mime_type=result.mime_type,
                 audio_bytes=len(result.audio_bytes),
@@ -341,8 +335,8 @@ class AgentManager:
             )
             await self._comm.enqueue_outbound(reply)
             log.info(
-                f"{_LOG_OUT} Fallback reply enqueued — {peer} · {_comm_kind(msg)}",
-                **_comm_extras(msg, reason="no_chat_llm"),
+                f"{LOG_OUT} Fallback reply enqueued — {peer} · {comm_kind(msg)}",
+                **comm_extras(msg, reason="no_chat_llm"),
             )
             return
 
@@ -382,8 +376,8 @@ class AgentManager:
                 if "adapter_error" in i.metadata
             ]
             log.warning(
-                f"{_LOG_IN} No usable input — {peer} · {_comm_kind(msg)}",
-                **_comm_extras(
+                f"{LOG_IN} No usable input — {peer} · {comm_kind(msg)}",
+                **comm_extras(
                     msg,
                     content_types=[i.content_type for i in msg.content],
                     adapter_errors=adapter_errors or None,
@@ -392,8 +386,8 @@ class AgentManager:
             return
 
         log.info(
-            f"{_LOG_IN} Agent processing — {peer} · {_comm_kind(msg)}",
-            **_comm_extras(
+            f"{LOG_IN} Agent processing — {peer} · {comm_kind(msg)}",
+            **comm_extras(
                 msg,
                 thread_id=thread_id,
                 text_preview=text_body[:200],
@@ -407,8 +401,8 @@ class AgentManager:
             state = await self._agent.aget_state(config)
             history = state.values.get("messages", []) if state.values else []
             log.debug(
-                f"{_LOG_IN} Agent invocation context — {peer} · {_comm_kind(msg)}",
-                **_comm_extras(
+                f"{LOG_IN} Agent invocation context — {peer} · {comm_kind(msg)}",
+                **comm_extras(
                     msg,
                     thread_id=thread_id,
                     history_len=len(history),
@@ -440,8 +434,8 @@ class AgentManager:
             if not reply_body:
                 raise ValueError("agent returned empty reply content")
             log.info(
-                f"✅ Agent reply — {peer} · {_comm_kind(msg)}",
-                **_comm_extras(
+                f"✅ Agent reply — {peer} · {comm_kind(msg)}",
+                **comm_extras(
                     msg,
                     reply_preview=reply_body[:200],
                     output_length=len(reply_body),
@@ -452,9 +446,9 @@ class AgentManager:
             )
         except Exception as exc:
             log.error(
-                f"❌ Agent invocation failed — {peer} · {_comm_kind(msg)}",
+                f"❌ Agent invocation failed — {peer} · {comm_kind(msg)}",
                 error=str(exc),
-                **_comm_extras(msg, thread_id=thread_id),
+                **comm_extras(msg, thread_id=thread_id),
                 exc_info=True,
             )
             reply_body = _FALLBACK_ERROR_BODY
@@ -463,10 +457,10 @@ class AgentManager:
             reply = _make_reply(msg, reply_body)
         except Exception as exc:
             log.error(
-                f"❌ Reply construction failed — {peer} · {_comm_kind(msg)}",
+                f"❌ Reply construction failed — {peer} · {comm_kind(msg)}",
                 error=str(exc),
                 reply_body_type=type(reply_body).__name__,
-                **_comm_extras(msg, thread_id=thread_id),
+                **comm_extras(msg, thread_id=thread_id),
                 exc_info=True,
             )
             raise
@@ -495,15 +489,15 @@ class AgentManager:
             await self._comm.enqueue_outbound(reply)
         except Exception as exc:
             log.error(
-                f"❌ Reply enqueue failed — {comm_peer_label(reply, self._ctx)} · {_comm_kind(reply)}",
+                f"❌ Reply enqueue failed — {comm_peer_label(reply, self._ctx)} · {comm_kind(reply)}",
                 error=str(exc),
-                **_comm_extras(reply, in_reply_to=msg.routing.id, thread_id=thread_id),
+                **comm_extras(reply, in_reply_to=msg.routing.id, thread_id=thread_id),
                 exc_info=True,
             )
             raise
         log.info(
-            f"{_LOG_OUT} Text reply enqueued — {comm_peer_label(reply, self._ctx)} · {_comm_kind(reply)}",
-            **_comm_extras(
+            f"{LOG_OUT} Text reply enqueued — {comm_peer_label(reply, self._ctx)} · {comm_kind(reply)}",
+            **comm_extras(
                 reply,
                 in_reply_to=msg.routing.id,
                 thread_id=thread_id,
@@ -525,7 +519,7 @@ class AgentManager:
                 f"❌ TTS scheduling failed — {peer} · text reply already sent",
                 error=str(exc),
                 ref_id=reply.routing.id,
-                **_comm_extras(msg, thread_id=thread_id),
+                **comm_extras(msg, thread_id=thread_id),
                 exc_info=True,
             )
 
@@ -552,7 +546,7 @@ class AgentManager:
             else:
                 log.error(
                     "❌ No chat LLM configured — HiroServer will run without agent · preferences\n"
-                    "Set llm.default_chat and configure providers (hirocli provider add / scan-env)."
+                    "Set llm.default_chat and configure providers (hiro provider add / scan-env)."
                 )
         except Exception as exc:
             log.error(
@@ -597,9 +591,9 @@ class AgentManager:
                 except Exception as exc:
                     # Keep the worker alive so one malformed provider response cannot block later messages.
                     log.error(
-                        f"❌ Agent message handling failed — {comm_peer_label(msg, self._ctx)} · {_comm_kind(msg)}",
+                        f"❌ Agent message handling failed — {comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}",
                         error=str(exc),
-                        **_comm_extras(msg),
+                        **comm_extras(msg),
                         exc_info=True,
                     )
                 finally:

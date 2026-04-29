@@ -8,6 +8,7 @@ import '../../../core/errors/app_exception.dart';
 import '../../../core/utils/logger.dart';
 import '../../../domain/models/identity/attestation.dart';
 import '../../../domain/services/crypto_service.dart';
+import '../gateway/gateway_contract.dart';
 
 /// Minimal WebSocket client for the pairing handshake only.
 /// Not used after pairing — the full GatewayClient (Gateway phase) takes over.
@@ -59,15 +60,15 @@ class PairingClient {
       // 2 — Sign the nonce and send pairing_request
       final nonceSignature = await _cryptoService.signNonce(seedBase64, nonce);
       final pairingRequest = <String, dynamic>{
-        'type': 'pairing_request',
+        GatewayAuthWire.type: GatewayPairingWire.pairingRequest,
         'pairing_code': pairingCode,
         'device_public_key': publicKeyBase64,
-        'device_id': deviceId,
-        'nonce_signature': nonceSignature,
+        GatewayAuthWire.deviceId: deviceId,
+        GatewayAuthWire.nonceSignature: nonceSignature,
       };
       // Include device_name so the server can label the device in the admin UI.
       if (deviceName != null && deviceName.isNotEmpty) {
-        pairingRequest['device_name'] = deviceName;
+        pairingRequest[GatewayAuthWire.deviceName] = deviceName;
       }
       channel.sink.add(jsonEncode(pairingRequest));
       _log.debug('Sent pairing_request');
@@ -76,20 +77,27 @@ class PairingClient {
       final response = await stream
           .map(_toMap)
           .firstWhere(
-            (m) => m != null && m['type']?.toString() == 'pairing_response',
+            (m) =>
+                m != null &&
+                m[GatewayAuthWire.type]?.toString() ==
+                    GatewayPairingWire.pairingResponse,
           )
           .timeout(
             AppConstants.pairingTimeout,
-            onTimeout: () => throw const PairingException('Timed out waiting for pairing approval'),
+            onTimeout: () => throw const PairingException(
+              'Timed out waiting for pairing approval',
+            ),
           );
 
       final status = response?['status']?.toString();
       if (status != 'approved') {
-        final reason = response?['reason']?.toString() ?? 'Pairing was rejected';
+        final reason =
+            response?['reason']?.toString() ?? 'Pairing was rejected';
         throw PairingException(reason);
       }
 
-      final attJson = (response?['attestation'] as Map?)?.cast<String, dynamic>();
+      final attJson = (response?['attestation'] as Map?)
+          ?.cast<String, dynamic>();
       if (attJson == null || attJson.isEmpty) {
         throw const PairingException('Pairing response missing attestation');
       }
@@ -122,18 +130,26 @@ class PairingClient {
     try {
       challengeMsg = await stream
           .map(_toMap)
-          .firstWhere((m) => m != null && m['type']?.toString() == 'auth_challenge')
+          .firstWhere(
+            (m) =>
+                m != null &&
+                m[GatewayAuthWire.type]?.toString() ==
+                    GatewayAuthWire.authChallenge,
+          )
           .timeout(
             AppConstants.authTimeout,
-            onTimeout: () =>
-                throw const GatewayException('Timed out waiting for auth challenge'),
+            onTimeout: () => throw const GatewayException(
+              'Timed out waiting for auth challenge',
+            ),
           );
     } on StateError {
       throw const GatewayException('Gateway closed before auth challenge');
     }
 
-    final nonce = challengeMsg?['nonce']?.toString() ?? '';
-    if (nonce.isEmpty) throw const GatewayException('Auth challenge missing nonce');
+    final nonce = challengeMsg?[GatewayAuthWire.nonce]?.toString() ?? '';
+    if (nonce.isEmpty) {
+      throw const GatewayException('Auth challenge missing nonce');
+    }
     return nonce;
   }
 

@@ -1,9 +1,9 @@
 """Metrics CLI subcommands — view server resource metrics from the terminal.
 
 Commands:
-  hirocli metrics status   — show collector config and state
-  hirocli metrics snapshot — print the latest metrics snapshot
-  hirocli metrics live     — live-updating dashboard (Ctrl+C to stop)
+  hiro metrics status   — show collector config and state
+  hiro metrics snapshot — print the latest metrics snapshot
+  hiro metrics live     — live-updating dashboard (Ctrl+C to stop)
 """
 
 from __future__ import annotations
@@ -233,7 +233,7 @@ def register(metrics_app: typer.Typer, console: Console) -> None:
 
         interval = max(interval, 1.0)
 
-        console.print(f"[bold cyan]hirocli metrics live[/bold cyan]  (refresh every {interval:.1f}s, Ctrl+C to stop)\n")
+        console.print(f"[bold cyan]hiro metrics live[/bold cyan]  (refresh every {interval:.1f}s, Ctrl+C to stop)\n")
 
         def _make_display() -> Table | Text:
             try:

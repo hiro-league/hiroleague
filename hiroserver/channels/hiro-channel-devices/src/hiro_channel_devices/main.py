@@ -12,7 +12,7 @@ from hiro_commons.constants.storage import LOGS_DIR
 
 from .plugin import DevicesChannel
 
-_DEFAULT_LOG_DIR = str(Path.home() / ".hirocli" / LOGS_DIR)
+_DEFAULT_LOG_DIR = str(Path.home() / ".hiro" / LOGS_DIR)
 _DEFAULT_PLUGIN_WS = f"ws://{DEFAULT_LOCALHOST}:{PORT_RANGE_START + PORT_OFFSET_PLUGIN}"
 
 app = typer.Typer(
@@ -27,7 +27,7 @@ def run(
     hiro_ws: str = typer.Option(
         _DEFAULT_PLUGIN_WS,
         "--hiro-ws",
-        help="WebSocket URL of hirocli plugin server.",
+        help="WebSocket URL of Hiro plugin server.",
         envvar="HIRO_WS",
     ),
     log_dir: str = typer.Option(

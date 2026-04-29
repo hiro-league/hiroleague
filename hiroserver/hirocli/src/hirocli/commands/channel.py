@@ -51,7 +51,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         if not result.channels:
             console.print(
                 "[dim]No channels configured. "
-                "Run [bold]hirocli channel setup <name>[/bold] to add one.[/dim]"
+                "Run [bold]hiro channel setup <name>[/bold] to add one.[/dim]"
             )
             return
 
@@ -81,7 +81,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
     ) -> None:
         """Install a channel plugin via uv tool install."""
         pkg = package or f"hiro-channel-{name}"
-        log.info("hirocli channel install", channel=name, package=pkg, editable=editable)
+        log.info("hiro channel install", channel=name, package=pkg, editable=editable)
 
         console.print(f"Installing [bold]{pkg}[/bold]…")
         try:
@@ -97,7 +97,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         if result.output:
             console.print(result.output)
         console.print(f"[green]Installed {result.package}.[/green]")
-        console.print(f"  Next: [bold]hirocli channel setup {name}[/bold] to configure it.")
+        console.print(f"  Next: [bold]hiro channel setup {name}[/bold] to configure it.")
 
     @channel_app.command("setup")
     def channel_setup(
@@ -128,7 +128,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             default=default_cmd,
         )
 
-        log.info("hirocli channel setup", channel=name, command=resolved_command, enabled=enable)
+        log.info("hiro channel setup", channel=name, command=resolved_command, enabled=enable)
 
         try:
             result = ChannelSetupTool().execute(
@@ -149,7 +149,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         if result.workspace_dir:
             console.print(f"  workspace: [dim]{result.workspace_dir}[/dim]")
         console.print(
-            "\nRestart hirocli to activate: [bold]hirocli stop[/bold] then [bold]hirocli start[/bold]"
+            "\nRestart Hiro to activate: [bold]hiro stop[/bold] then [bold]hiro start[/bold]"
         )
 
     @channel_app.command("enable")
@@ -160,7 +160,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Enable a configured channel plugin."""
-        log.info("hirocli channel enable", channel=name)
+        log.info("hiro channel enable", channel=name)
 
         try:
             result = ChannelEnableTool().execute(channel_name=name, workspace=workspace)
@@ -177,7 +177,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Disable a channel plugin without removing its configuration."""
-        log.info("hirocli channel disable", channel=name)
+        log.info("hiro channel disable", channel=name)
 
         try:
             result = ChannelDisableTool().execute(channel_name=name, workspace=workspace)
@@ -198,7 +198,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         if not yes:
             typer.confirm(f"Remove configuration for channel '{name}'?", abort=True)
 
-        log.info("hirocli channel remove", channel=name)
+        log.info("hiro channel remove", channel=name)
 
         try:
             result = ChannelRemoveTool().execute(channel_name=name, workspace=workspace)
@@ -227,8 +227,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
                 data = json.loads(resp.read())
         except Exception as exc:
             console.print(
-                f"[red]Could not reach hirocli server at {url}: {exc}[/red]\n"
-                "[dim]Is hirocli running? Try [bold]hirocli status[/bold].[/dim]"
+                f"[red]Could not reach Hiro server at {url}: {exc}[/red]\n"
+                "[dim]Is Hiro running? Try [bold]hiro status[/bold].[/dim]"
             )
             raise typer.Exit(1)
 

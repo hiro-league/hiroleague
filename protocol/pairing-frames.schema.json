@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hiroleague.local/protocol/pairing-frames.schema.json",
+  "title": "GatewayPairingFrame",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "pairing_code", "device_public_key"],
+      "properties": {
+        "type": { "const": "pairing_request" },
+        "pairing_code": { "type": "string", "minLength": 1 },
+        "device_public_key": { "type": "string", "minLength": 1 },
+        "device_name": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "const": "pairing_pending" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "status"],
+      "properties": {
+        "type": { "const": "pairing_response" },
+        "request_id": { "type": "string" },
+        "status": { "enum": ["approved", "rejected"] },
+        "attestation": { "type": "object" },
+        "device_id": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  ]
+}

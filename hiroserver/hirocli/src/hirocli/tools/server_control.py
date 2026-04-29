@@ -52,7 +52,7 @@ def start_server(
     admin: bool = False,
     metrics: bool = False,
 ) -> int | None:
-    """Start the hirocli server for a workspace.
+    """Start the Hiro server for a workspace.
 
     Returns the child PID on success (``None`` for foreground mode, which
     blocks until the server exits).

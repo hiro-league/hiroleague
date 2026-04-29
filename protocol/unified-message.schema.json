@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hiroleague.local/protocol/unified-message.schema.json",
+  "title": "UnifiedMessage",
+  "type": "object",
+  "required": ["version", "message_type", "routing", "content"],
+  "properties": {
+    "version": { "const": "0.1" },
+    "message_type": {
+      "enum": ["message", "event", "request", "response", "stream"]
+    },
+    "request_id": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "routing": { "$ref": "#/$defs/MessageRouting" },
+    "content": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ContentItem" }
+    },
+    "event": {
+      "anyOf": [
+        { "$ref": "#/$defs/EventPayload" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "message_type": { "const": "message" } } },
+      "then": {
+        "properties": {
+          "content": { "minItems": 1 },
+          "event": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "event" } } },
+      "then": {
+        "required": ["event"],
+        "properties": {
+          "content": { "maxItems": 0 },
+          "event": { "$ref": "#/$defs/EventPayload" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "message_type": { "enum": ["request", "response"] } } },
+      "then": {
+        "required": ["request_id"],
+        "properties": {
+          "content": {
+            "minItems": 1,
+            "contains": {
+              "type": "object",
+              "required": ["content_type"],
+              "properties": {
+                "content_type": { "const": "json" }
+              }
+            }
+          },
+          "event": { "type": "null" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "MessageRouting": {
+      "type": "object",
+      "required": ["id", "channel", "direction", "sender_id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "channel": { "type": "string", "minLength": 1 },
+        "direction": { "enum": ["inbound", "outbound"] },
+        "sender_id": { "type": "string", "minLength": 1 },
+        "recipient_id": { "type": ["string", "null"] },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "ContentItem": {
+      "type": "object",
+      "required": ["content_type"],
+      "properties": {
+        "content_type": {
+          "enum": ["text", "json", "image", "audio", "video", "file", "location"]
+        },
+        "body": { "type": "string" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "EventPayload": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "message.received",
+            "message.transcribed",
+            "message.voiced",
+            "message.content_added"
+          ]
+        },
+        "ref_id": { "type": ["string", "null"] },
+        "data": { "type": "object" }
+      }
+    }
+  }
+}

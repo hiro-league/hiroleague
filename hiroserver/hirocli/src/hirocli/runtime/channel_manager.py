@@ -1,4 +1,4 @@
-"""ChannelManager — hirocli-side orchestrator for channel plugins.
+"""ChannelManager — Hiro-side orchestrator for channel plugins.
 
 Responsibilities:
   - Runs a local WebSocket server on plugin_port (default 18081).
@@ -50,8 +50,8 @@ from hiro_channel_sdk.models import UnifiedMessage
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
 from .. import rpc_helpers as rpc
 
-# Shared with CommunicationManager: same arrows, kind string, and content_hint for humans.
-from .communication_manager import _LOG_IN, _LOG_OUT, _comm_extras, _comm_kind
+# Shared comm-log helpers (arrows, kind, content_hint) — same vocabulary as CommunicationManager.
+from .comm_log import LOG_IN, LOG_OUT, comm_extras, comm_kind
 
 if TYPE_CHECKING:
     from .server_context import ServerContext
@@ -84,6 +84,19 @@ class ChannelManager:
         self._subprocesses: dict[str, subprocess.Popen[bytes]] = {}
         self._host = DEFAULT_LOCALHOST
         self._port = ctx.config.plugin_port
+
+    # Late-binding setters: let the bootstrap build ChannelManager first (so it
+    # can be passed as the OutboundSink to CommunicationManager), then install
+    # the upstream callbacks once both managers exist.
+    def set_message_handler(
+        self, handler: Callable[[dict[str, Any]], Awaitable[None]]
+    ) -> None:
+        self._on_message = handler
+
+    def set_event_handler(
+        self, handler: Callable[[str, dict[str, Any]], Awaitable[None]]
+    ) -> None:
+        self._on_event = handler
 
     # ------------------------------------------------------------------
     # Main coroutine
@@ -151,7 +164,7 @@ class ChannelManager:
             log.error(
                 "❌ Channel command not found",
                 cmd=cmd[0],
-                hint=f"hirocli channel install {ch.name}",
+                hint=f"hiro channel install {ch.name}",
             )
         except Exception as exc:
             log.error(
@@ -269,10 +282,10 @@ class ChannelManager:
                         # Reuse comm log helpers when params are a valid UnifiedMessage (human-first kind + content_hint).
                         try:
                             um = UnifiedMessage.model_validate(params)
-                            kind = _comm_kind(um)
+                            kind = comm_kind(um)
                             log.info(
-                                f"{_LOG_IN} Received — {device} · {kind}",
-                                **_comm_extras(
+                                f"{LOG_IN} Received — {device} · {kind}",
+                                **comm_extras(
                                     um,
                                     channel=channel_name,
                                     msg_id=um.routing.id,
@@ -281,7 +294,7 @@ class ChannelManager:
                         except Exception:
                             mt = params.get("message_type", "?")
                             log.info(
-                                f"{_LOG_IN} Received — {device} · {mt}",
+                                f"{LOG_IN} Received — {device} · {mt}",
                                 channel=channel_name,
                             )
                         if self._on_message:
@@ -289,7 +302,7 @@ class ChannelManager:
                                 await self._on_message(params)
                             except Exception as exc:
                                 log.error(
-                                    f"❌ {_LOG_IN} on_message handler error — {device}",
+                                    f"❌ {LOG_IN} on_message handler error — {device}",
                                     channel=channel_name,
                                     error=str(exc),
                                     exc_info=True,
@@ -311,7 +324,7 @@ class ChannelManager:
                         if peer:
                             log_kwargs["device"] = peer
                         log.info(
-                            f"{_LOG_IN} Channel event — {ev}",
+                            f"{LOG_IN} Channel event — {ev}",
                             **log_kwargs,
                         )
                         if self._on_event and isinstance(event_name, str):
@@ -377,7 +390,7 @@ class ChannelManager:
             await self.configure_channel(channel_name, payload)
 
     # ------------------------------------------------------------------
-    # Outbound API (hirocli → plugin)
+    # Outbound API (Hiro → plugin)
     # ------------------------------------------------------------------
 
     async def send_to_channel(
@@ -386,7 +399,7 @@ class ChannelManager:
         ch = self._channels.get(channel_name)
         if ch is None:
             log.warning(
-                f"⚠️ {_LOG_OUT} Cannot send to ({channel_name}) — not connected"
+                f"⚠️ {LOG_OUT} Cannot send to ({channel_name}) — not connected"
             )
             return
         await ch.ws.send(rpc.build_notification(METHOD_SEND, message))
@@ -397,12 +410,12 @@ class ChannelManager:
         try:
             um = UnifiedMessage.model_validate(message)
             log.info(
-                f"{_LOG_OUT} Sent — ({channel_name}) · {device} · {_comm_kind(um)}",
-                **_comm_extras(um, msg_id=msg_id),
+                f"{LOG_OUT} Sent — ({channel_name}) · {device} · {comm_kind(um)}",
+                **comm_extras(um, msg_id=msg_id),
             )
         except Exception:
             log.info(
-                f"{_LOG_OUT} Sent — ({channel_name}) · {device}",
+                f"{LOG_OUT} Sent — ({channel_name}) · {device}",
                 msg_id=msg_id,
             )
 
@@ -412,7 +425,7 @@ class ChannelManager:
                 await ch.ws.send(rpc.build_notification(METHOD_SEND, message))
             except Exception as exc:
                 log.warning(
-                    f"⚠️ {_LOG_OUT} Broadcast failed to ({ch.name})",
+                    f"⚠️ {LOG_OUT} Broadcast failed to ({ch.name})",
                     error=str(exc),
                 )
 
@@ -432,7 +445,7 @@ class ChannelManager:
         ch = self._channels.get(channel_name)
         if ch is None:
             log.warning(
-                f"⚠️ {_LOG_OUT} Cannot send event to ({channel_name}) — not connected"
+                f"⚠️ {LOG_OUT} Cannot send event to ({channel_name}) — not connected"
             )
             return
         await ch.ws.send(

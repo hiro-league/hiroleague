@@ -1,0 +1,19 @@
+{
+  "version": "0.1",
+  "message_type": "event",
+  "routing": {
+    "id": "evt-received-1",
+    "channel": "devices",
+    "direction": "outbound",
+    "sender_id": "server",
+    "recipient_id": "device-1",
+    "timestamp": "2026-04-28T18:00:02Z",
+    "metadata": {}
+  },
+  "content": [],
+  "event": {
+    "type": "message.received",
+    "ref_id": "msg-text-1",
+    "data": {}
+  }
+}

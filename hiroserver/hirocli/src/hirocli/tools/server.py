@@ -171,7 +171,7 @@ class SetupTool(Tool):
 
 class StartTool(Tool):
     name = "start"
-    description = "Start the hirocli server for a workspace (background by default)"
+    description = "Start the Hiro server for a workspace (background by default)"
     params = {
         "workspace": ToolParam(str, "Workspace name or id to start", required=False),
         "foreground": ToolParam(
@@ -203,7 +203,7 @@ class StartTool(Tool):
         if not (workspace_path / "config.json").exists():
             raise ValueError(
                 f"Workspace '{entry.name}' is not configured. "
-                f"Run 'hirocli setup --workspace {entry.name}' first."
+                f"Run 'hiro workspace setup {entry.name}' first."
             )
 
         config = load_config(workspace_path)
@@ -239,7 +239,7 @@ class StartTool(Tool):
 
 class StopTool(Tool):
     name = "stop"
-    description = "Stop the running hirocli server for a workspace"
+    description = "Stop the running Hiro server for a workspace"
     params = {
         "workspace": ToolParam(str, "Workspace name or id to stop", required=False),
     }
@@ -254,7 +254,7 @@ class StopTool(Tool):
 
 class RestartTool(Tool):
     name = "restart"
-    description = "Gracefully restart the hirocli server for a workspace"
+    description = "Gracefully restart the Hiro server for a workspace"
     params = {
         "workspace": ToolParam(str, "Workspace name or id to restart", required=False),
         "foreground": ToolParam(
@@ -286,7 +286,7 @@ class RestartTool(Tool):
         if not (workspace_path / "config.json").exists():
             raise ValueError(
                 f"Workspace '{entry.name}' is not configured. "
-                f"Run 'hirocli setup --workspace {entry.name}' first."
+                f"Run 'hiro workspace setup {entry.name}' first."
             )
 
         config = load_config(workspace_path)
@@ -356,7 +356,7 @@ class StatusTool(Tool):
         for ws_id in ids:
             ws_entry = registry.workspaces[ws_id]
             ws_path = Path(ws_entry.path)
-            pid = read_pid(ws_path, "hirocli.pid")
+            pid = read_pid(ws_path, PID_FILENAME)
             running = is_running(pid)
             state = load_state(ws_path)
             config = load_config(ws_path)

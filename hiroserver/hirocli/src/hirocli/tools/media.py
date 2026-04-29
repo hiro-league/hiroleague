@@ -79,7 +79,7 @@ class TranscribeTool(Tool):
         if not service.is_available():
             raise RuntimeError(
                 "No STT providers are available for this workspace. "
-                "Configure a provider: hirocli provider add openai (or google)."
+                "Configure a provider: hiro provider add openai (or google)."
             )
 
         transcript = service.transcribe_sync(source, model=model) if model else service.transcribe_sync(source)
@@ -132,7 +132,7 @@ class DescribeImageTool(Tool):
             raise RuntimeError(
                 "Vision service is not available for this workspace. "
                 "Configure the vision model's provider (see IMAGE_VISION_MODEL) via "
-                "`hirocli provider add`."
+                "`hiro provider add`."
             )
 
         description = service.describe_sync(source, prompt)

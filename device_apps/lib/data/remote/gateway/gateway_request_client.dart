@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'gateway_contract.dart';
 import 'unified_message.dart';
 
 /// Sends request-type [UnifiedMessage]s and correlates responses by request_id.
@@ -11,7 +12,7 @@ import 'unified_message.dart';
 ///   // result is {"status": "ok", "data": {...}}
 class GatewayRequestClient {
   GatewayRequestClient({required void Function(Map<String, dynamic>) sendFn})
-      : _sendFn = sendFn;
+    : _sendFn = sendFn;
 
   final void Function(Map<String, dynamic>) _sendFn;
   final _pending = <String, Completer<Map<String, dynamic>>>{};
@@ -28,22 +29,23 @@ class GatewayRequestClient {
     Map<String, dynamic> params = const {},
     Duration timeout = _defaultTimeout,
   }) {
-    final requestId = 'req_${++_counter}_${DateTime.now().millisecondsSinceEpoch}';
+    final requestId =
+        'req_${++_counter}_${DateTime.now().millisecondsSinceEpoch}';
     final completer = Completer<Map<String, dynamic>>();
     _pending[requestId] = completer;
 
     final msg = UnifiedMessage(
-      messageType: 'request',
+      messageType: UnifiedMessageWire.typeRequest,
       requestId: requestId,
       routing: MessageRouting(
         id: requestId,
         channel: 'devices',
-        direction: 'inbound',
+        direction: UnifiedMessageWire.directionInbound,
         senderId: 'flutter',
       ),
       content: [
         ContentItem(
-          contentType: 'json',
+          contentType: ContentWire.json,
           body: jsonEncode({'method': method, 'params': params}),
         ),
       ],
@@ -51,10 +53,13 @@ class GatewayRequestClient {
 
     _sendFn(msg.toJson());
 
-    return completer.future.timeout(timeout, onTimeout: () {
-      _pending.remove(requestId);
-      throw TimeoutException('Request $method timed out', timeout);
-    });
+    return completer.future.timeout(
+      timeout,
+      onTimeout: () {
+        _pending.remove(requestId);
+        throw TimeoutException('Request $method timed out', timeout);
+      },
+    );
   }
 
   /// Complete a pending request by request ID and raw JSON body string.
@@ -86,13 +91,15 @@ class GatewayRequestClient {
     if (!_pending.containsKey(rid)) return false;
 
     for (final item in msg.content) {
-      if (item.contentType == 'json') {
+      if (item.contentType == ContentWire.json) {
         return completeRequest(rid, item.body);
       }
     }
 
     final completer = _pending.remove(rid);
-    completer?.completeError(const FormatException('Response has no JSON content'));
+    completer?.completeError(
+      const FormatException('Response has no JSON content'),
+    );
     return true;
   }
 

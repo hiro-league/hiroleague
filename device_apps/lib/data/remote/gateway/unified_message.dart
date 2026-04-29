@@ -10,6 +10,8 @@
 /// constructed, ensuring sender and receiver stay in sync.
 library;
 
+import 'gateway_contract.dart';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -44,11 +46,7 @@ Map<String, dynamic> _asStringMap(dynamic value) {
 /// [data] carries event-specific values (e.g. `{"transcript": "..."}` for
 /// `"message.transcribed"`).
 class EventPayload {
-  const EventPayload({
-    required this.type,
-    this.refId,
-    this.data = const {},
-  });
+  const EventPayload({required this.type, this.refId, this.data = const {}});
 
   final String type;
   final String? refId;
@@ -64,10 +62,10 @@ class EventPayload {
   }
 
   Map<String, dynamic> toJson() => {
-        'type': type,
-        if (refId != null) 'ref_id': refId,
-        'data': data,
-      };
+    'type': type,
+    if (refId != null) 'ref_id': refId,
+    'data': data,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,10 +97,10 @@ class ContentItem {
   }
 
   Map<String, dynamic> toJson() => {
-        'content_type': contentType,
-        'body': body,
-        'metadata': metadata,
-      };
+    'content_type': contentType,
+    'body': body,
+    'metadata': metadata,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -154,14 +152,14 @@ class MessageRouting {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'channel': channel,
-        'direction': direction,
-        'sender_id': senderId,
-        if (recipientId != null) 'recipient_id': recipientId,
-        if (timestamp != null) 'timestamp': timestamp,
-        'metadata': metadata,
-      };
+    'id': id,
+    'channel': channel,
+    'direction': direction,
+    'sender_id': senderId,
+    if (recipientId != null) 'recipient_id': recipientId,
+    if (timestamp != null) 'timestamp': timestamp,
+    'metadata': metadata,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +179,8 @@ class MessageRouting {
 /// See architecture/unified-message in mintdocs for full field reference.
 class UnifiedMessage {
   const UnifiedMessage({
-    this.version = '0.1',
-    this.messageType = 'message',
+    this.version = UnifiedMessageWire.version,
+    this.messageType = UnifiedMessageWire.typeMessage,
     this.requestId,
     required this.routing,
     required this.content,
@@ -235,27 +233,90 @@ class UnifiedMessage {
       messageType: json['message_type'] as String,
       requestId: json['request_id'] as String?,
       routing: MessageRouting.fromJson(Map<String, dynamic>.from(routingRaw)),
-      content: contentRaw.indexed
-          .map((entry) {
-            final (i, item) = entry;
-            if (item is! Map) {
-              throw FormatException(
-                '$ctx: content[$i] must be a JSON object, got ${item.runtimeType}',
-              );
-            }
-            return ContentItem.fromJson(Map<String, dynamic>.from(item));
-          })
-          .toList(),
+      content: contentRaw.indexed.map((entry) {
+        final (i, item) = entry;
+        if (item is! Map) {
+          throw FormatException(
+            '$ctx: content[$i] must be a JSON object, got ${item.runtimeType}',
+          );
+        }
+        return ContentItem.fromJson(Map<String, dynamic>.from(item));
+      }).toList(),
       event: event,
-    );
+    ).._validateSemantics();
   }
 
-  Map<String, dynamic> toJson() => {
-        'version': version,
-        'message_type': messageType,
-        if (requestId != null) 'request_id': requestId,
-        'routing': routing.toJson(),
-        'content': content.map((c) => c.toJson()).toList(),
-        if (event != null) 'event': event!.toJson(),
-      };
+  Map<String, dynamic> toJson() {
+    _validateSemantics();
+    return {
+      'version': version,
+      'message_type': messageType,
+      if (requestId != null) 'request_id': requestId,
+      'routing': routing.toJson(),
+      'content': content.map((c) => c.toJson()).toList(),
+      if (event != null) 'event': event!.toJson(),
+    };
+  }
+
+  void _validateSemantics() {
+    const ctx = 'UnifiedMessage';
+    if (version != UnifiedMessageWire.version) {
+      throw FormatException(
+        '$ctx: unsupported version "$version", expected "${UnifiedMessageWire.version}"',
+      );
+    }
+
+    switch (messageType) {
+      case UnifiedMessageWire.typeMessage:
+        if (content.isEmpty) {
+          throw const FormatException(
+            '$ctx: message_type "message" requires at least one content item',
+          );
+        }
+        if (event != null) {
+          throw const FormatException(
+            '$ctx: message_type "message" must not carry an event payload',
+          );
+        }
+        break;
+
+      case UnifiedMessageWire.typeEvent:
+        if (event == null) {
+          throw const FormatException(
+            '$ctx: message_type "event" requires an event payload',
+          );
+        }
+        if (content.isNotEmpty) {
+          throw const FormatException(
+            '$ctx: message_type "event" must not carry content items',
+          );
+        }
+        break;
+
+      case UnifiedMessageWire.typeRequest:
+      case UnifiedMessageWire.typeResponse:
+        if (requestId == null || requestId!.isEmpty) {
+          throw FormatException(
+            '$ctx: message_type "$messageType" requires request_id',
+          );
+        }
+        if (event != null) {
+          throw FormatException(
+            '$ctx: message_type "$messageType" must not carry an event payload',
+          );
+        }
+        if (!content.any((item) => item.contentType == ContentWire.json)) {
+          throw FormatException(
+            '$ctx: message_type "$messageType" requires a json content item',
+          );
+        }
+        break;
+
+      case UnifiedMessageWire.typeStream:
+        break;
+
+      default:
+        throw FormatException('$ctx: unknown message_type "$messageType"');
+    }
+  }
 }

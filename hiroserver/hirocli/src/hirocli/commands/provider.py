@@ -41,7 +41,7 @@ def _mask_env_value(value: str, tail: int = 4) -> str:
 
 
 def print_provider_summary_table(console: Console, *, workspace: str | None) -> None:
-    """Print the same configured-provider table as ``hirocli provider list``."""
+    """Print the same configured-provider table as ``hiro provider list``."""
     result = ProviderListConfiguredTool().execute(workspace=workspace)
     if not result.providers:
         console.print("[dim]No providers configured for this workspace.[/dim]")
@@ -259,7 +259,7 @@ def interactive_credential_provisioning(
 ) -> int:
     """Interactive import from environment + manual API key entry; prints provider summary.
 
-    Uses one ``CredentialStore`` for this flow. When ``hirocli setup`` runs interactively,
+    Uses one ``CredentialStore`` for this flow. When ``hiro workspace setup`` runs interactively,
     ``SetupTool`` skips ``import_detected_env_keys`` so the same keys are not imported twice.
 
     Returns the number of configured providers in the store after the flow.
@@ -573,7 +573,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
 
 
 def register_models_command(app: typer.Typer, console: Console) -> None:
-    """Register top-level ``hirocli models`` (available models in current workspace)."""
+    """Register top-level ``hiro models`` (available models in current workspace)."""
 
     @app.command("models")
     def models_command(

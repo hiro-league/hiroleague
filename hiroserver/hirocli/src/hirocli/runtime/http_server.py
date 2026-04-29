@@ -1,4 +1,4 @@
-"""FastAPI HTTP server for hirocli.
+"""FastAPI HTTP server for Hiro.
 
 Runs concurrently with the WS client inside the same asyncio event loop.
 Endpoints:

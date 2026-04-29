@@ -2,7 +2,7 @@
 
 Authoritative source for the JSON-RPC wire protocol, WebSocket close codes,
 auth roles, message content types, and reconnect policy used by all Hiro
-channel packages and the hirocli/hirogateway servers.
+channel packages and the Hiro/Gateway servers.
 """
 
 from __future__ import annotations

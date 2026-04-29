@@ -1,0 +1,23 @@
+{
+  "version": "0.1",
+  "message_type": "event",
+  "routing": {
+    "id": "evt-voiced-1",
+    "channel": "devices",
+    "direction": "outbound",
+    "sender_id": "server",
+    "recipient_id": "device-1",
+    "timestamp": "2026-04-28T18:00:04Z",
+    "metadata": {}
+  },
+  "content": [],
+  "event": {
+    "type": "message.voiced",
+    "ref_id": "msg-text-1",
+    "data": {
+      "audio": "UklGRg==",
+      "mime_type": "audio/mp3",
+      "duration_ms": 900
+    }
+  }
+}

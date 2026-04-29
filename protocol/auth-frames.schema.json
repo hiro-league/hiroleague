@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hiroleague.local/protocol/auth-frames.schema.json",
+  "title": "GatewayAuthFrame",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "nonce"],
+      "properties": {
+        "type": { "const": "auth_challenge" },
+        "nonce": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "auth_mode", "nonce_signature"],
+      "properties": {
+        "type": { "const": "auth_response" },
+        "auth_mode": { "enum": ["desktop", "device"] },
+        "device_id": { "type": "string" },
+        "attestation": { "type": "object" },
+        "nonce_signature": { "type": "string", "minLength": 1 },
+        "device_name": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "device_id"],
+      "properties": {
+        "type": { "const": "auth_ok" },
+        "device_id": { "type": "string", "minLength": 1 }
+      }
+    }
+  ]
+}

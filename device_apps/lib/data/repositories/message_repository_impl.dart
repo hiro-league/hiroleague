@@ -10,6 +10,7 @@ import '../../application/auth/auth_notifier.dart';
 import '../../application/auth/auth_state.dart';
 import '../../application/gateway/gateway_notifier.dart';
 import '../../data/remote/gateway/gateway_inbound_frame.dart';
+import '../../data/remote/gateway/gateway_contract.dart';
 import '../../data/remote/gateway/unified_message.dart';
 import '../../domain/models/message/audio_attachment.dart';
 import '../../domain/models/message/message.dart';
@@ -32,10 +33,10 @@ class MessageRepositoryImpl implements MessageRepository {
     required Stream<GatewayInboundFrame> frameStream,
     required String? Function() myDeviceIdGetter,
     required AudioStorageService audioStorage,
-  })  : _messagesDao = messagesDao,
-        _channelsDao = channelsDao,
-        _myDeviceIdGetter = myDeviceIdGetter,
-        _audioStorage = audioStorage {
+  }) : _messagesDao = messagesDao,
+       _channelsDao = channelsDao,
+       _myDeviceIdGetter = myDeviceIdGetter,
+       _audioStorage = audioStorage {
     _sub = frameStream.listen(_onInboundFrame);
   }
 
@@ -90,10 +91,10 @@ class MessageRepositoryImpl implements MessageRepository {
 
   Future<void> _onInboundFrame(GatewayInboundFrame frame) async {
     final version = frame.payload['version']?.toString();
-    if (version != '0.1') {
+    if (version != UnifiedMessageWire.version) {
       _log.warning(
         'Dropping frame — unsupported UnifiedMessage version',
-        fields: {'version': version, 'expected': '0.1'},
+        fields: {'version': version, 'expected': UnifiedMessageWire.version},
       );
       return;
     }
@@ -110,15 +111,15 @@ class MessageRepositoryImpl implements MessageRepository {
     }
 
     // Response frames are routed in GatewayNotifier before broadcast — skip here
-    if (msg.messageType == 'response') return;
+    if (msg.messageType == UnifiedMessageWire.typeResponse) return;
 
     // Handle event frames (delivery acks, transcription results).
-    if (msg.messageType == 'event' && msg.event != null) {
+    if (msg.messageType == UnifiedMessageWire.typeEvent && msg.event != null) {
       await _handleEvent(msg);
       return;
     }
 
-    if (msg.messageType != 'message') {
+    if (msg.messageType != UnifiedMessageWire.typeMessage) {
       _log.debug(
         'Ignoring non-message frame',
         fields: {'message_type': msg.messageType, 'id': msg.routing.id},
@@ -127,10 +128,12 @@ class MessageRepositoryImpl implements MessageRepository {
     }
 
     // Route to the appropriate content handler.
-    final audioItem =
-        msg.content.where((c) => c.contentType == 'audio').firstOrNull;
-    final textItem =
-        msg.content.where((c) => c.contentType == 'text').firstOrNull;
+    final audioItem = msg.content
+        .where((c) => c.contentType == ContentWire.audio)
+        .firstOrNull;
+    final textItem = msg.content
+        .where((c) => c.contentType == ContentWire.text)
+        .firstOrNull;
 
     if (audioItem != null) {
       await _handleInboundAudio(msg, audioItem);
@@ -157,12 +160,12 @@ class MessageRepositoryImpl implements MessageRepository {
     if (refId == null || refId.isEmpty) return;
 
     switch (event.type) {
-      case 'message.received':
+      case EventWire.messageReceived:
         // Server acknowledged our message — double gray checks.
         await _messagesDao.updateStatus(refId, MessageStatus.delivered.name);
         _log.debug('Message marked delivered', fields: {'ref_id': refId});
 
-      case 'message.transcribed':
+      case EventWire.messageTranscribed:
         // Server finished transcribing — double blue checks + store transcript.
         await _messagesDao.updateStatus(refId, MessageStatus.read.name);
         final transcript = event.data['transcript'] as String?;
@@ -171,8 +174,7 @@ class MessageRepositoryImpl implements MessageRepository {
           if (row != null) {
             // Merge transcript into existing metadata JSON.
             final existing = row.metadata != null
-                ? Map<String, dynamic>.from(
-                    jsonDecode(row.metadata!) as Map)
+                ? Map<String, dynamic>.from(jsonDecode(row.metadata!) as Map)
                 : <String, dynamic>{};
             existing['transcript'] = transcript;
             await _messagesDao.updateMetadata(refId, jsonEncode(existing));
@@ -180,13 +182,11 @@ class MessageRepositoryImpl implements MessageRepository {
         }
         _log.debug('Message transcribed', fields: {'ref_id': refId});
 
-      case 'message.voiced':
+      case EventWire.messageVoiced:
         // Server generated a voice reply for a text message (text → audio modality mirror).
         final audioB64 = event.data['audio'] as String?;
-        final mimeType =
-            event.data['mime_type'] as String? ?? 'audio/mp3';
-        final durationMs =
-            (event.data['duration_ms'] as num?)?.toInt() ?? 0;
+        final mimeType = event.data['mime_type'] as String? ?? 'audio/mp3';
+        final durationMs = (event.data['duration_ms'] as num?)?.toInt() ?? 0;
 
         if (audioB64 != null && audioB64.isNotEmpty) {
           try {
@@ -200,8 +200,7 @@ class MessageRepositoryImpl implements MessageRepository {
             final row = await _messagesDao.getById(refId);
             if (row != null) {
               final existing = row.metadata != null
-                  ? Map<String, dynamic>.from(
-                      jsonDecode(row.metadata!) as Map)
+                  ? Map<String, dynamic>.from(jsonDecode(row.metadata!) as Map)
                   : <String, dynamic>{};
               // Nested "voice" object — same keys as audio message metadata.
               existing['voice'] = {
@@ -209,8 +208,7 @@ class MessageRepositoryImpl implements MessageRepository {
                 'mime_type': mimeType,
                 'local_path': localPath,
               };
-              await _messagesDao.updateMetadata(
-                  refId, jsonEncode(existing));
+              await _messagesDao.updateMetadata(refId, jsonEncode(existing));
             }
           } catch (e) {
             _log.warning(
@@ -239,7 +237,8 @@ class MessageRepositoryImpl implements MessageRepository {
   ) async {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
-    final channelId = msg.routing.metadata['channel_id']?.toString() ??
+    final channelId =
+        msg.routing.metadata[MetadataWire.channelId]?.toString() ??
         await _resolveDefaultChannelId();
     final timestamp = DateTime.now().toUtc();
     final myDeviceId = _myDeviceIdGetter();
@@ -257,14 +256,16 @@ class MessageRepositoryImpl implements MessageRepository {
           mimeType: audioItem.metadata['mime_type'] as String? ?? 'audio/m4a',
         );
       } catch (e) {
-        _log.warning('Failed to save inbound audio', fields: {'error': e.toString()});
+        _log.warning(
+          'Failed to save inbound audio',
+          fields: {'error': e.toString()},
+        );
       }
     }
 
     final durationMs =
         (audioItem.metadata['duration_ms'] as num?)?.toInt() ?? 0;
-    final mimeType =
-        audioItem.metadata['mime_type'] as String? ?? 'audio/m4a';
+    final mimeType = audioItem.metadata['mime_type'] as String? ?? 'audio/m4a';
 
     final metadataJson = jsonEncode({
       'duration_ms': durationMs,
@@ -277,7 +278,7 @@ class MessageRepositoryImpl implements MessageRepository {
         id: id,
         channelId: channelId,
         senderId: senderId,
-        contentType: 'audio',
+        contentType: ContentWire.audio,
         body: '',
         timestampMs: timestamp.millisecondsSinceEpoch,
         status: MessageStatus.delivered.name,
@@ -299,7 +300,8 @@ class MessageRepositoryImpl implements MessageRepository {
   ) async {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
-    final channelId = msg.routing.metadata['channel_id']?.toString() ??
+    final channelId =
+        msg.routing.metadata[MetadataWire.channelId]?.toString() ??
         await _resolveDefaultChannelId();
     final timestamp = DateTime.now().toUtc();
     final myDeviceId = _myDeviceIdGetter();
@@ -333,13 +335,15 @@ class MessageRepositoryImpl implements MessageRepository {
   }
 
   Future<void> _touchChannelTimestamp(
-      String channelId, DateTime timestamp) async {
+    String channelId,
+    DateTime timestamp,
+  ) async {
     final existingChannel = await _channelsDao.getById(channelId);
     if (existingChannel != null) {
       await _channelsDao.insertOrUpdate(
-        existingChannel.toCompanion(true).copyWith(
-              lastMessageAt: Value(timestamp.millisecondsSinceEpoch),
-            ),
+        existingChannel
+            .toCompanion(true)
+            .copyWith(lastMessageAt: Value(timestamp.millisecondsSinceEpoch)),
       );
     } else {
       _log.warning('Received message for unknown channel: $channelId');
@@ -348,8 +352,8 @@ class MessageRepositoryImpl implements MessageRepository {
 
   Message _rowToMessage(MessageRecord row) {
     final MessageContent content = switch (row.contentType) {
-      'text' => _parseTextContent(row),
-      'audio' => _parseAudioContent(row),
+      ContentWire.text => _parseTextContent(row),
+      ContentWire.audio => _parseAudioContent(row),
       final other => UnsupportedContent(other),
     };
     return Message(
@@ -357,8 +361,10 @@ class MessageRepositoryImpl implements MessageRepository {
       channelId: row.channelId,
       senderId: row.senderId,
       content: content,
-      timestamp:
-          DateTime.fromMillisecondsSinceEpoch(row.timestampMs, isUtc: true),
+      timestamp: DateTime.fromMillisecondsSinceEpoch(
+        row.timestampMs,
+        isUtc: true,
+      ),
       status: MessageStatus.fromName(row.status),
       isOutbound: row.isOutbound,
     );
@@ -384,8 +390,9 @@ class MessageRepositoryImpl implements MessageRepository {
       final voiceMeta = meta['voice'] as Map<String, dynamic>?;
       return TextContent(
         row.body,
-        voiceReply:
-            voiceMeta != null ? _audioAttachmentFromMap(voiceMeta) : null,
+        voiceReply: voiceMeta != null
+            ? _audioAttachmentFromMap(voiceMeta)
+            : null,
       );
     } catch (_) {
       return TextContent(row.body);

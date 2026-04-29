@@ -1,4 +1,4 @@
-"""Runtime server components for hirocli.
+"""Runtime server components for Hiro.
 
 All runtime modules receive a shared ``ServerContext`` (defined in
 ``server_context.py``) instead of individual workspace_path / config

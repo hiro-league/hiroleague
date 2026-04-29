@@ -1,6 +1,6 @@
-"""Minimal JSON-RPC 2.0 helpers for hirocli's plugin server side.
+"""Minimal JSON-RPC 2.0 helpers for Hiro's plugin server side.
 
-Kept as a standalone module so hirocli does not need to import hiro-channel-sdk.
+Kept as a standalone module so Hiro does not need to import hiro-channel-sdk.
 """
 
 from __future__ import annotations

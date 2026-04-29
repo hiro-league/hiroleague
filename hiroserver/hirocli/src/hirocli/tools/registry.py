@@ -1,4 +1,4 @@
-"""ToolRegistry — central dispatch for all hirocli tools.
+"""ToolRegistry — central dispatch for all Hiro tools.
 
 The registry holds one instance of every registered Tool.  Any caller —
 HTTP /invoke, future web UI, tests — goes through registry.invoke() instead

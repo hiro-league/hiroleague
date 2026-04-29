@@ -33,7 +33,7 @@ AUTH_TIMEOUT_SECONDS = 15.0
 
 
 def _default_master_key_path() -> Path:
-    return Path.home() / ".hirocli" / "master_key.pem"
+    return Path.home() / ".hiro" / "master_key.pem"
 
 
 class DevicesChannel(ChannelPlugin):

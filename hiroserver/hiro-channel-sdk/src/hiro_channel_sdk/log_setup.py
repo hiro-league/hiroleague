@@ -29,7 +29,7 @@ def init(
         Root log level string (``"INFO"``, ``"DEBUG"``, …).
     foreground:
         If *True*, colourised output is also written to stdout.
-        Use for ``hirocli start --foreground`` and direct gateway runs.
+        Use for ``hiro start --foreground`` and direct gateway runs.
     module_log_levels:
         Optional per-module level overrides, e.g.
         ``{"AGENT": "DEBUG", "COMM": "WARNING"}``.

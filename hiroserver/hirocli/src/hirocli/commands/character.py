@@ -117,7 +117,7 @@ def register(character_app: typer.Typer, console: Console) -> None:
         extras_json: Optional[str] = typer.Option(None, "--extras-json", help="JSON object."),
     ) -> None:
         """Create a new character."""
-        log.info("hirocli character create", character_id=character_id)
+        log.info("hiro character create", character_id=character_id)
         try:
             result = CharacterCreateTool().execute(
                 character_id=character_id,
@@ -202,7 +202,7 @@ def register(character_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Delete a character (not allowed for the default)."""
-        log.info("hirocli character delete", character_id=character_id)
+        log.info("hiro character delete", character_id=character_id)
         try:
             result = CharacterDeleteTool().execute(character_id=character_id, workspace=workspace)
         except WorkspaceError as exc:

@@ -1,7 +1,7 @@
 """Public service layer for hirogateway instance lifecycle management.
 
 All real business logic lives here.  The CLI in main.py and external callers
-(e.g. hirocli tools) both use these functions — no one reaches into main.py
+(e.g. Hiro tools) both use these functions — no one reaches into main.py
 internals directly.
 """
 
@@ -111,7 +111,7 @@ def _validate_desktop_public_key(key_b64: str) -> None:
     except Exception as exc:
         raise GatewayInstanceError(
             f"Invalid desktop public key: {exc}. "
-            "Provide the base64-encoded Ed25519 public key from 'hirocli status'."
+            "Provide the base64-encoded Ed25519 public key from 'hiro status'."
         ) from exc
 
 

@@ -29,7 +29,7 @@ from .db import db_path, ensure_db
 
 logger = logging.getLogger(__name__)
 
-# Packaged defaults live next to the hirocli package (see characters/hiro/).
+# Packaged defaults live next to the internal package (see characters/hiro/).
 _HIROCLI_ROOT = Path(__file__).resolve().parent.parent
 _PACKAGED_HIRO_DIR = _HIROCLI_ROOT / "characters" / DEFAULT_CHARACTER_ID
 

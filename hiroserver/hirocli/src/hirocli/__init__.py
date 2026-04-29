@@ -1,3 +1,3 @@
-"""hirocli — Hiro desktop server."""
+"""Hiro desktop server package."""
 
 __version__ = "0.1.0"

@@ -1,9 +1,9 @@
-"""Workspace registry for hirocli.
+"""Workspace registry for Hiro.
 
 Registry location (per platform):
-  Windows:  %LOCALAPPDATA%\\hirocli\\registry.json
-  macOS:    ~/Library/Application Support/hirocli/registry.json
-  Linux:    ~/.local/share/hirocli/registry.json
+  Windows:  %LOCALAPPDATA%\\hiro\\registry.json
+  macOS:    ~/Library/Application Support/hiro/registry.json
+  Linux:    ~/.local/share/hiro/registry.json
 
 Each workspace is a self-contained directory holding config, keys, channels,
 logs, and PID files.
@@ -156,7 +156,7 @@ def resolve_workspace(identifier: str | None = None) -> tuple[WorkspaceEntry, Wo
 
     if not registry.workspaces:
         raise WorkspaceError(
-            "No workspaces configured. Run 'hirocli workspace create' first."
+            "No workspaces configured. Run 'hiro workspace create' first."
         )
 
     target = identifier or os.environ.get(ENV_WORKSPACE) or registry.default_workspace

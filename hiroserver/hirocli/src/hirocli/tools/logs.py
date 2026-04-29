@@ -2,7 +2,7 @@
 
 These tools read CSV log files written by log_setup.init() / Logger.open_log_dir().
 They are available to the AI agent (for natural-language log queries),
-the CLI (hirocli logs search/tail), and the admin UI (direct import).
+the CLI (`hiro logs search/tail`), and the admin UI (direct import).
 
 CSV log format: timestamp,level,module,message,extra
 timestamp is a Unix epoch float (e.g. 1742312005.437821).

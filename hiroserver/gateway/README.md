@@ -2,7 +2,7 @@
 
 **Hiro Gateway** — WebSocket relay server.
 
-Accepts connections from `hirocli` desktop clients and online apps, performs
+Accepts connections from Hiro desktop servers and online apps, performs
 challenge/response authentication, and relays messages between authenticated
 devices identified by `device_id`.
 

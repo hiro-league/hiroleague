@@ -8,6 +8,7 @@ import '../../../core/errors/app_exception.dart';
 import '../../../core/utils/logger.dart';
 import '../../../domain/models/identity/device_identity.dart';
 import '../../../domain/services/crypto_service.dart';
+import 'gateway_contract.dart';
 
 /// Result of a successful auth handshake.
 class GatewayAuthResult {
@@ -37,7 +38,9 @@ class GatewayAuthHandler {
     required DeviceIdentity identity,
   }) async {
     if (identity.attestation == null) {
-      throw const AuthException('Cannot authenticate: device has no attestation. Pair first.');
+      throw const AuthException(
+        'Cannot authenticate: device has no attestation. Pair first.',
+      );
     }
 
     // 1 — Receive auth_challenge
@@ -45,16 +48,20 @@ class GatewayAuthHandler {
     _log.debug('Received auth challenge');
 
     // 2 — Sign nonce and send auth_response
-    final nonceSignature = await _cryptoService.signNonce(identity.seedBase64, nonce);
+    final nonceSignature = await _cryptoService.signNonce(
+      identity.seedBase64,
+      nonce,
+    );
     // device_name is included outside the signed attestation blob — it is cosmetic
     // metadata for gateway logs and has no effect on access control decisions.
     sink.add(
       jsonEncode(<String, dynamic>{
-        'type': 'auth_response',
-        'auth_mode': 'device',
-        'attestation': identity.attestation!.toJson(),
-        'nonce_signature': nonceSignature,
-        if (identity.deviceName != null) 'device_name': identity.deviceName,
+        GatewayAuthWire.type: GatewayAuthWire.authResponse,
+        GatewayAuthWire.authMode: GatewayAuthWire.authModeDevice,
+        GatewayAuthWire.attestation: identity.attestation!.toJson(),
+        GatewayAuthWire.nonceSignature: nonceSignature,
+        if (identity.deviceName != null)
+          GatewayAuthWire.deviceName: identity.deviceName,
       }),
     );
     _log.debug('Sent auth_response');
@@ -70,18 +77,26 @@ class GatewayAuthHandler {
     try {
       msg = await stream
           .map(_toMap)
-          .firstWhere((m) => m != null && m['type']?.toString() == 'auth_challenge')
+          .firstWhere(
+            (m) =>
+                m != null &&
+                m[GatewayAuthWire.type]?.toString() ==
+                    GatewayAuthWire.authChallenge,
+          )
           .timeout(
             AppConstants.authTimeout,
-            onTimeout: () =>
-                throw const GatewayException('Timed out waiting for auth challenge'),
+            onTimeout: () => throw const GatewayException(
+              'Timed out waiting for auth challenge',
+            ),
           );
     } on StateError {
       throw const GatewayException('Gateway closed before auth challenge');
     }
 
-    final nonce = msg?['nonce']?.toString() ?? '';
-    if (nonce.isEmpty) throw const GatewayException('Auth challenge missing nonce');
+    final nonce = msg?[GatewayAuthWire.nonce]?.toString() ?? '';
+    if (nonce.isEmpty) {
+      throw const GatewayException('Auth challenge missing nonce');
+    }
     return nonce;
   }
 
@@ -93,8 +108,10 @@ class GatewayAuthHandler {
           .firstWhere(
             (m) =>
                 m != null &&
-                (m['type']?.toString() == 'auth_ok' ||
-                    m['type']?.toString() == 'auth_failed'),
+                (m[GatewayAuthWire.type]?.toString() ==
+                        GatewayAuthWire.authOk ||
+                    m[GatewayAuthWire.type]?.toString() ==
+                        GatewayAuthWire.authFailed),
           )
           .timeout(
             AppConstants.authTimeout,
@@ -105,12 +122,13 @@ class GatewayAuthHandler {
       throw const GatewayException('Gateway closed before auth_ok');
     }
 
-    if (msg?['type']?.toString() == 'auth_failed') {
-      final reason = msg?['reason']?.toString() ?? 'Auth rejected';
+    if (msg?[GatewayAuthWire.type]?.toString() == GatewayAuthWire.authFailed) {
+      final reason =
+          msg?[GatewayAuthWire.reason]?.toString() ?? 'Auth rejected';
       throw AuthException(reason);
     }
 
-    final deviceId = msg?['device_id']?.toString() ?? '';
+    final deviceId = msg?[GatewayAuthWire.deviceId]?.toString() ?? '';
     if (deviceId.isEmpty) {
       throw const GatewayException('auth_ok missing device_id');
     }
