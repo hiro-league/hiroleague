@@ -146,17 +146,10 @@
     }
   }
 
-  async function switchTab(tab: 'providers' | 'models' | 'active-providers') {
+  async function switchTab(tab: 'providers' | 'models') {
     await prefs.setActiveTab(tab, tab === 'models' ? modelFilters : {});
     if (tab === 'models' && models.length === 0 && !modelsLoading) {
       await loadModels();
-    }
-    if (
-      tab === 'active-providers' &&
-      activeProviders.length === 0 &&
-      !activeProvidersLoading
-    ) {
-      await loadActiveProviders();
     }
   }
 
@@ -326,9 +319,6 @@
     if (prefs.activeTab === 'models') {
       await loadModels();
     }
-    if (prefs.activeTab === 'active-providers') {
-      await loadActiveProviders();
-    }
   });
 </script>
 
@@ -336,7 +326,7 @@
   <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
     <div>
       <p class="font-sans text-xs font-extrabold uppercase text-primary">AI Models</p>
-      <h2 class="brand-text-gradient mt-1 text-3xl font-semibold">Catalog</h2>
+      <h2 class="brand-text-gradient mt-1 text-3xl font-semibold">Model Catalog</h2>
     </div>
     <div class="inline-flex rounded-lg border bg-card p-1" role="tablist" aria-label="Catalog sections">
       <Button
@@ -362,20 +352,6 @@
         onclick={() => switchTab('models')}
       >
         Models
-      </Button>
-      <Button
-        class={cn(
-          'shadow-none',
-          prefs.activeTab === 'active-providers'
-            ? ''
-            : 'bg-transparent text-muted-foreground hover:bg-secondary'
-        )}
-        variant={prefs.activeTab === 'active-providers' ? 'secondary' : 'ghost'}
-        role="tab"
-        aria-selected={prefs.activeTab === 'active-providers'}
-        onclick={() => switchTab('active-providers')}
-      >
-        Active providers
       </Button>
     </div>
   </div>

@@ -114,6 +114,12 @@
         "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && ./dev.sh --all"
       },
       {
+        "name": "Admin Frontend Dev Server",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && npm --prefix admin_frontend install && npm --prefix admin_frontend run dev"
+      },
+      {
         "name": "Website Dev Server",
         "type": "node-terminal",
         "request": "launch",

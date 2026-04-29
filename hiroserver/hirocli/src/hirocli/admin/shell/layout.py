@@ -90,7 +90,7 @@ def create_page_layout(active_path: str = "/") -> None:
                     selected_id,
                 )
 
-    ui.dark_mode().bind_value(nicegui_app.storage.user, "dark_mode")
+    dark_mode = ui.dark_mode().bind_value(nicegui_app.storage.user, "dark_mode")
 
     header_title = "Hiro Admin (v2)"
     if hosting_name:
@@ -112,6 +112,10 @@ def create_page_layout(active_path: str = "/") -> None:
                 icon="auto_awesome",
                 on_click=lambda: ui.navigate.to("/admin-next/"),
             ).props('flat dense color="white" size="sm"')
+            ui.button(on_click=dark_mode.toggle).props(
+                'flat dense round color="white" size="sm" '
+                ':icon="$q.dark.isActive ? \'light_mode\' : \'dark_mode\'"'
+            ).tooltip("Toggle dark mode")
 
 
 def _toggle_sidebar_mini(drawer: Any) -> None:

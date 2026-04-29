@@ -4,7 +4,7 @@ import { PREF_KEYS, type CatalogTabPreference } from './keys';
 import { readSessionString, writeSessionString } from './storage';
 
 function normalizeTab(raw: string | null): CatalogTabPreference | null {
-  return raw === 'providers' || raw === 'models' || raw === 'active-providers' ? raw : null;
+  return raw === 'providers' || raw === 'models' ? raw : null;
 }
 
 export function createCatalogPreferences() {

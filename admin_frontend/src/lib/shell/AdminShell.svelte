@@ -8,9 +8,12 @@
     KeyRound,
     List,
     Menu,
+    MessageSquare,
+    Moon,
     PanelLeftClose,
     PanelLeftOpen,
     Server,
+    Sun,
     User
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
@@ -38,6 +41,7 @@
     grid: Grid2X2,
     key: KeyRound,
     list: List,
+    message: MessageSquare,
     server: Server,
     user: User
   };
@@ -103,14 +107,14 @@
     </div>
 
     <nav class="mt-5 grid gap-5 overflow-y-auto">
-      {#each Object.entries(groups) as [group, items]}
+      {#each Object.entries(groups) as [group, items] (group)}
         <section class="grid gap-1" aria-label={group}>
           {#if !prefs.sidebarCollapsed}
-            <div class="px-2 pb-1 font-sans text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+            <div class="accent-text-gradient px-2 pb-1 font-sans text-[11px] font-bold uppercase tracking-wide">
               {group}
             </div>
           {/if}
-          {#each items as item}
+          {#each items as item (item.path)}
             {@const Icon = iconMap[item.icon as keyof typeof iconMap] ?? Menu}
             <a
               class={cn(
@@ -174,15 +178,28 @@
         aria-hidden="true"
       />
       <h1 class="accent-text-gradient min-w-0 truncate font-sans text-xl font-semibold">
-        Hiro League Control Room
+        Control Room
       </h1>
-      <div class="ml-auto hidden items-center gap-2 md:flex">
+      <div class="ml-auto flex items-center gap-2">
         <a
-          class="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 font-sans text-xs font-semibold shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+          class="hidden h-8 items-center justify-center rounded-md border border-input bg-background px-3 font-sans text-xs font-semibold shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground md:inline-flex"
           href={niceguiHome}
         >
           NiceGUI Home
         </a>
+        <Button
+          aria-label={prefs.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={prefs.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          variant="outline"
+          size="icon"
+          onclick={prefs.toggleTheme}
+        >
+          {#if prefs.theme === 'dark'}
+            <Sun size={17} />
+          {:else}
+            <Moon size={17} />
+          {/if}
+        </Button>
       </div>
     </header>
 
