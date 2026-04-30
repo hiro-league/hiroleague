@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     BookOpen,
     Check,
     CircleHelp,
     Copy,
+    CornerUpLeft,
     ExternalLink,
+    FileWarning,
     FolderOpen,
     KeyRound,
     Play,
@@ -17,6 +20,7 @@
   } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import Modal from '$lib/ui/Modal.svelte';
   import { createWorkspaceStore } from './workspace-store.svelte';
   import type { Notify } from './types';
@@ -24,10 +28,22 @@
 
   let { notify }: { notify: Notify } = $props();
 
-  const WORKSPACE_GATEWAY_DOCS_URL = 'https://docs.hiroleague.com/hirotemp/get-started/introduction';
+  const WORKSPACE_GATEWAY_DOCS_PATH = '/hiro/cli/server-operations';
 
+  let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
+  const workspaceGatewayDocsUrl = $derived(docsUrl(adminConfig, WORKSPACE_GATEWAY_DOCS_PATH));
   const workspace = createWorkspaceStore((kind, message) => notify(kind, message));
-  workspace.load();
+  onMount(() => {
+    workspace.load();
+    return workspace.startPolling();
+  });
+  getAdminConfig()
+    .then((payload) => {
+      adminConfig = payload.data ?? DEFAULT_ADMIN_CONFIG;
+    })
+    .catch(() => {
+      adminConfig = DEFAULT_ADMIN_CONFIG;
+    });
 
   function gatewayHttpUrl(url: string | null) {
     if (!url) return null;
@@ -41,6 +57,29 @@
   function adminUrl(row: WorkspaceRow) {
     return `http://127.0.0.1:${row.admin_port}/`;
   }
+
+  function formatStderrTime(value: string | null) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }
+
+  function formatBytes(value: number) {
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function stderrTitle(row: WorkspaceRow) {
+    const updated = formatStderrTime(row.stderr_log_mtime);
+    return `stderr.log${updated ? ` updated ${updated}` : ''} (${formatBytes(row.stderr_log_size)})`;
+  }
 </script>
 
 <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
@@ -50,10 +89,10 @@
         <h3 class="text-lg font-semibold">Workspaces</h3>
         <a
           class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          href={WORKSPACE_GATEWAY_DOCS_URL}
+          href={workspaceGatewayDocsUrl}
           target="_blank"
           rel="noreferrer"
-          title="Workspace and gateway CLI docs"
+          title={`Workspace and gateway CLI docs: ${workspaceGatewayDocsUrl}`}
           aria-label="Workspace and gateway CLI docs"
         >
           <BookOpen size={15} />
@@ -64,7 +103,15 @@
       </span>
     </div>
     <div class="flex flex-wrap gap-2">
-      <Button variant="outline" onclick={workspace.load}><RefreshCw size={15} /> Refresh</Button>
+      <Button
+        class="size-9 px-0"
+        variant="outline"
+        onclick={() => workspace.load()}
+        aria-label="Refresh workspaces"
+        title="Refresh workspaces"
+      >
+        <RefreshCw size={15} />
+      </Button>
       <Button onclick={workspace.openCreate}>Create workspace</Button>
     </div>
   </div>
@@ -80,8 +127,8 @@
     <p class="text-muted-foreground">No workspaces configured yet.</p>
   {:else}
     <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[1120px]">
-        <div class="grid grid-cols-[1.25fr_120px_120px_1.45fr_115px_360px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
+      <div class="min-w-[1180px]">
+        <div class="grid grid-cols-[220px_110px_125px_1.25fr_105px_445px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
           <span>Name</span>
           <span>Setup</span>
           <span>Status</span>
@@ -90,7 +137,7 @@
           <span>Actions</span>
         </div>
         {#each workspace.rows as row}
-          <div class="grid min-h-16 grid-cols-[1.25fr_120px_120px_1.45fr_115px_360px] gap-3 border-t px-3 py-3">
+          <div class="grid min-h-16 grid-cols-[220px_110px_125px_1.25fr_105px_445px] items-center gap-3 border-t px-3 py-3">
             <span class="min-w-0">
               <span class="flex min-w-0 items-center gap-1.5">
                 {#if row.is_default}
@@ -98,27 +145,49 @@
                     class="shrink-0 text-amber-500"
                     fill="currentColor"
                     size={15}
-                    title="Default Workspace"
+                    title={`Default workspace: ${row.name}`}
                   />
                 {/if}
                 <strong class="block truncate font-sans text-sm">{row.name}</strong>
+                <button
+                  class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  type="button"
+                  onclick={() => workspace.openFolder(row)}
+                  title={`Open workspace folder: ${row.path}`}
+                  aria-label={`Open workspace folder: ${row.path}`}
+                >
+                  <FolderOpen size={13} />
+                </button>
               </span>
-              <small class="block truncate text-xs text-muted-foreground">{row.path}</small>
             </span>
-            <span>
+            <span class="self-center">
               <Badge variant={row.is_configured ? 'success' : 'warning'}>
                 {row.is_configured ? 'Configured' : 'Needs setup'}
               </Badge>
             </span>
-            <span class="space-y-1">
-              <Badge variant={row.running ? 'success' : 'outline'}>
-                {row.running ? 'Running' : 'Stopped'}
-              </Badge>
-              {#if row.is_current}
-                <small class="block font-sans text-xs font-semibold text-primary">this UI</small>
+            <span class="space-y-1 self-center">
+              <span class="flex items-center gap-1.5">
+                {#if row.running}
+                  <a href={statusUrl(row)} target="_blank" rel="noreferrer" title={statusUrl(row)}>
+                    <Badge variant="success">Running</Badge>
+                  </a>
+                {:else}
+                  <Badge variant="outline">Stopped</Badge>
+                {/if}
+                {#if row.is_current}
+                  <CornerUpLeft
+                    class="text-primary"
+                    size={15}
+                    title="Workspace of this Control Room"
+                    aria-label="Workspace of this Control Room"
+                  />
+                {/if}
+              </span>
+              {#if row.pid && row.running}
+                <small class="block text-xs text-muted-foreground">PID {row.pid}</small>
               {/if}
             </span>
-            <span class="min-w-0 space-y-1 text-xs text-muted-foreground">
+            <span class="min-w-0 space-y-1 self-center text-xs text-muted-foreground">
               <span class="flex min-w-0 items-center gap-1.5">
                 {#if row.gateway_url}
                   {#if row.running}
@@ -140,9 +209,6 @@
               </span>
               <span class="flex flex-wrap items-center gap-2 font-sans">
                 {#if row.running}
-                  <a class="inline-flex items-center gap-1 text-primary hover:underline" href={statusUrl(row)} target="_blank" rel="noreferrer" title={statusUrl(row)}>
-                    <ExternalLink size={12} /> status
-                  </a>
                   {#if !row.is_current}
                     <a class="inline-flex items-center gap-1 text-primary hover:underline" href={adminUrl(row)} target="_blank" rel="noreferrer" title={`Admin UI: ${adminUrl(row)}`}>
                       <ExternalLink size={12} /> admin
@@ -154,8 +220,12 @@
                 {/if}
               </span>
             </span>
-            <span class="truncate text-xs text-muted-foreground">{row.autostart_method ?? '-'}</span>
-            <span class="flex flex-wrap gap-1.5">
+            <span class="self-center">
+              <Badge variant={row.autostart_method && row.autostart_method !== 'skipped' ? 'secondary' : 'outline'}>
+                {row.autostart_method ?? '-'}
+              </Badge>
+            </span>
+            <span class="flex flex-wrap items-center gap-1.5 self-center">
               {#if !row.is_configured}
                 <Button size="sm" variant="outline" onclick={() => workspace.openSetup(row)}><Settings size={13} /> Setup</Button>
               {:else}
@@ -171,7 +241,17 @@
                 <Button size="sm" variant="outline" onclick={() => workspace.openRestart(row)}><RotateCw size={13} /> Restart</Button>
               {/if}
               <Button size="sm" variant="outline" onclick={() => workspace.openEdit(row)}>Edit</Button>
-              <Button size="sm" variant="outline" onclick={() => workspace.openFolder(row)}><FolderOpen size={13} /> Folder</Button>
+              {#if row.stderr_log_exists}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  class={row.stderr_log_recent ? 'border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive' : ''}
+                  title={stderrTitle(row)}
+                  onclick={() => workspace.openStderrLog(row)}
+                >
+                  <FileWarning size={13} /> stderr
+                </Button>
+              {/if}
               {#if !row.is_current}
                 <Button size="sm" variant="destructive" onclick={() => workspace.openRemove(row)}><Trash2 size={13} /> Remove</Button>
               {:else}

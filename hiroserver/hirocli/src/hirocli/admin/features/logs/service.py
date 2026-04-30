@@ -13,6 +13,8 @@ from hirocli.admin.shared.result import Result
 from hirocli.tools.logs import (
     LogSearchTool,
     LogTailTool,
+    _file_has_content,
+    _resolve_gateway_instance_path,
     _resolve_gateway_log_dir,
     _segment_to_key_value,
     _split_extra_segments,
@@ -78,8 +80,14 @@ class LogsService:
                 for f in sorted(log_dir.glob("channel-*.log"))
             ]
             has_gateway = (
-                gateway_log_dir is not None
-                and (gateway_log_dir / "gateway.log").exists()
+                (
+                    gateway_log_dir is not None
+                    and (gateway_log_dir / "gateway.log").exists()
+                )
+                or (
+                    (gateway_instance_path := _resolve_gateway_instance_path()) is not None
+                    and _file_has_content(gateway_instance_path / "stderr.log")
+                )
             )
             has_cli = (log_dir / "cli.log").exists()
             return Result.success(

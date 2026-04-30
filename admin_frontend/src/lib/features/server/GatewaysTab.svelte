@@ -1,15 +1,43 @@
 <script lang="ts">
-  import { Play, RefreshCw, Square, Trash2 } from '@lucide/svelte';
+  import { onMount } from 'svelte';
+  import { FileWarning, FolderOpen, Play, RefreshCw, Square, Star, Trash2 } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import Modal from '$lib/ui/Modal.svelte';
   import { createGatewayStore } from './gateway-store.svelte';
   import type { Notify } from './types';
+  import type { GatewayRow } from '$lib/api/server';
 
   let { notify }: { notify: Notify } = $props();
 
   const gateway = createGatewayStore((kind, message) => notify(kind, message));
-  gateway.load();
+  onMount(() => {
+    gateway.load();
+    return gateway.startPolling();
+  });
+
+  function formatStderrTime(value: string | null) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }
+
+  function formatBytes(value: number) {
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function stderrTitle(row: GatewayRow) {
+    const updated = formatStderrTime(row.stderr_log_mtime);
+    return `stderr.log${updated ? ` updated ${updated}` : ''} (${formatBytes(row.stderr_log_size)})`;
+  }
 </script>
 
 <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
@@ -21,7 +49,15 @@
       </span>
     </div>
     <div class="flex flex-wrap gap-2">
-      <Button variant="outline" onclick={gateway.load}><RefreshCw size={15} /> Refresh</Button>
+      <Button
+        class="size-9 px-0"
+        variant="outline"
+        onclick={() => gateway.load()}
+        aria-label="Refresh gateways"
+        title="Refresh gateways"
+      >
+        <RefreshCw size={15} />
+      </Button>
       <Button onclick={gateway.openCreate}>Create gateway</Button>
     </div>
   </div>
@@ -37,18 +73,35 @@
     <p class="text-muted-foreground">No gateway instances configured yet.</p>
   {:else}
     <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[980px]">
-        <div class="grid grid-cols-[150px_130px_140px_95px_1fr_180px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
+      <div class="min-w-[760px]">
+        <div class="grid grid-cols-[220px_130px_140px_260px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
           <span>Name</span>
           <span>Status</span>
           <span>Host : Port</span>
-          <span>Default</span>
-          <span>Path</span>
           <span>Actions</span>
         </div>
         {#each gateway.rows as row}
-          <div class="grid min-h-16 grid-cols-[150px_130px_140px_95px_1fr_180px] gap-3 border-t px-3 py-3">
-            <span class="truncate font-sans text-sm font-semibold">{row.name}</span>
+          <div class="grid min-h-16 grid-cols-[220px_130px_140px_260px] gap-3 border-t px-3 py-3">
+            <span class="flex min-w-0 items-center gap-1.5">
+              {#if row.is_default}
+                <Star
+                  class="shrink-0 text-amber-500"
+                  fill="currentColor"
+                  size={15}
+                  title={`Default gateway: ${row.name}`}
+                />
+              {/if}
+              <strong class="truncate font-sans text-sm">{row.name}</strong>
+              <button
+                class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                type="button"
+                onclick={() => gateway.openFolder(row)}
+                title={`Open gateway folder: ${row.path}`}
+                aria-label={`Open gateway folder: ${row.path}`}
+              >
+                <FolderOpen size={13} />
+              </button>
+            </span>
             <span class="space-y-1">
               <Badge variant={row.running ? 'success' : 'outline'}>
                 {row.running ? 'Running' : 'Stopped'}
@@ -58,19 +111,22 @@
               {/if}
             </span>
             <span class="truncate text-xs text-muted-foreground">{row.host}:{row.port}</span>
-            <span>
-              {#if row.is_default}
-                <Badge variant="secondary">default</Badge>
-              {:else}
-                <small class="text-muted-foreground">-</small>
-              {/if}
-            </span>
-            <span class="truncate text-xs text-muted-foreground">{row.path}</span>
             <span class="flex flex-wrap gap-1.5">
               {#if !row.running}
                 <Button size="sm" variant="outline" disabled={gateway.busy} onclick={() => gateway.start(row)}><Play size={13} /> Start</Button>
               {:else}
                 <Button size="sm" variant="outline" disabled={gateway.busy} onclick={() => gateway.openStop(row)}><Square size={13} /> Stop</Button>
+              {/if}
+              {#if row.stderr_log_exists}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  class={row.stderr_log_recent ? 'border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive' : ''}
+                  title={stderrTitle(row)}
+                  onclick={() => gateway.openStderrLog(row)}
+                >
+                  <FileWarning size={13} /> stderr
+                </Button>
               {/if}
               <Button size="sm" variant="destructive" onclick={() => gateway.openRemove(row)}><Trash2 size={13} /> Remove</Button>
             </span>

@@ -15,6 +15,11 @@ export type WorkspaceRow = {
   port_slot: number;
   gateway_url: string | null;
   autostart_method: string | null;
+  stderr_log_path: string;
+  stderr_log_exists: boolean;
+  stderr_log_size: number;
+  stderr_log_mtime: string | null;
+  stderr_log_recent: boolean;
 };
 
 export type GatewayRow = {
@@ -27,6 +32,11 @@ export type GatewayRow = {
   is_default: boolean;
   desktop_connected?: boolean;
   last_auth_error?: string | null;
+  stderr_log_path: string;
+  stderr_log_exists: boolean;
+  stderr_log_size: number;
+  stderr_log_mtime: string | null;
+  stderr_log_recent: boolean;
 };
 
 export type WorkspaceStartResult = {
@@ -120,6 +130,13 @@ export async function regenerateWorkspaceKey(id: string) {
 
 export async function openWorkspaceFolder(path: string) {
   return apiRequest<null>('/workspaces/open-folder', {
+    method: 'POST',
+    body: { path }
+  });
+}
+
+export async function openPath(path: string) {
+  return apiRequest<null>('/open-path', {
     method: 'POST',
     body: { path }
   });

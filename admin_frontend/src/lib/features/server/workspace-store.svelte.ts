@@ -2,6 +2,7 @@ import {
   createWorkspace,
   getWorkspacePublicKey,
   listWorkspaces,
+  openPath,
   openWorkspaceFolder,
   regenerateWorkspaceKey,
   removeWorkspace,
@@ -13,6 +14,8 @@ import {
   type WorkspaceRow
 } from '$lib/api/server';
 import type { Notify } from './types';
+
+const POLL_INTERVAL_MS = 5000;
 
 export type WorkspaceDialog =
   | 'create'
@@ -52,18 +55,43 @@ export function createWorkspaceStore(notify: Notify) {
   const configuredCount = $derived(rows.filter((row) => row.is_configured).length);
   const runningCount = $derived(rows.filter((row) => row.running).length);
 
-  async function load() {
-    loading = true;
-    error = null;
+  function rowsChanged(nextRows: WorkspaceRow[], nextHostingWorkspaceId: string | null) {
+    return (
+      hostingWorkspaceId !== nextHostingWorkspaceId ||
+      JSON.stringify(rows) !== JSON.stringify(nextRows)
+    );
+  }
+
+  async function load(options: { silent?: boolean } = {}) {
+    if (options.silent && busy) return;
+    if (!options.silent) {
+      loading = true;
+    }
     try {
       const payload = await listWorkspaces();
-      rows = payload.data;
-      hostingWorkspaceId = payload.hosting_workspace_id ?? null;
+      const nextRows = payload.data;
+      const nextHostingWorkspaceId = payload.hosting_workspace_id ?? null;
+      if (rowsChanged(nextRows, nextHostingWorkspaceId)) {
+        rows = nextRows;
+        hostingWorkspaceId = nextHostingWorkspaceId;
+      }
+      error = null;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load workspaces.';
+      if (!options.silent) {
+        error = err instanceof Error ? err.message : 'Failed to load workspaces.';
+      }
     } finally {
-      loading = false;
+      if (!options.silent) {
+        loading = false;
+      }
     }
+  }
+
+  function startPolling() {
+    const id = window.setInterval(() => {
+      void load({ silent: true });
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(id);
   }
 
   function closeDialog() {
@@ -249,6 +277,16 @@ export function createWorkspaceStore(notify: Notify) {
     }
   }
 
+  async function openStderrLog(row: WorkspaceRow) {
+    if (!row.stderr_log_exists) return;
+    try {
+      await openPath(row.stderr_log_path);
+      notify('info', `Opening stderr log: ${row.stderr_log_path}`);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Open stderr log failed.');
+    }
+  }
+
   async function openPublicKey(row: WorkspaceRow) {
     busy = true;
     selected = row;
@@ -343,6 +381,7 @@ export function createWorkspaceStore(notify: Notify) {
       return runningCount;
     },
     load,
+    startPolling,
     closeDialog,
     openCreate,
     openEdit,
@@ -357,6 +396,7 @@ export function createWorkspaceStore(notify: Notify) {
     start,
     stop,
     openFolder,
+    openStderrLog,
     openPublicKey,
     regenerateKey,
     copyText

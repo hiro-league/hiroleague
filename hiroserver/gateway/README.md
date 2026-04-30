@@ -1,4 +1,4 @@
-# hirogateway
+# hirogate
 
 **Hiro Gateway** — WebSocket relay server.
 
@@ -8,7 +8,7 @@ devices identified by `device_id`.
 
 ## Dev setup
 
-`hirogateway` is part of the `hiroserver` uv workspace. No separate tool install is needed — it runs directly from the workspace venv via `uv run`.
+`hirogate` is part of the `hiroserver` uv workspace. No separate tool install is needed — it runs directly from the workspace venv via `uv run`.
 
 After cloning or pulling updated code, run from the repo root:
 
@@ -27,12 +27,12 @@ uv sync
 
 ```bash
 # Create a named gateway instance (mandatory values at creation)
-uv run hirogateway instance create home --port 8765 --desktop-pubkey "<base64-public-key>" --set-default
+uv run hirogate instance create home --port 8765 --desktop-pubkey "<base64-public-key>" --set-default
 
 # Start the instance later using only its name/default
-uv run hirogateway start --instance home
+uv run hirogate start --instance home
 # or simply:
-uv run hirogateway
+uv run hirogate
 ```
 
 ## Instance model
@@ -47,10 +47,10 @@ Each gateway runs as a named instance with persistent config:
 Instance commands:
 
 ```bash
-hirogateway instance list
-hirogateway instance show home
-hirogateway instance set-default home
-hirogateway instance remove home --purge
+hirogate instance list
+hirogate instance show home
+hirogate instance set-default home
+hirogate instance remove home --purge
 ```
 
 ## How it works

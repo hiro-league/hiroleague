@@ -4,6 +4,8 @@
 
 set -e
 
+export HIRO_ENV="${HIRO_ENV:-dev}"
+
 # Stop the server if running so Windows releases the file lock on hiro.exe
 echo "==> Stopping Hiro server (if running)..."
 hiro stop 2>/dev/null || true
@@ -13,9 +15,11 @@ echo "==> Stopping hiro-channel-devices (if running)..."
 # Git Bash/MSYS can rewrite /F-style args unless conversion is disabled.
 MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hiro-channel-devices.exe 2>/dev/null || true
 
-echo "==> Stopping hirogateway (if running)..."
-# Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogateway.exe before reinstalling.
-hirogateway stop 2>/dev/null || true
+echo "==> Stopping hirogate (if running)..."
+# Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogate.exe before reinstalling.
+hirogate stop 2>/dev/null || true
+# Remove pre-rename dev binaries that can otherwise hold Windows file locks.
+MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hirogate.exe 2>/dev/null || true
 
 if [ -f admin_frontend/package.json ]; then
   echo "==> Syncing Svelte admin frontend dependencies..."
@@ -36,15 +40,16 @@ echo "==> Updating Hiro tool binary..."
 uv tool uninstall hirocli 2>/dev/null || true
 uv tool install --editable hirocli --upgrade --force
 
-echo "==> Updating hirogateway tool binary..."
+echo "==> Updating hirogate tool binary..."
+uv tool uninstall hirogate 2>/dev/null || true
 uv tool install --editable gateway --upgrade --force
 
 echo ""
 echo "Done. All tool binaries are up to date."
 echo "  hiro                 -> run: hiro --help"
 echo "  hiro-channel-devices -> run: hiro-channel-devices --help  (bundled with hiroleague)"
-echo "  hirogateway          -> run: hirogateway --help"
+echo "  hirogate             -> run: hirogate --help"
 
 # Foreground gateway in a shell background job so Hiro can keep the terminal (both use -f).
-hirogateway start -f &
+hirogate start -f &
 hiro start --admin -f

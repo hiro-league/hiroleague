@@ -12,7 +12,7 @@ members = [
     "hiro-channel-echo",
     "hiro-channel-sdk",
     "hiro-commons",
-    "hirogateway",
+    "hirogate",
     "hiroleague",
 ]
 
@@ -859,7 +859,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "hirogateway"
+name = "hirogate"
 version = "0.1.0"
 source = { editable = "gateway" }
 dependencies = [
@@ -909,7 +909,7 @@ dependencies = [
     { name = "hiro-channel-devices" },
     { name = "hiro-channel-sdk" },
     { name = "hiro-commons" },
-    { name = "hirogateway" },
+    { name = "hirogate" },
     { name = "keyring" },
     { name = "lameenc" },
     { name = "langchain" },
@@ -951,7 +951,7 @@ requires-dist = [
     { name = "hiro-channel-devices", editable = "channels/hiro-channel-devices" },
     { name = "hiro-channel-sdk", editable = "hiro-channel-sdk" },
     { name = "hiro-commons", editable = "hiro-commons" },
-    { name = "hirogateway", editable = "gateway" },
+    { name = "hirogate", editable = "gateway" },
     { name = "keyring", specifier = ">=25.7" },
     { name = "lameenc", specifier = ">=1.8.2" },
     { name = "langchain", specifier = ">=1.0" },

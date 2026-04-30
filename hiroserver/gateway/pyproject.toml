@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hirogateway"
+name = "hirogate"
 version = "0.1.0"
 description = "Hiro — WebSocket relay gateway server"
 readme = "README.md"
@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hirogateway = "hirogateway.main:cli"
+hirogate = "hirogateway.main:cli"
 
 [tool.uv.sources]
 hiro-channel-sdk = { workspace = true }

@@ -13,7 +13,7 @@
     type ActiveProviderRow,
     type AddableProviderRow
   } from '$lib/api/catalog';
-  import { cn } from '$lib/utils';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
 
   let activeProviders = $state<ActiveProviderRow[]>([]);
   let addableProviders = $state<AddableProviderRow[]>([]);
@@ -183,20 +183,6 @@
     </div>
   </div>
 
-  {#if toast}
-    <div
-      class={cn(
-        'w-fit max-w-full rounded-md border px-3 py-2 font-sans text-sm font-semibold',
-        toast.kind === 'success' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-        toast.kind === 'error' && 'border-destructive/30 bg-destructive/10 text-destructive',
-        toast.kind === 'warning' && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
-        toast.kind === 'info' && 'border-primary/30 bg-primary/10 text-primary'
-      )}
-    >
-      {toast.message}
-    </div>
-  {/if}
-
   <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
     <div>
       <h3 class="text-lg font-semibold">Configured providers</h3>
@@ -256,6 +242,8 @@
     {/if}
   </section>
 </section>
+
+<ToastHost {toast} />
 
 <Modal open={providerDialog === 'add'} title="Add provider API key" onClose={closeProviderDialog}>
   {#if addableProvidersLoading}

@@ -64,7 +64,7 @@ def resolve_instance(name: str | None = None) -> tuple[GatewayInstanceEntry, Gat
 
     if not registry.instances:
         raise GatewayInstanceError(
-            "No gateway instances configured. Run 'hirogateway instance create <name>' first."
+            "No gateway instances configured. Run 'hirogate instance create <name>' first."
         )
 
     if not target or target not in registry.instances:

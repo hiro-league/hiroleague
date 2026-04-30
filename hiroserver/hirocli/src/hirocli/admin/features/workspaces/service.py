@@ -20,6 +20,7 @@ from hirocli.tools.workspace import (
 )
 
 from hirocli.admin.shared.result import Result
+from hirocli.admin.shared.stderr_log import stderr_log_info
 
 _MSG_STOP_HOSTING = (
     "Cannot stop the workspace running this Admin UI. "
@@ -58,6 +59,7 @@ class WorkspaceService:
                     "running": running,
                     "pid": pid,
                     "is_current": ws["id"] == hosting_workspace_id,
+                    **stderr_log_info(ws_path),
                 }
             )
         return Result.success(rows)

@@ -49,7 +49,7 @@ dependencies = [
     "hiro-channel-sdk",
     "hiro-commons",
     "hiro-channel-devices",
-    "hirogateway",
+    "hirogate",
     "langmem>=0.0.30",
 ]
 
@@ -61,7 +61,7 @@ hiro-channel-devices = "hiro_channel_devices.main:app"
 hiro-channel-sdk = { workspace = true }
 hiro-commons = { workspace = true }
 hiro-channel-devices = { workspace = true }
-hirogateway = { workspace = true }
+hirogate = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hirocli"]

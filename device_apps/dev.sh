@@ -18,6 +18,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLUTTER="$SCRIPT_DIR/flutter_build.sh"
+HIRO_ENV="${HIRO_ENV:-dev}"
+DART_DEFINES=("--dart-define=HIRO_ENV=$HIRO_ENV")
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,12 +76,12 @@ fi
 
 if [[ "$DO_WEB" == true ]]; then
   step "Building Flutter web"
-  "$FLUTTER" build web
+  "$FLUTTER" build web "${DART_DEFINES[@]}"
 fi
 
 if [[ "$DO_ANDROID" == true ]]; then
   step "Building Flutter APK (arm64-v8a)"
-  "$FLUTTER" build apk --target-platform android-arm64
+  "$FLUTTER" build apk "${DART_DEFINES[@]}" --target-platform android-arm64
 fi
 
 echo ""

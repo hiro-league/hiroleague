@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from hirocli.tools.gateway import (
@@ -14,6 +15,7 @@ from hirocli.tools.gateway import (
 )
 
 from hirocli.admin.shared.result import Result
+from hirocli.admin.shared.stderr_log import stderr_log_info
 
 
 class GatewayService:
@@ -24,7 +26,12 @@ class GatewayService:
             result = GatewayStatusTool().execute()
         except Exception as exc:
             return Result.failure(str(exc))
-        return Result.success([asdict(inst) for inst in result.instances])
+        rows: list[dict[str, Any]] = []
+        for inst in result.instances:
+            row = asdict(inst)
+            row.update(stderr_log_info(Path(inst.path)))
+            rows.append(row)
+        return Result.success(rows)
 
     def start(self, instance_name: str, *, verbose: bool = False) -> Result[tuple[bool, int | None]]:
         """Returns (already_running, pid)."""

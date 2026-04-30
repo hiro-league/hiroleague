@@ -61,11 +61,9 @@ def _resolve_log_dir(workspace: str | None) -> Path:
     return resolve_log_dir(ws_path, config)
 
 
-def _resolve_gateway_log_dir() -> Path | None:
-    """Return the log directory for the default gateway instance, or None."""
+def _resolve_gateway_instance_path() -> Path | None:
+    """Return the default gateway instance path, or None."""
     try:
-        from hirogateway.config import load_config as gw_load_config
-        from hirogateway.config import resolve_log_dir as gw_resolve_log_dir
         from hirogateway.instance import load_registry
 
         registry = load_registry()
@@ -75,7 +73,21 @@ def _resolve_gateway_log_dir() -> Path | None:
         entry = registry.instances.get(name)
         if entry is None:
             return None
-        instance_path = Path(entry.path)
+        return Path(entry.path)
+    except Exception as exc:
+        log.warning("Failed to resolve gateway instance path", error=str(exc))
+        return None
+
+
+def _resolve_gateway_log_dir() -> Path | None:
+    """Return the log directory for the default gateway instance, or None."""
+    try:
+        from hirogateway.config import load_config as gw_load_config
+        from hirogateway.config import resolve_log_dir as gw_resolve_log_dir
+
+        instance_path = _resolve_gateway_instance_path()
+        if instance_path is None:
+            return None
         config = gw_load_config(instance_path)
         return gw_resolve_log_dir(instance_path, config)
     except Exception as exc:
@@ -112,12 +124,26 @@ def _collect_log_files(
         if f.exists():
             files.append((f, "gateway"))
 
+    if src in ("all", "gateway"):
+        gateway_instance_path = _resolve_gateway_instance_path()
+        if gateway_instance_path is not None:
+            stderr_file = gateway_instance_path / "stderr.log"
+            if _file_has_content(stderr_file):
+                files.append((stderr_file, "gateway"))
+
     if src in ("all", "cli"):
         f = log_dir / "cli.log"
         if f.exists():
             files.append((f, "cli"))
 
     return files
+
+
+def _file_has_content(path: Path) -> bool:
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
 
 
 _LEVEL_CSS_CLASS = {
@@ -298,10 +324,57 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
     return None
 
 
+def _parse_stderr_line(
+    path: Path,
+    source: str,
+    line: str,
+    index: int,
+    base_timestamp: float,
+) -> dict[str, Any] | None:
+    """Convert a plain stderr line into a log row for startup crash visibility."""
+    message = line.rstrip("\r\n")
+    if not message.strip():
+        return None
+    ts_num = base_timestamp + (index / 1_000_000)
+    level = "ERROR"
+    module = "STDERR"
+    lvl_cls = _LEVEL_CSS_CLASS.get(level, "")
+    mod_cls = f"log-mod-{_module_color_idx(module)}"
+    raw_extra = f"file={path}"
+    return {
+        "id": f"{source}:{path}:{index}:{ts_num}",
+        "timestamp": ts_num,
+        "timestamp_display": _to_12h(str(ts_num)),
+        "date_display": _format_date(str(ts_num)),
+        "level": level,
+        "level_html": f'<span class="{lvl_cls}">{level}</span>',
+        "module": module,
+        "module_html": f'<span class="{mod_cls}">{module}</span>',
+        "message": message,
+        "message_html": _html.escape(message),
+        "extra": raw_extra,
+        "extra_html": _format_extra_html(raw_extra),
+        "extra_tooltip_html": _format_extra_tooltip_html(raw_extra),
+        "source": source,
+        "is_startup": False,
+    }
+
+
+def _is_plain_stderr(path: Path) -> bool:
+    return path.name == "stderr.log"
+
+
 def _read_all_rows(path: Path, source: str) -> list[dict[str, str]]:
     """Read every CSV row from a log file."""
     rows: list[dict[str, str]] = []
     try:
+        if _is_plain_stderr(path):
+            base_timestamp = path.stat().st_mtime
+            for index, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines()):
+                parsed = _parse_stderr_line(path, source, line, index, base_timestamp)
+                if parsed is not None:
+                    rows.append(parsed)
+            return rows
         with path.open(encoding="utf-8", errors="replace") as fh:
             for row in csv.reader(fh):
                 parsed = _parse_csv_row(row, source)
@@ -323,6 +396,15 @@ def _read_tail_rows(
 
     rows: list[dict[str, str]] = []
     try:
+        if _is_plain_stderr(path):
+            base_timestamp = path.stat().st_mtime
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            start = max(0, len(lines) - n)
+            for index, line in enumerate(lines[start:], start=start):
+                parsed = _parse_stderr_line(path, source, line, index, base_timestamp)
+                if parsed is not None:
+                    rows.append(parsed)
+            return rows, size
         with path.open(encoding="utf-8", errors="replace") as fh:
             seek_pos = max(0, size - _TAIL_READ_BYTES)
             fh.seek(seek_pos)
@@ -351,6 +433,19 @@ def _read_rows_from_offset(
     rows: list[dict[str, str]] = []
     new_offset = offset
     try:
+        if _is_plain_stderr(path):
+            base_timestamp = path.stat().st_mtime
+            with path.open(encoding="utf-8", errors="replace") as fh:
+                fh.seek(offset)
+                chunk = fh.read()
+                new_offset = fh.tell()
+            if chunk:
+                start_line = offset
+                for index, line in enumerate(chunk.splitlines(), start=start_line):
+                    parsed = _parse_stderr_line(path, source, line, index, base_timestamp)
+                    if parsed is not None:
+                        rows.append(parsed)
+            return rows, new_offset
         with path.open(encoding="utf-8", errors="replace") as fh:
             fh.seek(offset)
             chunk = fh.read()

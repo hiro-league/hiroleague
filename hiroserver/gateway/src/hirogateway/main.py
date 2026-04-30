@@ -330,7 +330,7 @@ def instance_create(
         console.print(f"  [green]Auto-start registered[/green] (method: {result.autostart_method}).")
     elif not skip_autostart:
         console.print(f"  [yellow]Auto-start registration failed[/yellow] ({result.autostart_method}).")
-    console.print(f"\nNext: [bold]hirogateway start --instance {result.instance_name}[/bold]")
+    console.print(f"\nNext: [bold]hirogate start --instance {result.instance_name}[/bold]")
 
 
 @instance_app.command("set-default")
@@ -407,7 +407,7 @@ def _default_instance_name() -> str:
 
 
 def _print_instance_status(entry: GatewayInstanceStatusEntry, registry: GatewayRegistry) -> None:
-    title = f"hirogateway status — {entry.name}"
+    title = f"hirogate status — {entry.name}"
     if entry.is_default:
         title += " [cyan](default)[/cyan]"
 

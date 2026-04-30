@@ -1,4 +1,4 @@
-"""Auto-start registration wrappers for hirogateway instances."""
+"""Auto-start registration wrappers for hirogate instances."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from hiro_commons.autostart import (
 def register_autostart(instance_name: str) -> AutostartMethod:
     return commons_register_autostart(
         instance_name,
-        entry_name_prefix="hirogateway",
-        executable_name="hirogateway",
+        entry_name_prefix="hirogate",
+        executable_name="hirogate",
         launch_args=["start", "--instance", instance_name],
     )
 
@@ -23,15 +23,15 @@ def register_autostart(instance_name: str) -> AutostartMethod:
 def register_autostart_elevated(instance_name: str) -> bool:
     return commons_register_autostart_elevated(
         instance_name,
-        entry_name_prefix="hirogateway",
-        executable_name="hirogateway",
+        entry_name_prefix="hirogate",
+        executable_name="hirogate",
         launch_args=["start", "--instance", instance_name],
     )
 
 
 def unregister_autostart(instance_name: str) -> None:
-    commons_unregister_autostart(instance_name, entry_name_prefix="hirogateway")
+    commons_unregister_autostart(instance_name, entry_name_prefix="hirogate")
 
 
 def unregister_autostart_elevated(instance_name: str) -> bool:
-    return commons_unregister_autostart_elevated(instance_name, entry_name_prefix="hirogateway")
+    return commons_unregister_autostart_elevated(instance_name, entry_name_prefix="hirogate")

@@ -1,12 +1,15 @@
 import {
   createGateway,
   listGateways,
+  openPath,
   removeGateway,
   startGateway,
   stopGateway,
   type GatewayRow
 } from '$lib/api/server';
 import type { Notify } from './types';
+
+const POLL_INTERVAL_MS = 5000;
 
 export type GatewayDialog = 'create' | 'stop' | 'remove' | null;
 
@@ -30,17 +33,37 @@ export function createGatewayStore(notify: Notify) {
 
   const runningCount = $derived(rows.filter((row) => row.running).length);
 
-  async function load() {
-    loading = true;
-    error = null;
+  function rowsChanged(nextRows: GatewayRow[]) {
+    return JSON.stringify(rows) !== JSON.stringify(nextRows);
+  }
+
+  async function load(options: { silent?: boolean } = {}) {
+    if (options.silent && busy) return;
+    if (!options.silent) {
+      loading = true;
+    }
     try {
       const payload = await listGateways();
-      rows = payload.data;
+      if (rowsChanged(payload.data)) {
+        rows = payload.data;
+      }
+      error = null;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load gateways.';
+      if (!options.silent) {
+        error = err instanceof Error ? err.message : 'Failed to load gateways.';
+      }
     } finally {
-      loading = false;
+      if (!options.silent) {
+        loading = false;
+      }
     }
+  }
+
+  function startPolling() {
+    const id = window.setInterval(() => {
+      void load({ silent: true });
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(id);
   }
 
   function closeDialog() {
@@ -148,6 +171,25 @@ export function createGatewayStore(notify: Notify) {
     }
   }
 
+  async function openStderrLog(row: GatewayRow) {
+    if (!row.stderr_log_exists) return;
+    try {
+      await openPath(row.stderr_log_path);
+      notify('info', `Opening stderr log: ${row.stderr_log_path}`);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Open stderr log failed.');
+    }
+  }
+
+  async function openFolder(row: GatewayRow) {
+    try {
+      await openPath(row.path);
+      notify('info', `Opening folder: ${row.path}`);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Open folder failed.');
+    }
+  }
+
   return {
     get rows() {
       return rows;
@@ -177,6 +219,7 @@ export function createGatewayStore(notify: Notify) {
       return runningCount;
     },
     load,
+    startPolling,
     closeDialog,
     openCreate,
     openStop,
@@ -184,6 +227,8 @@ export function createGatewayStore(notify: Notify) {
     submitCreate,
     start,
     submitStop,
-    submitRemove
+    submitRemove,
+    openStderrLog,
+    openFolder
   };
 }

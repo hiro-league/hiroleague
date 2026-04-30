@@ -9,7 +9,7 @@ FVMRC="$SCRIPT_DIR/.fvmrc"
 
 # Parse required version from .fvmrc  e.g. {"flutter":"3.41.4"}
 REQUIRED=$(grep -oE '"flutter"[[:space:]]*:[[:space:]]*"[^"]+"' "$FVMRC" \
-           | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+           | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
 
 if [[ -z "$REQUIRED" ]]; then
   echo "❌ Could not read required Flutter version from $FVMRC"
@@ -17,7 +17,7 @@ if [[ -z "$REQUIRED" ]]; then
 fi
 
 ACTUAL=$(flutter --version 2>/dev/null \
-         | grep -E '^Flutter ' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+         | grep -E '^Flutter ' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 
 if [[ -z "$ACTUAL" ]]; then
   echo "❌ Flutter is not installed or not on PATH."

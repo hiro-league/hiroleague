@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { createChannelsDevicesPreferences } from '$lib/preferences/channels-devices-preferences.svelte';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
   import { cn } from '$lib/utils';
   import ChannelsTab from './ChannelsTab.svelte';
   import DevicesTab from './DevicesTab.svelte';
@@ -58,23 +59,11 @@
     </div>
   </div>
 
-  {#if toast}
-    <div
-      class={cn(
-        'w-fit max-w-full rounded-md border px-3 py-2 font-sans text-sm font-semibold',
-        toast.kind === 'success' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-        toast.kind === 'error' && 'border-destructive/30 bg-destructive/10 text-destructive',
-        toast.kind === 'warning' && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
-        toast.kind === 'info' && 'border-primary/30 bg-primary/10 text-primary'
-      )}
-    >
-      {toast.message}
-    </div>
-  {/if}
-
   {#if prefs.activeTab === 'channels'}
     <ChannelsTab {notify} />
   {:else}
     <DevicesTab {notify} />
   {/if}
 </section>
+
+<ToastHost {toast} />

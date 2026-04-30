@@ -28,6 +28,7 @@
   import { listCatalogModels, type CatalogModelRow } from '$lib/api/catalog';
   import { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
   import Modal from '$lib/ui/Modal.svelte';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
   import { cn } from '$lib/utils';
 
   type NotifyKind = 'success' | 'error' | 'info' | 'warning';
@@ -436,20 +437,6 @@
     </div>
   </div>
 
-  {#if toast}
-    <div
-      class={cn(
-        'w-fit max-w-full rounded-md border px-3 py-2 font-sans text-sm font-semibold',
-        toast.kind === 'success' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-        toast.kind === 'error' && 'border-destructive/30 bg-destructive/10 text-destructive',
-        toast.kind === 'warning' && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
-        toast.kind === 'info' && 'border-primary/30 bg-primary/10 text-primary'
-      )}
-    >
-      {toast.message}
-    </div>
-  {/if}
-
   {#if prefs.activeTab === 'browse'}
     <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
       <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -700,6 +687,8 @@
     </section>
   {/if}
 </section>
+
+<ToastHost {toast} />
 
 <Modal
   open={deleteOpen}

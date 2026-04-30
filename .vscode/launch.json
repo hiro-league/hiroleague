@@ -16,6 +16,7 @@
         "args": ["start", "--foreground"],
         "cwd": "${workspaceFolder}\\hiroserver",
         "env": {
+          "HIRO_ENV": "dev",
           "PYTHONPATH": "${workspaceFolder}\\hiroserver\\gateway\\src;${workspaceFolder}\\hiroserver\\hiro-channel-sdk\\src"
         },
         "console": "integratedTerminal",
@@ -30,6 +31,7 @@
         "args": ["start", "--foreground", "--admin"],
         "cwd": "${workspaceFolder}\\hiroserver",
         "env": {
+          "HIRO_ENV": "dev",
           "PYTHONPATH": "${workspaceFolder}\\hiroserver\\hirocli\\src;${workspaceFolder}\\hiroserver\\hiro-channel-sdk\\src"
         },
         "console": "integratedTerminal",
@@ -87,7 +89,7 @@
         "name": "Flutter - Run Web",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && ./flutter_build.sh run -d chrome --web-port 63000"
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && HIRO_ENV=dev ./flutter_build.sh run --dart-define=HIRO_ENV=dev -d chrome --web-port 63000"
       },
       {
         "name": "Flutter - Build Android (arm64)",
@@ -99,7 +101,7 @@
         "name": "Flutter - Run Android",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && ./flutter_build.sh run -d android"
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && HIRO_ENV=dev ./flutter_build.sh run --dart-define=HIRO_ENV=dev -d android"
       },
       {
         "name": "Flutter - List Outdated Packages",

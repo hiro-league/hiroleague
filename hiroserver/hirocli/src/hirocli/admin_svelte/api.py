@@ -35,6 +35,7 @@ from hirocli.admin.shared.result import Result
 from hirocli.admin_svelte.static_server import ADMIN_NEXT_PATH
 from hirocli.domain.config import load_config, resolve_log_dir
 from hirocli.domain.workspace import resolve_workspace
+from hirocli.environment import get_environment_config
 from hirocli.qr_rendering import render_qr_svg
 
 api_router = APIRouter(prefix=f"{ADMIN_NEXT_PATH}/api", tags=["hiro-admin-next"])
@@ -229,6 +230,16 @@ def _logs_layout(workspace_id: str | None) -> Result[dict[str, Any]]:
         return Result.failure(str(exc))
 
 
+@api_router.get("/config")
+async def get_admin_config() -> dict[str, Any]:
+    config = get_environment_config()
+    return {
+        "ok": True,
+        "error": None,
+        "data": dataclasses.asdict(config),
+    }
+
+
 def _metrics_collector() -> Any:
     from hirocli.runtime.http_server import app as http_app
 
@@ -349,6 +360,12 @@ async def regenerate_workspace_key(workspace_id: str) -> dict[str, Any]:
 
 @api_router.post("/workspaces/open-folder")
 async def open_workspace_folder(body: OpenFolderRequest) -> dict[str, Any]:
+    result = await run_in_threadpool(WorkspaceService().open_folder, body.path)
+    return _api_from_result(result)
+
+
+@api_router.post("/open-path")
+async def open_path(body: OpenFolderRequest) -> dict[str, Any]:
     result = await run_in_threadpool(WorkspaceService().open_folder, body.path)
     return _api_from_result(result)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from hirocli.admin.features.logs.service import LogsService
+from hirocli.tools.logs import _read_tail_rows
 
 
 def test_layout_info_channels_gateway_cli(tmp_path) -> None:
@@ -30,9 +31,45 @@ def test_layout_info_no_gateway_file(tmp_path) -> None:
     gw_dir = tmp_path / "gw"
     gw_dir.mkdir()
 
-    r = LogsService().layout_info(log_dir, gw_dir)
+    with patch(
+        "hirocli.admin.features.logs.service._resolve_gateway_instance_path",
+        return_value=None,
+    ):
+        r = LogsService().layout_info(log_dir, gw_dir)
     assert r.ok and r.data is not None
     assert r.data.has_gateway is False
+
+
+def test_layout_info_gateway_stderr_counts_as_gateway(tmp_path) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    gw_dir = tmp_path / "gw-logs"
+    gw_dir.mkdir()
+    instance_dir = tmp_path / "gateway-instance"
+    instance_dir.mkdir()
+    (instance_dir / "stderr.log").write_text("Traceback boom\n", encoding="utf-8")
+
+    with patch(
+        "hirocli.admin.features.logs.service._resolve_gateway_instance_path",
+        return_value=instance_dir,
+    ):
+        r = LogsService().layout_info(log_dir, gw_dir)
+
+    assert r.ok and r.data is not None
+    assert r.data.has_gateway is True
+
+
+def test_gateway_stderr_tail_rows_are_plain_error_rows(tmp_path) -> None:
+    stderr_log = tmp_path / "stderr.log"
+    stderr_log.write_text("Traceback line\nUnicodeEncodeError: boom\n", encoding="utf-8")
+
+    rows, offset = _read_tail_rows(stderr_log, "gateway", 10)
+
+    assert offset == stderr_log.stat().st_size
+    assert [row["source"] for row in rows] == ["gateway", "gateway"]
+    assert [row["level"] for row in rows] == ["ERROR", "ERROR"]
+    assert [row["module"] for row in rows] == ["STDERR", "STDERR"]
+    assert rows[1]["message"] == "UnicodeEncodeError: boom"
 
 
 def test_tail_initial_success() -> None:

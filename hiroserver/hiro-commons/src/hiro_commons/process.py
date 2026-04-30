@@ -79,7 +79,9 @@ def spawn_detached(
     The caller should NOT try to use the returned PID — the child writes its
     own PID via write_pid().  Use wait_for_pid() to wait for it.
     """
-    effective_env = env if env is not None else dict(os.environ)
+    effective_env = dict(os.environ) if env is None else dict(env)
+    effective_env.setdefault("PYTHONUTF8", "1")
+    effective_env.setdefault("PYTHONIOENCODING", "utf-8")
     stderr_target = open(stderr_log, "a") if stderr_log else subprocess.DEVNULL  # noqa: SIM115
     if sys.platform == "win32":
         subprocess.Popen(
