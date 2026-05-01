@@ -127,7 +127,7 @@ export function createWorkspaceStore(notify: Notify) {
     editForm = {
       name: row.name,
       gatewayUrl: row.gateway_url ?? '',
-      setDefault: false
+      setDefault: row.is_default
     };
     dialog = 'edit';
   }
