@@ -1,4 +1,4 @@
-"""ChannelService — mocked tools, no NiceGUI."""
+"""ChannelService tests with mocked tools."""
 
 from __future__ import annotations
 

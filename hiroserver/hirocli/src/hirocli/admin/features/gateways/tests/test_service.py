@@ -1,4 +1,4 @@
-"""GatewayService — mocked tools, no NiceGUI."""
+"""GatewayService tests with mocked tools."""
 
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ const config = {
       strict: true
     }),
     paths: {
-      base: process.env.HIRO_ADMIN_BASE ?? '/admin-next'
+      base: ''
     }
   }
 };

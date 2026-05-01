@@ -1,4 +1,4 @@
-"""Uniform service return type — no NiceGUI imports."""
+"""Uniform service return type for admin services."""
 
 from __future__ import annotations
 

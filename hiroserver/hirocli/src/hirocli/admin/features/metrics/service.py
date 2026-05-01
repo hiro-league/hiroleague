@@ -1,4 +1,4 @@
-"""Admin metrics — transforms MetricsCollector snapshots for the UI (no NiceGUI)."""
+"""Admin metrics for the Svelte UI."""
 
 from __future__ import annotations
 

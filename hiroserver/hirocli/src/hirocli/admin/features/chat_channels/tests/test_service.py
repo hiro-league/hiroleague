@@ -1,4 +1,4 @@
-"""ChatChannelsService — mocked tools, no NiceGUI."""
+"""ChatChannelsService tests with mocked tools."""
 
 from __future__ import annotations
 

@@ -142,7 +142,7 @@ Review questions:
 
 ### 7. Formalize the Admin Feature Architecture
 
-The NiceGUI admin side already has service/controller/components/page patterns.
+The admin side has service modules behind the Svelte API.
 The opportunity is to make that pattern explicit and avoid leaking CLI/tool
 concerns into admin features.
 
@@ -152,7 +152,7 @@ Review questions:
 - Are tools only CLI/API adapters, or are they business logic?
 - Is each feature using the same state/result/error pattern?
 - Are table, form, and dialog components reusable without becoming generic clutter?
-- Can admin actions be tested without NiceGUI?
+- Can admin actions be tested without the browser UI?
 - Is workspace selection handled once?
 
 ### 8. Unify Command/Tool/Domain Boundaries

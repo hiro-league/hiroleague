@@ -1,4 +1,4 @@
-"""Workspace operations — wraps workspace + server tools; no NiceGUI (guidelines §1.3)."""
+"""Workspace operations for the admin API."""
 
 from __future__ import annotations
 

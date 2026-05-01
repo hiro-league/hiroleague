@@ -1,8 +1,6 @@
-"""FastAPI routes for the Svelte-based HiroAdmin.
+"""FastAPI routes for the Svelte-based Hiro Admin.
 
-Routes call existing admin services rather than duplicating business logic. This
-keeps the Svelte migration aligned with the current NiceGUI admin while making
-the frontend/backend boundary explicit.
+Routes call existing admin services rather than duplicating business logic.
 """
 
 from __future__ import annotations
@@ -37,13 +35,12 @@ from hirocli.admin.features.metrics.service import MetricsAdminService
 from hirocli.admin.features.providers.service import ProvidersPageService
 from hirocli.admin.features.workspaces.service import WorkspaceService
 from hirocli.admin.shared.result import Result
-from hirocli.admin_svelte.static_server import ADMIN_NEXT_PATH
 from hirocli.domain.config import load_config, resolve_log_dir
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.environment import get_environment_config
 from hirocli.qr_rendering import render_qr_svg
 
-api_router = APIRouter(prefix=f"{ADMIN_NEXT_PATH}/api", tags=["hiro-admin-next"])
+api_router = APIRouter(prefix="/api", tags=["hiro-admin"])
 
 
 class ApiResponse(BaseModel):
@@ -325,15 +322,19 @@ async def stream_status_events(
 ) -> StreamingResponse:
     async def events():
         last_payload = ""
-        while not await request.is_disconnected():
-            snapshot = await run_in_threadpool(_status_snapshot, workspace)
-            payload = json.dumps(snapshot, separators=(",", ":"))
-            if payload != last_payload:
-                yield f"event: status\ndata: {payload}\n\n"
-                last_payload = payload
-            else:
-                yield ": heartbeat\n\n"
-            await asyncio.sleep(STATUS_STREAM_INTERVAL_SECONDS)
+        try:
+            while not await request.is_disconnected():
+                snapshot = await run_in_threadpool(_status_snapshot, workspace)
+                payload = json.dumps(snapshot, separators=(",", ":"))
+                if payload != last_payload:
+                    yield f"event: status\ndata: {payload}\n\n"
+                    last_payload = payload
+                else:
+                    yield ": heartbeat\n\n"
+                await asyncio.sleep(STATUS_STREAM_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            # Browser tab closes and server shutdown both cancel SSE streams.
+            return
 
     return StreamingResponse(
         events(),
@@ -350,7 +351,7 @@ def _metrics_collector() -> Any:
 
 @api_router.get("/workspaces")
 async def list_workspaces() -> dict[str, Any]:
-    """Return workspace rows using the same service as the NiceGUI admin page."""
+    """Return workspace rows for the admin UI."""
     hosting_workspace_id = _hosting_workspace_id()
     result = await run_in_threadpool(WorkspaceService().list_rows, hosting_workspace_id)
     payload = _api_from_result(result)

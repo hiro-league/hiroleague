@@ -1,4 +1,4 @@
-"""Conversation channels + message history — wraps conversation tools; no NiceGUI (§1.3)."""
+"""Conversation channels and message history operations for the admin API."""
 
 from __future__ import annotations
 

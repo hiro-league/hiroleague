@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hiro-channel-devices"
-version = "0.1.1"
+version = "0.1.3"
 description = "SDK for building device channel plugins for Hiro-League"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,8 +30,8 @@ dependencies = [
     "websockets>=12",
     "typer>=0.12",
     "cryptography>=43",
-    "hiro-channel-sdk~=0.1.1",
-    "hiro-commons~=0.1.1",
+    "hiro-channel-sdk~=0.1.3",
+    "hiro-commons~=0.1.3",
 ]
 
 [project.urls]

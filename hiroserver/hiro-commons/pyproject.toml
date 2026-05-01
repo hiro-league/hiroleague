@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hiro-commons"
-version = "0.1.1"
+version = "0.1.3"
 description = "Internal shared utilities for Hiro League — not a public API; depend at your own risk"
 readme = "README.md"
 requires-python = ">=3.11"

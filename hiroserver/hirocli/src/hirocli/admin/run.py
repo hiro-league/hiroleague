@@ -1,7 +1,4 @@
-"""HiroAdmin — route registration and NiceGUI bootstrap on admin_port.
-
-Entry point: `run_admin_ui_logged` (used by `server_process` when `--admin`; wraps `run_admin_ui`).
-"""
+"""Hiro Admin FastAPI bootstrap on admin_port."""
 
 from __future__ import annotations
 
@@ -12,6 +9,7 @@ from typing import TYPE_CHECKING
 import uvicorn
 from fastapi import FastAPI
 from hiro_commons.log import Logger
+from hirocli.runtime.asgi import ShutdownCancellationGuard
 
 if TYPE_CHECKING:
     from hirocli.admin.context import AdminContext
@@ -19,17 +17,18 @@ if TYPE_CHECKING:
 
 log = Logger.get("ADMIN")
 
-_admin_routes_initialized = False
-
 
 def build_admin_context(ctx: ServerContext) -> "AdminContext":
-    """Build frozen context for the admin shell (workspace + log paths)."""
+    """Build frozen context for the admin shell."""
     from hirocli.admin.context import AdminContext
 
     gateway_log_dir: Path | None = None
     try:
+        from hirogateway.config import (
+            load_config as _load_gw_config,
+            resolve_log_dir as _gw_resolve_log_dir,
+        )
         from hirogateway.instance import load_registry as _load_gw_registry
-        from hirogateway.config import load_config as _load_gw_config, resolve_log_dir as _gw_resolve_log_dir
 
         _gw_registry = _load_gw_registry()
         if _gw_registry.instances:
@@ -65,78 +64,20 @@ def build_admin_context(ctx: ServerContext) -> "AdminContext":
     )
 
 
-def register_admin_routes() -> None:
-    """Import page modules (side effects on admin_router), then mount router on core.app once."""
-    global _admin_routes_initialized
-    if _admin_routes_initialized:
-        return
-
-    from nicegui import core
-
-    from hirocli.admin.router import admin_router
-    from hirocli.admin.shell.layout import register_shell_shared_styles
-
-    register_shell_shared_styles()
-
-    from hirocli.admin.features.catalog import page as _catalog  # noqa: F401
-    from hirocli.admin.features.chat_channels import page as _chat_channels  # noqa: F401
-    from hirocli.admin.features.channels import page as _channels  # noqa: F401
-    from hirocli.admin.features.characters import page as _characters  # noqa: F401
-    from hirocli.admin.features.dashboard import page as _dashboard  # noqa: F401
-    from hirocli.admin.features.devices import page as _devices  # noqa: F401
-    from hirocli.admin.features.gateways import page as _gateways  # noqa: F401
-    from hirocli.admin.features.logs import page as _logs  # noqa: F401
-    from hirocli.admin.features.metrics import page as _metrics  # noqa: F401
-    from hirocli.admin.features.providers import page as _providers  # noqa: F401
-    from hirocli.admin.features.tabbed_demo import page as _tabbed_demo  # noqa: F401
-    from hirocli.admin.features.workspaces import page as _workspaces  # noqa: F401
-    from hirocli.admin.stubs import register_stub_pages
-
-    register_stub_pages(admin_router)
-    core.app.include_router(admin_router)
-    log.info("Hiro Admin routes mounted", base_path="/")
-    # Only mark complete after imports + mount succeed so a failed attempt can retry (e.g. REPL).
-    _admin_routes_initialized = True
-
-
 async def run_admin_ui(ctx: ServerContext) -> None:
-    """Start the NiceGUI admin UI and shut it down when stop_event fires."""
-    from nicegui import ui
-
+    """Start the Svelte admin UI and shut it down when stop_event fires."""
     from hirocli.admin.context import set_runtime_context
-    from hirocli.admin.shared.theme import apply_theme
+    from hirocli.admin_svelte.api import include_admin_svelte_api
+    from hirocli.admin_svelte.static_server import mount_admin_svelte_static
 
     set_runtime_context(build_admin_context(ctx))
-    register_admin_routes()
-    apply_theme()
 
     admin_app = FastAPI(title="Hiro Admin")
-    from hirocli.admin_svelte.api import include_admin_svelte_api
-    from hirocli.admin_svelte.static_server import ADMIN_NEXT_PATH, mount_admin_svelte_static
-
-    # Register Svelte routes before NiceGUI mounts its app at root; otherwise NiceGUI's
-    # catch-all handler shadows /admin-next/* and the API/static routes return 404.
     include_admin_svelte_api(admin_app)
-    svelte_mounted = mount_admin_svelte_static(admin_app, require_built=False)
-    if svelte_mounted:
-        log.info(
-            "Hiro Admin Next POC mounted",
-            admin_next_url=f"http://127.0.0.1:{ctx.config.admin_port}{ADMIN_NEXT_PATH}/",
-        )
-    else:
-        log.warning(
-            "Hiro Admin Next POC assets not found; skipping static mount",
-            build_command="npm --prefix admin_frontend run package:python",
-        )
-    ui.run_with(
-        admin_app,
-        title="Hiro Admin",
-        show_welcome_message=False,
-        storage_secret=f"hiro-admin-{ctx.config.device_id}",
-    )
+    mount_admin_svelte_static(admin_app)
 
     uv_config = uvicorn.Config(
-        app=admin_app,
+        app=ShutdownCancellationGuard(admin_app, ctx.stop_event),
         host="127.0.0.1",
         port=ctx.config.admin_port,
         log_level="warning",
@@ -148,7 +89,7 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     stop_task = asyncio.create_task(ctx.stop_event.wait())
 
     log.info(
-        f"🎉 Hiro Dashboard Ready - http://127.0.0.1:{ctx.config.admin_port}",
+        "Hiro Admin ready",
         admin_url=f"http://127.0.0.1:{ctx.config.admin_port}/",
     )
 
@@ -172,11 +113,11 @@ async def run_admin_ui(ctx: ServerContext) -> None:
 
 
 async def run_admin_ui_logged(ctx: ServerContext) -> None:
-    """Run NiceGUI admin; log failures (gather(return_exceptions=True) would otherwise hide them)."""
+    """Run admin UI; log failures hidden by gather(return_exceptions=True)."""
     try:
         await run_admin_ui(ctx)
     except Exception as exc:
         log.error(
-            f"❌ Admin UI failed — {type(exc).__name__}: {exc}",
+            f"Admin UI failed - {type(exc).__name__}: {exc}",
             exc_info=True,
         )

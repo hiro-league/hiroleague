@@ -1,4 +1,4 @@
-"""Log tail and search — wraps LogTailTool / LogSearchTool; no NiceGUI (guidelines §1.3)."""
+"""Log tail and search operations for the admin API."""
 
 from __future__ import annotations
 

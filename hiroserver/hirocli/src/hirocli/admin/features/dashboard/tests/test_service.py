@@ -1,4 +1,4 @@
-"""DashboardService — mock tools, no NiceGUI."""
+"""DashboardService tests with mocked tools."""
 
 from __future__ import annotations
 

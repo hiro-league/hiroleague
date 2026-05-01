@@ -293,7 +293,7 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
         message = row[3]
         # Startup rows get a styled span so the Message cell is highlighted via
         # html_columns — rowClassRules/cellClassRules expression strings are not
-        # evaluated by NiceGUI's AG Grid serialisation, so html_columns is the
+        # evaluated by the old browser grid serialisation, so html_columns is the
         # only reliable per-row visual distinction mechanism.
         is_startup = message.startswith("🚀 Hiro Server starting")
         message_html = (

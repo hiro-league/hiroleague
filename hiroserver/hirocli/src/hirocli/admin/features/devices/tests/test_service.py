@@ -1,4 +1,4 @@
-"""DeviceService — mocked tools, no NiceGUI."""
+"""DeviceService tests with mocked tools."""
 
 from __future__ import annotations
 

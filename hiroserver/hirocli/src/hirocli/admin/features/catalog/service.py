@@ -1,4 +1,4 @@
-"""Catalog browser — wraps LLM catalog tools; no NiceGUI (guidelines §1.3)."""
+"""Catalog browser operations for the admin API."""
 
 from __future__ import annotations
 

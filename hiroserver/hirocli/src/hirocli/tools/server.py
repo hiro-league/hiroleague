@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import sys
+from importlib import metadata
 from pathlib import Path
 
 from hiro_commons.keys import public_key_to_b64
+from hiro_commons.log import Logger
 from hiro_commons.process import is_running, read_pid
 
 from ..domain.config import Config, load_config, load_state, master_key_path, save_config
@@ -36,6 +40,7 @@ from .server_models import (
     StopResult,
     TeardownResult,
     UninstallResult,
+    UpgradeResult,
     WorkspaceStatusEntry,
 )
 
@@ -434,3 +439,258 @@ class UninstallTool(Tool):
     ) -> UninstallResult:
         teardown_result = TeardownTool().execute(workspace=workspace, purge=purge)
         return UninstallResult(teardown=teardown_result)
+
+
+# ---------------------------------------------------------------------------
+# Upgrade
+# ---------------------------------------------------------------------------
+#
+# `hiro upgrade` exists because `uv tool upgrade hiroleague` alone does not
+# always pick up newer versions: uv records the *resolved* version of an
+# unconstrained tool spec in its receipt, so subsequent `upgrade` calls can
+# report "Nothing to upgrade" even when PyPI has a newer release. The
+# documented escape hatch is `uv tool upgrade --reinstall`, which deletes the
+# tool venv and re-resolves from scratch. That's safe — Python wheels have no
+# install/uninstall hooks, and user-data directories live outside the venv.
+#
+# We hide that behind a simple `hiro upgrade` so end users never need to know
+# about uv's quirks. The same command also handles workspace devs (editable
+# installs) and pip/pipx users by detecting the install method.
+
+
+def _detect_install_method(installed_path: Path | None) -> tuple[str, str]:
+    """Classify how the currently-running `hirocli` is installed.
+
+    Returns ``(method, explanation)``. See ``UpgradeResult.install_method``
+    for the list of methods.
+
+    Detection is best-effort and based on the install path. We can't ask
+    uv "did you install this?" directly, so we recognise its standard
+    layout (``…/uv/tools/<name>/…``) and pipx's (``…/pipx/venvs/<name>/…``).
+    """
+    if installed_path is None:
+        return "unknown", "Could not determine where hirocli is installed."
+
+    path_str = str(installed_path).replace("\\", "/").lower()
+
+    # uv tool layout: <data-dir>/uv/tools/<tool-name>/lib/...
+    if "/uv/tools/" in path_str:
+        if "/uv/tools/hiroleague/" in path_str:
+            return (
+                "uv-tool-hiroleague",
+                "Installed via `uv tool install hiroleague` (end-user meta-package).",
+            )
+        if "/uv/tools/hirocli/" in path_str:
+            return (
+                "uv-tool-hirocli",
+                "Installed via `uv tool install --editable hirocli` (workspace dev).",
+            )
+        return (
+            "uv-tool-hirocli",
+            "Installed via `uv tool install` (uv tool layout detected).",
+        )
+
+    # pipx layout: <data-dir>/pipx/venvs/<tool-name>/lib/...
+    if "/pipx/venvs/" in path_str:
+        return (
+            "pipx-hiroleague",
+            "Installed via `pipx install hiroleague`.",
+        )
+
+    # Editable installs leave a .pth file or an `__editable__` finder; the
+    # easiest signal is whether the package metadata points at a source tree
+    # we can write into. Best-effort: if the path contains "src/hirocli", it's
+    # an editable workspace install (e.g. `uv pip install -e .`).
+    if "/src/hirocli" in path_str:
+        return (
+            "editable",
+            "Editable install detected — upgrade by pulling the repo and re-running `uv sync`.",
+        )
+
+    return "pip", "Installed via pip into a regular Python environment."
+
+
+def _build_upgrade_command(method: str) -> list[str] | None:
+    """Return the recommended shell command for the given install method.
+
+    ``None`` means there's no fully-automatic upgrade path (editable /
+    unknown) — the user has to handle it themselves.
+    """
+    if method == "uv-tool-hiroleague":
+        # --reinstall forces uv to drop the cached pin and re-resolve, which
+        # is the only way to escape "Nothing to upgrade" on already-pinned
+        # tool installs.
+        return ["uv", "tool", "upgrade", "--reinstall", "hiroleague"]
+    if method == "uv-tool-hirocli":
+        return ["uv", "tool", "upgrade", "--reinstall", "hirocli"]
+    if method == "pipx-hiroleague":
+        return ["pipx", "upgrade", "hiroleague"]
+    if method == "pip":
+        # `python -m pip` (rather than bare `pip`) so we hit the same
+        # interpreter that's running `hiro` — avoids the classic "wrong pip"
+        # footgun on systems with multiple Pythons.
+        return [sys.executable, "-m", "pip", "install", "--upgrade", "hiroleague"]
+    return None
+
+
+class UpgradeTool(Tool):
+    name = "upgrade"
+    description = (
+        "Detect how Hiro is installed and run the right upgrade command "
+        "(uv tool upgrade --reinstall / pipx / pip)"
+    )
+    params = {
+        "workspace": ToolParam(
+            str,
+            "Workspace whose server should be stopped before upgrading "
+            "(default: registry default)",
+            required=False,
+        ),
+        "dry_run": ToolParam(
+            bool,
+            "Detect install method and print the recommended command, "
+            "but do not run it",
+            required=False,
+        ),
+        "stop_server": ToolParam(
+            bool,
+            "Stop the running server before upgrading (default: true). "
+            "Required on Windows to release locked files in the venv.",
+            required=False,
+        ),
+        "restart_server": ToolParam(
+            bool,
+            "Start the server again after a successful upgrade if it was "
+            "running before (default: true)",
+            required=False,
+        ),
+    }
+
+    def execute(
+        self,
+        workspace: str | None = None,
+        dry_run: bool = False,
+        stop_server: bool = True,
+        restart_server: bool = True,
+    ) -> UpgradeResult:
+        log = Logger.get("TOOLS.UPGRADE")
+
+        # Resolve the package version + install path. We prefer the umbrella
+        # `hiroleague` metadata when present (end-user install); fall back to
+        # `hirocli` for workspace devs.
+        version_str = "unknown"
+        install_path: Path | None = None
+        for name in ("hiroleague", "hirocli"):
+            try:
+                version_str = metadata.version(name)
+                dist = metadata.distribution(name)
+                if dist.locate_file(""):
+                    install_path = Path(str(dist.locate_file("")))
+                break
+            except metadata.PackageNotFoundError:
+                continue
+
+        method, explanation = _detect_install_method(install_path)
+        upgrade_cmd = _build_upgrade_command(method)
+
+        # Inspect the server state for the requested (or default) workspace
+        # so we can stop/restart around the upgrade. We tolerate "no
+        # workspace yet" — a user might be upgrading before they've ever
+        # configured one.
+        server_was_running = False
+        server_pid: int | None = None
+        server_workspace: str | None = None
+        workspace_path: Path | None = None
+        config_for_restart: Config | None = None
+        try:
+            entry, _, workspace_path = ctrl.resolve_or_create(workspace)
+            server_workspace = entry.name
+            server_pid = read_pid(workspace_path, PID_FILENAME)
+            server_was_running = server_pid is not None and is_running(server_pid)
+            if server_was_running and (workspace_path / "config.json").exists():
+                config_for_restart = load_config(workspace_path)
+        except WorkspaceError:
+            pass
+
+        if dry_run or upgrade_cmd is None:
+            log.info(
+                "Upgrade plan — HiroServer · upgrade",
+                method=method,
+                version=version_str,
+                command=" ".join(upgrade_cmd) if upgrade_cmd else "(none)",
+            )
+            return UpgradeResult(
+                installed_version=version_str,
+                install_method=method,
+                upgrade_command=upgrade_cmd,
+                explanation=explanation,
+                server_was_running=server_was_running,
+                server_pid=server_pid,
+                server_workspace=server_workspace,
+                executed=False,
+                exit_code=None,
+                server_restarted=False,
+            )
+
+        if stop_server and server_was_running and workspace_path is not None:
+            log.info(
+                "Stopping server before upgrade — HiroServer · upgrade",
+                workspace=server_workspace,
+                pid=server_pid,
+            )
+            ctrl.stop_server(workspace_path)
+
+        log.info(
+            "⬆️ Running upgrade — HiroServer · upgrade",
+            method=method,
+            command=" ".join(upgrade_cmd),
+        )
+        # We deliberately don't capture stdout/stderr — uv/pipx/pip print
+        # nicely-formatted progress that the user benefits from seeing live.
+        # Failure surfaces via the returncode; we log it and let the CLI
+        # layer render it.
+        try:
+            proc = subprocess.run(upgrade_cmd, check=False)
+            exit_code = proc.returncode
+        except FileNotFoundError as exc:
+            log.error(
+                "❌ Upgrade command not found — HiroServer · upgrade",
+                command=upgrade_cmd[0],
+                error=str(exc),
+                exc_info=True,
+            )
+            exit_code = 127
+
+        upgrade_ok = exit_code == 0
+        server_restarted = False
+        if (
+            upgrade_ok
+            and restart_server
+            and server_was_running
+            and workspace_path is not None
+            and config_for_restart is not None
+        ):
+            log.info(
+                "Restarting server after upgrade — HiroServer · upgrade",
+                workspace=server_workspace,
+            )
+            ctrl.start_server(
+                workspace_path,
+                config_for_restart,
+                workspace_name=server_workspace or "default",
+                foreground=False,
+            )
+            server_restarted = True
+
+        return UpgradeResult(
+            installed_version=version_str,
+            install_method=method,
+            upgrade_command=upgrade_cmd,
+            explanation=explanation,
+            server_was_running=server_was_running,
+            server_pid=server_pid,
+            server_workspace=server_workspace,
+            executed=True,
+            exit_code=exit_code,
+            server_restarted=server_restarted,
+        )

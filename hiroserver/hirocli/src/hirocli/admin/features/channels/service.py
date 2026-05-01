@@ -1,4 +1,4 @@
-"""Channel plugin operations — wraps channel tools; no NiceGUI (guidelines §1.3)."""
+"""Channel plugin operations for the admin API."""
 
 from __future__ import annotations
 

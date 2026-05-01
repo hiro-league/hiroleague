@@ -16,6 +16,7 @@ from ..tools.server import (
     StatusTool,
     StopTool,
     UninstallTool,
+    UpgradeTool,
 )
 
 log = Logger.get("CLI.SERVER")
@@ -165,6 +166,119 @@ def register(app: typer.Typer, console: Console) -> None:
             _print_workspace_status_entry(console, ws)
             if len(result.workspaces) > 1:
                 console.print()
+
+    @app.command()
+    def upgrade(
+        workspace: Optional[str] = typer.Option(
+            None, "--workspace", "-W",
+            help="Workspace whose server should be stopped before upgrading "
+                 "(default: registry default).",
+        ),
+        dry_run: bool = typer.Option(
+            False, "--dry-run",
+            help="Print the recommended upgrade command without running it.",
+        ),
+        yes: bool = typer.Option(
+            False, "--yes", "-y",
+            help="Skip the confirmation prompt and run the upgrade immediately.",
+        ),
+        no_stop: bool = typer.Option(
+            False, "--no-stop",
+            help="Do not stop the running server before upgrading. Not "
+                 "recommended on Windows — locked venv files can fail the upgrade.",
+        ),
+        no_restart: bool = typer.Option(
+            False, "--no-restart",
+            help="Do not start the server again after a successful upgrade.",
+        ),
+    ) -> None:
+        """Upgrade Hiro League to the latest version on PyPI.
+
+        Detects how Hiro is installed (uv tool / pipx / pip / editable) and
+        runs the right upgrade command. For uv-tool installs it uses
+        ``uv tool upgrade --reinstall`` to escape uv's pinned-receipt cache —
+        that is safe because Python wheels have no install/uninstall hooks
+        and your workspace data lives outside the tool venv.
+        """
+        log.info("hiro upgrade", dry_run=dry_run, no_stop=no_stop, no_restart=no_restart)
+
+        # Step 1: detect what we'd do (no side effects yet) so we can show the
+        # plan to the user before asking for confirmation.
+        plan = UpgradeTool().execute(
+            workspace=workspace,
+            dry_run=True,
+            stop_server=not no_stop,
+            restart_server=not no_restart,
+        )
+
+        console.print(f"[bold cyan]hiro upgrade[/bold cyan] — {plan.explanation}")
+        console.print(f"  Installed version: [cyan]{plan.installed_version}[/cyan]")
+        console.print(f"  Install method:    [cyan]{plan.install_method}[/cyan]")
+        if plan.upgrade_command:
+            console.print(
+                f"  Upgrade command:   [yellow]{' '.join(plan.upgrade_command)}[/yellow]"
+            )
+        else:
+            console.print(
+                "  [yellow]No automatic upgrade path for this install method.[/yellow]\n"
+                "  For editable workspace installs, pull the repo and run "
+                "`uv sync` from `hiroserver/`."
+            )
+            raise typer.Exit(1)
+
+        if plan.server_was_running:
+            console.print(
+                f"  Server status:     [green]running[/green] "
+                f"(workspace: {plan.server_workspace}, PID {plan.server_pid})"
+            )
+            if not no_stop:
+                console.print(
+                    "  [dim]The server will be stopped before upgrade and "
+                    "restarted afterwards.[/dim]"
+                )
+        else:
+            console.print("  Server status:     [dim]not running[/dim]")
+
+        if dry_run:
+            console.print("\n[dim]--dry-run: nothing was executed.[/dim]")
+            return
+
+        if not yes:
+            if not typer.confirm("\nProceed with upgrade?", default=True):
+                console.print("[yellow]Aborted.[/yellow]")
+                raise typer.Exit(1)
+
+        # Step 2: actually execute.
+        result = UpgradeTool().execute(
+            workspace=workspace,
+            dry_run=False,
+            stop_server=not no_stop,
+            restart_server=not no_restart,
+        )
+
+        if result.exit_code == 0:
+            console.print("\n[green]Upgrade complete.[/green]")
+            if result.server_restarted:
+                console.print(
+                    f"[green]Server restarted[/green] (workspace: {result.server_workspace})."
+                )
+            elif result.server_was_running and not no_restart:
+                console.print(
+                    "[yellow]Server was stopped but not restarted automatically.[/yellow] "
+                    "Run [cyan]hiro start[/cyan] to bring it back up."
+                )
+        else:
+            console.print(
+                f"\n[red]Upgrade failed[/red] "
+                f"(exit code {result.exit_code}). "
+                "See output above for details."
+            )
+            if result.server_was_running and not result.server_restarted:
+                console.print(
+                    "[yellow]The server was stopped before upgrade. "
+                    "Start it manually with [cyan]hiro start[/cyan].[/yellow]"
+                )
+            raise typer.Exit(result.exit_code or 1)
 
     @app.command()
     def uninstall(

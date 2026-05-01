@@ -1,4 +1,4 @@
-"""Smoke tests for shared Result type (no NiceGUI)."""
+"""Smoke tests for shared Result type."""
 
 from __future__ import annotations
 

@@ -52,6 +52,7 @@ from .server import (
     StopTool,
     TeardownTool,
     UninstallTool,
+    UpgradeTool,
 )
 from .workspace import (
     WorkspaceCreateTool,
@@ -98,6 +99,7 @@ def all_tools() -> list[Tool]:
         StatusTool(),
         TeardownTool(),
         UninstallTool(),
+        UpgradeTool(),
         GatewayStatusTool(),
         GatewayStartTool(),
         GatewayStopTool(),

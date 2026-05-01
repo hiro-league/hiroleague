@@ -1,4 +1,4 @@
-"""Device pairing and approved-device list — wraps device tools; no NiceGUI (guidelines §1.3)."""
+"""Device pairing and approved-device operations for the admin API."""
 
 from __future__ import annotations
 

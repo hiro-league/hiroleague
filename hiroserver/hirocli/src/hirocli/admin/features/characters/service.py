@@ -1,4 +1,4 @@
-"""Character management — wraps character tools; no NiceGUI (guidelines §1.3)."""
+"""Character management for the admin API."""
 
 from __future__ import annotations
 

@@ -96,7 +96,7 @@ def start_server(
     stderr_log = workspace_path / "stderr.log"
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
 
-    return wait_for_pid(workspace_path, PID_FILENAME)
+    return wait_for_pid(workspace_path, PID_FILENAME, stderr_log=stderr_log)
 
 
 def stop_server(workspace_path: Path) -> tuple[bool, int | None]:

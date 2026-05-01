@@ -83,3 +83,34 @@ class TeardownResult:
 @dataclass
 class UninstallResult:
     teardown: TeardownResult
+
+
+@dataclass
+class UpgradeResult:
+    """Result of inspecting how Hiro is installed and what to do to upgrade.
+
+    ``installed_version`` is the *currently-running* `hiroleague` (or
+    `hirocli` for editable workspace installs) version.
+
+    ``install_method`` is one of:
+      - ``"uv-tool-hiroleague"``    end-user, ``uv tool install hiroleague``
+      - ``"uv-tool-hirocli"``       workspace dev, ``uv tool install --editable hirocli``
+      - ``"pipx-hiroleague"``       end-user, ``pipx install hiroleague``
+      - ``"pip"``                   plain ``pip install`` (regular venv / system)
+      - ``"editable"``              editable install detected (workspace dev)
+      - ``"unknown"``               could not classify
+
+    ``upgrade_command`` is the recommended shell command to actually upgrade.
+    May be ``None`` when no automatic upgrade path exists (editable / unknown).
+    """
+
+    installed_version: str
+    install_method: str
+    upgrade_command: list[str] | None
+    explanation: str
+    server_was_running: bool
+    server_pid: int | None
+    server_workspace: str | None
+    executed: bool
+    exit_code: int | None
+    server_restarted: bool

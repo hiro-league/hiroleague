@@ -56,12 +56,6 @@
     user: User
   };
 
-  const niceguiHome = $derived(
-    location.port === '5173'
-      ? `${import.meta.env.VITE_HIRO_ADMIN_ORIGIN ?? 'http://127.0.0.1:18083'}/`
-      : '/'
-  );
-
   function navHref(path: string) {
     if (path.startsWith('#')) {
       return path;
@@ -96,7 +90,7 @@
 </script>
 
 <svelte:head>
-  <title>Hiro Admin Next</title>
+  <title>Hiro Admin</title>
 </svelte:head>
 
 <div
@@ -125,7 +119,7 @@
       {#if !prefs.sidebarCollapsed}
         <div class="min-w-0 font-sans">
           <strong class="brand-text-gradient block truncate text-sm">HiroLeague</strong>
-          <span class="text-xs text-muted-foreground">Admin Next</span>
+          <span class="text-xs text-muted-foreground">Admin</span>
         </div>
       {/if}
     </div>
@@ -214,12 +208,6 @@
         aria-label={headerStatusLabel}
       ></span>
       <div class="ml-auto flex items-center gap-2">
-        <a
-          class="hidden h-8 items-center justify-center rounded-md border border-input bg-background px-3 font-sans text-xs font-semibold shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground md:inline-flex"
-          href={niceguiHome}
-        >
-          NiceGUI Home
-        </a>
         <a
           class="inline-flex h-9 w-11 shrink-0 items-center justify-center gap-1 rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
           href={adminDocsUrl}

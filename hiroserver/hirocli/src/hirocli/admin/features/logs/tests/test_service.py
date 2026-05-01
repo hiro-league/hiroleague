@@ -1,4 +1,4 @@
-"""LogsService — mocked tools / tmp dirs; no NiceGUI."""
+"""LogsService tests with mocked tools and temporary directories."""
 
 from __future__ import annotations
 

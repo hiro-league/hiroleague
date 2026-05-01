@@ -1,4 +1,4 @@
-"""Dashboard aggregate stats — wraps workspace/server/gateway/device/channel tools (no NiceGUI)."""
+"""Dashboard aggregate stats for the admin API."""
 
 from __future__ import annotations
 

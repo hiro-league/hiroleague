@@ -8,6 +8,12 @@
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync.sh"
       },
       {
+        "name": "PyPI Publish",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./scripts/publish-pypi.sh"
+      },
+      {
         "name": "Gateway Start",
         "type": "debugpy",
         "request": "launch",

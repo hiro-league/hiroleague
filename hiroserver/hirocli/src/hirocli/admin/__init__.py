@@ -1,1 +1,1 @@
-"""HiroAdmin — NiceGUI control plane (default UI; legacy `hirocli.ui` not mounted)."""
+"""Hiro Admin control plane."""

@@ -1,11 +1,10 @@
-"""Runtime context for HiroAdmin v2 — replaces module globals from legacy ui/state.py."""
+"""Runtime context for Hiro Admin."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-# Set once at startup in admin.run before pages are served.
 _runtime: AdminContext | None = None
 
 
@@ -21,7 +20,7 @@ class AdminContext:
 
 
 def set_runtime_context(ctx: AdminContext) -> None:
-    """Called from `hirocli.admin.run.run_admin_ui` before routes are registered."""
+    """Set the process-wide admin context during startup."""
     global _runtime
     _runtime = ctx
 
@@ -29,36 +28,3 @@ def set_runtime_context(ctx: AdminContext) -> None:
 def get_runtime_context() -> AdminContext | None:
     """Return the context set at startup, or None if not initialized."""
     return _runtime
-
-
-def get_selected_workspace() -> str | None:
-    """Current header workspace id from per-browser storage (valid during a page request).
-
-    NiceGUI only allows ``app.storage.user`` while a client UI context is active. Async
-    ``@ui.refreshable`` coroutines can resume after ``await`` without that context; fall back to
-    the process ``AdminContext.hosting_workspace_id`` (desktop admin single-workspace case).
-    """
-    from nicegui import app as nicegui_app
-    from nicegui import ui
-
-    if ui.context.client is None:
-        rt = get_runtime_context()
-        return rt.hosting_workspace_id if rt else None
-    try:
-        return nicegui_app.storage.user.get("selected_workspace")
-    except RuntimeError:
-        rt = get_runtime_context()
-        return rt.hosting_workspace_id if rt else None
-
-
-def ensure_selected_workspace_storage(valid_ids: list[str], default_id: str | None) -> str | None:
-    """Read selected_workspace from user storage, coerce to a valid id, write back, return it.
-
-    Keeps workspace selection logic out of layout.py (guidelines §1.2 / §2.2).
-    """
-    from nicegui import app as nicegui_app
-
-    stored = nicegui_app.storage.user.get("selected_workspace")
-    selected_id = stored if stored in valid_ids else default_id
-    nicegui_app.storage.user["selected_workspace"] = selected_id
-    return selected_id

@@ -113,8 +113,9 @@ def wait_for_pid(
     base_path: Path,
     pid_filename: str,
     *,
-    timeout: float = 5.0,
+    timeout: float = 20.0,
     poll_interval: float = 0.15,
+    stderr_log: Path | None = None,
 ) -> int:
     """Wait for a child process to write its PID file and confirm it is alive.
 
@@ -131,10 +132,23 @@ def wait_for_pid(
     pid = read_pid(base_path, pid_filename)
     if pid is not None and is_running(pid):
         return pid
+    stderr_tail = _stderr_tail(stderr_log)
+    stderr_hint = f"\n\nRecent stderr:\n{stderr_tail}" if stderr_tail else ""
     raise RuntimeError(
         f"Child process did not start within {timeout}s "
         f"(pid_file={base_path / pid_filename}, last_pid={pid})"
+        f"{stderr_hint}"
     )
+
+
+def _stderr_tail(stderr_log: Path | None, *, max_lines: int = 40) -> str:
+    if stderr_log is None or not stderr_log.exists():
+        return ""
+    try:
+        lines = stderr_log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-max_lines:])
 
 
 def pid_file(base_path: Path, pid_filename: str) -> Path:

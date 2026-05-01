@@ -1,4 +1,4 @@
-"""Gateway instance lifecycle — wraps gateway tools; no NiceGUI (guidelines §1.3)."""
+"""Gateway instance lifecycle operations for the admin API."""
 
 from __future__ import annotations
 

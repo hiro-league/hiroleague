@@ -1,4 +1,4 @@
-"""Providers page — wraps provider tools + credential store scan; no NiceGUI (guidelines §1.3)."""
+"""Provider operations for the admin API."""
 
 from __future__ import annotations
 

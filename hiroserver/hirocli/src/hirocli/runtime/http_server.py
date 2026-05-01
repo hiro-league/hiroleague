@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from ..domain.config import load_state
 from ..constants import APP_NAME, PID_FILENAME
 from ..tools.registry import ToolExecutionError, ToolNotFoundError
+from .asgi import ShutdownCancellationGuard
 
 if TYPE_CHECKING:
     from .server_context import ServerContext
@@ -224,7 +225,7 @@ async def configure_metrics(body: _MetricsConfigureBody, request: Request) -> JS
 async def run_http_server(ctx: ServerContext) -> None:
     """Start uvicorn and shut it down when stop_event is set."""
     uv_config = uvicorn.Config(
-        app=app,
+        app=ShutdownCancellationGuard(app, ctx.stop_event),
         host=ctx.config.http_host,
         port=ctx.config.http_port,
         log_level="warning",

@@ -82,17 +82,17 @@
   <section class="grid max-w-6xl gap-5">
     <div class="grid gap-6 rounded-lg border bg-card p-6 shadow-sm lg:grid-cols-[minmax(0,1fr)_320px]">
       <div>
-        <p class="font-sans text-xs font-extrabold uppercase text-primary">SvelteKit migration proof</p>
+        <p class="font-sans text-xs font-extrabold uppercase text-primary">Control Room</p>
         <h2 class="accent-text-gradient mt-2 max-w-3xl text-3xl font-semibold leading-tight md:text-4xl">
-          Same Hiro backend, cleaner browser-owned UI state.
+          Hiro workspace status and operations.
         </h2>
         <p class="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-          This POC keeps NiceGUI untouched while proving the future admin shell, static build,
-          and Python package integration path.
+          Monitor configured providers, running workspaces, and gateway connectivity from the
+          local admin server.
         </p>
       </div>
       <div class="self-end rounded-lg border border-primary/30 bg-primary/10 p-4">
-        <span class="font-sans text-sm text-muted-foreground">Build target</span>
+        <span class="font-sans text-sm text-muted-foreground">Admin package</span>
         <strong class="mt-1 block [overflow-wrap:anywhere] font-sans font-semibold">
           hirocli.admin_svelte.static
         </strong>

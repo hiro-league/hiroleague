@@ -243,7 +243,7 @@ def start_instance(
     spawn_detached(cmd, stderr_log=stderr_log)
 
     # Wait for the child to write its own PID and confirm it is alive.
-    child_pid = wait_for_pid(instance_path, PID_FILENAME)
+    child_pid = wait_for_pid(instance_path, PID_FILENAME, stderr_log=stderr_log)
 
     return GatewayStartResult(
         instance_name=entry.name,

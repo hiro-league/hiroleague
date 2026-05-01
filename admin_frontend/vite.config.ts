@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
   server: {
     proxy: {
-      '/admin-next/api': {
+      '/api': {
         target: hiroAdminOrigin,
         changeOrigin: true
       }
