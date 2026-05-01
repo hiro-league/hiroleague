@@ -5,9 +5,10 @@ Design principles:
   - The parent never writes the PID — it polls for the PID file to appear.
   - Only stop_process() removes the PID file — the child never deletes it.
   - stderr goes to a log file so crashes are diagnosable.
-  - Always spawn via ``uv run --directory`` so the correct venv and all
-    workspace packages are guaranteed regardless of sys.executable quirks
-    (debugpy, entry-point stubs, etc.).
+  - In source checkouts, spawn via ``uv run --directory`` so the correct
+    workspace venv and editable packages are guaranteed.
+  - In installed packages, fall back to ``sys.executable`` because the current
+    venv already contains the installed Hiro packages.
 """
 
 from __future__ import annotations
@@ -54,19 +55,20 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
 
 
 def uv_python_cmd() -> list[str]:
-    """Return the command prefix ``["uv", "run", "--directory", <root>, "python"]``
-    that spawns Python inside the uv workspace venv.
+    """Return the Python command prefix for spawning Hiro child processes.
 
-    This is the only reliable way to get the correct interpreter + all
-    workspace packages, regardless of how the parent process was launched
-    (debugpy, entry-point scripts, Task Scheduler, etc.).
+    In source checkouts, use ``uv run --directory`` to get the workspace venv
+    regardless of how the parent process was launched (debugpy, entry-point
+    scripts, Task Scheduler, etc.). In installed packages there is no uv
+    workspace root, so use the current interpreter from the active install
+    environment.
     """
     root = find_workspace_root()
-    if root is None:
-        raise FileNotFoundError(
-            "Could not find uv workspace root (pyproject.toml with [tool.uv.workspace])"
-        )
-    return ["uv", "run", "--directory", str(root), "python"]
+    if root is not None:
+        return ["uv", "run", "--directory", str(root), "python"]
+
+    # PyPI / uv-tool / pipx installs do not include the source uv workspace.
+    return [sys.executable]
 
 
 def spawn_detached(

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hiro-channel-sdk"
-version = "0.1.0"
-description = "Private Home Box — shared SDK and contract for channel plugins"
+version = "0.1.1"
+description = "SDK for building channel plugins for Hiro-League"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "pydantic>=2",
     "websockets>=12",
-    "hiro-commons~=0.1.0",
+    "hiro-commons~=0.1.1",
 ]
 
 [project.urls]

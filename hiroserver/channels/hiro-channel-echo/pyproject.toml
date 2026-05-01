@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hiro-channel-echo"
-version = "0.1.0"
-description = "Private Home Box — echo channel plugin for development and testing"
+version = "0.1.1"
+description = "Minimal sample channel plugin for Hiro-League - Echo"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -28,8 +28,8 @@ classifiers = [
 ]
 dependencies = [
     "typer>=0.12",
-    "hiro-channel-sdk~=0.1.0",
-    "hiro-commons~=0.1.0",
+    "hiro-channel-sdk~=0.1.1",
+    "hiro-commons~=0.1.1",
 ]
 
 [project.urls]

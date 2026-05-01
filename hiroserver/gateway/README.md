@@ -1,4 +1,4 @@
-# hirogate
+# Hiro Gateway
 
 **Hiro Gateway** — WebSocket relay server.
 
@@ -6,52 +6,9 @@ Accepts connections from Hiro desktop servers and online apps, performs
 challenge/response authentication, and relays messages between authenticated
 devices identified by `device_id`.
 
-## Dev setup
-
-`hirogate` is part of the `hiroserver` uv workspace. No separate tool install is needed — it runs directly from the workspace venv via `uv run`.
-
-After cloning or pulling updated code, run from the repo root:
-
-```bash
-./dev-sync.sh
-```
-
-Or manually:
-
-```bash
-cd hiroserver
-uv sync
-```
-
 ## Quick Start
 
-```bash
-# Create a named gateway instance (mandatory values at creation)
-uv run hirogate instance create home --port 8765 --desktop-pubkey "<base64-public-key>" --set-default
-
-# Start the instance later using only its name/default
-uv run hirogate start --instance home
-# or simply:
-uv run hirogate
-```
-
-## Instance model
-
-Each gateway runs as a named instance with persistent config:
-
-- `name` (instance identity)
-- `host` and `port` (bind address)
-- `desktop_public_key` trust root
-- `log_dir` (optional override)
-
-Instance commands:
-
-```bash
-hirogate instance list
-hirogate instance show home
-hirogate instance set-default home
-hirogate instance remove home --purge
-```
+TBD
 
 ## How it works
 
@@ -64,11 +21,4 @@ hirogate instance remove home --purge
 
 ## Message Format
 
-```json
-{
-  "target_device_id": "uuid-of-the-target-device",
-  "payload": { ... }
-}
-```
-
-If `target_device_id` is omitted, the message is broadcast to all connected devices.
+TBD

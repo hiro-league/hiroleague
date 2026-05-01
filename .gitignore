@@ -36,6 +36,10 @@ Thumbs.db
 .nicegui/
 .VSCodeCounter/
 
+# Fresh venv used for pip wheel smoke tests (pre-release checklist)
+hiroserver/_smoke_clean_install/
+.smoke-runtime/
+
 # HiroAdmin Svelte POC
 admin_frontend/node_modules/
 admin_frontend/.svelte-kit/

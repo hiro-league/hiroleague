@@ -4,8 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hiroleague"
-version = "0.1.0"
+version = "0.1.1"
 description = "Hiro is your private, personal Assistant. Works for you, your home and your family."
+# Package-local readme: ../../README.md breaks hatchling isolated builds (path outside pkg root).
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -24,12 +25,18 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "hirocli~=0.1.0",
-    "hiro-channel-devices~=0.1.0",
+    "hirocli~=0.1.1",
+    "hiro-channel-devices~=0.1.1",
 ]
 # Note: hirogate is pulled in transitively via hirocli (hirocli imports
 # hirogateway.service to manage local gateway instances). It is not an
 # optional extra — every desktop install gets it.
+
+[project.scripts]
+# Re-export dependency entry points so tool installers expose the full desktop bundle.
+hiro = "hirocli.commands.app:app"
+hirogate = "hirogateway.main:cli"
+hiro-channel-devices = "hiro_channel_devices.main:app"
 
 [project.urls]
 Homepage = "https://www.hiroleague.com"

@@ -152,9 +152,9 @@ def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> No
     """Create/update the mandatory ``devices`` channel config inside the workspace."""
     existing = load_channel_config(workspace_path, MANDATORY_CHANNEL_NAME)
     uv_workspace = find_workspace_root()
-    workspace_dir = str(uv_workspace) if uv_workspace else (
-        existing.workspace_dir if existing else ""
-    )
+    # Installed packages should use the installed hiro-channel-devices executable,
+    # not a stale dev workspace recorded by an earlier source checkout.
+    workspace_dir = str(uv_workspace) if uv_workspace else ""
     channel_cfg = ChannelConfig(
         name=MANDATORY_CHANNEL_NAME,
         enabled=True,
