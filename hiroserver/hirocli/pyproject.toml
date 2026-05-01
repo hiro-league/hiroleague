@@ -3,12 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hiroleague"
+name = "hirocli"
 version = "0.1.0"
-description = "Hiro - desktop server CLI with WebSocket gateway client"
+description = "Hiro — desktop server CLI (the `hiro` command)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
 keywords = ["home", "server", "websocket", "gateway", "cli"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -46,21 +50,28 @@ dependencies = [
     "nicegui>=3.0",
     "qrcode>=8.0",
     "psutil>=7.0",
-    "hiro-channel-sdk",
-    "hiro-commons",
-    "hiro-channel-devices",
-    "hirogate",
     "langmem>=0.0.30",
+    "hiro-commons~=0.1.0",
+    "hiro-channel-sdk~=0.1.0",
+    # hirocli imports hirogateway.service / .instance / .config to drive the
+    # `hiro gateway *` lifecycle commands, so hirogate is a real library
+    # dependency of hirocli, not just a co-located process. VPS-only deploys
+    # are unaffected — those install `hirogate` alone, never `hirocli`.
+    "hirogate~=0.1.0",
 ]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
 
 [project.scripts]
 hiro = "hirocli.commands.app:app"
-hiro-channel-devices = "hiro_channel_devices.main:app"
 
 [tool.uv.sources]
-hiro-channel-sdk = { workspace = true }
 hiro-commons = { workspace = true }
-hiro-channel-devices = { workspace = true }
+hiro-channel-sdk = { workspace = true }
 hirogate = { workspace = true }
 
 [tool.hatch.build.targets.wheel]

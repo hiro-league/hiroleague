@@ -259,7 +259,7 @@ def interactive_credential_provisioning(
 ) -> int:
     """Interactive import from environment + manual API key entry; prints provider summary.
 
-    Uses one ``CredentialStore`` for this flow. When ``hiro workspace setup`` runs interactively,
+    Uses one ``CredentialStore`` for this flow. When ``hiro workspaces setup`` runs interactively,
     ``SetupTool`` skips ``import_detected_env_keys`` so the same keys are not imported twice.
 
     Returns the number of configured providers in the store after the flow.

@@ -1,5 +1,10 @@
 [tool.uv.workspace]
-members = ["hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "channels/*"]
+members = ["hiroleague", "hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "channels/*"]
 
 [dependency-groups]
 dev = ["debugpy>=1.8,<2"]
+
+# Workspace-level runs collect several test files with the same basename.
+# Importlib mode gives each file a unique import path during collection.
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]

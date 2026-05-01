@@ -3,6 +3,7 @@
   import { FileWarning, FolderOpen, Play, RefreshCw, Square, Star, Trash2 } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import { liveStatus } from '$lib/live/status.svelte';
   import Modal from '$lib/ui/Modal.svelte';
   import { createGatewayStore } from './gateway-store.svelte';
   import type { Notify } from './types';
@@ -13,7 +14,9 @@
   const gateway = createGatewayStore((kind, message) => notify(kind, message));
   onMount(() => {
     gateway.load();
-    return gateway.startPolling();
+    return liveStatus.subscribe((status) => {
+      gateway.applyLiveRows(status.gateways, status.gateways_error);
+    });
   });
 
   function formatStderrTime(value: string | null) {
@@ -73,15 +76,16 @@
     <p class="text-muted-foreground">No gateway instances configured yet.</p>
   {:else}
     <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[760px]">
-        <div class="grid grid-cols-[220px_130px_140px_260px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
+      <div class="min-w-[880px]">
+        <div class="grid grid-cols-[220px_130px_140px_110px_260px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
           <span>Name</span>
           <span>Status</span>
           <span>Host : Port</span>
+          <span>Autostart</span>
           <span>Actions</span>
         </div>
         {#each gateway.rows as row}
-          <div class="grid min-h-16 grid-cols-[220px_130px_140px_260px] gap-3 border-t px-3 py-3">
+          <div class="grid min-h-16 grid-cols-[220px_130px_140px_110px_260px] gap-3 border-t px-3 py-3">
             <span class="flex min-w-0 items-center gap-1.5">
               {#if row.is_default}
                 <Star
@@ -111,6 +115,11 @@
               {/if}
             </span>
             <span class="truncate text-xs text-muted-foreground">{row.host}:{row.port}</span>
+            <span>
+              <Badge variant={row.autostart_method && row.autostart_method !== 'skipped' ? 'secondary' : 'outline'}>
+                {row.autostart_method ?? '-'}
+              </Badge>
+            </span>
             <span class="flex flex-wrap gap-1.5">
               {#if !row.running}
                 <Button size="sm" variant="outline" disabled={gateway.busy} onclick={() => gateway.start(row)}><Play size={13} /> Start</Button>

@@ -1,16 +1,26 @@
-# Hiro League
+# hirocli
 
-Desktop server CLI with WebSocket gateway connectivity.
+The desktop server CLI for Hiro League — installs the `hiro` command.
 
-## Installation from PyPI
+This is the **server** package. It does not pull in the device channel plugin
+(`hiro-channel-devices` ships as a separate package and runs as a subprocess).
+End users almost always want the umbrella package `hiroleague` instead, which
+bundles the full desktop install.
 
-```bash
-pip install hiroleague
-```
+`hirocli` does pull in `hirogate` transitively — its CLI commands
+(`hiro gateway start/stop/setup/...`) call directly into `hirogateway.service`
+to manage local gateway instances. VPS-only operators should install `hirogate`
+alone, not `hirocli`.
 
-This installs the `hiro` command.
+## Install matrix
 
-## Installation from source
+| Use case | Command |
+|---|---|
+| Full desktop (recommended) | `pip install hiroleague` |
+| Server only (no device channel, gateway still pulled in) | `pip install hirocli` |
+| VPS gateway only | `pip install hirogate` |
+
+## Installation from source (workspace dev)
 
 ```bash
 cd hiroserver
@@ -18,7 +28,8 @@ uv sync
 uv tool install --editable hirocli
 ```
 
-The workspace member directory is still named `hirocli`, but the installed command is `hiro`.
+The workspace member directory is named `hirocli`, and the installed command
+is `hiro`.
 
 ### After pulling updated code
 
@@ -28,20 +39,22 @@ Run from the repo root every time you pull changes or switch environments:
 ./dev-sync.sh
 ```
 
-`dev-sync.sh` stops the server, syncs dependencies, and reinstalls the editable tool so the `hiro` entry point stays current.
+`dev-sync.sh` stops the server, syncs dependencies, and reinstalls the
+editable tool binaries (`hiro`, `hiro-channel-devices`, `hirogate`) so all
+entry points stay current.
 
 ## Quick start
 
 ```bash
 # If you want a named workspace
-hiro workspace create home --set-default
-hiro workspace setup home
+hiro workspaces create home --set-default
+hiro workspaces setup home
 
 # One-time setup with auto-created default workspace
-hiro workspace setup
+hiro workspaces setup
 
 # If needed on Windows, request UAC to create an elevated scheduled task
-hiro workspace setup --elevated-task
+hiro workspaces setup --elevated-task
 
 # Manual start / stop
 hiro start
@@ -60,7 +73,7 @@ hiro device list
 hiro device revoke <device_id>
 
 # Cleanup auto-start and running process
-hiro workspace teardown
+hiro workspaces teardown
 
 # Full uninstall flow
 hiro uninstall

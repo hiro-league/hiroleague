@@ -156,7 +156,7 @@ def resolve_workspace(identifier: str | None = None) -> tuple[WorkspaceEntry, Wo
 
     if not registry.workspaces:
         raise WorkspaceError(
-            "No workspaces configured. Run 'hiro workspace create' first."
+            "No workspaces configured. Run 'hiro workspaces create' first."
         )
 
     target = identifier or os.environ.get(ENV_WORKSPACE) or registry.default_workspace

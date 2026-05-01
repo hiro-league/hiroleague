@@ -9,14 +9,36 @@ description = "Private Home Box — device channel plugin bridging gateway <-> u
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
 keywords = ["home", "server", "channel", "plugin", "devices", "gateway"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Networking",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
-    "hiro-channel-sdk",
     "websockets>=12",
     "typer>=0.12",
     "cryptography>=43",
-    "hiro-commons",
+    "hiro-channel-sdk~=0.1.0",
+    "hiro-commons~=0.1.0",
 ]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
 
 [project.scripts]
 hiro-channel-devices = "hiro_channel_devices.main:app"

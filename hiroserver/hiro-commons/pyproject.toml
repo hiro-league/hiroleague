@@ -5,13 +5,19 @@ build-backend = "hatchling.build"
 [project]
 name = "hiro-commons"
 version = "0.1.0"
-description = "Hiro shared commons utilities"
+description = "Internal shared utilities for Hiro League — not a public API; depend at your own risk"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
 keywords = ["hiroleague", "commons", "crypto", "utils"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -21,6 +27,12 @@ dependencies = [
     "structlog>=25",
     "colorama>=0.4.6",
 ]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hiro_commons"]

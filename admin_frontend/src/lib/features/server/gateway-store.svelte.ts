@@ -59,6 +59,14 @@ export function createGatewayStore(notify: Notify) {
     }
   }
 
+  function applyLiveRows(nextRows: GatewayRow[], nextError: string | null) {
+    if (rowsChanged(nextRows)) {
+      rows = nextRows;
+    }
+    error = nextError;
+    loading = false;
+  }
+
   function startPolling() {
     const id = window.setInterval(() => {
       void load({ silent: true });
@@ -68,6 +76,10 @@ export function createGatewayStore(notify: Notify) {
 
   function closeDialog() {
     if (busy) return;
+    resetDialog();
+  }
+
+  function resetDialog() {
     dialog = null;
     selected = null;
   }
@@ -109,7 +121,7 @@ export function createGatewayStore(notify: Notify) {
         elevated_task: createForm.elevatedTask
       });
       notify('success', result.data ?? 'Gateway created.');
-      closeDialog();
+      resetDialog();
       await load();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Create gateway failed.');
@@ -147,7 +159,7 @@ export function createGatewayStore(notify: Notify) {
           ? `Gateway '${selected.name}' stopped.`
           : `Gateway '${selected.name}' was not running.`
       );
-      closeDialog();
+      resetDialog();
       await load();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Stop gateway failed.');
@@ -162,7 +174,7 @@ export function createGatewayStore(notify: Notify) {
     try {
       const result = await removeGateway(selected.name, removeForm.purge);
       notify('success', result.data ?? 'Gateway removed.');
-      closeDialog();
+      resetDialog();
       await load();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Remove gateway failed.');
@@ -219,6 +231,7 @@ export function createGatewayStore(notify: Notify) {
       return runningCount;
     },
     load,
+    applyLiveRows,
     startPolling,
     closeDialog,
     openCreate,

@@ -203,7 +203,7 @@ class StartTool(Tool):
         if not (workspace_path / "config.json").exists():
             raise ValueError(
                 f"Workspace '{entry.name}' is not configured. "
-                f"Run 'hiro workspace setup {entry.name}' first."
+                f"Run 'hiro workspaces setup {entry.name}' first."
             )
 
         config = load_config(workspace_path)
@@ -286,7 +286,7 @@ class RestartTool(Tool):
         if not (workspace_path / "config.json").exists():
             raise ValueError(
                 f"Workspace '{entry.name}' is not configured. "
-                f"Run 'hiro workspace setup {entry.name}' first."
+                f"Run 'hiro workspaces setup {entry.name}' first."
             )
 
         config = load_config(workspace_path)

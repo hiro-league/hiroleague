@@ -51,7 +51,7 @@ def create_chat_model(
     if wid is None:
         raise ValueError(
             "Workspace path is not registered; cannot resolve credential scope. "
-            "Pass workspace_id explicitly or add this folder via hiro workspace."
+            "Pass workspace_id explicitly or add this folder via hiro workspaces."
         )
 
     store = credential_store or CredentialStore(workspace_path, wid)

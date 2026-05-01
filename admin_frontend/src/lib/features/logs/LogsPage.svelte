@@ -49,6 +49,10 @@
     controlsCollapsed?: boolean;
   };
 
+  type RenderLogRow = LogRow & {
+    _rowKey: string;
+  };
+
   const columns: ColumnDef<any, LogRow, unknown>[] = [
     { id: 'date_display', accessorKey: 'date_display', header: 'Date' },
     { id: 'timestamp_display', accessorKey: 'timestamp_display', header: 'Time' },
@@ -60,7 +64,7 @@
   ];
 
   let layout = $state<LogsLayout | null>(null);
-  let rows = $state<LogRow[]>([]);
+  let rows = $state<RenderLogRow[]>([]);
   let fileOffsets = $state<Record<string, number>>({});
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -75,7 +79,7 @@
   let autoScroll = $state(true);
   let detailPanelOpen = $state(false);
   let controlsCollapsed = $state(false);
-  let activeRowId = $state<string | null>(null);
+  let activeRowKey = $state<string | null>(null);
   let initialized = $state(false);
   let polling = false;
   let searchTimer: number | null = null;
@@ -100,7 +104,7 @@
   });
 
   const activeRow = $derived(
-    activeRowId ? visibleRows.find((row) => row.id === activeRowId) ?? null : null
+    activeRowKey ? visibleRows.find((row) => row._rowKey === activeRowKey) ?? null : null
   );
 
   const table = createTable({
@@ -109,8 +113,15 @@
     },
     columns,
     getCoreRowModel: createCoreRowModel(),
-    getRowId: (row: LogRow) => row.id
+    getRowId: (row: RenderLogRow) => row._rowKey
   } as any);
+
+  function withRenderKeys(logRows: LogRow[], startIndex = 0): RenderLogRow[] {
+    return logRows.map((row, index) => ({
+      ...row,
+      _rowKey: `${row.id}:${startIndex + index}`
+    }));
+  }
 
   function readPreferences() {
     const raw = sessionStorage.getItem(PREF_KEY);
@@ -192,11 +203,11 @@
     return true;
   }
 
-  function setActiveRow(row: LogRow | null) {
-    activeRowId = row?.id ?? null;
+  function setActiveRow(row: RenderLogRow | null) {
+    activeRowKey = row?._rowKey ?? null;
   }
 
-  function selectRow(row: LogRow) {
+  function selectRow(row: RenderLogRow) {
     setActiveRow(row);
     tableScroller?.focus();
   }
@@ -261,10 +272,10 @@
       return;
     }
     const payload = await tailLogs({ lines: INITIAL_TAIL_LINES });
-    rows = payload.data.rows;
+    rows = withRenderKeys(payload.data.rows);
     fileOffsets = payload.data.file_offsets;
-    if (visibleRows.length > 0 && !activeRowId) {
-      activeRowId = visibleRows[0].id;
+    if (visibleRows.length > 0 && !activeRowKey) {
+      activeRowKey = visibleRows[0]._rowKey;
     }
   }
 
@@ -278,7 +289,7 @@
       pollError = null;
       fileOffsets = payload.data.file_offsets;
       if (payload.data.rows.length > 0) {
-        rows = [...rows, ...payload.data.rows];
+        rows = [...rows, ...withRenderKeys(payload.data.rows, rows.length)];
       }
     } catch (err) {
       pollError = err instanceof Error ? err.message : 'Live log polling failed.';
@@ -299,13 +310,13 @@
     try {
       const payload = await searchLogs(trimmed);
       if (searchText.trim() !== trimmed) return;
-      rows = payload.data.rows;
+      rows = withRenderKeys(payload.data.rows);
       fileOffsets = {};
-      activeRowId = rows[0]?.id ?? null;
+      activeRowKey = rows[0]?._rowKey ?? null;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Search failed.';
       rows = [];
-      activeRowId = null;
+      activeRowKey = null;
     } finally {
       searchBusy = false;
     }
@@ -340,8 +351,8 @@
 
   function moveActiveRow(delta: number) {
     if (visibleRows.length === 0) return;
-    const currentIndex = activeRowId
-      ? visibleRows.findIndex((row) => row.id === activeRowId)
+    const currentIndex = activeRowKey
+      ? visibleRows.findIndex((row) => row._rowKey === activeRowKey)
       : -1;
     const nextIndex =
       currentIndex < 0
@@ -382,7 +393,7 @@
 
   $effect(() => {
     if (!detailPanelOpen || activeRow || visibleRows.length === 0) return;
-    activeRowId = visibleRows[0].id;
+    activeRowKey = visibleRows[0]._rowKey;
   });
 
   $effect(() => {
@@ -612,14 +623,14 @@
               </thead>
               <tbody>
                 {#each table.getRowModel().rows as tableRow (tableRow.id)}
-                  {@const row = tableRow.original as LogRow}
+                  {@const row = tableRow.original as RenderLogRow}
                   <tr
                     class={cn(
                       'cursor-default border-b border-border/60 transition-colors hover:bg-secondary/30',
                       row.is_startup && 'log-startup-row',
-                      activeRowId === row.id && 'bg-primary/10 outline outline-1 outline-primary/30'
+                      activeRowKey === row._rowKey && 'bg-primary/10 outline outline-1 outline-primary/30'
                     )}
-                    data-active={activeRowId === row.id ? 'true' : undefined}
+                    data-active={activeRowKey === row._rowKey ? 'true' : undefined}
                     onclick={() => selectRow(row)}
                   >
                     <td class="truncate px-2 py-1.5 text-muted-foreground">{row.date_display}</td>
@@ -641,7 +652,7 @@
                       {/if}
                     </td>
                     <td class="log-extra-cell truncate px-2 py-1.5" title={row.extra}>
-                      {#each row.extra_segments as segment (segment)}
+                      {#each row.extra_segments as segment}
                         <span class="log-extra-segment">
                           {#if segment.key}
                             <span class="log-extra-key">{segment.key}</span><span class="log-extra-eq">=</span><span class="log-extra-val">{segment.value}</span>
@@ -652,7 +663,7 @@
                       {/each}
                       {#if row.extra_segments.length}
                         <div class="log-extra-tooltip">
-                          {#each row.extra_segments as segment (segment)}
+                          {#each row.extra_segments as segment}
                             <div class="log-extra-tooltip-row">
                               {#if segment.key}
                                 <span class="log-extra-key">{segment.key}</span><span class="log-extra-eq">=</span><span class="log-extra-val">{segment.value}</span>
@@ -720,7 +731,7 @@
             <div class="detail-field">
               <span>Extra</span>
               {#if activeRow.extra_segments.length}
-                {#each activeRow.extra_segments as segment (segment)}
+                {#each activeRow.extra_segments as segment}
                   <div class="mt-2">
                     <span>{segment.key ?? 'value'}</span>
                     {#if segment.pretty}

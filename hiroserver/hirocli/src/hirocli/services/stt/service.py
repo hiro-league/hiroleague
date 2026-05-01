@@ -57,6 +57,8 @@ class STTService:
         providers: list[STTProvider] | None = None,
         default_model: str | None = None,
     ) -> None:
+        # Keep accepted providers visible so factory tests can verify credential injection.
+        self.providers: list[STTProvider] = []
         self._model_to_provider: dict[str, STTProvider] = {}
         self._models: list[ModelInfo] = []
 
@@ -64,6 +66,7 @@ class STTService:
             if not provider.is_available():
                 log.debug("STT provider not available, skipping", provider=provider.name)
                 continue
+            self.providers.append(provider)
             for model_info in provider.supported_models():
                 self._model_to_provider[model_info.model_id] = provider
                 self._models.append(model_info)

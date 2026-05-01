@@ -9,7 +9,7 @@ from hiro_commons.process import is_running, read_pid
 
 from hirocli.constants import PID_FILENAME
 from hirocli.domain.workspace import WorkspaceError
-from hirocli.tools.server import RestartTool, SetupTool, StartTool, StopTool
+from hirocli.tools.server import RestartTool, SetupTool, StartTool, StatusTool, StopTool
 from hirocli.tools.workspace import (
     WorkspaceCreateTool,
     WorkspaceGetPublicKeyTool,
@@ -44,9 +44,15 @@ class WorkspaceService:
             ws_result = WorkspaceListTool().execute()
         except Exception as exc:
             return Result.failure(str(exc))
+        status_by_id: dict[str, Any] = {}
+        try:
+            status_by_id = {ws.id: ws for ws in StatusTool().execute().workspaces}
+        except Exception:
+            status_by_id = {}
         rows: list[dict[str, Any]] = []
         for ws in ws_result.workspaces:
             ws_path = Path(ws["path"])
+            status = status_by_id.get(ws["id"])
             try:
                 pid = read_pid(ws_path, PID_FILENAME)
                 running = is_running(pid)
@@ -58,6 +64,8 @@ class WorkspaceService:
                     **ws,
                     "running": running,
                     "pid": pid,
+                    "ws_connected": bool(getattr(status, "ws_connected", False)),
+                    "last_connected": getattr(status, "last_connected", None),
                     "is_current": ws["id"] == hosting_workspace_id,
                     **stderr_log_info(ws_path),
                 }

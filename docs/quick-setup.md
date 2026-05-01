@@ -1,13 +1,13 @@
 ## First-time workspace + gateway
 
-**Naming a workspace:** Create it **before** `hiro workspace setup <name>`. Plain `hiro workspace setup` is enough when you want the auto-created **`default`** workspace instead.
+**Naming a workspace:** Create it **before** `hiro workspaces setup <name>`. Plain `hiro workspaces setup` is enough when you want the auto-created **`default`** workspace instead.
 
 1. **Workspace:**
-   `hiro workspace create home --set-default`
+   `hiro workspaces create home --set-default`
    (pick any name instead of `home`)
 
 2. **Desktop setup:**
-   `hiro workspace setup home`
+   `hiro workspaces setup home`
    Enter the gateway URL you will use (e.g. `ws://localhost:8765` if the gateway runs on this PC). Copy **`desktop_pub`** from the printed summary.
 
 3. **Gateway:** Create an instance with that same **`desktop_pub`** and a port that matches your URL (example port **8765**):
@@ -22,7 +22,7 @@
 
 ### Supported (CLI)
 
-1. **Desktop server:** run `hiro workspace teardown`. Use `--purge` if you also want the workspace folder removed. Optional: pass `<name-or-id>` if you have several workspaces.
+1. **Desktop server:** run `hiro workspaces teardown`. Use `--purge` if you also want the workspace folder removed. Optional: pass `<name-or-id>` if you have several workspaces.
 2. **Gateway:** run `hirogate teardown`. Use `--instance <name>` if you are not using the default instance. If teardown fails because of how the startup task was created, retry with `--elevated-task`.
 
 ### Manual (only if teardown did not clean up)

@@ -7,17 +7,22 @@ the frontend/backend boundary explicit.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import dataclasses
+import json
+import platform
 import tempfile
 from functools import partial
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
 
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hirocli.admin.context import get_runtime_context
@@ -141,6 +146,9 @@ class MetricsConfigureRequest(BaseModel):
     interval: float | None = None
 
 
+STATUS_STREAM_INTERVAL_SECONDS = 2.0
+
+
 def _hosting_workspace_id() -> str | None:
     ctx = get_runtime_context()
     return ctx.hosting_workspace_id if ctx else None
@@ -149,6 +157,65 @@ def _hosting_workspace_id() -> str | None:
 def _selected_workspace_id(header_workspace_id: str | None) -> str | None:
     selected = (header_workspace_id or "").strip()
     return selected or _hosting_workspace_id()
+
+
+def _workspace_name(workspace_id: str | None) -> str | None:
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        return entry.name
+    except Exception:
+        ctx = get_runtime_context()
+        return ctx.hosting_workspace_name if ctx else None
+
+
+def _package_version(name: str) -> str:
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _hiro_package_version() -> str:
+    version = _package_version("hiroleague")
+    return version if version != "unknown" else _package_version("hirocli")
+
+
+def _workspace_status_label(row: dict[str, Any] | None) -> tuple[str, str]:
+    if row is None or not row.get("running"):
+        return "stopped", "Workspace not running"
+    if not row.get("ws_connected"):
+        return "running_disconnected", "Workspace running, gateway disconnected"
+    return "connected", "Workspace running and connected to gateway"
+
+
+def _status_snapshot(workspace_id: str | None = None) -> dict[str, Any]:
+    hosting_workspace_id = _hosting_workspace_id()
+    workspaces = WorkspaceService().list_rows(hosting_workspace_id)
+    gateways = GatewayService().list_instances()
+    workspace_rows = workspaces.data if workspaces.ok and workspaces.data is not None else []
+    gateway_rows = gateways.data if gateways.ok and gateways.data is not None else []
+
+    selected_workspace_id = workspace_id or hosting_workspace_id
+    selected_row = next(
+        (row for row in workspace_rows if selected_workspace_id and row.get("id") == selected_workspace_id),
+        None,
+    )
+    if selected_row is None:
+        selected_row = next((row for row in workspace_rows if row.get("is_current")), None)
+    if selected_row is None and workspace_rows:
+        selected_row = workspace_rows[0]
+
+    status, status_label = _workspace_status_label(selected_row)
+    return {
+        "workspace": selected_row,
+        "workspace_status": status,
+        "workspace_status_label": status_label,
+        "workspaces": workspace_rows,
+        "workspaces_error": None if workspaces.ok else workspaces.error,
+        "gateways": gateway_rows,
+        "gateways_error": None if gateways.ok else gateways.error,
+        "hosting_workspace_id": hosting_workspace_id,
+    }
 
 
 def _api_from_result(result: Result[Any]) -> dict[str, Any]:
@@ -231,13 +298,48 @@ def _logs_layout(workspace_id: str | None) -> Result[dict[str, Any]]:
 
 
 @api_router.get("/config")
-async def get_admin_config() -> dict[str, Any]:
+async def get_admin_config(
+    x_hiro_workspace: str | None = Header(default=None),
+) -> dict[str, Any]:
     config = get_environment_config()
+    data = dataclasses.asdict(config)
+    data.update(
+        {
+            "workspace_id": _selected_workspace_id(x_hiro_workspace),
+            "workspace_name": _workspace_name(_selected_workspace_id(x_hiro_workspace)),
+            "python_version": platform.python_version(),
+            "hiro_package_version": _hiro_package_version(),
+        }
+    )
     return {
         "ok": True,
         "error": None,
-        "data": dataclasses.asdict(config),
+        "data": data,
     }
+
+
+@api_router.get("/events/status")
+async def stream_status_events(
+    request: Request,
+    workspace: str | None = None,
+) -> StreamingResponse:
+    async def events():
+        last_payload = ""
+        while not await request.is_disconnected():
+            snapshot = await run_in_threadpool(_status_snapshot, workspace)
+            payload = json.dumps(snapshot, separators=(",", ":"))
+            if payload != last_payload:
+                yield f"event: status\ndata: {payload}\n\n"
+                last_payload = payload
+            else:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(STATUS_STREAM_INTERVAL_SECONDS)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _metrics_collector() -> Any:

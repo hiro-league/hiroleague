@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hiroleague"
+version = "0.1.0"
+description = "Hiro is your private, personal Assistant. Works for you, your home and your family."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
+keywords = ["hiroleague", "home", "server", "desktop", "meta-package"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "hirocli~=0.1.0",
+    "hiro-channel-devices~=0.1.0",
+]
+# Note: hirogate is pulled in transitively via hirocli (hirocli imports
+# hirogateway.service to manage local gateway instances). It is not an
+# optional extra — every desktop install gets it.
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
+
+[tool.uv.sources]
+hirocli = { workspace = true }
+hiro-channel-devices = { workspace = true }
+
+# Meta-package: no Python code of its own, only metadata + dependencies.
+# `bypass-selection = true` tells hatchling not to look for a package directory.
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

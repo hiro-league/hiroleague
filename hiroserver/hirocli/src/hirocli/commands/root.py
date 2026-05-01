@@ -197,10 +197,14 @@ def register(app: typer.Typer, console: Console) -> None:
             console.print(f"[green]Workspace folder removed:[/green] {td.workspace_path}")
             console.print(f"[green]Workspace '{td.workspace}' removed from registry.[/green]")
 
+        # End users install the `hiroleague` umbrella package; workspace devs
+        # use `uv tool install --editable hirocli` directly. Show both flows so
+        # the message works regardless of how the user installed it.
         console.print(
             "\n[bold]To fully remove Hiro League, run one of:[/bold]\n"
-            "  [cyan]uv tool uninstall hiroleague[/cyan]     (if installed via uv tool)\n"
-            "  [cyan]pip uninstall hiroleague[/cyan]          (if installed via pip)\n"
+            "  [cyan]pip uninstall hiroleague[/cyan]                  (end user, pip install)\n"
+            "  [cyan]uv tool uninstall hirocli[/cyan]                  (workspace dev, uv tool)\n"
+            "  [cyan]uv tool uninstall hiro-channel-devices hirogate[/cyan]  (workspace dev, also remove plugin/gateway)\n"
         )
 
 

@@ -9,12 +9,34 @@ description = "Private Home Box — echo channel plugin for development and test
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-keywords = ["home", "server", "channel", "plugin", "echo"]
-dependencies = [
-    "hiro-channel-sdk",
-    "typer>=0.12",
-    "hiro-commons",
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
 ]
+
+keywords = ["home", "server", "channel", "plugin", "echo"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Testing",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "typer>=0.12",
+    "hiro-channel-sdk~=0.1.0",
+    "hiro-commons~=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
 
 [project.scripts]
 hiro-channel-echo = "hiro_channel_echo.main:app"

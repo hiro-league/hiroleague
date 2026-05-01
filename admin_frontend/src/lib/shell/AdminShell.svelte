@@ -4,6 +4,7 @@
     Activity,
     BookOpen,
     Cpu,
+    ExternalLink,
     Grid2X2,
     KeyRound,
     List,
@@ -18,7 +19,9 @@
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
+  import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import Button from '$lib/components/ui/button.svelte';
+  import { liveStatus, type WorkspaceStatusState } from '$lib/live/status.svelte';
   import { createShellPreferences } from '$lib/preferences/shell-preferences.svelte';
   import { cn } from '$lib/utils';
   import { navItems } from './nav';
@@ -26,6 +29,13 @@
   let { activePath = 'dashboard', children }: { activePath?: string; children?: Snippet } =
     $props();
   const prefs = createShellPreferences();
+  let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
+  const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
+  const headerWorkspaceName = $derived(adminConfig.workspace_name ?? 'unknown');
+  const headerStatus = $derived(liveStatus.payload?.workspace_status ?? 'stopped');
+  const headerStatusLabel = $derived(
+    liveStatus.payload?.workspace_status_label ?? 'Workspace status unavailable'
+  );
 
   const groups = $derived(
     navItems.reduce<Record<string, typeof navItems>>((acc, item) => {
@@ -66,8 +76,22 @@
     return path.includes(activePath);
   }
 
+  function statusDotClass(status: WorkspaceStatusState) {
+    if (status === 'connected') return 'bg-emerald-500';
+    if (status === 'running_disconnected') return 'bg-amber-500';
+    return 'bg-red-500';
+  }
+
   onMount(() => {
     prefs.initialize();
+    liveStatus.start(prefs.selectedWorkspace);
+    getAdminConfig()
+      .then((payload) => {
+        adminConfig = payload.data ?? DEFAULT_ADMIN_CONFIG;
+      })
+      .catch(() => {
+        adminConfig = DEFAULT_ADMIN_CONFIG;
+      });
   });
 </script>
 
@@ -138,14 +162,18 @@
     <div
       class={cn(
         'mt-auto flex items-center gap-3 rounded-md border bg-background/60 p-3',
-        prefs.sidebarCollapsed && 'justify-center px-2'
+        prefs.sidebarCollapsed && 'hidden'
       )}
     >
-      <span class="size-2.5 shrink-0 rounded-full bg-brand"></span>
       {#if !prefs.sidebarCollapsed}
-        <div class="min-w-0 font-sans">
-          <strong class="block truncate text-sm">{prefs.selectedWorkspace ?? 'local-dev'}</strong>
-          <span class="text-xs text-muted-foreground">Selected workspace</span>
+        <div class="min-w-0 font-sans text-xs">
+          <strong class="block truncate text-sm">Workspace: {headerWorkspaceName}</strong>
+          <span class="block truncate text-muted-foreground">
+            Python: {adminConfig.python_version}
+          </span>
+          <span class="block truncate text-muted-foreground">
+            Hiro: {adminConfig.hiro_package_version}
+          </span>
         </div>
       {/if}
     </div>
@@ -180,12 +208,28 @@
       <h1 class="accent-text-gradient min-w-0 truncate font-sans text-xl font-semibold">
         Control Room
       </h1>
+      <span
+        class={cn('size-2.5 shrink-0 rounded-full', statusDotClass(headerStatus))}
+        title={headerStatusLabel}
+        aria-label={headerStatusLabel}
+      ></span>
       <div class="ml-auto flex items-center gap-2">
         <a
           class="hidden h-8 items-center justify-center rounded-md border border-input bg-background px-3 font-sans text-xs font-semibold shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground md:inline-flex"
           href={niceguiHome}
         >
           NiceGUI Home
+        </a>
+        <a
+          class="inline-flex h-9 w-11 shrink-0 items-center justify-center gap-1 rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+          href={adminDocsUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open Hiro docs in a new tab"
+          title={`Open Hiro docs in a new tab: ${adminDocsUrl}`}
+        >
+          <BookOpen size={17} />
+          <ExternalLink size={14} />
         </a>
         <Button
           aria-label={prefs.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}

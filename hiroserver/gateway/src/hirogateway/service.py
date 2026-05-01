@@ -81,6 +81,7 @@ class GatewayInstanceStatusEntry:
     host: str
     port: int
     path: str
+    autostart_method: str | None = None
     desktop_connected: bool = False
     last_auth_error: str | None = None
 
@@ -292,6 +293,7 @@ def get_status(instance: str | None = None) -> GatewayStatusResult:
         inst_path = Path(reg_entry.path)
         pid = read_pid(inst_path, PID_FILENAME)
         running = is_running(pid)
+        config = load_config(inst_path)
         state = load_state(inst_path)
         # If the process is no longer running, desktop_connected must be false
         # regardless of what state.json says (stale file from a crash).
@@ -305,6 +307,7 @@ def get_status(instance: str | None = None) -> GatewayStatusResult:
                 host=reg_entry.host,
                 port=reg_entry.port,
                 path=reg_entry.path,
+                autostart_method=config.autostart_method,
                 desktop_connected=desktop_connected,
                 last_auth_error=state.last_auth_error if not desktop_connected else None,
             )

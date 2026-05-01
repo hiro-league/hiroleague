@@ -87,6 +87,19 @@ export function createWorkspaceStore(notify: Notify) {
     }
   }
 
+  function applyLiveRows(
+    nextRows: WorkspaceRow[],
+    nextHostingWorkspaceId: string | null,
+    nextError: string | null
+  ) {
+    if (rowsChanged(nextRows, nextHostingWorkspaceId)) {
+      rows = nextRows;
+      hostingWorkspaceId = nextHostingWorkspaceId;
+    }
+    error = nextError;
+    loading = false;
+  }
+
   function startPolling() {
     const id = window.setInterval(() => {
       void load({ silent: true });
@@ -381,6 +394,7 @@ export function createWorkspaceStore(notify: Notify) {
       return runningCount;
     },
     load,
+    applyLiveRows,
     startPolling,
     closeDialog,
     openCreate,

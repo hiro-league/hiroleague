@@ -21,6 +21,7 @@
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
+  import { liveStatus } from '$lib/live/status.svelte';
   import Modal from '$lib/ui/Modal.svelte';
   import { createWorkspaceStore } from './workspace-store.svelte';
   import type { Notify } from './types';
@@ -35,7 +36,9 @@
   const workspace = createWorkspaceStore((kind, message) => notify(kind, message));
   onMount(() => {
     workspace.load();
-    return workspace.startPolling();
+    return liveStatus.subscribe((status) => {
+      workspace.applyLiveRows(status.workspaces, status.hosting_workspace_id, status.workspaces_error);
+    });
   });
   getAdminConfig()
     .then((payload) => {

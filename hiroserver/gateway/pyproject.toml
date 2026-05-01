@@ -9,6 +9,10 @@ description = "Hiro — WebSocket relay gateway server"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
 keywords = ["home", "server", "websocket", "gateway", "relay"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -24,9 +28,15 @@ dependencies = [
     "typer>=0.12",
     "rich>=13",
     "cryptography>=43",
-    "hiro-channel-sdk",
-    "hiro-commons",
+    "hiro-channel-sdk~=0.1.0",
+    "hiro-commons~=0.1.0",
 ]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
 
 [project.scripts]
 hirogate = "hirogateway.main:cli"

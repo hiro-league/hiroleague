@@ -36,9 +36,16 @@ uv sync
 echo "==> Updating Hiro tool binary..."
 # --upgrade refreshes packages in-place without deleting the venv (avoids Windows file-lock errors on Scripts/).
 # --force overwrites the entry-point script in ~/.local/bin (needed when the script was left behind by a prior failed install).
-# hiro-channel-devices is bundled as a script in hiroleague's pyproject.toml, so this single install covers both binaries.
+# Each top-level binary is installed separately because hirocli no longer bundles hiro-channel-devices
+# (the channel is its own distributable package, and the meta-package `hiroleague` is only used by end users).
+# Also clean up any older `hiroleague` editable tool install left over from before the package split.
+uv tool uninstall hiroleague 2>/dev/null || true
 uv tool uninstall hirocli 2>/dev/null || true
 uv tool install --editable hirocli --upgrade --force
+
+echo "==> Updating hiro-channel-devices tool binary..."
+uv tool uninstall hiro-channel-devices 2>/dev/null || true
+uv tool install --editable channels/hiro-channel-devices --upgrade --force
 
 echo "==> Updating hirogate tool binary..."
 uv tool uninstall hirogate 2>/dev/null || true
@@ -47,7 +54,7 @@ uv tool install --editable gateway --upgrade --force
 echo ""
 echo "Done. All tool binaries are up to date."
 echo "  hiro                 -> run: hiro --help"
-echo "  hiro-channel-devices -> run: hiro-channel-devices --help  (bundled with hiroleague)"
+echo "  hiro-channel-devices -> run: hiro-channel-devices --help"
 echo "  hirogate             -> run: hirogate --help"
 
 # Foreground gateway in a shell background job so Hiro can keep the terminal (both use -f).

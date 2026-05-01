@@ -76,7 +76,7 @@ metrics_app = typer.Typer(
     add_completion=False,
 )
 workspace_app = typer.Typer(
-    name="workspace",
+    name="workspaces",
     help="Manage workspaces (isolated server instances).",
     add_completion=False,
 )
@@ -96,7 +96,7 @@ app.add_typer(character_app, name="character")
 app.add_typer(device_app, name="device")
 app.add_typer(logs_app, name="logs")
 app.add_typer(metrics_app, name="metrics")
-app.add_typer(workspace_app, name="workspace")
+app.add_typer(workspace_app, name="workspaces")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(provider_app, name="provider")
 

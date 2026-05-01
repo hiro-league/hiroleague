@@ -6,6 +6,8 @@ export type WorkspaceRow = {
   path: string;
   running: boolean;
   pid: number | null;
+  ws_connected: boolean;
+  last_connected: string | null;
   is_current: boolean;
   is_default: boolean;
   is_configured: boolean;
@@ -30,6 +32,7 @@ export type GatewayRow = {
   port: number;
   path: string;
   is_default: boolean;
+  autostart_method: string | null;
   desktop_connected?: boolean;
   last_auth_error?: string | null;
   stderr_log_path: string;

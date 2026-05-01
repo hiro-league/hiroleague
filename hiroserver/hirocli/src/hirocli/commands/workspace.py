@@ -1,12 +1,12 @@
 """Workspace management subcommands — thin CLI layer over workspace tools.
 
-hiro workspace list
-hiro workspace create <name> [--path P] [--set-default]
-hiro workspace setup [<name-or-id>]
-hiro workspace remove <name-or-id> [--purge] [--yes]
-hiro workspace update <name-or-id> [--name N] [--set-default] [--gateway-url URL]
-hiro workspace show [<name-or-id>]
-hiro workspace teardown [<name-or-id>] [--purge]
+hiro workspaces list
+hiro workspaces create <name> [--path P] [--set-default]
+hiro workspaces setup [<name-or-id>]
+hiro workspaces remove <name-or-id> [--purge] [--yes]
+hiro workspaces update <name-or-id> [--name N] [--set-default] [--gateway-url URL]
+hiro workspaces show [<name-or-id>]
+hiro workspaces teardown [<name-or-id>] [--purge]
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         if not result.workspaces:
             console.print(
                 "[dim]No workspaces configured. "
-                "Run [bold]hiro workspace create <name>[/bold] to get started.[/dim]"
+                "Run [bold]hiro workspaces create <name>[/bold] to get started.[/dim]"
             )
             return
 
@@ -115,7 +115,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
 
         # workspace create makes the workspace — open sinks after so the path exists.
         Logger.open_log_dir(Path(result.path) / "logs")
-        log.info("hiro workspace create", name=result.name, path=result.path, set_default=make_default)
+        log.info("hiro workspaces create", name=result.name, path=result.path, set_default=make_default)
 
         console.print(f"[green]Workspace '[bold]{result.name}[/bold]' created.[/green]")
         console.print(f"  id          : [dim]{result.id}[/dim]")
@@ -127,7 +127,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         if result.is_default:
             console.print("  [cyan]Set as default workspace.[/cyan]")
 
-        console.print(f"\nNext: [bold]hiro workspace setup {result.name}[/bold]")
+        console.print(f"\nNext: [bold]hiro workspaces setup {result.name}[/bold]")
 
     @workspace_app.command("setup")
     def workspace_setup(
@@ -168,7 +168,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Configure gateway, generate device ID, and register auto-start."""
-        console.print("[bold cyan]hiro workspace setup[/bold cyan]")
+        console.print("[bold cyan]hiro workspaces setup[/bold cyan]")
 
         from ..domain.config import load_config as _load_config
 
@@ -215,7 +215,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         except Exception:
             pass
         log.info(
-            "hiro workspace setup",
+            "hiro workspaces setup",
             workspace=result.workspace,
             gateway_url=result.gateway_url,
             http_port=result.http_port,
@@ -299,7 +299,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
                 f"Are you sure you want to {action} workspace '{workspace}'?", abort=True
             )
 
-        log.info("hiro workspace remove", workspace_arg=workspace, purge=purge)
+        log.info("hiro workspaces remove", workspace_arg=workspace, purge=purge)
 
         try:
             result = WorkspaceRemoveTool().execute(workspace=workspace, purge=purge)
@@ -325,7 +325,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         gateway_url: Optional[str] = typer.Option(
             None, "--gateway-url", "-g",
             help="New gateway WebSocket URL (light update — no key regen). "
-                 "For full reconfiguration use 'hiro workspace setup'.",
+                 "For full reconfiguration use 'hiro workspaces setup'.",
         ),
     ) -> None:
         """Update workspace name, default flag, and/or gateway URL."""
@@ -333,7 +333,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             console.print("[yellow]Nothing to update. Pass --name, --set-default, or --gateway-url.[/yellow]")
             raise typer.Exit(0)
 
-        log.info("hiro workspace update", name=new_name, set_default=make_default, gateway_url=gateway_url)
+        log.info("hiro workspaces update", name=new_name, set_default=make_default, gateway_url=gateway_url)
 
         try:
             result = WorkspaceUpdateTool().execute(
@@ -427,8 +427,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Stop server and remove all auto-start registrations for a workspace."""
-        console.print("[bold cyan]hiro workspace teardown[/bold cyan]")
-        log.info("hiro workspace teardown", purge=purge)
+        console.print("[bold cyan]hiro workspaces teardown[/bold cyan]")
+        log.info("hiro workspaces teardown", purge=purge)
 
         try:
             result = TeardownTool().execute(
