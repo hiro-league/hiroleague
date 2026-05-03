@@ -6,6 +6,9 @@ Endpoints:
   GET  /channels           — connected channel plugin names and info
   GET  /tools              — list all registered tools and their schemas
   POST /invoke             — execute a tool by name with a flat params dict
+  GET  /characters         — list character profiles (id, name, description, has_photo) for Flutter
+  GET  /characters/{id}/profile — single character profile + updated_at cache hint
+  GET  /characters/{id}/photo   — character image (or packaged default when no upload)
   GET  /metrics            — latest metrics snapshot (if enabled)
   GET  /metrics/history    — historical snapshots for the last N minutes
   GET  /metrics/status     — collector config and state
@@ -23,12 +26,17 @@ from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from hiro_commons.log import Logger
 from hiro_commons.process import is_running, read_pid
 from pydantic import BaseModel
 
 from ..domain.config import load_state
+from ..domain.character import (
+    list_public_character_summaries,
+    public_character_profile,
+    resolve_character_photo_file_for_http,
+)
 from ..constants import APP_NAME, PID_FILENAME
 from ..tools.registry import ToolExecutionError, ToolNotFoundError
 from .asgi import ShutdownCancellationGuard
@@ -102,6 +110,46 @@ async def get_tools(request: Request) -> JSONResponse:
     if registry is None:
         return JSONResponse({"tools": []})
     return JSONResponse({"tools": registry.schema()})
+
+
+# ---------------------------------------------------------------------------
+# Character profile API (Phase 6 — Flutter; same trust boundary as /status)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/characters")
+async def list_characters_public(request: Request) -> JSONResponse:
+    ctx = _ctx(request)
+    items = list_public_character_summaries(ctx.workspace_path)
+    return JSONResponse({"characters": items})
+
+
+@app.get("/characters/{character_id}/profile")
+async def get_character_profile_public(character_id: str, request: Request) -> JSONResponse:
+    ctx = _ctx(request)
+    try:
+        profile = public_character_profile(ctx.workspace_path, character_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(profile)
+
+
+@app.get("/characters/{character_id}/photo")
+async def get_character_photo_public(character_id: str, request: Request) -> FileResponse:
+    ctx = _ctx(request)
+    try:
+        path, media_type = resolve_character_photo_file_for_http(
+            ctx.workspace_path,
+            character_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=path.name,
+        content_disposition_type="inline",
+    )
 
 
 class InvokeRequest(BaseModel):

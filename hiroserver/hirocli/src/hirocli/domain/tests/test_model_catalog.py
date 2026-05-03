@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from hirocli.domain.model_catalog import (
     ModelCatalog,
     clear_model_catalog_cache,
     get_model_catalog,
+    reload_model_catalog,
 )
 
 
@@ -22,10 +24,40 @@ def _clear_catalog_cache() -> None:
 
 
 def test_bundled_catalog_loads() -> None:
+    root = resources.files("hirocli.catalog_data")
+    raw_doc = yaml.safe_load(root.joinpath("catalog.yaml").read_text(encoding="utf-8"))
+    expected_version = str(raw_doc["catalog_version"]).strip()
     cat = get_model_catalog()
-    assert cat.catalog_version >= 2
+    assert cat.catalog_version == expected_version
     assert cat.get_provider("openai") is not None
     assert cat.get_model("openai:gpt-5.4") is not None
+    assert cat.get_model("openai:gpt-5.5") is not None
+    assert cat.get_model("openai:gpt-image-2") is not None
+    openai = cat.get_provider("openai")
+    assert openai is not None and len(openai.tts_voices) >= 10
+    assert cat.get_model("openai:tts-1") is not None
+    assert cat.get_model("openai:tts-1-hd") is not None
+    google = cat.get_provider("google")
+    assert google is not None and len(google.tts_voices) >= 25
+    assert any(v.id == "Kore" for v in google.tts_voices)
+    for mid in (
+        "google:gemini-3-flash-preview",
+        "google:gemini-3.1-flash-lite-preview",
+        "google:gemini-3.1-pro-preview",
+        "google:gemini-3.1-flash-tts-preview",
+        "google:gemini-2.5-flash-preview-tts",
+        "google:gemini-2.5-pro-preview-tts",
+    ):
+        assert cat.get_model(mid) is not None
+
+
+def test_reload_model_catalog_refreshes_process_cache() -> None:
+    """``reload_model_catalog`` must clear LRU cache so a new singleton is loaded."""
+    first = get_model_catalog()
+    reloaded = reload_model_catalog()
+    again = get_model_catalog()
+    assert reloaded is again
+    assert reloaded.catalog_version == first.catalog_version
 
 
 def test_list_models_filter_hosting() -> None:
@@ -52,7 +84,7 @@ def test_list_credential_env_keys_unique_sorted() -> None:
 
 def test_validate_model_ids_buckets(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 99,
+        "catalog_version": "99.0.0",
         "providers": [
             {
                 "id": "p1",
@@ -92,7 +124,7 @@ def test_validate_model_ids_buckets(tmp_path: Path) -> None:
 
 def test_invalid_provider_reference_rejected(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "only",
@@ -119,7 +151,7 @@ def test_invalid_provider_reference_rejected(tmp_path: Path) -> None:
 
 def test_model_id_must_match_provider_prefix(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "openai",
@@ -146,7 +178,7 @@ def test_model_id_must_match_provider_prefix(tmp_path: Path) -> None:
 
 def test_recommended_models_validated(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "other",
@@ -187,7 +219,7 @@ def test_recommended_models_validated(tmp_path: Path) -> None:
 
 def test_recommended_models_wrong_kind(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "p",
@@ -215,7 +247,7 @@ def test_recommended_models_wrong_kind(tmp_path: Path) -> None:
 
 def test_suggested_defaults_empty_and_populated(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "p",
@@ -244,7 +276,7 @@ def test_suggested_defaults_empty_and_populated(tmp_path: Path) -> None:
 
 def test_replacement_id_must_exist(tmp_path: Path) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "p",

@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ..domain.model_catalog import get_model_catalog
+from ..domain.model_catalog import get_model_catalog, reload_model_catalog
 from ..tools.llm_catalog import (
     LlmCatalogGetModelTool,
     LlmCatalogListModelsTool,
@@ -105,6 +105,21 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
         console.print_json(data=result.model)
         console.print("[bold]Provider[/bold]")
         console.print_json(data=result.provider)
+
+    @catalog_app.command("reload")
+    def catalog_reload() -> None:
+        """Reload bundled catalog.yaml in this process (clears the in-memory cache)."""
+        try:
+            cat = reload_model_catalog()
+        except Exception as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        n_prov = len(cat.list_providers())
+        n_mod = len(cat.list_models())
+        console.print(
+            f"[bold]Catalog v{cat.catalog_version}[/bold] reloaded "
+            f"({n_prov} providers, {n_mod} models)."
+        )
 
     @catalog_app.command("env-keys")
     def catalog_env_keys(

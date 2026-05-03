@@ -40,7 +40,7 @@
   let form = $state({
     name: '',
     userId: '',
-    agentId: '',
+    characterId: '',
     channelType: 'direct'
   });
   let deleteTarget = $state<ChatChannelRow | null>(null);
@@ -179,7 +179,7 @@
     formMode = 'create';
     editingChannelId = null;
     formError = null;
-    form = { name: '', userId: '', agentId: '', channelType: 'direct' };
+    form = { name: '', userId: '', characterId: '', channelType: 'direct' };
     formOpen = true;
   }
 
@@ -190,7 +190,7 @@
     form = {
       name: row.name,
       userId: String(row.user_id),
-      agentId: row.agent_id,
+      characterId: row.character_id,
       channelType: row.type || 'direct'
     };
     formOpen = true;
@@ -203,19 +203,19 @@
 
   function parseForm(): ChatChannelPayload | null {
     const name = form.name.trim();
-    const agentId = form.agentId.trim();
+    const characterId = form.characterId.trim();
     const userId = Number.parseInt(form.userId, 10);
     const channelType = form.channelType.trim() || 'direct';
 
-    if (!name || !agentId || !Number.isInteger(userId) || userId < 1) {
-      formError = 'Name, User ID (>= 1), and Agent ID are required.';
+    if (!name || !characterId || !Number.isInteger(userId) || userId < 1) {
+      formError = 'Name, User ID (>= 1), and Character ID are required.';
       return null;
     }
 
     return {
       name,
       user_id: userId,
-      agent_id: agentId,
+      character_id: characterId,
       channel_type: channelType
     };
   }
@@ -343,7 +343,7 @@
               <span>ID</span>
               <span>Name</span>
               <span>Type</span>
-              <span>Agent</span>
+              <span>Character</span>
               <span>User</span>
               <span>Last activity</span>
               <span>Actions</span>
@@ -355,8 +355,8 @@
                 <span class="font-mono text-xs text-muted-foreground">{row.id}</span>
                 <span class="truncate font-sans text-sm font-semibold" title={row.name}>{row.name}</span>
                 <span><Badge variant="secondary">{row.type || 'direct'}</Badge></span>
-                <span class="truncate font-mono text-xs text-muted-foreground" title={row.agent_id}>
-                  {row.agent_id}
+                <span class="truncate font-mono text-xs text-muted-foreground" title={row.character_id}>
+                  {row.character_id}
                 </span>
                 <span class="font-mono text-xs text-muted-foreground">{row.user_id}</span>
                 <span class="truncate text-xs text-muted-foreground">{formatDate(row.last_message_at)}</span>
@@ -466,8 +466,8 @@
     <input bind:value={form.userId} inputmode="numeric" autocomplete="off" />
   </label>
   <label>
-    Agent ID
-    <input bind:value={form.agentId} autocomplete="off" />
+    Character ID
+    <input bind:value={form.characterId} autocomplete="off" />
   </label>
   <label>
     Type

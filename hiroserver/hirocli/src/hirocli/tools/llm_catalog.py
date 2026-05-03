@@ -21,19 +21,19 @@ def _dump_model_row(m: Any, *, hosting: str | None) -> dict[str, Any]:
 
 @dataclass
 class LlmCatalogListProvidersResult:
-    catalog_version: int
+    catalog_version: str
     providers: list[dict[str, Any]]
 
 
 @dataclass
 class LlmCatalogListModelsResult:
-    catalog_version: int
+    catalog_version: str
     models: list[dict[str, Any]]
 
 
 @dataclass
 class LlmCatalogGetModelResult:
-    catalog_version: int
+    catalog_version: str
     model: dict[str, Any]
     provider: dict[str, Any]
 
@@ -43,7 +43,8 @@ class LlmCatalogListProvidersTool(Tool):
     description = (
         "List AI providers known to Hiro (OpenAI, Google, Anthropic, local runtimes). "
         "Each entry includes hosting type (cloud vs local), required credential env var "
-        "names, and metadata dates. Optional filter by hosting."
+        "names, metadata dates, and optional tts_voices presets for bundled TTS. "
+        "Optional filter by hosting."
     )
     params = {
         "hosting": ToolParam(

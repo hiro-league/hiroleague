@@ -1,5 +1,12 @@
 import { apiRequest, type ApiResponse } from './client';
 
+/** Preset voice id for a provider's bundled TTS API (matches catalog.yaml tts_voices). */
+export type CatalogTtsVoiceRow = {
+  id: string;
+  display_name?: string | null;
+  description?: string | null;
+};
+
 export type CatalogProviderRow = {
   id: string;
   display_name: string;
@@ -8,6 +15,8 @@ export type CatalogProviderRow = {
   docs_url?: string | null;
   default_base_url?: string | null;
   recommended_models?: Record<string, string>;
+  /** Curated presets for vendor TTS; empty when provider has no integrated speech API in Hiro. */
+  tts_voices?: CatalogTtsVoiceRow[];
   metadata_updated_at?: string | null;
   notes?: string | null;
 };
@@ -30,7 +39,7 @@ export type CatalogModelRow = {
 };
 
 export type CatalogModelsResponse = {
-  catalog_version: number;
+  catalog_version: string;
   models: CatalogModelRow[];
 };
 
@@ -48,6 +57,12 @@ export type ActiveProviderRow = {
 export type AddableProviderRow = {
   id: string;
   display_name: string;
+};
+
+export type CatalogReloadData = {
+  catalog_version: string;
+  provider_count: number;
+  model_count: number;
 };
 
 export type CatalogModelFilters = {
@@ -76,6 +91,10 @@ export async function listCatalogModels(
   filters: CatalogModelFilters = {}
 ): Promise<ApiResponse<CatalogModelsResponse>> {
   return apiRequest<CatalogModelsResponse>(`/catalog/models${queryString(filters)}`);
+}
+
+export async function reloadModelCatalog(): Promise<ApiResponse<CatalogReloadData>> {
+  return apiRequest<CatalogReloadData>('/catalog/reload', { method: 'POST' });
 }
 
 export async function listActiveProviders(): Promise<ApiResponse<ActiveProviderRow[]>> {

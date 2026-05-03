@@ -18,7 +18,7 @@ class ConversationChannel(BaseModel):
     id: int
     name: str
     type: str = "direct"
-    agent_id: str
+    character_id: str
     user_id: int
     created_at: str
     last_message_at: str | None = None
@@ -128,7 +128,7 @@ def create_channel(
     workspace_path: Path,
     *,
     name: str,
-    agent_id: str,
+    character_id: str,
     user_id: int,
     channel_type: str = "direct",
     created_at: str | None = None,
@@ -147,10 +147,10 @@ def create_channel(
 
         cursor = conn.execute(
             """
-            INSERT INTO channels (name, type, agent_id, user_id, created_at)
+            INSERT INTO channels (name, type, character_id, user_id, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (name, channel_type, agent_id, user_id, timestamp),
+            (name, channel_type, character_id, user_id, timestamp),
         )
         conn.commit()
         row = conn.execute(
@@ -168,7 +168,7 @@ def update_channel(
     *,
     name: str | None = None,
     channel_type: str | None = None,
-    agent_id: str | None = None,
+    character_id: str | None = None,
     user_id: int | None = None,
 ) -> ConversationChannel:
     """Update editable fields on a conversation channel row.
@@ -181,7 +181,7 @@ def update_channel(
 
     new_name = name if name is not None else existing.name
     new_type = channel_type if channel_type is not None else existing.type
-    new_agent = agent_id if agent_id is not None else existing.agent_id
+    new_character = character_id if character_id is not None else existing.character_id
     new_user = user_id if user_id is not None else existing.user_id
 
     ensure_data_db(workspace_path)
@@ -200,10 +200,10 @@ def update_channel(
         conn.execute(
             """
             UPDATE channels
-            SET name = ?, type = ?, agent_id = ?, user_id = ?
+            SET name = ?, type = ?, character_id = ?, user_id = ?
             WHERE id = ?
             """,
-            (new_name, new_type, new_agent, new_user, channel_id),
+            (new_name, new_type, new_character, new_user, channel_id),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
@@ -229,7 +229,7 @@ def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:
         id=row["id"],
         name=row["name"],
         type=row["type"],
-        agent_id=row["agent_id"],
+        character_id=row["character_id"],
         user_id=row["user_id"],
         created_at=row["created_at"],
         last_message_at=row["last_message_at"],

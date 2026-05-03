@@ -4,7 +4,7 @@ export type ChatChannelRow = {
   id: number;
   name: string;
   type: string;
-  agent_id: string;
+  character_id: string;
   user_id: number;
   created_at: string;
   last_message_at: string | null;
@@ -27,7 +27,7 @@ export type ChatMessageRow = {
 export type ChatChannelPayload = {
   name: string;
   user_id: number;
-  agent_id: string;
+  character_id: string;
   channel_type: string;
 };
 

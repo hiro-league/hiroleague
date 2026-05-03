@@ -33,7 +33,7 @@ class ChatChannelsService:
         *,
         name: str,
         user_id: int,
-        agent_id: str,
+        character_id: str,
         channel_type: str = "direct",
     ) -> Result[dict[str, Any]]:
         if not workspace_id:
@@ -44,7 +44,7 @@ class ChatChannelsService:
             out = ConversationChannelCreateTool().execute(
                 channel_name=name.strip(),
                 user_id=user_id,
-                agent_id=agent_id.strip(),
+                character_id=character_id.strip(),
                 channel_type=channel_type.strip() or "direct",
                 workspace=workspace_id,
             )
@@ -59,7 +59,7 @@ class ChatChannelsService:
         *,
         name: str | None = None,
         channel_type: str | None = None,
-        agent_id: str | None = None,
+        character_id: str | None = None,
         user_id: int | None = None,
     ) -> Result[dict[str, Any]]:
         if not workspace_id:
@@ -70,7 +70,7 @@ class ChatChannelsService:
                 workspace=workspace_id,
                 channel_name=name,
                 channel_type=channel_type,
-                agent_id=agent_id,
+                character_id=character_id,
                 user_id=user_id,
             )
         except Exception as exc:

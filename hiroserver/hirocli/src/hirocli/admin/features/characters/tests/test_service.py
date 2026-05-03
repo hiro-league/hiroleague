@@ -45,3 +45,15 @@ def test_validate_json_array_invalid() -> None:
 def test_validate_json_object_invalid() -> None:
     r = CharacterService.validate_optional_json_object("x", "[]")
     assert not r.ok
+
+
+def test_get_resolved_configuration_requires_workspace() -> None:
+    r = CharacterService().get_character_resolved_configuration(None, "hiro")
+    assert not r.ok
+
+
+def test_get_resolved_configuration_unknown_character() -> None:
+    with patch("hirocli.admin.features.characters.service.CharacterGetTool") as T:
+        T.return_value.execute.side_effect = FileNotFoundError("Unknown character id: nope")
+        r = CharacterService().get_character_resolved_configuration("ws-1", "nope")
+    assert not r.ok

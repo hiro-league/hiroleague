@@ -14,12 +14,24 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
 Hosting = Literal["cloud", "local"]
 ModelKind = Literal["chat", "tts", "stt", "embedding", "image_gen"]
+
+
+class TtsVoicePreset(BaseModel):
+    """Built-in TTS voice id for a provider (API-native ``id`` string).
+
+    Used for admin/API dropdowns; HiroCLI TTS providers pass ``id`` through to the vendor SDK.
+    Optional editorial labels — omit ``display_name`` when it adds no value beyond ``id``.
+    """
+
+    id: str = Field(min_length=1)
+    display_name: str | None = None
+    description: str | None = None
 
 
 class PricingBlock(BaseModel):
@@ -31,6 +43,12 @@ class PricingBlock(BaseModel):
     per_character: float | None = None
     per_second: float | None = None
     per_image: float | None = None
+    estimated_usd_per_1k_chars_speech: float | None = Field(
+        default=None,
+        description=(
+            "TTS: curated rough USD per ~1k chars of input script including typical audio output tokens; approximate."
+        ),
+    )
     pricing_updated_at: str
     pricing_source: str | None = None
 
@@ -44,6 +62,8 @@ class Provider(BaseModel):
     default_base_url: str | None = None
     # Phase 3c: editorial defaults per model kind for onboarding (kind -> canonical id).
     recommended_models: dict[str, str] | None = None
+    # Curated preset voices for this vendor's integrated TTS APIs (same list for all catalog TTS models).
+    tts_voices: list[TtsVoicePreset] = Field(default_factory=list)
     metadata_updated_at: str
     notes: str | None = None
 
@@ -74,9 +94,28 @@ class ModelSpec(BaseModel):
 
 
 class CatalogDocument(BaseModel):
-    catalog_version: int
+    """Root catalog document loaded from ``catalog.yaml``."""
+
+    catalog_version: str = Field(
+        ...,
+        description=(
+            "Semantic version string for this catalog snapshot (PEP 440 style), "
+            "e.g. 0.1.3 — not monotonic integers."
+        ),
+    )
     providers: list[Provider]
     models: list[ModelSpec]
+
+    @field_validator("catalog_version", mode="before")
+    @classmethod
+    def catalog_version_trim(cls, value: Any) -> str:
+        """Normalize catalog_version from YAML (quote dotted versions so they are strings, not floats)."""
+        if value is None:
+            raise ValueError("catalog_version is required")
+        stripped = str(value).strip()
+        if not stripped:
+            raise ValueError("catalog_version must be a non-empty string")
+        return stripped
 
     @model_validator(mode="after")
     def cross_reference_providers(self) -> CatalogDocument:
@@ -154,7 +193,7 @@ class ModelCatalog:
         self._models_by_id: dict[str, ModelSpec] = {m.id: m for m in doc.models}
 
     @property
-    def catalog_version(self) -> int:
+    def catalog_version(self) -> str:
         return self._doc.catalog_version
 
     @classmethod
@@ -164,7 +203,10 @@ class ModelCatalog:
 
     @classmethod
     def load_bundled(cls) -> ModelCatalog:
-        """Load packaged ``catalog_data/catalog.yaml`` (works when installed as wheel)."""
+        """Load packaged ``catalog_data/catalog.yaml`` (works when installed as wheel).
+
+        Root ``catalog_version`` lives only in this YAML — no parallel constant in code.
+        """
         root = resources.files("hirocli.catalog_data")
         catalog = root.joinpath("catalog.yaml")
         text = catalog.read_text(encoding="utf-8")
@@ -268,6 +310,29 @@ def get_model_catalog() -> ModelCatalog:
     return cat
 
 
+def reload_model_catalog() -> ModelCatalog:
+    """Reload bundled ``catalog.yaml`` from package data (clears the in-process LRU cache).
+
+    Next ``get_model_catalog()`` loads a fresh ``ModelCatalog``. Used by admin
+    ``POST /catalog/reload`` and ``hiro catalog reload``.
+
+    Note: long-lived objects that read the catalog only at process startup (for
+    example ``TTSService``) are not automatically rebuilt.
+    """
+    clear_model_catalog_cache()
+    cat = get_model_catalog()
+    logger.info(
+        "Reloaded LLM catalog v%s (%s providers, %s models)",
+        cat.catalog_version,
+        len(cat.list_providers()),
+        len(cat._doc.models),
+    )
+    return cat
+
+
 def clear_model_catalog_cache() -> None:
-    """Test helper: force reload on next ``get_model_catalog()`` call."""
+    """Clear the catalog singleton so the next ``get_model_catalog()`` reloads YAML.
+
+    Used by tests, ``reload_model_catalog()``, and admin/CLI reload flows.
+    """
     get_model_catalog.cache_clear()

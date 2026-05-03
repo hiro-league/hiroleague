@@ -4,6 +4,8 @@
   "description": "Your personal AI assistant running on Hiro League.",
   "llm_models": [],
   "voice_models": [],
+  "tts_instructions": "",
+  "tts_voice_by_provider": {},
   "emotions_enabled": false,
   "extras": {}
 }

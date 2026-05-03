@@ -106,6 +106,29 @@ def _parse_json_object(label: str, raw: str | None) -> dict[str, Any] | None:
     return data
 
 
+def _parse_json_voice_provider_map_optional(label: str, raw: str | None) -> dict[str, str] | None:
+    """Parse optional JSON object mapping provider_id → voice preset id; None means omit."""
+    if raw is None:
+        return None
+    if not str(raw).strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON for {label}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{label} must be a JSON object.")
+    out: dict[str, str] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise ValueError(f"{label} must map string keys to string values.")
+        kk = k.strip()
+        vv = v.strip()
+        if kk and vv:
+            out[kk] = vv
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
@@ -201,6 +224,16 @@ class CharacterCreateTool(Tool):
             'JSON array of preferred voice ids',
             required=False,
         ),
+        "tts_instructions": ToolParam(
+            str,
+            "Optional global TTS style instruction (one string per character).",
+            required=False,
+        ),
+        "tts_voice_by_provider_json": ToolParam(
+            str,
+            'Optional JSON object mapping catalog provider id to one voice preset, e.g. {"openai":"sage"}',
+            required=False,
+        ),
         "emotions_enabled": ToolParam(bool, "Enable emotions flag (default false)", required=False),
         "extras_json": ToolParam(str, "JSON object for extra metadata", required=False),
     }
@@ -215,6 +248,8 @@ class CharacterCreateTool(Tool):
         backstory: str | None = None,
         llm_models_json: str | None = None,
         voice_models_json: str | None = None,
+        tts_instructions: str | None = None,
+        tts_voice_by_provider_json: str | None = None,
         emotions_enabled: bool | None = None,
         extras_json: str | None = None,
     ) -> CharacterCreateResult:
@@ -222,6 +257,9 @@ class CharacterCreateTool(Tool):
         llm_models = _parse_json_string_list("llm_models_json", llm_models_json)
         voice_models = _parse_json_string_list("voice_models_json", voice_models_json)
         extras = _parse_json_object("extras_json", extras_json)
+        tts_vp = _parse_json_voice_provider_map_optional(
+            "tts_voice_by_provider_json", tts_voice_by_provider_json
+        )
         detail = character_domain.create_character(
             workspace_path,
             character_id,
@@ -231,6 +269,8 @@ class CharacterCreateTool(Tool):
             backstory=backstory or "",
             llm_models=llm_models,
             voice_models=voice_models,
+            tts_instructions=(tts_instructions or "").strip(),
+            tts_voice_by_provider=tts_vp if tts_vp is not None else {},
             emotions_enabled=bool(emotions_enabled) if emotions_enabled is not None else False,
             extras=extras,
         )
@@ -254,6 +294,16 @@ class CharacterUpdateTool(Tool):
         "backstory": ToolParam(str, "Static backstory markdown", required=False),
         "llm_models_json": ToolParam(str, "JSON array of preferred LLM ids", required=False),
         "voice_models_json": ToolParam(str, "JSON array of preferred voice ids", required=False),
+        "tts_instructions": ToolParam(
+            str,
+            "Optional global TTS style instruction for this character.",
+            required=False,
+        ),
+        "tts_voice_by_provider_json": ToolParam(
+            str,
+            'Optional JSON object: provider id → voice preset (replaces map when set)',
+            required=False,
+        ),
         "emotions_enabled": ToolParam(bool, "Emotions participation flag", required=False),
         "extras_json": ToolParam(str, "JSON object replacing extras when set", required=False),
     }
@@ -268,6 +318,8 @@ class CharacterUpdateTool(Tool):
         backstory: str | None = None,
         llm_models_json: str | None = None,
         voice_models_json: str | None = None,
+        tts_instructions: str | None = None,
+        tts_voice_by_provider_json: str | None = None,
         emotions_enabled: bool | None = None,
         extras_json: str | None = None,
     ) -> CharacterUpdateResult:
@@ -275,6 +327,11 @@ class CharacterUpdateTool(Tool):
         llm_models = _parse_json_string_list("llm_models_json", llm_models_json)
         voice_models = _parse_json_string_list("voice_models_json", voice_models_json)
         extras = _parse_json_object("extras_json", extras_json)
+        tts_vp: dict[str, str] | None = None
+        if tts_voice_by_provider_json is not None:
+            tts_vp = _parse_json_voice_provider_map_optional(
+                "tts_voice_by_provider_json", tts_voice_by_provider_json
+            )
         detail = character_domain.update_character(
             workspace_path,
             character_id,
@@ -284,6 +341,8 @@ class CharacterUpdateTool(Tool):
             backstory=backstory,
             llm_models=llm_models,
             voice_models=voice_models,
+            tts_instructions=tts_instructions.strip() if tts_instructions is not None else None,
+            tts_voice_by_provider=tts_vp,
             emotions_enabled=emotions_enabled,
             extras=extras,
         )

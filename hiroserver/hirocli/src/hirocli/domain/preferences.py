@@ -10,7 +10,6 @@ Storage: ``<workspace>/preferences.json`` — Pydantic model serialised to JSON.
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -52,19 +51,9 @@ class LLMPreferences(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class VoiceOption(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    provider: str
-    model: str
-    voice: str
-    instructions: str = ""
-
-
 class AudioPreferences(BaseModel):
     agent_replies_in_voice: bool = False
     accept_voice_from_user: bool = True
-    selected_voice: str | None = None
-    voice_options: list[VoiceOption] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +126,15 @@ class ResolvedModel:
     model_id: str
     temperature: float
     max_tokens: int
+
+
+@dataclass(frozen=True)
+class ResolvedVoiceForSynthesis:
+    """Voice selection for ``TTSService.synthesize`` (short catalog model name)."""
+
+    model: str
+    voice: str = ""
+    instructions: str = ""
 
 
 def resolve_llm(
@@ -240,15 +238,125 @@ def resolve_summarization_llm(
     return None
 
 
-def resolve_voice(prefs: WorkspacePreferences) -> VoiceOption | None:
-    """Resolve the active voice option (selected_voice id > first option > None)."""
-    options = prefs.audio.voice_options
-    if not options:
+def resolve_character_llm(
+    ordered_model_ids: list[str],
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Pick the first **available** chat model from a character's ``llm_models`` list.
+
+    Falls back to ``resolve_llm(..., "chat")`` when the list is empty or no id is usable.
+    Availability matches ``resolve_llm`` (catalog + credential store).
+    """
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            logger.debug("resolve_character_llm: workspace path not in registry — %s", workspace_path)
+            return resolve_llm(prefs, workspace_path, "chat", workspace_id=workspace_id)
+        store = CredentialStore(workspace_path, wid)
+
+    cat = get_model_catalog()
+    ams = AvailableModelsService(cat, store)
+    seen: set[str] = set()
+    for mid in ordered_model_ids:
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        spec = cat.get_model(mid)
+        if spec is None or spec.model_kind != "chat":
+            continue
+        if not ams.is_model_available(mid):
+            continue
+        tuning = prefs.llm.tuning.get(mid, ModelTuning())
+        return ResolvedModel(
+            model_id=mid,
+            temperature=tuning.temperature,
+            max_tokens=tuning.max_tokens,
+        )
+    return resolve_llm(
+        prefs,
+        workspace_path,
+        "chat",
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_character_voice(
+    ordered_voice_model_ids: list[str],
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+    tts_instructions: str = "",
+    tts_voice_by_provider: dict[str, str] | None = None,
+) -> ResolvedVoiceForSynthesis | None:
+    """Pick the first **available** TTS model from ``voice_models``; else workspace ``default_tts``.
+
+    Returns catalog short model id plus optional voice preset / instructions for ``TTSService``.
+    Character-level ``tts_voice_by_provider`` maps catalog ``provider_id`` to one preset id per provider;
+    ``tts_instructions`` is a single optional global style hint for synthesis.
+    """
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            return None
+        store = CredentialStore(workspace_path, wid)
+
+    cat = get_model_catalog()
+    ams = AvailableModelsService(cat, store)
+
+    voice_map = dict(tts_voice_by_provider or {})
+    instructions = (tts_instructions or "").strip()
+
+    def _voice_for_provider(provider_id: str) -> str:
+        raw = voice_map.get(provider_id, "")
+        return str(raw).strip()
+
+    seen: set[str] = set()
+    for mid in ordered_voice_model_ids:
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        spec = cat.get_model(mid)
+        if spec is None or spec.model_kind != "tts":
+            continue
+        if not ams.is_model_available(mid):
+            continue
+        short = mid.split(":", 1)[1]
+        pid = spec.provider_id or ""
+        voice_preset = _voice_for_provider(pid)
+        return ResolvedVoiceForSynthesis(model=short, voice=voice_preset, instructions=instructions)
+
+    tts_entry = resolve_llm(
+        prefs,
+        workspace_path,
+        "tts",
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+    if tts_entry is None:
         return None
-
-    if prefs.audio.selected_voice:
-        for opt in options:
-            if opt.id == prefs.audio.selected_voice:
-                return opt
-
-    return options[0]
+    spec = cat.get_model(tts_entry.model_id)
+    if spec is None or spec.model_kind != "tts":
+        return None
+    short = tts_entry.model_id.split(":", 1)[1]
+    pid = spec.provider_id or ""
+    voice_preset = _voice_for_provider(pid)
+    return ResolvedVoiceForSynthesis(model=short, voice=voice_preset, instructions=instructions)

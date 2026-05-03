@@ -21,7 +21,7 @@ def _clear_cat() -> None:
 
 def _minimal_catalog(tmp_path: Path) -> ModelCatalog:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "pa",
@@ -116,7 +116,7 @@ def test_validate_deprecated_llm_not_also_wrong_kind_or_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "pa",

@@ -19,10 +19,23 @@ export function createCharactersPreferences() {
   let characterId = $state('');
 
   function initialize() {
-    const urlTab = normalizeTab(page.url.searchParams.get('tab'));
+    const params = page.url.searchParams;
+    // Sidebar link is `/characters/` with no query — always land on Browse (session alone must not keep Detail).
+    const hasCharactersParams =
+      params.has('tab') || params.has('mode') || params.has('character_id');
+
+    if (!hasCharactersParams) {
+      activeTab = 'browse';
+      detailMode = 'view';
+      characterId = '';
+      writeSessionString(PREF_KEYS.charactersActiveTab, activeTab);
+      return;
+    }
+
+    const urlTab = normalizeTab(params.get('tab'));
     const storedTab = normalizeTab(readSessionString(PREF_KEYS.charactersActiveTab));
-    const nextMode = normalizeMode(page.url.searchParams.get('mode'));
-    const nextId = page.url.searchParams.get('character_id') ?? '';
+    const nextMode = normalizeMode(params.get('mode'));
+    const nextId = params.get('character_id') ?? '';
 
     activeTab = urlTab ?? storedTab ?? 'browse';
     detailMode = nextMode;

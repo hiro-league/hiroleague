@@ -1,7 +1,9 @@
 """Gemini TTS provider — speech synthesis via Google GenAI generate_content().
 
-Models offered:
-  - gemini-2.5-flash-preview-tts  (default, preview only via AI Studio / API key)
+Models offered (see ai.google.dev/gemini-api/docs/speech-generation#supported-models):
+  - gemini-3.1-flash-tts-preview   (default; preview via API key)
+  - gemini-2.5-flash-preview-tts
+  - gemini-2.5-pro-preview-tts
 
 The generate_content path returns raw PCM audio (24 kHz, 16-bit, mono).
 This provider converts it to MP3 via lameenc (Python LAME bindings — no
@@ -28,7 +30,7 @@ from .provider import TTSModelInfo, TTSProvider, TTSResult
 
 log = Logger.get("TTS.GEMINI")
 
-_DEFAULT_MODEL = "gemini-2.5-flash-preview-tts"
+_DEFAULT_MODEL = "gemini-3.1-flash-tts-preview"
 _DEFAULT_VOICE = "Kore"
 _PCM_SAMPLE_RATE = 24000
 _PCM_SAMPLE_WIDTH = 2  # 16-bit = 2 bytes
@@ -36,9 +38,19 @@ _PCM_CHANNELS = 1
 
 _MODELS: list[TTSModelInfo] = [
     TTSModelInfo(
+        model_id="gemini-3.1-flash-tts-preview",
+        provider="gemini",
+        display_name="Gemini 3.1 Flash TTS (preview)",
+    ),
+    TTSModelInfo(
         model_id="gemini-2.5-flash-preview-tts",
         provider="gemini",
         display_name="Gemini 2.5 Flash TTS (preview)",
+    ),
+    TTSModelInfo(
+        model_id="gemini-2.5-pro-preview-tts",
+        provider="gemini",
+        display_name="Gemini 2.5 Pro TTS (preview)",
     ),
 ]
 

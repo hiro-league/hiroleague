@@ -73,10 +73,13 @@ def format_pricing_summary(
             return f"${inp:.2f}/1M tokens"
 
     if kind == "tts":
+        est = _num("estimated_usd_per_1k_chars_speech")
+        if est is not None:
+            return f"${est:.3f}/1K characters"
         pc = _num("per_character")
         if pc is not None:
             per_1k = pc * 1000.0
-            return f"${per_1k:.4f}/1K chars"
+            return f"${per_1k:.4f}/1K characters"
 
     if kind == "stt":
         ps = _num("per_second")
@@ -84,6 +87,15 @@ def format_pricing_summary(
             return f"${ps:.4f}/sec audio"
 
     if kind == "image_gen":
+        inp = _num("input_per_1m_tokens")
+        out = _num("output_per_1m_tokens")
+        if inp is not None or out is not None:
+            parts_img: list[str] = []
+            if inp is not None:
+                parts_img.append(f"${inp:.2f}/1M in")
+            if out is not None:
+                parts_img.append(f"${out:.2f}/1M out")
+            return " · ".join(parts_img)
         pi = _num("per_image")
         if pi is not None:
             return f"${pi:.4f}/image"

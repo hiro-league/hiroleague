@@ -1,8 +1,11 @@
 # Hiro LLM catalog — curated reference data.
-# Model *names* follow vendor APIs as of 2026-03 (see platform.openai.com/docs/models,
+# Model *names* follow vendor APIs as of 2026-05 (see developers.openai.com/api/docs/models,
 # ai.google.dev/gemini-api/docs/models, platform.claude.com/docs/.../models/overview).
-# Pricing is approximate; always verify at the vendor pricing page before billing users.
-catalog_version: 2
+# Pricing is approximate; pricing_source points to vendor API pricing pages (verify before billing).
+# tts_voices: preset ids for bundled TTS integrations — verify against vendor docs when upgrading SDKs.
+# catalog_version: PEP 440-style string (quote so YAML does not parse as float).
+# Pinned to 0.1.3 until the hirocli/app package version is published (bump together then).
+catalog_version: "0.1.3"
 
 providers:
   - id: openai
@@ -11,11 +14,26 @@ providers:
     credential_env_keys: [OPENAI_API_KEY]
     docs_url: https://platform.openai.com/docs
     recommended_models:
-      chat: openai:gpt-5.4
+      chat: openai:gpt-5.5
       tts: openai:gpt-4o-mini-tts
       stt: openai:gpt-4o-transcribe
       embedding: openai:text-embedding-3-small
-    metadata_updated_at: "2026-03-27"
+    # Audio speech API — gpt-4o-mini-tts (instructions); tts-1 / tts-1-hd (character-classic; smaller voice set in docs).
+    tts_voices:
+      - { id: alloy, display_name: Alloy }
+      - { id: ash, display_name: Ash }
+      - { id: ballad, display_name: Ballad }
+      - { id: coral, display_name: Coral }
+      - { id: cedar, display_name: Cedar }
+      - { id: echo, display_name: Echo }
+      - { id: fable, display_name: Fable }
+      - { id: marin, display_name: Marin }
+      - { id: nova, display_name: Nova }
+      - { id: onyx, display_name: Onyx }
+      - { id: sage, display_name: Sage }
+      - { id: shimmer, display_name: Shimmer }
+      - { id: verse, display_name: Verse }
+    metadata_updated_at: "2026-05-03"
 
   - id: google
     display_name: Google (Gemini)
@@ -23,9 +41,42 @@ providers:
     credential_env_keys: [GOOGLE_API_KEY]
     docs_url: https://ai.google.dev/gemini-api/docs
     recommended_models:
-      chat: google:gemini-2.5-flash
+      chat: google:gemini-3-flash-preview
+      tts: google:gemini-3.1-flash-tts-preview
       embedding: google:gemini-embedding-001
-    metadata_updated_at: "2026-03-27"
+    # Gemini speech generation — PrebuiltVoiceConfig.voice_name (see ai.google.dev/gemini-api/docs/speech-generation).
+    tts_voices:
+      - { id: Achernar }
+      - { id: Achird }
+      - { id: Algenib }
+      - { id: Algieba }
+      - { id: Alnilam }
+      - { id: Aoede }
+      - { id: Autonoe }
+      - { id: Callirrhoe }
+      - { id: Charon }
+      - { id: Despina }
+      - { id: Enceladus }
+      - { id: Erinome }
+      - { id: Fenrir }
+      - { id: Gacrux }
+      - { id: Iapetus }
+      - { id: Kore }
+      - { id: Laomedeia }
+      - { id: Leda }
+      - { id: Orus }
+      - { id: Puck }
+      - { id: Pulcherrima }
+      - { id: Rasalgethi }
+      - { id: Sadachbia }
+      - { id: Sadaltager }
+      - { id: Schedar }
+      - { id: Sulafat }
+      - { id: Umbriel }
+      - { id: Vindemiatrix }
+      - { id: Zephyr }
+      - { id: Zubenelgenubi }
+    metadata_updated_at: "2026-05-03"
 
   - id: anthropic
     display_name: Anthropic
@@ -69,7 +120,22 @@ providers:
     notes: Default port varies by install; check Jan settings.
 
 models:
-  # --- OpenAI cloud (frontier chat: platform.openai.com/docs/models) ---
+  # --- OpenAI cloud (developers.openai.com/api/docs/models; pricing openai.com/api/pricing) ---
+  - id: openai:gpt-5.5
+    provider_id: openai
+    display_name: GPT-5.5
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1050000
+    modalities: [text, image_in]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    notes: Frontier model; prompts with >272K input tokens use 2x input and 1.5x output for the full session (see OpenAI pricing).
+    pricing:
+      input_per_1m_tokens: 5.00
+      output_per_1m_tokens: 30.00
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
+
   - id: openai:gpt-5.4
     provider_id: openai
     display_name: GPT-5.4
@@ -82,7 +148,7 @@ models:
       input_per_1m_tokens: 2.50
       output_per_1m_tokens: 15.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models
+      pricing_source: https://openai.com/api/pricing
 
   - id: openai:gpt-5.4-mini
     provider_id: openai
@@ -96,7 +162,7 @@ models:
       input_per_1m_tokens: 0.75
       output_per_1m_tokens: 4.50
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models
+      pricing_source: https://openai.com/api/pricing
 
   - id: openai:gpt-5.4-nano
     provider_id: openai
@@ -110,19 +176,92 @@ models:
       input_per_1m_tokens: 0.20
       output_per_1m_tokens: 1.25
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models
+      pricing_source: https://openai.com/api/pricing
 
-  # OpenAI speech / TTS (specialized models page)
+  - id: openai:gpt-image-2
+    provider_id: openai
+    display_name: GPT Image 2
+    model_kind: image_gen
+    modalities: [text, image_in, image_out]
+    features: []
+    notes: Image generation/editing; rates below are image-token list prices — verify modality mix on OpenAI pricing.
+    pricing:
+      input_per_1m_tokens: 8.00
+      output_per_1m_tokens: 30.00
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
+
+  - id: openai:gpt-realtime-1.5
+    provider_id: openai
+    display_name: GPT Realtime 1.5
+    model_kind: chat
+    model_class: balanced
+    context_window: 32000
+    modalities: [text, audio_in, audio_out, image_in]
+    features: [tools, streaming]
+    notes: Realtime API voice flagship; audio tokens billed separately ($32/$64 per 1M audio in/out). Text rates shown.
+    pricing:
+      input_per_1m_tokens: 4.00
+      output_per_1m_tokens: 16.00
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
+
+  - id: openai:gpt-audio-1.5
+    provider_id: openai
+    display_name: GPT Audio 1.5
+    model_kind: chat
+    model_class: balanced
+    context_window: 128000
+    modalities: [text, audio_in, audio_out]
+    features: [tools, streaming]
+    notes: Chat Completions audio in/out; audio tokens $32/$64 per 1M (see OpenAI pricing). Text rates shown.
+    pricing:
+      input_per_1m_tokens: 2.50
+      output_per_1m_tokens: 10.00
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
+
+  # OpenAI speech / TTS. Token fields = vendor list price. estimated_usd_per_1k_chars_speech = table estimate
+  # for ~1k chars of script → speech (gpt-4o-mini: 250 in-tok @ $/MTok + ~6 audio tok per in-tok; tts-1/tts-1-hd: $/M char rate).
   - id: openai:gpt-4o-mini-tts
     provider_id: openai
     display_name: GPT-4o mini TTS
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
+    notes: Supports optional instructions (style) in API; max ~2k input tokens per vendor docs.
     pricing:
-      per_character: 0.000015
-      pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models (approximate; verify pricing page)
+      input_per_1m_tokens: 0.60
+      output_per_1m_tokens: 12.00
+      estimated_usd_per_1k_chars_speech: 0.018
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
+
+  - id: openai:tts-1
+    provider_id: openai
+    display_name: TTS-1
+    model_kind: tts
+    modalities: [text, audio_out]
+    features: [streaming]
+    notes: Latency-optimized speech; voice set smaller than gpt-4o-mini-tts on some tiers (see text-to-speech guide).
+    pricing:
+      output_per_1m_tokens: 15.00
+      estimated_usd_per_1k_chars_speech: 0.015
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
+
+  - id: openai:tts-1-hd
+    provider_id: openai
+    display_name: TTS-1 HD
+    model_kind: tts
+    modalities: [text, audio_out]
+    features: [streaming]
+    notes: Higher-quality than tts-1; same /v1/audio/speech endpoint.
+    pricing:
+      output_per_1m_tokens: 30.00
+      estimated_usd_per_1k_chars_speech: 0.03
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://openai.com/api/pricing
 
   - id: openai:gpt-4o-transcribe
     provider_id: openai
@@ -133,7 +272,7 @@ models:
     pricing:
       per_second: 0.0001
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models (approximate; verify pricing page)
+      pricing_source: https://openai.com/api/pricing
 
   - id: openai:gpt-4o-mini-transcribe
     provider_id: openai
@@ -145,7 +284,7 @@ models:
     pricing:
       per_second: 0.00005
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models (approximate; verify pricing page)
+      pricing_source: https://openai.com/api/pricing
 
   - id: openai:gpt-4o-transcribe-diarize
     provider_id: openai
@@ -157,7 +296,7 @@ models:
     pricing:
       per_second: 0.00012
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/models (approximate; verify pricing page)
+      pricing_source: https://openai.com/api/pricing
 
   - id: openai:text-embedding-3-small
     provider_id: openai
@@ -170,7 +309,7 @@ models:
     pricing:
       input_per_1m_tokens: 0.02
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.openai.com/docs/guides/embeddings
+      pricing_source: https://openai.com/api/pricing
 
   # --- Google Gemini (stable + current preview; ai.google.dev/gemini-api/docs/models) ---
   - id: google:gemini-2.5-flash-lite
@@ -185,7 +324,7 @@ models:
       input_per_1m_tokens: 0.04
       output_per_1m_tokens: 0.15
       pricing_updated_at: "2026-03-27"
-      pricing_source: ai.google.dev (approximate; verify Gemini pricing)
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing
 
   - id: google:gemini-2.5-flash
     provider_id: google
@@ -199,7 +338,7 @@ models:
       input_per_1m_tokens: 0.075
       output_per_1m_tokens: 0.30
       pricing_updated_at: "2026-03-27"
-      pricing_source: ai.google.dev (approximate; verify Gemini pricing)
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing
 
   - id: google:gemini-2.5-pro
     provider_id: google
@@ -213,7 +352,37 @@ models:
       input_per_1m_tokens: 1.25
       output_per_1m_tokens: 10.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: ai.google.dev (approximate; verify Gemini pricing)
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+
+  - id: google:gemini-3-flash-preview
+    provider_id: google
+    display_name: Gemini 3 Flash Preview
+    model_kind: chat
+    model_class: balanced
+    context_window: 1048576
+    modalities: [text, image_in, audio_in, video_in]
+    features: [tools, structured_output, streaming, json_mode]
+    notes: Preview model id may change; audio input billed higher per vendor pricing — see pricing page.
+    pricing:
+      input_per_1m_tokens: 0.50
+      output_per_1m_tokens: 3.00
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3-flash-preview
+
+  - id: google:gemini-3.1-flash-lite-preview
+    provider_id: google
+    display_name: Gemini 3.1 Flash-Lite Preview
+    model_kind: chat
+    model_class: fast
+    context_window: 1048576
+    modalities: [text, image_in, audio_in, video_in]
+    features: [tools, structured_output, streaming, json_mode]
+    notes: Preview model id may change; audio input billed higher per vendor pricing — see pricing page.
+    pricing:
+      input_per_1m_tokens: 0.25
+      output_per_1m_tokens: 1.50
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-flash-lite-preview
 
   - id: google:gemini-3.1-pro-preview
     provider_id: google
@@ -228,7 +397,7 @@ models:
       input_per_1m_tokens: 1.50
       output_per_1m_tokens: 12.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: ai.google.dev (approximate preview pricing)
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing
 
   - id: google:gemini-embedding-001
     provider_id: google
@@ -240,7 +409,50 @@ models:
     pricing:
       input_per_1m_tokens: 0.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: ai.google.dev (approximate; free tier may apply)
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+
+  # Gemini TTS estimates: ~14 chars/sec speech, 25 audio tok/sec → audio tok ≈ (1000/14)*25 per 1k script chars; plus 250 text in-tok @ 4 chars/tok.
+  - id: google:gemini-3.1-flash-tts-preview
+    provider_id: google
+    display_name: Gemini 3.1 Flash TTS (preview)
+    model_kind: tts
+    modalities: [text, audio_out]
+    features: []
+    notes: Preview; same generate_content + AUDIO path as other Gemini TTS model ids.
+    pricing:
+      input_per_1m_tokens: 1.00
+      output_per_1m_tokens: 20.00
+      estimated_usd_per_1k_chars_speech: 0.036
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-flash-tts-preview
+
+  - id: google:gemini-2.5-flash-preview-tts
+    provider_id: google
+    display_name: Gemini 2.5 Flash TTS (preview)
+    model_kind: tts
+    modalities: [text, audio_out]
+    features: []
+    notes: Preview-only via Gemini API key path; verify model id in ai.google.dev docs before production.
+    pricing:
+      input_per_1m_tokens: 0.50
+      output_per_1m_tokens: 10.00
+      estimated_usd_per_1k_chars_speech: 0.018
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-flash-preview-tts
+
+  - id: google:gemini-2.5-pro-preview-tts
+    provider_id: google
+    display_name: Gemini 2.5 Pro TTS (preview)
+    model_kind: tts
+    modalities: [text, audio_out]
+    features: []
+    notes: Preview; higher-quality / Pro tier per vendor docs — verify availability for your API key.
+    pricing:
+      input_per_1m_tokens: 1.00
+      output_per_1m_tokens: 20.00
+      estimated_usd_per_1k_chars_speech: 0.036
+      pricing_updated_at: "2026-05-03"
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-pro-preview-tts
 
   # --- Anthropic Claude 4.6 family (platform.claude.com/docs/.../models/overview) ---
   - id: anthropic:claude-opus-4-6
@@ -255,7 +467,7 @@ models:
       input_per_1m_tokens: 5.00
       output_per_1m_tokens: 25.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.claude.com/docs (1M context; verify long-context surcharges)
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
   - id: anthropic:claude-sonnet-4-6
     provider_id: anthropic
@@ -269,7 +481,7 @@ models:
       input_per_1m_tokens: 3.00
       output_per_1m_tokens: 15.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.claude.com/docs
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
   - id: anthropic:claude-haiku-4-5-20251001
     provider_id: anthropic
@@ -284,7 +496,7 @@ models:
       input_per_1m_tokens: 1.00
       output_per_1m_tokens: 5.00
       pricing_updated_at: "2026-03-27"
-      pricing_source: platform.claude.com/docs
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
   # --- Local: Ollama (library names; pull the tag you use) ---
   - id: ollama:llama3.2

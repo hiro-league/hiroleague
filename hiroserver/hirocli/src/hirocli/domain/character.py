@@ -37,7 +37,7 @@ CHARACTER_JSON_NAME = "character.json"
 PROMPT_MD_NAME = "prompt.md"
 BACKSTORY_MD_NAME = "backstory.md"
 
-# Default system prompt text for new workspaces (matches legacy agent_config default).
+# Default system prompt text for new workspaces (seeded into default character prompt.md).
 DEFAULT_PROMPT_TEXT = """\
 You are a helpful home assistant running on Hiro.
 Answer questions concisely and helpfully.
@@ -54,6 +54,9 @@ class Character(BaseModel):
     description: str = ""
     llm_models: list[str] = Field(default_factory=list)
     voice_models: list[str] = Field(default_factory=list)
+    # Optional TTS tuning: one preset per provider id (catalog), one global instruction string.
+    tts_instructions: str = ""
+    tts_voice_by_provider: dict[str, str] = Field(default_factory=dict)
     emotions_enabled: bool = False
     extras: dict[str, Any] = Field(default_factory=dict)
     prompt: str = ""
@@ -69,6 +72,8 @@ class Character(BaseModel):
             "description": self.description,
             "llm_models": self.llm_models,
             "voice_models": self.voice_models,
+            "tts_instructions": self.tts_instructions,
+            "tts_voice_by_provider": dict(self.tts_voice_by_provider),
             "emotions_enabled": self.emotions_enabled,
             "extras": self.extras,
         }
@@ -107,12 +112,21 @@ def load_character_from_disk(workspace_path: Path, character_id: str) -> Charact
     prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.is_file() else ""
     backstory = back_path.read_text(encoding="utf-8") if back_path.is_file() else ""
 
+    tts_map: dict[str, str] = {}
+    raw_voices = raw.get("tts_voice_by_provider")
+    if isinstance(raw_voices, dict):
+        for k, v in raw_voices.items():
+            if isinstance(k, str) and isinstance(v, str):
+                tts_map[k] = v
+
     return Character(
         id=str(raw.get("id", character_id)),
         name=str(raw.get("name", character_id)),
         description=str(raw.get("description", "")),
         llm_models=list(raw.get("llm_models") or []),
         voice_models=list(raw.get("voice_models") or []),
+        tts_instructions=str(raw.get("tts_instructions") or ""),
+        tts_voice_by_provider=tts_map,
         emotions_enabled=bool(raw.get("emotions_enabled", False)),
         extras=dict(raw.get("extras") or {}),
         prompt=prompt,
@@ -192,6 +206,8 @@ def _write_inline_default_hiro_files(dest: Path) -> None:
                 "description": "Your personal AI assistant running on Hiro League.",
                 "llm_models": [],
                 "voice_models": [],
+                "tts_instructions": "",
+                "tts_voice_by_provider": {},
                 "emotions_enabled": False,
                 "extras": {},
             },
@@ -337,6 +353,8 @@ def get_character_detail(workspace_path: Path, character_id: str) -> dict[str, A
         "backstory": ch.backstory,
         "llm_models": ch.llm_models,
         "voice_models": ch.voice_models,
+        "tts_instructions": ch.tts_instructions,
+        "tts_voice_by_provider": dict(ch.tts_voice_by_provider),
         "emotions_enabled": ch.emotions_enabled,
         "extras": ch.extras,
         "has_photo": ch.has_photo,
@@ -403,6 +421,8 @@ def create_character(
     backstory: str = "",
     llm_models: list[str] | None = None,
     voice_models: list[str] | None = None,
+    tts_instructions: str = "",
+    tts_voice_by_provider: dict[str, str] | None = None,
     emotions_enabled: bool = False,
     extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -420,6 +440,8 @@ def create_character(
         backstory=backstory,
         llm_models=list(llm_models or []),
         voice_models=list(voice_models or []),
+        tts_instructions=tts_instructions.strip(),
+        tts_voice_by_provider=dict(tts_voice_by_provider or {}),
         emotions_enabled=emotions_enabled,
         extras=dict(extras or {}),
     )
@@ -449,6 +471,8 @@ def update_character(
     backstory: str | None = None,
     llm_models: list[str] | None = None,
     voice_models: list[str] | None = None,
+    tts_instructions: str | None = None,
+    tts_voice_by_provider: dict[str, str] | None = None,
     emotions_enabled: bool | None = None,
     extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -468,6 +492,10 @@ def update_character(
         ch.llm_models = list(llm_models)
     if voice_models is not None:
         ch.voice_models = list(voice_models)
+    if tts_instructions is not None:
+        ch.tts_instructions = tts_instructions.strip()
+    if tts_voice_by_provider is not None:
+        ch.tts_voice_by_provider = dict(tts_voice_by_provider)
     if emotions_enabled is not None:
         ch.emotions_enabled = emotions_enabled
     if extras is not None:
@@ -504,6 +532,97 @@ def delete_character(workspace_path: Path, character_id: str) -> bool:
         conn.commit()
     logger.info("Deleted character", character_id=cid, workspace=str(workspace_path))
     return True
+
+
+def character_photo_media_type(filename: str) -> str:
+    """Content-Type for a character photo filename (workspace or packaged asset)."""
+    lower = filename.lower()
+    if lower.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    if lower.endswith(".gif"):
+        return "image/gif"
+    return "image/png"
+
+
+def list_public_character_summaries(workspace_path: Path) -> list[dict[str, Any]]:
+    """Minimal index rows for GET /characters (Phase 6 — Flutter profile list)."""
+    rows = list_characters_detailed(workspace_path)
+    wp = workspace_path
+    result: list[dict[str, Any]] = []
+    for r in rows:
+        llm_models: list[str] = []
+        voice_models: list[str] = []
+        if not r.get("error"):
+            try:
+                ch = load_character_from_disk(wp, r["id"])
+                llm_models = list(ch.llm_models)
+                voice_models = list(ch.voice_models)
+            except FileNotFoundError:
+                pass
+        result.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "description": r.get("description") or "",
+                "has_photo": bool(r.get("has_photo")),
+                "llm_models": llm_models,
+                "voice_models": voice_models,
+            }
+        )
+    return result
+
+
+def public_character_profile(workspace_path: Path, character_id: str) -> dict[str, Any]:
+    """Subset of character detail for GET /characters/{{id}}/profile."""
+    d = get_character_detail(workspace_path, character_id)
+    return {
+        "id": d["id"],
+        "name": d["name"],
+        "description": d.get("description") or "",
+        "has_photo": bool(d.get("has_photo")),
+        "updated_at": d.get("updated_at") or "",
+        # Same preference lists the agent uses (Phase 5); helps clients align with runtime.
+        "llm_models": list(d.get("llm_models") or []),
+        "voice_models": list(d.get("voice_models") or []),
+    }
+
+
+def packaged_default_character_photo_path() -> Path:
+    """Packaged ``hiro`` photo used when a character has no uploaded photo."""
+    return _PACKAGED_HIRO_DIR / "photo.png"
+
+
+def resolve_character_photo_file_for_http(
+    workspace_path: Path,
+    character_id: str,
+) -> tuple[Path, str]:
+    """Absolute path and media type to serve for GET /characters/{{id}}/photo.
+
+    Uses the character's ``photo.*`` when present; otherwise the packaged default
+    avatar (same asset as seeded ``hiro``). Raises FileNotFoundError if the
+    character is unknown or no image can be resolved.
+    """
+    seed_default_characters(workspace_path)
+    cid = character_id.strip()
+    if not character_index_row_exists(workspace_path, cid):
+        raise FileNotFoundError(f"Unknown character id: {cid}")
+    ch = load_character_from_disk(workspace_path, cid)
+    if ch.has_photo and ch.photo_filename:
+        path = (character_dir(workspace_path, cid) / ch.photo_filename).resolve()
+        if path.is_file():
+            return path, character_photo_media_type(ch.photo_filename)
+    fallback = packaged_default_character_photo_path().resolve()
+    if fallback.is_file():
+        return fallback, "image/png"
+    raise FileNotFoundError("No character photo and packaged default avatar is missing")
+
+
+def effective_character_system_prompt(character: Character) -> str:
+    """System prompt from ``prompt.md`` for LangGraph, with legacy empty-file fallback."""
+    text = (character.prompt or "").strip()
+    return text if text else DEFAULT_PROMPT_TEXT.strip()
 
 
 def replace_character_photo(

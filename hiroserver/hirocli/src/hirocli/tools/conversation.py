@@ -125,11 +125,11 @@ class ConversationChannelGetTool(Tool):
 
 class ConversationChannelCreateTool(Tool):
     name = "conversation_channel_create"
-    description = "Create a conversation channel for a specific user and agent"
+    description = "Create a conversation channel for a specific user and character"
     params = {
         "channel_name": ToolParam(str, "Channel name"),
         "user_id": ToolParam(int, "Owning user id"),
-        "agent_id": ToolParam(str, "Owning agent id"),
+        "character_id": ToolParam(str, "Character id (slug) for this conversation"),
         "channel_type": ToolParam(str, "Channel type (default: direct)", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
@@ -138,7 +138,7 @@ class ConversationChannelCreateTool(Tool):
         self,
         channel_name: str,
         user_id: int,
-        agent_id: str,
+        character_id: str,
         channel_type: str = "direct",
         workspace: str | None = None,
         *,
@@ -148,7 +148,7 @@ class ConversationChannelCreateTool(Tool):
         channel = create_channel(
             resolved_workspace_path,
             name=channel_name,
-            agent_id=agent_id,
+            character_id=character_id,
             user_id=user_id,
             channel_type=channel_type,
         )
@@ -163,7 +163,7 @@ class ConversationChannelUpdateTool(Tool):
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
         "channel_name": ToolParam(str, "Channel display name", required=False),
         "channel_type": ToolParam(str, "Channel type (e.g. direct)", required=False),
-        "agent_id": ToolParam(str, "Owning agent id", required=False),
+        "character_id": ToolParam(str, "Character id (slug)", required=False),
         "user_id": ToolParam(int, "Owning user id", required=False),
     }
 
@@ -175,17 +175,17 @@ class ConversationChannelUpdateTool(Tool):
         workspace_path: Path | None = None,
         channel_name: str | None = None,
         channel_type: str | None = None,
-        agent_id: str | None = None,
+        character_id: str | None = None,
         user_id: int | None = None,
     ) -> ConversationChannelUpdateResult:
         if (
             channel_name is None
             and channel_type is None
-            and agent_id is None
+            and character_id is None
             and user_id is None
         ):
             raise ValueError(
-                "At least one of channel_name, channel_type, agent_id, or user_id must be provided."
+                "At least one of channel_name, channel_type, character_id, or user_id must be provided."
             )
         resolved = workspace_path or _resolve_path(workspace)
         channel = update_channel(
@@ -193,7 +193,7 @@ class ConversationChannelUpdateTool(Tool):
             channel_id,
             name=channel_name,
             channel_type=channel_type,
-            agent_id=agent_id,
+            character_id=character_id,
             user_id=user_id,
         )
         return ConversationChannelUpdateResult(channel=channel.model_dump())

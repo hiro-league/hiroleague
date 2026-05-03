@@ -13,16 +13,16 @@ todos:
     status: completed
   - id: phase-4
     content: "Phase 4: Channel binding -- character_id in data.db, drop agent_config.py, conversation tools updated"
-    status: pending
+    status: completed
   - id: phase-5
     content: "Phase 5: Character-aware agent invocation -- resolve_character_llm/voice, AgentManager per-character prompt + cache"
-    status: pending
+    status: completed
   - id: phase-6
-    content: "Phase 6: Profile API for Flutter -- GET /characters, profile, photo"
-    status: pending
+    content: "Phase 6: Profile API for Flutter -- GET /characters, profile, photo (+ llm_models/voice_models aligned with runtime)"
+    status: completed
   - id: phase-7
     content: "Phase 7: Resolved preferences UX in admin -- show applied model/voice per character"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -256,8 +256,8 @@ CREATE TABLE IF NOT EXISTS characters (
 **Goal:** Flutter app can fetch and display character profile.
 
 - [http_server.py](d:\projects\hiroleague\hiroserver\hirocli\src\hirocli\runtime\http_server.py):
-  - `GET /characters` -- list of `{id, name, description, has_photo}`
-  - `GET /characters/{id}/profile` -- `{id, name, description, has_photo, updated_at}`
+  - `GET /characters` -- list of `{id, name, description, has_photo, llm_models, voice_models}` (same preference lists the runtime uses)
+  - `GET /characters/{id}/profile` -- `{id, name, description, has_photo, updated_at, llm_models, voice_models}`
   - `GET /characters/{id}/photo` -- serves the photo file from disk (or default fallback)
 - All endpoints public within workspace (no additional auth)
 - `updated_at` from DB row for client-side cache invalidation
@@ -272,6 +272,7 @@ CREATE TABLE IF NOT EXISTS characters (
 - Same visualization for `voice_models`
 - If all preferences miss, show workspace fallback with explanation
 - Reuses `resolve_character_llm` / `resolve_character_voice` from Phase 5
+- **Implemented:** `CharacterService.get_character_resolved_configuration`, `GET /api/characters/{id}/resolved`, admin UI (`CharacterResolvedBlock` on view + edit)
 
 ## Default character: hiro
 

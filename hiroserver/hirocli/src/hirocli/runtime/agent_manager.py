@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import time
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_EVENT
@@ -110,38 +112,31 @@ class AgentManager:
         self._ctx = ctx
         self._comm = comm_manager
         self._tts_service = tts_service
-        self._agent = None  # built inside run() once the async checkpointer is ready
+        self._checkpointer = None
+        self._credential_store = None
+        self._agent_cache: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+        self._agent_cache_max = 24
 
-    def _build_agent(self, checkpointer, credential_store=None):
-        """Build the LangChain agent from preferences.  Returns None if no chat LLM is configured."""
+    def _build_agent(
+        self,
+        checkpointer,
+        credential_store,
+        *,
+        llm_entry,
+        system_prompt: str,
+        prefs,
+    ):
+        """Compile LangGraph/LangChain agent for a resolved chat model and persona prompt."""
         from ..domain.model_factory import create_chat_model
-        from ..domain.preferences import load_preferences, resolve_llm
-
-        prefs = load_preferences(self._ctx.workspace_path)
-        llm_entry = resolve_llm(
-            prefs,
-            self._ctx.workspace_path,
-            "chat",
-            credential_store=credential_store,
-        )
-        if llm_entry is None:
-            log.error(
-                "❌ No chat LLM configured — preferences · default_chat\n"
-                "Set llm.default_chat to a canonical catalog id (e.g. openai:gpt-5.4), "
-                "configure the provider (hiro provider add), and ensure the model is available."
-            )
-            return None
 
         try:
             from langchain.agents import create_agent
 
-            from ..domain.agent_config import load_system_prompt
             from ..domain.preferences import resolve_summarization_llm
             from ..tools import all_tools
             from ..tools.langchain_adapter import to_langchain_list
             from .summarizing_agent_graph import build_summarizing_agent_graph
 
-            system_prompt = load_system_prompt(self._ctx.workspace_path)
             tools = to_langchain_list(all_tools())
 
             log.fineinfo(
@@ -159,7 +154,6 @@ class AgentManager:
                 credential_store=credential_store,
             )
 
-            # Step 1 memory: LangMem summarization inside the graph (token thresholds in prefs.memory).
             if prefs.memory.summarization_enabled:
                 sum_entry = resolve_summarization_llm(
                     prefs,
@@ -209,7 +203,6 @@ class AgentManager:
                 checkpointer=checkpointer,
             )
         except Exception as exc:
-            # Human-first: error before opaque fields; kind in the message line.
             log.error(
                 "❌ Agent build failed — HiroServer · chat",
                 error=str(exc),
@@ -217,10 +210,98 @@ class AgentManager:
             )
             raise
 
+    def _summarization_cache_token(self, prefs) -> str:
+        """Summarization configuration fingerprint for compiled agent cache keys."""
+        from ..domain.preferences import resolve_summarization_llm
+
+        if not prefs.memory.summarization_enabled:
+            return "sum:off"
+        se = resolve_summarization_llm(
+            prefs,
+            self._ctx.workspace_path,
+            credential_store=self._credential_store,
+        )
+        if se is None:
+            return "sum:none"
+        return f"sum:{se.model_id}"
+
+    def _agent_cache_key(self, llm_entry, system_prompt: str, prefs) -> tuple[Any, ...]:
+        fp = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        return (
+            llm_entry.model_id,
+            round(float(llm_entry.temperature), 6),
+            int(llm_entry.max_tokens),
+            self._summarization_cache_token(prefs),
+            fp,
+        )
+
+    def _get_or_create_agent(self, llm_entry, system_prompt: str, prefs):
+        key = self._agent_cache_key(llm_entry, system_prompt, prefs)
+        agent = self._agent_cache.get(key)
+        if agent is not None:
+            self._agent_cache.move_to_end(key)
+            return agent
+        assert self._checkpointer is not None
+        agent = self._build_agent(
+            self._checkpointer,
+            self._credential_store,
+            llm_entry=llm_entry,
+            system_prompt=system_prompt,
+            prefs=prefs,
+        )
+        self._agent_cache[key] = agent
+        self._agent_cache.move_to_end(key)
+        while len(self._agent_cache) > self._agent_cache_max:
+            self._agent_cache.popitem(last=False)
+        return agent
+
+    def _load_character_for_channel(self, character_id: str):
+        from ..domain.character import default_character_id, load_character_from_disk
+
+        wp = self._ctx.workspace_path
+        cid = (character_id or "").strip()
+        if not cid:
+            cid = default_character_id(wp)
+        try:
+            return load_character_from_disk(wp, cid)
+        except FileNotFoundError:
+            fallback = default_character_id(wp)
+            log.warning(
+                "⚠️ Character folder missing — HiroServer · using default character",
+                requested=cid,
+                fallback=fallback,
+            )
+            return load_character_from_disk(wp, fallback)
+
+    def _resolve_thread_character(
+        self, msg: UnifiedMessage
+    ) -> tuple[str, int, str]:
+        """Return (thread_id, channel_id, character_id) for this channel+sender pair."""
+        from ..domain.data_store import get_default_user_id
+        from ..domain.character import default_character_id
+        from ..tools.conversation import ConversationChannelGetTool
+
+        channel_name = f"{msg.routing.channel}:{msg.routing.sender_id}"
+        user_id = get_default_user_id(self._ctx.workspace_path)
+        channel_result = ConversationChannelGetTool().execute(
+            channel_name=channel_name,
+            workspace_path=self._ctx.workspace_path,
+            user_id=user_id,
+        )
+        if channel_result.channel is None:
+            raise RuntimeError("No conversation channel available for agent thread resolution")
+        row = channel_result.channel
+        channel_id = int(row["id"])
+        character_id = (row.get("character_id") or "").strip()
+        if not character_id:
+            character_id = default_character_id(self._ctx.workspace_path)
+        return str(channel_id), channel_id, character_id
+
     @property
     def _tts_enabled(self) -> bool:
         """Check if TTS is enabled in workspace preferences."""
         from ..domain.preferences import load_preferences
+
         prefs = load_preferences(self._ctx.workspace_path)
         return prefs.audio.agent_replies_in_voice
 
@@ -229,6 +310,10 @@ class AgentManager:
         inbound: UnifiedMessage,
         text_reply: UnifiedMessage,
         text: str,
+        *,
+        character_voice_models: list[str],
+        tts_instructions: str = "",
+        tts_voice_by_provider: dict[str, str] | None = None,
     ) -> None:
         """Synthesize speech from the agent's text reply and send a message.voiced event.
 
@@ -236,20 +321,32 @@ class AgentManager:
         reply has already been delivered so the user is never left without a response.
         """
         try:
-            from ..domain.preferences import load_preferences, resolve_voice
+            from ..domain.preferences import load_preferences, resolve_character_voice
 
-            voice = resolve_voice(load_preferences(self._ctx.workspace_path))
-            if not voice:
-                return
-
+            prefs = load_preferences(self._ctx.workspace_path)
             peer = comm_peer_label(inbound, self._ctx)
 
-            # Model is already resolved from the catalog at service creation time;
-            # voice and instructions come from audio preferences.
+            resolved = resolve_character_voice(
+                character_voice_models,
+                prefs,
+                self._ctx.workspace_path,
+                credential_store=self._credential_store,
+                tts_instructions=tts_instructions,
+                tts_voice_by_provider=tts_voice_by_provider,
+            )
+            # Voice preset / instructions come from the character (optional); prefs supply default_tts fallback.
+            if resolved is None:
+                log.warning(
+                    f"⚠️ Voice reply skipped — {peer} · no TTS model resolved "
+                    "(set character voice_models and/or llm.default_tts)",
+                    ref_id=text_reply.routing.id,
+                )
+                return
             result = await self._tts_service.synthesize(
                 text,
-                voice=voice.voice,
-                instructions=voice.instructions,
+                model=resolved.model,
+                voice=resolved.voice,
+                instructions=resolved.instructions,
             )
 
             # DEBUG: save MP3 to workspace for manual playback testing
@@ -302,54 +399,16 @@ class AgentManager:
                 exc_info=True,
             )
 
-    def _resolve_thread_id(self, msg: UnifiedMessage) -> tuple[str, int]:
-        """Return (thread_id, channel_id) for this channel+sender pair.
-
-        The channel name used as the lookup key is channel:sender_id so that
-        each unique sender on each plugin channel gets its own persistent thread.
-        If the requested channel does not exist, the seeded General channel is used.
-        thread_id is str(channel.id) — LangGraph uses it as a string key.
-        """
-        from ..domain.data_store import get_default_user_id
-        from ..tools.conversation import ConversationChannelGetTool
-
-        channel_name = f"{msg.routing.channel}:{msg.routing.sender_id}"
-        user_id = get_default_user_id(self._ctx.workspace_path)
-        channel_result = ConversationChannelGetTool().execute(
-            channel_name=channel_name,
-            workspace_path=self._ctx.workspace_path,
-            user_id=user_id,
-        )
-        if channel_result.channel is None:
-            raise RuntimeError("No conversation channel available for agent thread resolution")
-        channel_id = int(channel_result.channel["id"])
-        return str(channel_id), channel_id
-
     async def _process(self, msg: UnifiedMessage) -> None:
-        if self._agent is None:
-            peer = comm_peer_label(msg, self._ctx)
-            reply = _make_reply(
-                msg,
-                "The agent is not available — no chat LLM is configured. "
-                "Please register an LLM in preferences.json.",
-            )
-            await self._comm.enqueue_outbound(reply)
-            log.info(
-                f"{LOG_OUT} Fallback reply enqueued — {peer} · {comm_kind(msg)}",
-                **comm_extras(msg, reason="no_chat_llm"),
-            )
-            return
+        from ..domain.character import effective_character_system_prompt
+        from ..domain.preferences import load_preferences, resolve_character_llm
 
         peer = comm_peer_label(msg, self._ctx)
-        thread_id, channel_id = self._resolve_thread_id(msg)
+        thread_id, channel_id, character_id = self._resolve_thread_character(msg)
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Build agent input from all content items.
-        # Audio transcripts are treated as canonical user text (the user spoke
-        # these words) — no prefix, so the agent reasons about what was said,
-        # not about the fact that it was audio.
-        # Other non-text items (image, etc.) keep a descriptive prefix.
-        parts = []
+        # Build agent input from all content items first (avoid compiling graphs for empty input).
+        parts: list[str] = []
         for item in msg.content:
             if item.content_type == "text":
                 if item.body:
@@ -385,11 +444,52 @@ class AgentManager:
             )
             return
 
+        prefs = load_preferences(self._ctx.workspace_path)
+        ch = self._load_character_for_channel(character_id)
+        system_prompt = effective_character_system_prompt(ch)
+        llm_entry = resolve_character_llm(
+            ch.llm_models,
+            prefs,
+            self._ctx.workspace_path,
+            credential_store=self._credential_store,
+        )
+        if llm_entry is None:
+            reply = _make_reply(
+                msg,
+                "The agent is not available — no chat LLM is configured. "
+                "Please register an LLM in preferences.json.",
+            )
+            await self._comm.enqueue_outbound(reply)
+            log.info(
+                f"{LOG_OUT} Fallback reply enqueued — {peer} · {comm_kind(msg)}",
+                **comm_extras(msg, reason="no_chat_llm"),
+            )
+            return
+
+        try:
+            agent = self._get_or_create_agent(llm_entry, system_prompt, prefs)
+        except Exception as exc:
+            log.error(
+                f"❌ Agent build failed for message — {peer} · {comm_kind(msg)}",
+                error=str(exc),
+                **comm_extras(msg, character_id=character_id, model_id=llm_entry.model_id),
+                exc_info=True,
+            )
+            reply = _make_reply(
+                msg,
+                "The assistant could not load its model for this conversation. "
+                "Check workspace LLM configuration and try again.",
+            )
+            await self._comm.enqueue_outbound(reply)
+            return
+
         log.info(
             f"{LOG_IN} Agent processing — {peer} · {comm_kind(msg)}",
             **comm_extras(
                 msg,
                 thread_id=thread_id,
+                character_id=character_id,
+                model_id=llm_entry.model_id,
                 text_preview=text_body[:200],
                 body_length=len(text_body),
             ),
@@ -398,7 +498,7 @@ class AgentManager:
             agent_input = {"messages": [{"role": "user", "content": text_body}]}
 
             # Log the full conversation state the LLM will see (checkpoint + new message).
-            state = await self._agent.aget_state(config)
+            state = await agent.aget_state(config)
             history = state.values.get("messages", []) if state.values else []
             log.debug(
                 f"{LOG_IN} Agent invocation context — {peer} · {comm_kind(msg)}",
@@ -423,7 +523,7 @@ class AgentManager:
             )
 
             _t0 = time.perf_counter()
-            result = await self._agent.ainvoke(
+            result = await agent.ainvoke(
                 agent_input,
                 config=config,
             )
@@ -511,7 +611,14 @@ class AgentManager:
             tts_for_this_msg = per_request if per_request is not None else self._tts_enabled
             if tts_for_this_msg and self._tts_service:
                 asyncio.create_task(
-                    self._synthesize_and_send(msg, reply, reply_body),
+                    self._synthesize_and_send(
+                        msg,
+                        reply,
+                        reply_body,
+                        character_voice_models=ch.voice_models,
+                        tts_instructions=ch.tts_instructions,
+                        tts_voice_by_provider=dict(ch.tts_voice_by_provider),
+                    ),
                     name=f"tts-{reply.routing.id}",
                 )
         except Exception as exc:
@@ -524,12 +631,10 @@ class AgentManager:
             )
 
     def _log_agent_config(self, credential_store=None) -> None:
-        """Log the agent model configuration from preferences.
-
-        Absorbed from server_process.py — this is an AgentManager concern.
-        """
+        """Log workspace default chat resolution (per-message agent uses character prefs first)."""
         try:
             from ..domain.preferences import load_preferences, resolve_llm
+
             prefs = load_preferences(self._ctx.workspace_path)
             llm = resolve_llm(
                 prefs,
@@ -539,13 +644,14 @@ class AgentManager:
             )
             if llm:
                 log.info(
-                    f"✅ Agent config loaded — preferences · {llm.model_id}",
+                    "✅ Workspace chat default — preferences · "
+                    f"{llm.model_id} (characters may override via llm_models)",
                     temperature=llm.temperature,
                     max_tokens=llm.max_tokens,
                 )
             else:
                 log.error(
-                    "❌ No chat LLM configured — HiroServer will run without agent · preferences\n"
+                    "❌ No chat LLM configured — HiroServer will reply with fallbacks · preferences\n"
                     "Set llm.default_chat and configure providers (hiro provider add / scan-env)."
                 )
         except Exception as exc:
@@ -556,32 +662,47 @@ class AgentManager:
             )
 
     async def run(self) -> None:
-        """Build the agent with a persistent SQLite checkpointer then drain inbound_queue."""
+        """Open the LangGraph checkpointer and drain inbound_queue (agents built per message)."""
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
         from ..domain.credential_store import CredentialStore
         from ..domain.db import db_path
+        from ..domain.preferences import load_preferences, resolve_llm
         from ..domain.workspace import workspace_id_for_path
 
         wid = workspace_id_for_path(self._ctx.workspace_path)
         credential_store = (
             CredentialStore(self._ctx.workspace_path, wid) if wid is not None else None
         )
+        self._credential_store = credential_store
         self._log_agent_config(credential_store=credential_store)
         db = str(db_path(self._ctx.workspace_path))
 
         # AsyncSqliteSaver manages its own checkpoint tables inside workspace.db.
         # They coexist with the application tables without conflict.
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
-            self._agent = self._build_agent(checkpointer, credential_store=credential_store)
-            if self._agent is None:
+            self._checkpointer = checkpointer
+            self._agent_cache.clear()
+
+            prefs = load_preferences(self._ctx.workspace_path)
+            probe = (
+                resolve_llm(
+                    prefs,
+                    self._ctx.workspace_path,
+                    "chat",
+                    credential_store=credential_store,
+                )
+                if credential_store is not None
+                else None
+            )
+            if probe is None:
                 log.warning(
-                    "⚠️ AgentManager started — workspace · no chat LLM (fallback replies only)",
+                    "⚠️ AgentManager started — workspace · no default chat LLM (per-channel fallback replies only)",
                     db=db,
                 )
             else:
                 log.info(
-                    "✅ AgentManager started — workspace · chat agent",
+                    "✅ AgentManager started — workspace · per-channel character agents",
                     db=db,
                 )
             while True:

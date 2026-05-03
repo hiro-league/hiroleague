@@ -57,7 +57,7 @@ def test_local_endpoint_no_keyring_secret(tmp_path: Path) -> None:
 
 def _catalog_with_env_provider(tmp_path: Path) -> ModelCatalog:
     doc = {
-        "catalog_version": 1,
+        "catalog_version": "1.0.0",
         "providers": [
             {
                 "id": "pa",

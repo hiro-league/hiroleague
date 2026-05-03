@@ -27,7 +27,7 @@ def _clear_catalog_cache() -> None:
 
 def _minimal_catalog(tmp_path: Path) -> ModelCatalog:
     doc = {
-        "catalog_version": 99,
+        "catalog_version": "99.0.0",
         "providers": [
             {
                 "id": "a",

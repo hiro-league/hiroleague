@@ -119,6 +119,11 @@ def test_create_tts_service_injects_credential_store_key(tmp_path: Path) -> None
     )
     mock_store = MagicMock()
     mock_store.get_api_key.return_value = "sk-from-store"
+    mock_store.is_configured.side_effect = lambda pid: pid == "openai"
+
+    mock_tts_row = MagicMock()
+    mock_tts_row.model_kind = "tts"
+
     with (
         patch("hirocli.domain.preferences.load_preferences", return_value=prefs),
         patch("hirocli.domain.workspace.workspace_id_for_path", return_value="w1"),
@@ -126,7 +131,9 @@ def test_create_tts_service_injects_credential_store_key(tmp_path: Path) -> None
         patch("hirocli.domain.model_catalog.get_model_catalog") as gmc,
         patch("hirocli.domain.credential_store.CredentialStore", return_value=mock_store),
     ):
-        gmc.return_value.get_model.return_value = mock_spec
+        cat = gmc.return_value
+        cat.get_model.return_value = mock_spec
+        cat.list_models.return_value = [mock_tts_row]
         svc = create_tts_service(tmp_path)
     assert svc is not None
     mock_store.get_api_key.assert_called_once_with("openai")

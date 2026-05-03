@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from hirocli.domain.model_catalog import reload_model_catalog
 from hirocli.tools.llm_catalog import (
     LlmCatalogListModelsTool,
     LlmCatalogListProvidersTool,
@@ -33,7 +34,7 @@ class CatalogBrowserService:
         model_kind: str | None = None,
         model_class: str | None = None,
         hosting: str | None = None,
-    ) -> Result[tuple[int, list[dict[str, Any]]]]:
+    ) -> Result[tuple[str, list[dict[str, Any]]]]:
         """Return (catalog_version, models) for table display."""
         kwargs: dict[str, Any] = {}
         if provider_id:
@@ -49,3 +50,17 @@ class CatalogBrowserService:
         except Exception as exc:
             return Result.failure(str(exc))
         return Result.success((raw.catalog_version, list(raw.models)))
+
+    def reload_from_disk(self) -> Result[dict[str, Any]]:
+        """Clear catalog cache and load bundled YAML again (running HiroServer process)."""
+        try:
+            cat = reload_model_catalog()
+        except Exception as exc:
+            return Result.failure(str(exc))
+        return Result.success(
+            {
+                "catalog_version": cat.catalog_version,
+                "provider_count": len(cat.list_providers()),
+                "model_count": len(cat.list_models()),
+            }
+        )

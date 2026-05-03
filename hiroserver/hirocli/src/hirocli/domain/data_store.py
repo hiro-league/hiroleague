@@ -43,7 +43,7 @@ _DDL = [
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         name            TEXT NOT NULL,
         type            TEXT NOT NULL DEFAULT 'direct',
-        agent_id        TEXT NOT NULL,
+        character_id    TEXT NOT NULL,
         user_id         INTEGER NOT NULL REFERENCES users(id),
         created_at      TEXT NOT NULL,
         last_message_at TEXT
@@ -76,7 +76,7 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     # channels
     ("channels", "name",            "TEXT NOT NULL DEFAULT ''"),
     ("channels", "type",            "TEXT NOT NULL DEFAULT 'direct'"),
-    ("channels", "agent_id",        "TEXT NOT NULL DEFAULT ''"),
+    ("channels", "character_id",    "TEXT NOT NULL DEFAULT ''"),
     ("channels", "user_id",         "INTEGER NOT NULL DEFAULT 0"),
     ("channels", "created_at",      "TEXT NOT NULL DEFAULT ''"),
     ("channels", "last_message_at", "TEXT"),
@@ -115,6 +115,19 @@ def media_dir(workspace_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _migrate_channels_agent_id_to_character_id(conn: sqlite3.Connection) -> None:
+    """Rename legacy ``agent_id`` column on channels (Phase 4: character entity).
+
+    Fresh installs create ``character_id`` directly; existing workspaces keep data
+    via SQLite ``RENAME COLUMN`` (3.25+).
+    """
+    cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(channels)")}
+    if "character_id" in cols:
+        return
+    if "agent_id" in cols:
+        conn.execute("ALTER TABLE channels RENAME COLUMN agent_id TO character_id")
+
+
 def ensure_data_db(workspace_path: Path) -> None:
     """Create data.db, upgrade tables, seed defaults (sync, idempotent)."""
     key = str(workspace_path.resolve())
@@ -128,6 +141,17 @@ def ensure_data_db(workspace_path: Path) -> None:
     with sqlite3.connect(db) as conn:
         for ddl in _DDL:
             conn.execute(ddl)
+
+        # Must run before ADD COLUMN logic so we never end up with both names.
+        try:
+            _migrate_channels_agent_id_to_character_id(conn)
+        except sqlite3.OperationalError as exc:
+            # Very old SQLite without RENAME COLUMN — surface a clear error.
+            log.error(
+                "channels migration failed (need SQLite 3.25+ for RENAME COLUMN)",
+                error=str(exc),
+            )
+            raise
 
         table_existing: dict[str, set[str]] = {}
         for table, col_name, col_def in _EXPECTED_COLUMNS:
@@ -162,16 +186,17 @@ def _seed_defaults(conn: sqlite3.Connection, workspace_path: Path) -> None:
     ).fetchone()
     user_id = user_row[0]
 
-    # Resolve the default agent from workspace.db
-    agent_id = get_default_agent_id(workspace_path)
+    from .character import default_character_id
 
-    # Default channel — linked to default user and default agent
+    character_id = default_character_id(workspace_path)
+
+    # Default channel — linked to default user and default character (slug in workspace.db index)
     conn.execute(
         """
-        INSERT OR IGNORE INTO channels (name, type, agent_id, user_id, created_at)
+        INSERT OR IGNORE INTO channels (name, type, character_id, user_id, created_at)
         VALUES (?, 'direct', ?, ?, ?)
         """,
-        (_DEFAULT_CHANNEL_NAME, agent_id, user_id, now),
+        (_DEFAULT_CHANNEL_NAME, character_id, user_id, now),
     )
     conn.commit()
 
@@ -189,12 +214,3 @@ def get_default_user_id(workspace_path: Path) -> int:
         return int(row[0])
 
 
-def get_default_agent_id(workspace_path: Path) -> str:
-    """Read the default character id from workspace.db (cross-DB reference).
-
-    Kept name ``get_default_agent_id`` until channel schema uses ``character_id``
-    (Phase 4); value is the character slug (e.g. ``hiro``).
-    """
-    from .character import default_character_id
-
-    return default_character_id(workspace_path)

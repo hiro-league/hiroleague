@@ -118,6 +118,8 @@ class CharacterSaveRequest(BaseModel):
     backstory: str = ""
     llm_models_json: str = ""
     voice_models_json: str = ""
+    tts_instructions: str = ""
+    tts_voice_by_provider_json: str = "{}"
     emotions_enabled: bool = False
     extras_json: str = ""
 
@@ -129,7 +131,7 @@ class CharacterPhotoUploadRequest(BaseModel):
 class ChatChannelSaveRequest(BaseModel):
     name: str
     user_id: int
-    agent_id: str
+    character_id: str
     channel_type: str = "direct"
 
 
@@ -515,6 +517,13 @@ async def list_catalog_models(
     }
 
 
+@api_router.post("/catalog/reload")
+async def reload_catalog() -> dict[str, Any]:
+    """Clear in-process catalog cache and reload bundled ``catalog.yaml``."""
+    result = await run_in_threadpool(CatalogBrowserService().reload_from_disk)
+    return _api_from_result(result)
+
+
 @api_router.get("/providers")
 async def list_active_providers(
     x_hiro_workspace: str | None = Header(default=None),
@@ -608,6 +617,8 @@ async def create_character(
             backstory=body.backstory,
             llm_models_json=body.llm_models_json,
             voice_models_json=body.voice_models_json,
+            tts_instructions=body.tts_instructions,
+            tts_voice_by_provider_json=body.tts_voice_by_provider_json,
             emotions_enabled=body.emotions_enabled,
             extras_json=body.extras_json,
         )
@@ -641,6 +652,20 @@ async def get_character(
     return {"ok": True, "error": None, "data": data}
 
 
+@api_router.get("/characters/{character_id}/resolved")
+async def get_character_resolved(
+    character_id: str,
+    x_hiro_workspace: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Phase 7: runtime resolution preview (catalog + credentials vs character lists)."""
+    result = await run_in_threadpool(
+        CharacterService().get_character_resolved_configuration,
+        _selected_workspace_id(x_hiro_workspace),
+        character_id,
+    )
+    return _api_from_result(result)
+
+
 @api_router.patch("/characters/{character_id}")
 async def update_character(
     character_id: str,
@@ -658,6 +683,8 @@ async def update_character(
             backstory=body.backstory,
             llm_models_json=body.llm_models_json,
             voice_models_json=body.voice_models_json,
+            tts_instructions=body.tts_instructions,
+            tts_voice_by_provider_json=body.tts_voice_by_provider_json,
             emotions_enabled=body.emotions_enabled,
             extras_json=body.extras_json,
         )
@@ -775,7 +802,7 @@ async def create_chat_channel(
             _selected_workspace_id(x_hiro_workspace),
             name=body.name,
             user_id=body.user_id,
-            agent_id=body.agent_id,
+            character_id=body.character_id,
             channel_type=body.channel_type,
         )
     )
@@ -795,7 +822,7 @@ async def update_chat_channel(
             channel_id,
             name=body.name,
             channel_type=body.channel_type,
-            agent_id=body.agent_id,
+            character_id=body.character_id,
             user_id=body.user_id,
         )
     )

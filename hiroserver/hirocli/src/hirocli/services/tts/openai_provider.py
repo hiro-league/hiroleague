@@ -1,7 +1,9 @@
 """OpenAI TTS provider — speech synthesis via the /audio/speech endpoint.
 
 Models offered:
-  - gpt-4o-mini-tts  (default) — compact, fast, supports voice instructions
+  - gpt-4o-mini-tts  (default) — token-priced; supports voice instructions
+  - tts-1 — fast / classic speech API
+  - tts-1-hd — higher quality
 
 Output format: MP3 (universally playable on iOS, Android, and web including Firefox).
 
@@ -30,6 +32,16 @@ _MODELS: list[TTSModelInfo] = [
         model_id="gpt-4o-mini-tts",
         provider="openai",
         display_name="GPT-4o Mini TTS",
+    ),
+    TTSModelInfo(
+        model_id="tts-1",
+        provider="openai",
+        display_name="TTS-1",
+    ),
+    TTSModelInfo(
+        model_id="tts-1-hd",
+        provider="openai",
+        display_name="TTS-1 HD",
     ),
 ]
 

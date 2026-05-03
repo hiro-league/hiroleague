@@ -59,28 +59,38 @@ def create_tts_service(workspace_path: Path) -> TTSService | None:
 
     wid = workspace_id_for_path(workspace_path)
     store = CredentialStore(workspace_path, wid) if wid is not None else None
-    # Resolve TTS model through catalog + credential store (canonical ID path)
-    tts_resolved = resolve_llm(prefs, workspace_path, "tts", credential_store=store)
+    if store is None:
+        _log.warning("TTS enabled but workspace is not in registry — cannot build credential store")
+        return None
 
-    default_model: str | None = None
+    cat = get_model_catalog()
     providers: list[TTSProvider] = []
+    # Phase 5: load every TTS provider the workspace has credentials for so character
+    # voice_models can use a different vendor than llm.default_tts.
+    for provider_id, cls in _PROVIDER_MAP.items():
+        if not store.is_configured(provider_id):
+            continue
+        if not any(
+            m.model_kind == "tts" for m in cat.list_models(provider_id=provider_id)
+        ):
+            continue
+        inst = cls(api_key=store.get_api_key(provider_id))
+        if inst.is_available():
+            providers.append(inst)
 
+    tts_resolved = resolve_llm(prefs, workspace_path, "tts", credential_store=store)
+    default_model: str | None = None
     if tts_resolved is not None:
-        spec = get_model_catalog().get_model(tts_resolved.model_id)
+        spec = cat.get_model(tts_resolved.model_id)
         if spec is None:
             _log.warning("TTS model id not in catalog", model_id=tts_resolved.model_id)
         else:
-            cls = _PROVIDER_MAP.get(spec.provider_id)
-            if cls is None:
-                _log.warning(
-                    "Unknown TTS provider in catalog for preferences",
-                    provider_id=spec.provider_id,
-                )
-            else:
-                default_model = tts_resolved.model_id.split(":", 1)[1]
-                key = store.get_api_key(spec.provider_id) if store else None
-                providers = [cls(api_key=key)]
+            default_model = tts_resolved.model_id.split(":", 1)[1]
     else:
         _log.warning("TTS enabled but no TTS model resolved — set llm.default_tts in preferences")
+
+    if not providers:
+        _log.warning("TTS enabled but no TTS providers loaded (check API keys and SDKs)")
+        return None
 
     return TTSService(providers=providers, default_model=default_model)
