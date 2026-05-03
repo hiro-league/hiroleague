@@ -72,7 +72,16 @@ class ModelSpec(BaseModel):
     id: str
     provider_id: str
     display_name: str
-    model_kind: ModelKind
+    model_kind: ModelKind = Field(
+        description="Primary/editorial kind — UI badges and pricing tables use this first."
+    )
+    extra_kinds: list[ModelKind] = Field(
+        default_factory=list,
+        description=(
+            "Additional Hiro purposes this row is valid for (e.g. chat model also usable as STT). "
+            "Must not repeat model_kind; see supports_kind()."
+        ),
+    )
     model_class: str | None = None
     context_window: int | None = None
     modalities: list[str] = Field(default_factory=list)
@@ -83,6 +92,13 @@ class ModelSpec(BaseModel):
     replacement_id: str | None = None
     notes: str | None = None
 
+    def supports_kind(self, kind: ModelKind | str) -> bool:
+        """True if this catalog row may be selected for ``kind`` (primary or extra)."""
+        k = str(kind)
+        if self.model_kind == k:
+            return True
+        return k in self.extra_kinds
+
     @model_validator(mode="after")
     def id_matches_provider_prefix(self) -> ModelSpec:
         expected_prefix = f"{self.provider_id}:"
@@ -90,6 +106,28 @@ class ModelSpec(BaseModel):
             raise ValueError(
                 f"model id {self.id!r} must start with provider prefix {expected_prefix!r}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def extra_kinds_consistent(self) -> ModelSpec:
+        allowed: set[str] = {
+            "chat",
+            "tts",
+            "stt",
+            "embedding",
+            "image_gen",
+        }
+        seen: set[str] = set()
+        for k in self.extra_kinds:
+            if k not in allowed:
+                raise ValueError(f"model {self.id!r} has invalid extra_kind {k!r}")
+            if k in seen:
+                raise ValueError(f"model {self.id!r} has duplicate extra_kind {k!r}")
+            seen.add(k)
+            if k == self.model_kind:
+                raise ValueError(
+                    f"model {self.id!r} extra_kinds must not repeat model_kind {k!r}"
+                )
         return self
 
 
@@ -158,10 +196,11 @@ class CatalogDocument(BaseModel):
                         f"provider {prov.id!r} recommended model {mid!r} belongs to "
                         f"provider {spec.provider_id!r}, not {prov.id!r}"
                     )
-                if spec.model_kind != kind:
+                if not spec.supports_kind(kind):
                     raise ValueError(
                         f"provider {prov.id!r} recommended_models[{kind!r}] points to "
-                        f"{mid!r} but that model has model_kind {spec.model_kind!r}, not {kind!r}"
+                        f"{mid!r} but that model does not support kind {kind!r} "
+                        f"(model_kind={spec.model_kind!r}, extra_kinds={spec.extra_kinds!r})"
                     )
         return self
 
@@ -237,7 +276,7 @@ class ModelCatalog:
         for m in self._doc.models:
             if provider_id is not None and m.provider_id != provider_id:
                 continue
-            if model_kind is not None and m.model_kind != model_kind:
+            if model_kind is not None and not m.supports_kind(model_kind):
                 continue
             if model_class is not None and m.model_class != model_class:
                 continue

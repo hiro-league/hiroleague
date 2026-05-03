@@ -42,40 +42,41 @@ providers:
     docs_url: https://ai.google.dev/gemini-api/docs
     recommended_models:
       chat: google:gemini-3-flash-preview
+      stt: google:gemini-3-flash-preview
       tts: google:gemini-3.1-flash-tts-preview
       embedding: google:gemini-embedding-001
     # Gemini speech generation — PrebuiltVoiceConfig.voice_name (see ai.google.dev/gemini-api/docs/speech-generation).
     tts_voices:
-      - { id: Achernar }
-      - { id: Achird }
-      - { id: Algenib }
-      - { id: Algieba }
-      - { id: Alnilam }
-      - { id: Aoede }
-      - { id: Autonoe }
-      - { id: Callirrhoe }
-      - { id: Charon }
-      - { id: Despina }
-      - { id: Enceladus }
-      - { id: Erinome }
-      - { id: Fenrir }
-      - { id: Gacrux }
-      - { id: Iapetus }
-      - { id: Kore }
-      - { id: Laomedeia }
-      - { id: Leda }
-      - { id: Orus }
-      - { id: Puck }
-      - { id: Pulcherrima }
-      - { id: Rasalgethi }
-      - { id: Sadachbia }
-      - { id: Sadaltager }
-      - { id: Schedar }
-      - { id: Sulafat }
-      - { id: Umbriel }
-      - { id: Vindemiatrix }
-      - { id: Zephyr }
-      - { id: Zubenelgenubi }
+      - { id: Achernar, description: "Soft, Higher pitch" }
+      - { id: Achird, description: "Friendly, Lower middle pitch" }
+      - { id: Algenib, description: "Gravelly, Lower pitch" }
+      - { id: Algieba, description: "Smooth, Lower pitch" }
+      - { id: Alnilam, description: "Firm, Lower middle pitch" }
+      - { id: Aoede, description: "Breezy, Middle pitch" }
+      - { id: Autonoe, description: "Bright, Middle pitch" }
+      - { id: Callirrhoe, description: "Easy-going, Middle pitch" }
+      - { id: Charon, description: "Informative, Lower pitch" }
+      - { id: Despina, description: "Smooth, Middle pitch" }
+      - { id: Enceladus, description: "Breathy, Lower pitch" }
+      - { id: Erinome, description: "Clear, Middle pitch" }
+      - { id: Fenrir, description: "Excitable, Lower middle pitch" }
+      - { id: Gacrux, description: "Mature, Middle pitch" }
+      - { id: Iapetus, description: "Clear, Lower middle pitch" }
+      - { id: Kore, description: "Firm, Middle pitch" }
+      - { id: Laomedeia, description: "Upbeat, Higher pitch" }
+      - { id: Leda, description: "Youthful, Higher pitch" }
+      - { id: Orus, description: "Firm, Lower middle pitch" }
+      - { id: Puck, description: "Upbeat, Middle pitch" }
+      - { id: Pulcherrima, description: "Forward, Middle pitch" }
+      - { id: Rasalgethi, description: "Informative, Middle pitch" }
+      - { id: Sadachbia, description: "Lively, Lower pitch" }
+      - { id: Sadaltager, description: "Knowledgeable, Middle pitch" }
+      - { id: Schedar, description: "Even, Lower middle pitch" }
+      - { id: Sulafat, description: "Warm, Middle pitch" }
+      - { id: Umbriel, description: "Easy-going, Lower middle pitch" }
+      - { id: Vindemiatrix, description: "Gentle, Middle pitch" }
+      - { id: Zephyr, description: "Current, Bright, Higher pitch" }
+      - { id: Zubenelgenubi, description: "Casual, Lower middle pitch" }
     metadata_updated_at: "2026-05-03"
 
   - id: anthropic
@@ -330,6 +331,7 @@ models:
     provider_id: google
     display_name: Gemini 2.5 Flash
     model_kind: chat
+    extra_kinds: [stt]
     model_class: balanced
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
@@ -358,6 +360,7 @@ models:
     provider_id: google
     display_name: Gemini 3 Flash Preview
     model_kind: chat
+    extra_kinds: [stt]
     model_class: balanced
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
@@ -373,6 +376,7 @@ models:
     provider_id: google
     display_name: Gemini 3.1 Flash-Lite Preview
     model_kind: chat
+    extra_kinds: [stt]
     model_class: fast
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]

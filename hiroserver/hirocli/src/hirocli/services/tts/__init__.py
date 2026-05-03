@@ -71,7 +71,7 @@ def create_tts_service(workspace_path: Path) -> TTSService | None:
         if not store.is_configured(provider_id):
             continue
         if not any(
-            m.model_kind == "tts" for m in cat.list_models(provider_id=provider_id)
+            m.supports_kind("tts") for m in cat.list_models(provider_id=provider_id)
         ):
             continue
         inst = cls(api_key=store.get_api_key(provider_id))

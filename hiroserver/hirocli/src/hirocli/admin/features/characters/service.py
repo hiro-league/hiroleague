@@ -50,13 +50,13 @@ def _llm_row_status(cat: Any, ams: AvailableModelsService, model_id: str) -> Row
 
 
 def _voice_row_status(cat: Any, ams: AvailableModelsService, model_id: str) -> RowStatus:
-    """Classify a character ``voice_models`` entry for TTS resolution (STT → wrong_kind)."""
+    """Classify a character ``voice_models`` entry (TTS and/or STT-capable catalog rows)."""
     spec = cat.get_model(model_id)
     if spec is None:
         return "unknown"
     if spec.deprecated_since:
         return "deprecated"
-    if spec.model_kind != "tts":
+    if not (spec.supports_kind("tts") or spec.supports_kind("stt")):
         return "wrong_kind"
     if not ams.is_model_available(model_id):
         return "unavailable"
@@ -102,8 +102,8 @@ def _preference_workspace_tts_row(
     }
     if st == "deprecated" and spec is not None:
         row["replacement_id"] = spec.replacement_id
-    if spec is not None and spec.model_kind == "stt":
-        row["note"] = "STT model — not used for reply TTS; pick a TTS model for voice replies."
+    if spec is not None and not spec.supports_kind("tts"):
+        row["note"] = "Not a TTS model — pick a TTS catalog entry for voice replies."
     return row
 
 
@@ -149,7 +149,7 @@ def _first_available_tts_from_character_list(
             continue
         seen.add(mid)
         spec = cat.get_model(mid)
-        if spec is None or spec.model_kind != "tts":
+        if spec is None or not spec.supports_kind("tts"):
             continue
         if not ams.is_model_available(mid):
             continue
@@ -337,8 +337,10 @@ class CharacterService:
             }
             if st == "deprecated" and spec is not None:
                 row["replacement_id"] = spec.replacement_id
-            if spec is not None and spec.model_kind == "stt":
-                row["note"] = "STT model — not used for reply TTS; pick a TTS model for voice replies."
+            if spec is not None and spec.supports_kind("stt") and not spec.supports_kind("tts"):
+                row["note"] = (
+                    "Speech-to-text capable — not used for reply TTS; pick a TTS model for voice synthesis."
+                )
             voice_rows.append(row)
 
         voice_workspace_row = _preference_workspace_tts_row(prefs, cat, ams)

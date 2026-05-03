@@ -51,7 +51,9 @@ class AvailableModelsService:
             if prov is None:
                 continue
             models = self._catalog.list_models(provider_id=meta.provider_id)
-            kinds = {m.model_kind for m in models}
+            has_chat = any(m.supports_kind("chat") for m in models)
+            has_tts = any(m.supports_kind("tts") for m in models)
+            has_stt = any(m.supports_kind("stt") for m in models)
             summaries.append(
                 ConfiguredProviderSummary(
                     provider_id=meta.provider_id,
@@ -59,9 +61,9 @@ class AvailableModelsService:
                     hosting=prov.hosting,
                     auth_method=meta.auth_method,
                     available_model_count=len(models),
-                    has_chat="chat" in kinds,
-                    has_tts="tts" in kinds,
-                    has_stt="stt" in kinds,
+                    has_chat=has_chat,
+                    has_tts=has_tts,
+                    has_stt=has_stt,
                 )
             )
         return sorted(summaries, key=lambda s: s.provider_id)
@@ -97,9 +99,6 @@ class AvailableModelsService:
         wrong_kind_voice: list[str] = []
         unavailable_llm: list[str] = []
         unavailable_voice: list[str] = []
-
-        def _voice_kinds_ok(kind: str) -> bool:
-            return kind in ("tts", "stt")
 
         seen_llm: set[str] = set()
         for mid in llm_models:
@@ -144,7 +143,7 @@ class AvailableModelsService:
                     )
                 )
                 continue
-            if not _voice_kinds_ok(spec.model_kind):
+            if not (spec.supports_kind("tts") or spec.supports_kind("stt")):
                 wrong_kind_voice.append(mid)
                 continue
             if not self._store.is_configured(spec.provider_id):

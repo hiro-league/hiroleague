@@ -74,7 +74,8 @@ class LlmCatalogListModelsTool(Tool):
     name = "llm_catalog_list_models"
     description = (
         "List models in the Hiro catalog with optional filters: provider_id, model_kind "
-        "(chat, tts, stt, embedding, image_gen), model_class (e.g. agentic, fast), "
+        "(chat, tts, stt, embedding, image_gen — includes rows whose primary or extra_kinds "
+        "match), model_class (e.g. agentic, fast), "
         "or hosting (cloud vs local). Each row includes pricing metadata when present."
     )
     params = {
@@ -85,7 +86,7 @@ class LlmCatalogListModelsTool(Tool):
         ),
         "model_kind": ToolParam(
             str,
-            "Filter by kind: chat, tts, stt, embedding, image_gen",
+            "Filter by kind: chat, tts, stt, embedding, image_gen (matches primary model_kind or extra_kinds)",
             required=False,
         ),
         "model_class": ToolParam(

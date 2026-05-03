@@ -73,6 +73,27 @@
     return { Icon: Box, title: kind };
   }
 
+  /** Distinct kinds for this row (primary first, then extras), in catalog kind order. */
+  function allCatalogKinds(model: CatalogModelRow): ModelKindFilterId[] {
+    const primary = model.model_kind;
+    const extras = model.extra_kinds ?? [];
+    const raw = [primary, ...extras];
+    const uniq = [...new Set(raw)];
+    const order = [...MODEL_KIND_FILTER_IDS] as string[];
+    return uniq.sort((a, b) => order.indexOf(a) - order.indexOf(b)) as ModelKindFilterId[];
+  }
+
+  function modelSupportsCatalogKind(model: CatalogModelRow, kind: string): boolean {
+    if (model.model_kind === kind) return true;
+    return (model.extra_kinds ?? []).includes(kind);
+  }
+
+  function catalogKindsTitle(model: CatalogModelRow): string {
+    return allCatalogKinds(model)
+      .map((k) => modelKindUiForRow(k).title)
+      .join(' · ');
+  }
+
   const HOSTING_FILTER_IDS = ['cloud', 'local'] as const;
   type HostingFilterId = (typeof HOSTING_FILTER_IDS)[number];
 
@@ -304,9 +325,9 @@
       const payload = await listCatalogModels(fetchFilters);
       catalogVersion = payload.data.catalog_version;
       let list = payload.data.models;
-      // API accepts only one model_kind; with multiple toggles on, narrow results on the client.
+      // Single kind: server filters by primary or extra_kinds. Multiple kinds: OR on the client.
       if (kinds.length > 1) {
-        list = list.filter((m) => kinds.some((k) => k === m.model_kind));
+        list = list.filter((m) => kinds.some((k) => modelSupportsCatalogKind(m, k)));
       }
       models = list;
     } catch (err) {
@@ -780,7 +801,7 @@
       {:else}
         <div class="overflow-x-auto rounded-md border">
           <div class="min-w-[1180px]">
-            <div class="grid grid-cols-[1fr_1.25fr_90px_110px_100px_100px_1fr_1.35fr] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
+            <div class="grid grid-cols-[1fr_1.25fr_120px_110px_100px_100px_1fr_1.35fr] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
               <span>Provider</span>
               <span>Model</span>
               <span>Kind</span>
@@ -791,12 +812,11 @@
               <span>Features</span>
             </div>
             {#each models as model}
-              {@const kindUi = modelKindUiForRow(model.model_kind)}
-              {@const KindIcon = kindUi.Icon}
+              {@const kindKeys = allCatalogKinds(model)}
               {@const hostingUi = catalogHostingUiForRow(model.hosting)}
               {@const HostingIcon = hostingUi.Icon}
               {@const priceHref = pricingSourceHref(model)}
-              <div class="grid min-h-16 grid-cols-[1fr_1.25fr_90px_110px_100px_100px_1fr_1.35fr] gap-3 border-t px-3 py-3">
+              <div class="grid min-h-16 grid-cols-[1fr_1.25fr_120px_110px_100px_100px_1fr_1.35fr] gap-3 border-t px-3 py-3">
                 <span class="truncate text-sm">{providerLabels[model.provider_id] ?? model.provider_id}</span>
                 <span class="min-w-0">
                   <strong class="flex min-w-0 items-baseline gap-1 font-sans text-sm">
@@ -812,11 +832,18 @@
                   </strong>
                   <small class="block truncate text-xs text-muted-foreground">{model.id}</small>
                 </span>
-                <span class="flex justify-center">
-                  <span class="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-muted/40 text-foreground" title={kindUi.title}>
-                    <KindIcon size={16} strokeWidth={2} aria-hidden="true" />
-                    <span class="sr-only">{kindUi.title}</span>
-                  </span>
+                <span class="flex flex-wrap justify-center gap-0.5" title={catalogKindsTitle(model)}>
+                  {#each kindKeys as k (k)}
+                    {@const kui = modelKindUiForRow(k)}
+                    {@const SubIcon = kui.Icon}
+                    <span
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-muted/40 text-foreground"
+                      title={kui.title}
+                    >
+                      <SubIcon size={16} strokeWidth={2} aria-hidden="true" />
+                      <span class="sr-only">{kui.title}</span>
+                    </span>
+                  {/each}
                 </span>
                 <span class="truncate text-sm text-muted-foreground">{model.model_class ?? '-'}</span>
                 <span class="flex justify-center">

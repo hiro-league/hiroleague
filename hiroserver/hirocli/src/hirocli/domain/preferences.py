@@ -165,7 +165,7 @@ def resolve_llm(
     if spec is None:
         return None
     expected_kind = {"chat": "chat", "stt": "stt", "tts": "tts"}[purpose]
-    if spec.model_kind != expected_kind:
+    if not spec.supports_kind(expected_kind):
         return None
 
     if credential_store is not None:
@@ -335,7 +335,7 @@ def resolve_character_voice(
             continue
         seen.add(mid)
         spec = cat.get_model(mid)
-        if spec is None or spec.model_kind != "tts":
+        if spec is None or not spec.supports_kind("tts"):
             continue
         if not ams.is_model_available(mid):
             continue
@@ -354,7 +354,7 @@ def resolve_character_voice(
     if tts_entry is None:
         return None
     spec = cat.get_model(tts_entry.model_id)
-    if spec is None or spec.model_kind != "tts":
+    if spec is None or not spec.supports_kind("tts"):
         return None
     short = tts_entry.model_id.split(":", 1)[1]
     pid = spec.provider_id or ""

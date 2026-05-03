@@ -26,6 +26,8 @@ export type CatalogModelRow = {
   provider_id: string;
   display_name: string;
   model_kind: 'chat' | 'tts' | 'stt' | 'embedding' | 'image_gen' | string;
+  /** Additional Hiro purposes beyond ``model_kind`` (e.g. chat row also valid for STT). */
+  extra_kinds?: string[];
   model_class?: string | null;
   hosting?: 'cloud' | 'local' | string | null;
   context_window?: number | null;

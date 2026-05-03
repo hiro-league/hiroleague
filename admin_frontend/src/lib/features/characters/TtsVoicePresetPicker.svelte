@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowUpRight } from '@lucide/svelte';
-  import type { CatalogProviderRow } from '$lib/api/catalog';
+  import type { CatalogProviderRow, CatalogTtsVoiceRow } from '$lib/api/catalog';
   import { cn } from '$lib/utils';
   import { tick } from 'svelte';
 
@@ -37,13 +37,21 @@
 
   const vendorVoiceListDocsUrl = $derived(TTS_VOICE_LIST_DOCS[provider.id] ?? null);
 
-  const selectionSummary = $derived.by(() => {
-    if (!selectedVoiceId.trim()) {
-      return 'Catalog default';
-    }
+  /** Display label (catalog ``display_name`` or API ``id``) vs optional description — styled separately in the UI. */
+  function voicePresetParts(v: CatalogTtsVoiceRow): { name: string; desc: string | null } {
+    return {
+      name: v.display_name?.trim() || v.id,
+      desc: v.description?.trim() || null
+    };
+  }
+
+  const isDefaultVoice = $derived(!selectedVoiceId.trim());
+
+  const selectedVoiceDisplay = $derived.by((): { name: string; desc: string | null } | null => {
+    if (!selectedVoiceId.trim()) return null;
     const row = provider.tts_voices?.find((v) => v.id === selectedVoiceId);
-    const name = row?.display_name?.trim();
-    return name || selectedVoiceId;
+    if (!row) return { name: selectedVoiceId, desc: null };
+    return voicePresetParts(row);
   });
 
   // Keep the highlighted option visible inside this listbox only (never scroll the document).
@@ -80,7 +88,17 @@
         </a>
       {/if}
     </span>
-    <span class="font-normal text-muted-foreground">· {selectionSummary}</span>
+    <span class="inline-flex flex-wrap items-baseline gap-x-0 font-normal">
+      <span class="text-muted-foreground">·&nbsp;</span>
+      {#if isDefaultVoice}
+        <span class="text-muted-foreground">Catalog default</span>
+      {:else if selectedVoiceDisplay}
+        <span class="font-medium text-foreground">{selectedVoiceDisplay.name}</span>
+        {#if selectedVoiceDisplay.desc}
+          <span class="text-muted-foreground"> · {selectedVoiceDisplay.desc}</span>
+        {/if}
+      {/if}
+    </span>
   </p>
   <div
     bind:this={listRoot}
@@ -103,6 +121,7 @@
       Catalog default
     </button>
     {#each provider.tts_voices ?? [] as v (v.id)}
+      {@const parts = voicePresetParts(v)}
       <button
         type="button"
         role="option"
@@ -115,7 +134,12 @@
         )}
         onclick={() => onPick(provider.id, v.id)}
       >
-        {v.display_name?.trim() ? v.display_name : v.id}
+        <span class="min-w-0 leading-snug">
+          <span class="font-medium text-foreground">{parts.name}</span>
+          {#if parts.desc}
+            <span class="text-muted-foreground"> · {parts.desc}</span>
+          {/if}
+        </span>
       </button>
     {/each}
   </div>

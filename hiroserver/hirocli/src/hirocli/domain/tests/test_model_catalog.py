@@ -50,6 +50,13 @@ def test_bundled_catalog_loads() -> None:
     ):
         assert cat.get_model(mid) is not None
 
+    g3 = cat.get_model("google:gemini-3-flash-preview")
+    assert g3 is not None
+    assert g3.supports_kind("chat")
+    assert g3.supports_kind("stt")
+    assert cat.list_models(model_kind="stt")
+    assert any(m.id == "google:gemini-3-flash-preview" for m in cat.list_models(model_kind="stt"))
+
 
 def test_reload_model_catalog_refreshes_process_cache() -> None:
     """``reload_model_catalog`` must clear LRU cache so a new singleton is loaded."""
@@ -241,7 +248,7 @@ def test_recommended_models_wrong_kind(tmp_path: Path) -> None:
     }
     path = tmp_path / "rec2.yaml"
     path.write_text(yaml.safe_dump(doc), encoding="utf-8")
-    with pytest.raises(ValueError, match="model_kind"):
+    with pytest.raises(ValueError, match="does not support kind"):
         ModelCatalog.load_from_path(path)
 
 
@@ -300,4 +307,63 @@ def test_replacement_id_must_exist(tmp_path: Path) -> None:
     path = tmp_path / "repl.yaml"
     path.write_text(yaml.safe_dump(doc), encoding="utf-8")
     with pytest.raises(ValueError, match="replacement_id"):
+        ModelCatalog.load_from_path(path)
+
+
+def test_recommended_models_accepts_extra_kinds_stt(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "p",
+                "display_name": "P",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+                "recommended_models": {"chat": "p:chatstt", "stt": "p:chatstt"},
+            },
+        ],
+        "models": [
+            {
+                "id": "p:chatstt",
+                "provider_id": "p",
+                "display_name": "Both",
+                "model_kind": "chat",
+                "extra_kinds": ["stt"],
+            },
+        ],
+    }
+    path = tmp_path / "rec_stt.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cat = ModelCatalog.load_from_path(path)
+    spec = cat.get_model("p:chatstt")
+    assert spec is not None
+    assert spec.supports_kind("stt")
+
+
+def test_extra_kinds_must_not_repeat_primary(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "p",
+                "display_name": "P",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+            },
+        ],
+        "models": [
+            {
+                "id": "p:x",
+                "provider_id": "p",
+                "display_name": "X",
+                "model_kind": "chat",
+                "extra_kinds": ["chat"],
+            },
+        ],
+    }
+    path = tmp_path / "dup_primary.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="extra_kinds must not repeat"):
         ModelCatalog.load_from_path(path)
