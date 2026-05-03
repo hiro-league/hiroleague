@@ -47,3 +47,13 @@ def get_environment_config() -> HiroEnvironmentConfig:
         hiro_env=current_hiro_env(),
         docs_base_url=docs_base_url(),
     )
+
+
+def default_workspace_log_level() -> str:
+    """Root ``log_level`` for a new workspace before ``config.json`` exists.
+
+    ``HIRO_ENV`` values that normalize to production use ``INFO``; any other
+    value (``dev``, ``staging``, etc.) uses ``DEBUG`` for local and non-prod
+    diagnostics.
+    """
+    return "DEBUG" if current_hiro_env() != "prod" else "INFO"

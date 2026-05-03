@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../application/auth/auth_notifier.dart';
 import '../../application/auth/auth_state.dart';
 import '../../application/gateway/gateway_notifier.dart';
+import '../../application/server_info/server_info_notifier.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_exception.dart';
 import '../../core/utils/logger.dart';
@@ -48,6 +49,9 @@ class MessageSendNotifier extends _$MessageSendNotifier {
     // async gap in case the provider is rebuilt between awaits (Riverpod v3).
     final repo = ref.read(messageRepositoryProvider);
     final gateway = ref.read(gatewayProvider.notifier);
+    final requestVoiceReply = ref.read(
+      channelVoiceReplyEnabledProvider(channelId),
+    );
 
     try {
       await repo.insertOutbound(
@@ -71,7 +75,10 @@ class MessageSendNotifier extends _$MessageSendNotifier {
             direction: UnifiedMessageWire.directionOutbound,
             senderId: identity.deviceId,
             timestamp: now.toIso8601String(),
-            metadata: {MetadataWire.channelId: channelId},
+            metadata: {
+              MetadataWire.channelId: channelId,
+              if (requestVoiceReply) MetadataWire.requestVoiceReply: true,
+            },
           ),
           content: [ContentItem(contentType: ContentWire.text, body: text)],
         ).toJson(),
@@ -108,8 +115,13 @@ class MessageSendNotifier extends _$MessageSendNotifier {
     final gateway = ref.read(gatewayProvider.notifier);
     // Captured before first await — ref must not be read across async gaps.
     final audioStorage = ref.read(audioStorageProvider);
+    final voiceInputAllowed =
+        ref.read(channelCapabilitiesProvider(channelId))?.input.voice ?? true;
 
     try {
+      if (!voiceInputAllowed) {
+        throw const UnknownException('Voice messages are unavailable for this chat.');
+      }
       // 1. Persist audio locally.
       final localPath = await audioStorage.save(
         messageId: messageId,

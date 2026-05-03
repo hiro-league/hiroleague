@@ -1,0 +1,6 @@
+[project]
+name = "codebase-index-inspector"
+version = "0.1.0"
+description = "Standalone CLI for inspecting embeddable file lists (not part of Hiro packages)."
+requires-python = ">=3.11"
+dependencies = []

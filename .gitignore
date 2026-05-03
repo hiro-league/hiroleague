@@ -38,6 +38,9 @@ Thumbs.db
 
 # Fresh venv used for pip wheel smoke tests (pre-release checklist)
 hiroserver/_smoke_clean_install/
+
+# dev-sync.sh fingerprint cache (skips redundant npm/svelte/uv installs)
+.dev-sync-cache/
 .smoke-runtime/
 
 # HiroAdmin Svelte POC

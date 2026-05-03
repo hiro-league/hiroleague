@@ -22,12 +22,10 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.push(RouteNames.appLogs),
           ),
           const Divider(height: 1),
-          const SwitchListTile(
-            secondary: Icon(Icons.record_voice_over_rounded),
+          const ListTile(
+            leading: Icon(Icons.record_voice_over_rounded),
             title: Text(AppStrings.voiceRepliesTitle),
-            subtitle: Text(AppStrings.voiceRepliesSubtitle),
-            value: false,
-            onChanged: null,
+            subtitle: Text(AppStrings.voiceRepliesPerChatSubtitle),
           ),
           const Divider(height: 1),
           _DisconnectTile(ref: ref),

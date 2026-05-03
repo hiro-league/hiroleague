@@ -176,14 +176,13 @@ def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> No
 
 
 def ensure_default_preferences(workspace_path: Path) -> None:
-    """Create ``preferences.json`` with structural defaults if it doesn't exist yet."""
-    from ..domain.preferences import load_preferences, preferences_file, save_preferences
+    """Materialize ``preferences.json`` when missing (``load_preferences`` persists defaults)."""
+    from ..domain.preferences import load_preferences, preferences_file
 
     if preferences_file(workspace_path).exists():
         return
 
-    prefs = load_preferences(workspace_path)
-    save_preferences(workspace_path, prefs)
+    load_preferences(workspace_path)
 
 
 # ---------------------------------------------------------------------------

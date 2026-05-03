@@ -7,10 +7,12 @@ read item.body and write the transcript into item.metadata.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from hiro_channel_sdk.models import ContentItem, UnifiedMessage
 from hiro_commons.log import Logger
 
+from ...domain.preferences import load_preferences
 from ...services.stt import STTService
 from ..message_adapter import ContentTypeAdapter
 
@@ -20,7 +22,12 @@ log = Logger.get("ADAPTER.AUDIO")
 class AudioTranscriptionAdapter(ContentTypeAdapter):
     """Transcribes audio ContentItems using STTService."""
 
-    def __init__(self, service: STTService | None = None) -> None:
+    def __init__(
+        self,
+        workspace_path: Path,
+        service: STTService | None = None,
+    ) -> None:
+        self._workspace_path = workspace_path
         self._service = service or STTService()
 
     @property
@@ -28,6 +35,10 @@ class AudioTranscriptionAdapter(ContentTypeAdapter):
         return "audio"
 
     def can_handle(self, msg: UnifiedMessage) -> bool:
+        # Runtime policy can change while the server is already running, so the adapter
+        # checks current preferences for every message instead of caching the startup value.
+        if not load_preferences(self._workspace_path).media.input.voice:
+            return False
         if not self._service.is_available():
             return False
         return super().can_handle(msg)

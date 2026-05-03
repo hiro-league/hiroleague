@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,29 @@ from hiro_commons.constants.storage import PREFERENCES_FILENAME
 from .credential_store import CredentialStore
 
 logger = logging.getLogger(__name__)
+
+PreferenceSaveSubscriber = Callable[[Path, "WorkspacePreferences"], None]
+_PREFERENCE_SAVE_SUBSCRIBERS: list[PreferenceSaveSubscriber] = []
+
+
+def subscribe_preferences_saved(callback: PreferenceSaveSubscriber) -> None:
+    """Register a callback invoked after ``preferences.json`` is written."""
+    if callback not in _PREFERENCE_SAVE_SUBSCRIBERS:
+        _PREFERENCE_SAVE_SUBSCRIBERS.append(callback)
+
+
+def unsubscribe_preferences_saved(callback: PreferenceSaveSubscriber) -> None:
+    """Remove a previously-registered save callback."""
+    if callback in _PREFERENCE_SAVE_SUBSCRIBERS:
+        _PREFERENCE_SAVE_SUBSCRIBERS.remove(callback)
+
+
+def _notify_preferences_saved(workspace_path: Path, prefs: "WorkspacePreferences") -> None:
+    for callback in list(_PREFERENCE_SAVE_SUBSCRIBERS):
+        try:
+            callback(workspace_path, prefs)
+        except Exception:
+            logger.exception("preferences save subscriber failed", extra={"workspace_path": str(workspace_path)})
 
 # ---------------------------------------------------------------------------
 # LLM selection (canonical catalog ids: ``openai:gpt-5.4``)
@@ -47,13 +70,28 @@ class LLMPreferences(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Audio / voice
+# Media policy / capabilities
 # ---------------------------------------------------------------------------
 
 
-class AudioPreferences(BaseModel):
-    agent_replies_in_voice: bool = False
-    accept_voice_from_user: bool = True
+class ModalityFlags(BaseModel):
+    voice: bool = False
+    image: bool = False
+    video: bool = False
+    file: bool = False
+
+
+def default_input_modalities() -> ModalityFlags:
+    return ModalityFlags(voice=True)
+
+
+def default_output_modalities() -> ModalityFlags:
+    return ModalityFlags()
+
+
+class MediaPreferences(BaseModel):
+    input: ModalityFlags = Field(default_factory=default_input_modalities)
+    output: ModalityFlags = Field(default_factory=default_output_modalities)
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +125,7 @@ class WorkspacePreferences(BaseModel):
 
     version: int = 2
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
-    audio: AudioPreferences = Field(default_factory=AudioPreferences)
+    media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
 
 
@@ -104,7 +142,17 @@ def load_preferences(workspace_path: Path) -> WorkspacePreferences:
     f = preferences_file(workspace_path)
     if f.exists():
         return WorkspacePreferences.model_validate_json(f.read_text(encoding="utf-8"))
-    return WorkspacePreferences()
+    # Missing file: use structural defaults and persist so the workspace always has a real prefs file.
+    prefs = WorkspacePreferences()
+    save_preferences(workspace_path, prefs)
+    logger.info(
+        "⚠️ Persisted preferences — workspace · defaults (preferences.json was missing)",
+        extra={
+            "content_hint": "structural defaults written to disk",
+            "workspace_path": str(workspace_path.resolve()),
+        },
+    )
+    return prefs
 
 
 def save_preferences(workspace_path: Path, prefs: WorkspacePreferences) -> None:
@@ -112,6 +160,7 @@ def save_preferences(workspace_path: Path, prefs: WorkspacePreferences) -> None:
     preferences_file(workspace_path).write_text(
         prefs.model_dump_json(indent=2), encoding="utf-8",
     )
+    _notify_preferences_saved(workspace_path, prefs)
 
 
 # ---------------------------------------------------------------------------

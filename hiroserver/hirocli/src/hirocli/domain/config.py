@@ -43,6 +43,8 @@ from hiro_commons.constants.network import (
 )
 from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME
 
+from ..environment import default_workspace_log_level
+
 
 class Config(BaseModel):
     device_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -110,7 +112,8 @@ def load_config(workspace_path: Path) -> Config:
     cfg_file = workspace_config_file(workspace_path)
     if cfg_file.exists():
         return Config.model_validate_json(cfg_file.read_text(encoding="utf-8"))
-    return Config()
+    # New workspace: prefer DEBUG outside production HIRO_ENV (see environment.default_workspace_log_level).
+    return Config(log_level=default_workspace_log_level())
 
 
 def save_config(workspace_path: Path, config: Config) -> None:

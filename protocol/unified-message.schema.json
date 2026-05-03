@@ -104,7 +104,8 @@
             "message.received",
             "message.transcribed",
             "message.voiced",
-            "message.content_added"
+            "message.content_added",
+            "server.info"
           ]
         },
         "ref_id": { "type": ["string", "null"] },

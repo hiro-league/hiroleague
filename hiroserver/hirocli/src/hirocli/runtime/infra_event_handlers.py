@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from hirocli.runtime.channel_event_handler import ChannelEventHandler
     from hirocli.runtime.channel_manager import ChannelManager
     from hirocli.runtime.server_context import ServerContext
+    from hirocli.runtime.server_info_broadcaster import ServerInfoBroadcaster
 
 log = Logger.get("INFRA")
 
@@ -37,14 +38,20 @@ class InfraEventHandlers:
     def __init__(self, ctx: ServerContext) -> None:
         self._ctx = ctx
         self._channel_manager: ChannelManager | None = None
+        self._server_info_broadcaster: ServerInfoBroadcaster | None = None
 
     def set_channel_manager(self, cm: ChannelManager) -> None:
         self._channel_manager = cm
+
+    def set_server_info_broadcaster(self, broadcaster: ServerInfoBroadcaster) -> None:
+        self._server_info_broadcaster = broadcaster
 
     def register_all(self, handler: ChannelEventHandler) -> None:
         handler.register("pairing_request", self.handle_pairing_request)
         handler.register("gateway_connected", self.handle_gateway_connected)
         handler.register("gateway_disconnected", self.handle_gateway_disconnected)
+        handler.register("device_connected", self.handle_device_connected)
+        handler.register("device_disconnected", self.handle_device_disconnected)
 
     async def handle_pairing_request(self, data: dict[str, Any]) -> None:
         if self._channel_manager is None:
@@ -131,3 +138,19 @@ class InfraEventHandlers:
 
     async def handle_gateway_disconnected(self, data: dict[str, Any]) -> None:
         mark_disconnected(self._ctx.workspace_path)
+        if self._server_info_broadcaster is not None:
+            await self._server_info_broadcaster.clear_connected_devices()
+
+    async def handle_device_connected(self, data: dict[str, Any]) -> None:
+        device_id = data.get("device_id")
+        if not isinstance(device_id, str) or not device_id:
+            return
+        if self._server_info_broadcaster is not None:
+            await self._server_info_broadcaster.handle_device_connected(device_id)
+
+    async def handle_device_disconnected(self, data: dict[str, Any]) -> None:
+        device_id = data.get("device_id")
+        if not isinstance(device_id, str) or not device_id:
+            return
+        if self._server_info_broadcaster is not None:
+            await self._server_info_broadcaster.handle_device_disconnected(device_id)

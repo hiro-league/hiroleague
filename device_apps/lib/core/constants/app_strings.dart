@@ -70,6 +70,16 @@ abstract final class AppStrings {
   // Settings — voice replies
   static const String voiceRepliesTitle = 'Voice replies';
   static const String voiceRepliesSubtitle = 'Agent responds with voice audio';
+  static const String voiceRepliesPerChatSubtitle =
+      'Choose text or voice replies from each chat header.';
+  static const String voiceRepliesUnavailable =
+      'Voice replies are currently unavailable for this chat.';
+  static const String voiceRepliesEnabledForChannel =
+      'Voice replies will be requested for this chat.';
+  static const String voiceRepliesDisabledForChannel =
+      'Voice replies will stay text-only for this chat.';
+  static const String voiceMessagesUnavailable =
+      'Voice messages are currently unavailable for this chat.';
 
   // Chat — unsupported content
   static const String unsupportedContent = 'Unsupported content';

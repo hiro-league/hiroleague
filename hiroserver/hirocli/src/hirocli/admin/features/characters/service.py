@@ -345,7 +345,7 @@ class CharacterService:
 
         voice_workspace_row = _preference_workspace_tts_row(prefs, cat, ams)
 
-        voice_disabled = not prefs.audio.agent_replies_in_voice
+        voice_disabled = not prefs.media.output.voice
         voice_applied: dict[str, Any] | None = None
         if not voice_disabled:
             resolved_voice = resolve_character_voice(

@@ -106,6 +106,10 @@ class SetupTool(Tool):
             pairing_code_length=existing.pairing_code_length,
             pairing_code_ttl_seconds=existing.pairing_code_ttl_seconds,
             attestation_expires_days=existing.attestation_expires_days,
+            # Carry forward logging fields so re-setup does not reset a customized config.
+            log_level=existing.log_level,
+            log_dir=existing.log_dir,
+            module_log_levels=existing.module_log_levels,
             metrics_enabled=metrics_enabled if metrics_enabled is not None else existing.metrics_enabled,
             metrics_interval=metrics_interval if metrics_interval is not None else existing.metrics_interval,
             metrics_history_size=existing.metrics_history_size,

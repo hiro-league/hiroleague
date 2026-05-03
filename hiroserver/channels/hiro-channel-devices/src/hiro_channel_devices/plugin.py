@@ -208,6 +208,12 @@ class DevicesChannel(ChannelPlugin):
         if msg_type == "pairing_request":
             await self._handle_pairing_request(msg)
             return
+        if msg_type == "device_connected":
+            await self._handle_device_connected(msg)
+            return
+        if msg_type == "device_disconnected":
+            await self._handle_device_disconnected(msg)
+            return
 
         payload = msg.get("payload")
         if not isinstance(payload, dict):
@@ -271,6 +277,28 @@ class DevicesChannel(ChannelPlugin):
         if device_name:
             event_data["device_name"] = device_name
         await self.emit_event("pairing_request", event_data)
+
+    async def _handle_device_connected(self, msg: dict) -> None:
+        device_id = msg.get("device_id")
+        if not isinstance(device_id, str) or not device_id:
+            log.warning("⚠️ Device connected event missing device_id")
+            return
+        event_data: dict[str, object] = {"device_id": device_id}
+        device_name = msg.get("device_name")
+        if isinstance(device_name, str) and device_name:
+            event_data["device_name"] = device_name
+        await self.emit_event("device_connected", event_data)
+
+    async def _handle_device_disconnected(self, msg: dict) -> None:
+        device_id = msg.get("device_id")
+        if not isinstance(device_id, str) or not device_id:
+            log.warning("⚠️ Device disconnected event missing device_id")
+            return
+        event_data: dict[str, object] = {"device_id": device_id}
+        device_name = msg.get("device_name")
+        if isinstance(device_name, str) and device_name:
+            event_data["device_name"] = device_name
+        await self.emit_event("device_disconnected", event_data)
 
     async def on_event(self, event: str, data: dict) -> None:
         if event != "pairing_response":

@@ -219,6 +219,9 @@ class MessageRepositoryImpl implements MessageRepository {
         }
         _log.debug('Message voiced', fields: {'ref_id': refId});
 
+      case EventWire.serverInfo:
+        _log.debug('Server info event received');
+
       default:
         _log.debug(
           'Ignoring unknown event type',

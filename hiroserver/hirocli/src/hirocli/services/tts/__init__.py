@@ -42,7 +42,7 @@ _PROVIDER_MAP: dict[str, type[TTSProvider]] = {
 
 
 def create_tts_service(workspace_path: Path) -> TTSService | None:
-    """Build a TTSService from workspace preferences, or None if TTS is disabled.
+    """Build a TTSService from workspace credentials and catalog availability.
 
     Resolves the TTS model from ``preferences.llm.default_tts`` through the
     catalog and credential store — same pattern as ``create_stt_service``.
@@ -53,9 +53,6 @@ def create_tts_service(workspace_path: Path) -> TTSService | None:
     from hirocli.domain.workspace import workspace_id_for_path
 
     prefs = load_preferences(workspace_path)
-    if not prefs.audio.agent_replies_in_voice:
-        _log.info("TTS disabled in preferences (agent_replies_in_voice=false)")
-        return None
 
     wid = workspace_id_for_path(workspace_path)
     store = CredentialStore(workspace_path, wid) if wid is not None else None

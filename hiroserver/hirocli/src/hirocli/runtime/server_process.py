@@ -40,6 +40,7 @@ from hirocli.runtime.infra_event_handlers import InfraEventHandlers
 from hirocli.runtime.message_adapter import create_adapter_pipeline
 from hirocli.runtime.request_handler import RequestHandler
 from hirocli.runtime.server_context import ServerContext
+from hirocli.runtime.server_info_broadcaster import ServerInfoBroadcaster
 from hirocli.services.metrics import MetricsCollector
 from hirocli.services.tts import create_tts_service
 from hirocli.tools import all_tools
@@ -70,7 +71,7 @@ def _build_context(
     )
 
 
-def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelManager]:
+def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelManager, ServerInfoBroadcaster]:
     """Build adapter pipeline, handlers, ChannelManager, and CommunicationManager.
 
     Construction order is now: leaf collaborators → ChannelManager (no upstream
@@ -101,14 +102,20 @@ def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelMana
         event_handler=event_handler,
         request_handler=request_handler,
     )
+    server_info_broadcaster = ServerInfoBroadcaster(
+        ctx.workspace_path,
+        comm_manager.enqueue_outbound,
+    )
+    server_info_broadcaster.start()
 
     channel_manager.set_message_handler(comm_manager.receive)
     channel_manager.set_event_handler(channel_event_handler.handle)
     # InfraEventHandlers still needs the ChannelManager for pairing responses.
     # That cycle is out of scope for this PR — see communication-manager-refactor.md §6.
     infra_handlers.set_channel_manager(channel_manager)
+    infra_handlers.set_server_info_broadcaster(server_info_broadcaster)
 
-    return comm_manager, channel_manager
+    return comm_manager, channel_manager, server_info_broadcaster
 
 
 def _register_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -191,7 +198,7 @@ async def _main(
     log.info("Metrics collector configured", enabled=effective_metrics, interval=ctx.config.metrics_interval)
 
     # --- Wire communication + channel stacks ---
-    comm_manager, channel_manager = _wire_runtime(ctx)
+    comm_manager, channel_manager, server_info_broadcaster = _wire_runtime(ctx)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
@@ -237,6 +244,8 @@ async def _main(
         await server_task
     except (asyncio.CancelledError, Exception):
         pass
+    finally:
+        server_info_broadcaster.close()
 
     if ctx.restart_requested:
         log.info("Restart requested — spawning new server process")

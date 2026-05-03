@@ -40,6 +40,9 @@ log = Logger.get("AGENT")
 _FALLBACK_ERROR_BODY = (
     "Sorry, I encountered an error processing your message. Please try again."
 )
+_VOICE_INPUT_DISABLED_BODY = (
+    "Voice messages are currently disabled for this server. Please send your request as text."
+)
 
 
 def _reply_content_type(content: Any) -> str:
@@ -92,6 +95,11 @@ def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
         ),
         content=[ContentItem(content_type="text", body=body)],
     )
+
+
+def _metadata_requests_voice_reply(metadata: dict[str, Any] | None) -> bool:
+    value = (metadata or {}).get("request_voice_reply")
+    return value is True
 
 
 class AgentManager:
@@ -297,13 +305,38 @@ class AgentManager:
             character_id = default_character_id(self._ctx.workspace_path)
         return str(channel_id), channel_id, character_id
 
-    @property
-    def _tts_enabled(self) -> bool:
-        """Check if TTS is enabled in workspace preferences."""
-        from ..domain.preferences import load_preferences
+    def _voice_reply_allowed(self, prefs, character) -> bool:
+        from ..domain.preferences import resolve_character_voice
 
-        prefs = load_preferences(self._ctx.workspace_path)
-        return prefs.audio.agent_replies_in_voice
+        if not prefs.media.output.voice:
+            return False
+        if self._tts_service is None:
+            return False
+        return (
+            resolve_character_voice(
+                character.voice_models,
+                prefs,
+                self._ctx.workspace_path,
+                credential_store=self._credential_store,
+                tts_instructions=character.tts_instructions,
+                tts_voice_by_provider=dict(character.tts_voice_by_provider),
+            )
+            is not None
+        )
+
+    async def _send_voice_input_disabled_reply(
+        self,
+        msg: UnifiedMessage,
+        *,
+        thread_id: str,
+    ) -> None:
+        reply = _make_reply(msg, _VOICE_INPUT_DISABLED_BODY)
+        await self._comm.enqueue_outbound(reply)
+        log.warning(
+            f"⚠️ Voice input blocked — {comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}",
+            reason="policy_disabled",
+            **comm_extras(msg, thread_id=thread_id),
+        )
 
     async def _synthesize_and_send(
         self,
@@ -401,11 +434,34 @@ class AgentManager:
 
     async def _process(self, msg: UnifiedMessage) -> None:
         from ..domain.character import effective_character_system_prompt
-        from ..domain.preferences import load_preferences, resolve_character_llm
+        from ..domain.preferences import load_preferences, resolve_character_llm, resolve_llm
 
         peer = comm_peer_label(msg, self._ctx)
         thread_id, channel_id, character_id = self._resolve_thread_character(msg)
         config = {"configurable": {"thread_id": thread_id}}
+        prefs = load_preferences(self._ctx.workspace_path)
+        voice_input_allowed = bool(
+            prefs.media.input.voice
+            and resolve_llm(
+                prefs,
+                self._ctx.workspace_path,
+                "stt",
+                credential_store=self._credential_store,
+            )
+            is not None
+        )
+
+        if any(item.content_type == "audio" for item in msg.content) and not voice_input_allowed:
+            # Policy wins over device intent: do not transcribe audio when voice input is disabled.
+            text_items = [item for item in msg.content if item.content_type == "text" and item.body]
+            if not text_items:
+                await self._send_voice_input_disabled_reply(msg, thread_id=thread_id)
+                return
+            log.warning(
+                f"⚠️ Audio ignored by policy — {peer} · {comm_kind(msg)}",
+                reason="policy_disabled",
+                **comm_extras(msg, thread_id=thread_id),
+            )
 
         # Build agent input from all content items first (avoid compiling graphs for empty input).
         parts: list[str] = []
@@ -444,7 +500,6 @@ class AgentManager:
             )
             return
 
-        prefs = load_preferences(self._ctx.workspace_path)
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
         llm_entry = resolve_character_llm(
@@ -607,9 +662,9 @@ class AgentManager:
         # TTS post-processing: fire-and-forget so it never blocks the next message.
         # Text reply is already delivered — if TTS fails, the user still has the text.
         try:
-            per_request = msg.routing.metadata.get("request_voice_reply")
-            tts_for_this_msg = per_request if per_request is not None else self._tts_enabled
-            if tts_for_this_msg and self._tts_service:
+            voice_requested = _metadata_requests_voice_reply(msg.routing.metadata)
+            voice_allowed = self._voice_reply_allowed(prefs, ch)
+            if voice_requested and voice_allowed:
                 asyncio.create_task(
                     self._synthesize_and_send(
                         msg,
@@ -620,6 +675,14 @@ class AgentManager:
                         tts_voice_by_provider=dict(ch.tts_voice_by_provider),
                     ),
                     name=f"tts-{reply.routing.id}",
+                )
+            elif voice_requested and not voice_allowed:
+                # The device asked for voice, but the channel cannot do it right now.
+                log.warning(
+                    f"⚠️ Voice reply requested but unavailable — {peer} · output.voice=false",
+                    reason="policy_or_character_unavailable",
+                    ref_id=reply.routing.id,
+                    **comm_extras(msg, thread_id=thread_id),
                 )
         except Exception as exc:
             log.error(

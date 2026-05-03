@@ -94,9 +94,18 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
   // Recording gestures — delegate logic to RecordingNotifier
   // ---------------------------------------------------------------------------
 
+  bool _voiceInputAvailable() {
+    final caps = ref.read(channelCapabilitiesProvider(widget.channelId));
+    return caps?.input.voice ?? true;
+  }
+
   void _onLongPressStart(LongPressStartDetails details) {
     final recording = ref.read(recordingProvider);
     if (recording is! RecordingIdle) return;
+    if (!_voiceInputAvailable()) {
+      _showError(AppStrings.voiceMessagesUnavailable);
+      return;
+    }
     if (!recording.hasMicrophone) {
       _showError(AppStrings.noMicrophoneDetected);
       return;
@@ -233,6 +242,9 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
     final cs = Theme.of(context).colorScheme;
     final isConnected = ref.watch(gatewayProvider) is GatewayConnected;
     final recordingState = ref.watch(recordingProvider);
+    final voiceInputAvailable =
+        ref.watch(channelCapabilitiesProvider(widget.channelId))?.input.voice ??
+        true;
     final RecordingActive? activeState =
         recordingState is RecordingActive ? recordingState : null;
     final isRecording = activeState != null;
@@ -337,6 +349,7 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
                       _MicButton(
                         isRecording: isRecording,
                         isConnected: isConnected,
+                        isAvailable: voiceInputAvailable,
                         pulseAnimation: _pulseAnim,
                       ),
                     ],
@@ -387,7 +400,7 @@ class _RecordingTimer extends StatelessWidget {
         // Pulsing red dot — reuses the mic pulse animation for sync.
         AnimatedBuilder(
           animation: pulseAnimation,
-          builder: (_, __) => Container(
+          builder: (_, _) => Container(
             width: 10 * pulseAnimation.value,
             height: 10 * pulseAnimation.value,
             decoration:
@@ -450,11 +463,13 @@ class _MicButton extends StatelessWidget {
   const _MicButton({
     required this.isRecording,
     required this.isConnected,
+    required this.isAvailable,
     required this.pulseAnimation,
   });
 
   final bool isRecording;
   final bool isConnected;
+  final bool isAvailable;
   final Animation<double> pulseAnimation;
 
   // Idle size and 1.5× recording size.
@@ -466,7 +481,7 @@ class _MicButton extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return AnimatedOpacity(
-      opacity: isConnected ? 1.0 : 0.5,
+      opacity: isConnected ? (isAvailable ? 1.0 : 0.45) : 0.5,
       duration: const Duration(milliseconds: 150),
       child: isRecording ? _buildRecording(cs) : _buildIdle(cs),
     );

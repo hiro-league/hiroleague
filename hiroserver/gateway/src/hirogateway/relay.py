@@ -246,7 +246,37 @@ def _write_auth_error(reason: str) -> None:
     save_state(_instance_path, state)
 
 
+async def _notify_desktop_device_event(
+    event_type: str,
+    device_id: str,
+    *,
+    device_name: str | None = None,
+) -> None:
+    desktop_ws = await _get_desktop_ws()
+    if desktop_ws is None:
+        return
+
+    payload: dict[str, object] = {
+        "type": event_type,
+        "device_id": device_id,
+    }
+    if device_name:
+        payload["device_name"] = device_name
+
+    try:
+        await desktop_ws.send(json.dumps(payload))
+    except Exception as exc:
+        log.warning(
+            "⚠️ Device event not forwarded — HiroServer · gateway notification",
+            event_type=event_type,
+            device_id=device_id,
+            error=str(exc),
+        )
+
+
 async def register(device_id: str, ws: ServerConnection, *, role: str = "") -> bool:
+    device_name: str | None = None
+    should_notify = False
     async with _registry_lock:
         if device_id in _registry:
             old_ws = _registry[device_id]
@@ -264,18 +294,34 @@ async def register(device_id: str, ws: ServerConnection, *, role: str = "") -> b
             _device_roles[device_id] = role
         label = _HIRO_SERVER if role == AUTH_ROLE_DESKTOP else _device_label(device_id)
         log.info(f"✅ Device connected — {label}", device_id=device_id, role=role or "?", total=len(_registry))
-        return True
+        should_notify = role == AUTH_ROLE_DEVICE
+        device_name = _device_names.get(device_id)
+    if should_notify:
+        await _notify_desktop_device_event(
+            "device_connected",
+            device_id,
+            device_name=device_name,
+        )
+    return True
 
 
 async def unregister(device_id: str, ws: ServerConnection) -> None:
+    role = ""
+    device_name: str | None = None
     async with _registry_lock:
         if _registry.get(device_id) is ws:
             _registry.pop(device_id, None)
             role = _device_roles.pop(device_id, "")
             # Resolve label before evicting the name so the disconnect log still shows it.
             label = _HIRO_SERVER if role == AUTH_ROLE_DESKTOP else _device_label(device_id)
-            _device_names.pop(device_id, None)
+            device_name = _device_names.pop(device_id, None)
             log.info(f"🔌 Device disconnected — {label}", device_id=device_id, role=role or "?", total=len(_registry))
+    if role == AUTH_ROLE_DEVICE:
+        await _notify_desktop_device_event(
+            "device_disconnected",
+            device_id,
+            device_name=device_name,
+        )
 
 
 async def relay_message(sender_id: str, raw: str) -> None:

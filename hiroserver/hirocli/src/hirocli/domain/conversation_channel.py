@@ -2,14 +2,39 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
+from typing import Callable
 
 from pydantic import BaseModel
 
 from hiro_commons.timestamps import utc_iso, utc_now
 
 from .data_store import data_db_path, ensure_data_db
+
+logger = logging.getLogger(__name__)
+
+ChannelChangeSubscriber = Callable[[Path, int], None]
+_CHANNEL_CHANGE_SUBSCRIBERS: list[ChannelChangeSubscriber] = []
+
+
+def subscribe_channel_changes(callback: ChannelChangeSubscriber) -> None:
+    if callback not in _CHANNEL_CHANGE_SUBSCRIBERS:
+        _CHANNEL_CHANGE_SUBSCRIBERS.append(callback)
+
+
+def unsubscribe_channel_changes(callback: ChannelChangeSubscriber) -> None:
+    if callback in _CHANNEL_CHANGE_SUBSCRIBERS:
+        _CHANNEL_CHANGE_SUBSCRIBERS.remove(callback)
+
+
+def _notify_channel_changed(workspace_path: Path, channel_id: int) -> None:
+    for callback in list(_CHANNEL_CHANGE_SUBSCRIBERS):
+        try:
+            callback(workspace_path, channel_id)
+        except Exception:
+            logger.exception("channel change subscriber failed", extra={"channel_id": channel_id})
 
 
 class ConversationChannel(BaseModel):
@@ -159,7 +184,9 @@ def create_channel(
         ).fetchone()
         if row is None:
             raise RuntimeError("Conversation channel creation succeeded but row could not be reloaded.")
-        return _row_to_channel(row)
+        created = _row_to_channel(row)
+        _notify_channel_changed(workspace_path, created.id)
+        return created
 
 
 def update_channel(
@@ -209,7 +236,9 @@ def update_channel(
         row = conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
         if row is None:
             raise RuntimeError("Conversation channel update succeeded but row could not be reloaded.")
-        return _row_to_channel(row)
+        updated = _row_to_channel(row)
+        _notify_channel_changed(workspace_path, updated.id)
+        return updated
 
 
 def delete_channel(workspace_path: Path, channel_id: int) -> None:
@@ -222,6 +251,7 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
         conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
         conn.commit()
+    _notify_channel_changed(workspace_path, channel_id)
 
 
 def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:

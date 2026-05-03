@@ -8,6 +8,12 @@
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync.sh"
       },
       {
+        "name": "Server + Gateway - Rebuild Components (fast)",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh"
+      },
+      {
         "name": "PyPI Publish",
         "type": "node-terminal",
         "request": "launch",
@@ -145,6 +151,12 @@
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder:hiro-docs}\")\" && uv run python diagram-gen/generate.py"
       },
+      {
+        "name": "codebase_index_inspector",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")/utils/codebase_index_inspector\" && uv run python codebase_index_inspector.py --input \"${input:codebaseInspectorInput}\" --detail-max-lines 250"
+      },
     ],
     "compounds": [
       {
@@ -161,6 +173,14 @@
           "Server Start",
           "Flutter - Run Web"
         ]
+      }
+    ],
+    "inputs": [
+      {
+        "id": "codebaseInspectorInput",
+        "type": "promptString",
+        "description": "Path to embeddable/file list (one relative path per line)",
+        "default": "c:/Users/augr/AppData/Roaming/Cursor/User/workspaceStorage/b8870fcbce9656c6b5aa06846882a66a/anysphere.cursor-retrieval/embeddable_files.txt"
       }
     ]
   }

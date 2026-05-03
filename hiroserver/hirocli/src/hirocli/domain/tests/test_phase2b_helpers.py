@@ -13,7 +13,7 @@ from hirocli.commands.provider import (
 )
 from hirocli.domain.available_models import CharacterModelValidation
 from hirocli.domain.model_catalog import DeprecatedModelInfo
-from hirocli.domain.preferences import AudioPreferences, WorkspacePreferences
+from hirocli.domain.preferences import WorkspacePreferences
 from hirocli.services.tts import create_tts_service
 from hirocli.services.tts.openai_provider import OpenAITTSProvider
 from hirocli.tools.character import character_model_validation_warnings
@@ -109,7 +109,6 @@ def test_create_tts_service_injects_credential_store_key(tmp_path: Path) -> None
     mock_spec = MagicMock()
     mock_spec.provider_id = "openai"
     prefs = WorkspacePreferences(
-        audio=AudioPreferences(agent_replies_in_voice=True),
         llm=LLMPreferences(default_tts="openai:gpt-4o-mini-tts"),
     )
     resolved = ResolvedModel(

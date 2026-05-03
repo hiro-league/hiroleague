@@ -15,6 +15,7 @@ from ..tools.conversation import (
     ConversationChannelListTool,
     MessageHistoryTool,
 )
+from ..tools.server_info import ServerInfoGetTool
 from .request_handler import RequestContext, RequestHandler
 
 
@@ -37,7 +38,14 @@ async def handle_messages_history(params: dict[str, Any], ctx: RequestContext) -
     return {"messages": result.messages}
 
 
+async def handle_server_info_get(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    tool = ServerInfoGetTool()
+    result = tool.execute(workspace_path=ctx.workspace_path)
+    return result.snapshot
+
+
 def register_request_methods(handler: RequestHandler) -> None:
     """Register all data-plane request methods."""
     handler.register("channels.list", handle_channels_list)
     handler.register("messages.history", handle_messages_history)
+    handler.register("server.info.get", handle_server_info_get)

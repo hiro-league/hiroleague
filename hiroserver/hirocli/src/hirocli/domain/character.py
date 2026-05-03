@@ -18,7 +18,7 @@ import re
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,27 @@ from hiro_commons.timestamps import utc_iso, utc_now
 from .db import db_path, ensure_db
 
 logger = logging.getLogger(__name__)
+
+CharacterChangeSubscriber = Callable[[Path, str], None]
+_CHARACTER_CHANGE_SUBSCRIBERS: list[CharacterChangeSubscriber] = []
+
+
+def subscribe_character_changes(callback: CharacterChangeSubscriber) -> None:
+    if callback not in _CHARACTER_CHANGE_SUBSCRIBERS:
+        _CHARACTER_CHANGE_SUBSCRIBERS.append(callback)
+
+
+def unsubscribe_character_changes(callback: CharacterChangeSubscriber) -> None:
+    if callback in _CHARACTER_CHANGE_SUBSCRIBERS:
+        _CHARACTER_CHANGE_SUBSCRIBERS.remove(callback)
+
+
+def _notify_character_changed(workspace_path: Path, character_id: str) -> None:
+    for callback in list(_CHARACTER_CHANGE_SUBSCRIBERS):
+        try:
+            callback(workspace_path, character_id)
+        except Exception:
+            logger.exception("character change subscriber failed", extra={"character_id": character_id})
 
 # Packaged defaults live next to the internal package (see characters/hiro/).
 _HIROCLI_ROOT = Path(__file__).resolve().parent.parent
@@ -458,6 +479,7 @@ def create_character(
         )
         conn.commit()
     logger.info("Created character", character_id=cid, workspace=str(workspace_path))
+    _notify_character_changed(workspace_path, cid)
     return get_character_detail(workspace_path, cid)
 
 
@@ -509,6 +531,7 @@ def update_character(
         )
         conn.commit()
     logger.info("Updated character", character_id=cid, workspace=str(workspace_path))
+    _notify_character_changed(workspace_path, cid)
     return get_character_detail(workspace_path, cid)
 
 
@@ -531,6 +554,7 @@ def delete_character(workspace_path: Path, character_id: str) -> bool:
         conn.execute("DELETE FROM characters WHERE id = ?", (cid,))
         conn.commit()
     logger.info("Deleted character", character_id=cid, workspace=str(workspace_path))
+    _notify_character_changed(workspace_path, cid)
     return True
 
 

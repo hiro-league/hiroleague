@@ -14,6 +14,7 @@ from typing import Any
 from hiro_channel_sdk.constants import (
     CONTENT_TYPE_JSON,
     EVENT_TYPE_MESSAGE_RECEIVED,
+    EVENT_TYPE_SERVER_INFO,
     EVENT_TYPE_MESSAGE_TRANSCRIBED,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_RESPONSE,
@@ -37,6 +38,22 @@ def _outbound_routing(origin: UnifiedMessage) -> MessageRouting:
         sender_id=_SERVER_SENDER_ID,
         recipient_id=origin.routing.sender_id,
         metadata=origin.routing.metadata,
+    )
+
+
+def _direct_outbound_routing(
+    *,
+    channel: str,
+    recipient_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> MessageRouting:
+    """Build outbound routing when there is no originating inbound message."""
+    return MessageRouting(
+        channel=channel,
+        direction="outbound",
+        sender_id=_SERVER_SENDER_ID,
+        recipient_id=recipient_id,
+        metadata=dict(metadata or {}),
     )
 
 
@@ -65,6 +82,28 @@ class EnvelopeFactory:
                 type=EVENT_TYPE_MESSAGE_TRANSCRIBED,
                 ref_id=origin.routing.id,
                 data={"transcript": transcript},
+            ),
+        )
+
+    @staticmethod
+    def server_info_event(
+        *,
+        channel: str,
+        recipient_id: str,
+        snapshot: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> UnifiedMessage:
+        """A ``server.info`` event with the current policy and channel capability snapshot."""
+        return UnifiedMessage(
+            message_type=MESSAGE_TYPE_EVENT,
+            routing=_direct_outbound_routing(
+                channel=channel,
+                recipient_id=recipient_id,
+                metadata=metadata,
+            ),
+            event=EventPayload(
+                type=EVENT_TYPE_SERVER_INFO,
+                data=snapshot,
             ),
         )
 

@@ -11,12 +11,18 @@ from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     LLMPreferences,
+    MediaPreferences,
     MemoryPreferences,
+    ModalityFlags,
     ModelTuning,
     WorkspacePreferences,
+    load_preferences,
+    preferences_file,
     resolve_llm,
     resolve_summarization_llm,
+    save_preferences,
 )
+from hirocli.domain.server_info import build_server_info_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +93,23 @@ def test_resolve_llm_none_without_default(tmp_path: Path, monkeypatch: pytest.Mo
     _patch_catalog(tmp_path, monkeypatch)
     prefs = WorkspacePreferences()
     assert resolve_llm(prefs, tmp_path, "chat") is None
+
+
+def test_workspace_preferences_media_defaults() -> None:
+    prefs = WorkspacePreferences()
+    assert prefs.media.input.voice is True
+    assert prefs.media.output.voice is False
+    assert prefs.media.input.image is False
+    assert prefs.media.output.file is False
+
+
+def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None:
+    ws = tmp_path / "fresh_ws"
+    assert not preferences_file(ws).exists()
+    prefs = load_preferences(ws)
+    assert preferences_file(ws).is_file()
+    assert prefs.version == 2
+    assert prefs.media.input.voice is True
 
 
 def test_resolve_llm_with_default_and_credentials(
@@ -248,3 +271,88 @@ def test_resolve_summarization_memory_id_overrides_default_summarization(
     )
     r = resolve_summarization_llm(prefs, tmp_path)
     assert r is not None and r.model_id == "openai:gpt-other"
+
+
+def test_build_server_info_snapshot_includes_policy_and_channel_voice_capabilities(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_workspace(tmp_path, monkeypatch)
+    from hirocli.domain import model_catalog as mc
+    from hirocli.domain.character import create_character
+    from hirocli.domain.conversation_channel import create_channel
+
+    doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "openai",
+                "display_name": "OpenAI",
+                "hosting": "cloud",
+                "credential_env_keys": ["OPENAI_API_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
+        ],
+        "models": [
+            {
+                "id": "openai:gpt-test",
+                "provider_id": "openai",
+                "display_name": "G",
+                "model_kind": "chat",
+            },
+            {
+                "id": "openai:stt-one",
+                "provider_id": "openai",
+                "display_name": "STT",
+                "model_kind": "stt",
+            },
+            {
+                "id": "openai:tts-one",
+                "provider_id": "openai",
+                "display_name": "TTS",
+                "model_kind": "tts",
+            },
+        ],
+    }
+    p = tmp_path / "cat.yaml"
+    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cat = ModelCatalog.load_from_path(p)
+    monkeypatch.setattr(mc, "get_model_catalog", lambda: cat)
+    monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
+
+    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
+
+    save_preferences(
+        tmp_path,
+        WorkspacePreferences(
+            llm=LLMPreferences(
+                default_chat="openai:gpt-test",
+                default_stt="openai:stt-one",
+                default_tts="openai:tts-one",
+            ),
+            media=MediaPreferences(
+                input=ModalityFlags(voice=True),
+                output=ModalityFlags(voice=True),
+            ),
+        ),
+    )
+    create_character(
+        tmp_path,
+        "voice-bot",
+        "Voice Bot",
+        voice_models=["openai:tts-one"],
+    )
+    create_channel(
+        tmp_path,
+        name="Voice Bot",
+        character_id="voice-bot",
+        user_id=1,
+    )
+
+    snapshot = build_server_info_snapshot(tmp_path)
+    voice_channel = next(channel for channel in snapshot.channels if channel.character.id == "voice-bot")
+    assert snapshot.policy.input.voice is True
+    assert snapshot.policy.output.voice is True
+    assert voice_channel.capabilities.input.voice is True
+    assert voice_channel.capabilities.output.voice is True
