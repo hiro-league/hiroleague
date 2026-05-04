@@ -1,21 +1,23 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../application/gateway/gateway_notifier.dart';
 import '../experiments/dot_matrix/dot_matrix_game.dart';
 import 'chat_app_bar.dart';
 import 'widgets/input_bar/message_input_bar.dart';
 import 'widgets/message_list.dart';
 
-class ChatScreen extends StatefulWidget {
+class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, required this.channelId});
 
   final String channelId;
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends ConsumerState<ChatScreen> {
   // Created in State (not static) so hot restart always picks up the latest
   // DotMatrixGame constructor, including any config changes made in code.
   late final DotMatrixGame _dotMatrixGame = DotMatrixGame();
@@ -24,6 +26,17 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _flameExpanded = false;
 
   void _toggleFlame() => setState(() => _flameExpanded = !_flameExpanded);
+
+  @override
+  void initState() {
+    super.initState();
+    // Same stale-while-revalidate hook as channel list — capabilities/policy may have changed while away.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(gatewayProvider.notifier).revalidateResourcesIfStale(
+            const ['channels', 'policy'],
+          );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

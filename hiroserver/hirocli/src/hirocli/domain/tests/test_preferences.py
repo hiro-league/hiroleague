@@ -22,7 +22,10 @@ from hirocli.domain.preferences import (
     resolve_summarization_llm,
     save_preferences,
 )
-from hirocli.domain.server_info import build_server_info_snapshot
+from hirocli.domain.server_info import (
+    build_channel_list_entries,
+    build_policy_snapshot,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -273,7 +276,7 @@ def test_resolve_summarization_memory_id_overrides_default_summarization(
     assert r is not None and r.model_id == "openai:gpt-other"
 
 
-def test_build_server_info_snapshot_includes_policy_and_channel_voice_capabilities(
+def test_build_policy_snapshot_and_channel_list_voice_capabilities(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -350,9 +353,13 @@ def test_build_server_info_snapshot_includes_policy_and_channel_voice_capabiliti
         user_id=1,
     )
 
-    snapshot = build_server_info_snapshot(tmp_path)
-    voice_channel = next(channel for channel in snapshot.channels if channel.character.id == "voice-bot")
-    assert snapshot.policy.input.voice is True
-    assert snapshot.policy.output.voice is True
-    assert voice_channel.capabilities.input.voice is True
-    assert voice_channel.capabilities.output.voice is True
+    policy_snap = build_policy_snapshot(tmp_path)
+    assert policy_snap.policy.input.voice is True
+    assert policy_snap.policy.output.voice is True
+
+    channel_list = build_channel_list_entries(tmp_path)
+    voice_entry = next(channel for channel in channel_list if channel.character.id == "voice-bot")
+    assert voice_entry.name == "Voice Bot"
+    assert voice_entry.character_id == "voice-bot"
+    assert voice_entry.capabilities.input.voice is True
+    assert voice_entry.capabilities.output.voice is True

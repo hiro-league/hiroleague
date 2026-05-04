@@ -54,7 +54,7 @@ from .server import (
     UninstallTool,
     UpgradeTool,
 )
-from .server_info import ServerInfoGetTool
+from .policy import PolicyGetTool
 from .workspace import (
     WorkspaceCreateTool,
     WorkspaceListTool,
@@ -101,7 +101,7 @@ def all_tools() -> list[Tool]:
         TeardownTool(),
         UninstallTool(),
         UpgradeTool(),
-        ServerInfoGetTool(),
+        PolicyGetTool(),
         GatewayStatusTool(),
         GatewayStartTool(),
         GatewayStopTool(),

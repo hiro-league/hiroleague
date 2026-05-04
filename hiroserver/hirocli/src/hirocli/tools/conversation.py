@@ -13,8 +13,8 @@ from ..domain.conversation_channel import (
     _get_channel_by_id,
     _get_channel_by_name,
     _get_default_channel,
-    _list_channels,
 )
+from ..domain.server_info import build_channel_list_entries
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 
@@ -86,11 +86,16 @@ class ConversationChannelListTool(Tool):
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
-    def execute(self, workspace: str | None = None) -> ConversationChannelListResult:
-        workspace_path = _resolve_path(workspace)
-        channels = _list_channels(workspace_path)
+    def execute(
+        self,
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+    ) -> ConversationChannelListResult:
+        resolved_workspace_path = workspace_path or _resolve_path(workspace)
+        channels = build_channel_list_entries(resolved_workspace_path)
         return ConversationChannelListResult(
-            channels=[ch.model_dump() for ch in channels],
+            channels=[ch.model_dump(mode="json") for ch in channels],
         )
 
 

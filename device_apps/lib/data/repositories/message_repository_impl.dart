@@ -219,8 +219,8 @@ class MessageRepositoryImpl implements MessageRepository {
         }
         _log.debug('Message voiced', fields: {'ref_id': refId});
 
-      case EventWire.serverInfo:
-        _log.debug('Server info event received');
+      case EventWire.resourceChanged:
+        _log.debug('Resource changed hint received');
 
       default:
         _log.debug(

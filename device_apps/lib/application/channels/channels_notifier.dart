@@ -6,7 +6,8 @@ import '../../domain/models/channel/channel.dart';
 part 'channels_notifier.g.dart';
 
 /// Emits the live list of channels from the local DB.
-/// Channel metadata is refreshed by GatewayNotifier from the server.info snapshot.
+/// Channel rows sync from ``channels.list`` via [GatewayNotifier]
+/// (`resource.changed` hints + connect-time pull).
 @riverpod
 // ignore: deprecated_member_use_from_same_package
 Stream<List<Channel>> channels(Ref ref) async* {

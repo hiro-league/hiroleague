@@ -11,30 +11,38 @@ class ChannelsDao extends DatabaseAccessor<AppDatabase>
   ChannelsDao(super.db);
 
   Stream<List<ChannelRecord>> watchAllChannels() {
-    return (select(channels)
-          ..orderBy([
-            (c) => OrderingTerm(
-                  expression: c.lastMessageAt,
-                  mode: OrderingMode.desc,
-                ),
-          ]))
+    return (select(channels)..orderBy([
+          (c) => OrderingTerm(
+            expression: c.lastMessageAt,
+            mode: OrderingMode.desc,
+          ),
+        ]))
         .watch();
   }
 
   Future<ChannelRecord?> getById(String channelId) {
-    return (select(channels)..where((c) => c.id.equals(channelId)))
-        .getSingleOrNull();
+    return (select(
+      channels,
+    )..where((c) => c.id.equals(channelId))).getSingleOrNull();
   }
 
   Future<int> count() async {
-    final result = await (selectOnly(channels)
-          ..addColumns([channels.id.count()]))
-        .getSingle();
+    final result = await (selectOnly(
+      channels,
+    )..addColumns([channels.id.count()])).getSingle();
     return result.read(channels.id.count()) ?? 0;
   }
 
   Future<void> insertOrUpdate(ChannelsCompanion companion) async {
     await into(channels).insertOnConflictUpdate(companion);
+  }
+
+  Future<void> deleteMissing(Set<String> channelIds) async {
+    if (channelIds.isEmpty) {
+      await delete(channels).go();
+      return;
+    }
+    await (delete(channels)..where((c) => c.id.isNotIn(channelIds))).go();
   }
 
   Future<ChannelRecord?> getFirst() {

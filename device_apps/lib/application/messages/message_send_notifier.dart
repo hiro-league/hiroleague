@@ -6,7 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../application/auth/auth_notifier.dart';
 import '../../application/auth/auth_state.dart';
 import '../../application/gateway/gateway_notifier.dart';
-import '../../application/server_info/server_info_notifier.dart';
+import '../../application/policy/policy_notifier.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_exception.dart';
 import '../../core/utils/logger.dart';

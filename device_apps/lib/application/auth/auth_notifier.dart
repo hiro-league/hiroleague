@@ -1,6 +1,7 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/errors/app_exception.dart';
+import '../sync/resource_sync_version_store.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import 'auth_state.dart';
 
@@ -40,6 +41,7 @@ class AuthNotifier extends _$AuthNotifier {
   Future<void> unpair() async {
     final repo = ref.read(authRepositoryProvider);
     await repo.clearIdentity();
+    await ref.read(resourceSyncVersionStoreProvider.notifier).clear();
     state = const AsyncData(AuthState.unauthenticated());
   }
 }

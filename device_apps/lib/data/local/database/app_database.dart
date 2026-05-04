@@ -10,16 +10,12 @@ import 'tables/messages_table.dart';
 
 part 'app_database.g.dart';
 
-@DriftDatabase(
-  tables: [Channels, Messages],
-  daos: [ChannelsDao, MessagesDao],
-)
+@DriftDatabase(tables: [Channels, Messages], daos: [ChannelsDao, MessagesDao])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openExecutor());
 
-
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(

@@ -64,7 +64,7 @@ EVENT_TYPE_MESSAGE_RECEIVED: str = "message.received"          # server acknowle
 EVENT_TYPE_MESSAGE_TRANSCRIBED: str = "message.transcribed"    # transcript is ready for a voice message (audio → text modality mirror)
 EVENT_TYPE_MESSAGE_VOICED: str = "message.voiced"              # spoken audio of a text reply (text → audio modality mirror)
 EVENT_TYPE_MESSAGE_CONTENT_ADDED: str = "message.content_added"  # new supplementary content attached to a message (photos, docs, etc.)
-EVENT_TYPE_SERVER_INFO: str = "server.info"                    # current server policy + channel capability snapshot for devices
+EVENT_TYPE_RESOURCE_CHANGED: str = "resource.changed"          # hint: named cache invalidated — pull via *.list / *.get (Tier 1+ sync substrate)
 
 # ---------------------------------------------------------------------------
 # Message content types — content_type values used in ContentItem

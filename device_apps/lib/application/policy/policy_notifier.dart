@@ -3,59 +3,72 @@ import 'dart:convert';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../channels/channels_notifier.dart';
 import '../../domain/models/server_info/server_info.dart';
 import '../../platform/storage/secure_storage_service.dart';
 
-part 'server_info_notifier.g.dart';
+part 'policy_notifier.g.dart';
 
-const _serverInfoStorageKey = 'server_info.snapshot.v1';
-const _voiceReplyPrefsStorageKey = 'server_info.voice_reply_prefs.v1';
+const _policyStorageKey = 'policy.snapshot.v1';
+const _voiceReplyPrefsStorageKey = 'policy.voice_reply_prefs.v1';
 
 @Riverpod(keepAlive: true)
-class ServerInfoNotifier extends _$ServerInfoNotifier {
+class PolicyNotifier extends _$PolicyNotifier {
   @override
-  ServerInfoSnapshot? build() {
+  PolicySnapshot? build() {
     unawaited(_load());
     return null;
   }
 
   Future<void> _load() async {
     final storage = ref.read(secureStorageServiceProvider);
-    final raw = await storage.read(_serverInfoStorageKey);
+    final raw = await storage.read(_policyStorageKey);
     if (raw == null || raw.isEmpty) return;
     try {
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      state = ServerInfoSnapshot.fromJson(decoded);
+      state = PolicySnapshot.fromJson(decoded);
     } catch (_) {
       state = null;
     }
   }
 
-  Future<void> applySnapshot(ServerInfoSnapshot snapshot) async {
+  Future<void> applySnapshot(PolicySnapshot snapshot) async {
     state = snapshot;
     await ref
         .read(secureStorageServiceProvider)
-        .write(_serverInfoStorageKey, jsonEncode(snapshot.toJson()));
+        .write(_policyStorageKey, jsonEncode(snapshot.toJson()));
   }
 
   Future<void> applyJson(Map<String, dynamic> json) async {
-    await applySnapshot(ServerInfoSnapshot.fromJson(json));
+    await applySnapshot(PolicySnapshot.fromJson(json));
   }
 
   Future<void> clear() async {
     state = null;
-    await ref.read(secureStorageServiceProvider).delete(_serverInfoStorageKey);
+    await ref.read(secureStorageServiceProvider).delete(_policyStorageKey);
   }
 }
 
 @riverpod
 MediaCapabilities? channelCapabilities(Ref ref, String channelId) {
-  return ref.watch(serverInfoProvider)?.channelForLocalId(channelId)?.capabilities;
+  final channels =
+      ref.watch(channelsProvider).whenOrNull(data: (value) => value) ??
+      const [];
+  for (final channel in channels) {
+    if (channel.id == channelId) return channel.capabilities;
+  }
+  return null;
 }
 
 @riverpod
 String? channelCharacterName(Ref ref, String channelId) {
-  return ref.watch(serverInfoProvider)?.channelForLocalId(channelId)?.character.name;
+  final channels =
+      ref.watch(channelsProvider).whenOrNull(data: (value) => value) ??
+      const [];
+  for (final channel in channels) {
+    if (channel.id == channelId) return channel.characterName;
+  }
+  return null;
 }
 
 @Riverpod(keepAlive: true)
@@ -72,28 +85,24 @@ class VoiceReplyPreferenceNotifier extends _$VoiceReplyPreferenceNotifier {
     if (raw == null || raw.isEmpty) return;
     try {
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      state = decoded.map(
-        (key, value) => MapEntry(key, value == true),
-      );
+      state = decoded.map((key, value) => MapEntry(key, value == true));
     } catch (_) {
       state = const {};
     }
   }
 
   Future<void> setVoiceReplyEnabled(String channelId, bool enabled) async {
-    state = {
-      ...state,
-      channelId: enabled,
-    };
-    await ref.read(secureStorageServiceProvider).write(
-      _voiceReplyPrefsStorageKey,
-      jsonEncode(state),
-    );
+    state = {...state, channelId: enabled};
+    await ref
+        .read(secureStorageServiceProvider)
+        .write(_voiceReplyPrefsStorageKey, jsonEncode(state));
   }
 
   Future<void> clear() async {
     state = const {};
-    await ref.read(secureStorageServiceProvider).delete(_voiceReplyPrefsStorageKey);
+    await ref
+        .read(secureStorageServiceProvider)
+        .delete(_voiceReplyPrefsStorageKey);
   }
 }
 

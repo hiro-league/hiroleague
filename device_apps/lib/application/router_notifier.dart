@@ -15,7 +15,7 @@ class RouterNotifier extends _$RouterNotifier with ChangeNotifier {
   @override
   void build() {
     // Notify go_router whenever auth state changes so redirect is re-evaluated.
-    ref.listen(authProvider, (_, __) => notifyListeners());
+    ref.listen(authProvider, (_, _) => notifyListeners());
   }
 
   String? redirect(BuildContext context, GoRouterState state) {

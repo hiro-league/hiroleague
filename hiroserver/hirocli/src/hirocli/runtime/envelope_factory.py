@@ -14,7 +14,7 @@ from typing import Any
 from hiro_channel_sdk.constants import (
     CONTENT_TYPE_JSON,
     EVENT_TYPE_MESSAGE_RECEIVED,
-    EVENT_TYPE_SERVER_INFO,
+    EVENT_TYPE_RESOURCE_CHANGED,
     EVENT_TYPE_MESSAGE_TRANSCRIBED,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_RESPONSE,
@@ -86,14 +86,14 @@ class EnvelopeFactory:
         )
 
     @staticmethod
-    def server_info_event(
+    def resource_changed_event(
         *,
         channel: str,
         recipient_id: str,
-        snapshot: dict[str, Any],
+        data: dict[str, Any],
         metadata: dict[str, Any] | None = None,
     ) -> UnifiedMessage:
-        """A ``server.info`` event with the current policy and channel capability snapshot."""
+        """A ``resource.changed`` event hint — carries ``resource``, ``reason``, and Tier-2 ``resource_sync_version``."""
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_EVENT,
             routing=_direct_outbound_routing(
@@ -102,8 +102,8 @@ class EnvelopeFactory:
                 metadata=metadata,
             ),
             event=EventPayload(
-                type=EVENT_TYPE_SERVER_INFO,
-                data=snapshot,
+                type=EVENT_TYPE_RESOURCE_CHANGED,
+                data=dict(data),
             ),
         )
 

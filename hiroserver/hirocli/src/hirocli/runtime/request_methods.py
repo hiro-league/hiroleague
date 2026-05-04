@@ -15,14 +15,20 @@ from ..tools.conversation import (
     ConversationChannelListTool,
     MessageHistoryTool,
 )
-from ..tools.server_info import ServerInfoGetTool
+from ..tools.policy import PolicyGetTool
 from .request_handler import RequestContext, RequestHandler
 
 
 async def handle_channels_list(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    del params
     tool = ConversationChannelListTool()
-    result = tool.execute()
-    return {"channels": result.channels}
+    result = tool.execute(workspace_path=ctx.workspace_path)
+    payload: dict[str, Any] = {"channels": result.channels}
+    versions = ctx.resource_versions
+    if versions is not None:
+        # Tier 2: monotonic counter shared with resource.changed (see ResourceVersionStore).
+        payload["resource_sync_version"] = versions.get("channels")
+    return payload
 
 
 async def handle_messages_history(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
@@ -38,14 +44,20 @@ async def handle_messages_history(params: dict[str, Any], ctx: RequestContext) -
     return {"messages": result.messages}
 
 
-async def handle_server_info_get(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
-    tool = ServerInfoGetTool()
+async def handle_policy_get(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    del params
+    tool = PolicyGetTool()
     result = tool.execute(workspace_path=ctx.workspace_path)
-    return result.snapshot
+    payload = dict(result.snapshot)
+    versions = ctx.resource_versions
+    if versions is not None:
+        # Tier 2: policy resource clock — distinct from snapshot.schema ``version``.
+        payload["resource_sync_version"] = versions.get("policy")
+    return payload
 
 
 def register_request_methods(handler: RequestHandler) -> None:
     """Register all data-plane request methods."""
     handler.register("channels.list", handle_channels_list)
     handler.register("messages.history", handle_messages_history)
-    handler.register("server.info.get", handle_server_info_get)
+    handler.register("policy.get", handle_policy_get)

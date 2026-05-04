@@ -39,8 +39,9 @@ from hirocli.runtime.http_server import app as http_app, run_http_server
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
 from hirocli.runtime.message_adapter import create_adapter_pipeline
 from hirocli.runtime.request_handler import RequestHandler
+from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaster
+from hirocli.runtime.resource_versioning import ResourceVersionStore
 from hirocli.runtime.server_context import ServerContext
-from hirocli.runtime.server_info_broadcaster import ServerInfoBroadcaster
 from hirocli.services.metrics import MetricsCollector
 from hirocli.services.tts import create_tts_service
 from hirocli.tools import all_tools
@@ -71,7 +72,9 @@ def _build_context(
     )
 
 
-def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelManager, ServerInfoBroadcaster]:
+def _wire_runtime(
+    ctx: ServerContext,
+) -> tuple[CommunicationManager, ChannelManager, ResourceChangeBroadcaster]:
     """Build adapter pipeline, handlers, ChannelManager, and CommunicationManager.
 
     Construction order is now: leaf collaborators → ChannelManager (no upstream
@@ -83,7 +86,8 @@ def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelMana
     """
     adapter_pipeline = create_adapter_pipeline(ctx.workspace_path)
     event_handler = EventHandler()
-    request_handler = RequestHandler(ctx)
+    resource_versions = ResourceVersionStore()
+    request_handler = RequestHandler(ctx, resource_versions=resource_versions)
 
     from hirocli.runtime.request_methods import register_request_methods
     register_request_methods(request_handler)
@@ -102,20 +106,21 @@ def _wire_runtime(ctx: ServerContext) -> tuple[CommunicationManager, ChannelMana
         event_handler=event_handler,
         request_handler=request_handler,
     )
-    server_info_broadcaster = ServerInfoBroadcaster(
+    resource_change_broadcaster = ResourceChangeBroadcaster(
         ctx.workspace_path,
         comm_manager.enqueue_outbound,
+        version_store=resource_versions,
     )
-    server_info_broadcaster.start()
+    resource_change_broadcaster.start()
 
     channel_manager.set_message_handler(comm_manager.receive)
     channel_manager.set_event_handler(channel_event_handler.handle)
     # InfraEventHandlers still needs the ChannelManager for pairing responses.
     # That cycle is out of scope for this PR — see communication-manager-refactor.md §6.
     infra_handlers.set_channel_manager(channel_manager)
-    infra_handlers.set_server_info_broadcaster(server_info_broadcaster)
+    infra_handlers.set_resource_change_broadcaster(resource_change_broadcaster)
 
-    return comm_manager, channel_manager, server_info_broadcaster
+    return comm_manager, channel_manager, resource_change_broadcaster
 
 
 def _register_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -198,7 +203,7 @@ async def _main(
     log.info("Metrics collector configured", enabled=effective_metrics, interval=ctx.config.metrics_interval)
 
     # --- Wire communication + channel stacks ---
-    comm_manager, channel_manager, server_info_broadcaster = _wire_runtime(ctx)
+    comm_manager, channel_manager, resource_change_broadcaster = _wire_runtime(ctx)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
@@ -245,7 +250,7 @@ async def _main(
     except (asyncio.CancelledError, Exception):
         pass
     finally:
-        server_info_broadcaster.close()
+        resource_change_broadcaster.close()
 
     if ctx.restart_requested:
         log.info("Restart requested — spawning new server process")

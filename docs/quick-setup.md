@@ -16,6 +16,9 @@
 
 4. **Run:** Start the gateway (`hirogate start` or `hirogate`), then start the desktop server (`hiro start`).
 
+After pulling changes that modify **`hiro-channel-sdk`** (new protocol constants, models), reinstall deps so local tooling picks them up:
+`uv sync` (from `hiroserver/hirocli`, or your workspace root if that is where Hiro resolves).
+
 ---
 
 ## Removing Hiro from startup

@@ -8,11 +8,28 @@ import '../../application/gateway/gateway_state.dart';
 import '../../core/constants/app_strings.dart';
 import '../../domain/models/channel/channel.dart';
 
-class ChannelListScreen extends ConsumerWidget {
+class ChannelListScreen extends ConsumerStatefulWidget {
   const ChannelListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChannelListScreen> createState() => _ChannelListScreenState();
+}
+
+class _ChannelListScreenState extends ConsumerState<ChannelListScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Stale-while-revalidate: reopening this shell after sleep may miss hints;
+    // timed pulls complement `resource.changed` + connect-time syncAll.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(gatewayProvider.notifier).revalidateResourcesIfStale(
+            const ['channels', 'policy'],
+          );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final gateway = ref.watch(gatewayProvider);
     final channelsAsync = ref.watch(channelsProvider);
 
@@ -26,9 +43,7 @@ class ChannelListScreen extends ConsumerWidget {
         error: (e, _) => Center(
           child: Text(
             'Failed to load channels',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.error,
-            ),
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ),
         data: (channels) {
@@ -43,7 +58,7 @@ class ChannelListScreen extends ConsumerWidget {
           }
           return ListView.separated(
             itemCount: channels.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
+            separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) =>
                 _ChannelTile(channel: channels[index]),
           );
@@ -67,9 +82,7 @@ class _ChannelTile extends StatelessWidget {
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
         child: Text(
-          channel.name.isNotEmpty
-              ? channel.name[0].toUpperCase()
-              : '#',
+          channel.name.isNotEmpty ? channel.name[0].toUpperCase() : '#',
         ),
       ),
       title: Text(channel.name),
@@ -86,22 +99,20 @@ class _GatewayStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    final label = gateway.map(
+      disconnected: (_) => 'Offline',
+      connecting: (_) => 'Connecting…',
+      connected: (c) => 'Online · ${c.deviceId}',
+      error: (e) => 'Error · ${e.message}',
+    );
+
     return Padding(
-      padding: const EdgeInsets.only(right: 16),
-      child: gateway.when(
-        disconnected: () =>
-            Icon(Icons.cloud_off_rounded, color: cs.outline),
-        connecting: () => SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(
-              strokeWidth: 2, color: cs.primary),
-        ),
-        connected: (_) =>
-            Icon(Icons.cloud_done_rounded, color: Colors.green.shade600),
-        error: (_) =>
-            Icon(Icons.cloud_off_rounded, color: cs.error),
+      padding: const EdgeInsets.only(right: 8),
+      child: Chip(
+        label: Text(label, style: const TextStyle(fontSize: 11)),
+        visualDensity: VisualDensity.compact,
+        backgroundColor: colorScheme.surfaceContainerHighest,
       ),
     );
   }

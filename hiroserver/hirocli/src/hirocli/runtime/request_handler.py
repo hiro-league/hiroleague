@@ -26,6 +26,7 @@ from hiro_commons.log import Logger
 from .envelope_factory import EnvelopeFactory
 
 if TYPE_CHECKING:
+    from .resource_versioning import ResourceVersionStore
     from .server_context import ServerContext
 
 log = Logger.get("REQUEST")
@@ -34,10 +35,17 @@ log = Logger.get("REQUEST")
 class RequestContext:
     """Context passed to method handlers."""
 
-    def __init__(self, ctx: ServerContext, msg: UnifiedMessage) -> None:
+    def __init__(
+        self,
+        ctx: ServerContext,
+        msg: UnifiedMessage,
+        *,
+        resource_versions: ResourceVersionStore | None = None,
+    ) -> None:
         self.workspace_path = ctx.workspace_path
         self.msg = msg
         self.server_ctx = ctx
+        self.resource_versions = resource_versions
 
 
 MethodHandler = Callable[[dict[str, Any], RequestContext], Awaitable[dict[str, Any]]]
@@ -56,8 +64,13 @@ class RequestHandler:
         async def my_handler(params: dict, ctx: RequestContext) -> dict
     """
 
-    def __init__(self, ctx: ServerContext) -> None:
+    def __init__(
+        self,
+        ctx: ServerContext,
+        resource_versions: ResourceVersionStore | None = None,
+    ) -> None:
         self._ctx = ctx
+        self._resource_versions = resource_versions
         self._methods: dict[str, MethodHandler] = {}
 
     def register(self, method: str, handler: MethodHandler) -> None:
@@ -92,7 +105,7 @@ class RequestHandler:
             )
 
         try:
-            ctx = RequestContext(self._ctx, msg)
+            ctx = RequestContext(self._ctx, msg, resource_versions=self._resource_versions)
             result = await handler(params, ctx)
             return EnvelopeFactory.response(msg, status="ok", payload=result)
         except Exception as exc:

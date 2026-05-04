@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .character import default_character_id, load_character_from_disk
 from .conversation_channel import _list_channels
@@ -26,17 +26,23 @@ class ServerInfoCharacter(BaseModel):
     name: str
 
 
-class ServerInfoChannel(BaseModel):
-    id: int
-    name: str
-    character: ServerInfoCharacter
-    capabilities: MediaPreferences
+class PolicySnapshot(BaseModel):
+    """Workspace-wide saved media policy only — per-channel data lives on ``channels.list``."""
 
-
-class ServerInfoSnapshot(BaseModel):
     version: int = 1
     policy: MediaPreferences
-    channels: list[ServerInfoChannel] = Field(default_factory=list)
+
+
+class ChannelListEntry(BaseModel):
+    id: int
+    name: str
+    type: str
+    character_id: str
+    user_id: int
+    created_at: str
+    last_message_at: str | None = None
+    character: ServerInfoCharacter
+    capabilities: MediaPreferences
 
 
 def _load_character_for_channel(workspace_path: Path, character_id: str):
@@ -149,22 +155,46 @@ def resolve_channel_capabilities(
     )
 
 
-def build_server_info_snapshot(
+def build_policy_snapshot(
     workspace_path: Path,
     *,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
-) -> ServerInfoSnapshot:
+) -> PolicySnapshot:
+    del workspace_id, credential_store
+    prefs = load_preferences(workspace_path)
+    snapshot = PolicySnapshot(
+        version=1,
+        policy=prefs.media.model_copy(deep=True),
+    )
+    logger.debug(
+        "Built policy snapshot",
+        extra={"workspace_path": str(workspace_path)},
+    )
+    return snapshot
+
+
+def build_channel_list_entries(
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> list[ChannelListEntry]:
     prefs = load_preferences(workspace_path)
     resolved_workspace_id = workspace_id or workspace_id_for_path(workspace_path)
-    channels: list[ServerInfoChannel] = []
+    entries: list[ChannelListEntry] = []
 
     for channel in _list_channels(workspace_path):
         character = _load_character_for_channel(workspace_path, channel.character_id)
-        channels.append(
-            ServerInfoChannel(
+        entries.append(
+            ChannelListEntry(
                 id=channel.id,
                 name=channel.name,
+                type=channel.type,
+                character_id=channel.character_id,
+                user_id=channel.user_id,
+                created_at=channel.created_at,
+                last_message_at=channel.last_message_at,
                 character=ServerInfoCharacter(id=character.id, name=character.name),
                 capabilities=resolve_channel_capabilities(
                     workspace_path,
@@ -176,13 +206,4 @@ def build_server_info_snapshot(
             )
         )
 
-    snapshot = ServerInfoSnapshot(
-        # Keep the saved policy untouched; channels carry the effective values.
-        policy=prefs.media.model_copy(deep=True),
-        channels=channels,
-    )
-    logger.debug(
-        "Built server info snapshot",
-        extra={"workspace_path": str(workspace_path), "channels": len(channels)},
-    )
-    return snapshot
+    return entries

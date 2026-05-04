@@ -32,7 +32,7 @@ abstract final class EventWire {
   static const messageTranscribed = 'message.transcribed';
   static const messageVoiced = 'message.voiced';
   static const messageContentAdded = 'message.content_added';
-  static const serverInfo = 'server.info';
+  static const resourceChanged = 'resource.changed';
 }
 
 abstract final class GatewayEnvelopeWire {

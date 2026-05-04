@@ -9,14 +9,6 @@ int _requireInt(Map<String, dynamic> json, String key, String context) {
   );
 }
 
-String _requireString(Map<String, dynamic> json, String key, String context) {
-  final value = json[key];
-  if (value is String && value.isNotEmpty) return value;
-  throw FormatException(
-    '$context: "$key" must be a non-empty string, got ${value?.runtimeType}',
-  );
-}
-
 Map<String, dynamic> _asStringMap(dynamic value, String context) {
   if (value is Map) return Map<String, dynamic>.from(value);
   throw FormatException('$context must be a JSON object, got ${value.runtimeType}');
@@ -85,102 +77,27 @@ class MediaCapabilities {
   };
 }
 
-class ServerInfoCharacter {
-  const ServerInfoCharacter({required this.id, required this.name});
-
-  final String id;
-  final String name;
-
-  factory ServerInfoCharacter.fromJson(Map<String, dynamic> json) {
-    return ServerInfoCharacter(
-      id: _requireString(json, 'id', 'ServerInfoCharacter'),
-      name: _requireString(json, 'name', 'ServerInfoCharacter'),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {'id': id, 'name': name};
-}
-
-class ServerInfoChannel {
-  const ServerInfoChannel({
-    required this.id,
-    required this.name,
-    required this.character,
-    required this.capabilities,
-  });
-
-  final int id;
-  final String name;
-  final ServerInfoCharacter character;
-  final MediaCapabilities capabilities;
-
-  String get localChannelId => 'server-$id';
-
-  factory ServerInfoChannel.fromJson(Map<String, dynamic> json) {
-    return ServerInfoChannel(
-      id: _requireInt(json, 'id', 'ServerInfoChannel'),
-      name: _requireString(json, 'name', 'ServerInfoChannel'),
-      character: ServerInfoCharacter.fromJson(
-        _asStringMap(json['character'], 'ServerInfoChannel.character'),
-      ),
-      capabilities: MediaCapabilities.fromJson(
-        _asStringMap(json['capabilities'], 'ServerInfoChannel.capabilities'),
-      ),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'character': character.toJson(),
-    'capabilities': capabilities.toJson(),
-  };
-}
-
-class ServerInfoSnapshot {
-  const ServerInfoSnapshot({
+/// Workspace-wide saved media policy — channel rows live on `channels.list`.
+class PolicySnapshot {
+  const PolicySnapshot({
     required this.version,
     required this.policy,
-    required this.channels,
   });
 
   final int version;
   final MediaCapabilities policy;
-  final List<ServerInfoChannel> channels;
 
-  factory ServerInfoSnapshot.fromJson(Map<String, dynamic> json) {
-    final channelsRaw = json['channels'];
-    if (channelsRaw is! List) {
-      throw FormatException(
-        'ServerInfoSnapshot: "channels" must be a JSON array, got ${channelsRaw.runtimeType}',
-      );
-    }
-    return ServerInfoSnapshot(
-      version: _requireInt(json, 'version', 'ServerInfoSnapshot'),
+  factory PolicySnapshot.fromJson(Map<String, dynamic> json) {
+    return PolicySnapshot(
+      version: _requireInt(json, 'version', 'PolicySnapshot'),
       policy: MediaCapabilities.fromJson(
-        _asStringMap(json['policy'], 'ServerInfoSnapshot.policy'),
+        _asStringMap(json['policy'], 'PolicySnapshot.policy'),
       ),
-      channels: channelsRaw.map((entry) {
-        if (entry is! Map) {
-          throw FormatException(
-            'ServerInfoSnapshot: channel entry must be a JSON object, got ${entry.runtimeType}',
-          );
-        }
-        return ServerInfoChannel.fromJson(Map<String, dynamic>.from(entry));
-      }).toList(),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'version': version,
     'policy': policy.toJson(),
-    'channels': channels.map((channel) => channel.toJson()).toList(),
   };
-
-  ServerInfoChannel? channelForLocalId(String channelId) {
-    for (final channel in channels) {
-      if (channel.localChannelId == channelId) return channel;
-    }
-    return null;
-  }
 }

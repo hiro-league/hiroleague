@@ -3,20 +3,21 @@ import 'dart:async';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/utils/logger.dart';
-import '../../data/repositories/channel_repository_impl.dart';
+import '../sync/resource_sync_bootstrap.dart';
+import '../sync/resource_sync_registry.dart';
+import '../sync/resource_sync_version_store.dart';
 import '../../data/remote/gateway/gateway_auth_handler.dart';
 import '../../data/remote/gateway/gateway_client.dart';
 import '../../data/remote/gateway/gateway_contract.dart';
+import '../../data/remote/gateway/gateway_event_bus.dart';
 import '../../data/remote/gateway/gateway_inbound_frame.dart';
 import '../../data/remote/gateway/gateway_protocol.dart';
 import '../../data/remote/gateway/gateway_request_client.dart';
 import '../../data/remote/gateway/reconnect_policy.dart';
-import '../../domain/models/server_info/server_info.dart';
 import '../../domain/models/identity/device_identity.dart';
 import '../../domain/services/crypto_service.dart';
 import '../auth/auth_notifier.dart';
 import '../auth/auth_state.dart';
-import '../server_info/server_info_notifier.dart';
 import 'gateway_state.dart';
 
 part 'gateway_notifier.g.dart';
@@ -36,6 +37,11 @@ class GatewayNotifier extends _$GatewayNotifier {
 
   GatewayRequestClient? _requestClient;
   GatewayRequestClient? get requestClient => _requestClient;
+
+  final GatewayEventBus _eventBus = GatewayEventBus();
+  final ResourceSyncRegistry _resourceSync = ResourceSyncRegistry();
+  final List<FrozenRetryRequest> _frozenRetryBacklog = [];
+  bool _gatewayHandlersWired = false;
 
   @override
   GatewayState build() {
@@ -67,7 +73,13 @@ class GatewayNotifier extends _$GatewayNotifier {
   }
 
   void _connect(DeviceIdentity identity) {
-    _teardownClient();
+    final previousRc = _requestClient;
+    if (previousRc != null) {
+      _frozenRetryBacklog.addAll(previousRc.takeFrozenIdempotentPending());
+      previousRc.cancelAll();
+    }
+    _requestClient = null;
+    _disposeTransport();
 
     final client = GatewayClient(
       authHandler: GatewayAuthHandler(CryptoService()),
@@ -76,7 +88,7 @@ class GatewayNotifier extends _$GatewayNotifier {
     );
 
     _requestClient = GatewayRequestClient(
-      sendFn: (payload) => client.send(payload),
+      sendFn: client.send,
     );
 
     _stateSub = client.updates.listen(_onClientUpdate);
@@ -85,18 +97,58 @@ class GatewayNotifier extends _$GatewayNotifier {
       // broadcasting — the broadcast stream may have no subscribers yet.
       if (frame.payload['message_type'] == UnifiedMessageWire.typeResponse) {
         _routeResponse(frame.payload);
-      }
-      if (_isServerInfoEvent(frame.payload)) {
-        final data = (frame.payload['event'] as Map?)?['data'];
-        if (data is Map) {
-          unawaited(_applyServerInfoPayload(Map<String, dynamic>.from(data)));
-        }
+      } else if (frame.payload['message_type'] ==
+          UnifiedMessageWire.typeEvent) {
+        unawaited(_eventBus.dispatch(frame.payload));
       }
       _frameController.add(frame);
     });
 
     client.start(gatewayUrl: identity.gatewayUrl, identity: identity);
     _client = client;
+
+    _wireGatewayAppHandlersOnce();
+    _wireResourceSync();
+  }
+
+  /// Registers `resource.changed` with [GatewayEventBus] — sync logic lives in [resource_sync_bootstrap].
+  void _wireGatewayAppHandlersOnce() {
+    if (_gatewayHandlersWired) return;
+    _gatewayHandlersWired = true;
+    _eventBus.register(EventWire.resourceChanged, _handleResourceChangedEvent);
+  }
+
+  /// Re-bind sync lambdas on every connect so they use the fresh request client.
+  void _wireResourceSync() {
+    wireResourceSync(
+      ref: ref,
+      registry: _resourceSync,
+      getClient: () => _requestClient,
+    );
+  }
+
+  Future<void> _handleResourceChangedEvent(Map<String, dynamic> data) async {
+    final resource = data['resource'] as String?;
+    if (resource == null) return;
+
+    final hintVer = readResourceSyncVersion(data);
+    if (hintVer != null) {
+      final last = ref
+          .read(resourceSyncVersionStoreProvider.notifier)
+          .lastSeen(resource);
+      // Skip exact duplicate emissions only. Do not use hintVer <= last: after a host
+      // restart the new counter can replay lower numbers while lastSeen still holds
+      // the pre-restart value until connect-time syncAll finishes.
+      if (last != null && hintVer == last) {
+        _log.debug(
+          'Skipping duplicate resource.changed',
+          fields: {'resource': resource, 'sync_version': hintVer},
+        );
+        return;
+      }
+    }
+
+    await _resourceSync.sync(resource);
   }
 
   Future<void> _disconnect() async {
@@ -104,16 +156,22 @@ class GatewayNotifier extends _$GatewayNotifier {
     state = const GatewayState.disconnected();
   }
 
-  void _teardownClient() {
+  void _disposeTransport() {
     _stateSub?.cancel();
     _frameSub?.cancel();
     _stateSub = null;
     _frameSub = null;
-    _requestClient?.cancelAll();
-    _requestClient = null;
     _client?.stop();
     _client?.dispose();
     _client = null;
+  }
+
+  /// Logout / disposal — abandon queued idempotent retries.
+  void _teardownClient() {
+    _requestClient?.cancelAll();
+    _requestClient = null;
+    _frozenRetryBacklog.clear();
+    _disposeTransport();
   }
 
   /// Complete a pending request/response completer from the raw frame payload.
@@ -143,7 +201,30 @@ class GatewayNotifier extends _$GatewayNotifier {
       GatewayClientError(:final message) => GatewayState.error(message),
     };
     if (update is GatewayClientConnected) {
-      unawaited(_refreshServerInfo());
+      // Re-issue reads that were in-flight during socket teardown — after listeners
+      // attach so responses route to [GatewayRequestClient].
+      if (_frozenRetryBacklog.isNotEmpty && _requestClient != null) {
+        final backlog = [..._frozenRetryBacklog];
+        _frozenRetryBacklog.clear();
+        _requestClient!.replayFrozen(backlog);
+      }
+      unawaited(_resourceSync.syncAll());
+    }
+  }
+
+  /// Pull [resources] again when the last successful fetch is older than [maxStale]
+  /// (stale-while-revalidate; complements `resource.changed` + connect-time syncAll).
+  Future<void> revalidateResourcesIfStale(
+    List<String> resources, {
+    Duration maxStale = const Duration(seconds: 30),
+  }) async {
+    if (_requestClient == null) return;
+    if (state is! GatewayConnected) return;
+    final syncStore = ref.read(resourceSyncVersionStoreProvider.notifier);
+    for (final resource in resources) {
+      if (syncStore.shouldRevalidate(resource, maxStale)) {
+        await _resourceSync.sync(resource);
+      }
     }
   }
 
@@ -156,47 +237,5 @@ class GatewayNotifier extends _$GatewayNotifier {
   void _dispose() {
     _teardownClient();
     _frameController.close();
-  }
-
-  bool _isServerInfoEvent(Map<String, dynamic> payload) {
-    if (payload['message_type'] != UnifiedMessageWire.typeEvent) return false;
-    final event = payload['event'];
-    return event is Map && event['type'] == EventWire.serverInfo;
-  }
-
-  Future<void> _refreshServerInfo() async {
-    final client = _requestClient;
-    if (client == null) return;
-    try {
-      final response = await client.request('server.info.get');
-      final data = response['data'];
-      if (data is! Map) return;
-      await _applyServerInfoPayload(Map<String, dynamic>.from(data));
-    } catch (e) {
-      _log.warning('Failed to refresh server info', fields: {'error': e.toString()});
-    }
-  }
-
-  Future<void> _applyServerInfoPayload(Map<String, dynamic> payload) async {
-    try {
-      final snapshot = ServerInfoSnapshot.fromJson(payload);
-      await ref.read(serverInfoProvider.notifier).applySnapshot(snapshot);
-      await ref.read(channelRepositoryProvider).syncFromServer(
-        snapshot.channels
-            .map(
-              (channel) => <String, dynamic>{
-                'id': channel.id,
-                'name': channel.name,
-              },
-            )
-            .toList(),
-      );
-      _log.info(
-        'Applied server info snapshot',
-        fields: {'channels': snapshot.channels.length},
-      );
-    } catch (e) {
-      _log.warning('Failed to apply server info snapshot', fields: {'error': e.toString()});
-    }
   }
 }

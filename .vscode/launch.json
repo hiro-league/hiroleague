@@ -20,6 +20,12 @@
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./scripts/publish-pypi.sh"
       },
       {
+        "name": "Bash startup (Windows Terminal)",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./bash-startup.sh"
+      },
+      {
         "name": "Gateway Start",
         "type": "debugpy",
         "request": "launch",
