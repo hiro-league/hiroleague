@@ -302,6 +302,7 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
             else _html.escape(message)
         )
         raw_extra = row[4] if len(row) >= 5 else ""
+        scope = _extract_scope_fields(raw_extra)
         return {
             "id": f"{source}:{ts_num}",             # deterministic row key for AG Grid selection persistence
             "timestamp": ts_num,                    # epoch float — AG Grid numeric sort key
@@ -320,6 +321,13 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
             # rowClassRules in AG Grid evaluates expression strings using `data.*` variables,
             # so this boolean drives the "log-startup-row" class applied to the full row.
             "is_startup": is_startup,
+            # Structured scope fields parsed from extra — used for icon display and
+            # exact-match filtering without re-parsing the raw extra string.
+            "scope_device_id": scope.get("device_id", ""),
+            "scope_msg_id": scope.get("msg_id", ""),
+            "scope_method": scope.get("method", ""),
+            "scope_text_preview": scope.get("text_preview", ""),
+            "has_msg_id": bool(scope.get("msg_id")),
         }
     return None
 
@@ -426,6 +434,65 @@ def _read_tail_rows(
     return rows[-n:] if len(rows) > n else rows, size
 
 
+# Expand tail window until the oldest row in the batch is before *min_ts* or the whole file is read.
+_TAIL_SINCE_MAX_LINES = 300_000
+
+
+def _read_tail_rows_since(
+    path: Path,
+    source: str,
+    min_ts: float,
+    *,
+    start_n: int,
+) -> tuple[list[dict[str, str]], int]:
+    """Last lines from *path* with ``timestamp >= min_ts`` (initial admin load / time range).
+
+    Starts at *start_n* lines and doubles until the batch crosses *min_ts*, the file is
+    exhausted, or ``_TAIL_SINCE_MAX_LINES`` is reached. Polling offset is always full file size.
+    """
+    n = max(1, start_n)
+    while n <= _TAIL_SINCE_MAX_LINES:
+        rows, size = _read_tail_rows(path, source, n)
+        if not rows:
+            return [], size
+        oldest = float(rows[0]["timestamp"])
+        if oldest < min_ts or len(rows) < n:
+            filtered = [r for r in rows if float(r["timestamp"]) >= min_ts]
+            return filtered, size
+        next_n = min(n * 2, _TAIL_SINCE_MAX_LINES)
+        if next_n == n:
+            filtered = [r for r in rows if float(r["timestamp"]) >= min_ts]
+            return filtered, size
+        n = next_n
+    rows, size = _read_tail_rows(path, source, _TAIL_SINCE_MAX_LINES)
+    filtered = [r for r in rows if float(r["timestamp"]) >= min_ts]
+    return filtered, size
+
+
+def find_last_server_session_start_ts(workspace: str | None) -> float | None:
+    """Epoch timestamp of the latest ``message`` row matching server startup, if any (``server.log`` tail).
+
+    Scans an expanding tail window so the *most recent* startup line wins, not the first seen.
+    """
+    log_dir = _resolve_log_dir(workspace)
+    server_log = log_dir / "server.log"
+    if not server_log.exists():
+        return None
+    last_ts: float | None = None
+    n = 200
+    while n <= _TAIL_SINCE_MAX_LINES:
+        rows, _ = _read_tail_rows(server_log, "server", n)
+        for r in rows:
+            if r.get("is_startup"):
+                ts = float(r["timestamp"])
+                if last_ts is None or ts > last_ts:
+                    last_ts = ts
+        if len(rows) < n:
+            break
+        n = min(n * 2, _TAIL_SINCE_MAX_LINES)
+    return last_ts
+
+
 def _read_rows_from_offset(
     path: Path, source: str, offset: int
 ) -> tuple[list[dict[str, str]], int]:
@@ -461,6 +528,29 @@ def _read_rows_from_offset(
 
 
 # ---------------------------------------------------------------------------
+# Scope field extraction — device_id / msg_id / method from CSV extra
+# ---------------------------------------------------------------------------
+
+# Keys stamped by hiro_commons.log.log_scope that identify a device or message.
+_SCOPE_KEYS = frozenset({"device_id", "msg_id", "method", "text_preview"})
+
+
+def _extract_scope_fields(extra: str) -> dict[str, str]:
+    """Extract device_id, msg_id, method from the CSV extra field by exact key match.
+
+    Scope fields are written by the structlog _inject_scope processor and live
+    alongside other key=value pairs in the extra column.  Returns only the keys
+    that are actually present; absent keys are not included.
+    """
+    out: dict[str, str] = {}
+    for seg in _split_extra_segments(extra):
+        k, v = _segment_to_key_value(seg)
+        if k in _SCOPE_KEYS and v:
+            out[k] = v
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Filtering helpers
 # ---------------------------------------------------------------------------
 
@@ -488,6 +578,34 @@ def _apply_query_filter(rows: list[dict], query: str | None) -> list[dict]:
         for r in rows
         if q in r.get("message", "").lower() or q in r.get("extra", "").lower()
     ]
+
+
+def _apply_scope_filter(
+    rows: list[dict],
+    *,
+    device_id: str | None = None,
+    msg_id: str | None = None,
+    method: str | None = None,
+) -> list[dict]:
+    """Exact-match filter on parsed scope fields (device_id / msg_id / method).
+
+    Filters AND together: a row must satisfy every non-None constraint.
+    Uses the pre-parsed ``scope_*`` fields on each row dict (populated by
+    ``_parse_csv_row``) so no repeated extra-field parsing is needed.
+    """
+    device_id = (device_id or "").strip() or None
+    msg_id = (msg_id or "").strip() or None
+    method = (method or "").strip() or None
+    if not any([device_id, msg_id, method]):
+        return rows
+    result = rows
+    if device_id:
+        result = [r for r in result if r.get("scope_device_id") == device_id]
+    if msg_id:
+        result = [r for r in result if r.get("scope_msg_id") == msg_id]
+    if method:
+        result = [r for r in result if r.get("scope_method") == method]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +660,21 @@ class LogSearchTool(Tool):
             "Full-text search across message and extra fields (case-insensitive)",
             required=False,
         ),
+        "device_id": ToolParam(
+            str,
+            "Exact-match filter on the device_id scope field (UUID of a paired device)",
+            required=False,
+        ),
+        "msg_id": ToolParam(
+            str,
+            "Exact-match filter on the msg_id scope field (routing.id of a user message)",
+            required=False,
+        ),
+        "method": ToolParam(
+            str,
+            "Exact-match filter on the method scope field (e.g. 'channels.list', 'policy.get')",
+            required=False,
+        ),
         "limit": ToolParam(
             int,
             f"Maximum rows to return (default {_DEFAULT_SEARCH_LIMIT})",
@@ -560,12 +693,19 @@ class LogSearchTool(Tool):
         level: str | None = None,
         module: str | None = None,
         query: str | None = None,
+        device_id: str | None = None,
+        msg_id: str | None = None,
+        method: str | None = None,
         limit: int | None = None,
         workspace: str | None = None,
     ) -> LogSearchResult:
         log_dir = _resolve_log_dir(workspace)
         gateway_log_dir = _resolve_gateway_log_dir()
         effective_limit = limit if limit is not None else _DEFAULT_SEARCH_LIMIT
+
+        device_id = (device_id or "").strip() or None
+        msg_id = (msg_id or "").strip() or None
+        method = (method or "").strip() or None
 
         files = _collect_log_files(log_dir, gateway_log_dir, source or "all")
         all_rows: list[dict] = []
@@ -575,6 +715,7 @@ class LogSearchTool(Tool):
         all_rows = _apply_level_filter(all_rows, level)
         all_rows = _apply_module_filter(all_rows, module)
         all_rows = _apply_query_filter(all_rows, query)
+        all_rows = _apply_scope_filter(all_rows, device_id=device_id, msg_id=msg_id, method=method)
         all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
 
         total = len(all_rows)
@@ -615,6 +756,11 @@ class LogTailTool(Tool):
             "Workspace name (default: registry default)",
             required=False,
         ),
+        "min_timestamp": ToolParam(
+            float,
+            "If set (initial load only), only rows with timestamp >= this epoch value are returned.",
+            required=False,
+        ),
     }
 
     def execute(
@@ -623,6 +769,7 @@ class LogTailTool(Tool):
         lines: int | None = None,
         after_offsets: str | None = None,
         workspace: str | None = None,
+        min_timestamp: float | None = None,
     ) -> LogTailResult:
         log_dir = _resolve_log_dir(workspace)
         gateway_log_dir = _resolve_gateway_log_dir()
@@ -645,8 +792,17 @@ class LogTailTool(Tool):
                 # Incremental: only read bytes appended since last poll.
                 rows, offset = _read_rows_from_offset(file_path, src_label, prev_offsets[key])
             else:
-                # Initial: read the last n lines.
-                rows, offset = _read_tail_rows(file_path, src_label, n)
+                # Initial: read the last n lines, or expand until *min_timestamp* when set
+                # (``after_offsets`` empty => full initial load).
+                if min_timestamp is not None and not prev_offsets:
+                    rows, offset = _read_tail_rows_since(
+                        file_path,
+                        src_label,
+                        float(min_timestamp),
+                        start_n=n,
+                    )
+                else:
+                    rows, offset = _read_tail_rows(file_path, src_label, n)
             all_rows.extend(rows)
             new_offsets[key] = offset
 

@@ -140,6 +140,7 @@ class InfraEventHandlers:
         mark_disconnected(self._ctx.workspace_path)
         if self._resource_change_broadcaster is not None:
             await self._resource_change_broadcaster.clear_connected_devices()
+            log.fineinfo("🔌 Recipients cleared — HiroServer · gateway:down")
 
     async def handle_device_connected(self, data: dict[str, Any]) -> None:
         device_id = data.get("device_id")
@@ -147,6 +148,10 @@ class InfraEventHandlers:
             return
         if self._resource_change_broadcaster is not None:
             await self._resource_change_broadcaster.handle_device_connected(device_id)
+            log.fineinfo(
+                f"🔌 Recipient added — {device_id} · transport:device-up",
+                device_id=device_id,
+            )
 
     async def handle_device_disconnected(self, data: dict[str, Any]) -> None:
         device_id = data.get("device_id")
@@ -154,3 +159,7 @@ class InfraEventHandlers:
             return
         if self._resource_change_broadcaster is not None:
             await self._resource_change_broadcaster.handle_device_disconnected(device_id)
+            log.fineinfo(
+                f"🔌 Recipient removed — {device_id} · transport:device-down",
+                device_id=device_id,
+            )

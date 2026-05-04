@@ -89,6 +89,7 @@ __all__ = [
     "set_module_levels",
     "disable",
     "enable",
+    "log_scope",
 ]
 
 _LEVEL_ABBREV = {
@@ -120,6 +121,24 @@ _INDENT_LEVEL: contextvars.ContextVar[int] = contextvars.ContextVar(
     "indent_level", default=0
 )
 _INDENT_UNIT: str = "--"
+
+# ---------------------------------------------------------------------------
+# Structured log scope — propagated automatically across asyncio tasks.
+# Populated by log_scope(); injected into every event_dict by _inject_scope.
+# ---------------------------------------------------------------------------
+_DEVICE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_device_id", default=None
+)
+_MSG_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_msg_id", default=None
+)
+_METHOD: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_method", default=None
+)
+_TEXT_PREVIEW_DEFAULT = object()
+_TEXT_PREVIEW: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_text_preview", default=None
+)
 
 _LEVELS: Mapping[str, int] = {
     name: level for name, level in logging._nameToLevel.items()
@@ -290,6 +309,34 @@ class _StdlibCatchAll(logging.Handler):
             log_method(record.getMessage(), stdlib_logger=record.name)
         except Exception:
             pass
+
+
+def _inject_scope(logger, method_name, event_dict):
+    """Stamp device_id / msg_id / method / text_preview from the active log_scope onto every event.
+
+    If the call site already passed ``device_id``, ``msg_id``, ``method``, or ``text_preview`` as a
+    structured-log kwarg, that key is left unchanged — even when the value is
+    empty or None — so explicit suppression wins over contextvars.  Only keys
+    absent from ``event_dict`` receive non-empty values from the active
+    :func:`log_scope`.
+    """
+    if "device_id" not in event_dict:
+        d = _DEVICE_ID.get()
+        if d:
+            event_dict["device_id"] = d
+    if "msg_id" not in event_dict:
+        m = _MSG_ID.get()
+        if m:
+            event_dict["msg_id"] = m
+    if "method" not in event_dict:
+        mt = _METHOD.get()
+        if mt:
+            event_dict["method"] = mt
+    if "text_preview" not in event_dict:
+        tp = _TEXT_PREVIEW.get()
+        if tp:
+            event_dict["text_preview"] = tp
+    return event_dict
 
 
 def _module_level_filter(logger, method_name, event_dict):
@@ -465,6 +512,7 @@ class Logger:
             structlog.processors.TimeStamper(fmt=None, utc=True, key="ts"),
             structlog.processors.add_log_level,
             _add_module,
+            _inject_scope,
             _module_level_filter,
             _emit_to_file_sinks,
             _strip_exception_for_console,
@@ -678,3 +726,52 @@ set_level = Logger.set_level
 set_module_levels = Logger.set_module_levels
 disable = Logger.disable
 enable = Logger.enable
+
+
+@contextmanager
+def log_scope(
+    *,
+    device_id: str | None = None,
+    msg_id: str | None = None,
+    method: str | None = None,
+    text_preview: str | None | object = _TEXT_PREVIEW_DEFAULT,
+):
+    """Open a structured logging scope for one device / message / request.
+
+    Every log line emitted within this context — including inside asyncio tasks
+    spawned from it — is automatically stamped with the supplied fields in the
+    ``extra`` column.  Explicit values passed at call sites always win over the
+    scope (the processor only injects when the key is absent).
+
+    Fields:
+        device_id  — the UUID of the device this activity is about.
+        msg_id     — routing.id of the user message driving this activity
+                     (set only for message-type messages and ref_id-bearing events).
+        method     — JSON-RPC method name for request/response flows
+                     (e.g. ``"channels.list"``, ``"policy.get"``).
+        text_preview — short human-readable message snippet for log UIs / cross-row anchoring.
+
+    ``text_preview`` is optional: omit the keyword entirely to inherit the parent's
+    value; pass ``None`` or ``''`` explicitly to bind an empty preview for this nest.
+
+    Scopes nest safely; inner scopes shadow outer ones and restore on exit.
+    """
+    tokens: list[tuple] = []
+    try:
+        if device_id is not None:
+            tokens.append((_DEVICE_ID, _DEVICE_ID.set(device_id)))
+        if msg_id is not None:
+            tokens.append((_MSG_ID, _MSG_ID.set(msg_id)))
+        if method is not None:
+            tokens.append((_METHOD, _METHOD.set(method)))
+        if text_preview is not _TEXT_PREVIEW_DEFAULT:
+            tokens.append(
+                (
+                    _TEXT_PREVIEW,
+                    _TEXT_PREVIEW.set((text_preview or "").strip() or None),
+                )
+            )
+        yield
+    finally:
+        for var, token in reversed(tokens):
+            var.reset(token)

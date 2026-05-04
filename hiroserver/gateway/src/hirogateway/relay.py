@@ -29,8 +29,10 @@ from typing import Any, Dict
 import websockets
 from websockets.asyncio.server import ServerConnection
 from hiro_commons.nonces import generate_nonce
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 
+from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
+from hiro_channel_sdk.models import UnifiedMessage
 from hiro_channel_sdk.constants import (
     AUTH_ROLE_DESKTOP,
     AUTH_ROLE_DEVICE,
@@ -99,8 +101,8 @@ def _device_label(device_id: str) -> str:
 def _relay_kind(payload: dict[str, Any]) -> str:
     """Short type summary from a raw UnifiedMessage payload dict.
 
-    Mirrors communication_manager._comm_kind() but operates on the plain dict
-    since the gateway never deserialises payloads into UnifiedMessage objects.
+    Mirrors communication_manager._comm_kind(); relay keeps dict parsing here so we only
+    :func:`~hiro_channel_sdk.models.UnifiedMessage.model_validate` the payload once when computing scope.
     """
     mt = payload.get("message_type") if isinstance(payload, dict) else None
     if mt == "message":
@@ -193,11 +195,18 @@ def _update_name_cache(
         _device_names[sender_id] = name.strip()
 
 
-def _message_id(msg: dict[str, object]) -> str | None:
+def _fallback_message_id_from_envelope(msg: dict[str, object]) -> str | None:
+    """Correlation id when ``payload`` is not a valid ``UnifiedMessage``.
+
+    Avoid using ``routing.id`` for JSON-RPC request/response fallbacks — that id has no semantic
+    link to conversational ``msg_id`` and used to inflate the admin "message scope" chip column.
+    """
     payload = msg.get("payload")
     if not isinstance(payload, dict):
         return None
-    # Try routing.id first (UnifiedMessage), fall back to top-level id.
+    mt = payload.get("message_type")
+    if mt in ("request", "response"):
+        return None
     routing = payload.get("routing")
     if isinstance(routing, dict):
         rid = routing.get("id")
@@ -205,6 +214,26 @@ def _message_id(msg: dict[str, object]) -> str | None:
             return rid
     msg_id = payload.get("id")
     return msg_id if isinstance(msg_id, str) and msg_id else None
+
+
+def _relay_log_scope_fields(
+    msg: dict[str, object],
+    *,
+    is_from_server: bool,
+    sender_id: str,
+    target_id: str | None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Match hirocli relay semantics: same ``device_id`` / ``msg_id`` / ``method`` / ``text_preview`` as ``unified_message_log_scope``."""
+    payload = msg.get("payload")
+    if isinstance(payload, dict):
+        try:
+            um = UnifiedMessage.model_validate(payload)
+            direction = "outbound" if is_from_server else "inbound"
+            return unified_message_log_scope(um, direction=direction)
+        except Exception:
+            pass
+    device_id = sender_id if not is_from_server else (target_id or sender_id)
+    return device_id, _fallback_message_id_from_envelope(msg), None, None
 
 
 def configure_auth(auth_manager: GatewayAuthManager) -> None:
@@ -333,7 +362,6 @@ async def relay_message(sender_id: str, raw: str) -> None:
 
     msg["sender_device_id"] = sender_id
     target_id: str | None = msg.get("target_device_id")
-    msg_id = _message_id(msg)
 
     # Determine direction from sender role.
     sender_role = _device_roles.get(sender_id, "")
@@ -351,53 +379,54 @@ async def relay_message(sender_id: str, raw: str) -> None:
         kind = "?"
         hint = None
 
-    route = "unicast" if target_id else "broadcast"
-    log_extras: dict[str, Any] = {}
-    if hint:
-        log_extras["content_hint"] = hint
-    log_extras["sender_id"] = sender_id
-    log_extras["msg_id"] = msg_id or "-"
-    if target_id:
-        log_extras["target_id"] = target_id
-    log.info(
-        f"{arrow} Message received — {sender_label} · {kind} ({route})",
-        **log_extras,
+    scope_dev, scope_mid, scope_meth, scope_text_preview = _relay_log_scope_fields(
+        msg,
+        is_from_server=is_from_server,
+        sender_id=sender_id,
+        target_id=target_id,
     )
-    out = json.dumps(msg)
 
-    async with _registry_lock:
-        if target_id:
-            target_ws = _registry.get(target_id)
-            if target_ws is None:
-                log.warning(
-                    f"⚠️ Message dropped — target not connected · {kind}",
-                    sender_id=sender_id,
-                    target_id=target_id,
-                    msg_id=msg_id or "-",
+    with log_scope(
+        device_id=scope_dev,
+        msg_id=scope_mid,
+        method=scope_meth,
+        text_preview=scope_text_preview,
+    ):
+        route = "unicast" if target_id else "broadcast"
+        log_extras: dict[str, Any] = {}
+        if hint:
+            log_extras["content_hint"] = hint
+        log.info(
+            f"{arrow} Message received — {sender_label} · {kind} ({route})",
+            **log_extras,
+        )
+        out = json.dumps(msg)
+
+        async with _registry_lock:
+            if target_id:
+                target_ws = _registry.get(target_id)
+                if target_ws is None:
+                    log.warning(
+                        f"⚠️ Message dropped — target not connected · {kind}",
+                    )
+                    return
+                recipients = [(target_id, target_ws)]
+            else:
+                recipients = [(did, ws) for did, ws in _registry.items() if did != sender_id]
+
+        for did, ws in recipients:
+            try:
+                await ws.send(out)
+                recipient_role = _device_roles.get(did, "")
+                recipient_label = _HIRO_SERVER if recipient_role == AUTH_ROLE_DESKTOP else _device_label(did)
+                log.info(
+                    f"{arrow} Message relayed — {sender_label} → {recipient_label} · {kind}",
                 )
-                return
-            recipients = [(target_id, target_ws)]
-        else:
-            recipients = [(did, ws) for did, ws in _registry.items() if did != sender_id]
-
-    for did, ws in recipients:
-        try:
-            await ws.send(out)
-            recipient_role = _device_roles.get(did, "")
-            recipient_label = _HIRO_SERVER if recipient_role == AUTH_ROLE_DESKTOP else _device_label(did)
-            log.info(
-                f"{arrow} Message relayed — {sender_label} → {recipient_label} · {kind}",
-                msg_id=msg_id or "-",
-                sender_id=sender_id,
-                recipient_id=did,
-            )
-        except Exception as exc:
-            log.warning(
-                f"⚠️ Failed to relay — {sender_label} → {_device_label(did)} · {kind}",
-                recipient_id=did,
-                msg_id=msg_id or "-",
-                error=str(exc),
-            )
+            except Exception as exc:
+                log.warning(
+                    f"⚠️ Failed to relay — {sender_label} → {_device_label(did)} · {kind}",
+                    error=str(exc),
+                )
 
 
 async def _authenticate_connection(

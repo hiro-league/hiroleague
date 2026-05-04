@@ -9,7 +9,9 @@ HTTP, Admin UI, and WebSocket requests.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
+
+from hiro_commons.log import Logger
 
 from ..tools.conversation import (
     ConversationChannelListTool,
@@ -17,6 +19,8 @@ from ..tools.conversation import (
 )
 from ..tools.policy import PolicyGetTool
 from .request_handler import RequestContext, RequestHandler
+
+log = Logger.get("REQUEST")
 
 
 async def handle_channels_list(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
@@ -28,6 +32,11 @@ async def handle_channels_list(params: dict[str, Any], ctx: RequestContext) -> d
     if versions is not None:
         # Tier 2: monotonic counter shared with resource.changed (see ResourceVersionStore).
         payload["resource_sync_version"] = versions.get("channels")
+    log.fineinfo(
+        "Resource served — request:channels.list",
+        count=len(result.channels),
+        version=payload.get("resource_sync_version"),
+    )
     return payload
 
 
@@ -41,6 +50,12 @@ async def handle_messages_history(params: dict[str, Any], ctx: RequestContext) -
         after=params.get("after"),
         limit=params.get("limit", 50),
     )
+    log.fineinfo(
+        "Resource served — request:messages.history",
+        channel_id=channel_id,
+        count=len(result.messages),
+        after=params.get("after"),
+    )
     return {"messages": result.messages}
 
 
@@ -53,11 +68,25 @@ async def handle_policy_get(params: dict[str, Any], ctx: RequestContext) -> dict
     if versions is not None:
         # Tier 2: policy resource clock — distinct from snapshot.schema ``version``.
         payload["resource_sync_version"] = versions.get("policy")
+    log.fineinfo(
+        "Resource served — request:policy.get",
+        version=payload.get("resource_sync_version"),
+    )
     return payload
+
+
+_REGISTERED_HANDLERS: Final[tuple[tuple[str, Any], ...]] = (
+    ("channels.list", handle_channels_list),
+    ("messages.history", handle_messages_history),
+    ("policy.get", handle_policy_get),
+)
+
+REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(
+    name for name, _ in _REGISTERED_HANDLERS
+)
 
 
 def register_request_methods(handler: RequestHandler) -> None:
     """Register all data-plane request methods."""
-    handler.register("channels.list", handle_channels_list)
-    handler.register("messages.history", handle_messages_history)
-    handler.register("policy.get", handle_policy_get)
+    for name, fn in _REGISTERED_HANDLERS:
+        handler.register(name, fn)

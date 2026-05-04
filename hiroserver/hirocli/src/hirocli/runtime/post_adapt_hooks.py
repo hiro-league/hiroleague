@@ -66,7 +66,6 @@ class AdapterErrorLogHook:
                         msg,
                         content_type=item.content_type,
                         error=item.metadata["adapter_error"],
-                        msg_id=msg.routing.id,
                     ),
                 )
 
@@ -93,7 +92,7 @@ class AudioTranscriptHook:
             if not transcript.strip():
                 log.warning(
                     f"⚠️ {LOG_IN} Empty audio transcription (silence?) — {comm_peer_label(msg, self._ctx)}",
-                    **comm_extras(msg, msg_id=msg.routing.id),
+                    **comm_extras(msg),
                 )
 
             event = EnvelopeFactory.transcript_event(msg, transcript)
@@ -103,8 +102,6 @@ class AudioTranscriptHook:
                 **comm_extras(
                     event,
                     ref_msg_id=msg.routing.id,
-                    transcript_preview=transcript[:150],
-                    transcript_len=len(transcript),
                 ),
             )
 
@@ -128,7 +125,6 @@ class PersistenceHook:
             log.warning(
                 f"⚠️ {LOG_IN} Message persistence failed (non-fatal) — {comm_peer_label(msg, self._ctx)}",
                 error=str(exc),
-                msg_id=msg.routing.id,
             )
 
 
@@ -147,5 +143,5 @@ class InboundEnqueueHook:
         self._queue.put_nowait(msg)
         log.info(
             f"{LOG_IN} Queued after adaptation — {comm_peer_label(msg, self._ctx)}",
-            **comm_extras(msg, msg_id=msg.routing.id, channel=msg.routing.channel),
+            **comm_extras(msg, channel=msg.routing.channel),
         )

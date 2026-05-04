@@ -117,6 +117,9 @@ class MessageSendNotifier extends _$MessageSendNotifier {
     final audioStorage = ref.read(audioStorageProvider);
     final voiceInputAllowed =
         ref.read(channelCapabilitiesProvider(channelId))?.input.voice ?? true;
+    final requestVoiceReply = ref.read(
+      channelVoiceReplyEnabledProvider(channelId),
+    );
 
     try {
       if (!voiceInputAllowed) {
@@ -164,7 +167,10 @@ class MessageSendNotifier extends _$MessageSendNotifier {
             direction: UnifiedMessageWire.directionOutbound,
             senderId: identity.deviceId,
             timestamp: now.toIso8601String(),
-            metadata: {MetadataWire.channelId: channelId},
+            metadata: {
+              MetadataWire.channelId: channelId,
+              if (requestVoiceReply) MetadataWire.requestVoiceReply: true,
+            },
           ),
           content: [
             ContentItem(

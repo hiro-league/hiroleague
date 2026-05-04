@@ -136,8 +136,12 @@ class ChatChannelSaveRequest(BaseModel):
 
 
 class LogsTailRequest(BaseModel):
+    """POST /logs/tail — live tail snapshot. ``since_seconds_ago`` is ignored when ``last_session_only``."""
+
     after_offsets: dict[str, int] | None = None
     lines: int | None = None
+    last_session_only: bool = False
+    since_seconds_ago: int | None = None
 
 
 class MetricsConfigureRequest(BaseModel):
@@ -929,8 +933,15 @@ async def tail_logs(
             body.after_offsets,
         )
     else:
+        since = None if body.last_session_only else body.since_seconds_ago
         result = await run_in_threadpool(
-            partial(service.tail_initial, workspace_id, lines=body.lines or 500)
+            partial(
+                service.tail_initial,
+                workspace_id,
+                lines=body.lines or 500,
+                last_session_only=body.last_session_only,
+                since_seconds_ago=since,
+            )
         )
     if not result.ok or result.data is None:
         return _api_from_result(result)
@@ -946,14 +957,21 @@ async def tail_logs(
 
 @api_router.get("/logs/search")
 async def search_logs(
-    query: str,
+    query: str | None = None,
+    device_id: str | None = None,
+    msg_id: str | None = None,
+    method: str | None = None,
     x_hiro_workspace: str | None = Header(default=None),
 ) -> dict[str, Any]:
     service = LogsService()
+    workspace_id = _selected_workspace_id(x_hiro_workspace)
     result = await run_in_threadpool(
-        service.search,
-        _selected_workspace_id(x_hiro_workspace),
-        query,
+        service.search_filtered,
+        workspace_id,
+        query=query,
+        device_id=device_id,
+        msg_id=msg_id,
+        method=method,
     )
     if not result.ok:
         return _api_from_result(result)
@@ -962,6 +980,19 @@ async def search_logs(
         "error": None,
         "data": {"rows": _shape_log_rows(result.data or [], service)},
     }
+
+
+@api_router.get("/logs/methods")
+async def discover_log_methods(
+    x_hiro_workspace: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Distinct JSON-RPC ``method`` values seen in the recent log tail (scope popup)."""
+    service = LogsService()
+    result = await run_in_threadpool(
+        service.discover_methods,
+        _selected_workspace_id(x_hiro_workspace),
+    )
+    return _api_from_result(result)
 
 
 @api_router.get("/metrics/tick")

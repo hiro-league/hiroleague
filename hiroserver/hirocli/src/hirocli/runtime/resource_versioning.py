@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import threading
 
+from hiro_commons.log import Logger
+
+log = Logger.get("RESOURCE.CHANGED")
+
 
 class ResourceVersionStore:
     """Thread-safe in-memory counters bumped when ``resource.changed`` is emitted."""
@@ -17,7 +21,8 @@ class ResourceVersionStore:
         with self._lock:
             next_v = self._versions.get(resource, 0) + 1
             self._versions[resource] = next_v
-            return next_v
+        log.debug(f"Version bumped — resource:{resource} · version:{next_v}", version=next_v)
+        return next_v
 
     def get(self, resource: str) -> int:
         """Current version (0 if never bumped)."""

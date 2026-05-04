@@ -26,8 +26,11 @@
   import { cn } from '$lib/utils';
   import { navItems } from './nav';
 
-  let { activePath = 'dashboard', children }: { activePath?: string; children?: Snippet } =
-    $props();
+  let {
+    activePath = 'dashboard',
+    mainClass = '',
+    children
+  }: { activePath?: string; mainClass?: string; children?: Snippet } = $props();
   const prefs = createShellPreferences();
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
@@ -235,7 +238,7 @@
       </div>
     </header>
 
-    <main class="p-4 md:p-6">
+    <main class={cn('p-4 md:p-6', mainClass)}>
       {@render children?.()}
     </main>
   </div>

@@ -13,6 +13,12 @@ Exports the key building blocks every plugin author needs:
 
 from . import constants, log_setup
 from .base import ChannelPlugin
+from .log_scope_fields import (
+    METADATA_LOG_REPLY_TO_MSG_ID,
+    METADATA_LOG_RPC_METHOD,
+    METADATA_LOG_TEXT_PREVIEW,
+    unified_message_log_scope,
+)
 from .models import ChannelInfo, ContentItem, EventPayload, MessageRouting, RpcRequest, RpcResponse, UnifiedMessage
 from .transport import PluginTransport
 
@@ -20,6 +26,10 @@ __version__ = "0.1.0"
 __all__ = [
     "log_setup",
     "constants",
+    "METADATA_LOG_REPLY_TO_MSG_ID",
+    "METADATA_LOG_RPC_METHOD",
+    "METADATA_LOG_TEXT_PREVIEW",
+    "unified_message_log_scope",
     "ChannelPlugin",
     "ChannelInfo",
     "ContentItem",

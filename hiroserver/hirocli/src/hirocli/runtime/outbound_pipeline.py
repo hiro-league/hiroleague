@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 
 from .comm_log import LOG_OUT, comm_extras, comm_kind, comm_peer_label
 
@@ -49,42 +50,63 @@ class OutboundPipeline:
 
     async def enqueue(self, msg: UnifiedMessage) -> None:
         """Place a message on the outbound queue. Returns once enqueued."""
-        await self.queue.put(msg)
-        log.info(
-            f"{LOG_OUT} Queued — {self._routing_tag(msg)}",
-            **comm_extras(
-                msg,
-                msg_id=msg.routing.id,
-                channel=msg.routing.channel,
-                items=len(msg.content),
-            ),
+        _out_device_id, _out_msg_id, _out_method, _out_text_preview = unified_message_log_scope(
+            msg,
+            direction="outbound",
         )
+        with log_scope(
+            device_id=_out_device_id,
+            msg_id=_out_msg_id,
+            method=_out_method,
+            text_preview=_out_text_preview,
+        ):
+            await self.queue.put(msg)
+            log.info(
+                f"{LOG_OUT} Queued — {self._routing_tag(msg)}",
+                **comm_extras(
+                    msg,
+                    channel=msg.routing.channel,
+                    items=len(msg.content),
+                ),
+            )
 
     async def run(self) -> None:
         """Continuously drain the queue and dispatch to the sink."""
         while True:
             msg = await self.queue.get()
             try:
-                try:
-                    _check_permissions(msg)
-                except PermissionError as exc:
-                    log.warning(
-                        f"⚠️ {LOG_OUT} Blocked by permission — {self._routing_tag(msg)}",
-                        **comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
-                    )
-                    continue
+                # Re-open scope here: the queue hop breaks the asyncio task context.
+                # Outbound direction: device_id is the recipient.
+                # Events with ref_id (transcript, voiced) carry the original msg_id.
+                _out_device_id, _out_msg_id, _out_method, _out_text_preview = unified_message_log_scope(
+                    msg,
+                    direction="outbound",
+                )
+                with log_scope(
+                    device_id=_out_device_id,
+                    msg_id=_out_msg_id,
+                    method=_out_method,
+                    text_preview=_out_text_preview,
+                ):
+                    try:
+                        _check_permissions(msg)
+                    except PermissionError as exc:
+                        log.warning(
+                            f"⚠️ {LOG_OUT} Blocked by permission — {self._routing_tag(msg)}",
+                            **comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
+                        )
+                        continue
 
-                log.info(
-                    f"{LOG_OUT} Dispatching — {self._routing_tag(msg)}",
-                    **comm_extras(
-                        msg,
-                        msg_id=msg.routing.id,
-                        channel=msg.routing.channel,
-                        items=len(msg.content),
-                    ),
-                )
-                await self._sink.send_to_channel(
-                    msg.routing.channel, msg.model_dump(mode="json")
-                )
+                    log.info(
+                        f"{LOG_OUT} Dispatching — {self._routing_tag(msg)}",
+                        **comm_extras(
+                            msg,
+                            channel=msg.routing.channel,
+                            items=len(msg.content),
+                        ),
+                    )
+                    await self._sink.send_to_channel(
+                        msg.routing.channel, msg.model_dump(mode="json")
+                    )
             finally:
                 self.queue.task_done()

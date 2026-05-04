@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import websockets
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 from hiro_commons.process import (
     is_running,
     kill_process,
@@ -33,6 +33,7 @@ from hiro_commons.process import (
 
 from hiro_channel_sdk.constants import (
     JSONRPC_ERROR_METHOD_NOT_FOUND,
+    MESSAGE_TYPE_MESSAGE,
     METHOD_CONFIGURE,
     METHOD_EVENT,
     METHOD_RECEIVE,
@@ -45,13 +46,14 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.network import DEFAULT_LOCALHOST
 from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
+from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
 
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
 from .. import rpc_helpers as rpc
 
 # Shared comm-log helpers (arrows, kind, content_hint) — same vocabulary as CommunicationManager.
-from .comm_log import LOG_IN, LOG_OUT, comm_extras, comm_kind
+from .comm_log import LOG_IN, LOG_OUT, comm_extras, comm_kind, routing_requests_voice_reply
 
 if TYPE_CHECKING:
     from .server_context import ServerContext
@@ -283,14 +285,26 @@ class ChannelManager:
                         try:
                             um = UnifiedMessage.model_validate(params)
                             kind = comm_kind(um)
-                            log.info(
-                                f"{LOG_IN} Received — {device} · {kind}",
-                                **comm_extras(
-                                    um,
-                                    channel=channel_name,
-                                    msg_id=um.routing.id,
-                                ),
+                            # Surface per-message voice-reply intent in the log message (not only extras) for text and audio sends.
+                            vr_suffix = ""
+                            vr_extras: dict[str, Any] = {}
+                            if um.message_type == MESSAGE_TYPE_MESSAGE:
+                                vr_on = routing_requests_voice_reply(um.routing.metadata)
+                                vr_suffix = " · voice_reply=yes" if vr_on else " · voice_reply=no"
+                                vr_extras["voice_reply_requested"] = vr_on
+                            sd, smid, smeth, stpv = unified_message_log_scope(
+                                um,
+                                direction="inbound",
                             )
+                            with log_scope(device_id=sd, msg_id=smid, method=smeth, text_preview=stpv):
+                                log.info(
+                                    f"{LOG_IN} Received — {device} · {kind}{vr_suffix}",
+                                    **comm_extras(
+                                        um,
+                                        channel=channel_name,
+                                        **vr_extras,
+                                    ),
+                                )
                         except Exception:
                             mt = params.get("message_type", "?")
                             log.info(
@@ -409,10 +423,12 @@ class ChannelManager:
         device = self._device_label(recipient_id) if recipient_id else "unknown"
         try:
             um = UnifiedMessage.model_validate(message)
-            log.info(
-                f"{LOG_OUT} Sent — ({channel_name}) · {device} · {comm_kind(um)}",
-                **comm_extras(um, msg_id=msg_id),
-            )
+            sd, smid, smeth, stpv = unified_message_log_scope(um, direction="outbound")
+            with log_scope(device_id=sd, msg_id=smid, method=smeth, text_preview=stpv):
+                log.info(
+                    f"{LOG_OUT} Sent — ({channel_name}) · {device} · {comm_kind(um)}",
+                    **comm_extras(um),
+                )
         except Exception:
             log.info(
                 f"{LOG_OUT} Sent — ({channel_name}) · {device}",

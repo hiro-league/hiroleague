@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,12 +11,17 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from hirocli.admin.shared.result import Result
+from hirocli.runtime.request_methods import REGISTERED_REQUEST_METHOD_NAMES
 from hirocli.tools.logs import (
     LogSearchTool,
     LogTailTool,
+    find_last_server_session_start_ts,
+    _collect_log_files,
     _file_has_content,
+    _read_tail_rows,
     _resolve_gateway_instance_path,
     _resolve_gateway_log_dir,
+    _resolve_log_dir,
     _segment_to_key_value,
     _split_extra_segments,
     pretty_print_log_value,
@@ -105,14 +111,29 @@ class LogsService:
         workspace: str | None,
         *,
         lines: int = INITIAL_TAIL_LINES,
+        last_session_only: bool = False,
+        since_seconds_ago: int | None = None,
     ) -> Result[LogTailSnapshot]:
-        """Load the last *lines* rows from all sources (no prior offsets)."""
+        """Load the last *lines* rows from all sources (no prior offsets).
+
+        When *last_session_only* is True, rows are limited to timestamps at/after the latest
+        ``🚀 Hiro Server starting`` line in ``server.log`` (if that line exists).
+        Otherwise, if *since_seconds_ago* is set, rows are limited to the last that many seconds.
+        """
         try:
-            result = LogTailTool().execute(
+            min_ts: float | None = None
+            if last_session_only:
+                min_ts = find_last_server_session_start_ts(workspace)
+            elif since_seconds_ago is not None:
+                min_ts = time.time() - float(since_seconds_ago)
+            exec_kwargs: dict[str, Any] = dict(
                 source="all",
                 lines=lines,
                 workspace=workspace,
             )
+            if min_ts is not None:
+                exec_kwargs["min_timestamp"] = min_ts
+            result = LogTailTool().execute(**exec_kwargs)
             return Result.success(
                 LogTailSnapshot(rows=list(result.rows), file_offsets=dict(result.file_offsets))
             )
@@ -157,5 +178,91 @@ class LogsService:
                 workspace=workspace,
             )
             return Result.success(list(result.rows))
+        except Exception as exc:
+            return Result.failure(str(exc))
+
+    def search_filtered(
+        self,
+        workspace: str | None,
+        *,
+        query: str | None = None,
+        device_id: str | None = None,
+        msg_id: str | None = None,
+        method: str | None = None,
+    ) -> Result[list[dict[str, Any]]]:
+        """Full-text search combined with structured scope filters (AND).
+
+        At least one of ``query`` (non-empty) or a scope field must be provided.
+        """
+        q = (query or "").strip()
+        did = (device_id or "").strip() or None
+        mid = (msg_id or "").strip() or None
+        meth = (method or "").strip() or None
+        if not q and not any([did, mid, meth]):
+            return Result.failure(
+                "Provide a non-empty search query or at least one scope filter "
+                "(device_id, msg_id, method)."
+            )
+        try:
+            result = LogSearchTool().execute(
+                source="all",
+                query=q or None,
+                device_id=did,
+                msg_id=mid,
+                method=meth,
+                workspace=workspace,
+            )
+            return Result.success(list(result.rows))
+        except Exception as exc:
+            return Result.failure(str(exc))
+
+    def filter_by_scope(
+        self,
+        workspace: str | None,
+        *,
+        device_id: str | None = None,
+        msg_id: str | None = None,
+        method: str | None = None,
+    ) -> Result[list[dict[str, Any]]]:
+        """Exact-match filter by structured scope fields (device / message / request type).
+
+        Filters AND together: pass only the fields you want to constrain.
+        Results are sorted by timestamp and cover all log sources.
+        """
+        did = (device_id or "").strip() or None
+        mid = (msg_id or "").strip() or None
+        meth = (method or "").strip() or None
+        if not any([did, mid, meth]):
+            return Result.failure("At least one scope filter (device_id, msg_id, method) is required.")
+        try:
+            result = LogSearchTool().execute(
+                source="all",
+                device_id=did,
+                msg_id=mid,
+                method=meth,
+                workspace=workspace,
+            )
+            return Result.success(list(result.rows))
+        except Exception as exc:
+            return Result.failure(str(exc))
+
+    def discover_methods(self, workspace: str | None) -> Result[list[str]]:
+        """Return RPC ``method`` names for the admin dropdown.
+
+        Merges the server's registered JSON-RPC methods with distinct ``scope_method``
+        values from the recent log tail so unknown/custom methods still appear.
+        """
+        try:
+            log_dir = _resolve_log_dir(workspace)
+            gateway_log_dir = _resolve_gateway_log_dir()
+            files = _collect_log_files(log_dir, gateway_log_dir, "all")
+            methods: set[str] = set(REGISTERED_REQUEST_METHOD_NAMES)
+            for file_path, src_label in files:
+                rows, _ = _read_tail_rows(file_path, src_label, INITIAL_TAIL_LINES)
+                for row in rows:
+                    m = row.get("scope_method", "")
+                    if isinstance(m, str) and m.strip():
+                        methods.add(m.strip())
+            return Result.success(sorted(methods))
         except Exception as exc:
             return Result.failure(str(exc))

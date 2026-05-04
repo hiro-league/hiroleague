@@ -67,6 +67,15 @@ def comm_kind(msg: UnifiedMessage) -> str:
     return str(mt)
 
 
+def routing_requests_voice_reply(metadata: dict[str, Any] | None) -> bool:
+    """True when routing.metadata.request_voice_reply is exactly True (per-message client ask for TTS).
+
+    Matches AgentManager TTS scheduling semantics; used for CHANNEL_MAN inbound lines and tooling.
+    """
+
+    return (metadata or {}).get("request_voice_reply") is True
+
+
 def _snippet_text(body: str, max_len: int = _TEXT_SNIPPET_MAX) -> str:
     t = " ".join(body.split())
     if len(t) <= max_len:

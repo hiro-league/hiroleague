@@ -14,10 +14,12 @@ The router never blocks on adaptation — even if transcription takes seconds,
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING
 
+from hiro_channel_sdk.log_scope_fields import unified_message_text_preview
 from hiro_channel_sdk.models import UnifiedMessage
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 
 from .comm_log import LOG_IN, comm_extras, comm_peer_label
 from .envelope_factory import EnvelopeFactory
@@ -58,7 +60,6 @@ class MessageFlow:
             f"{LOG_IN} Message acked, adapter spawned — {comm_peer_label(msg, self._ctx)}",
             **comm_extras(
                 msg,
-                msg_id=msg.routing.id,
                 channel=msg.routing.channel,
                 content_types=[item.content_type for item in msg.content],
             ),
@@ -70,12 +71,21 @@ class MessageFlow:
             if self._pipeline is not None:
                 msg = await self._pipeline.process(msg)
 
-            for hook in self._hooks:
-                await hook.run(msg, self._emit)
+            # After STT/description enrichment, widen log_scope ``text_preview`` so post-adapt hooks
+            # and downstream logs carry the snippet (device/msg/method stay inherited from inbound scope).
+            _post_preview = unified_message_text_preview(msg)
+            _adapt_ctx = (
+                log_scope(text_preview=_post_preview)
+                if _post_preview
+                else contextlib.nullcontext()
+            )
+            with _adapt_ctx:
+                for hook in self._hooks:
+                    await hook.run(msg, self._emit)
         except Exception as exc:
             log.error(
                 f"❌ {LOG_IN} Adapter pipeline failed — {comm_peer_label(msg, self._ctx)}",
-                **comm_extras(msg, msg_id=msg.routing.id, error=str(exc)),
+                **comm_extras(msg, error=str(exc)),
                 exc_info=True,
             )
             await self._emit(

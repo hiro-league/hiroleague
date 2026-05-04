@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from hiro_commons.log import Logger
+
+log = Logger.get("RESOURCE.CHANGED")
+
 
 class DeviceTargeting:
     """Returns recipients for outbound hint events.
@@ -20,4 +24,11 @@ class DeviceTargeting:
     ) -> list[str]:
         """`_scope` reserved for multi-user fan-out; Tier 1 ignores it."""
         _ = _scope
-        return sorted(connected)
+        selected = sorted(connected)
+        log.debug(
+            "Targeting resolved",
+            connected=len(connected),
+            selected=len(selected),
+            scope=_scope,
+        )
+        return selected

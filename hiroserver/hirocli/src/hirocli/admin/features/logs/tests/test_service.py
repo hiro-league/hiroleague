@@ -86,6 +86,40 @@ def test_tail_initial_success() -> None:
     call_kw = T.return_value.execute.call_args.kwargs
     assert call_kw.get("source") == "all"
     assert call_kw.get("workspace") == "ws1"
+    assert call_kw.get("min_timestamp") is None
+
+
+def test_tail_initial_since_seconds_passes_min_timestamp() -> None:
+    mock_tail = MagicMock()
+    mock_tail.rows = []
+    mock_tail.file_offsets = {}
+    with (
+        patch("hirocli.admin.features.logs.service.LogTailTool") as T,
+        patch("hirocli.admin.features.logs.service.time.time", return_value=10_000.0),
+    ):
+        T.return_value.execute.return_value = mock_tail
+        r = LogsService().tail_initial("ws1", since_seconds_ago=100, last_session_only=False)
+    assert r.ok
+    kw = T.return_value.execute.call_args.kwargs
+    assert kw.get("min_timestamp") == 9_900.0
+
+
+def test_tail_initial_last_session_only_uses_startup_ts() -> None:
+    mock_tail = MagicMock()
+    mock_tail.rows = []
+    mock_tail.file_offsets = {}
+    with (
+        patch("hirocli.admin.features.logs.service.LogTailTool") as T,
+        patch(
+            "hirocli.admin.features.logs.service.find_last_server_session_start_ts",
+            return_value=123.45,
+        ),
+    ):
+        T.return_value.execute.return_value = mock_tail
+        r = LogsService().tail_initial("ws1", last_session_only=True, since_seconds_ago=9999)
+    assert r.ok
+    kw = T.return_value.execute.call_args.kwargs
+    assert kw.get("min_timestamp") == 123.45
 
 
 def test_tail_initial_tool_error() -> None:
@@ -124,6 +158,39 @@ def test_search_tool_error() -> None:
     with patch("hirocli.admin.features.logs.service.LogSearchTool") as T:
         T.return_value.execute.side_effect = ValueError("bad")
         r = LogsService().search("ws", "q")
+    assert not r.ok
+
+
+def test_search_filtered_scope_only() -> None:
+    mock_res = MagicMock()
+    mock_res.rows = [{"scope_method": "channels.list"}]
+    with patch("hirocli.admin.features.logs.service.LogSearchTool") as T:
+        T.return_value.execute.return_value = mock_res
+        r = LogsService().search_filtered("ws1", method="channels.list")
+    assert r.ok and r.data == [{"scope_method": "channels.list"}]
+    kw = T.return_value.execute.call_args.kwargs
+    assert kw.get("query") is None
+    assert kw.get("method") == "channels.list"
+
+
+def test_search_filtered_query_and_scope() -> None:
+    mock_res = MagicMock()
+    mock_res.rows = [{"message": "hit"}]
+    with patch("hirocli.admin.features.logs.service.LogSearchTool") as T:
+        T.return_value.execute.return_value = mock_res
+        r = LogsService().search_filtered(
+            "ws1",
+            query="hello",
+            device_id="dev-1",
+        )
+    assert r.ok
+    kw = T.return_value.execute.call_args.kwargs
+    assert kw.get("query") == "hello"
+    assert kw.get("device_id") == "dev-1"
+
+
+def test_search_filtered_all_empty() -> None:
+    r = LogsService().search_filtered("ws")
     assert not r.ok
 
 

@@ -23,12 +23,27 @@ import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
+from hiro_channel_sdk.log_scope_fields import (
+    METADATA_LOG_REPLY_TO_MSG_ID,
+    METADATA_LOG_TEXT_PREVIEW,
+    log_preview_snippet,
+    unified_message_log_scope,
+    unified_message_text_preview,
+)
+# UnifiedMessage for TTS follow-up needs SDK literals; omitting them raised NameError after successful synthesis.
 from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_EVENT
 from hiro_channel_sdk.models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 
 # Reuse comm-log helpers so AGENT lines share peer, kind, and content_hint ordering with COMM_MAN.
-from .comm_log import LOG_IN, LOG_OUT, comm_extras, comm_kind, comm_peer_label
+from .comm_log import (
+    LOG_IN,
+    LOG_OUT,
+    comm_extras,
+    comm_kind,
+    comm_peer_label,
+    routing_requests_voice_reply,
+)
 
 if TYPE_CHECKING:
     from ..services.tts.service import TTSService
@@ -84,22 +99,23 @@ def _normalize_reply_content(content: Any) -> str:
 def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
     if not isinstance(body, str):
         raise TypeError(f"reply body must be str, got {type(body).__name__}")
-    # Preserve routing metadata (e.g. device_name injected by ChannelManager) for logs and downstream.
+    # Correlate outbound replies with the inbound user message for log_scope / admin filters.
+    meta = dict(inbound.routing.metadata or {})
+    meta[METADATA_LOG_REPLY_TO_MSG_ID] = inbound.routing.id
+    # Logs UI should anchor correlated lines on the user's words, not on the outbound agent reply body.
+    _user_pv = unified_message_text_preview(inbound)
+    if _user_pv:
+        meta[METADATA_LOG_TEXT_PREVIEW] = _user_pv
     return UnifiedMessage(
         routing=MessageRouting(
             channel=inbound.routing.channel,
             direction="outbound",
             sender_id="server",
             recipient_id=inbound.routing.sender_id,
-            metadata=dict(inbound.routing.metadata or {}),
+            metadata=meta,
         ),
         content=[ContentItem(content_type="text", body=body)],
     )
-
-
-def _metadata_requests_voice_reply(metadata: dict[str, Any] | None) -> bool:
-    value = (metadata or {}).get("request_voice_reply")
-    return value is True
 
 
 class AgentManager:
@@ -393,6 +409,13 @@ class AgentManager:
             )
 
             audio_b64 = base64.b64encode(result.audio_bytes).decode()
+            _voiced_meta = dict(inbound.routing.metadata or {})
+            _voiced_meta[METADATA_LOG_REPLY_TO_MSG_ID] = inbound.routing.id
+            # Same anchoring convention as `_make_reply`: prefer the user's utterance snippet.
+            _user_pv_voice = unified_message_text_preview(inbound)
+            _voiced_meta[METADATA_LOG_TEXT_PREVIEW] = (
+                _user_pv_voice if _user_pv_voice else log_preview_snippet(text)
+            )
             voiced_event = UnifiedMessage(
                 message_type=MESSAGE_TYPE_EVENT,
                 routing=MessageRouting(
@@ -400,7 +423,7 @@ class AgentManager:
                     direction="outbound",
                     sender_id="server",
                     recipient_id=inbound.routing.sender_id,
-                    metadata=inbound.routing.metadata,
+                    metadata=_voiced_meta,
                 ),
                 event=EventPayload(
                     type=EVENT_TYPE_MESSAGE_VOICED,
@@ -538,8 +561,10 @@ class AgentManager:
             await self._comm.enqueue_outbound(reply)
             return
 
+        vr_on = routing_requests_voice_reply(msg.routing.metadata)
+        vr_suffix = " · voice_reply=yes" if vr_on else " · voice_reply=no"
         log.info(
-            f"{LOG_IN} Agent processing — {peer} · {comm_kind(msg)}",
+            f"{LOG_IN} Agent processing — {peer} · {comm_kind(msg)}{vr_suffix}",
             **comm_extras(
                 msg,
                 thread_id=thread_id,
@@ -547,6 +572,7 @@ class AgentManager:
                 model_id=llm_entry.model_id,
                 text_preview=text_body[:200],
                 body_length=len(text_body),
+                voice_reply_requested=vr_on,
             ),
         )
         try:
@@ -662,7 +688,7 @@ class AgentManager:
         # TTS post-processing: fire-and-forget so it never blocks the next message.
         # Text reply is already delivered — if TTS fails, the user still has the text.
         try:
-            voice_requested = _metadata_requests_voice_reply(msg.routing.metadata)
+            voice_requested = routing_requests_voice_reply(msg.routing.metadata)
             voice_allowed = self._voice_reply_allowed(prefs, ch)
             if voice_requested and voice_allowed:
                 asyncio.create_task(
@@ -771,7 +797,19 @@ class AgentManager:
             while True:
                 msg: UnifiedMessage = await self._comm.inbound_queue.get()
                 try:
-                    await self._process(msg)
+                    # Re-open scope here: the queue hop breaks the asyncio task context
+                    # set by InboundPipeline, so the agent and TTS tasks need their own.
+                    _agent_dev, _agent_msg_id, _agent_method, _agent_text_preview = unified_message_log_scope(
+                        msg,
+                        direction="inbound",
+                    )
+                    with log_scope(
+                        device_id=_agent_dev,
+                        msg_id=_agent_msg_id,
+                        method=_agent_method,
+                        text_preview=_agent_text_preview,
+                    ):
+                        await self._process(msg)
                 except Exception as exc:
                     # Keep the worker alive so one malformed provider response cannot block later messages.
                     log.error(

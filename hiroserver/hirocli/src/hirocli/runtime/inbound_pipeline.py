@@ -22,8 +22,9 @@ from hiro_channel_sdk.constants import (
     MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_REQUEST,
 )
+from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 
 from .comm_log import LOG_IN, comm_extras, comm_kind, comm_peer_label
 from .envelope_factory import EnvelopeFactory
@@ -86,32 +87,43 @@ class InboundPipeline:
             )
             return
 
-        match msg.message_type:
-            case _ if msg.message_type == MESSAGE_TYPE_MESSAGE:
-                await self._message_flow.handle(msg)
+        _scope_device_id, _scope_msg_id, _scope_method, _scope_text_preview = unified_message_log_scope(
+            msg,
+            direction="inbound",
+        )
 
-            case _ if msg.message_type == MESSAGE_TYPE_REQUEST:
-                await self._dispatch_request(msg)
+        with log_scope(
+            device_id=_scope_device_id,
+            msg_id=_scope_msg_id,
+            method=_scope_method,
+            text_preview=_scope_text_preview,
+        ):
+            match msg.message_type:
+                case _ if msg.message_type == MESSAGE_TYPE_MESSAGE:
+                    await self._message_flow.handle(msg)
 
-            case _ if msg.message_type == MESSAGE_TYPE_EVENT:
-                await self._dispatch_event(msg)
+                case _ if msg.message_type == MESSAGE_TYPE_REQUEST:
+                    await self._dispatch_request(msg)
 
-            case _:
-                log.warning(
-                    f"⚠️ {LOG_IN} Unknown message_type, dropping — {self._routing_tag(msg)}",
-                    **comm_extras(msg, message_type=msg.message_type, msg_id=msg.routing.id),
-                )
-                await self._emit(
-                    EnvelopeFactory.routing_error_response(
-                        msg, f"Unknown message_type: {msg.message_type}"
+                case _ if msg.message_type == MESSAGE_TYPE_EVENT:
+                    await self._dispatch_event(msg)
+
+                case _:
+                    log.warning(
+                        f"⚠️ {LOG_IN} Unknown message_type, dropping — {self._routing_tag(msg)}",
+                        **comm_extras(msg, message_type=msg.message_type),
                     )
-                )
+                    await self._emit(
+                        EnvelopeFactory.routing_error_response(
+                            msg, f"Unknown message_type: {msg.message_type}"
+                        )
+                    )
 
     async def _dispatch_request(self, msg: UnifiedMessage) -> None:
         if self._request_handler is None:
             log.warning(
                 f"⚠️ {LOG_IN} No RequestHandler, dropping — {self._routing_tag(msg)}",
-                **comm_extras(msg, msg_id=msg.routing.id),
+                **comm_extras(msg),
             )
             return
 
@@ -136,7 +148,6 @@ class InboundPipeline:
         if self._event_handler is None:
             log.info(
                 f"{LOG_IN} Event dropped (no EventHandler) — {self._routing_tag(msg)}",
-                msg_id=msg.routing.id,
                 event_type=msg.event.type if msg.event else None,
             )
             return

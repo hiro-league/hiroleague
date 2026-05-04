@@ -17,9 +17,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hiro_commons.keys import load_private_key_pem
 from hiro_commons.signing import sign_nonce
 from websockets.exceptions import ConnectionClosed
-from hiro_commons.log import Logger
+from hiro_commons.log import Logger, log_scope
 
-from hiro_channel_sdk import ChannelInfo, ChannelPlugin, UnifiedMessage
+from hiro_channel_sdk import ChannelInfo, ChannelPlugin, UnifiedMessage, unified_message_log_scope
 from hiro_channel_sdk.constants import AUTH_ROLE_DESKTOP, RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.network import DEFAULT_GATEWAY_PORT
@@ -104,12 +104,12 @@ class DevicesChannel(ChannelPlugin):
         }
         if message.routing.recipient_id:
             out["target_device_id"] = message.routing.recipient_id
-        log.info(
-            "📤 Forwarding message to gateway",
-            msg_id=message.routing.id,
-            recipient=message.routing.recipient_id or "*",
-            items=len(message.content),
-        )
+        _sd, _smid, _smeth, _stpv = unified_message_log_scope(message, direction="outbound")
+        with log_scope(device_id=_sd, msg_id=_smid, method=_smeth, text_preview=_stpv):
+            log.info(
+                "📤 Forwarding message to gateway",
+                items=len(message.content),
+            )
         await self._gateway_ws.send(json.dumps(out))
 
     async def _run_gateway_loop(self) -> None:
@@ -243,13 +243,17 @@ class DevicesChannel(ChannelPlugin):
 
         unified.routing.channel = MANDATORY_CHANNEL_NAME
         unified.routing.direction = "inbound"
-        log.info(
-            "📥 Inbound message from gateway",
-            msg_id=unified.routing.id,
-            sender=unified.routing.sender_id,
-            items=len(unified.content),
-        )
-        await self.emit(unified)
+        # Scope matches server inbound rules (message / event.ref_id / RPC method only —
+        # not routing.id for unrelated shapes).
+        _sd, _smid, _smeth, _stpv = unified_message_log_scope(unified, direction="inbound")
+        with log_scope(device_id=_sd, msg_id=_smid, method=_smeth, text_preview=_stpv):
+            log.info(
+                "📥 Inbound message from gateway",
+                msg_id=unified.routing.id,
+                sender=unified.routing.sender_id,
+                items=len(unified.content),
+            )
+            await self.emit(unified)
 
     async def _handle_pairing_request(self, msg: dict) -> None:
         request_id = msg.get("request_id")

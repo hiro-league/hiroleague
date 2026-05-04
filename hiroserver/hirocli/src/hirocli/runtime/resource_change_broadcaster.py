@@ -79,22 +79,33 @@ class ResourceChangeBroadcaster:
         del prefs
         if workspace_path != self._workspace_path:
             return
+        log.debug("Domain signal — domain:preferences_saved")
         self._schedule_for_signal("preferences_saved")
 
     def _on_character_changed(self, workspace_path: Path, character_id: str) -> None:
         del character_id
         if workspace_path != self._workspace_path:
             return
+        log.debug("Domain signal — domain:character_changed")
         self._schedule_for_signal("character_changed")
 
     def _on_channel_changed(self, workspace_path: Path, channel_id: int) -> None:
         del channel_id
         if workspace_path != self._workspace_path:
             return
+        log.debug("Domain signal — domain:channel_changed")
         self._schedule_for_signal("channel_changed")
 
     def _schedule_for_signal(self, signal: str) -> None:
-        for resource in self._registry.resources_for_signal(signal):
+        resources = list(self._registry.resources_for_signal(signal))
+        if not resources:
+            log.debug("Signal ignored (no resources) — domain:{signal}", signal=signal)
+            return
+        log.fineinfo(
+            f"Resources marked dirty — domain:{signal} · resources:{','.join(resources)}",
+            count=len(resources),
+        )
+        for resource in resources:
             self._schedule_emit(resource, signal)
 
     def _schedule_emit(self, resource: str, reason: str) -> None:
@@ -109,6 +120,10 @@ class ResourceChangeBroadcaster:
             # already inside `_flush`, the old task is discarded — acceptable because the
             # next scheduled emit uses a fresh bump + reason after the sleep.
             old.cancel()
+            log.debug(
+                f"Debounce coalesced — resource:{resource}",
+                reason=reason,
+            )
 
         task = loop.create_task(
             self._debounced_emit(resource, reason),
@@ -122,6 +137,13 @@ class ResourceChangeBroadcaster:
             await self._flush(resource, reason)
         except asyncio.CancelledError:
             raise
+        except Exception as exc:
+            log.error(
+                f"❌ Resource hint failed — resource:{resource}",
+                reason=reason,
+                error=str(exc),
+                exc_info=True,
+            )
         finally:
             existing = self._debounce_tasks.get(resource)
             if existing is asyncio.current_task():
@@ -130,6 +152,10 @@ class ResourceChangeBroadcaster:
     async def _flush(self, resource: str, reason: str) -> None:
         recipients = self._targeting.device_ids_for_connected(self._connected_device_ids)
         if not recipients:
+            log.debug(
+                f"Hint skipped (no devices) — resource:{resource}",
+                reason=reason,
+            )
             return
 
         sync_version = self._version_store.bump(resource)
