@@ -14,6 +14,8 @@ PROVIDERS_FILENAME: str = "providers.json"
 DATA_DIR: str = "data"
 DATA_DB_FILENAME: str = "data.db"
 MEDIA_DIR: str = "media"
+# Conversation channel thumbnails (workspace `data/channel_photos/<id>/photo_512.webp`)
+CHANNEL_PHOTOS_DIR: str = "channel_photos"
 
 # Character entities (workspace-relative `characters/<id>/`; see Hiro domain/character.py)
 CHARACTERS_DIR: str = "characters"

@@ -64,6 +64,7 @@ def test_delete_channel_removes_messages(tmp_path) -> None:
     ensure_data_db(tmp_path)
     uid = _default_user_id(tmp_path)
     ch = create_channel(tmp_path, name="Zap", character_id="a", user_id=uid)
+    assert ch.id != 1, "fixture expects seeded General keeps id 1"
     _insert_message(tmp_path, ch.id, external_id="ext-1")
     _insert_message(tmp_path, ch.id, external_id="ext-2")
     delete_channel(tmp_path, ch.id)
@@ -84,6 +85,25 @@ def test_sync_list_limit_none_returns_all(tmp_path) -> None:
     assert len(limited) == 50
     all_rows = _sync_list(tmp_path, ch.id, limit=None)
     assert len(all_rows) == 60
+
+
+def test_delete_primary_lowest_channel_id_raises(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    with pytest.raises(ValueError, match="primary"):
+        delete_channel(tmp_path, 1)
+
+
+def test_create_channel_records_description(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch = create_channel(
+        tmp_path,
+        name="Desk",
+        character_id="agent-a",
+        user_id=uid,
+        description=" Team status ",
+    )
+    assert ch.description == "Team status"
 
 
 def _default_user_id(workspace_path) -> int:

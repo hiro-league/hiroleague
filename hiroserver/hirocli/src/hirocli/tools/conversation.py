@@ -130,21 +130,21 @@ class ConversationChannelGetTool(Tool):
 
 class ConversationChannelCreateTool(Tool):
     name = "conversation_channel_create"
-    description = "Create a conversation channel for a specific user and character"
+    description = (
+        "Create a direct conversation channel for the workspace owner user and selected character slug"
+    )
     params = {
         "channel_name": ToolParam(str, "Channel name"),
-        "user_id": ToolParam(int, "Owning user id"),
         "character_id": ToolParam(str, "Character id (slug) for this conversation"),
-        "channel_type": ToolParam(str, "Channel type (default: direct)", required=False),
+        "channel_description": ToolParam(str, "Optional description", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
     def execute(
         self,
         channel_name: str,
-        user_id: int,
         character_id: str,
-        channel_type: str = "direct",
+        channel_description: str = "",
         workspace: str | None = None,
         *,
         workspace_path: Path | None = None,
@@ -154,22 +154,23 @@ class ConversationChannelCreateTool(Tool):
             resolved_workspace_path,
             name=channel_name,
             character_id=character_id,
-            user_id=user_id,
-            channel_type=channel_type,
+            description=channel_description.strip(),
         )
         return ConversationChannelCreateResult(channel=channel.model_dump())
 
 
 class ConversationChannelUpdateTool(Tool):
     name = "conversation_channel_update"
-    description = "Update an existing conversation channel; only provided fields are changed"
+    description = (
+        "Update an existing conversation channel name, optional description text, "
+        "or character slug — type stays direct and owner stays the workspace default user"
+    )
     params = {
         "channel_id": ToolParam(int, "Channel integer id"),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
         "channel_name": ToolParam(str, "Channel display name", required=False),
-        "channel_type": ToolParam(str, "Channel type (e.g. direct)", required=False),
+        "channel_description": ToolParam(str, "Channel description/subtitle text", required=False),
         "character_id": ToolParam(str, "Character id (slug)", required=False),
-        "user_id": ToolParam(int, "Owning user id", required=False),
     }
 
     def execute(
@@ -179,27 +180,20 @@ class ConversationChannelUpdateTool(Tool):
         *,
         workspace_path: Path | None = None,
         channel_name: str | None = None,
-        channel_type: str | None = None,
+        channel_description: str | None = None,
         character_id: str | None = None,
-        user_id: int | None = None,
     ) -> ConversationChannelUpdateResult:
-        if (
-            channel_name is None
-            and channel_type is None
-            and character_id is None
-            and user_id is None
-        ):
+        if channel_name is None and channel_description is None and character_id is None:
             raise ValueError(
-                "At least one of channel_name, channel_type, character_id, or user_id must be provided."
+                "At least one of channel_name, channel_description, or character_id must be provided."
             )
         resolved = workspace_path or _resolve_path(workspace)
         channel = update_channel(
             resolved,
             channel_id,
             name=channel_name,
-            channel_type=channel_type,
+            description=channel_description,
             character_id=character_id,
-            user_id=user_id,
         )
         return ConversationChannelUpdateResult(channel=channel.model_dump())
 

@@ -11,7 +11,8 @@ from pydantic import BaseModel
 
 from hiro_commons.timestamps import utc_iso, utc_now
 
-from .data_store import data_db_path, ensure_data_db
+from .data_store import data_db_path, ensure_data_db, get_default_user_id
+from .conversation_channel_photo import remove_channel_photo_dir
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,11 @@ def _notify_channel_changed(workspace_path: Path, channel_id: int) -> None:
             logger.exception("channel change subscriber failed", extra={"channel_id": channel_id})
 
 
+def notify_conversation_channel_changed(workspace_path: Path, channel_id: int) -> None:
+    """Subscriber hook for thumbnails and other extras that alter ``channels.list`` payloads."""
+    _notify_channel_changed(workspace_path, channel_id)
+
+
 class ConversationChannel(BaseModel):
     """Metadata for a single conversation thread."""
 
@@ -45,12 +51,21 @@ class ConversationChannel(BaseModel):
     type: str = "direct"
     character_id: str
     user_id: int
+    description: str = ""
     created_at: str
     last_message_at: str | None = None
 
 
 # Keep the default channel name aligned with data_store.py seeding.
 DEFAULT_CONVERSATION_CHANNEL_NAME = "General"
+
+
+def min_channel_id(workspace_path: Path) -> int | None:
+    """Smallest channel primary key in the workspace, if any."""
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        row = conn.execute("SELECT MIN(id) FROM channels").fetchone()
+        return int(row[0]) if row and row[0] is not None else None
 
 
 def _list_channels(workspace_path: Path) -> list[ConversationChannel]:
@@ -154,28 +169,36 @@ def create_channel(
     *,
     name: str,
     character_id: str,
-    user_id: int,
+    user_id: int | None = None,
     channel_type: str = "direct",
+    description: str = "",
     created_at: str | None = None,
 ) -> ConversationChannel:
-    """Create a new conversation channel scoped to a user."""
+    """Create a conversation channel for the workspace default user (single-user mode).
+
+    ``user_id`` is accepted for backwards compatibility but ignored; the seeded owner is always used.
+    """
+    _ = user_id  # Single-user workspaces: binding is always ``get_default_user_id``.
+    uid = get_default_user_id(workspace_path)
+    channel_type = "direct"
     ensure_data_db(workspace_path)
     timestamp = created_at or utc_iso(utc_now())
+    desc = (description or "").strip()
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
         existing = conn.execute(
             "SELECT * FROM channels WHERE user_id = ? AND name = ?",
-            (user_id, name),
+            (uid, name),
         ).fetchone()
         if existing is not None:
-            raise ValueError(f"Conversation channel '{name}' already exists for user {user_id}.")
+            raise ValueError(f"Conversation channel '{name}' already exists for user {uid}.")
 
         cursor = conn.execute(
             """
-            INSERT INTO channels (name, type, character_id, user_id, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO channels (name, type, character_id, user_id, description, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (name, channel_type, character_id, user_id, timestamp),
+            (name, channel_type, character_id, uid, desc, timestamp),
         )
         conn.commit()
         row = conn.execute(
@@ -194,43 +217,38 @@ def update_channel(
     channel_id: int,
     *,
     name: str | None = None,
-    channel_type: str | None = None,
+    description: str | None = None,
     character_id: str | None = None,
-    user_id: int | None = None,
 ) -> ConversationChannel:
-    """Update editable fields on a conversation channel row.
-
-    Enforces unique (user_id, name) per workspace when name or user_id changes.
-    """
+    """Update name, optional description text, or character slug; ``type``/``user_id`` stay fixed."""
     existing = _get_channel_by_id(workspace_path, channel_id)
     if existing is None:
         raise ValueError(f"No conversation channel with id {channel_id}.")
 
     new_name = name if name is not None else existing.name
-    new_type = channel_type if channel_type is not None else existing.type
     new_character = character_id if character_id is not None else existing.character_id
-    new_user = user_id if user_id is not None else existing.user_id
+    new_desc = existing.description if description is None else description.strip()
 
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
-        if (new_user, new_name) != (existing.user_id, existing.name):
+        if (existing.user_id, new_name) != (existing.user_id, existing.name):
             conflict = conn.execute(
                 "SELECT id FROM channels WHERE user_id = ? AND name = ? AND id != ?",
-                (new_user, new_name, channel_id),
+                (existing.user_id, new_name, channel_id),
             ).fetchone()
             if conflict is not None:
                 raise ValueError(
-                    f"Conversation channel '{new_name}' already exists for user {new_user}."
+                    f"Conversation channel '{new_name}' already exists for user {existing.user_id}."
                 )
 
         conn.execute(
             """
             UPDATE channels
-            SET name = ?, type = ?, character_id = ?, user_id = ?
+            SET name = ?, character_id = ?, description = ?
             WHERE id = ?
             """,
-            (new_name, new_type, new_character, new_user, channel_id),
+            (new_name, new_character, new_desc, channel_id),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
@@ -242,25 +260,36 @@ def update_channel(
 
 
 def delete_channel(workspace_path: Path, channel_id: int) -> None:
-    """Remove a conversation channel and all of its messages (FK-safe)."""
+    """Remove a conversation channel and all of its messages (FK-safe).
+
+    Raises if ``channel_id`` is the smallest id in the table (primary/default channel guard).
+    """
     if _get_channel_by_id(workspace_path, channel_id) is None:
         raise ValueError(f"No conversation channel with id {channel_id}.")
+
+    anchor = min_channel_id(workspace_path)
+    if anchor is not None and channel_id == anchor:
+        raise ValueError("Cannot delete the primary conversation channel (lowest channel id).")
 
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
         conn.commit()
+    remove_channel_photo_dir(workspace_path, channel_id)
     _notify_channel_changed(workspace_path, channel_id)
 
 
 def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:
+    keys = row.keys()
+    raw_desc = str(row["description"]) if "description" in keys else ""
     return ConversationChannel(
         id=row["id"],
         name=row["name"],
         type=row["type"],
         character_id=row["character_id"],
         user_id=row["user_id"],
+        description=raw_desc.strip(),
         created_at=row["created_at"],
         last_message_at=row["last_message_at"],
     )

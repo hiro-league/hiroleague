@@ -86,6 +86,14 @@ class _ChannelTile extends StatelessWidget {
         ),
       ),
       title: Text(channel.name),
+      subtitle:
+          channel.description != null && channel.description!.trim().isNotEmpty
+          ? Text(
+              channel.description!.trim(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            )
+          : null,
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: () => context.push('/app/channels/${channel.id}'),
     );

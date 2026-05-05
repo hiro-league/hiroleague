@@ -6,8 +6,14 @@ export type ChatChannelRow = {
   type: string;
   character_id: string;
   user_id: number;
+  description?: string;
   created_at: string;
   last_message_at: string | null;
+  character?: { id: string; name: string };
+  capabilities?: unknown;
+  is_lowest_id_channel?: boolean;
+  photo_data_url?: string | null;
+  thumbnail_mtime_ns?: number;
 };
 
 export type ChatMessageRow = {
@@ -26,9 +32,8 @@ export type ChatMessageRow = {
 
 export type ChatChannelPayload = {
   name: string;
-  user_id: number;
   character_id: string;
-  channel_type: string;
+  description: string;
 };
 
 export async function listChatChannels() {
@@ -48,6 +53,13 @@ export async function updateChatChannel(channelId: number, payload: ChatChannelP
 
 export async function deleteChatChannel(channelId: number) {
   return apiRequest<number>(`/chat-channels/${channelId}`, { method: 'DELETE' });
+}
+
+export async function uploadChatChannelPhoto(channelId: number, dataUrl: string) {
+  return apiRequest<null>(`/chat-channels/${channelId}/photo`, {
+    method: 'POST',
+    body: { data_url: dataUrl }
+  });
 }
 
 export async function listChatMessages(channelId: number) {

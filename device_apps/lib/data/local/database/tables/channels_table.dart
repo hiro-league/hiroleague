@@ -8,6 +8,8 @@ class Channels extends Table {
   IntColumn get serverId => integer().nullable()();
   TextColumn get characterId => text().nullable()();
   TextColumn get characterName => text().nullable()();
+  TextColumn get description => text().nullable()();
+  IntColumn get thumbnailMtimeNs => integer().nullable()();
   TextColumn get capabilitiesJson => text().nullable()();
 
   @override

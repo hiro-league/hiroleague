@@ -130,9 +130,12 @@ class CharacterPhotoUploadRequest(BaseModel):
 
 class ChatChannelSaveRequest(BaseModel):
     name: str
-    user_id: int
     character_id: str
-    channel_type: str = "direct"
+    description: str = ""
+
+
+class ChatChannelPhotoUploadRequest(BaseModel):
+    data_url: str
 
 
 class LogsTailRequest(BaseModel):
@@ -805,9 +808,8 @@ async def create_chat_channel(
             ChatChannelsService().create_channel,
             _selected_workspace_id(x_hiro_workspace),
             name=body.name,
-            user_id=body.user_id,
             character_id=body.character_id,
-            channel_type=body.channel_type,
+            description=body.description,
         )
     )
     return _api_from_result(result)
@@ -825,9 +827,8 @@ async def update_chat_channel(
             _selected_workspace_id(x_hiro_workspace),
             channel_id,
             name=body.name,
-            channel_type=body.channel_type,
             character_id=body.character_id,
-            user_id=body.user_id,
+            description=body.description,
         )
     )
     return _api_from_result(result)
@@ -859,6 +860,31 @@ async def list_chat_channel_messages(
     payload = _api_from_result(result)
     payload["data"] = payload["data"] or []
     return payload
+
+
+@api_router.post("/chat-channels/{channel_id}/photo")
+async def upload_chat_channel_photo(
+    channel_id: int,
+    body: ChatChannelPhotoUploadRequest,
+    x_hiro_workspace: str | None = Header(default=None),
+) -> dict[str, Any]:
+    try:
+        raw = _decode_photo_data_url(body.data_url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "data": None}
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(raw)
+        tmp_path = tmp.name
+    try:
+        result = await run_in_threadpool(
+            ChatChannelsService().upload_channel_photo,
+            _selected_workspace_id(x_hiro_workspace),
+            channel_id,
+            tmp_path,
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    return _api_from_result(result)
 
 
 @api_router.get("/devices")

@@ -33,6 +33,8 @@ class ChannelRepositoryImpl implements ChannelRepository {
         serverId: Value(channel.serverId),
         characterId: Value(channel.characterId),
         characterName: Value(channel.characterName),
+        description: Value(channel.description),
+        thumbnailMtimeNs: Value(channel.thumbnailMtimeNs),
         capabilitiesJson: Value(
           channel.capabilities != null
               ? jsonEncode(channel.capabilities!.toJson())
@@ -57,6 +59,8 @@ class ChannelRepositoryImpl implements ChannelRepository {
       // Use server id as part of the local id for stable identity
       final localId = 'server-$serverId';
       localIds.add(localId);
+      final thumbnailMtime = _asThumbnailMtimeNs(sc['thumbnail_mtime_ns']);
+
       await _dao.insertOrUpdate(
         ChannelsCompanion.insert(
           id: localId,
@@ -67,6 +71,8 @@ class ChannelRepositoryImpl implements ChannelRepository {
             character['id'] as String? ?? sc['character_id']?.toString(),
           ),
           characterName: Value(character['name'] as String?),
+          description: Value(sc['description'] as String?),
+          thumbnailMtimeNs: Value(thumbnailMtime),
           capabilitiesJson: Value(
             capabilities != null ? jsonEncode(capabilities) : null,
           ),
@@ -86,6 +92,8 @@ class ChannelRepositoryImpl implements ChannelRepository {
       serverId: row.serverId,
       characterId: row.characterId,
       characterName: row.characterName,
+      description: row.description,
+      thumbnailMtimeNs: row.thumbnailMtimeNs,
       capabilities: _parseCapabilities(row.capabilitiesJson),
     );
   }
@@ -103,6 +111,13 @@ class ChannelRepositoryImpl implements ChannelRepository {
     if (value == null) return null;
     final parsed = DateTime.tryParse(value.toString());
     return parsed?.toUtc().millisecondsSinceEpoch;
+  }
+
+  static int? _asThumbnailMtimeNs(Object? value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
   }
 
   static MediaCapabilities? _parseCapabilities(String? raw) {

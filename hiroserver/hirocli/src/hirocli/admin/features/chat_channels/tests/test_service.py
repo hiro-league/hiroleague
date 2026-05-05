@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from hirocli.admin.features.chat_channels.service import ChatChannelsService
@@ -15,10 +16,26 @@ def test_list_no_workspace() -> None:
 def test_list_success() -> None:
     mock_out = MagicMock()
     mock_out.channels = [{"id": 1, "name": "General"}]
-    with patch("hirocli.admin.features.chat_channels.service.ConversationChannelListTool") as T:
+    with (
+        patch("hirocli.admin.features.chat_channels.service.ConversationChannelListTool") as T,
+        patch("hirocli.admin.features.chat_channels.service.min_channel_id", return_value=1),
+        patch(
+            "hirocli.admin.features.chat_channels.service.read_channel_thumbnail_bytes",
+            return_value=None,
+        ),
+        patch.object(ChatChannelsService, "_workspace_path", lambda self, _ws: Path(".")),
+    ):
         T.return_value.execute.return_value = mock_out
         r = ChatChannelsService().list_channels("ws-1")
-    assert r.ok and r.data == [{"id": 1, "name": "General"}]
+    assert r.ok
+    assert r.data == [
+        {
+            "id": 1,
+            "name": "General",
+            "is_lowest_id_channel": True,
+            "photo_data_url": None,
+        }
+    ]
 
 
 def test_messages_all_uses_tool_flag() -> None:

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from .character import default_character_id, load_character_from_disk
 from .conversation_channel import _list_channels
+from .conversation_channel_photo import channel_thumbnail_mtimens
 from .credential_store import CredentialStore
 from .preferences import (
     MediaPreferences,
@@ -39,6 +40,8 @@ class ChannelListEntry(BaseModel):
     type: str
     character_id: str
     user_id: int
+    description: str = ""
+    thumbnail_mtime_ns: int = 0
     created_at: str
     last_message_at: str | None = None
     character: ServerInfoCharacter
@@ -193,6 +196,8 @@ def build_channel_list_entries(
                 type=channel.type,
                 character_id=channel.character_id,
                 user_id=channel.user_id,
+                description=channel.description,
+                thumbnail_mtime_ns=channel_thumbnail_mtimens(workspace_path, channel.id),
                 created_at=channel.created_at,
                 last_message_at=channel.last_message_at,
                 character=ServerInfoCharacter(id=character.id, name=character.name),

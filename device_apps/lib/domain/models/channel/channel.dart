@@ -13,6 +13,8 @@ abstract class Channel with _$Channel {
     int? serverId,
     String? characterId,
     String? characterName,
+    String? description,
+    int? thumbnailMtimeNs,
     MediaCapabilities? capabilities,
   }) = _Channel;
 }

@@ -45,6 +45,7 @@ _DDL = [
         type            TEXT NOT NULL DEFAULT 'direct',
         character_id    TEXT NOT NULL,
         user_id         INTEGER NOT NULL REFERENCES users(id),
+        description     TEXT NOT NULL DEFAULT '',
         created_at      TEXT NOT NULL,
         last_message_at TEXT
     )
@@ -78,6 +79,7 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("channels", "type",            "TEXT NOT NULL DEFAULT 'direct'"),
     ("channels", "character_id",    "TEXT NOT NULL DEFAULT ''"),
     ("channels", "user_id",         "INTEGER NOT NULL DEFAULT 0"),
+    ("channels", "description",     "TEXT NOT NULL DEFAULT ''"),
     ("channels", "created_at",      "TEXT NOT NULL DEFAULT ''"),
     ("channels", "last_message_at", "TEXT"),
     # messages
@@ -167,6 +169,10 @@ def ensure_data_db(workspace_path: Path) -> None:
 
         _seed_defaults(conn, workspace_path)
 
+    from hirocli.domain.conversation_channel_photo import seed_min_id_channel_thumbnail_if_missing
+
+    seed_min_id_channel_thumbnail_if_missing(workspace_path)
+
     _initialized.add(key)
     log.info("Data store initialized", path=db)
 
@@ -193,8 +199,8 @@ def _seed_defaults(conn: sqlite3.Connection, workspace_path: Path) -> None:
     # Default channel — linked to default user and default character (slug in workspace.db index)
     conn.execute(
         """
-        INSERT OR IGNORE INTO channels (name, type, character_id, user_id, created_at)
-        VALUES (?, 'direct', ?, ?, ?)
+        INSERT OR IGNORE INTO channels (name, type, character_id, user_id, description, created_at)
+        VALUES (?, 'direct', ?, ?, '', ?)
         """,
         (_DEFAULT_CHANNEL_NAME, character_id, user_id, now),
     )

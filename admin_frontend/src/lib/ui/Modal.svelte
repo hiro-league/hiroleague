@@ -9,7 +9,10 @@
     subtitle = '',
     children,
     footer,
-    onClose
+    onClose,
+    overlayClass = 'z-50',
+    /** Return false to keep the modal open (e.g. show an unsaved-changes confirmation). */
+    onBeforeClose
   }: {
     open: boolean;
     title: string;
@@ -17,14 +20,59 @@
     children?: Snippet;
     footer?: Snippet;
     onClose: () => void;
+    /** Tailwind stacking (e.g. z-[60] when nesting modals above z-50). */
+    overlayClass?: string;
+    onBeforeClose?: (source: 'backdrop' | 'escape' | 'header') => boolean;
   } = $props();
+
+  /** Tracks overlay pointer path so drag-starting inside the dialog can't dismiss on backdrop release. */
+  let backdropArmClose = false;
+
+  function tryDismiss(
+    source: 'backdrop' | 'escape' | 'header',
+    ev?: KeyboardEvent
+  ): void {
+    if (onBeforeClose && !onBeforeClose(source)) {
+      backdropArmClose = false;
+      return;
+    }
+    backdropArmClose = false;
+    if (ev && source === 'escape') ev.preventDefault();
+    onClose();
+  }
+
+  function backdropPointerDown(e: PointerEvent) {
+    backdropArmClose = e.target === e.currentTarget;
+  }
+
+  function backdropPointerUp(e: PointerEvent) {
+    const releasedOnBackdrop = e.target === e.currentTarget;
+    if (backdropArmClose && releasedOnBackdrop) {
+      tryDismiss('backdrop');
+    } else {
+      backdropArmClose = false;
+    }
+  }
+
+  $effect(() => {
+    if (!open) return;
+    const onDocKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // If onBeforeClose vetoes (e.g. dirty state delegated to nested modal), do not
+      // preventDefault so a higher-stacked Modal can observe the same Escape.
+      tryDismiss('escape', e);
+    };
+    window.addEventListener('keydown', onDocKeyDown, true);
+    return () => window.removeEventListener('keydown', onDocKeyDown, true);
+  });
 </script>
 
 {#if open}
   <div
-    class="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm"
+    class="fixed inset-0 grid place-items-center bg-background/70 p-4 backdrop-blur-sm {overlayClass}"
     role="presentation"
-    onclick={onClose}
+    onpointerdown={backdropPointerDown}
+    onpointerup={backdropPointerUp}
   >
     <div
       class="grid max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-2xl"
@@ -33,7 +81,8 @@
       aria-label={title}
       tabindex="-1"
       onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
+      onpointerdown={(e) => e.stopPropagation()}
+      onpointerup={(e) => e.stopPropagation()}
     >
       <header class="flex items-start justify-between gap-4 border-b px-5 py-4">
         <div class="min-w-0 space-y-1">
@@ -42,7 +91,13 @@
             <p class="truncate font-sans text-sm text-muted-foreground">{subtitle}</p>
           {/if}
         </div>
-        <Button aria-label="Close dialog" class="size-8" variant="ghost" size="icon" onclick={onClose}>
+        <Button
+          aria-label="Close dialog"
+          class="size-8"
+          variant="ghost"
+          size="icon"
+          onclick={() => tryDismiss('header')}
+        >
           <X size={16} />
         </Button>
       </header>
