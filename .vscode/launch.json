@@ -152,12 +152,6 @@
         "command": "cd \"$(cygpath \"${workspaceFolder:hiro-docs}\")/mintdocs\" && mint dev"
       },
       {
-        "name": "Diagram Generator Start",
-        "type": "node-terminal",
-        "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder:hiro-docs}\")\" && uv run python diagram-gen/generate.py"
-      },
-      {
         "name": "codebase_index_inspector",
         "type": "node-terminal",
         "request": "launch",
