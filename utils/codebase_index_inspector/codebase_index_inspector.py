@@ -661,13 +661,13 @@ def write_markdown_report(
         at_or_below = sum(1 for r in index_rows if r.lines <= detail_max_lines)
         lines_out.append(
             f"- Per-file detail table cutoff: **`{_fmt_int(detail_max_lines)}`** physical lines "
-            "(files **above** this are omitted from the file-by-file table only; rollups unchanged)."
+            "(only files **above** this appear in the file-by-file table; rollups unchanged)."
         )
         lines_out.append(
-            f"- Indexed files **above** cutoff (hidden from detail table): **{_fmt_int(above_cutoff)}**"
+            f"- Indexed files **above** cutoff (shown in detail table): **{_fmt_int(above_cutoff)}**"
         )
         lines_out.append(
-            f"- Indexed files **at or below** cutoff (shown in detail table): **{_fmt_int(at_or_below)}**"
+            f"- Indexed files **at or below** cutoff (omitted from detail table): **{_fmt_int(at_or_below)}**"
         )
     lines_out.append("")
     lines_out.append("## Totals by top-level folder (first path segment under base)")
@@ -758,14 +758,15 @@ def write_markdown_report(
     lines_out.append("")
     if detail_max_lines is not None:
         lines_out.append(
-            f"_Rows omitted when physical lines exceed **`{_fmt_int(detail_max_lines)}`**; "
+            f"_Only files with physical lines **above** **`{_fmt_int(detail_max_lines)}`** are listed; "
             "the **Total** row still sums **all** indexed files._"
         )
         lines_out.append("")
+    # --detail-max-lines: list only files strictly larger than N so the Index highlights "heavy" sources.
     detail_rows = (
         index_rows
         if detail_max_lines is None
-        else [r for r in index_rows if r.lines <= detail_max_lines]
+        else [r for r in index_rows if r.lines > detail_max_lines]
     )
     lines_out.append(
         "| Lines | Non-empty | Exc. comments | Size (approx. KB) | Extension | "
@@ -865,7 +866,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help=(
-            "Omit rows from the per-file Index table when physical line count exceeds N "
+            "Per-file Index table lists only files whose physical line count is greater than N "
             "(rollups and the Index Total row still include every indexed file)."
         ),
     )

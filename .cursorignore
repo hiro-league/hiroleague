@@ -2,3 +2,4 @@
 # i want to ignore another repo in workspace hiroleague-website
 **/sqlite3.wasm
 **/drift_worker*.*
+protocol/fixtures/*
