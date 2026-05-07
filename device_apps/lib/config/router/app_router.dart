@@ -4,6 +4,8 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../application/router_notifier.dart';
 import '../../core/constants/route_names.dart';
 import '../../features/channels/channel_list_screen.dart';
+import '../../features/chat/chat_channel_settings_screen.dart';
+import '../../features/chat/channel_info_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/onboarding/qr_scan_screen.dart';
@@ -46,6 +48,20 @@ GoRouter appRouter(Ref ref) {
                 builder: (context, state) => ChatScreen(
                   channelId: state.pathParameters['channelId']!,
                 ),
+                routes: [
+                  GoRoute(
+                    path: 'settings',
+                    builder: (context, state) => ChatChannelSettingsScreen(
+                      channelId: state.pathParameters['channelId']!,
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'info',
+                    builder: (context, state) => ChannelInfoScreen(
+                      channelId: state.pathParameters['channelId']!,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

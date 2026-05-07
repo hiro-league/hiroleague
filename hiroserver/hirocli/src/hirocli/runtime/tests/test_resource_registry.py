@@ -11,10 +11,16 @@ def test_preferences_saved_maps_to_channels_and_policy() -> None:
     assert set(names) == {"channels", "policy"}
 
 
-def test_character_changed_maps_to_channels_only() -> None:
+def test_character_changed_maps_to_channels_and_characters() -> None:
     reg = ResourceRegistry()
     names = reg.resources_for_signal("character_changed")
-    assert names == ["channels"]
+    assert set(names) == {"channels", "characters"}
+
+
+def test_character_photo_changed_maps_to_characters_only() -> None:
+    reg = ResourceRegistry()
+    names = reg.resources_for_signal("character_photo_changed")
+    assert names == ["characters"]
 
 
 def test_channel_changed_maps_to_channels_only() -> None:

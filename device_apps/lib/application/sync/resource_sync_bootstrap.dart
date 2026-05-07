@@ -5,6 +5,7 @@ import '../../data/repositories/channel_repository_impl.dart';
 import '../../data/remote/gateway/gateway_request_client.dart';
 import '../../domain/models/server_info/server_info.dart';
 import '../policy/policy_notifier.dart';
+import 'character_photo_sync.dart';
 import 'resource_sync_registry.dart';
 import 'resource_sync_version_store.dart';
 
@@ -28,6 +29,7 @@ void wireResourceSync({
   registry
     ..clear()
     ..register('channels', () => refreshChannels(ref, getClient()))
+    ..register('characters', () => refreshCharacterPhotos(ref, getClient()))
     ..register('policy', () => refreshPolicy(ref, getClient()));
 }
 

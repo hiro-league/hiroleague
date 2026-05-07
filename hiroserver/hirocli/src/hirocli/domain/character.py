@@ -32,6 +32,31 @@ logger = logging.getLogger(__name__)
 CharacterChangeSubscriber = Callable[[Path, str], None]
 _CHARACTER_CHANGE_SUBSCRIBERS: list[CharacterChangeSubscriber] = []
 
+CharacterPhotoChangeSubscriber = Callable[[Path, str], None]
+_CHARACTER_PHOTO_CHANGE_SUBSCRIBERS: list[CharacterPhotoChangeSubscriber] = []
+
+
+def subscribe_character_photo_changes(callback: CharacterPhotoChangeSubscriber) -> None:
+    if callback not in _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS:
+        _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS.append(callback)
+
+
+def unsubscribe_character_photo_changes(callback: CharacterPhotoChangeSubscriber) -> None:
+    if callback in _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS:
+        _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS.remove(callback)
+
+
+def _notify_character_photo_changed(workspace_path: Path, character_id: str) -> None:
+    """Notify subscribers when only the character photo bytes change (not full character metadata)."""
+    for callback in list(_CHARACTER_PHOTO_CHANGE_SUBSCRIBERS):
+        try:
+            callback(workspace_path, character_id)
+        except Exception:
+            logger.exception(
+                "character photo change subscriber failed",
+                extra={"character_id": character_id},
+            )
+
 
 def subscribe_character_changes(callback: CharacterChangeSubscriber) -> None:
     if callback not in _CHARACTER_CHANGE_SUBSCRIBERS:
@@ -681,4 +706,6 @@ def replace_character_photo(
         )
         conn.commit()
     logger.info("Updated character photo", character_id=cid, photo=dest_name)
+    # Photo-only bump for resource sync — avoids invalidating channels.list when the channel row is unchanged.
+    _notify_character_photo_changed(workspace_path, cid)
     return dest_name

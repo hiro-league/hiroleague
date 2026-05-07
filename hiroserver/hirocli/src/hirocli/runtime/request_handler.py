@@ -17,7 +17,8 @@ Response content format (content_type "json"):
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import CONTENT_TYPE_JSON
 from hiro_channel_sdk.models import UnifiedMessage
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
 
 log = Logger.get("REQUEST")
 
+EmitOutbound = Callable[[UnifiedMessage], Awaitable[None]]
+
 
 class RequestContext:
     """Context passed to method handlers."""
@@ -41,14 +44,16 @@ class RequestContext:
         msg: UnifiedMessage,
         *,
         resource_versions: ResourceVersionStore | None = None,
+        emit_outbound: EmitOutbound | None = None,
     ) -> None:
         self.workspace_path = ctx.workspace_path
         self.msg = msg
         self.server_ctx = ctx
         self.resource_versions = resource_versions
+        self.emit_outbound = emit_outbound
 
 
-MethodHandler = Callable[[dict[str, Any], RequestContext], Awaitable[dict[str, Any]]]
+MethodHandler = Callable[[dict[str, Any], RequestContext], Awaitable[dict[str, Any] | None]]
 
 
 class RequestHandler:
@@ -60,8 +65,9 @@ class RequestHandler:
         handler.register("channels.list", channels_list_handler)
         # CommunicationManager awaits handler.handle(msg) and enqueues the result.
 
-    Method handlers are async functions with signature:
-        async def my_handler(params: dict, ctx: RequestContext) -> dict
+    Method handlers are async functions::
+
+        async def my_handler(params: dict, ctx: RequestContext) -> dict[str, Any] | None
     """
 
     def __init__(
@@ -78,8 +84,17 @@ class RequestHandler:
         self._methods[method] = handler
         log.info(f"✅ Registered request method: {method}")
 
-    async def handle(self, msg: UnifiedMessage) -> UnifiedMessage:
-        """Dispatch a request message and return the response envelope."""
+    async def handle(
+        self,
+        msg: UnifiedMessage,
+        *,
+        emit_outbound: EmitOutbound,
+    ) -> UnifiedMessage | None:
+        """Dispatch a request message and return the response envelope, if any.
+
+        Handlers may emit additional envelopes via ``RequestContext.emit_outbound`` and
+        return ``None`` (e.g. ``files.get`` ack + stream + terminal already emitted).
+        """
         method, params = _parse_request(msg)
         log.info(
             "Handling request",
@@ -105,8 +120,15 @@ class RequestHandler:
             )
 
         try:
-            ctx = RequestContext(self._ctx, msg, resource_versions=self._resource_versions)
+            ctx = RequestContext(
+                self._ctx,
+                msg,
+                resource_versions=self._resource_versions,
+                emit_outbound=emit_outbound,
+            )
             result = await handler(params, ctx)
+            if result is None:
+                return None
             return EnvelopeFactory.response(msg, status="ok", payload=result)
         except Exception as exc:
             log.error(

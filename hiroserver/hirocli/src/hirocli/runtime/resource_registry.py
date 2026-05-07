@@ -24,6 +24,13 @@ DEFAULT_RESOURCE_REGISTRY: tuple[ResourceSpec, ...] = (
         }),
     ),
     ResourceSpec(
+        name="characters",
+        on_signals=frozenset({
+            "character_changed",
+            "character_photo_changed",
+        }),
+    ),
+    ResourceSpec(
         name="policy",
         on_signals=frozenset({"preferences_saved"}),
     ),

@@ -36,6 +36,7 @@ dependencies:
 
   # Crypto
   cryptography: ^2.7.0
+  crypto: ^3.0.7
 
   # QR scanning
   mobile_scanner: ^7.2.0

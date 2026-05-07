@@ -36,6 +36,7 @@ from .channel import (
     ChannelSetupTool,
 )
 from .device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
+from .files import FilesHeadTool
 from .gateway import (
     GatewaySetupTool,
     GatewayStartTool,
@@ -76,6 +77,7 @@ def all_tools() -> list[Tool]:
         DeviceAddTool(),
         DeviceListTool(),
         DeviceRevokeTool(),
+        FilesHeadTool(),
         ChannelListTool(),
         ChannelInstallTool(),
         ChannelSetupTool(),

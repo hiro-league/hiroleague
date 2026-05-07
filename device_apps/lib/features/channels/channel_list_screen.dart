@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../application/channels/channels_notifier.dart';
 import '../../application/gateway/gateway_notifier.dart';
 import '../../application/gateway/gateway_state.dart';
+import '../../application/sync/character_photo_notifier.dart';
 import '../../core/constants/app_strings.dart';
 import '../../domain/models/channel/channel.dart';
 
@@ -23,7 +24,7 @@ class _ChannelListScreenState extends ConsumerState<ChannelListScreen> {
     // timed pulls complement `resource.changed` + connect-time syncAll.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(gatewayProvider.notifier).revalidateResourcesIfStale(
-            const ['channels', 'policy'],
+            const ['channels', 'characters', 'policy'],
           );
     });
   }
@@ -68,22 +69,29 @@ class _ChannelListScreenState extends ConsumerState<ChannelListScreen> {
   }
 }
 
-class _ChannelTile extends StatelessWidget {
+class _ChannelTile extends ConsumerWidget {
   const _ChannelTile({required this.channel});
 
   final Channel channel;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
+    final photoMap = ref.watch(characterPhotoMapProvider);
+    final cid = channel.characterId;
+    final photoBytes = cid != null ? photoMap[cid] : null;
 
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
-        child: Text(
-          channel.name.isNotEmpty ? channel.name[0].toUpperCase() : '#',
-        ),
+        backgroundImage:
+            photoBytes != null ? MemoryImage(photoBytes) : null,
+        child: photoBytes == null
+            ? Text(
+                channel.name.isNotEmpty ? channel.name[0].toUpperCase() : '#',
+              )
+            : null,
       ),
       title: Text(channel.name),
       subtitle:

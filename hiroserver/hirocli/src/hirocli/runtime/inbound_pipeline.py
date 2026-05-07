@@ -21,6 +21,7 @@ from hiro_channel_sdk.constants import (
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_REQUEST,
+    MESSAGE_TYPE_STREAM,
 )
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
@@ -105,6 +106,12 @@ class InboundPipeline:
                 case _ if msg.message_type == MESSAGE_TYPE_REQUEST:
                     await self._dispatch_request(msg)
 
+                case _ if msg.message_type == MESSAGE_TYPE_STREAM:
+                    log.info(
+                        f"{LOG_IN} Stream frame ignored (server is download-only in Phase 1) — {self._routing_tag(msg)}",
+                        **comm_extras(msg),
+                    )
+
                 case _ if msg.message_type == MESSAGE_TYPE_EVENT:
                     await self._dispatch_event(msg)
 
@@ -135,8 +142,9 @@ class InboundPipeline:
 
     async def _safe_handle_request(self, msg: UnifiedMessage) -> None:
         try:
-            response = await self._request_handler.handle(msg)
-            await self._emit(response)
+            response = await self._request_handler.handle(msg, emit_outbound=self._emit)
+            if response is not None:
+                await self._emit(response)
         except Exception as exc:
             log.error(
                 f"❌ {LOG_IN} RequestHandler failed — {self._routing_tag(msg)}",

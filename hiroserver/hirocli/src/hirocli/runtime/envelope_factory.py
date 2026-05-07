@@ -12,12 +12,14 @@ import json
 from typing import Any
 
 from hiro_channel_sdk.constants import (
+    CONTENT_TYPE_FILE,
     CONTENT_TYPE_JSON,
     EVENT_TYPE_MESSAGE_RECEIVED,
     EVENT_TYPE_RESOURCE_CHANGED,
     EVENT_TYPE_MESSAGE_TRANSCRIBED,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_RESPONSE,
+    MESSAGE_TYPE_STREAM,
 )
 from hiro_channel_sdk.log_scope_fields import (
     METADATA_LOG_RPC_METHOD,
@@ -182,6 +184,43 @@ class EnvelopeFactory:
                 metadata=req_meta,
             ),
             content=[ContentItem(content_type=CONTENT_TYPE_JSON, body=json.dumps(body))],
+        )
+
+    @staticmethod
+    def stream_chunk(
+        origin_request: UnifiedMessage,
+        *,
+        blob_id: str,
+        seq: int,
+        final: bool,
+        body_b64: str,
+    ) -> UnifiedMessage:
+        """One base64 chunk for an active ``files.get`` / upload session (``MESSAGE_TYPE_STREAM``)."""
+        req_meta = _merge_rpc_method_into_metadata(
+            origin_request,
+            dict(origin_request.routing.metadata or {}),
+        )
+        return UnifiedMessage(
+            message_type=MESSAGE_TYPE_STREAM,
+            request_id=origin_request.request_id,
+            routing=MessageRouting(
+                channel=origin_request.routing.channel,
+                direction="outbound",
+                sender_id=_SERVER_SENDER_ID,
+                recipient_id=origin_request.routing.sender_id,
+                metadata=req_meta,
+            ),
+            content=[
+                ContentItem(
+                    content_type=CONTENT_TYPE_FILE,
+                    body=body_b64,
+                    metadata={
+                        "blob_id": blob_id,
+                        "seq": seq,
+                        "final": final,
+                    },
+                )
+            ],
         )
 
     @staticmethod

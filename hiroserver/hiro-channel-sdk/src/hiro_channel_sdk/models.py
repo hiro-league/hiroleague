@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, model_validator
 
 from .constants import (
+    CONTENT_TYPE_FILE,
     CONTENT_TYPE_JSON,
     JSONRPC_VERSION,
     MESSAGE_TYPE_EVENT,
@@ -134,7 +135,25 @@ class UnifiedMessage(BaseModel):
                     f"message_type '{self.message_type}' requires a json content item"
                 )
         elif self.message_type == MESSAGE_TYPE_STREAM:
-            pass
+            if not self.request_id:
+                raise ValueError("message_type 'stream' requires request_id")
+            if self.event is not None:
+                raise ValueError("message_type 'stream' must not carry an event payload")
+            if len(self.content) != 1:
+                raise ValueError("message_type 'stream' requires exactly one content item")
+            chunk = self.content[0]
+            if chunk.content_type != CONTENT_TYPE_FILE:
+                raise ValueError("message_type 'stream' requires content_type 'file'")
+            meta = chunk.metadata or {}
+            blob_raw = meta.get("blob_id")
+            if not isinstance(blob_raw, str) or not blob_raw.strip():
+                raise ValueError("message_type 'stream' requires metadata.blob_id (non-empty string)")
+            seq_raw = meta.get("seq")
+            if not isinstance(seq_raw, int) or seq_raw < 0:
+                raise ValueError("message_type 'stream' requires metadata.seq (int >= 0)")
+            final_raw = meta.get("final")
+            if not isinstance(final_raw, bool):
+                raise ValueError("message_type 'stream' requires metadata.final (bool)")
         return self
 
 

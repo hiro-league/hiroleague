@@ -69,20 +69,48 @@ abstract final class AppStrings {
 
   // Settings — voice replies
   static const String voiceRepliesTitle = 'Voice replies';
+  static const String textRepliesModeTooltip = 'Text replies';
   static const String voiceRepliesSubtitle = 'Agent responds with voice audio';
   static const String voiceRepliesPerChatSubtitle =
-      'Choose text or voice replies from each chat header.';
+      'Choose text or voice replies from each chat via the gear icon.';
   static const String voiceRepliesUnavailable =
       'Voice replies are currently unavailable for this chat.';
-  static const String voiceRepliesEnabledForChannel =
-      'Voice replies will be requested for this chat.';
-  static const String voiceRepliesDisabledForChannel =
-      'Voice replies will stay text-only for this chat.';
   static const String voiceMessagesUnavailable =
       'Voice messages are currently unavailable for this chat.';
 
   // Chat — unsupported content
   static const String unsupportedContent = 'Unsupported content';
+
+  // Chat — header / per-channel settings
+  static const String chatChannelSettingsTitle = 'Chat settings';
+  static const String chatCharacterFallback = 'Character';
+  static const String gatewayConnected = 'Connected';
+  static const String gatewayDisconnected = 'Disconnected';
+  static const String gatewayConnecting = 'Connecting…';
+  static const String reloadConversationsTitle = 'Reload conversations';
+
+  // Chat — channel info
+  static const String channelInfoTitle = 'Channel info';
+  static const String channelPhotoCaption = 'Channel';
+  static const String characterPhotoCaption = 'Character';
+  static const String noChannelImageYet =
+      'No channel image on this device yet.';
+  static const String descriptionHeading = 'Description';
+  static const String noDescriptionBody =
+      'No description was provided for this channel.';
+  static const String capabilitiesSectionTitle = 'Capabilities';
+  static const String capabilitiesYouSend = 'You can send';
+  static const String capabilitiesAssistantSends = 'Assistant can send';
+  static const String modalitiesNoneListed = 'None';
+  static const String detailsSectionTitle = 'Details';
+  static const String labelChannelId = 'Channel ID';
+  static const String labelCharacterId = 'Character ID';
+  static const String labelLastMessageAt = 'Last message';
+  static const String labelServerId = 'Server row ID';
+  static const String labelThumbnailMtime =
+      'Thumbnail revision (mtime ns)';
+  static const String channelNotFoundBody =
+      'This channel is no longer in the list. Go back to channels.';
 
   // Errors
   static const String errorGeneric = 'Something went wrong. Please try again.';

@@ -10,7 +10,12 @@ from typing import Any
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.log import Logger
 
-from ..domain.character import subscribe_character_changes, unsubscribe_character_changes
+from ..domain.character import (
+    subscribe_character_changes,
+    subscribe_character_photo_changes,
+    unsubscribe_character_changes,
+    unsubscribe_character_photo_changes,
+)
 from ..domain.conversation_channel import (
     subscribe_channel_changes,
     unsubscribe_channel_changes,
@@ -55,6 +60,7 @@ class ResourceChangeBroadcaster:
     def start(self) -> None:
         subscribe_preferences_saved(self._on_preferences_saved)
         subscribe_character_changes(self._on_character_changed)
+        subscribe_character_photo_changes(self._on_character_photo_changed)
         subscribe_channel_changes(self._on_channel_changed)
 
     def close(self) -> None:
@@ -64,6 +70,7 @@ class ResourceChangeBroadcaster:
         self._debounce_tasks.clear()
         unsubscribe_preferences_saved(self._on_preferences_saved)
         unsubscribe_character_changes(self._on_character_changed)
+        unsubscribe_character_photo_changes(self._on_character_photo_changed)
         unsubscribe_channel_changes(self._on_channel_changed)
 
     async def handle_device_connected(self, device_id: str) -> None:
@@ -88,6 +95,13 @@ class ResourceChangeBroadcaster:
             return
         log.debug("Domain signal — domain:character_changed")
         self._schedule_for_signal("character_changed")
+
+    def _on_character_photo_changed(self, workspace_path: Path, character_id: str) -> None:
+        del character_id
+        if workspace_path != self._workspace_path:
+            return
+        log.debug("Domain signal — domain:character_photo_changed")
+        self._schedule_for_signal("character_photo_changed")
 
     def _on_channel_changed(self, workspace_path: Path, channel_id: int) -> None:
         del channel_id

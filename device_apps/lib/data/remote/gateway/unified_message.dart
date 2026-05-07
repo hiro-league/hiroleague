@@ -313,6 +313,46 @@ class UnifiedMessage {
         break;
 
       case UnifiedMessageWire.typeStream:
+        if (requestId == null || requestId!.isEmpty) {
+          throw const FormatException(
+            '$ctx: message_type "stream" requires request_id',
+          );
+        }
+        if (event != null) {
+          throw const FormatException(
+            '$ctx: message_type "stream" must not carry an event payload',
+          );
+        }
+        if (content.length != 1) {
+          throw FormatException(
+            '$ctx: message_type "stream" requires exactly one content item',
+          );
+        }
+        final chunk = content.first;
+        if (chunk.contentType != ContentWire.file) {
+          throw const FormatException(
+            '$ctx: message_type "stream" requires content_type "file"',
+          );
+        }
+        final meta = chunk.metadata;
+        final blobId = meta['blob_id'];
+        if (blobId is! String || blobId.isEmpty) {
+          throw const FormatException(
+            '$ctx: stream chunk requires metadata.blob_id (non-empty string)',
+          );
+        }
+        final seq = meta['seq'];
+        if (seq is! int || seq < 0) {
+          throw const FormatException(
+            '$ctx: stream chunk requires metadata.seq (int >= 0)',
+          );
+        }
+        final fin = meta['final'];
+        if (fin is! bool) {
+          throw const FormatException(
+            '$ctx: stream chunk requires metadata.final (bool)',
+          );
+        }
         break;
 
       default:

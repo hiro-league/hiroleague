@@ -18,6 +18,7 @@ from .constants import (
     MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_REQUEST,
     MESSAGE_TYPE_RESPONSE,
+    MESSAGE_TYPE_STREAM,
 )
 from .models import UnifiedMessage
 
@@ -115,6 +116,12 @@ def unified_message_log_scope(
         if msg.message_type in (MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE):
             return device_id, None, method, text_preview_in
 
+        if msg.message_type == MESSAGE_TYPE_STREAM:
+            m_rpc = meta.get(METADATA_LOG_RPC_METHOD)
+            if isinstance(m_rpc, str) and m_rpc.strip():
+                method = m_rpc.strip()
+            return device_id, None, method, text_preview_in
+
         msg_id: str | None = None
         if msg.message_type == MESSAGE_TYPE_MESSAGE:
             msg_id = r.id
@@ -130,9 +137,13 @@ def unified_message_log_scope(
         m = meta.get(METADATA_LOG_RPC_METHOD)
         if isinstance(m, str) and m.strip():
             method = m.strip()
+    elif msg.message_type == MESSAGE_TYPE_STREAM:
+        m = meta.get(METADATA_LOG_RPC_METHOD)
+        if isinstance(m, str) and m.strip():
+            method = m.strip()
 
     tp_out_rpc = unified_message_text_preview(msg)
-    if msg.message_type in (MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE):
+    if msg.message_type in (MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE, MESSAGE_TYPE_STREAM):
         return device_id, None, method, tp_out_rpc
 
     reply_corr = meta.get(METADATA_LOG_REPLY_TO_MSG_ID)

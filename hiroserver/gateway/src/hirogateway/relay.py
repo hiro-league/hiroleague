@@ -134,6 +134,15 @@ def _relay_kind(payload: dict[str, Any]) -> str:
                 except (json.JSONDecodeError, TypeError):
                     pass
         return "response"
+    if mt == "stream":
+        for item in (payload.get("content") or []):
+            if isinstance(item, dict) and item.get("content_type") == "file":
+                meta = item.get("metadata") or {}
+                if isinstance(meta, dict):
+                    seq = meta.get("seq", "?")
+                    fin = meta.get("final", "?")
+                    return f"stream[file seq={seq} final={fin}]"
+        return "stream"
     return str(mt) if mt else "?"
 
 
@@ -145,9 +154,25 @@ def _relay_snippet(body: str, max_len: int = _TEXT_SNIPPET_MAX) -> str:
 def _relay_content_hint(payload: dict[str, Any]) -> str | None:
     """Text snippet or content-type label from payload content items.
 
-    Only meaningful for message_type == "message". Mirrors _comm_content_hint().
+    For message_type == "message", mirrors communication_manager._comm_content_hint().
+    For message_type == "stream", surfaces seq / final / blob_id (DEBUG-oriented detail
+    lives in structured extras; this keeps relay one-line summaries readable).
     """
-    if not isinstance(payload, dict) or payload.get("message_type") != "message":
+    if not isinstance(payload, dict):
+        return None
+    mt = payload.get("message_type")
+    if mt == "stream":
+        for item in (payload.get("content") or []):
+            if isinstance(item, dict) and item.get("content_type") == "file":
+                meta = item.get("metadata") or {}
+                if isinstance(meta, dict):
+                    seq = meta.get("seq")
+                    final = meta.get("final")
+                    bid = meta.get("blob_id")
+                    blob_short = str(bid)[-12:] if bid else "?"
+                    return f"seq={seq} final={final} blob=…{blob_short}"
+        return "stream"
+    if mt != "message":
         return None
     parts: list[str] = []
     for item in (payload.get("content") or []):
@@ -396,7 +421,10 @@ async def relay_message(sender_id: str, raw: str) -> None:
         log_extras: dict[str, Any] = {}
         if hint:
             log_extras["content_hint"] = hint
-        log.info(
+        is_stream = isinstance(payload, dict) and payload.get("message_type") == "stream"
+        # Per file-communication logging spec: stream frames at DEBUG on relay (high volume).
+        _recv_log = log.debug if is_stream else log.info
+        _recv_log(
             f"{arrow} Message received — {sender_label} · {kind} ({route})",
             **log_extras,
         )
@@ -419,7 +447,8 @@ async def relay_message(sender_id: str, raw: str) -> None:
                 await ws.send(out)
                 recipient_role = _device_roles.get(did, "")
                 recipient_label = _HIRO_SERVER if recipient_role == AUTH_ROLE_DESKTOP else _device_label(did)
-                log.info(
+                _relay_log = log.debug if is_stream else log.info
+                _relay_log(
                     f"{arrow} Message relayed — {sender_label} → {recipient_label} · {kind}",
                 )
             except Exception as exc:

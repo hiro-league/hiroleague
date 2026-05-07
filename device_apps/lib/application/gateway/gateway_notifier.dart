@@ -14,6 +14,7 @@ import '../../data/remote/gateway/gateway_inbound_frame.dart';
 import '../../data/remote/gateway/gateway_protocol.dart';
 import '../../data/remote/gateway/gateway_request_client.dart';
 import '../../data/remote/gateway/reconnect_policy.dart';
+import '../../data/remote/gateway/unified_message.dart';
 import '../../domain/models/identity/device_identity.dart';
 import '../../domain/services/crypto_service.dart';
 import '../auth/auth_notifier.dart';
@@ -93,13 +94,20 @@ class GatewayNotifier extends _$GatewayNotifier {
 
     _stateSub = client.updates.listen(_onClientUpdate);
     _frameSub = client.frames.listen((frame) {
-      // Intercept response frames and route to the request client before
-      // broadcasting — the broadcast stream may have no subscribers yet.
-      if (frame.payload['message_type'] == UnifiedMessageWire.typeResponse) {
-        _routeResponse(frame.payload);
-      } else if (frame.payload['message_type'] ==
-          UnifiedMessageWire.typeEvent) {
-        unawaited(_eventBus.dispatch(frame.payload));
+      final payload = frame.payload;
+      final mt = payload['message_type'] as String?;
+      // Intercept responses and stream chunks before the broadcast stream.
+      if (mt == UnifiedMessageWire.typeResponse) {
+        _routeResponse(payload);
+      } else if (mt == UnifiedMessageWire.typeStream) {
+        try {
+          final msg = UnifiedMessage.fromJson(Map<String, dynamic>.from(payload));
+          _requestClient?.ingestStreamFrame(msg);
+        } catch (_) {
+          // Malformed stream frame — logged elsewhere if needed.
+        }
+      } else if (mt == UnifiedMessageWire.typeEvent) {
+        unawaited(_eventBus.dispatch(payload));
       }
       _frameController.add(frame);
     });
@@ -179,13 +187,16 @@ class GatewayNotifier extends _$GatewayNotifier {
     final rid = payload['request_id'] as String?;
     if (rid == null || _requestClient == null) return;
 
-    // Find the JSON content item that carries the response body
     final contentRaw = payload['content'];
     if (contentRaw is! List || contentRaw.isEmpty) return;
 
     for (final item in contentRaw) {
       if (item is Map && item['content_type'] == ContentWire.json) {
-        _requestClient!.completeRequest(rid, item['body'] as String);
+        final body = item['body'] as String;
+        if (_requestClient!.handleFileGetJsonResponse(rid, body)) {
+          return;
+        }
+        _requestClient!.completeRequest(rid, body);
         return;
       }
     }
