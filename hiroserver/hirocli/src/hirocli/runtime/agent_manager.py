@@ -106,16 +106,28 @@ def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
     _user_pv = unified_message_text_preview(inbound)
     if _user_pv:
         meta[METADATA_LOG_TEXT_PREVIEW] = _user_pv
+    # No ``recipient_id``: the user has one shared conversation across all of
+    # their paired devices, so the gateway broadcasts the reply to every device
+    # and they all stay in sync (device B's chat scrolls even when device A
+    # asked the question).
     return UnifiedMessage(
         routing=MessageRouting(
             channel=inbound.routing.channel,
             direction="outbound",
             sender_id="server",
-            recipient_id=inbound.routing.sender_id,
             metadata=meta,
         ),
         content=[ContentItem(content_type="text", body=body)],
     )
+
+
+def _audio_extension_for_media_type(media_type: str) -> str:
+    """Return a stable file extension for a TTS MIME type."""
+    # Thin re-export so existing imports (and tests) keep working — the real
+    # mapping lives next to the bytes-on-disk helpers in domain.media_store.
+    from ..domain.media_store import audio_extension_for_media_type
+
+    return audio_extension_for_media_type(media_type)
 
 
 class AgentManager:
@@ -300,15 +312,23 @@ class AgentManager:
     def _resolve_thread_character(
         self, msg: UnifiedMessage
     ) -> tuple[str, int, str]:
-        """Return (thread_id, channel_id, character_id) for this channel+sender pair."""
+        """Return (thread_id, channel_id, character_id) for the user's single conversation.
+
+        WhatsApp/Telegram model: one user, one conversation thread, regardless of
+        which device sent the inbound message. ``msg.routing.sender_id`` is the
+        device id and is intentionally **not** part of the channel/thread key —
+        otherwise every paired device would get its own LangGraph memory and
+        history would never converge across devices.
+        """
+        del msg  # routing.sender_id deliberately unused — see docstring.
         from ..domain.data_store import get_default_user_id
         from ..domain.character import default_character_id
+        from ..domain.conversation_channel import DEFAULT_CONVERSATION_CHANNEL_NAME
         from ..tools.conversation import ConversationChannelGetTool
 
-        channel_name = f"{msg.routing.channel}:{msg.routing.sender_id}"
         user_id = get_default_user_id(self._ctx.workspace_path)
         channel_result = ConversationChannelGetTool().execute(
-            channel_name=channel_name,
+            channel_name=DEFAULT_CONVERSATION_CHANNEL_NAME,
             workspace_path=self._ctx.workspace_path,
             user_id=user_id,
         )
@@ -360,6 +380,8 @@ class AgentManager:
         text_reply: UnifiedMessage,
         text: str,
         *,
+        channel_id: int,
+        reply_message_pk: int | None,
         character_voice_models: list[str],
         tts_instructions: str = "",
         tts_voice_by_provider: dict[str, str] | None = None,
@@ -398,15 +420,79 @@ class AgentManager:
                 instructions=resolved.instructions,
             )
 
-            # DEBUG: save MP3 to workspace for manual playback testing
-            tts_debug_dir = self._ctx.workspace_path / "tts_debug"
-            tts_debug_dir.mkdir(exist_ok=True)
-            debug_file = tts_debug_dir / f"{text_reply.routing.id}.mp3"
-            debug_file.write_bytes(result.audio_bytes)
-            log.debug(
-                f"🔧 TTS debug file written — {peer}",
-                path=str(debug_file),
-            )
+            attachment_data: dict[str, object] = {}
+            if reply_message_pk is not None:
+                try:
+                    from ..domain.blob_store import (
+                        DEFAULT_CHUNK_SIZE,
+                        blob_id_for_file,
+                        chunk_count_for_size,
+                    )
+                    from ..domain.data_store import data_dir
+                    from ..domain.media_store import save_media_file
+                    from ..domain.message_attachments import attachment_ref, insert_attachment
+
+                    ext = _audio_extension_for_media_type(result.mime_type)
+                    media_path = save_media_file(
+                        self._ctx.workspace_path,
+                        channel_id,
+                        reply_message_pk,
+                        result.audio_bytes,
+                        ext,
+                        slot_index=0,
+                    )
+                    abs_path = data_dir(self._ctx.workspace_path) / media_path
+                    blob_id = blob_id_for_file(abs_path)
+                    size = abs_path.stat().st_size
+                    ref = attachment_ref(text_reply.routing.id, 0)
+                    insert_attachment(
+                        self._ctx.workspace_path,
+                        message_pk=reply_message_pk,
+                        slot_index=0,
+                        content_type="audio",
+                        blob_id=blob_id,
+                        media_type=result.mime_type,
+                        size=size,
+                        media_path=media_path,
+                        filename=abs_path.name,
+                        duration_ms=result.duration_ms,
+                        metadata={
+                            "source": "character_tts",
+                            "reply_to_message_id": inbound.routing.id,
+                            "model": result.model,
+                            "voice": result.voice,
+                        },
+                    )
+                    attachment_data = {
+                        "blob_id": blob_id,
+                        "ref": ref,
+                        "size": size,
+                        "chunk_size": DEFAULT_CHUNK_SIZE,
+                        "chunk_count": chunk_count_for_size(size, DEFAULT_CHUNK_SIZE),
+                    }
+                    log.info(
+                        f"{LOG_OUT} TTS attachment stored — {peer} · audio",
+                        blob_id=blob_id,
+                        size=size,
+                        duration_ms=result.duration_ms,
+                        model=result.model,
+                        voice=result.voice,
+                        ref_id=text_reply.routing.id,
+                    )
+                except Exception as exc:
+                    log.error(
+                        f"❌ TTS attachment skipped — {peer} · persistence_failed",
+                        error=str(exc),
+                        reason="persistence_failed",
+                        ref_id=text_reply.routing.id,
+                        exc_info=True,
+                    )
+            else:
+                log.warning(
+                    f"⚠️ TTS attachment skipped — {peer} · reply_not_persisted",
+                    reason="reply_not_persisted",
+                    ref_id=text_reply.routing.id,
+                )
 
             audio_b64 = base64.b64encode(result.audio_bytes).decode()
             _voiced_meta = dict(inbound.routing.metadata or {})
@@ -416,13 +502,14 @@ class AgentManager:
             _voiced_meta[METADATA_LOG_TEXT_PREVIEW] = (
                 _user_pv_voice if _user_pv_voice else log_preview_snippet(text)
             )
+            # Same broadcast rationale as `_make_reply`: every paired device of
+            # the user gets the voiced event so playback state stays consistent.
             voiced_event = UnifiedMessage(
                 message_type=MESSAGE_TYPE_EVENT,
                 routing=MessageRouting(
                     channel=inbound.routing.channel,
                     direction="outbound",
                     sender_id="server",
-                    recipient_id=inbound.routing.sender_id,
                     metadata=_voiced_meta,
                 ),
                 event=EventPayload(
@@ -432,6 +519,7 @@ class AgentManager:
                         "audio": audio_b64,
                         "mime_type": result.mime_type,
                         "duration_ms": result.duration_ms,
+                        **attachment_data,
                     },
                 ),
             )
@@ -446,11 +534,14 @@ class AgentManager:
                 ref_id=text_reply.routing.id,
             )
         except Exception as exc:
-            # Graceful degradation: text was already delivered, just log
+            # Graceful degradation: text was already delivered, just log.
+            # ``reason=synthesis_failed`` matches the §11 logging table so
+            # downstream filters can group all TTS-failure events.
             peer = comm_peer_label(inbound, self._ctx)
             log.error(
-                f"❌ TTS synthesis failed — {peer} · text reply already sent",
+                f"⚠️ TTS attachment skipped — {peer} · synthesis_failed",
                 error=str(exc),
+                reason="synthesis_failed",
                 ref_id=text_reply.routing.id,
                 exc_info=True,
             )
@@ -647,9 +738,10 @@ class AgentManager:
             raise
 
         # Persist the outbound reply to data.db
+        reply_message_pk: int | None = None
         try:
             from ..domain.message_store import save_message
-            await save_message(
+            reply_message_pk = await save_message(
                 self._ctx.workspace_path,
                 external_id=reply.routing.id,
                 channel_id=channel_id,
@@ -696,6 +788,8 @@ class AgentManager:
                         msg,
                         reply,
                         reply_body,
+                        channel_id=channel_id,
+                        reply_message_pk=reply_message_pk,
                         character_voice_models=ch.voice_models,
                         tts_instructions=ch.tts_instructions,
                         tts_voice_by_provider=dict(ch.tts_voice_by_provider),

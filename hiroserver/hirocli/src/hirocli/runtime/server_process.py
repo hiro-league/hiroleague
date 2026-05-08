@@ -31,6 +31,7 @@ from hirocli.domain.crypto import load_or_create_master_key
 from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
+from hirocli.domain.events import get_domain_event_bus
 from hirocli.runtime.channel_event_handler import ChannelEventHandler
 from hirocli.runtime.channel_manager import ChannelManager
 from hirocli.runtime.communication_manager import CommunicationManager
@@ -163,6 +164,12 @@ async def _main(
     stop_event = asyncio.Event()
     ctx = _build_context(workspace_path, workspace_name, stop_event)
 
+    # Bind the process-wide DomainEventBus to this loop *before* any subsystem
+    # subscribes or any worker thread can publish. From here on, domain
+    # mutations from admin worker threads / CLI sync code are safely
+    # trampolined onto the runtime loop.
+    get_domain_event_bus().attach_loop(ctx.loop)
+
     Logger.set_level(ctx.config.log_level)
     Logger.setup(console=foreground)
     Logger.open_log_dir(ctx.log_dir)
@@ -251,6 +258,7 @@ async def _main(
         pass
     finally:
         resource_change_broadcaster.close()
+        get_domain_event_bus().detach_loop()
 
     if ctx.restart_requested:
         log.info("Restart requested — spawning new server process")

@@ -1,6 +1,7 @@
 import { tick } from 'svelte';
 import { listDevices, type DeviceRow } from '$lib/api/channels-devices';
 import {
+  clearLogs,
   discoverLogMethods,
   getLogsLayout,
   logTimeRangeSeconds,
@@ -34,6 +35,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   let logMethods = $state<string[]>([]);
   let devicesForLogs = $state<DeviceRow[]>([]);
   let searchBusy = $state(false);
+  let clearingLogs = $state(false);
   let initialized = $state(false);
   let activeRowKey = $state<string | null>(null);
 
@@ -391,6 +393,26 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     }
   }
 
+  async function clearAllLogs() {
+    clearingLogs = true;
+    loading = true;
+    error = null;
+    pollError = null;
+    searchFetchGeneration += 1;
+    try {
+      await clearLogs();
+      rows = [];
+      fileOffsets = {};
+      activeRowKey = null;
+      await reloadRows();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to clear logs.';
+    } finally {
+      loading = false;
+      clearingLogs = false;
+    }
+  }
+
   function moveActiveRow(delta: number, getScroller: () => HTMLElement | null) {
     if (visibleRows.length === 0) return;
     const currentIndex = activeRowKey
@@ -481,6 +503,9 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     get searchBusy() {
       return searchBusy;
     },
+    get clearingLogs() {
+      return clearingLogs;
+    },
     get initialized() {
       return initialized;
     },
@@ -518,6 +543,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     onSearchInput,
     clearSearch,
     clearAllFilters,
+    clearAllLogs,
     afterScopeChange,
     removeScopeDevice,
     removeScopeMsg,

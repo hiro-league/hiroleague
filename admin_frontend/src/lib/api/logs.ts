@@ -80,6 +80,10 @@ export type LogsSearchResponse = {
   rows: LogRow[];
 };
 
+export type LogsClearResponse = {
+  cleared_files: string[];
+};
+
 export async function getLogsLayout(): Promise<ApiResponse<LogsLayout>> {
   return apiRequest<LogsLayout>('/logs/layout');
 }
@@ -121,4 +125,8 @@ export async function searchLogs(params: LogsSearchParams): Promise<ApiResponse<
 /** Distinct JSON-RPC ``method`` values seen in the recent log tail window. */
 export async function discoverLogMethods(): Promise<ApiResponse<string[]>> {
   return apiRequest<string[]>('/logs/methods');
+}
+
+export async function clearLogs(): Promise<ApiResponse<LogsClearResponse>> {
+  return apiRequest<LogsClearResponse>('/logs/clear', { method: 'POST' });
 }

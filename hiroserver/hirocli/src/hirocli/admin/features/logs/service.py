@@ -11,6 +11,7 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from hirocli.admin.shared.result import Result
+from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.request_methods import REGISTERED_REQUEST_METHOD_NAMES
 from hirocli.tools.logs import (
     LogSearchTool,
@@ -48,6 +49,13 @@ class LogTailSnapshot:
 
     rows: list[dict[str, Any]]
     file_offsets: dict[str, int]
+
+
+@dataclass
+class LogsClearSummary:
+    """Summary of log files truncated by the admin clear action."""
+
+    cleared_files: list[str]
 
 
 class LogsService:
@@ -264,5 +272,40 @@ class LogsService:
                     if isinstance(m, str) and m.strip():
                         methods.add(m.strip())
             return Result.success(sorted(methods))
+        except Exception as exc:
+            return Result.failure(str(exc))
+
+    def clear_all(self, workspace: str | None) -> Result[LogsClearSummary]:
+        """Truncate all admin-visible log files for the workspace and gateway.
+
+        Files are truncated rather than deleted so running processes can keep writing through
+        existing handles. This includes detached-process ``stderr.log`` files beside the
+        workspace and gateway instance roots.
+        """
+        try:
+            entry, _ = resolve_workspace(workspace)
+            workspace_path = Path(entry.path)
+            log_dir = _resolve_log_dir(workspace)
+            gateway_log_dir = _resolve_gateway_log_dir()
+            gateway_instance_path = _resolve_gateway_instance_path()
+
+            paths: set[Path] = set()
+            if log_dir.exists():
+                paths.update(p for p in log_dir.glob("*.log") if p.is_file())
+            paths.add(workspace_path / "stderr.log")
+            if gateway_log_dir is not None and gateway_log_dir.exists():
+                paths.update(p for p in gateway_log_dir.glob("*.log") if p.is_file())
+            if gateway_instance_path is not None:
+                paths.add(gateway_instance_path / "stderr.log")
+
+            cleared: list[str] = []
+            for path in sorted(paths, key=lambda p: str(p)):
+                if not path.exists() or not path.is_file():
+                    continue
+                with path.open("w", encoding="utf-8"):
+                    pass
+                cleared.append(str(path))
+
+            return Result.success(LogsClearSummary(cleared_files=cleared))
         except Exception as exc:
             return Result.failure(str(exc))

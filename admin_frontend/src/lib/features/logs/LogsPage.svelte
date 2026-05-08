@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import type { LogTimeRange } from '$lib/api/logs';
+  import Button from '$lib/components/ui/button.svelte';
+  import Modal from '$lib/ui/Modal.svelte';
   import { cn } from '$lib/utils';
   import LogsDetailPanel from './LogsDetailPanel.svelte';
   import LogsFiltersPanel from './LogsFiltersPanel.svelte';
@@ -17,6 +19,7 @@
 
   let autoScroll = $state(true);
   let tableScroller = $state<HTMLDivElement | null>(null);
+  let clearLogsConfirmOpen = $state(false);
 
   function selectRow(row: RenderLogRow) {
     ctrl.setActiveRow(row);
@@ -74,6 +77,15 @@
     void ctrl.reloadLiveTail();
   }
 
+  function requestClearLogs() {
+    clearLogsConfirmOpen = true;
+  }
+
+  function confirmClearLogs() {
+    clearLogsConfirmOpen = false;
+    void ctrl.clearAllLogs();
+  }
+
   onMount(() => setupLogsPageRuntime({ prefs, ctrl }));
 </script>
 
@@ -98,10 +110,12 @@
     onToggleDetailPanel={() => ctrl.toggleDetailPanel()}
     controlsCollapsed={prefs.controlsCollapsed}
     onToggleControlsCollapsed={() => prefs.toggleControlsCollapsed()}
+    onClearLogs={requestClearLogs}
     filtersRegionId={LOGS_FILTER_REGION_ID}
     visibleCount={ctrl.visibleRows.length}
     loadedCount={ctrl.rows.length}
     searchBusy={ctrl.searchBusy}
+    clearingLogs={ctrl.clearingLogs}
     filtered={ctrl.isSearchMode || ctrl.hasScopeFilters}
   />
 
@@ -150,6 +164,25 @@
     {/if}
   </div>
 </section>
+
+<Modal
+  open={clearLogsConfirmOpen}
+  title="Clear all logs?"
+  subtitle="This truncates workspace, gateway, and stderr log files."
+  onClose={() => {
+    if (!ctrl.clearingLogs) clearLogsConfirmOpen = false;
+  }}
+>
+  <p class="font-sans text-sm text-muted-foreground">This action cannot be undone.</p>
+  {#snippet footer()}
+    <Button variant="outline" disabled={ctrl.clearingLogs} onclick={() => (clearLogsConfirmOpen = false)}>
+      Cancel
+    </Button>
+    <Button variant="destructive" disabled={ctrl.clearingLogs} onclick={confirmClearLogs}>
+      Clear logs
+    </Button>
+  {/snippet}
+</Modal>
 
 <style>
   /* Class name must match LOGS_NO_DOCUMENT_SCROLL_CLASS in shared/logs-page-lifecycle.ts */

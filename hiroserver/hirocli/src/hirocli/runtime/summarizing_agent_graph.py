@@ -11,6 +11,7 @@ model, ``summarizer_input_summary`` when a summary is triggered, and
 
 from __future__ import annotations
 
+import ast
 from typing import Any, TypedDict
 
 from langchain_core.language_models import BaseChatModel
@@ -25,6 +26,7 @@ from hiro_commons.log import Logger
 from ..domain.preferences import MemoryPreferences
 
 log = Logger.get("AGENT")
+_SUMMARY_PREFIX = "Summary of the conversation so far: "
 
 
 class HiroAgentState(MessagesState):
@@ -34,6 +36,7 @@ class HiroAgentState(MessagesState):
 
 
 class _LLMInputState(TypedDict):
+    messages: list[AnyMessage]
     summarized_messages: list[AnyMessage]
     context: dict[str, Any]
 
@@ -70,6 +73,55 @@ def _model_input_summary_row(m: AnyMessage, *, preview_chars: int = 80) -> dict[
     }
 
 
+def _text_from_content(content: Any) -> str:
+    """Collapse provider-native content blocks to user-visible text."""
+    if isinstance(content, str):
+        return _strip_summary_block_repr(content)
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+            elif isinstance(item, str) and item:
+                parts.append(item)
+        return "\n".join(parts)
+    return str(content)
+
+
+def _strip_summary_block_repr(text: str) -> str:
+    if not text.startswith(_SUMMARY_PREFIX):
+        return text
+    raw = text[len(_SUMMARY_PREFIX):]
+    if not raw.startswith("["):
+        return text
+    try:
+        parsed = ast.literal_eval(raw)
+    except (SyntaxError, ValueError):
+        return text
+    clean = _text_from_content(parsed).strip()
+    return f"{_SUMMARY_PREFIX}{clean}" if clean else text
+
+
+def _sanitize_summary_result(result: dict[str, Any]) -> None:
+    """Remove provider-only block metadata from LangMem summary state/messages."""
+    ctx = result.get("context")
+    if isinstance(ctx, dict):
+        running_summary = ctx.get("running_summary")
+        if running_summary is not None:
+            summary = getattr(running_summary, "summary", None)
+            clean_summary = _text_from_content(summary).strip()
+            if clean_summary and clean_summary != summary:
+                running_summary.summary = clean_summary
+
+    for message in result.get("summarized_messages", []) or []:
+        content = getattr(message, "content", None)
+        clean_content = _text_from_content(content)
+        if clean_content and clean_content != content:
+            message.content = clean_content
+
+
 def _clamp_summary_budget(mem: MemoryPreferences) -> tuple[int, int, int]:
     """Return (max_tokens, max_tokens_before_summary, max_summary_tokens) for LangMem.
 
@@ -87,6 +139,35 @@ def _clamp_summary_budget(mem: MemoryPreferences) -> tuple[int, int, int]:
     return max_ctx, before, max_sum
 
 
+def _bind_summary_token_limit(model: BaseChatModel, max_tokens: int):
+    """Bind the provider-specific output token limit for the summarizer model."""
+    if type(model).__module__.startswith("langchain_google_genai."):
+        return model.bind(max_output_tokens=max_tokens)
+    return model.bind(max_tokens=max_tokens)
+
+
+def _has_non_system_content(messages: list[AnyMessage]) -> bool:
+    """Return true when the provider request has at least one real chat turn."""
+    for message in messages:
+        if isinstance(message, SystemMessage):
+            continue
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content.strip():
+            return True
+        if content:
+            return True
+        if isinstance(message, AIMessage) and message.tool_calls:
+            return True
+    return False
+
+
+def _latest_non_system_message(messages: list[AnyMessage]) -> AnyMessage | None:
+    for message in reversed(messages):
+        if not isinstance(message, SystemMessage):
+            return message
+    return None
+
+
 def build_summarizing_agent_graph(
     *,
     model: BaseChatModel,
@@ -101,7 +182,7 @@ def build_summarizing_agent_graph(
     token_counter = _token_counter_for(model)
 
     summarization_node = SummarizationNode(
-        model=summarization_model.bind(max_tokens=max_sum),
+        model=_bind_summary_token_limit(summarization_model, max_sum),
         max_tokens=max_ctx,
         max_tokens_before_summary=before_sum,
         max_summary_tokens=max_sum,
@@ -117,6 +198,7 @@ def build_summarizing_agent_graph(
         pre_tokens = token_counter(state["messages"])
 
         result = await summarization_node.ainvoke(state)
+        _sanitize_summary_result(result)
 
         new_ctx = result.get("context") or prev_ctx
         new_rs = new_ctx.get("running_summary")
@@ -152,6 +234,15 @@ def build_summarizing_agent_graph(
             if system_prompt
             else list(msgs)
         )
+        if not _has_non_system_content(msgs_for_model):
+            latest_message = _latest_non_system_message(state.get("messages", []))
+            if latest_message is not None:
+                msgs_for_model.append(latest_message)
+                log.warning(
+                    "⚠️ Summary left no model content — HiroServer · appended latest turn",
+                    summarized_message_count=len(msgs),
+                    fallback_role=getattr(latest_message, "type", "?"),
+                )
         tok_invoke = token_counter(msgs_for_model)
         model_input_summary = [
             _model_input_summary_row(m) for m in msgs_for_model[-30:]

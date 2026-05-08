@@ -60,14 +60,32 @@ _DDL = [
         sender_id    TEXT NOT NULL,
         content_type TEXT NOT NULL,
         body         TEXT NOT NULL DEFAULT '',
-        media_path   TEXT,
         metadata     TEXT NOT NULL DEFAULT '{}',
         created_at   TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS message_attachments (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_pk   INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        slot_index   INTEGER NOT NULL,
+        content_type TEXT NOT NULL,
+        blob_id      TEXT NOT NULL,
+        media_type   TEXT NOT NULL,
+        size         INTEGER NOT NULL,
+        media_path   TEXT NOT NULL,
+        filename     TEXT,
+        duration_ms  INTEGER,
+        metadata     TEXT NOT NULL DEFAULT '{}',
+        created_at   TEXT NOT NULL,
+        UNIQUE(message_pk, slot_index)
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel_id, created_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_ext_id ON messages(external_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_user_name ON channels(user_id, name)",
+    "CREATE INDEX IF NOT EXISTS idx_message_attachments_blob ON message_attachments(blob_id)",
+    "CREATE INDEX IF NOT EXISTS idx_message_attachments_message ON message_attachments(message_pk)",
 ]
 
 _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
@@ -90,9 +108,20 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("messages", "sender_id",    "TEXT NOT NULL DEFAULT ''"),
     ("messages", "content_type", "TEXT NOT NULL DEFAULT ''"),
     ("messages", "body",         "TEXT NOT NULL DEFAULT ''"),
-    ("messages", "media_path",   "TEXT"),
     ("messages", "metadata",     "TEXT NOT NULL DEFAULT '{}'"),
     ("messages", "created_at",   "TEXT NOT NULL DEFAULT ''"),
+    # message_attachments
+    ("message_attachments", "message_pk",   "INTEGER NOT NULL DEFAULT 0"),
+    ("message_attachments", "slot_index",   "INTEGER NOT NULL DEFAULT 0"),
+    ("message_attachments", "content_type", "TEXT NOT NULL DEFAULT ''"),
+    ("message_attachments", "blob_id",      "TEXT NOT NULL DEFAULT ''"),
+    ("message_attachments", "media_type",   "TEXT NOT NULL DEFAULT ''"),
+    ("message_attachments", "size",         "INTEGER NOT NULL DEFAULT 0"),
+    ("message_attachments", "media_path",   "TEXT NOT NULL DEFAULT ''"),
+    ("message_attachments", "filename",     "TEXT"),
+    ("message_attachments", "duration_ms",  "INTEGER"),
+    ("message_attachments", "metadata",     "TEXT NOT NULL DEFAULT '{}'"),
+    ("message_attachments", "created_at",   "TEXT NOT NULL DEFAULT ''"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -141,6 +170,12 @@ def ensure_data_db(workspace_path: Path) -> None:
 
     db = str(data_db_path(workspace_path))
     with sqlite3.connect(db) as conn:
+        # SQLite needs foreign_keys=ON per-connection; without it the
+        # ON DELETE CASCADE on message_attachments(message_pk) is a no-op.
+        # Other connections (see conversation_channel.delete_channel) still
+        # delete attachments manually rather than rely on the cascade so
+        # they remain correct even without this pragma.
+        conn.execute("PRAGMA foreign_keys = ON")
         for ddl in _DDL:
             conn.execute(ddl)
 

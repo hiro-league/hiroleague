@@ -22,7 +22,10 @@ from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger
 from hiro_commons.timestamps import utc_iso, utc_now
 
+from .blob_store import DEFAULT_CHUNK_SIZE, chunk_count_for_size
 from .data_store import data_db_path, ensure_data_db
+from .media_store import audio_extension_for_media_type
+from .message_attachments import attachment_ref
 
 log = Logger.get("MSG_STORE")
 
@@ -30,8 +33,6 @@ log = Logger.get("MSG_STORE")
 # ---------------------------------------------------------------------------
 # High-level persistence entry points
 # ---------------------------------------------------------------------------
-
-_MEDIA_EXTENSIONS: dict[str, str] = {CONTENT_TYPE_AUDIO: "m4a"}
 
 
 async def persist_inbound(workspace_path: Path, msg: UnifiedMessage) -> int:
@@ -43,13 +44,22 @@ async def persist_inbound(workspace_path: Path, msg: UnifiedMessage) -> int:
     """
     from ..tools.conversation import ConversationChannelGetTool
     from .data_store import get_default_user_id
-    from .conversation_channel import update_last_message_at
+    from .conversation_channel import (
+        DEFAULT_CONVERSATION_CHANNEL_NAME,
+        update_last_message_at,
+    )
+    from .blob_store import blob_id_for_file
+    from .data_store import data_dir
     from .media_store import decode_and_save
+    from .message_attachments import insert_attachment
 
-    channel_name = f"{msg.routing.channel}:{msg.routing.sender_id}"
+    # WhatsApp/Telegram model: one user, one conversation, regardless of device.
+    # The channel is keyed by the workspace owner — never by routing.sender_id
+    # (which is the originating device id). All of the user's devices write
+    # into the same conversation thread.
     user_id = get_default_user_id(workspace_path)
     channel_result = ConversationChannelGetTool().execute(
-        channel_name=channel_name,
+        channel_name=DEFAULT_CONVERSATION_CHANNEL_NAME,
         workspace_path=workspace_path,
         user_id=user_id,
     )
@@ -70,11 +80,11 @@ async def persist_inbound(workspace_path: Path, msg: UnifiedMessage) -> int:
             primary_content_type = item.content_type
 
     text_body = "\n".join(body_parts)
-    items_meta = [
-        {"content_type": item.content_type, "metadata": item.metadata}
-        for item in msg.content
-    ]
 
+    # ``messages.metadata`` no longer mirrors per-item attachment metadata —
+    # attachments live in their own table and are joined back in by
+    # _sync_history. Keeping content_items here would double-store every
+    # blob_id / mime / size pair we already write to message_attachments.
     message_pk = await save_message(
         workspace_path,
         external_id=msg.routing.id,
@@ -84,19 +94,81 @@ async def persist_inbound(workspace_path: Path, msg: UnifiedMessage) -> int:
         sender_id=msg.routing.sender_id,
         content_type=primary_content_type,
         body=text_body,
-        metadata={"content_items": items_meta},
     )
 
-    for item in msg.content:
-        ext = _MEDIA_EXTENSIONS.get(item.content_type)
-        if ext and item.body and not item.body.startswith(("http://", "https://")):
-            mime = item.metadata.get("mime_type", "")
-            if "/" in mime:
-                ext = mime.split("/")[-1].replace("mpeg", "mp3")
-            media_path = decode_and_save(
-                workspace_path, channel_id, message_pk, item.body, ext,
+    for slot_index, item in enumerate(msg.content):
+        if item.content_type != CONTENT_TYPE_AUDIO:
+            continue
+        if not item.body:
+            log.warning(
+                "⚠️ Audio attachment skipped — inbound · empty_body",
+                slot_index=slot_index,
+                msg_id=msg.routing.id,
             )
-            await update_media_path(workspace_path, message_pk, media_path)
+            continue
+        if item.body.startswith(("http://", "https://")):
+            log.info(
+                "⬇️ Audio attachment skipped — inbound · external_url",
+                slot_index=slot_index,
+                msg_id=msg.routing.id,
+            )
+            continue
+
+        mime = str(item.metadata.get("mime_type", "audio/m4a") or "audio/m4a")
+        ext = audio_extension_for_media_type(mime)
+        try:
+            media_path = decode_and_save(
+                workspace_path,
+                channel_id,
+                message_pk,
+                item.body,
+                ext,
+                slot_index=slot_index,
+            )
+        except (ValueError, OSError) as exc:
+            # Surface decode/IO problems instead of silently dropping the row.
+            log.error(
+                "❌ Audio attachment decode failed — inbound · audio",
+                error=str(exc),
+                slot_index=slot_index,
+                msg_id=msg.routing.id,
+                exc_info=True,
+            )
+            continue
+
+        abs_path = data_dir(workspace_path) / media_path
+        blob_id = blob_id_for_file(abs_path)
+        size = abs_path.stat().st_size
+        duration_raw = item.metadata.get("duration_ms")
+        duration_ms = (
+            int(duration_raw) if isinstance(duration_raw, (int, float)) else None
+        )
+        attachment_metadata: dict[str, Any] = {"source": "user_audio"}
+        transcript = item.metadata.get("description")
+        if isinstance(transcript, str):
+            attachment_metadata["transcript"] = transcript
+        await asyncio.to_thread(
+            insert_attachment,
+            workspace_path,
+            message_pk=message_pk,
+            slot_index=slot_index,
+            content_type=item.content_type,
+            blob_id=blob_id,
+            media_type=mime,
+            size=size,
+            media_path=media_path,
+            filename=abs_path.name,
+            duration_ms=duration_ms,
+            metadata=attachment_metadata,
+        )
+        log.info(
+            "⬇️ Audio attachment stored — inbound · audio",
+            blob_id=blob_id,
+            size=size,
+            duration_ms=duration_ms,
+            slot_index=slot_index,
+            msg_id=msg.routing.id,
+        )
 
     await asyncio.to_thread(update_last_message_at, workspace_path, channel_id)
     return message_pk
@@ -117,7 +189,6 @@ async def save_message(
     sender_id: str,
     content_type: str,
     body: str = "",
-    media_path: str | None = None,
     metadata: dict[str, Any] | None = None,
     created_at: str | None = None,
 ) -> int:
@@ -132,19 +203,9 @@ async def save_message(
         sender_id=sender_id,
         content_type=content_type,
         body=body,
-        media_path=media_path,
         metadata=metadata,
         created_at=created_at,
     )
-
-
-async def update_media_path(
-    workspace_path: Path,
-    message_pk: int,
-    media_path: str,
-) -> None:
-    """Set media_path on an existing message row (used after saving media files)."""
-    await asyncio.to_thread(_sync_update_media_path, workspace_path, message_pk, media_path)
 
 
 async def list_messages(
@@ -152,6 +213,7 @@ async def list_messages(
     channel_id: int,
     *,
     after: str | None = None,
+    after_id: str | None = None,
     limit: int | None = 50,
 ) -> list[dict[str, Any]]:
     """Return messages for a channel, optionally after a timestamp, oldest first.
@@ -159,7 +221,31 @@ async def list_messages(
     ``limit`` None means no cap (all matching rows). Default 50.
     """
     return await asyncio.to_thread(
-        _sync_list, workspace_path, channel_id, after=after, limit=limit
+        _sync_list,
+        workspace_path,
+        channel_id,
+        after=after,
+        after_id=after_id,
+        limit=limit,
+    )
+
+
+async def list_message_history(
+    workspace_path: Path,
+    channel_id: int,
+    *,
+    after: str | None = None,
+    after_id: str | None = None,
+    limit: int | None = 50,
+) -> list[dict[str, Any]]:
+    """Return normalized history messages for device reload."""
+    return await asyncio.to_thread(
+        _sync_history,
+        workspace_path,
+        channel_id,
+        after=after,
+        after_id=after_id,
+        limit=limit,
     )
 
 
@@ -178,7 +264,6 @@ def _sync_save(
     sender_id: str,
     content_type: str,
     body: str,
-    media_path: str | None,
     metadata: dict[str, Any] | None,
     created_at: str | None,
 ) -> int:
@@ -190,28 +275,14 @@ def _sync_save(
             """
             INSERT INTO messages
                 (external_id, channel_id, user_id, sender_type, sender_id,
-                 content_type, body, media_path, metadata, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 content_type, body, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (external_id, channel_id, user_id, sender_type, sender_id,
-             content_type, body, media_path, meta_json, ts),
+             content_type, body, meta_json, ts),
         )
         conn.commit()
         return cursor.lastrowid  # type: ignore[return-value]
-
-
-def _sync_update_media_path(
-    workspace_path: Path,
-    message_pk: int,
-    media_path: str,
-) -> None:
-    ensure_data_db(workspace_path)
-    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
-        conn.execute(
-            "UPDATE messages SET media_path = ? WHERE id = ?",
-            (media_path, message_pk),
-        )
-        conn.commit()
 
 
 def _sync_list(
@@ -219,56 +290,148 @@ def _sync_list(
     channel_id: int,
     *,
     after: str | None = None,
+    after_id: str | None = None,
     limit: int | None = 50,
 ) -> list[dict[str, Any]]:
-    """List messages oldest-first. ``limit`` None omits SQL LIMIT (all rows)."""
+    """List messages oldest-first. ``limit`` None omits SQL LIMIT (all rows).
+
+    Ordering is ``(created_at, external_id)`` so the device can resume from a
+    compound cursor — without ``external_id`` as a tiebreaker, multiple rows
+    sharing the same ISO timestamp would silently lose ones at the page
+    boundary on the next pull.
+    """
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
-        if after:
-            if limit is None:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM messages
-                    WHERE channel_id = ? AND created_at > ?
-                    ORDER BY created_at ASC
-                    """,
-                    (channel_id, after),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM messages
-                    WHERE channel_id = ? AND created_at > ?
-                    ORDER BY created_at ASC
-                    LIMIT ?
-                    """,
-                    (channel_id, after, limit),
-                ).fetchall()
-        elif limit is None:
-            rows = conn.execute(
-                """
-                SELECT * FROM messages
-                WHERE channel_id = ?
-                ORDER BY created_at ASC
-                """,
-                (channel_id,),
-            ).fetchall()
+        order_clause = "ORDER BY created_at ASC, external_id ASC"
+        if after and after_id:
+            # Strict lexicographic > on (created_at, external_id). Rows with
+            # the same created_at but a larger external_id are still returned.
+            where = (
+                "WHERE channel_id = ? AND "
+                "(created_at > ? OR (created_at = ? AND external_id > ?))"
+            )
+            params: tuple[Any, ...] = (channel_id, after, after, after_id)
+        elif after:
+            where = "WHERE channel_id = ? AND created_at > ?"
+            params = (channel_id, after)
         else:
-            rows = conn.execute(
-                """
-                SELECT * FROM messages
-                WHERE channel_id = ?
-                ORDER BY created_at ASC
-                LIMIT ?
-                """,
-                (channel_id, limit),
-            ).fetchall()
+            where = "WHERE channel_id = ?"
+            params = (channel_id,)
+
+        if limit is None:
+            sql = f"SELECT * FROM messages {where} {order_clause}"
+            rows = conn.execute(sql, params).fetchall()
+        else:
+            sql = f"SELECT * FROM messages {where} {order_clause} LIMIT ?"
+            rows = conn.execute(sql, (*params, limit)).fetchall()
 
         return [_row_to_dict(row) for row in rows]
 
 
+def _sync_history(
+    workspace_path: Path,
+    channel_id: int,
+    *,
+    after: str | None = None,
+    after_id: str | None = None,
+    limit: int | None = 50,
+) -> list[dict[str, Any]]:
+    """List messages in the normalized history contract."""
+    messages = _sync_list(
+        workspace_path,
+        channel_id,
+        after=after,
+        after_id=after_id,
+        limit=limit,
+    )
+    if not messages:
+        return []
+
+    message_pks = [int(row["id"]) for row in messages]
+    placeholders = ",".join("?" for _ in message_pks)
+    attachments_by_message: dict[int, list[dict[str, Any]]] = {
+        pk: [] for pk in message_pks
+    }
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM message_attachments
+            WHERE message_pk IN ({placeholders})
+            ORDER BY message_pk ASC, slot_index ASC
+            """,
+            message_pks,
+        ).fetchall()
+    for row in rows:
+        attachment = _attachment_row_to_dict(row)
+        attachments_by_message.setdefault(int(attachment["message_pk"]), []).append(
+            attachment
+        )
+
+    return [
+        _history_row(row, attachments_by_message.get(int(row["id"]), []))
+        for row in messages
+    ]
+
+
+def _history_row(
+    row: dict[str, Any],
+    attachments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    message_id = str(row["external_id"])
+    content: list[dict[str, Any]] = []
+    body = str(row.get("body") or "")
+    if body.strip():
+        content.append({"content_type": CONTENT_TYPE_TEXT, "body": body})
+
+    for attachment in attachments:
+        metadata: dict[str, Any] = {}
+        existing_meta = attachment.get("metadata")
+        if isinstance(existing_meta, dict):
+            metadata.update(existing_meta)
+        metadata["blob_id"] = attachment["blob_id"]
+        metadata["size"] = attachment["size"]
+        metadata["media_type"] = attachment["media_type"]
+        metadata["chunk_size"] = DEFAULT_CHUNK_SIZE
+        metadata["chunk_count"] = chunk_count_for_size(
+            int(attachment["size"]),
+            DEFAULT_CHUNK_SIZE,
+        )
+        duration_ms = attachment.get("duration_ms")
+        if duration_ms is not None:
+            metadata["duration_ms"] = duration_ms
+
+        content.append(
+            {
+                "content_type": attachment["content_type"],
+                "body": attachment_ref(message_id, int(attachment["slot_index"])),
+                "metadata": metadata,
+            }
+        )
+
+    return {
+        "id": message_id,
+        "channel_id": row["channel_id"],
+        "sender_type": row["sender_type"],
+        "sender_id": row["sender_id"],
+        "created_at": row["created_at"],
+        "content": content,
+    }
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    if d.get("metadata"):
+        try:
+            d["metadata"] = json.loads(d["metadata"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return d
+
+
+def _attachment_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     if d.get("metadata"):
         try:

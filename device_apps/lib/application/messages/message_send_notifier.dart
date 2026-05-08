@@ -9,6 +9,7 @@ import '../../application/gateway/gateway_notifier.dart';
 import '../../application/policy/policy_notifier.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_exception.dart';
+import '../../core/utils/blob_id.dart';
 import '../../core/utils/logger.dart';
 import '../../data/remote/gateway/gateway_contract.dart';
 import '../../data/remote/gateway/unified_message.dart';
@@ -123,31 +124,44 @@ class MessageSendNotifier extends _$MessageSendNotifier {
 
     try {
       if (!voiceInputAllowed) {
-        throw const UnknownException('Voice messages are unavailable for this chat.');
+        throw const UnknownException(
+          'Voice messages are unavailable for this chat.',
+        );
       }
-      // 1. Persist audio locally.
-      final localPath = await audioStorage.save(
-        messageId: messageId,
-        bytes: recordingResult.bytes,
-        tempPath: recordingResult.tempPath,
-        blobUrl: recordingResult.tempPath, // on web tempPath IS the blob URL
+      // 1. Resolve the byte payload. On web the recorder may only give us a
+      // blob URL, so save/load that source before publishing the blob cache row.
+      var bytes = recordingResult.bytes;
+      if (bytes.isEmpty) {
+        final sourcePath = await audioStorage.save(
+          messageId: messageId,
+          bytes: bytes,
+          tempPath: recordingResult.tempPath,
+          blobUrl: recordingResult.tempPath,
+        );
+        bytes = (await audioStorage.loadBytes(sourcePath)) ?? bytes;
+      }
+      if (bytes.isEmpty) {
+        throw const UnknownException('Recorded audio was empty.');
+      }
+
+      final blobId = blobIdForBytes(bytes);
+      final chunkSize = defaultBlobChunkSize;
+      final chunkCount = blobChunkCountForSize(bytes.length, chunkSize);
+      final localPath = await audioStorage.saveBytes(
+        messageId: storageIdForBlob(blobId),
+        bytes: bytes,
+        mimeType: recordingResult.mimeType,
       );
-
-      // 2. Read bytes for base64 (on mobile we use what we have; on web re-read blob).
-      final bytes = recordingResult.bytes.isNotEmpty
-          ? recordingResult.bytes
-          : (await audioStorage.loadBytes(localPath)) ?? recordingResult.bytes;
-
       final base64Body = base64Encode(bytes);
 
-      // 3. Build metadata JSON stored in the DB.
+      // 2. Build metadata JSON stored in the DB. Playback comes from the
+      // attachment row; metadata is retained only for non-playback details.
       final metadataJson = jsonEncode({
         'duration_ms': recordingResult.durationMs,
         'mime_type': recordingResult.mimeType,
-        'local_path': localPath,
       });
 
-      // 4. Insert optimistic row.
+      // 3. Insert optimistic row and its ready local attachment.
       await repo.insertOutbound(
         id: messageId,
         channelId: channelId,
@@ -157,8 +171,18 @@ class MessageSendNotifier extends _$MessageSendNotifier {
         metadata: metadataJson,
         timestamp: now,
       );
+      await repo.upsertLocalAudioAttachment(
+        messageId: messageId,
+        localPath: localPath,
+        blobId: blobId,
+        mimeType: recordingResult.mimeType,
+        size: bytes.length,
+        durationMs: recordingResult.durationMs,
+        chunkSize: chunkSize,
+        chunkCount: chunkCount,
+      );
 
-      // 5. Send over WebSocket.
+      // 4. Send over WebSocket.
       gateway.send(
         UnifiedMessage(
           routing: MessageRouting(
@@ -179,13 +203,17 @@ class MessageSendNotifier extends _$MessageSendNotifier {
               metadata: {
                 'duration_ms': recordingResult.durationMs,
                 'mime_type': recordingResult.mimeType,
+                'blob_id': blobId,
+                'size': bytes.length,
+                'chunk_size': chunkSize,
+                'chunk_count': chunkCount,
               },
             ),
           ],
         ).toJson(),
       );
 
-      // 6. Mark as sent (single gray check).
+      // 5. Mark as sent (single gray check).
       await repo.updateMessageStatus(messageId, MessageStatus.sent);
     } on AppException {
       _log.error('Failed to send audio — DB or storage error');

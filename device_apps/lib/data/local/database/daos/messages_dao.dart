@@ -14,10 +14,8 @@ class MessagesDao extends DatabaseAccessor<AppDatabase>
     return (select(messages)
           ..where((m) => m.channelId.equals(channelId))
           ..orderBy([
-            (m) => OrderingTerm(
-                  expression: m.timestampMs,
-                  mode: OrderingMode.asc,
-                ),
+            (m) =>
+                OrderingTerm(expression: m.timestampMs, mode: OrderingMode.asc),
           ]))
         .watch();
   }
@@ -26,18 +24,31 @@ class MessagesDao extends DatabaseAccessor<AppDatabase>
     await into(messages).insertOnConflictUpdate(companion);
   }
 
+  Future<void> insertMessageOrIgnore(MessagesCompanion companion) async {
+    await into(messages).insert(companion, mode: InsertMode.insertOrIgnore);
+  }
+
   Future<void> updateStatus(String messageId, String status) async {
-    await (update(messages)..where((m) => m.id.equals(messageId)))
-        .write(MessagesCompanion(status: Value(status)));
+    await (update(messages)..where((m) => m.id.equals(messageId))).write(
+      MessagesCompanion(status: Value(status)),
+    );
   }
 
   Future<void> updateMetadata(String messageId, String metadata) async {
-    await (update(messages)..where((m) => m.id.equals(messageId)))
-        .write(MessagesCompanion(metadata: Value(metadata)));
+    await (update(messages)..where((m) => m.id.equals(messageId))).write(
+      MessagesCompanion(metadata: Value(metadata)),
+    );
+  }
+
+  Future<void> updateTranscript(String messageId, String transcript) async {
+    await (update(messages)..where((m) => m.id.equals(messageId))).write(
+      MessagesCompanion(transcript: Value(transcript)),
+    );
   }
 
   Future<MessageRecord?> getById(String messageId) async {
-    return (select(messages)..where((m) => m.id.equals(messageId)))
-        .getSingleOrNull();
+    return (select(
+      messages,
+    )..where((m) => m.id.equals(messageId))).getSingleOrNull();
   }
 }

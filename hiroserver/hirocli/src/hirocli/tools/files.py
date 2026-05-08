@@ -30,13 +30,27 @@ class FilesHeadTool(Tool):
     name = "files_head"
     description = "Resolve a file ref to blob metadata (size, sha256 id, chunk layout)"
     params = {
-        "ref": ToolParam(str, "Reference such as character_photo:hiro"),
+        "ref": ToolParam(
+            str,
+            "Reference such as character_photo:hiro or message_attachment:<message_id>:0",
+        ),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
-    def execute(self, ref: str, workspace: str | None = None) -> FilesHeadResult:
-        wp = _workspace_path(workspace)
-        path, media_type, blob_id = resolve_ref(wp, ref)
+    def execute(
+        self,
+        ref: str,
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+        requesting_device_id: str | None = None,
+    ) -> FilesHeadResult:
+        wp = workspace_path or _workspace_path(workspace)
+        path, media_type, blob_id = resolve_ref(
+            wp,
+            ref,
+            requesting_device_id=requesting_device_id,
+        )
         size = path.stat().st_size
         chunk_size = DEFAULT_CHUNK_SIZE
         chunk_count = chunk_count_for_size(size, chunk_size)

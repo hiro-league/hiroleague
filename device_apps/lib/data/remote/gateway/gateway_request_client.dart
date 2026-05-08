@@ -63,7 +63,7 @@ class _FileGetSession {
 /// Sends request-type [UnifiedMessage]s and correlates responses by request_id.
 class GatewayRequestClient {
   GatewayRequestClient({required void Function(Map<String, dynamic>) sendFn})
-      : _sendFn = sendFn;
+    : _sendFn = sendFn;
 
   final void Function(Map<String, dynamic>) _sendFn;
 
@@ -77,6 +77,7 @@ class GatewayRequestClient {
   static bool defaultIdempotentFor(String method) =>
       method == 'channels.list' ||
       method == 'characters.list' ||
+      method == 'messages.history' ||
       method == 'policy.get' ||
       method == 'files.head' ||
       method == 'files.get';
@@ -115,10 +116,7 @@ class GatewayRequestClient {
       final removed = _pending.remove(entry.requestId);
       if (removed != null && !entry.completer.isCompleted) {
         entry.completer.completeError(
-          TimeoutException(
-            'Request ${entry.method} timed out',
-            entry.timeout,
-          ),
+          TimeoutException('Request ${entry.method} timed out', entry.timeout),
         );
       }
     });
@@ -222,7 +220,10 @@ class GatewayRequestClient {
     final terminalBlob = map['blob_id'] as String?;
     final size = map['size'];
     if (terminalBlob == null || size is! int) {
-      _failFileGet(sess, const FormatException('files.get terminal missing fields'));
+      _failFileGet(
+        sess,
+        const FormatException('files.get terminal missing fields'),
+      );
       return true;
     }
     final got = sess.buffer.toBytes();
@@ -301,7 +302,9 @@ class GatewayRequestClient {
       return true;
     } catch (e) {
       if (!entry.completer.isCompleted) {
-        entry.completer.completeError(FormatException('Invalid response JSON: $e'));
+        entry.completer.completeError(
+          FormatException('Invalid response JSON: $e'),
+        );
       }
       return true;
     }

@@ -38,12 +38,12 @@ def test_list_success() -> None:
     ]
 
 
-def test_messages_all_uses_tool_flag() -> None:
-    mock_out = MagicMock()
-    mock_out.messages = [{"body": "x"}]
-    with patch("hirocli.admin.features.chat_channels.service.MessageHistoryTool") as T:
-        inst = T.return_value
-        inst.execute.return_value = mock_out
+def test_messages_all_uses_raw_rows_for_admin_ui() -> None:
+    with (
+        patch.object(ChatChannelsService, "_workspace_path", lambda self, _ws: Path(".")),
+        patch("hirocli.admin.features.chat_channels.service._sync_list") as list_messages,
+    ):
+        list_messages.return_value = [{"body": "x"}]
         r = ChatChannelsService().list_messages_all("ws-1", 3)
     assert r.ok and r.data == [{"body": "x"}]
-    inst.execute.assert_called_once_with(3, workspace="ws-1", all_messages=True)
+    list_messages.assert_called_once_with(Path("."), 3, limit=None)

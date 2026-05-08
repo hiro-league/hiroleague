@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -32,10 +34,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.initState();
     // Same stale-while-revalidate hook as channel list — capabilities/policy may have changed while away.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(gatewayProvider.notifier).revalidateResourcesIfStale(
-            const ['channels', 'policy'],
-          );
+      final gateway = ref.read(gatewayProvider.notifier);
+      unawaited(
+        gateway.revalidateResourcesIfStale(const ['channels', 'policy']),
+      );
+      unawaited(gateway.revalidateMessageHistoryForChannel(widget.channelId));
     });
+  }
+
+  Future<void> _refreshMessages() {
+    return ref
+        .read(gatewayProvider.notifier)
+        .revalidateMessageHistoryForChannel(widget.channelId, force: true);
   }
 
   @override
@@ -71,7 +81,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
           // --- Message list ---
           Expanded(
-            child: MessageList(channelId: widget.channelId),
+            child: MessageList(
+              channelId: widget.channelId,
+              onRefresh: _refreshMessages,
+            ),
           ),
           MessageInputBar(channelId: widget.channelId),
         ],

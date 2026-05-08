@@ -15,6 +15,18 @@ abstract class MessageRepository {
     String? metadata,
   });
 
+  Future<void> upsertLocalAudioAttachment({
+    required String messageId,
+    required String localPath,
+    required String blobId,
+    required String mimeType,
+    required int size,
+    required int durationMs,
+    int slotIndex = 0,
+    int? chunkSize,
+    int? chunkCount,
+  });
+
   Future<void> updateMessageStatus(String messageId, MessageStatus status);
 
   void dispose();

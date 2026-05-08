@@ -221,12 +221,19 @@ class ConversationChannelDeleteTool(Tool):
 class MessageHistoryTool(Tool):
     name = "message_history"
     description = (
-        "Retrieve message history for a conversation channel. "
-        "Use all_messages=true for no row limit; otherwise limit defaults to 50."
+        "Retrieve normalized message history for a conversation channel. "
+        "Use all_messages=true for no row limit; otherwise limit defaults to 50. "
+        "Pass after_id alongside after for stable pagination across rows that "
+        "share the same created_at timestamp."
     )
     params = {
         "channel_id": ToolParam(int, "Channel integer id"),
         "after": ToolParam(str, "ISO 8601 timestamp - return only messages after this time", required=False),
+        "after_id": ToolParam(
+            str,
+            "External message id tiebreaker for rows sharing ``after`` timestamp",
+            required=False,
+        ),
         "limit": ToolParam(int, "Max messages when all_messages is false (default 50)", required=False),
         "all_messages": ToolParam(
             bool,
@@ -243,10 +250,22 @@ class MessageHistoryTool(Tool):
         limit: int = 50,
         all_messages: bool = False,
         workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+        after_id: str | None = None,
     ) -> MessageHistoryResult:
-        from ..domain.message_store import _sync_list
+        # ``_sync_history`` is synchronous and meant for asyncio.to_thread, but
+        # this tool's callers (CLI, Admin UI) are synchronous too — using the
+        # private helper directly here keeps the call chain non-async.
+        from ..domain.message_store import _sync_history
 
-        workspace_path = _resolve_path(workspace)
+        resolved_workspace_path = workspace_path or _resolve_path(workspace)
         eff_limit: int | None = None if all_messages else limit
-        messages = _sync_list(workspace_path, channel_id, after=after, limit=eff_limit)
+        messages = _sync_history(
+            resolved_workspace_path,
+            channel_id,
+            after=after,
+            after_id=after_id,
+            limit=eff_limit,
+        )
         return MessageHistoryResult(messages=messages, channel_id=channel_id)

@@ -4,18 +4,23 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'daos/channels_dao.dart';
+import 'daos/message_attachments_dao.dart';
 import 'daos/messages_dao.dart';
 import 'tables/channels_table.dart';
+import 'tables/message_attachments_table.dart';
 import 'tables/messages_table.dart';
 
 part 'app_database.g.dart';
 
-@DriftDatabase(tables: [Channels, Messages], daos: [ChannelsDao, MessagesDao])
+@DriftDatabase(
+  tables: [Channels, Messages, MessageAttachments],
+  daos: [ChannelsDao, MessagesDao, MessageAttachmentsDao],
+)
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(_openExecutor());
+  AppDatabase([QueryExecutor? executor]) : super(executor ?? _openExecutor());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(

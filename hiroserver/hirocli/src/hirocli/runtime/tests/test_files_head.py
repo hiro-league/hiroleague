@@ -22,7 +22,6 @@ from hirocli.runtime.request_methods import handle_files_head
 @pytest.mark.asyncio
 async def test_files_head_character_photo(
     tmp_path_factory: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tmp_path = tmp_path_factory.mktemp("ws")
     seed_default_characters(tmp_path)
@@ -30,11 +29,6 @@ async def test_files_head_character_photo(
     expected_blob = blob_id_for_file(path)
     expected_size = path.stat().st_size
     expected_chunks = chunk_count_for_size(expected_size, DEFAULT_CHUNK_SIZE)
-
-    # FilesHeadTool resolves workspace via the registry; route the test workspace through it.
-    from hirocli.tools import files as files_tools
-
-    monkeypatch.setattr(files_tools, "_workspace_path", lambda _name: tmp_path)
 
     srv = SimpleNamespace(workspace_path=tmp_path, workspace_name="default")
     rctx = RequestContext(srv, msg=SimpleNamespace())  # type: ignore[arg-type]

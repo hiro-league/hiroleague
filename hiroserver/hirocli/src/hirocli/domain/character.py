@@ -18,7 +18,7 @@ import re
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -26,54 +26,31 @@ from hiro_commons.constants.storage import CHARACTERS_DIR, DEFAULT_CHARACTER_ID
 from hiro_commons.timestamps import utc_iso, utc_now
 
 from .db import db_path, ensure_db
+from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 logger = logging.getLogger(__name__)
 
-CharacterChangeSubscriber = Callable[[Path, str], None]
-_CHARACTER_CHANGE_SUBSCRIBERS: list[CharacterChangeSubscriber] = []
-
-CharacterPhotoChangeSubscriber = Callable[[Path, str], None]
-_CHARACTER_PHOTO_CHANGE_SUBSCRIBERS: list[CharacterPhotoChangeSubscriber] = []
-
-
-def subscribe_character_photo_changes(callback: CharacterPhotoChangeSubscriber) -> None:
-    if callback not in _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS:
-        _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS.append(callback)
-
-
-def unsubscribe_character_photo_changes(callback: CharacterPhotoChangeSubscriber) -> None:
-    if callback in _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS:
-        _CHARACTER_PHOTO_CHANGE_SUBSCRIBERS.remove(callback)
-
 
 def _notify_character_photo_changed(workspace_path: Path, character_id: str) -> None:
-    """Notify subscribers when only the character photo bytes change (not full character metadata)."""
-    for callback in list(_CHARACTER_PHOTO_CHANGE_SUBSCRIBERS):
-        try:
-            callback(workspace_path, character_id)
-        except Exception:
-            logger.exception(
-                "character photo change subscriber failed",
-                extra={"character_id": character_id},
-            )
-
-
-def subscribe_character_changes(callback: CharacterChangeSubscriber) -> None:
-    if callback not in _CHARACTER_CHANGE_SUBSCRIBERS:
-        _CHARACTER_CHANGE_SUBSCRIBERS.append(callback)
-
-
-def unsubscribe_character_changes(callback: CharacterChangeSubscriber) -> None:
-    if callback in _CHARACTER_CHANGE_SUBSCRIBERS:
-        _CHARACTER_CHANGE_SUBSCRIBERS.remove(callback)
+    """Publish a photo-only mutation. Bytes changed; index row did not."""
+    get_domain_event_bus().publish(
+        DomainEvent(
+            type=DomainEventType.CHARACTER_PHOTO_CHANGED,
+            workspace_path=workspace_path,
+            payload={"character_id": character_id},
+        )
+    )
 
 
 def _notify_character_changed(workspace_path: Path, character_id: str) -> None:
-    for callback in list(_CHARACTER_CHANGE_SUBSCRIBERS):
-        try:
-            callback(workspace_path, character_id)
-        except Exception:
-            logger.exception("character change subscriber failed", extra={"character_id": character_id})
+    """Publish a character metadata/index mutation."""
+    get_domain_event_bus().publish(
+        DomainEvent(
+            type=DomainEventType.CHARACTER_CHANGED,
+            workspace_path=workspace_path,
+            payload={"character_id": character_id},
+        )
+    )
 
 # Packaged defaults live next to the internal package (see characters/hiro/).
 _HIROCLI_ROOT = Path(__file__).resolve().parent.parent

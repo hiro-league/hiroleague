@@ -110,7 +110,12 @@ class EnvelopeFactory:
 
     @staticmethod
     def transcript_event(origin: UnifiedMessage, transcript: str) -> UnifiedMessage:
-        """A ``message.transcribed`` event carrying the audio transcript text."""
+        """A ``message.transcribed`` event carrying the audio transcript text.
+
+        Broadcasts (no ``recipient_id``) because the transcript is shared
+        conversation content — every paired device of the user should see it,
+        not only the device that recorded the original audio.
+        """
         _txn_meta = dict(origin.routing.metadata or {})
         _txn_meta[METADATA_LOG_TEXT_PREVIEW] = log_preview_snippet(transcript)
 
@@ -120,7 +125,6 @@ class EnvelopeFactory:
                 channel=origin.routing.channel,
                 direction="outbound",
                 sender_id=_SERVER_SENDER_ID,
-                recipient_id=origin.routing.sender_id,
                 metadata=_txn_meta,
             ),
             event=EventPayload(

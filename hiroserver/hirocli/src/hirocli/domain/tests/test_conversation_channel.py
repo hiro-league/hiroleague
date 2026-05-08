@@ -12,6 +12,7 @@ from hirocli.domain.conversation_channel import (
     update_channel,
 )
 from hirocli.domain.data_store import data_db_path, ensure_data_db
+from hirocli.domain.message_attachments import insert_attachment
 from hirocli.domain.message_store import _sync_list, _sync_save
 
 
@@ -31,7 +32,6 @@ def _insert_message(
         sender_id="u1",
         content_type="text",
         body=body,
-        media_path=None,
         metadata=None,
         created_at=None,
     )
@@ -67,11 +67,24 @@ def test_delete_channel_removes_messages(tmp_path) -> None:
     assert ch.id != 1, "fixture expects seeded General keeps id 1"
     _insert_message(tmp_path, ch.id, external_id="ext-1")
     _insert_message(tmp_path, ch.id, external_id="ext-2")
+    first_message_pk = _sync_list(tmp_path, ch.id, limit=1)[0]["id"]
+    insert_attachment(
+        tmp_path,
+        message_pk=first_message_pk,
+        slot_index=0,
+        content_type="audio",
+        blob_id="sha256:" + ("a" * 64),
+        media_type="audio/m4a",
+        size=10,
+        media_path="media/fake.m4a",
+    )
     delete_channel(tmp_path, ch.id)
     with sqlite3.connect(str(data_db_path(tmp_path))) as conn:
         m = conn.execute("SELECT COUNT(*) FROM messages WHERE channel_id = ?", (ch.id,)).fetchone()
+        a = conn.execute("SELECT COUNT(*) FROM message_attachments").fetchone()
         c = conn.execute("SELECT COUNT(*) FROM channels WHERE id = ?", (ch.id,)).fetchone()
     assert m[0] == 0
+    assert a[0] == 0
     assert c[0] == 0
 
 

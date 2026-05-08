@@ -5,9 +5,10 @@ import '../../../application/messages/messages_provider.dart';
 import 'message_bubble/message_bubble.dart';
 
 class MessageList extends ConsumerStatefulWidget {
-  const MessageList({super.key, required this.channelId});
+  const MessageList({super.key, required this.channelId, this.onRefresh});
 
   final String channelId;
+  final Future<void> Function()? onRefresh;
 
   @override
   ConsumerState<MessageList> createState() => _MessageListState();
@@ -35,17 +36,14 @@ class _MessageListState extends ConsumerState<MessageList> {
 
   @override
   Widget build(BuildContext context) {
-    final messagesAsync =
-        ref.watch(channelMessagesProvider(widget.channelId));
+    final messagesAsync = ref.watch(channelMessagesProvider(widget.channelId));
 
     return messagesAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(
         child: Text(
           'Failed to load messages',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.error,
-          ),
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
         ),
       ),
       data: (messages) {
@@ -58,24 +56,38 @@ class _MessageListState extends ConsumerState<MessageList> {
         }
 
         if (messages.isEmpty) {
-          return Center(
-            child: Text(
-              'No messages yet.\nSend the first one!',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+          return RefreshIndicator(
+            onRefresh: widget.onRefresh ?? () async {},
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(
+                  height: MediaQuery.sizeOf(context).height * 0.5,
+                  child: Center(
+                    child: Text(
+                      'No messages yet.\nSend the first one!',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
+                ),
+              ],
             ),
           );
         }
 
-        return ListView.builder(
-          controller: _scrollController,
-          padding:
-              const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-          itemCount: messages.length,
-          itemBuilder: (context, index) =>
-              MessageBubble(message: messages[index]),
+        return RefreshIndicator(
+          onRefresh: widget.onRefresh ?? () async {},
+          child: ListView.builder(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            itemCount: messages.length,
+            itemBuilder: (context, index) =>
+                MessageBubble(message: messages[index]),
+          ),
         );
       },
     );

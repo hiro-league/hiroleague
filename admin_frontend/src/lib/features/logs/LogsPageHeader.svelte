@@ -8,6 +8,7 @@
     Pause,
     Play,
     Search,
+    Trash2,
     X
   } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -35,11 +36,13 @@
     onToggleDetailPanel: () => void;
     controlsCollapsed: boolean;
     onToggleControlsCollapsed: () => void;
+    onClearLogs: () => void;
     /** Targets the filters ``role="region"`` (``aria-controls``). */
     filtersRegionId: string;
     visibleCount: number;
     loadedCount: number;
     searchBusy: boolean;
+    clearingLogs: boolean;
     /** True when server search or local scope filters narrow the result set. */
     filtered: boolean;
   };
@@ -64,10 +67,12 @@
     onToggleDetailPanel,
     controlsCollapsed,
     onToggleControlsCollapsed,
+    onClearLogs,
     filtersRegionId,
     visibleCount,
     loadedCount,
     searchBusy,
+    clearingLogs,
     filtered
   }: Props = $props();
 
@@ -175,6 +180,10 @@
       </select>
     </label>
     <span class="hidden h-6 w-px bg-border md:block"></span>
+    <Button variant="destructive" size="sm" onclick={onClearLogs} disabled={clearingLogs}>
+      <Trash2 size={15} />
+      {clearingLogs ? 'Clearing...' : 'Clear logs'}
+    </Button>
     <Button
       class="xl:ml-2"
       variant={detailPanelOpen ? 'secondary' : 'outline'}

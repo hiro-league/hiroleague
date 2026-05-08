@@ -34,6 +34,7 @@ from hiro_commons.process import (
 from hiro_channel_sdk.constants import (
     JSONRPC_ERROR_METHOD_NOT_FOUND,
     MESSAGE_TYPE_MESSAGE,
+    MESSAGE_TYPE_STREAM,
     METHOD_CONFIGURE,
     METHOD_EVENT,
     METHOD_RECEIVE,
@@ -425,7 +426,14 @@ class ChannelManager:
             um = UnifiedMessage.model_validate(message)
             sd, smid, smeth, stpv = unified_message_log_scope(um, direction="outbound")
             with log_scope(device_id=sd, msg_id=smid, method=smeth, text_preview=stpv):
-                log.info(
+                # Stream chunks are per-chunk noise — log once at the
+                # owning ``STREAM_SEND`` layer (single completion line).
+                sent_log = (
+                    log.fineinfo
+                    if um.message_type == MESSAGE_TYPE_STREAM
+                    else log.info
+                )
+                sent_log(
                     f"{LOG_OUT} Sent — ({channel_name}) · {device} · {comm_kind(um)}",
                     **comm_extras(um),
                 )

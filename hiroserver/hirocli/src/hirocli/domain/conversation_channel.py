@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Callable
 
 from pydantic import BaseModel
 
@@ -13,29 +12,20 @@ from hiro_commons.timestamps import utc_iso, utc_now
 
 from .data_store import data_db_path, ensure_data_db, get_default_user_id
 from .conversation_channel_photo import remove_channel_photo_dir
+from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 logger = logging.getLogger(__name__)
 
-ChannelChangeSubscriber = Callable[[Path, int], None]
-_CHANNEL_CHANGE_SUBSCRIBERS: list[ChannelChangeSubscriber] = []
-
-
-def subscribe_channel_changes(callback: ChannelChangeSubscriber) -> None:
-    if callback not in _CHANNEL_CHANGE_SUBSCRIBERS:
-        _CHANNEL_CHANGE_SUBSCRIBERS.append(callback)
-
-
-def unsubscribe_channel_changes(callback: ChannelChangeSubscriber) -> None:
-    if callback in _CHANNEL_CHANGE_SUBSCRIBERS:
-        _CHANNEL_CHANGE_SUBSCRIBERS.remove(callback)
-
 
 def _notify_channel_changed(workspace_path: Path, channel_id: int) -> None:
-    for callback in list(_CHANNEL_CHANGE_SUBSCRIBERS):
-        try:
-            callback(workspace_path, channel_id)
-        except Exception:
-            logger.exception("channel change subscriber failed", extra={"channel_id": channel_id})
+    """Publish a channel mutation (create/update/delete or thumbnail change)."""
+    get_domain_event_bus().publish(
+        DomainEvent(
+            type=DomainEventType.CHANNEL_CHANGED,
+            workspace_path=workspace_path,
+            payload={"channel_id": channel_id},
+        )
+    )
 
 
 def notify_conversation_channel_changed(workspace_path: Path, channel_id: int) -> None:
@@ -273,6 +263,15 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
 
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.execute(
+            """
+            DELETE FROM message_attachments
+            WHERE message_pk IN (
+                SELECT id FROM messages WHERE channel_id = ?
+            )
+            """,
+            (channel_id,),
+        )
         conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
         conn.commit()

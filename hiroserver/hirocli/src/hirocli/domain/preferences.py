@@ -12,38 +12,27 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
 from .credential_store import CredentialStore
+from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 logger = logging.getLogger(__name__)
 
-PreferenceSaveSubscriber = Callable[[Path, "WorkspacePreferences"], None]
-_PREFERENCE_SAVE_SUBSCRIBERS: list[PreferenceSaveSubscriber] = []
-
-
-def subscribe_preferences_saved(callback: PreferenceSaveSubscriber) -> None:
-    """Register a callback invoked after ``preferences.json`` is written."""
-    if callback not in _PREFERENCE_SAVE_SUBSCRIBERS:
-        _PREFERENCE_SAVE_SUBSCRIBERS.append(callback)
-
-
-def unsubscribe_preferences_saved(callback: PreferenceSaveSubscriber) -> None:
-    """Remove a previously-registered save callback."""
-    if callback in _PREFERENCE_SAVE_SUBSCRIBERS:
-        _PREFERENCE_SAVE_SUBSCRIBERS.remove(callback)
-
 
 def _notify_preferences_saved(workspace_path: Path, prefs: "WorkspacePreferences") -> None:
-    for callback in list(_PREFERENCE_SAVE_SUBSCRIBERS):
-        try:
-            callback(workspace_path, prefs)
-        except Exception:
-            logger.exception("preferences save subscriber failed", extra={"workspace_path": str(workspace_path)})
+    """Publish that ``preferences.json`` was written. ``prefs`` is included for handlers that need it."""
+    get_domain_event_bus().publish(
+        DomainEvent(
+            type=DomainEventType.PREFERENCES_SAVED,
+            workspace_path=workspace_path,
+            payload={"prefs": prefs},
+        )
+    )
 
 # ---------------------------------------------------------------------------
 # LLM selection (canonical catalog ids: ``openai:gpt-5.4``)

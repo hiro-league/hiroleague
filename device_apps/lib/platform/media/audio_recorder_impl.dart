@@ -111,6 +111,9 @@ class AudioRecorderImpl implements AudioRecorder {
       encoder: encoder,
       bitRate: 128000,
       sampleRate: 44100,
+      autoGain: true,
+      noiseSuppress: true,
+      echoCancel: true,
     );
 
     try {

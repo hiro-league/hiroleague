@@ -20,12 +20,11 @@ export type ChatMessageRow = {
   id: number;
   external_id: string;
   channel_id: number;
-  user_id: number | null;
+  user_id: number;
   sender_type: string;
   sender_id: string;
   content_type: string;
   body: string;
-  media_path: string | null;
   metadata: unknown;
   created_at: string;
 };

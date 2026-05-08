@@ -26,6 +26,10 @@ class ChannelsDao extends DatabaseAccessor<AppDatabase>
     )..where((c) => c.id.equals(channelId))).getSingleOrNull();
   }
 
+  Future<List<ChannelRecord>> listServerBacked() {
+    return (select(channels)..where((c) => c.serverId.isNotNull())).get();
+  }
+
   Future<int> count() async {
     final result = await (selectOnly(
       channels,
@@ -35,6 +39,31 @@ class ChannelsDao extends DatabaseAccessor<AppDatabase>
 
   Future<void> insertOrUpdate(ChannelsCompanion companion) async {
     await into(channels).insertOnConflictUpdate(companion);
+  }
+
+  Future<void> updateLastHistorySyncedAt(
+    String channelId,
+    int syncedAtMs,
+  ) async {
+    await (update(channels)..where((c) => c.id.equals(channelId))).write(
+      ChannelsCompanion(lastHistorySyncedAt: Value(syncedAtMs)),
+    );
+  }
+
+  /// Persist the compound history cursor — pass the newest ``created_at``
+  /// (ms) together with the ``external_id`` of the row at that timestamp
+  /// so the next page request can resume past collisions.
+  Future<void> updateLastHistorySyncedCursor(
+    String channelId, {
+    required int syncedAtMs,
+    required String? externalId,
+  }) async {
+    await (update(channels)..where((c) => c.id.equals(channelId))).write(
+      ChannelsCompanion(
+        lastHistorySyncedAt: Value(syncedAtMs),
+        lastHistorySyncedExternalId: Value(externalId),
+      ),
+    );
   }
 
   Future<void> deleteMissing(Set<String> channelIds) async {

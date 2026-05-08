@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from hiro_channel_sdk.constants import MESSAGE_TYPE_STREAM
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
@@ -61,7 +62,12 @@ class OutboundPipeline:
             text_preview=_out_text_preview,
         ):
             await self.queue.put(msg)
-            log.info(
+            # Stream chunks are per-chunk noise (one ``files.get`` can fan out
+            # to dozens of frames); the owning ``STREAM_SEND`` layer logs a
+            # single INFO completion line. Demote per-frame queue logs to
+            # fineinfo so they're available when verbosity is raised.
+            log_fn = log.fineinfo if msg.message_type == MESSAGE_TYPE_STREAM else log.info
+            log_fn(
                 f"{LOG_OUT} Queued — {self._routing_tag(msg)}",
                 **comm_extras(
                     msg,
@@ -97,7 +103,13 @@ class OutboundPipeline:
                         )
                         continue
 
-                    log.info(
+                    # See ``enqueue`` — stream frames are per-chunk noise.
+                    dispatch_log = (
+                        log.fineinfo
+                        if msg.message_type == MESSAGE_TYPE_STREAM
+                        else log.info
+                    )
+                    dispatch_log(
                         f"{LOG_OUT} Dispatching — {self._routing_tag(msg)}",
                         **comm_extras(
                             msg,

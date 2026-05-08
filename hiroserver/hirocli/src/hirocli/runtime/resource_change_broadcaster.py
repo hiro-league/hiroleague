@@ -1,4 +1,10 @@
-"""Emits ``resource.changed`` hints on workspace-domain mutations — Tier 1 substrate."""
+"""Emits ``resource.changed`` hints on workspace-domain mutations — Tier 1 substrate.
+
+Subscribes to the :mod:`hirocli.domain.events` bus and translates typed domain
+events into debounced fan-out of ``resource.changed`` envelopes to connected
+devices. The bus owns the asyncio loop and the thread-safety story; this class
+only deals with the runtime loop.
+"""
 
 from __future__ import annotations
 
@@ -10,20 +16,11 @@ from typing import Any
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.log import Logger
 
-from ..domain.character import (
-    subscribe_character_changes,
-    subscribe_character_photo_changes,
-    unsubscribe_character_changes,
-    unsubscribe_character_photo_changes,
-)
-from ..domain.conversation_channel import (
-    subscribe_channel_changes,
-    unsubscribe_channel_changes,
-)
-from ..domain.preferences import (
-    WorkspacePreferences,
-    subscribe_preferences_saved,
-    unsubscribe_preferences_saved,
+from ..domain.events import (
+    DomainEvent,
+    DomainEventType,
+    DomainEventBus,
+    get_domain_event_bus,
 )
 from .device_targeting import DeviceTargeting
 from .envelope_factory import EnvelopeFactory
@@ -33,6 +30,18 @@ from .resource_versioning import ResourceVersionStore
 EmitOutbound = Callable[..., Awaitable[None]]
 
 log = Logger.get("RESOURCE.CHANGED")
+
+
+# Map domain event types to the legacy "signal" identifiers consumed by
+# ``ResourceRegistry``. Keeping the registry's vocabulary stable means the
+# device-side resource list does not have to change in lockstep with bus
+# refactors.
+_EVENT_TO_SIGNAL: dict[str, str] = {
+    DomainEventType.PREFERENCES_SAVED: "preferences_saved",
+    DomainEventType.CHARACTER_CHANGED: "character_changed",
+    DomainEventType.CHARACTER_PHOTO_CHANGED: "character_photo_changed",
+    DomainEventType.CHANNEL_CHANGED: "channel_changed",
+}
 
 
 class ResourceChangeBroadcaster:
@@ -48,30 +57,28 @@ class ResourceChangeBroadcaster:
         version_store: ResourceVersionStore,
         registry: ResourceRegistry | None = None,
         targeting: DeviceTargeting | None = None,
+        bus: DomainEventBus | None = None,
     ) -> None:
         self._workspace_path = workspace_path
         self._emit_outbound = emit_outbound
         self._version_store = version_store
         self._registry = registry or ResourceRegistry()
         self._targeting = targeting or DeviceTargeting()
+        self._bus = bus or get_domain_event_bus()
         self._connected_device_ids: set[str] = set()
         self._debounce_tasks: dict[str, asyncio.Task[None]] = {}
 
     def start(self) -> None:
-        subscribe_preferences_saved(self._on_preferences_saved)
-        subscribe_character_changes(self._on_character_changed)
-        subscribe_character_photo_changes(self._on_character_photo_changed)
-        subscribe_channel_changes(self._on_channel_changed)
+        for event_type in _EVENT_TO_SIGNAL:
+            self._bus.subscribe(event_type, self._on_domain_event)
 
     def close(self) -> None:
         for task in list(self._debounce_tasks.values()):
             if not task.done():
                 task.cancel()
         self._debounce_tasks.clear()
-        unsubscribe_preferences_saved(self._on_preferences_saved)
-        unsubscribe_character_changes(self._on_character_changed)
-        unsubscribe_character_photo_changes(self._on_character_photo_changed)
-        unsubscribe_channel_changes(self._on_channel_changed)
+        for event_type in _EVENT_TO_SIGNAL:
+            self._bus.unsubscribe(event_type, self._on_domain_event)
 
     async def handle_device_connected(self, device_id: str) -> None:
         self._connected_device_ids.add(device_id)
@@ -82,51 +89,28 @@ class ResourceChangeBroadcaster:
     async def clear_connected_devices(self) -> None:
         self._connected_device_ids.clear()
 
-    def _on_preferences_saved(self, workspace_path: Path, prefs: WorkspacePreferences) -> None:
-        del prefs
-        if workspace_path != self._workspace_path:
+    async def _on_domain_event(self, event: DomainEvent) -> None:
+        if event.workspace_path != self._workspace_path:
             return
-        log.debug("Domain signal — domain:preferences_saved")
-        self._schedule_for_signal("preferences_saved")
-
-    def _on_character_changed(self, workspace_path: Path, character_id: str) -> None:
-        del character_id
-        if workspace_path != self._workspace_path:
+        signal = _EVENT_TO_SIGNAL.get(event.type)
+        if signal is None:
             return
-        log.debug("Domain signal — domain:character_changed")
-        self._schedule_for_signal("character_changed")
-
-    def _on_character_photo_changed(self, workspace_path: Path, character_id: str) -> None:
-        del character_id
-        if workspace_path != self._workspace_path:
-            return
-        log.debug("Domain signal — domain:character_photo_changed")
-        self._schedule_for_signal("character_photo_changed")
-
-    def _on_channel_changed(self, workspace_path: Path, channel_id: int) -> None:
-        del channel_id
-        if workspace_path != self._workspace_path:
-            return
-        log.debug("Domain signal — domain:channel_changed")
-        self._schedule_for_signal("channel_changed")
+        log.info("Domain signal received", event_type=event.type, signal=signal)
+        self._schedule_for_signal(signal)
 
     def _schedule_for_signal(self, signal: str) -> None:
         resources = list(self._registry.resources_for_signal(signal))
         if not resources:
-            log.debug("Signal ignored (no resources) — domain:{signal}", signal=signal)
+            log.debug("Signal ignored (no resources)", signal=signal)
             return
-        log.fineinfo(
-            f"Resources marked dirty — domain:{signal} · resources:{','.join(resources)}",
-            count=len(resources),
-        )
+        # Per-resource emission already logs ``⬆️ Resource hints sent``; no need
+        # to also log "marked dirty" between signal-received and flush.
         for resource in resources:
             self._schedule_emit(resource, signal)
 
     def _schedule_emit(self, resource: str, reason: str) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
+        # Subscribers always run on the bus's attached loop, so this is safe.
+        loop = asyncio.get_running_loop()
 
         old = self._debounce_tasks.pop(resource, None)
         if old is not None and not old.done():

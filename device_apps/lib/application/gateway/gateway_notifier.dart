@@ -43,6 +43,8 @@ class GatewayNotifier extends _$GatewayNotifier {
   final ResourceSyncRegistry _resourceSync = ResourceSyncRegistry();
   final List<FrozenRetryRequest> _frozenRetryBacklog = [];
   bool _gatewayHandlersWired = false;
+  Timer? _attachmentFetchTimer;
+  bool _attachmentFetchInFlight = false;
 
   @override
   GatewayState build() {
@@ -88,9 +90,7 @@ class GatewayNotifier extends _$GatewayNotifier {
       reconnectPolicy: const ReconnectPolicy(),
     );
 
-    _requestClient = GatewayRequestClient(
-      sendFn: client.send,
-    );
+    _requestClient = GatewayRequestClient(sendFn: client.send);
 
     _stateSub = client.updates.listen(_onClientUpdate);
     _frameSub = client.frames.listen((frame) {
@@ -101,7 +101,9 @@ class GatewayNotifier extends _$GatewayNotifier {
         _routeResponse(payload);
       } else if (mt == UnifiedMessageWire.typeStream) {
         try {
-          final msg = UnifiedMessage.fromJson(Map<String, dynamic>.from(payload));
+          final msg = UnifiedMessage.fromJson(
+            Map<String, dynamic>.from(payload),
+          );
           _requestClient?.ingestStreamFrame(msg);
         } catch (_) {
           // Malformed stream frame — logged elsewhere if needed.
@@ -176,6 +178,8 @@ class GatewayNotifier extends _$GatewayNotifier {
 
   /// Logout / disposal — abandon queued idempotent retries.
   void _teardownClient() {
+    _attachmentFetchTimer?.cancel();
+    _attachmentFetchTimer = null;
     _requestClient?.cancelAll();
     _requestClient = null;
     _frozenRetryBacklog.clear();
@@ -220,6 +224,7 @@ class GatewayNotifier extends _$GatewayNotifier {
         _requestClient!.replayFrozen(backlog);
       }
       unawaited(_resourceSync.syncAll());
+      _startAttachmentFetchTicker();
     }
   }
 
@@ -236,6 +241,41 @@ class GatewayNotifier extends _$GatewayNotifier {
       if (syncStore.shouldRevalidate(resource, maxStale)) {
         await _resourceSync.sync(resource);
       }
+    }
+  }
+
+  Future<void> revalidateMessageHistoryForChannel(
+    String channelId, {
+    Duration maxStale = const Duration(seconds: 60),
+    bool force = false,
+  }) async {
+    if (_requestClient == null) return;
+    if (state is! GatewayConnected) return;
+    await refreshMessageHistoryForChannel(
+      ref,
+      _requestClient,
+      channelId,
+      maxStale: maxStale,
+      force: force,
+    );
+  }
+
+  void _startAttachmentFetchTicker() {
+    _attachmentFetchTimer?.cancel();
+    _attachmentFetchTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _runAttachmentFetchTick(),
+    );
+  }
+
+  Future<void> _runAttachmentFetchTick() async {
+    if (_attachmentFetchInFlight) return;
+    if (_requestClient == null || state is! GatewayConnected) return;
+    _attachmentFetchInFlight = true;
+    try {
+      await refreshPendingMessageAttachments(ref, _requestClient);
+    } finally {
+      _attachmentFetchInFlight = false;
     }
   }
 

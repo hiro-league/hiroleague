@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from hirocli.admin.features.logs.service import LogsService
@@ -254,3 +255,47 @@ def test_pretty_print_log_field_delegates() -> None:
         ok, out = LogsService().pretty_print_log_field('{"a": 1}')
     assert ok and "a" in out
     pp.assert_called_once_with('{"a": 1}')
+
+
+def test_clear_all_truncates_workspace_gateway_and_stderr_logs(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    log_dir = workspace / "logs"
+    gateway = tmp_path / "gateway"
+    gateway_log_dir = gateway / "logs"
+    log_dir.mkdir(parents=True)
+    gateway_log_dir.mkdir(parents=True)
+
+    files = [
+        log_dir / "server.log",
+        log_dir / "cli.log",
+        log_dir / "channel-alpha.log",
+        workspace / "stderr.log",
+        gateway_log_dir / "gateway.log",
+        gateway / "stderr.log",
+    ]
+    for path in files:
+        path.write_text("old log\n", encoding="utf-8")
+    keep = log_dir / "not-a-log.txt"
+    keep.write_text("keep\n", encoding="utf-8")
+
+    with (
+        patch(
+            "hirocli.admin.features.logs.service.resolve_workspace",
+            return_value=(SimpleNamespace(path=str(workspace)), None),
+        ),
+        patch("hirocli.admin.features.logs.service._resolve_log_dir", return_value=log_dir),
+        patch(
+            "hirocli.admin.features.logs.service._resolve_gateway_log_dir",
+            return_value=gateway_log_dir,
+        ),
+        patch(
+            "hirocli.admin.features.logs.service._resolve_gateway_instance_path",
+            return_value=gateway,
+        ),
+    ):
+        result = LogsService().clear_all("ws1")
+
+    assert result.ok and result.data is not None
+    assert sorted(result.data.cleared_files) == sorted(str(path) for path in files)
+    assert all(path.read_text(encoding="utf-8") == "" for path in files)
+    assert keep.read_text(encoding="utf-8") == "keep\n"

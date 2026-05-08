@@ -14,13 +14,13 @@ from hirocli.domain.conversation_channel_photo import (
     read_channel_thumbnail_bytes,
     write_channel_thumbnail_from_file,
 )
+from hirocli.domain.message_store import _sync_list
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.tools.conversation import (
     ConversationChannelCreateTool,
     ConversationChannelDeleteTool,
     ConversationChannelListTool,
     ConversationChannelUpdateTool,
-    MessageHistoryTool,
 )
 
 from hirocli.admin.shared.result import Result
@@ -155,11 +155,10 @@ class ChatChannelsService:
         if not workspace_id:
             return Result.failure("No workspace selected.")
         try:
-            out = MessageHistoryTool().execute(
-                channel_id,
-                workspace=workspace_id,
-                all_messages=True,
-            )
+            wp = self._workspace_path(workspace_id)
+            if wp is None:
+                return Result.failure("Workspace path could not be resolved.")
+            messages = _sync_list(wp, channel_id, limit=None)
         except Exception as exc:
             return Result.failure(str(exc))
-        return Result.success(list(out.messages))
+        return Result.success(messages)

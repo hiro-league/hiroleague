@@ -9,6 +9,11 @@ class Channels extends Table {
   TextColumn get characterId => text().nullable()();
   TextColumn get characterName => text().nullable()();
   TextColumn get description => text().nullable()();
+  IntColumn get lastHistorySyncedAt => integer().nullable()();
+  // Compound-cursor tiebreaker for ``messages.history`` pagination: when two
+  // messages share the same ``created_at``, the server orders by external_id
+  // — without this we'd lose rows at page boundaries.
+  TextColumn get lastHistorySyncedExternalId => text().nullable()();
   IntColumn get thumbnailMtimeNs => integer().nullable()();
   TextColumn get capabilitiesJson => text().nullable()();
 

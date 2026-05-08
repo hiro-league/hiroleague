@@ -1021,6 +1021,24 @@ async def discover_log_methods(
     return _api_from_result(result)
 
 
+@api_router.post("/logs/clear")
+async def clear_logs(
+    x_hiro_workspace: str | None = Header(default=None),
+) -> dict[str, Any]:
+    service = LogsService()
+    result = await run_in_threadpool(
+        service.clear_all,
+        _selected_workspace_id(x_hiro_workspace),
+    )
+    if not result.ok or result.data is None:
+        return _api_from_result(result)
+    return {
+        "ok": True,
+        "error": None,
+        "data": {"cleared_files": result.data.cleared_files},
+    }
+
+
 @api_router.get("/metrics/tick")
 async def metrics_tick() -> dict[str, Any]:
     collector = _metrics_collector()

@@ -12,17 +12,19 @@ class Messages extends Table {
   /// Serialized payload body. For 'text' this is the plain string.
   TextColumn get body => text()();
 
+  /// Plain transcript for audio messages. Kept as a column for fast preview/search.
+  TextColumn get transcript => text().nullable()();
+
   /// Milliseconds since Unix epoch (UTC).
   IntColumn get timestampMs => integer()();
 
   /// MessageStatus enum name ('sending', 'sent', 'delivered', 'read', 'failed').
   TextColumn get status => text()();
 
-  BoolColumn get isOutbound =>
-      boolean().withDefault(const Constant(false))();
+  BoolColumn get isOutbound => boolean().withDefault(const Constant(false))();
 
   /// JSON-encoded metadata for non-text content.
-  /// Audio: {"duration_ms": int, "mime_type": str, "local_path": str?, "transcript": str?}
+  /// Audio: {"duration_ms": int, "mime_type": str, "local_path": str?}
   TextColumn get metadata => text().nullable()();
 
   @override

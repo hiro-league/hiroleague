@@ -720,8 +720,12 @@ class LogSearchTool(Tool):
 
         total = len(all_rows)
         truncated = total > effective_limit
+        # Keep the MOST RECENT matches, not the oldest. Slicing [:limit] after an
+        # ascending sort would drop newest rows, so admin filters appeared to lag
+        # by hours when total matches exceeded the limit.
+        rows_window = all_rows[-effective_limit:] if truncated else all_rows
         return LogSearchResult(
-            rows=all_rows[:effective_limit],
+            rows=rows_window,
             total_matches=total,
             truncated=truncated,
         )
