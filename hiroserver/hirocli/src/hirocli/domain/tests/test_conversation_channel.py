@@ -109,9 +109,12 @@ def test_clear_channel_messages_unlinks_file_when_blob_exclusive(tmp_path) -> No
     assert not abs_mp.exists()
 
 
-def test_clear_channel_messages_keeps_blob_file_when_other_channel_references_blob(
+def test_clear_channel_messages_unlinks_only_target_channel_files(
     tmp_path,
 ) -> None:
+    """Each attachment owns its own file. Clearing channel A unlinks A's files
+    only; channel B's files (even with the same blob_id) remain untouched
+    because they are stored under their own ``media_path``."""
     ensure_data_db(tmp_path)
     uid = _default_user_id(tmp_path)
     ch1 = create_channel(tmp_path, name="A", character_id="a", user_id=uid)
@@ -121,8 +124,8 @@ def test_clear_channel_messages_keeps_blob_file_when_other_channel_references_bl
     pk1 = _sync_list(tmp_path, ch1.id, limit=1)[0]["id"]
     pk2 = _sync_list(tmp_path, ch2.id, limit=1)[0]["id"]
     blob = "sha256:" + ("c" * 64)
-    rel1 = "media/shared/other1.m4a"
-    rel2 = "media/shared/other2.m4a"
+    rel1 = "media/ch1/other1.m4a"
+    rel2 = "media/ch2/other2.m4a"
     insert_attachment(
         tmp_path,
         message_pk=pk1,
@@ -150,7 +153,7 @@ def test_clear_channel_messages_keeps_blob_file_when_other_channel_references_bl
     p1.write_bytes(b"a")
     p2.write_bytes(b"b")
     clear_channel_messages(tmp_path, ch1.id)
-    assert p1.exists()
+    assert not p1.exists()
     assert p2.exists()
 
 

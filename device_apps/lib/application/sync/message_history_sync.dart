@@ -241,8 +241,11 @@ final class MessageHistorySync {
       return false;
     }
 
-    final ready = await _attachmentsDao.findReadyByBlobId(blobId);
-    final readyPath = ready?.localPath;
+    // Each attachment row owns its own bytes (no cross-row blob sharing —
+    // see `docs/channel-messages-clear-design.md`), so new history rows
+    // always start ``pending`` and the fetch service pulls them.
+    // ``insertOrIgnore`` keeps existing rows (incl. already-ready ones for
+    // this exact ``messageId``+``slotIndex``) untouched on replay.
     final slotIndex = slotIndexFromAttachmentRef(remoteRef) ?? 0;
 
     await _attachmentsDao.insertOrIgnore(
@@ -257,10 +260,7 @@ final class MessageHistorySync {
         chunkSize: _asInt(metadata['chunk_size']) ?? 0,
         chunkCount: _asInt(metadata['chunk_count']) ?? 0,
         remoteRef: remoteRef,
-        localPath: Value(readyPath),
-        fetchStatus: readyPath != null && readyPath.isNotEmpty
-            ? AttachmentFetchStatus.ready.name
-            : AttachmentFetchStatus.pending.name,
+        fetchStatus: AttachmentFetchStatus.pending.name,
         metadata: Value(_metadataJson(metadata)),
         createdAtMs: createdAtMs,
       ),

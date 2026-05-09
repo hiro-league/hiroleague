@@ -175,8 +175,10 @@ def resolve_blob_id_with_kind(
     - ``kind == "message_attachment"`` → ``{"message_external_id", "slot_index",
       "duration_ms", "filename"}`` (any of these may be absent/None).
 
-    Message attachments are indexed by ``blob_id``; character photos fall back to
-    the legacy directory scan because they are not stored in the attachment table.
+    Message attachments resolve via a direct 1:1 ``blob_id`` lookup (no
+    cross-row sharing — see `docs/channel-messages-clear-design.md`).
+    Character photos fall back to the legacy directory scan because they
+    are not stored in the attachment table.
     """
     blob_id = blob_id.strip()
     if not blob_id.startswith("sha256:"):

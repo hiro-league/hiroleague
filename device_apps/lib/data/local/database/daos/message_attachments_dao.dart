@@ -89,6 +89,9 @@ class MessageAttachmentsDao extends DatabaseAccessor<AppDatabase>
     }).toList();
   }
 
+  /// One-shot lookup by blob id. Each row owns its own bytes (no cross-row
+  /// blob sharing — see `docs/channel-messages-clear-design.md`), so callers
+  /// can treat the result as the single owning row.
   Future<MessageAttachmentRecord?> findByBlobId(String blobId) {
     return (select(messageAttachments)
           ..where((a) => a.blobId.equals(blobId))
@@ -96,52 +99,66 @@ class MessageAttachmentsDao extends DatabaseAccessor<AppDatabase>
         .getSingleOrNull();
   }
 
-  Future<MessageAttachmentRecord?> findReadyByBlobId(String blobId) {
-    return (select(messageAttachments)
-          ..where(
-            (a) => a.blobId.equals(blobId) & a.fetchStatus.equals('ready'),
-          )
-          ..limit(1))
+  Future<MessageAttachmentRecord?> findByMessageAndSlot(
+    String messageId,
+    int slotIndex,
+  ) {
+    return (select(messageAttachments)..where(
+          (a) =>
+              a.messageId.equals(messageId) & a.slotIndex.equals(slotIndex),
+        ))
         .getSingleOrNull();
   }
 
-  Future<List<MessageAttachmentRecord>> listByBlobId(String blobId) {
-    return (select(
-      messageAttachments,
-    )..where((a) => a.blobId.equals(blobId))).get();
+  Future<void> markFetching(
+    String messageId,
+    int slotIndex,
+    int attemptedAtMs,
+  ) async {
+    await (update(messageAttachments)..where(
+          (a) =>
+              a.messageId.equals(messageId) & a.slotIndex.equals(slotIndex),
+        ))
+        .write(
+          MessageAttachmentsCompanion(
+            fetchStatus: const Value('fetching'),
+            lastFetchAttemptMs: Value(attemptedAtMs),
+          ),
+        );
   }
 
-  Future<void> markFetching(String blobId, int attemptedAtMs) async {
-    await (update(
-      messageAttachments,
-    )..where((a) => a.blobId.equals(blobId))).write(
-      MessageAttachmentsCompanion(
-        fetchStatus: const Value('fetching'),
-        lastFetchAttemptMs: Value(attemptedAtMs),
-      ),
-    );
+  Future<void> markReady(
+    String messageId,
+    int slotIndex,
+    String localPath,
+  ) async {
+    await (update(messageAttachments)..where(
+          (a) =>
+              a.messageId.equals(messageId) & a.slotIndex.equals(slotIndex),
+        ))
+        .write(
+          MessageAttachmentsCompanion(
+            fetchStatus: const Value('ready'),
+            localPath: Value(localPath),
+          ),
+        );
   }
 
-  Future<void> markReady(String blobId, String localPath) async {
-    await (update(
-      messageAttachments,
-    )..where((a) => a.blobId.equals(blobId))).write(
-      MessageAttachmentsCompanion(
-        fetchStatus: const Value('ready'),
-        localPath: Value(localPath),
-      ),
-    );
-  }
-
-  Future<void> markFailed(String blobId, int attemptedAtMs) async {
-    await (update(
-      messageAttachments,
-    )..where((a) => a.blobId.equals(blobId))).write(
-      MessageAttachmentsCompanion(
-        fetchStatus: const Value('failed'),
-        lastFetchAttemptMs: Value(attemptedAtMs),
-      ),
-    );
+  Future<void> markFailed(
+    String messageId,
+    int slotIndex,
+    int attemptedAtMs,
+  ) async {
+    await (update(messageAttachments)..where(
+          (a) =>
+              a.messageId.equals(messageId) & a.slotIndex.equals(slotIndex),
+        ))
+        .write(
+          MessageAttachmentsCompanion(
+            fetchStatus: const Value('failed'),
+            lastFetchAttemptMs: Value(attemptedAtMs),
+          ),
+        );
   }
 
   /// Attachment rows tied to messages in [channelLocalId].
@@ -163,28 +180,5 @@ class MessageAttachmentsDao extends DatabaseAccessor<AppDatabase>
     return rows
         .map((row) => row.readTable(messageAttachments))
         .toList(growable: false);
-  }
-
-  /// Rows with [blobId] attached to messages in any channel except [excludeChannelId].
-  Future<int> countBlobReferencesOutsideChannel(
-    String blobId,
-    String excludeChannelLocalId,
-  ) async {
-    final countExp = messageAttachments.blobId.count();
-    final joined =
-        selectOnly(messageAttachments, distinct: false)
-          ..addColumns([countExp])
-          ..join([
-            innerJoin(
-              messages,
-              messages.id.equalsExp(messageAttachments.messageId),
-            ),
-          ])
-          ..where(
-            messageAttachments.blobId.equals(blobId) &
-                messages.channelId.equals(excludeChannelLocalId).not(),
-          );
-    final row = await joined.getSingle();
-    return row.read(countExp) ?? 0;
   }
 }

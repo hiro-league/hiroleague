@@ -68,47 +68,41 @@ final class AttachmentFetchService {
       failedRetryDelay: failedRetryDelay,
       fetchingTimeout: fetchingTimeout,
     );
-    // Group by blobId so cross-message duplicates only trigger one fetch and
-    // we know up front how many rows will share each result — avoids the
-    // race-prone ``listByBlobId`` call we used to make after marking rows
-    // ``fetching``.
-    final unique = <String, MessageAttachmentRecord>{};
-    final dedupCount = <String, int>{};
-    for (final row in pending) {
-      unique.putIfAbsent(row.blobId, () => row);
-      dedupCount[row.blobId] = (dedupCount[row.blobId] ?? 0) + 1;
-    }
-
+    // Each row owns its own bytes (no cross-row blob sharing — see
+    // `docs/channel-messages-clear-design.md`), so we fetch one row at a
+    // time and write back to that row's primary key.
     var ready = 0;
-    final rows = unique.values.toList();
     final concurrency = maxConcurrentFetches < 1 ? 1 : maxConcurrentFetches;
-    for (var i = 0; i < rows.length; i += concurrency) {
-      final end = i + concurrency > rows.length ? rows.length : i + concurrency;
+    for (var i = 0; i < pending.length; i += concurrency) {
+      final end = i + concurrency > pending.length
+          ? pending.length
+          : i + concurrency;
       final results = await Future.wait(
-        rows.sublist(i, end).map(
-              (row) => _fetchOne(row, dedupCount[row.blobId] ?? 1),
-            ),
+        pending.sublist(i, end).map(_fetchOne),
       );
       ready += results.where((fetched) => fetched).length;
     }
     return ready;
   }
 
-  Future<bool> _fetchOne(MessageAttachmentRecord row, int dedupCount) async {
+  Future<bool> _fetchOne(MessageAttachmentRecord row) async {
     final started = _nowMs();
     final attemptedAtMs = started;
     final blobId = row.blobId;
+    final messageId = row.messageId;
+    final slotIndex = row.slotIndex;
     try {
       _log.info(
         '⬇️ Attachment fetch — queued · audio',
         fields: {
           'size': row.size,
           'chunk_count': row.chunkCount,
-          'dedup_count': dedupCount,
+          'message_id': messageId,
+          'slot_index': slotIndex,
           'blob_id': blobId,
         },
       );
-      await _attachmentsDao.markFetching(blobId, attemptedAtMs);
+      await _attachmentsDao.markFetching(messageId, slotIndex, attemptedAtMs);
       Uint8List bytes;
       try {
         bytes = await _fetchBytes(blobId);
@@ -126,11 +120,11 @@ final class AttachmentFetchService {
         throw _ShaMismatchError('sha mismatch for $blobId');
       }
       final localPath = await _saveBytes(
-        messageId: storageIdForBlob(blobId),
+        messageId: attachmentStorageId(messageId, slotIndex),
         bytes: bytes,
         mimeType: row.mediaType,
       );
-      await _attachmentsDao.markReady(blobId, localPath);
+      await _attachmentsDao.markReady(messageId, slotIndex, localPath);
       _log.info(
         '✅ Attachment fetch — ready · audio',
         fields: {
@@ -138,18 +132,22 @@ final class AttachmentFetchService {
           'local_path_kind': localPath.startsWith('data:')
               ? 'data_url'
               : 'file',
+          'message_id': messageId,
+          'slot_index': slotIndex,
           'blob_id': blobId,
         },
       );
       return true;
     } catch (e) {
-      await _attachmentsDao.markFailed(blobId, _nowMs());
+      await _attachmentsDao.markFailed(messageId, slotIndex, _nowMs());
       _log.warning(
         '❌ Attachment fetch — failed · audio',
         fields: {
           'reason': _failureReason(e),
           'attempt': 1,
           'error': e.toString(),
+          'message_id': messageId,
+          'slot_index': slotIndex,
           'blob_id': blobId,
         },
       );

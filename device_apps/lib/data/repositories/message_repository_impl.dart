@@ -315,21 +315,6 @@ class MessageRepositoryImpl implements MessageRepository {
     }
     final blobId = serverBlobId ?? localBlobId;
 
-    final String localPath;
-    try {
-      localPath = await _audioStorage.saveBytes(
-        messageId: storageIdForBlob(blobId),
-        bytes: bytes,
-        mimeType: mimeType,
-      );
-    } catch (e) {
-      _log.warning(
-        'Failed to save voice reply audio',
-        fields: {'ref_id': refId, 'error': e.toString()},
-      );
-      return;
-    }
-
     final row = await _messagesDao.getById(refId);
     if (row == null) {
       _log.debug(
@@ -340,6 +325,22 @@ class MessageRepositoryImpl implements MessageRepository {
     }
 
     final remoteRef = data['ref'] as String? ?? messageAttachmentRef(refId, 0);
+    final slotIndex = slotIndexFromAttachmentRef(remoteRef) ?? 0;
+
+    final String localPath;
+    try {
+      localPath = await _audioStorage.saveBytes(
+        messageId: attachmentStorageId(refId, slotIndex),
+        bytes: bytes,
+        mimeType: mimeType,
+      );
+    } catch (e) {
+      _log.warning(
+        'Failed to save voice reply audio',
+        fields: {'ref_id': refId, 'error': e.toString()},
+      );
+      return;
+    }
     final size = (data['size'] as num?)?.toInt() ?? bytes.length;
     final chunkSize =
         (data['chunk_size'] as num?)?.toInt() ?? defaultBlobChunkSize;
@@ -359,7 +360,7 @@ class MessageRepositoryImpl implements MessageRepository {
     await _attachmentsDao.insertOrUpdate(
       MessageAttachmentsCompanion.insert(
         messageId: refId,
-        slotIndex: slotIndexFromAttachmentRef(remoteRef) ?? 0,
+        slotIndex: slotIndex,
         contentType: ContentWire.audio,
         blobId: blobId,
         mediaType: mimeType,
@@ -463,7 +464,7 @@ class MessageRepositoryImpl implements MessageRepository {
     String? localPath;
     try {
       localPath = await _audioStorage.saveBytes(
-        messageId: storageIdForBlob(blobId),
+        messageId: attachmentStorageId(id, slotIndex),
         bytes: bytes,
         mimeType: mimeType,
       );

@@ -24,14 +24,14 @@ String blobIdForBytes(Uint8List bytes) =>
 int blobChunkCountForSize(int size, [int chunkSize = defaultBlobChunkSize]) =>
     size <= 0 ? 0 : ((size + chunkSize - 1) ~/ chunkSize);
 
-/// Map a blob id to a filesystem-safe identifier (used to derive cache
-/// filenames). Strips the ``sha256:`` prefix when present so two messages
-/// sharing a blob also share one file on disk.
-String storageIdForBlob(String blobId) {
-  if (blobId.startsWith(sha256BlobPrefix)) {
-    return blobId.substring(sha256BlobPrefix.length);
-  }
-  return blobId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+/// Filesystem-safe identifier for a single attachment row. Each row owns its
+/// own bytes (no cross-row blob sharing — see
+/// `docs/channel-messages-clear-design.md`), so the cache filename is keyed
+/// by ``<messageId>_<slotIndex>``. Non-alphanumeric chars in [messageId]
+/// (e.g. UUID dashes) are kept; the platform storage layer handles them.
+String attachmentStorageId(String messageId, int slotIndex) {
+  final safe = messageId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+  return '${safe}_$slotIndex';
 }
 
 /// Verify that ``bytes`` hash to ``blobId``. Returns false for non-sha256

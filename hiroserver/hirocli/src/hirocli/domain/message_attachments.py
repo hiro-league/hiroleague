@@ -129,7 +129,13 @@ def get_attachment_by_message_external_id(
 
 
 def find_by_blob_id(workspace_path: Path, blob_id: str) -> dict[str, Any] | None:
-    """Return the first tracked attachment for a blob id.
+    """Return the tracked attachment for a blob id.
+
+    Each attachment row owns its own bytes (no cross-row blob sharing — see
+    `docs/channel-messages-clear-design.md`), so this lookup returns at most
+    one row. ``LIMIT 1`` + ``ORDER BY id`` is retained as a defensive guard:
+    if a future bug somehow inserts two rows with the same digest, callers
+    still see the older one deterministically.
 
     Joins ``messages`` so callers (logging in particular) can refer to the
     public ``message_external_id`` without a second round-trip.

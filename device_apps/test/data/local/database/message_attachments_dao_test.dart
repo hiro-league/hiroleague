@@ -46,19 +46,27 @@ void main() {
 
     expect(await db.messageAttachmentsDao.getMissingBlobIds(), hasLength(1));
 
-    await db.messageAttachmentsDao.markFetching('sha256:abc', 1200);
-    final fetching = await db.messageAttachmentsDao.findByBlobId('sha256:abc');
+    await db.messageAttachmentsDao.markFetching('msg-1', 0, 1200);
+    final fetching = await db.messageAttachmentsDao.findByMessageAndSlot(
+      'msg-1',
+      0,
+    );
     expect(fetching?.fetchStatus, 'fetching');
     expect(fetching?.lastFetchAttemptMs, 1200);
 
-    await db.messageAttachmentsDao.markReady('sha256:abc', '/audio/abc.mp3');
-    final ready = await db.messageAttachmentsDao.findReadyByBlobId(
-      'sha256:abc',
+    await db.messageAttachmentsDao.markReady('msg-1', 0, '/audio/abc.mp3');
+    final ready = await db.messageAttachmentsDao.findByMessageAndSlot(
+      'msg-1',
+      0,
     );
+    expect(ready?.fetchStatus, 'ready');
     expect(ready?.localPath, '/audio/abc.mp3');
 
-    await db.messageAttachmentsDao.markFailed('sha256:abc', 1400);
-    final failed = await db.messageAttachmentsDao.findByBlobId('sha256:abc');
+    await db.messageAttachmentsDao.markFailed('msg-1', 0, 1400);
+    final failed = await db.messageAttachmentsDao.findByMessageAndSlot(
+      'msg-1',
+      0,
+    );
     expect(failed?.fetchStatus, 'failed');
     expect(failed?.lastFetchAttemptMs, 1400);
   });

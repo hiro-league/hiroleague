@@ -147,8 +147,9 @@ class MessageSendNotifier extends _$MessageSendNotifier {
       final blobId = blobIdForBytes(bytes);
       final chunkSize = defaultBlobChunkSize;
       final chunkCount = blobChunkCountForSize(bytes.length, chunkSize);
+      const slotIndex = 0;
       final localPath = await audioStorage.saveBytes(
-        messageId: storageIdForBlob(blobId),
+        messageId: attachmentStorageId(messageId, slotIndex),
         bytes: bytes,
         mimeType: recordingResult.mimeType,
       );

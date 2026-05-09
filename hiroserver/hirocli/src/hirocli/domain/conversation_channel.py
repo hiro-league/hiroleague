@@ -255,13 +255,14 @@ def update_channel(
 def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
     """Delete every message and attachment in the channel; keep the channel row.
 
-    Increments ``last_deleted``, clears ``last_message_at``, removes attachment
-    files on disk only when no other channel still references the same ``blob_id``.
-    Publishes ``channel.changed`` for resource sync.
+    Increments ``last_deleted``, clears ``last_message_at``, removes every
+    attachment's media file on disk, and publishes ``channel.changed`` for
+    resource sync.
 
-    DB work runs under ``BEGIN IMMEDIATE`` so blob eligibility + deletes + epoch bump
-    are isolated from concurrent writers. Unlinking files on disk happens **after**
-    ``COMMIT`` (best-effort cleanup; orphaned bytes are acceptable if the process dies mid-unlink).
+    Each attachment row owns its own media file (no cross-row blob sharing —
+    see `docs/channel-messages-clear-design.md`), so unlink is unconditional.
+    Files are unlinked **after** ``COMMIT`` (best-effort; orphaned bytes are
+    acceptable if the process dies mid-unlink).
 
     Returns:
         The new ``last_deleted`` epoch.
@@ -273,38 +274,20 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
         raise ValueError(f"No conversation channel with id {channel_id}.")
 
     ensure_data_db(workspace_path)
-    blob_paths_to_unlink: list[tuple[str, str]] = []
+    media_paths_to_unlink: list[str] = []
 
-    db_path = str(data_db_path(workspace_path))
-    conn = sqlite3.connect(db_path, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    committed = False
-    try:
-        # Immediate lock: blob-eligibility reads + deletes + epoch bump stay atomic vs other writers.
-        conn.execute("BEGIN IMMEDIATE")
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT ma.blob_id AS blob_id, MIN(ma.media_path) AS media_path
+            SELECT ma.media_path AS media_path
             FROM message_attachments ma
             INNER JOIN messages m ON ma.message_pk = m.id
             WHERE m.channel_id = ?
-            GROUP BY ma.blob_id
             """,
             (channel_id,),
         ).fetchall()
-        for row in rows:
-            blob_id = str(row["blob_id"])
-            other = conn.execute(
-                """
-                SELECT COUNT(*) AS c FROM message_attachments ma
-                INNER JOIN messages m ON ma.message_pk = m.id
-                WHERE ma.blob_id = ? AND m.channel_id != ?
-                """,
-                (blob_id, channel_id),
-            ).fetchone()
-            assert other is not None
-            if int(other["c"]) == 0:
-                blob_paths_to_unlink.append((blob_id, str(row["media_path"])))
+        media_paths_to_unlink = [str(row["media_path"]) for row in rows]
 
         conn.execute(
             """
@@ -334,28 +317,18 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
             (channel_id,),
         ).fetchone()
         conn.commit()
-        committed = True
         if lr is None:
             raise RuntimeError(f"Channel id={channel_id} missing after bulk clear")
         new_epoch = int(lr["last_deleted"])
-    except BaseException:
-        if not committed:
-            try:
-                conn.execute("ROLLBACK")
-            except sqlite3.Error:
-                pass
-        raise
-    finally:
-        conn.close()
 
-    for blob_id, rel_path in blob_paths_to_unlink:
+    for rel_path in media_paths_to_unlink:
         absolute = media_file_path(workspace_path, rel_path)
         try:
             absolute.unlink(missing_ok=True)
-        except OSError as exc:
+        except OSError:
             logger.warning(
-                "⚠️ Clear channel messages — media file unlink failed · blob %s",
-                blob_id[:32],
+                "⚠️ Clear channel messages — media file unlink failed · %s",
+                rel_path,
                 exc_info=True,
             )
 

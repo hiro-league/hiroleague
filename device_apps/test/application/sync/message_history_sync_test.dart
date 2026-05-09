@@ -187,75 +187,85 @@ void main() {
     expect(count, 1);
   });
 
-  test('syncChannel reuses a ready local path for duplicate blobs', () async {
-    final channel = await insertChannel();
-    await db.messagesDao.insertMessage(
-      MessagesCompanion.insert(
-        id: 'cached-msg',
-        channelId: 'server-42',
-        senderId: 'server',
-        contentType: 'text',
-        body: 'cached',
-        timestampMs: 1,
-        status: 'sent',
-      ),
-    );
-    await db.messageAttachmentsDao.insertOrIgnore(
-      MessageAttachmentsCompanion.insert(
-        messageId: 'cached-msg',
-        slotIndex: 0,
-        contentType: 'audio',
-        blobId: 'sha256:same',
-        mediaType: 'audio/mpeg',
-        size: 10,
-        chunkSize: 49152,
-        chunkCount: 1,
-        remoteRef: 'message_attachment:cached-msg:0',
-        localPath: const Value('/audio/same.mp3'),
-        fetchStatus: AttachmentFetchStatus.ready.name,
-        createdAtMs: 1,
-      ),
-    );
+  test(
+    'syncChannel inserts a fresh pending row even when another row already '
+    'has the same blob (no cross-row sharing)',
+    () async {
+      final channel = await insertChannel();
+      await db.messagesDao.insertMessage(
+        MessagesCompanion.insert(
+          id: 'cached-msg',
+          channelId: 'server-42',
+          senderId: 'server',
+          contentType: 'text',
+          body: 'cached',
+          timestampMs: 1,
+          status: 'sent',
+        ),
+      );
+      await db.messageAttachmentsDao.insertOrIgnore(
+        MessageAttachmentsCompanion.insert(
+          messageId: 'cached-msg',
+          slotIndex: 0,
+          contentType: 'audio',
+          blobId: 'sha256:same',
+          mediaType: 'audio/mpeg',
+          size: 10,
+          chunkSize: 49152,
+          chunkCount: 1,
+          remoteRef: 'message_attachment:cached-msg:0',
+          localPath: const Value('/audio/cached.mp3'),
+          fetchStatus: AttachmentFetchStatus.ready.name,
+          createdAtMs: 1,
+        ),
+      );
 
-    final sync = MessageHistorySync(
-      channelsDao: db.channelsDao,
-      messagesDao: db.messagesDao,
-      attachmentsDao: db.messageAttachmentsDao,
-      requestHistory: (_) async => {
-        'status': 'ok',
-        'data': {
-          'messages': [
-            {
-              'id': 'new-msg',
-              'sender_type': 'agent',
-              'sender_id': 'server',
-              'created_at': '2026-05-08T10:00:00Z',
-              'content': [
-                {'content_type': 'text', 'body': 'again'},
-                {
-                  'content_type': 'audio',
-                  'body': 'message_attachment:new-msg:0',
-                  'metadata': {
-                    'blob_id': 'sha256:same',
-                    'media_type': 'audio/mpeg',
-                    'size': 10,
-                    'chunk_size': 49152,
-                    'chunk_count': 1,
+      final sync = MessageHistorySync(
+        channelsDao: db.channelsDao,
+        messagesDao: db.messagesDao,
+        attachmentsDao: db.messageAttachmentsDao,
+        requestHistory: (_) async => {
+          'status': 'ok',
+          'data': {
+            'messages': [
+              {
+                'id': 'new-msg',
+                'sender_type': 'agent',
+                'sender_id': 'server',
+                'created_at': '2026-05-08T10:00:00Z',
+                'content': [
+                  {'content_type': 'text', 'body': 'again'},
+                  {
+                    'content_type': 'audio',
+                    'body': 'message_attachment:new-msg:0',
+                    'metadata': {
+                      'blob_id': 'sha256:same',
+                      'media_type': 'audio/mpeg',
+                      'size': 10,
+                      'chunk_size': 49152,
+                      'chunk_count': 1,
+                    },
                   },
-                },
-              ],
-            },
-          ],
+                ],
+              },
+            ],
+          },
         },
-      },
-    );
+      );
 
-    await sync.syncChannel(channel);
+      await sync.syncChannel(channel);
 
-    final row = await (db.select(
-      db.messageAttachments,
-    )..where((a) => a.messageId.equals('new-msg'))).getSingle();
-    expect(row.fetchStatus, AttachmentFetchStatus.ready.name);
-    expect(row.localPath, '/audio/same.mp3');
-  });
+      final row = await (db.select(
+        db.messageAttachments,
+      )..where((a) => a.messageId.equals('new-msg'))).getSingle();
+      expect(row.fetchStatus, AttachmentFetchStatus.pending.name);
+      expect(row.localPath, equals(null));
+
+      final cached = await (db.select(
+        db.messageAttachments,
+      )..where((a) => a.messageId.equals('cached-msg'))).getSingle();
+      expect(cached.fetchStatus, AttachmentFetchStatus.ready.name);
+      expect(cached.localPath, '/audio/cached.mp3');
+    },
+  );
 }

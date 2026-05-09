@@ -17,7 +17,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 final _testBytes = Uint8List.fromList([1, 2, 3]);
 final _testBlobId = 'sha256:${sha256.convert(_testBytes)}';
-final _testBlobStorageId = _testBlobId.substring('sha256:'.length);
 final _secondBytes = Uint8List.fromList([4, 5, 6]);
 final _secondBlobId = 'sha256:${sha256.convert(_secondBytes)}';
 
@@ -74,7 +73,7 @@ void main() {
   }
 
   test(
-    'tick fetches each blob once and marks all matching rows ready',
+    'tick fetches each row independently (no cross-row blob sharing)',
     () async {
       await insertMessage('msg-1');
       await insertMessage('msg-2');
@@ -82,6 +81,7 @@ void main() {
       await insertPendingAttachment('msg-2');
 
       var fetches = 0;
+      final saveCalls = <String>[];
       final service = AttachmentFetchService(
         attachmentsDao: db.messageAttachmentsDao,
         fetchBytes: (blobId) async {
@@ -90,7 +90,7 @@ void main() {
         },
         saveBytes:
             ({required messageId, required bytes, required mimeType}) async {
-              expect(messageId, _testBlobStorageId);
+              saveCalls.add(messageId);
               expect(mimeType, 'audio/mpeg');
               return '/audio/$messageId.mp3';
             },
@@ -98,13 +98,15 @@ void main() {
 
       final readyCount = await service.tick();
 
-      expect(readyCount, 1);
-      expect(fetches, 1);
-      final rows = await db.messageAttachmentsDao.listByBlobId(_testBlobId);
+      expect(readyCount, 2);
+      expect(fetches, 2);
+      expect(saveCalls.toSet(), {'msg-1_0', 'msg-2_0'});
+      final rows = await (db.select(db.messageAttachments)).get();
       expect(rows, hasLength(2));
       expect(rows.map((row) => row.fetchStatus).toSet(), {'ready'});
       expect(rows.map((row) => row.localPath).toSet(), {
-        '/audio/$_testBlobStorageId.mp3',
+        '/audio/msg-1_0.mp3',
+        '/audio/msg-2_0.mp3',
       });
     },
   );
@@ -179,10 +181,10 @@ void main() {
     expect(row?.localPath, isNull);
   });
 
-  test('tick retries failed blobs after retry delay', () async {
+  test('tick retries failed rows after retry delay', () async {
     await insertMessage('msg-1');
     await insertPendingAttachment('msg-1');
-    await db.messageAttachmentsDao.markFailed(_testBlobId, 1000);
+    await db.messageAttachmentsDao.markFailed('msg-1', 0, 1000);
 
     var fetches = 0;
     final service = AttachmentFetchService(
@@ -205,10 +207,10 @@ void main() {
     expect(row?.fetchStatus, 'ready');
   });
 
-  test('tick retries stale fetching blobs', () async {
+  test('tick retries stale fetching rows', () async {
     await insertMessage('msg-1');
     await insertPendingAttachment('msg-1');
-    await db.messageAttachmentsDao.markFetching(_testBlobId, 1000);
+    await db.messageAttachmentsDao.markFetching('msg-1', 0, 1000);
 
     final service = AttachmentFetchService(
       attachmentsDao: db.messageAttachmentsDao,
@@ -255,15 +257,16 @@ void main() {
       });
 
       await db.messageAttachmentsDao.markReady(
-        _testBlobId,
-        '/audio/$_testBlobStorageId.mp3',
+        'msg-1',
+        0,
+        '/audio/msg-1_0.mp3',
       );
 
       await _waitFor(() {
         final content = values.isEmpty ? null : values.last.single.content;
         return content is AudioContent &&
             content.audio.isPlayable &&
-            content.audio.localPath == '/audio/$_testBlobStorageId.mp3';
+            content.audio.localPath == '/audio/msg-1_0.mp3';
       });
     },
   );
@@ -294,7 +297,7 @@ void main() {
       );
       await repo.upsertLocalAudioAttachment(
         messageId: 'local-audio-1',
-        localPath: '/audio/$_testBlobStorageId',
+        localPath: '/audio/local-audio-1_0',
         blobId: _testBlobId,
         mimeType: 'audio/mpeg',
         size: _testBytes.length,
@@ -309,7 +312,7 @@ void main() {
         final content = values.isEmpty ? null : values.last.single.content;
         return content is AudioContent &&
             content.audio.isPlayable &&
-            content.audio.localPath == '/audio/$_testBlobStorageId';
+            content.audio.localPath == '/audio/local-audio-1_0';
       });
     },
   );
@@ -374,7 +377,7 @@ void main() {
     await _waitFor(() async {
       final row = await db.messageAttachmentsDao.findByBlobId('sha256:voice');
       return row?.fetchStatus == 'ready' &&
-          row?.localPath == '/audio/voice' &&
+          row?.localPath == '/audio/reply-1_0' &&
           row?.remoteRef == 'message_attachment:reply-1:0';
     });
   });
@@ -469,7 +472,7 @@ void main() {
         return message?.isOutbound == true &&
             row?.messageId == 'live-audio-1' &&
             row?.fetchStatus == 'ready' &&
-            row?.localPath == '/audio/$_testBlobStorageId' &&
+            row?.localPath == '/audio/live-audio-1_0' &&
             row?.remoteRef == 'message_attachment:live-audio-1:0';
       });
     },

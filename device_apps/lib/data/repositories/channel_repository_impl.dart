@@ -132,27 +132,26 @@ class ChannelRepositoryImpl implements ChannelRepository {
       fields: {'new_applied_epoch': newAppliedEpoch},
     );
 
+    // Each attachment row owns its own bytes (no cross-row blob sharing —
+    // see `docs/channel-messages-clear-design.md`), so we unlink each row's
+    // ``localPath`` unconditionally.
     final rows = await _db.messageAttachmentsDao.listAttachmentRowsForChannel(
       channelLocalId,
     );
-    final seenBlob = <String>{};
     for (final a in rows) {
-      if (!seenBlob.add(a.blobId)) continue;
-      final outside = await _db.messageAttachmentsDao
-          .countBlobReferencesOutsideChannel(a.blobId, channelLocalId);
-      if (outside > 0) continue;
-      for (final r in rows.where((x) => x.blobId == a.blobId)) {
-        final p = r.localPath;
-        if (p != null && p.isNotEmpty) {
-          try {
-            await _audio.delete(p);
-          } catch (e) {
-            _log.warning(
-              'Failed to delete local attachment file',
-              fields: {'blob_id': a.blobId, 'error': e.toString()},
-            );
-          }
-        }
+      final p = a.localPath;
+      if (p == null || p.isEmpty) continue;
+      try {
+        await _audio.delete(p);
+      } catch (e) {
+        _log.warning(
+          'Failed to delete local attachment file',
+          fields: {
+            'message_id': a.messageId,
+            'slot_index': a.slotIndex,
+            'error': e.toString(),
+          },
+        );
       }
     }
 
