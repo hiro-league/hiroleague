@@ -8,7 +8,11 @@
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import { logLevelAccentClass, logModuleTextClass } from './shared/logs-classes';
-  import { logRowSourceLabel, type RenderLogRow } from './shared/logs-ui';
+  import {
+    logRowSourceLabel,
+    trafficClassChipClass,
+    type RenderLogRow
+  } from './shared/logs-ui';
 
   type Props = {
     ctrl: LogsPageController;
@@ -35,9 +39,11 @@
     { id: '_msg_scope', accessorKey: '_msg_scope', header: '' },
     { id: 'date_display', accessorKey: 'date_display', header: 'Date' },
     { id: 'timestamp_display', accessorKey: 'timestamp_display', header: 'Time' },
-    { id: 'level', accessorKey: 'level', header: 'Level' },
+    { id: 'level', accessorKey: 'level', header: 'Lvl' },
     { id: 'source', accessorKey: 'source', header: 'Source' },
     { id: 'module', accessorKey: 'module', header: 'Module' },
+    { id: 'class', accessorKey: 'scope_traffic_class', header: 'Class' },
+    { id: 'subclass', accessorKey: 'scope_traffic_subclass', header: 'Subclass' },
     { id: 'message', accessorKey: 'message', header: 'Message' },
     { id: 'extra', accessorKey: 'extra', header: 'Extra' }
   ];
@@ -72,7 +78,7 @@
       <table
         class={cn(
           'w-full table-fixed border-collapse font-sans text-xs',
-          detailPanelOpen ? 'min-w-[980px]' : 'min-w-[1080px]'
+          detailPanelOpen ? 'min-w-[1180px]' : 'min-w-[1280px]'
         )}
       >
         <thead
@@ -89,7 +95,9 @@
                     header.id === 'timestamp_display' && 'w-[76px] text-center',
                     header.id === 'source' && 'w-[136px]',
                     header.id === 'module' && 'w-[132px]',
-                    header.id === 'level' && 'w-[100px]',
+                    header.id === 'class' && 'w-[110px]',
+                    header.id === 'subclass' && 'w-[150px]',
+                    header.id === 'level' && 'w-[34px] min-w-[34px] px-0 text-center',
                     header.id === 'message' && 'w-[380px]',
                     header.id === 'extra' && 'w-auto'
                   )}
@@ -156,15 +164,15 @@
               <td class="truncate px-2 py-1.5 text-center text-muted-foreground">
                 {row.timestamp_display}
               </td>
-              <td class="truncate px-2 py-1.5">
-                <span class="inline-flex max-w-full items-center gap-1">
-                  <LogLevelIcon
-                    level={row.level}
-                    size={13}
-                    class={cn('shrink-0', logLevelAccentClass(row.level))}
-                  />
-                  <span class="min-w-0 truncate font-normal text-foreground">{row.level}</span>
-                </span>
+              <td
+                class="w-[34px] min-w-[34px] px-0 py-1.5 text-center align-middle"
+                title={row.level}
+              >
+                <LogLevelIcon
+                  level={row.level}
+                  size={14}
+                  class={cn('inline-block', logLevelAccentClass(row.level))}
+                />
               </td>
               <td
                 class="truncate px-2 py-1.5"
@@ -184,6 +192,26 @@
               <td class="truncate px-2 py-1.5">
                 <span class={logModuleTextClass(row.module)}>{row.module}</span>
               </td>
+              <td class="truncate px-2 py-1.5">
+                {#if row.scope_traffic_class}
+                  <span
+                    class={cn(
+                      'inline-flex max-w-full items-center rounded-full border px-1.5 py-0.5 text-[0.6rem] font-medium leading-none',
+                      trafficClassChipClass(row.scope_traffic_class)
+                    )}
+                    title={row.scope_traffic_class}
+                  >
+                    <span class="truncate">{row.scope_traffic_class}</span>
+                  </span>
+                {/if}
+              </td>
+              <td class="truncate px-2 py-1.5" title={row.scope_traffic_subclass}>
+                {#if row.scope_traffic_subclass}
+                  <span
+                    class="font-mono text-[0.7rem] text-muted-foreground"
+                  >{row.scope_traffic_subclass}</span>
+                {/if}
+              </td>
               <td class="truncate px-2 py-1.5" title={row.message}>
                 {#if row.is_startup}
                   <span class="font-bold">{row.message}</span>
@@ -200,7 +228,7 @@
           {:else}
             <tr>
               <td
-                colspan={detailPanelOpen ? 7 : 8}
+                colspan={detailPanelOpen ? 9 : 10}
                 class="px-3 py-10 text-center text-muted-foreground"
               >
                 No log rows match the current filters.

@@ -5,7 +5,8 @@ import {
   type LogRow,
   type LogSourceFilter,
   type LogTimeRange,
-  type LogsLayout
+  type LogsLayout,
+  type TrafficClass
 } from '$lib/api/logs';
 import type { DeviceRow } from '$lib/api/channels-devices';
 
@@ -21,6 +22,7 @@ export type LogsPrefsSnapshot = {
   scopeDeviceId?: string;
   scopeMsgId?: string;
   scopeMethod?: string;
+  trafficClassFilter?: TrafficClass[];
   detailPanelOpen?: boolean;
   controlsCollapsed?: boolean;
   /** Default true — tail from latest ``🚀 Hiro Server starting`` (server.log). */
@@ -106,6 +108,7 @@ export type RowFilterContext = {
   activeSources: LogSourceFilter[];
   activeChannel: string;
   levelFilter: LogLevel[];
+  trafficClassFilter: TrafficClass[];
 };
 
 export function rowPassesFilters(row: LogRow, ctx: RowFilterContext): boolean {
@@ -118,6 +121,10 @@ export function rowPassesFilters(row: LogRow, ctx: RowFilterContext): boolean {
     if (ctx.activeChannel && ctx.activeChannel !== channel) return false;
   }
   if (ctx.levelFilter.length > 0 && !ctx.levelFilter.includes(row.level as LogLevel)) return false;
+  if (ctx.trafficClassFilter.length > 0) {
+    const rowTc = (row.scope_traffic_class ?? '').trim();
+    if (!rowTc || !ctx.trafficClassFilter.includes(rowTc as TrafficClass)) return false;
+  }
   return true;
 }
 
@@ -130,6 +137,34 @@ export function deviceLabelFor(devices: DeviceRow[], deviceUuid: string): string
 
 export function shortMsgId(id: string): string {
   return id.length > 14 ? `${id.slice(0, 10)}…` : id;
+}
+
+/** Short, distinct labels for traffic_class chips. */
+export const TRAFFIC_CLASS_LABELS: Record<TrafficClass, string> = {
+  'inbound.message': 'In · message',
+  'inbound.event': 'In · event',
+  'inbound.request': 'In · request',
+  'outbound.response': 'Out · response',
+  'outbound.lifecycle': 'Out · lifecycle',
+  'outbound.broadcast': 'Out · broadcast',
+  'outbound.reply': 'Out · reply',
+  'stream.chunk': 'Stream',
+  'infra.event': 'Infra · event',
+  'infra.transport': 'Infra · transport'
+};
+
+/** Tailwind class for the traffic_class chip in the table column. Cool=in, warm=out, neutral=infra/stream. */
+export function trafficClassChipClass(tc: string): string {
+  if (tc.startsWith('inbound.')) {
+    return 'border-sky-400/40 bg-sky-500/15 text-sky-700 dark:text-sky-300';
+  }
+  if (tc.startsWith('outbound.')) {
+    return 'border-amber-400/40 bg-amber-500/15 text-amber-700 dark:text-amber-300';
+  }
+  if (tc === 'stream.chunk') {
+    return 'border-violet-400/40 bg-violet-500/10 text-violet-700 dark:text-violet-300';
+  }
+  return 'border-border/70 bg-muted text-muted-foreground';
 }
 
 /** Wider single-line preview for the logs message scope filter strip (full id on ``title``). */

@@ -987,6 +987,7 @@ async def search_logs(
     device_id: str | None = None,
     msg_id: str | None = None,
     method: str | None = None,
+    traffic_class: str | None = None,
     x_hiro_workspace: str | None = Header(default=None),
 ) -> dict[str, Any]:
     service = LogsService()
@@ -998,6 +999,7 @@ async def search_logs(
         device_id=device_id,
         msg_id=msg_id,
         method=method,
+        traffic_class=traffic_class,
     )
     if not result.ok:
         return _api_from_result(result)
@@ -1019,6 +1021,18 @@ async def discover_log_methods(
         _selected_workspace_id(x_hiro_workspace),
     )
     return _api_from_result(result)
+
+
+@api_router.get("/logs/traffic-classes")
+async def list_log_traffic_classes() -> dict[str, Any]:
+    """Static enum: the operational traffic_class taxonomy used by comm-path logs."""
+    from hiro_channel_sdk.log_scope_fields import TRAFFIC_CLASSES
+
+    return {
+        "ok": True,
+        "error": None,
+        "data": list(TRAFFIC_CLASSES),
+    }
 
 
 @api_router.post("/logs/clear")

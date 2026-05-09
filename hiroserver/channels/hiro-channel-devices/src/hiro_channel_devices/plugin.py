@@ -20,7 +20,12 @@ from websockets.exceptions import ConnectionClosed
 from hiro_commons.log import Logger, log_scope
 
 from hiro_channel_sdk import ChannelInfo, ChannelPlugin, UnifiedMessage, unified_message_log_scope
-from hiro_channel_sdk.constants import AUTH_ROLE_DESKTOP, RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX
+from hiro_channel_sdk.constants import (
+    AUTH_ROLE_DESKTOP,
+    MESSAGE_TYPE_STREAM,
+    RECONNECT_BACKOFF_BASE,
+    RECONNECT_BACKOFF_MAX,
+)
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.network import DEFAULT_GATEWAY_PORT
 from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
@@ -104,9 +109,22 @@ class DevicesChannel(ChannelPlugin):
         }
         if message.routing.recipient_id:
             out["target_device_id"] = message.routing.recipient_id
-        _sd, _smid, _smeth, _stpv = unified_message_log_scope(message, direction="outbound")
-        with log_scope(device_id=_sd, msg_id=_smid, method=_smeth, text_preview=_stpv):
-            log.info(
+        _sd, _smid, _smeth, _stpv, _stcl, _stsub = unified_message_log_scope(message, direction="outbound")
+        with log_scope(
+            device_id=_sd,
+            msg_id=_smid,
+            method=_smeth,
+            text_preview=_stpv,
+            traffic_class=_stcl,
+            traffic_subclass=_stsub,
+        ):
+            # Stream frames are per-chunk noise; demote to fineinfo (same as OutboundPipeline).
+            _fwd_log = (
+                log.fineinfo
+                if message.message_type == MESSAGE_TYPE_STREAM
+                else log.info
+            )
+            _fwd_log(
                 "📤 Forwarding message to gateway",
                 items=len(message.content),
             )
@@ -245,8 +263,15 @@ class DevicesChannel(ChannelPlugin):
         unified.routing.direction = "inbound"
         # Scope matches server inbound rules (message / event.ref_id / RPC method only —
         # not routing.id for unrelated shapes).
-        _sd, _smid, _smeth, _stpv = unified_message_log_scope(unified, direction="inbound")
-        with log_scope(device_id=_sd, msg_id=_smid, method=_smeth, text_preview=_stpv):
+        _sd, _smid, _smeth, _stpv, _stcl, _stsub = unified_message_log_scope(unified, direction="inbound")
+        with log_scope(
+            device_id=_sd,
+            msg_id=_smid,
+            method=_smeth,
+            text_preview=_stpv,
+            traffic_class=_stcl,
+            traffic_subclass=_stsub,
+        ):
             log.info(
                 "📥 Inbound message from gateway",
                 msg_id=unified.routing.id,

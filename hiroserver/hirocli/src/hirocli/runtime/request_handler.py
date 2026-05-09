@@ -82,7 +82,7 @@ class RequestHandler:
     def register(self, method: str, handler: MethodHandler) -> None:
         """Register an async handler for the given method name."""
         self._methods[method] = handler
-        log.info(f"✅ Registered request method: {method}")
+        log.fineinfo(f"✅ Registered request method: {method}")
 
     async def handle(
         self,
@@ -96,7 +96,7 @@ class RequestHandler:
         return ``None`` (e.g. ``files.get`` ack + stream + terminal already emitted).
         """
         method, params = _parse_request(msg)
-        log.info(
+        log.fineinfo(
             "Handling request",
             msg_id=msg.routing.id,
             request_id=msg.request_id,

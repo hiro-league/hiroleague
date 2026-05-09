@@ -56,7 +56,7 @@ class MessageFlow:
             name=f"adapt-{msg.routing.id}",
         )
 
-        log.info(
+        log.fineinfo(
             f"{LOG_IN} Message acked, adapter spawned — {comm_peer_label(msg, self._ctx)}",
             **comm_extras(
                 msg,

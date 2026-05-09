@@ -1,14 +1,19 @@
 <script lang="ts">
   import { X } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import { LOG_LEVELS } from '$lib/api/logs';
+  import { LOG_LEVELS, TRAFFIC_CLASSES } from '$lib/api/logs';
   import { cn } from '$lib/utils';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from './state/logs-preferences.svelte';
   import { logLevelFilterChipClass, logSourceFilterChipClass } from './shared/logs-classes';
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogSourceIcon from './shared/LogSourceIcon.svelte';
-  import { SOURCE_LABELS, msgIdFilterPreview } from './shared/logs-ui';
+  import {
+    SOURCE_LABELS,
+    TRAFFIC_CLASS_LABELS,
+    msgIdFilterPreview,
+    trafficClassChipClass
+  } from './shared/logs-ui';
 
   type Props = {
     prefs: LogsPreferences;
@@ -32,9 +37,9 @@
   hidden={regionHidden}
 >
   <div class="min-w-0 overflow-x-auto pb-0.5">
-    <!-- Single 2×2: Source | Scope / Level | Message (auto row-major placement). -->
+    <!-- Rows: Source | Scope / Level | Message / Traffic-class chips spanning both columns. -->
     <div
-      class="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] grid-rows-2 items-start gap-x-2 gap-y-3"
+      class="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-3"
     >
       <div class="flex min-w-0 flex-wrap items-center gap-2">
         <span class="font-sans text-sm font-semibold text-muted-foreground">Source:</span>
@@ -91,12 +96,15 @@
             class="h-8 min-w-48 rounded-md border border-input bg-background px-2 font-sans text-sm text-foreground shadow-xs outline-none focus:ring-2 focus:ring-ring"
             bind:value={prefs.scopeDeviceId}
             onchange={() => void ctrl.afterScopeChange()}
-            title="Filter logs by paired device (workspace DB)"
+            title="Filter logs by device (only devices seen in currently loaded log rows)"
           >
             <option value="">All devices</option>
             {#each ctrl.devicesForLogs as dev (dev.device_id)}
-              <option value={dev.device_id}>
-                {dev.device_name?.trim() || dev.device_id}
+              {@const fullLabel = dev.device_name?.trim() || dev.device_id}
+              {@const truncatedLabel =
+                fullLabel.length > 20 ? `${fullLabel.slice(0, 19)}…` : fullLabel}
+              <option value={dev.device_id} title={fullLabel}>
+                {truncatedLabel}
               </option>
             {/each}
           </select>
@@ -157,6 +165,37 @@
             {level}
           </Button>
         {/each}
+      </div>
+
+      <div class="col-span-2 flex flex-wrap items-center gap-2">
+        <span class="font-sans text-sm font-semibold text-muted-foreground">Traffic:</span>
+        {#each TRAFFIC_CLASSES as tc (tc)}
+          {@const active = prefs.trafficClassIsActive(tc)}
+          <Button
+            size="sm"
+            variant={active ? 'secondary' : 'ghost'}
+            class={cn(
+              'h-7 rounded-full border px-2.5 text-[0.7rem] font-medium shadow-none transition-colors',
+              active ? trafficClassChipClass(tc) : 'border-transparent text-muted-foreground hover:bg-secondary'
+            )}
+            onclick={() => prefs.toggleTrafficClass(tc)}
+            title={tc}
+          >
+            {TRAFFIC_CLASS_LABELS[tc]}
+          </Button>
+        {/each}
+        {#if prefs.trafficClassFilter.length > 0}
+          <Button
+            variant="ghost"
+            size="icon"
+            class={filterClearIconBtnClass}
+            onclick={() => ctrl.clearTrafficClassFilter()}
+            title="Clear traffic filter"
+            aria-label="Clear traffic filter"
+          >
+            <X size={15} strokeWidth={2} />
+          </Button>
+        {/if}
       </div>
 
       <div class="min-w-0">

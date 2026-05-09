@@ -88,16 +88,22 @@ class InboundPipeline:
             )
             return
 
-        _scope_device_id, _scope_msg_id, _scope_method, _scope_text_preview = unified_message_log_scope(
-            msg,
-            direction="inbound",
-        )
+        (
+            _scope_device_id,
+            _scope_msg_id,
+            _scope_method,
+            _scope_text_preview,
+            _scope_traffic_class,
+            _scope_traffic_subclass,
+        ) = unified_message_log_scope(msg, direction="inbound")
 
         with log_scope(
             device_id=_scope_device_id,
             msg_id=_scope_msg_id,
             method=_scope_method,
             text_preview=_scope_text_preview,
+            traffic_class=_scope_traffic_class,
+            traffic_subclass=_scope_traffic_subclass,
         ):
             match msg.message_type:
                 case _ if msg.message_type == MESSAGE_TYPE_MESSAGE:

@@ -33,7 +33,35 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   let error = $state<string | null>(null);
   let pollError = $state<string | null>(null);
   let logMethods = $state<string[]>([]);
-  let devicesForLogs = $state<DeviceRow[]>([]);
+  let pairedDevices = $state<DeviceRow[]>([]);
+
+  const devicesForLogs = $derived.by<DeviceRow[]>(() => {
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const id = (r.scope_device_id ?? '').trim();
+      if (id) seen.add(id);
+    }
+    if (seen.size === 0) return [];
+    const byId = new Map<string, DeviceRow>(pairedDevices.map((d) => [d.device_id, d]));
+    const out: DeviceRow[] = [];
+    for (const id of seen) {
+      const paired = byId.get(id);
+      if (paired) {
+        out.push(paired);
+      } else {
+        out.push({
+          device_id: id,
+          device_name: null,
+          paired_at: '',
+          expires_at: null
+        });
+      }
+    }
+    out.sort((a, b) =>
+      (a.device_name?.trim() || a.device_id).localeCompare(b.device_name?.trim() || b.device_id)
+    );
+    return out;
+  });
   let searchBusy = $state(false);
   let clearingLogs = $state(false);
   let initialized = $state(false);
@@ -65,7 +93,8 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   const filterCtx = $derived({
     activeSources: prefs.activeSources,
     activeChannel: prefs.activeChannel,
-    levelFilter: prefs.levelFilter
+    levelFilter: prefs.levelFilter,
+    trafficClassFilter: prefs.trafficClassFilter
   });
 
   const visibleRows = $derived.by(() => {
@@ -164,6 +193,10 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     void afterScopeChange();
   }
 
+  function clearTrafficClassFilter() {
+    prefs.trafficClassFilter = [];
+  }
+
   function filterToMessage(msgId: string, event: MouseEvent) {
     event.stopPropagation();
     prefs.scopeMsgId = msgId;
@@ -190,10 +223,10 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
           listDevices()
         ]);
         logMethods = methodsPayload.data ?? [];
-        devicesForLogs = devicesPayload.data ?? [];
+        pairedDevices = devicesPayload.data ?? [];
       } catch {
         logMethods = [];
-        devicesForLogs = [];
+        pairedDevices = [];
       }
       await reloadRows();
     } catch (err) {
@@ -254,9 +287,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     fileOffsets = {};
     const trimmed = prefs.searchText.trim();
     const scopeActive =
-      !!prefs.scopeDeviceId.trim() ||
-      !!prefs.scopeMsgId.trim() ||
-      !!prefs.scopeMethod.trim();
+      !!prefs.scopeDeviceId.trim() || !!prefs.scopeMsgId.trim() || !!prefs.scopeMethod.trim();
     if (trimmed || scopeActive) {
       await fetchFilteredRows(trimmed);
       return;
@@ -278,7 +309,9 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
         query: trimmed || undefined,
         deviceId: prefs.scopeDeviceId.trim() || undefined,
         msgId: prefs.scopeMsgId.trim() || undefined,
-        method: prefs.scopeMethod.trim() || undefined
+        method: prefs.scopeMethod.trim() || undefined,
+        trafficClasses:
+          prefs.trafficClassFilter.length > 0 ? [...prefs.trafficClassFilter] : undefined
       });
       if (myGen !== searchFetchGeneration) return;
       rows = withRenderKeys(payload.data.rows);
@@ -324,9 +357,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   async function runSearchFromInput() {
     const trimmed = prefs.searchText.trim();
     const scopeActive =
-      !!prefs.scopeDeviceId.trim() ||
-      !!prefs.scopeMsgId.trim() ||
-      !!prefs.scopeMethod.trim();
+      !!prefs.scopeDeviceId.trim() || !!prefs.scopeMsgId.trim() || !!prefs.scopeMethod.trim();
     if (!trimmed && !scopeActive) {
       if (searchTimer) {
         window.clearTimeout(searchTimer);
@@ -377,6 +408,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     prefs.scopeDeviceId = '';
     prefs.scopeMsgId = '';
     prefs.scopeMethod = '';
+    prefs.trafficClassFilter = [];
     if (searchTimer) {
       window.clearTimeout(searchTimer);
       searchTimer = null;
@@ -548,6 +580,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     removeScopeDevice,
     removeScopeMsg,
     removeScopeMethod,
+    clearTrafficClassFilter,
     filterToMessage,
     setActiveRow,
     toggleDetailPanel,

@@ -1,9 +1,11 @@
 import {
+  isTrafficClass,
   LOG_LEVELS,
   type LogLevel,
   type LogSortOrder,
   type LogSourceFilter,
-  type LogTimeRange
+  type LogTimeRange,
+  type TrafficClass
 } from '$lib/api/logs';
 import {
   isLogLevel,
@@ -24,6 +26,7 @@ export function createLogsPreferences() {
   let scopeDeviceId = $state('');
   let scopeMsgId = $state('');
   let scopeMethod = $state('');
+  let trafficClassFilter = $state<TrafficClass[]>([]);
   let detailPanelOpen = $state(false);
   let controlsCollapsed = $state(false);
   /** When true, initial tail starts at latest Hiro Server startup line (time range ignored on server). */
@@ -49,6 +52,7 @@ export function createLogsPreferences() {
       scopeDeviceId = String(prefs.scopeDeviceId ?? '');
       scopeMsgId = String(prefs.scopeMsgId ?? '');
       scopeMethod = String(prefs.scopeMethod ?? '');
+      trafficClassFilter = (prefs.trafficClassFilter ?? []).filter(isTrafficClass);
       detailPanelOpen = Boolean(prefs.detailPanelOpen);
       controlsCollapsed = Boolean(prefs.controlsCollapsed);
       lastSessionOnly =
@@ -71,6 +75,7 @@ export function createLogsPreferences() {
       scopeDeviceId,
       scopeMsgId,
       scopeMethod,
+      trafficClassFilter,
       detailPanelOpen,
       controlsCollapsed,
       lastSessionOnly,
@@ -97,6 +102,16 @@ export function createLogsPreferences() {
     levelFilter = levelIsActive(level)
       ? levelFilter.filter((item) => item !== level)
       : [...levelFilter, level];
+  }
+
+  function trafficClassIsActive(tc: TrafficClass) {
+    return trafficClassFilter.includes(tc);
+  }
+
+  function toggleTrafficClass(tc: TrafficClass) {
+    trafficClassFilter = trafficClassIsActive(tc)
+      ? trafficClassFilter.filter((item) => item !== tc)
+      : [...trafficClassFilter, tc];
   }
 
   function toggleSort() {
@@ -166,6 +181,12 @@ export function createLogsPreferences() {
     set scopeMethod(v: string) {
       scopeMethod = v;
     },
+    get trafficClassFilter() {
+      return trafficClassFilter;
+    },
+    set trafficClassFilter(v: TrafficClass[]) {
+      trafficClassFilter = v;
+    },
     get detailPanelOpen() {
       return detailPanelOpen;
     },
@@ -194,8 +215,10 @@ export function createLogsPreferences() {
     persistToSession,
     sourceIsActive,
     levelIsActive,
+    trafficClassIsActive,
     toggleSource,
     toggleLevel,
+    toggleTrafficClass,
     toggleSort,
     togglePause,
     toggleControlsCollapsed

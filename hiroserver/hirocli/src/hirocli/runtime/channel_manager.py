@@ -47,7 +47,11 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.network import DEFAULT_LOCALHOST
 from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
-from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
+from hiro_channel_sdk.log_scope_fields import (
+    TRAFFIC_CLASS_INFRA_EVENT,
+    TRAFFIC_CLASS_INFRA_TRANSPORT,
+    unified_message_log_scope,
+)
 from hiro_channel_sdk.models import UnifiedMessage
 
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
@@ -269,11 +273,15 @@ class ChannelManager:
                             description=params.get("description", ""),
                             ws=ws,
                         )
-                        log.info(
-                            f"✅ Channel ({channel_name}) registered",
-                            channel=channel_name,
-                            version=params.get("version", "?"),
-                        )
+                        with log_scope(
+                            traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                            traffic_subclass="register",
+                        ):
+                            log.info(
+                                f"✅ Channel ({channel_name}) registered",
+                                channel=channel_name,
+                                version=params.get("version", "?"),
+                            )
                         await self._push_config(channel_name)
 
                     case _ if method == METHOD_RECEIVE:
@@ -293,11 +301,18 @@ class ChannelManager:
                                 vr_on = routing_requests_voice_reply(um.routing.metadata)
                                 vr_suffix = " · voice_reply=yes" if vr_on else " · voice_reply=no"
                                 vr_extras["voice_reply_requested"] = vr_on
-                            sd, smid, smeth, stpv = unified_message_log_scope(
+                            sd, smid, smeth, stpv, stcl, stsub = unified_message_log_scope(
                                 um,
                                 direction="inbound",
                             )
-                            with log_scope(device_id=sd, msg_id=smid, method=smeth, text_preview=stpv):
+                            with log_scope(
+                                device_id=sd,
+                                msg_id=smid,
+                                method=smeth,
+                                text_preview=stpv,
+                                traffic_class=stcl,
+                                traffic_subclass=stsub,
+                            ):
                                 log.info(
                                     f"{LOG_IN} Received — {device} · {kind}{vr_suffix}",
                                     **comm_extras(
@@ -338,24 +353,35 @@ class ChannelManager:
                         }
                         if peer:
                             log_kwargs["device"] = peer
-                        log.info(
-                            f"{LOG_IN} Channel event — {ev}",
-                            **log_kwargs,
-                        )
-                        if self._on_event and isinstance(event_name, str):
-                            try:
-                                await self._on_event(event_name, raw_event_data)
-                            except Exception as exc:
-                                log.error(
-                                    f"❌ on_event handler error — ({channel_name})",
-                                    error=str(exc),
-                                    exc_info=True,
-                                )
+                        # Open infra.event scope so this log line + the downstream handler
+                        # log lines (gateway connected/disconnected, device pair/unpair,
+                        # device connect/disconnect) carry the traffic_class chip in the UI.
+                        with log_scope(
+                            traffic_class=TRAFFIC_CLASS_INFRA_EVENT,
+                            traffic_subclass=ev,
+                        ):
+                            log.info(
+                                f"{LOG_IN} Channel event — {ev}",
+                                **log_kwargs,
+                            )
+                            if self._on_event and isinstance(event_name, str):
+                                try:
+                                    await self._on_event(event_name, raw_event_data)
+                                except Exception as exc:
+                                    log.error(
+                                        f"❌ on_event handler error — ({channel_name})",
+                                        error=str(exc),
+                                        exc_info=True,
+                                    )
                     case _:
-                        log.warning(
-                            f"⚠️ Unknown method from channel ({channel_name})",
-                            method=method,
-                        )
+                        with log_scope(
+                            traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                            traffic_subclass="unknown_method",
+                        ):
+                            log.warning(
+                                f"⚠️ Unknown method from channel ({channel_name})",
+                                method=method,
+                            )
                         if req_id is not None:
                             await ws.send(
                                 rpc.build_error(
@@ -366,17 +392,29 @@ class ChannelManager:
                             )
 
         except ConnectionClosed:
-            log.warning(f"⚠️ Channel ({channel_name}) connection closed")
+            with log_scope(
+                traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                traffic_subclass="connection_closed",
+            ):
+                log.warning(f"⚠️ Channel ({channel_name}) connection closed")
         except Exception as exc:
-            log.error(
-                f"❌ Channel ({channel_name}) connection error",
-                error=str(exc),
-            )
+            with log_scope(
+                traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                traffic_subclass="connection_error",
+            ):
+                log.error(
+                    f"❌ Channel ({channel_name}) connection error",
+                    error=str(exc),
+                )
         finally:
             if channel_name and channel_name in self._channels:
                 if self._channels[channel_name].ws is ws:
                     del self._channels[channel_name]
-                    log.info(f"🔌 Channel ({channel_name}) disconnected")
+                    with log_scope(
+                        traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                        traffic_subclass="disconnect",
+                    ):
+                        log.info(f"🔌 Channel ({channel_name}) disconnected")
 
     async def _handle_response(
         self, channel_name: str | None, data: dict[str, Any]
@@ -413,9 +451,13 @@ class ChannelManager:
     ) -> None:
         ch = self._channels.get(channel_name)
         if ch is None:
-            log.warning(
-                f"⚠️ {LOG_OUT} Cannot send to ({channel_name}) — not connected"
-            )
+            with log_scope(
+                traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                traffic_subclass="not_connected",
+            ):
+                log.warning(
+                    f"⚠️ {LOG_OUT} Cannot send to ({channel_name}) — not connected"
+                )
             return
         await ch.ws.send(rpc.build_notification(METHOD_SEND, message))
         routing = message.get("routing", {}) if isinstance(message, dict) else {}
@@ -424,8 +466,15 @@ class ChannelManager:
         device = self._device_label(recipient_id) if recipient_id else "unknown"
         try:
             um = UnifiedMessage.model_validate(message)
-            sd, smid, smeth, stpv = unified_message_log_scope(um, direction="outbound")
-            with log_scope(device_id=sd, msg_id=smid, method=smeth, text_preview=stpv):
+            sd, smid, smeth, stpv, stcl, stsub = unified_message_log_scope(um, direction="outbound")
+            with log_scope(
+                device_id=sd,
+                msg_id=smid,
+                method=smeth,
+                text_preview=stpv,
+                traffic_class=stcl,
+                traffic_subclass=stsub,
+            ):
                 # Stream chunks are per-chunk noise — log once at the
                 # owning ``STREAM_SEND`` layer (single completion line).
                 sent_log = (
@@ -468,9 +517,13 @@ class ChannelManager:
     ) -> None:
         ch = self._channels.get(channel_name)
         if ch is None:
-            log.warning(
-                f"⚠️ {LOG_OUT} Cannot send event to ({channel_name}) — not connected"
-            )
+            with log_scope(
+                traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
+                traffic_subclass="not_connected",
+            ):
+                log.warning(
+                    f"⚠️ {LOG_OUT} Cannot send event to ({channel_name}) — not connected"
+                )
             return
         await ch.ws.send(
             rpc.build_notification(

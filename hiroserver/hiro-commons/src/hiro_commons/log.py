@@ -139,6 +139,12 @@ _TEXT_PREVIEW_DEFAULT = object()
 _TEXT_PREVIEW: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "log_text_preview", default=None
 )
+_TRAFFIC_CLASS: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_traffic_class", default=None
+)
+_TRAFFIC_SUBCLASS: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_traffic_subclass", default=None
+)
 
 _LEVELS: Mapping[str, int] = {
     name: level for name, level in logging._nameToLevel.items()
@@ -312,13 +318,13 @@ class _StdlibCatchAll(logging.Handler):
 
 
 def _inject_scope(logger, method_name, event_dict):
-    """Stamp device_id / msg_id / method / text_preview from the active log_scope onto every event.
+    """Stamp scope fields (device_id / msg_id / method / text_preview / traffic_class /
+    traffic_subclass) from the active log_scope onto every event.
 
-    If the call site already passed ``device_id``, ``msg_id``, ``method``, or ``text_preview`` as a
-    structured-log kwarg, that key is left unchanged — even when the value is
-    empty or None — so explicit suppression wins over contextvars.  Only keys
-    absent from ``event_dict`` receive non-empty values from the active
-    :func:`log_scope`.
+    If the call site already passed any of these keys as a structured-log kwarg, the
+    explicit value is left unchanged — even when empty or None — so explicit
+    suppression wins over contextvars. Only keys absent from ``event_dict`` receive
+    non-empty values from the active :func:`log_scope`.
     """
     if "device_id" not in event_dict:
         d = _DEVICE_ID.get()
@@ -336,6 +342,14 @@ def _inject_scope(logger, method_name, event_dict):
         tp = _TEXT_PREVIEW.get()
         if tp:
             event_dict["text_preview"] = tp
+    if "traffic_class" not in event_dict:
+        tcl = _TRAFFIC_CLASS.get()
+        if tcl:
+            event_dict["traffic_class"] = tcl
+    if "traffic_subclass" not in event_dict:
+        tsub = _TRAFFIC_SUBCLASS.get()
+        if tsub:
+            event_dict["traffic_subclass"] = tsub
     return event_dict
 
 
@@ -735,6 +749,8 @@ def log_scope(
     msg_id: str | None = None,
     method: str | None = None,
     text_preview: str | None | object = _TEXT_PREVIEW_DEFAULT,
+    traffic_class: str | None = None,
+    traffic_subclass: str | None = None,
 ):
     """Open a structured logging scope for one device / message / request.
 
@@ -750,6 +766,11 @@ def log_scope(
         method     — JSON-RPC method name for request/response flows
                      (e.g. ``"channels.list"``, ``"policy.get"``).
         text_preview — short human-readable message snippet for log UIs / cross-row anchoring.
+        traffic_class — Tier-1 operational classification (e.g. ``"inbound.message"``,
+                     ``"outbound.response"``, ``"infra.event"``); see
+                     ``hiro_channel_sdk.log_scope_fields.TRAFFIC_CLASSES``.
+        traffic_subclass — Tier-2 detail under ``traffic_class``: method name,
+                     content shape, or event type.
 
     ``text_preview`` is optional: omit the keyword entirely to inherit the parent's
     value; pass ``None`` or ``''`` explicitly to bind an empty preview for this nest.
@@ -771,6 +792,10 @@ def log_scope(
                     _TEXT_PREVIEW.set((text_preview or "").strip() or None),
                 )
             )
+        if traffic_class is not None:
+            tokens.append((_TRAFFIC_CLASS, _TRAFFIC_CLASS.set(traffic_class)))
+        if traffic_subclass is not None:
+            tokens.append((_TRAFFIC_SUBCLASS, _TRAFFIC_SUBCLASS.set(traffic_subclass)))
         yield
     finally:
         for var, token in reversed(tokens):

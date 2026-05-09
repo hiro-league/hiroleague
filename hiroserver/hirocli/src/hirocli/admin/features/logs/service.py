@@ -197,6 +197,7 @@ class LogsService:
         device_id: str | None = None,
         msg_id: str | None = None,
         method: str | None = None,
+        traffic_class: str | list[str] | None = None,
     ) -> Result[list[dict[str, Any]]]:
         """Full-text search combined with structured scope filters (AND).
 
@@ -206,10 +207,11 @@ class LogsService:
         did = (device_id or "").strip() or None
         mid = (msg_id or "").strip() or None
         meth = (method or "").strip() or None
-        if not q and not any([did, mid, meth]):
+        tcl = self._normalize_traffic_classes(traffic_class)
+        if not q and not any([did, mid, meth, tcl]):
             return Result.failure(
                 "Provide a non-empty search query or at least one scope filter "
-                "(device_id, msg_id, method)."
+                "(device_id, msg_id, method, traffic_class)."
             )
         try:
             result = LogSearchTool().execute(
@@ -218,11 +220,20 @@ class LogsService:
                 device_id=did,
                 msg_id=mid,
                 method=meth,
+                traffic_class=tcl or None,
                 workspace=workspace,
             )
             return Result.success(list(result.rows))
         except Exception as exc:
             return Result.failure(str(exc))
+
+    @staticmethod
+    def _normalize_traffic_classes(traffic_class: str | list[str] | None) -> list[str]:
+        if traffic_class is None:
+            return []
+        if isinstance(traffic_class, str):
+            return [tc.strip() for tc in traffic_class.split(",") if tc.strip()]
+        return [str(tc).strip() for tc in traffic_class if str(tc).strip()]
 
     def filter_by_scope(
         self,

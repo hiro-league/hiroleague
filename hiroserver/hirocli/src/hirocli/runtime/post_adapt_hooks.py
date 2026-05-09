@@ -141,7 +141,7 @@ class InboundEnqueueHook:
 
     async def run(self, msg: UnifiedMessage, emit: EmitOutbound) -> None:
         self._queue.put_nowait(msg)
-        log.info(
+        log.fineinfo(
             f"{LOG_IN} Queued after adaptation — {comm_peer_label(msg, self._ctx)}",
             **comm_extras(msg, channel=msg.routing.channel),
         )

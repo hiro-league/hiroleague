@@ -2,6 +2,25 @@ import { apiRequest, type ApiResponse } from './client';
 
 export const LOG_LEVELS = ['DEBUG', 'FINEINFO', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const;
 
+/** Tier-1 operational classification of comm-path log lines. Mirrors backend TRAFFIC_CLASSES. */
+export const TRAFFIC_CLASSES = [
+  'inbound.message',
+  'inbound.event',
+  'inbound.request',
+  'outbound.response',
+  'outbound.lifecycle',
+  'outbound.broadcast',
+  'outbound.reply',
+  'stream.chunk',
+  'infra.event',
+  'infra.transport'
+] as const;
+export type TrafficClass = (typeof TRAFFIC_CLASSES)[number];
+
+export function isTrafficClass(value: string): value is TrafficClass {
+  return (TRAFFIC_CLASSES as readonly string[]).includes(value);
+}
+
 /** Past-window options for live tail (ignored when ``last_session_only``). */
 export const LOG_TIME_RANGES = ['1h', '2h', '4h', '1d', '2d', '3d', 'all'] as const;
 export type LogTimeRange = (typeof LOG_TIME_RANGES)[number];
@@ -62,6 +81,8 @@ export type LogRow = {
   scope_msg_id?: string;
   scope_method?: string;
   scope_text_preview?: string;
+  scope_traffic_class?: string;
+  scope_traffic_subclass?: string;
   has_msg_id?: boolean;
 };
 
@@ -105,6 +126,7 @@ export type LogsSearchParams = {
   deviceId?: string | null;
   msgId?: string | null;
   method?: string | null;
+  trafficClasses?: TrafficClass[] | null;
 };
 
 /** Full-text search plus optional structured scope filters (AND). Requires at least one filter. */
@@ -114,10 +136,12 @@ export async function searchLogs(params: LogsSearchParams): Promise<ApiResponse<
   const deviceId = params.deviceId?.trim();
   const msgId = params.msgId?.trim();
   const method = params.method?.trim();
+  const trafficClasses = (params.trafficClasses ?? []).filter(Boolean);
   if (q) sp.set('query', q);
   if (deviceId) sp.set('device_id', deviceId);
   if (msgId) sp.set('msg_id', msgId);
   if (method) sp.set('method', method);
+  if (trafficClasses.length > 0) sp.set('traffic_class', trafficClasses.join(','));
   const qs = sp.toString();
   return apiRequest<LogsSearchResponse>(qs ? `/logs/search?${qs}` : '/logs/search');
 }

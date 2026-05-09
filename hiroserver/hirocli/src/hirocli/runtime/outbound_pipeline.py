@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from hiro_channel_sdk.constants import MESSAGE_TYPE_STREAM
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
@@ -51,23 +50,27 @@ class OutboundPipeline:
 
     async def enqueue(self, msg: UnifiedMessage) -> None:
         """Place a message on the outbound queue. Returns once enqueued."""
-        _out_device_id, _out_msg_id, _out_method, _out_text_preview = unified_message_log_scope(
-            msg,
-            direction="outbound",
-        )
+        (
+            _out_device_id,
+            _out_msg_id,
+            _out_method,
+            _out_text_preview,
+            _out_traffic_class,
+            _out_traffic_subclass,
+        ) = unified_message_log_scope(msg, direction="outbound")
         with log_scope(
             device_id=_out_device_id,
             msg_id=_out_msg_id,
             method=_out_method,
             text_preview=_out_text_preview,
+            traffic_class=_out_traffic_class,
+            traffic_subclass=_out_traffic_subclass,
         ):
             await self.queue.put(msg)
-            # Stream chunks are per-chunk noise (one ``files.get`` can fan out
-            # to dozens of frames); the owning ``STREAM_SEND`` layer logs a
-            # single INFO completion line. Demote per-frame queue logs to
-            # fineinfo so they're available when verbosity is raised.
-            log_fn = log.fineinfo if msg.message_type == MESSAGE_TYPE_STREAM else log.info
-            log_fn(
+            # Per-hop queue visibility is verbose; higher layers (e.g. Sent on
+            # the channel) retain INFO for message-flow milestones. Use
+            # fineinfo so default INFO logs stay readable.
+            log.fineinfo(
                 f"{LOG_OUT} Queued — {self._routing_tag(msg)}",
                 **comm_extras(
                     msg,
@@ -84,15 +87,21 @@ class OutboundPipeline:
                 # Re-open scope here: the queue hop breaks the asyncio task context.
                 # Outbound direction: device_id is the recipient.
                 # Events with ref_id (transcript, voiced) carry the original msg_id.
-                _out_device_id, _out_msg_id, _out_method, _out_text_preview = unified_message_log_scope(
-                    msg,
-                    direction="outbound",
-                )
+                (
+                    _out_device_id,
+                    _out_msg_id,
+                    _out_method,
+                    _out_text_preview,
+                    _out_traffic_class,
+                    _out_traffic_subclass,
+                ) = unified_message_log_scope(msg, direction="outbound")
                 with log_scope(
                     device_id=_out_device_id,
                     msg_id=_out_msg_id,
                     method=_out_method,
                     text_preview=_out_text_preview,
+                    traffic_class=_out_traffic_class,
+                    traffic_subclass=_out_traffic_subclass,
                 ):
                     try:
                         _check_permissions(msg)
@@ -103,13 +112,8 @@ class OutboundPipeline:
                         )
                         continue
 
-                    # See ``enqueue`` — stream frames are per-chunk noise.
-                    dispatch_log = (
-                        log.fineinfo
-                        if msg.message_type == MESSAGE_TYPE_STREAM
-                        else log.info
-                    )
-                    dispatch_log(
+                    # See ``enqueue`` — same rationale: avoid duplicate INFO per hop.
+                    log.fineinfo(
                         f"{LOG_OUT} Dispatching — {self._routing_tag(msg)}",
                         **comm_extras(
                             msg,

@@ -327,6 +327,8 @@ def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
             "scope_msg_id": scope.get("msg_id", ""),
             "scope_method": scope.get("method", ""),
             "scope_text_preview": scope.get("text_preview", ""),
+            "scope_traffic_class": scope.get("traffic_class", ""),
+            "scope_traffic_subclass": scope.get("traffic_subclass", ""),
             "has_msg_id": bool(scope.get("msg_id")),
         }
     return None
@@ -532,7 +534,9 @@ def _read_rows_from_offset(
 # ---------------------------------------------------------------------------
 
 # Keys stamped by hiro_commons.log.log_scope that identify a device or message.
-_SCOPE_KEYS = frozenset({"device_id", "msg_id", "method", "text_preview"})
+_SCOPE_KEYS = frozenset(
+    {"device_id", "msg_id", "method", "text_preview", "traffic_class", "traffic_subclass"}
+)
 
 
 def _extract_scope_fields(extra: str) -> dict[str, str]:
@@ -586,17 +590,20 @@ def _apply_scope_filter(
     device_id: str | None = None,
     msg_id: str | None = None,
     method: str | None = None,
+    traffic_classes: list[str] | None = None,
 ) -> list[dict]:
-    """Exact-match filter on parsed scope fields (device_id / msg_id / method).
+    """Exact-match filter on parsed scope fields (device_id / msg_id / method / traffic_class).
 
-    Filters AND together: a row must satisfy every non-None constraint.
+    Filters AND together: a row must satisfy every non-None constraint. ``traffic_classes``
+    is OR within itself (any-of) and AND with the others.
     Uses the pre-parsed ``scope_*`` fields on each row dict (populated by
     ``_parse_csv_row``) so no repeated extra-field parsing is needed.
     """
     device_id = (device_id or "").strip() or None
     msg_id = (msg_id or "").strip() or None
     method = (method or "").strip() or None
-    if not any([device_id, msg_id, method]):
+    tcl_set = {tc.strip() for tc in (traffic_classes or []) if tc and tc.strip()} or None
+    if not any([device_id, msg_id, method, tcl_set]):
         return rows
     result = rows
     if device_id:
@@ -605,6 +612,8 @@ def _apply_scope_filter(
         result = [r for r in result if r.get("scope_msg_id") == msg_id]
     if method:
         result = [r for r in result if r.get("scope_method") == method]
+    if tcl_set:
+        result = [r for r in result if r.get("scope_traffic_class") in tcl_set]
     return result
 
 
@@ -675,6 +684,12 @@ class LogSearchTool(Tool):
             "Exact-match filter on the method scope field (e.g. 'channels.list', 'policy.get')",
             required=False,
         ),
+        "traffic_class": ToolParam(
+            str,
+            "Filter by Tier-1 traffic_class (e.g. 'inbound.message', 'outbound.response'). "
+            "Comma-separated for multi-select; matches any.",
+            required=False,
+        ),
         "limit": ToolParam(
             int,
             f"Maximum rows to return (default {_DEFAULT_SEARCH_LIMIT})",
@@ -696,6 +711,7 @@ class LogSearchTool(Tool):
         device_id: str | None = None,
         msg_id: str | None = None,
         method: str | None = None,
+        traffic_class: str | list[str] | None = None,
         limit: int | None = None,
         workspace: str | None = None,
     ) -> LogSearchResult:
@@ -706,6 +722,12 @@ class LogSearchTool(Tool):
         device_id = (device_id or "").strip() or None
         msg_id = (msg_id or "").strip() or None
         method = (method or "").strip() or None
+        if isinstance(traffic_class, str):
+            traffic_classes = [tc.strip() for tc in traffic_class.split(",") if tc.strip()]
+        elif isinstance(traffic_class, list):
+            traffic_classes = [str(tc).strip() for tc in traffic_class if str(tc).strip()]
+        else:
+            traffic_classes = []
 
         files = _collect_log_files(log_dir, gateway_log_dir, source or "all")
         all_rows: list[dict] = []
@@ -715,7 +737,13 @@ class LogSearchTool(Tool):
         all_rows = _apply_level_filter(all_rows, level)
         all_rows = _apply_module_filter(all_rows, module)
         all_rows = _apply_query_filter(all_rows, query)
-        all_rows = _apply_scope_filter(all_rows, device_id=device_id, msg_id=msg_id, method=method)
+        all_rows = _apply_scope_filter(
+            all_rows,
+            device_id=device_id,
+            msg_id=msg_id,
+            method=method,
+            traffic_classes=traffic_classes or None,
+        )
         all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
 
         total = len(all_rows)

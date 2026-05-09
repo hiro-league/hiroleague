@@ -24,6 +24,10 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.log_scope_fields import (
+    METADATA_LOG_TRAFFIC_CLASS,
+    METADATA_LOG_TRAFFIC_SUBCLASS,
+    TRAFFIC_CLASS_OUTBOUND_LIFECYCLE,
+    TRAFFIC_CLASS_OUTBOUND_REPLY,
     METADATA_LOG_REPLY_TO_MSG_ID,
     METADATA_LOG_TEXT_PREVIEW,
     log_preview_snippet,
@@ -106,6 +110,8 @@ def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
     _user_pv = unified_message_text_preview(inbound)
     if _user_pv:
         meta[METADATA_LOG_TEXT_PREVIEW] = _user_pv
+    meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_REPLY
+    meta[METADATA_LOG_TRAFFIC_SUBCLASS] = "text"
     # No ``recipient_id``: the user has one shared conversation across all of
     # their paired devices, so the gateway broadcasts the reply to every device
     # and they all stay in sync (device B's chat scrolls even when device A
@@ -502,6 +508,8 @@ class AgentManager:
             _voiced_meta[METADATA_LOG_TEXT_PREVIEW] = (
                 _user_pv_voice if _user_pv_voice else log_preview_snippet(text)
             )
+            _voiced_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_LIFECYCLE
+            _voiced_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = EVENT_TYPE_MESSAGE_VOICED
             # Same broadcast rationale as `_make_reply`: every paired device of
             # the user gets the voiced event so playback state stays consistent.
             voiced_event = UnifiedMessage(
@@ -672,7 +680,7 @@ class AgentManager:
             # Log the full conversation state the LLM will see (checkpoint + new message).
             state = await agent.aget_state(config)
             history = state.values.get("messages", []) if state.values else []
-            log.debug(
+            log.fineinfo(
                 f"{LOG_IN} Agent invocation context — {peer} · {comm_kind(msg)}",
                 **comm_extras(
                     msg,
@@ -768,7 +776,7 @@ class AgentManager:
                 exc_info=True,
             )
             raise
-        log.info(
+        log.fineinfo(
             f"{LOG_OUT} Text reply enqueued — {comm_peer_label(reply, self._ctx)} · {comm_kind(reply)}",
             **comm_extras(
                 reply,
@@ -893,15 +901,21 @@ class AgentManager:
                 try:
                     # Re-open scope here: the queue hop breaks the asyncio task context
                     # set by InboundPipeline, so the agent and TTS tasks need their own.
-                    _agent_dev, _agent_msg_id, _agent_method, _agent_text_preview = unified_message_log_scope(
-                        msg,
-                        direction="inbound",
-                    )
+                    (
+                        _agent_dev,
+                        _agent_msg_id,
+                        _agent_method,
+                        _agent_text_preview,
+                        _agent_traffic_class,
+                        _agent_traffic_subclass,
+                    ) = unified_message_log_scope(msg, direction="inbound")
                     with log_scope(
                         device_id=_agent_dev,
                         msg_id=_agent_msg_id,
                         method=_agent_method,
                         text_preview=_agent_text_preview,
+                        traffic_class=_agent_traffic_class,
+                        traffic_subclass=_agent_traffic_subclass,
                     ):
                         await self._process(msg)
                 except Exception as exc:

@@ -3,9 +3,9 @@
 Summarization runs before each LLM call and again after tool execution so long
 tool traces stay bounded. Full message history remains in checkpoint ``messages``;
 the model receives ``summarized_messages`` from LangMem ``SummarizationNode``.
-Debug logs (logger ``AGENT``) record ``model_input_summary`` (same shape as
+``fineinfo`` lines (logger ``AGENT``) record ``model_input_summary`` (same shape as
 ``history_summary`` in ``agent_manager``) for the exact list passed to the chat
-model, ``summarizer_input_summary`` when a summary is triggered, and
+model; ``summarizer_input_summary`` uses ``debug`` when a summary is triggered; and
 ``✂️ Summary executed`` at info level with token counts and the summary text.
 """
 
@@ -258,7 +258,7 @@ def build_summarizing_agent_graph(
             if rs is not None
             else "⬇️ Chat model input — HiroServer"
         )
-        log.debug(
+        log.fineinfo(
             label,
             model_invoke_token_estimate=tok_invoke,
             model_invoke_message_count=len(msgs_for_model),

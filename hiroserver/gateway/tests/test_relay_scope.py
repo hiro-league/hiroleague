@@ -28,7 +28,7 @@ def _make_um_payload(**parts: object) -> dict[str, object]:
 
 def test_relay_scope_inbound_user_message_matches_sdk():
     msg = {"payload": _make_um_payload()}
-    dev, mid, meth = _relay_log_scope_fields(
+    dev, mid, meth, _preview, tcl, _tsub = _relay_log_scope_fields(
         msg,
         is_from_server=False,
         sender_id="dev-x",
@@ -37,6 +37,7 @@ def test_relay_scope_inbound_user_message_matches_sdk():
     assert dev == "dev-x"
     assert mid == "r-id"
     assert meth is None
+    assert tcl == "inbound.message"
 
 
 def test_relay_scope_outbound_response_reads_rpc_method_metadata():
@@ -54,7 +55,7 @@ def test_relay_scope_outbound_response_reads_rpc_method_metadata():
         {"content_type": "json", "body": json.dumps({"status": "ok", "data": {}})}
     ]
     msg = {"payload": um}
-    dev, mid, meth = _relay_log_scope_fields(
+    dev, mid, meth, _preview, tcl, _tsub = _relay_log_scope_fields(
         msg,
         is_from_server=True,
         sender_id="desktop-id",
@@ -63,6 +64,7 @@ def test_relay_scope_outbound_response_reads_rpc_method_metadata():
     assert dev == "peer-dev"
     assert meth == "channels.list"
     assert mid is None
+    assert tcl == "outbound.response"
 
 
 def test_relay_scope_outbound_reply_uses_reply_to_metadata():
@@ -76,7 +78,7 @@ def test_relay_scope_outbound_reply_uses_reply_to_metadata():
         "metadata": {METADATA_LOG_REPLY_TO_MSG_ID: "original-msg"},
     }
     msg = {"payload": um}
-    dev, mid, meth = _relay_log_scope_fields(
+    dev, mid, _meth, _preview, tcl, _tsub = _relay_log_scope_fields(
         msg,
         is_from_server=True,
         sender_id="desktop-id",
@@ -84,11 +86,12 @@ def test_relay_scope_outbound_reply_uses_reply_to_metadata():
     )
     assert dev == "peer-dev"
     assert mid == "original-msg"
+    assert tcl == "outbound.reply"
 
 
 def test_relay_scope_fallback_when_payload_invalid():
     msg = {"payload": {"not": "a unified message"}}
-    dev, mid, meth = _relay_log_scope_fields(
+    dev, mid, meth, _preview, tcl, _tsub = _relay_log_scope_fields(
         msg,
         is_from_server=False,
         sender_id="solo-dev",
@@ -97,3 +100,4 @@ def test_relay_scope_fallback_when_payload_invalid():
     assert dev == "solo-dev"
     assert mid is None
     assert meth is None
+    assert tcl is None

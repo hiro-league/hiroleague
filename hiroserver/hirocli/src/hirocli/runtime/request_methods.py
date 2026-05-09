@@ -285,6 +285,8 @@ REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(
 
 
 def register_request_methods(handler: RequestHandler) -> None:
-    """Register all data-plane request methods."""
+    """Register all data-plane request methods."""    
     for name, fn in _REGISTERED_HANDLERS:
         handler.register(name, fn)
+    log.info("✅ Registered all request methods")
+

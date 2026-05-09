@@ -24,6 +24,12 @@ from hiro_channel_sdk.constants import (
 from hiro_channel_sdk.log_scope_fields import (
     METADATA_LOG_RPC_METHOD,
     METADATA_LOG_TEXT_PREVIEW,
+    METADATA_LOG_TRAFFIC_CLASS,
+    METADATA_LOG_TRAFFIC_SUBCLASS,
+    TRAFFIC_CLASS_OUTBOUND_BROADCAST,
+    TRAFFIC_CLASS_OUTBOUND_LIFECYCLE,
+    TRAFFIC_CLASS_OUTBOUND_RESPONSE,
+    TRAFFIC_CLASS_STREAM_CHUNK,
     log_preview_snippet,
     message_text_preview_from_content,
 )
@@ -92,6 +98,8 @@ class EnvelopeFactory:
         _pv_ack = message_text_preview_from_content(origin)
         if _pv_ack:
             _ack_meta[METADATA_LOG_TEXT_PREVIEW] = _pv_ack
+        _ack_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_LIFECYCLE
+        _ack_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = EVENT_TYPE_MESSAGE_RECEIVED
 
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_EVENT,
@@ -118,6 +126,8 @@ class EnvelopeFactory:
         """
         _txn_meta = dict(origin.routing.metadata or {})
         _txn_meta[METADATA_LOG_TEXT_PREVIEW] = log_preview_snippet(transcript)
+        _txn_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_LIFECYCLE
+        _txn_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = EVENT_TYPE_MESSAGE_TRANSCRIBED
 
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_EVENT,
@@ -143,12 +153,15 @@ class EnvelopeFactory:
         metadata: dict[str, Any] | None = None,
     ) -> UnifiedMessage:
         """A ``resource.changed`` event hint — carries ``resource``, ``reason``, and Tier-2 ``resource_sync_version``."""
+        meta_with_class = dict(metadata or {})
+        meta_with_class[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_BROADCAST
+        meta_with_class[METADATA_LOG_TRAFFIC_SUBCLASS] = EVENT_TYPE_RESOURCE_CHANGED
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_EVENT,
             routing=_direct_outbound_routing(
                 channel=channel,
                 recipient_id=recipient_id,
-                metadata=metadata,
+                metadata=meta_with_class,
             ),
             event=EventPayload(
                 type=EVENT_TYPE_RESOURCE_CHANGED,
@@ -176,6 +189,10 @@ class EnvelopeFactory:
         # Stamp JSON-RPC method on routing metadata so outbound ``log_scope`` can filter
         # RPC responses (JSON-RPC response bodies do not repeat ``method``).
         req_meta = _merge_rpc_method_into_metadata(request, dict(request.routing.metadata or {}))
+        req_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_RESPONSE
+        rpc_method = req_meta.get(METADATA_LOG_RPC_METHOD)
+        if isinstance(rpc_method, str) and rpc_method.strip():
+            req_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = rpc_method.strip()
 
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_RESPONSE,
@@ -204,6 +221,10 @@ class EnvelopeFactory:
             origin_request,
             dict(origin_request.routing.metadata or {}),
         )
+        req_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_STREAM_CHUNK
+        rpc_method = req_meta.get(METADATA_LOG_RPC_METHOD)
+        if isinstance(rpc_method, str) and rpc_method.strip():
+            req_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = rpc_method.strip()
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_STREAM,
             request_id=origin_request.request_id,
@@ -239,6 +260,8 @@ class EnvelopeFactory:
             "error": {"code": "routing_error", "message": reason},
         })
         req_meta = _merge_rpc_method_into_metadata(origin, dict(origin.routing.metadata or {}))
+        req_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_RESPONSE
+        req_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = "routing_error"
         return UnifiedMessage(
             message_type=MESSAGE_TYPE_RESPONSE,
             request_id=origin.request_id or origin.routing.id,

@@ -10,6 +10,14 @@ from hiro_channel_sdk.log_scope_fields import (
     METADATA_LOG_REPLY_TO_MSG_ID,
     METADATA_LOG_RPC_METHOD,
     METADATA_LOG_TEXT_PREVIEW,
+    METADATA_LOG_TRAFFIC_CLASS,
+    TRAFFIC_CLASS_INBOUND_EVENT,
+    TRAFFIC_CLASS_INBOUND_MESSAGE,
+    TRAFFIC_CLASS_INBOUND_REQUEST,
+    TRAFFIC_CLASS_OUTBOUND_BROADCAST,
+    TRAFFIC_CLASS_OUTBOUND_LIFECYCLE,
+    TRAFFIC_CLASS_OUTBOUND_REPLY,
+    TRAFFIC_CLASS_OUTBOUND_RESPONSE,
     unified_message_log_scope,
 )
 from hiro_channel_sdk.models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
@@ -33,11 +41,13 @@ def test_inbound_user_message_scope():
         routing=_routing(sender_id="d1", id="mid-99"),
         content=[ContentItem(content_type="text", body="hello world transcript")],
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="inbound")
+    dev, mid, meth, preview, tcl, tsub = unified_message_log_scope(msg, direction="inbound")
     assert dev == "d1"
     assert mid == "mid-99"
     assert meth is None
     assert preview == "hello world transcript"
+    assert tcl == TRAFFIC_CLASS_INBOUND_MESSAGE
+    assert tsub == "text"
 
 
 def test_inbound_event_uses_ref_id_not_routing_id():
@@ -46,11 +56,13 @@ def test_inbound_event_uses_ref_id_not_routing_id():
         routing=_routing(sender_id="d2", id="evt-route-self"),
         event=EventPayload(type="message.received", ref_id="original-msg"),
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="inbound")
+    dev, mid, meth, preview, tcl, tsub = unified_message_log_scope(msg, direction="inbound")
     assert dev == "d2"
     assert mid == "original-msg"
     assert meth is None
     assert preview is None
+    assert tcl == TRAFFIC_CLASS_INBOUND_EVENT
+    assert tsub == "message.received"
 
 
 def test_inbound_json_rpc_request_extracts_method():
@@ -65,11 +77,13 @@ def test_inbound_json_rpc_request_extracts_method():
             )
         ],
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="inbound")
+    dev, mid, meth, preview, tcl, tsub = unified_message_log_scope(msg, direction="inbound")
     assert dev == "d3"
     assert mid is None
     assert meth == "channels.list"
     assert preview is None
+    assert tcl == TRAFFIC_CLASS_INBOUND_REQUEST
+    assert tsub == "channels.list"
 
 
 def test_outbound_response_reads_rpc_method_from_metadata():
@@ -86,11 +100,12 @@ def test_outbound_response_reads_rpc_method_from_metadata():
             ContentItem(content_type=CONTENT_TYPE_JSON, body=json.dumps({"status": "ok", "data": {}}))
         ],
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="outbound")
+    dev, mid, meth, preview, tcl, tsub = unified_message_log_scope(msg, direction="outbound")
     assert dev == "target-dev"
     assert meth == "policy.get"
     assert mid is None
     assert preview is None
+    assert tcl == TRAFFIC_CLASS_OUTBOUND_RESPONSE
 
 
 def test_outbound_agent_reply_prefers_reply_to_metadata():
@@ -105,11 +120,12 @@ def test_outbound_agent_reply_prefers_reply_to_metadata():
         ),
         content=[ContentItem(content_type="text", body="reply text")],
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="outbound")
+    dev, mid, meth, preview, tcl, tsub = unified_message_log_scope(msg, direction="outbound")
     assert dev == "peer"
     assert mid == "user-original"
     assert meth is None
     assert preview == "reply text"
+    assert tcl == TRAFFIC_CLASS_OUTBOUND_REPLY
 
 
 def test_outbound_agent_reply_uses_stamped_user_anchor_over_body():
@@ -128,7 +144,7 @@ def test_outbound_agent_reply_uses_stamped_user_anchor_over_body():
         ),
         content=[ContentItem(content_type="text", body="long agent reply text")],
     )
-    _, mid, _, preview = unified_message_log_scope(msg, direction="outbound")
+    _, mid, _, preview, _, _ = unified_message_log_scope(msg, direction="outbound")
     assert mid == "user-original"
     assert preview == "user question here"
 
@@ -148,7 +164,7 @@ def test_inbound_request_ignores_spoofed_reply_correlation():
             )
         ],
     )
-    _, mid, _, _ = unified_message_log_scope(msg, direction="inbound")
+    _, mid, _, _, _, _ = unified_message_log_scope(msg, direction="inbound")
     assert mid is None
 
 
@@ -169,11 +185,12 @@ def test_outbound_response_never_uses_reply_correlation_metadata():
             ContentItem(content_type=CONTENT_TYPE_JSON, body=json.dumps({"status": "ok", "data": {}}))
         ],
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="outbound")
+    dev, mid, meth, preview, tcl, _ = unified_message_log_scope(msg, direction="outbound")
     assert dev == "target-dev"
     assert mid is None
     assert meth == "channels.list"
     assert preview is None
+    assert tcl == TRAFFIC_CLASS_OUTBOUND_RESPONSE
 
 
 def test_outbound_event_falls_back_to_ref_id():
@@ -183,10 +200,12 @@ def test_outbound_event_falls_back_to_ref_id():
         routing=_routing(direction="outbound", sender_id="server", recipient_id="dev-z"),
         event=EventPayload(type="message.voiced", ref_id="correlated"),
     )
-    dev, mid, meth, preview = unified_message_log_scope(msg, direction="outbound")
+    dev, mid, meth, preview, tcl, tsub = unified_message_log_scope(msg, direction="outbound")
     assert dev == "dev-z"
     assert mid == "correlated"
     assert preview is None
+    assert tcl == TRAFFIC_CLASS_OUTBOUND_LIFECYCLE
+    assert tsub == "message.voiced"
 
 
 def test_outbound_stamped_metadata_text_preview_used_for_correlated_events():
@@ -203,6 +222,36 @@ def test_outbound_stamped_metadata_text_preview_used_for_correlated_events():
         ),
         event=EventPayload(type="message.transcribed", ref_id="user-original", data={"transcript": "x"}),
     )
-    _, mid, _, preview = unified_message_log_scope(msg, direction="outbound")
+    _, mid, _, preview, _, _ = unified_message_log_scope(msg, direction="outbound")
     assert mid == "user-original"
     assert preview == "STT snippet for logs"
+
+
+def test_outbound_stamped_traffic_class_overrides_default():
+    """``METADATA_LOG_TRAFFIC_CLASS`` set by the producer takes precedence over fallback inference."""
+    msg = UnifiedMessage(
+        message_type=MESSAGE_TYPE_EVENT,
+        routing=_routing(
+            direction="outbound",
+            sender_id="server",
+            recipient_id="peer",
+            metadata={
+                METADATA_LOG_TRAFFIC_CLASS: TRAFFIC_CLASS_OUTBOUND_BROADCAST,
+            },
+        ),
+        event=EventPayload(type="resource.changed", data={"resource": "characters"}),
+    )
+    _, _, _, _, tcl, _ = unified_message_log_scope(msg, direction="outbound")
+    assert tcl == TRAFFIC_CLASS_OUTBOUND_BROADCAST
+
+
+def test_outbound_event_without_ref_id_falls_back_to_broadcast():
+    """Free-standing events (no ref_id, no stamp) classify as ``outbound.broadcast``."""
+    msg = UnifiedMessage(
+        message_type=MESSAGE_TYPE_EVENT,
+        routing=_routing(direction="outbound", sender_id="server", recipient_id="dev-z"),
+        event=EventPayload(type="resource.changed", data={"resource": "characters"}),
+    )
+    _, _, _, _, tcl, tsub = unified_message_log_scope(msg, direction="outbound")
+    assert tcl == TRAFFIC_CLASS_OUTBOUND_BROADCAST
+    assert tsub == "resource.changed"

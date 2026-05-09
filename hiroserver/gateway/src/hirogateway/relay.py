@@ -247,8 +247,9 @@ def _relay_log_scope_fields(
     is_from_server: bool,
     sender_id: str,
     target_id: str | None,
-) -> tuple[str | None, str | None, str | None, str | None]:
-    """Match hirocli relay semantics: same ``device_id`` / ``msg_id`` / ``method`` / ``text_preview`` as ``unified_message_log_scope``."""
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+    """Match hirocli relay semantics: same ``device_id`` / ``msg_id`` / ``method`` / ``text_preview`` /
+    ``traffic_class`` / ``traffic_subclass`` as ``unified_message_log_scope``."""
     payload = msg.get("payload")
     if isinstance(payload, dict):
         try:
@@ -258,7 +259,7 @@ def _relay_log_scope_fields(
         except Exception:
             pass
     device_id = sender_id if not is_from_server else (target_id or sender_id)
-    return device_id, _fallback_message_id_from_envelope(msg), None, None
+    return device_id, _fallback_message_id_from_envelope(msg), None, None, None, None
 
 
 def configure_auth(auth_manager: GatewayAuthManager) -> None:
@@ -404,7 +405,14 @@ async def relay_message(sender_id: str, raw: str) -> None:
         kind = "?"
         hint = None
 
-    scope_dev, scope_mid, scope_meth, scope_text_preview = _relay_log_scope_fields(
+    (
+        scope_dev,
+        scope_mid,
+        scope_meth,
+        scope_text_preview,
+        scope_traffic_class,
+        scope_traffic_subclass,
+    ) = _relay_log_scope_fields(
         msg,
         is_from_server=is_from_server,
         sender_id=sender_id,
@@ -416,6 +424,8 @@ async def relay_message(sender_id: str, raw: str) -> None:
         msg_id=scope_mid,
         method=scope_meth,
         text_preview=scope_text_preview,
+        traffic_class=scope_traffic_class,
+        traffic_subclass=scope_traffic_subclass,
     ):
         route = "unicast" if target_id else "broadcast"
         log_extras: dict[str, Any] = {}
