@@ -119,7 +119,7 @@
         "name": "Flutter - Run Android",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && HIRO_ENV=dev ./flutter_build.sh run --dart-define=HIRO_ENV=dev -d android"
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")/device_apps\" && HIRO_ENV=dev ./flutter_build.sh run --dart-define=HIRO_ENV=dev"
       },
       {
         "name": "Flutter - List Outdated Packages",

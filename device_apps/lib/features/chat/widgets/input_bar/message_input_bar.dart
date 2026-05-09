@@ -21,6 +21,12 @@ class MessageInputBar extends ConsumerStatefulWidget {
 
 class _MessageInputBarState extends ConsumerState<MessageInputBar>
     with SingleTickerProviderStateMixin {
+  /// Floating SnackBar sits at the scaffold bottom; inset it above this bar so
+  /// the composer stays usable (especially on web). Tailored for ~single-line
+  /// field + padding + mic row; multiline composer may grow taller.
+  static const double _snackBarAboveComposerApproxHeight = 96;
+  static const double _snackBarGapAboveComposer = 12;
+
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   bool _hasText = false;
@@ -223,8 +229,19 @@ class _MessageInputBarState extends ConsumerState<MessageInputBar>
 
   void _showError(String msg) {
     if (!mounted) return;
+    final padding = MediaQuery.paddingOf(context);
+    // Inset above the composer so the mic/text row stays clear and tappable,
+    // especially on web where the default float sits on the input strip.
+    final bottomMargin = padding.bottom +
+        _snackBarAboveComposerApproxHeight +
+        _snackBarGapAboveComposer;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+        margin: EdgeInsets.fromLTRB(16, 0, 16, bottomMargin),
+      ),
     );
   }
 
