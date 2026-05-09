@@ -51,4 +51,11 @@ class MessagesDao extends DatabaseAccessor<AppDatabase>
       messages,
     )..where((m) => m.id.equals(messageId))).getSingleOrNull();
   }
+
+  /// Removes all rows for one channel — attachment rows cascade.
+  Future<int> deleteForChannel(String channelId) {
+    return (delete(
+      messages,
+    )..where((m) => m.channelId.equals(channelId))).go();
+  }
 }

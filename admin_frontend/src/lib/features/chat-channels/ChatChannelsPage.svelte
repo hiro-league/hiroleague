@@ -1,19 +1,29 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Edit, ImageIcon, MessageSquare, Plus, RefreshCw, Trash2, Upload } from '@lucide/svelte';
+  import { Edit, FileX2, ImageIcon, MessageSquare, Plus, RefreshCw, Trash2, Upload } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import {
+    clearChatMessages,
     createChatChannel,
     deleteChatChannel,
+    historyMessageFirstAudio,
+    historyMessageText,
     listChatChannels,
     listChatMessages,
     updateChatChannel,
     uploadChatChannelPhoto,
     type ChatChannelPayload,
     type ChatChannelRow,
-    type ChatMessageRow
+    type ChatHistoryMessage
   } from '$lib/api/chat-channels';
+  import ChatMessageAttachmentAudio from '$lib/features/chat-channels/ChatMessageAttachmentAudio.svelte';
+  import {
+    cycleChatAudioSpeed,
+    formatChatAudioSpeedLabel,
+    chatAudioPlaybackRate
+  } from '$lib/features/chat-channels/chat-audio-coordinator';
+  import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
   import { listCharacters, type CharacterRow } from '$lib/api/characters';
   import FormField from '$lib/components/ui/form-field.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
@@ -44,7 +54,7 @@
   let selectedChannelId = $state<string | null>(null);
   let channels = $state<ChatChannelRow[]>([]);
   let characters = $state<CharacterRow[]>([]);
-  let messages = $state<ChatMessageRow[]>([]);
+  let messages = $state<ChatHistoryMessage[]>([]);
   let channelsLoading = $state(true);
   let messagesLoading = $state(false);
   let channelsError = $state<string | null>(null);
@@ -62,11 +72,42 @@
   /** Snapshot when opening the dialog — detects unsaved changes for dismiss guarding. */
   let formBaseline = $state<FormBaseline | null>(null);
   let deleteTarget = $state<ChatChannelRow | null>(null);
+  let clearMessagesConfirmOpen = $state(false);
 
   const selectedChannel = $derived(
     selectedChannelId
       ? (channels.find((channel) => String(channel.id) === selectedChannelId) ?? null)
       : null
+  );
+
+  /** Character → channel thumbnail → placeholder: header avatar for Messages tab. */
+  const messagesHeaderPhotoSrc = $derived.by(() => {
+    if (!selectedChannel) return null;
+    const row = characters.find((c) => c.id === selectedChannel.character_id);
+    return row?.photo_data_url ?? selectedChannel.photo_data_url ?? null;
+  });
+
+  const messagesHeaderCharacterName = $derived.by(() => {
+    if (!selectedChannel) return null;
+    const row = characters.find((c) => c.id === selectedChannel.character_id);
+    return row?.name ?? selectedChannel.character?.name ?? selectedChannel.character_id;
+  });
+
+  /** Latest user message sender_id for header device line (replaces per-bubble sender). */
+  const messagesHeaderDeviceId = $derived.by(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.sender_type === 'user') {
+        const id = (m.sender_id ?? '').trim();
+        if (id) return id;
+      }
+    }
+    return null as string | null;
+  });
+
+  /** Channel label for tooltips — third header line moved here so layout stays two text lines. */
+  const messagesHeaderChannelHint = $derived.by(() =>
+    selectedChannel ? `${selectedChannel.name} · id ${selectedChannel.id}` : ''
   );
 
   const formTitle = $derived(
@@ -251,15 +292,6 @@
     await loadMessages();
   }
 
-  function formatDate(value: string | null | undefined) {
-    return value ? value.replace('T', ' ').replace('Z', ' UTC') : '-';
-  }
-
-  function senderMeta(message: ChatMessageRow) {
-    const senderType = message.sender_type || 'unknown';
-    return message.sender_id ? `${senderType} · ${message.sender_id}` : senderType;
-  }
-
   function characterLabel(id: string) {
     const row = characters.find((c) => c.id === id);
     return row ? `${row.name} — ${row.id}` : id;
@@ -374,6 +406,27 @@
     }
   }
 
+  async function submitClearMessages() {
+    const id = selectedChannelId ? Number(selectedChannelId) : NaN;
+    if (!Number.isFinite(id)) return;
+
+    busy = true;
+    try {
+      await clearChatMessages(id);
+      clearMessagesConfirmOpen = false;
+      notify('success', 'All messages were cleared.');
+      await loadChannels();
+      await loadMessages();
+    } catch (err) {
+      notify(
+        'error',
+        err instanceof Error ? err.message : 'Failed to clear messages.'
+      );
+    } finally {
+      busy = false;
+    }
+  }
+
   onMount(async () => {
     initializeNavigation();
     await loadCharacters();
@@ -476,7 +529,7 @@
                 <span class="truncate font-mono text-xs text-muted-foreground" title={row.character_id}>
                   {row.character?.name ?? row.character_id}
                 </span>
-                <span class="truncate text-xs text-muted-foreground">{formatDate(row.last_message_at)}</span>
+                <span class="truncate text-xs text-muted-foreground">{formatChatTimestamp(row.last_message_at)}</span>
                 <span class="flex justify-end gap-1">
                   <Button size="icon" variant="ghost" onclick={() => openMessages(row)} title="Messages">
                     <MessageSquare size={15} />
@@ -497,71 +550,130 @@
       {/if}
     </section>
   {:else}
-    <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
-      <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 class="text-lg font-semibold">Messages</h3>
-          <span class="font-sans text-sm text-muted-foreground">
+    <section
+      class="flex h-[min(calc(100vh-10rem),56rem)] min-h-[16rem] flex-col gap-4 overflow-hidden rounded-lg border bg-card p-5 shadow-sm"
+    >
+      <div class="flex shrink-0 min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex min-w-0 items-center gap-3">
+          {#if messagesHeaderPhotoSrc}
+            <img
+              src={messagesHeaderPhotoSrc}
+              alt=""
+              class="size-14 shrink-0 rounded-xl border bg-muted object-cover"
+              title={messagesHeaderChannelHint}
+            />
+          {:else}
+            <div
+              class="flex size-14 shrink-0 items-center justify-center rounded-xl border border-dashed bg-muted text-muted-foreground"
+              aria-hidden="true"
+              title={messagesHeaderChannelHint}
+            >
+              <ImageIcon size={24} />
+            </div>
+          {/if}
+          <div class="min-w-0">
+            <h3 class="text-lg font-semibold leading-tight">Messages</h3>
             {#if selectedChannel}
-              Channel: {selectedChannel.name} (id {selectedChannel.id})
+              <p class="mt-0.5 truncate font-sans text-sm leading-tight" title={messagesHeaderChannelHint}>
+                <span class="font-semibold text-foreground">{messagesHeaderCharacterName}</span>
+                {#if messagesHeaderDeviceId}
+                  <span class="text-muted-foreground"> · </span>
+                  <span class="font-mono text-[11px] text-muted-foreground">{messagesHeaderDeviceId}</span>
+                {/if}
+              </p>
             {:else}
-              No channel selected
+              <span class="mt-0.5 block font-sans text-sm text-muted-foreground">No channel selected</span>
             {/if}
-          </span>
+          </div>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
           {#if channels.length > 0}
             <select
               class="h-9 min-w-56 rounded-md border border-input bg-background px-3 font-sans text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               bind:value={selectedChannelId}
               onchange={handleChannelSelect}
               aria-label="Message channel"
+              title={messagesHeaderChannelHint}
             >
               {#each channels as channel (channel.id)}
                 <option value={String(channel.id)}>{channel.name} (id {channel.id})</option>
               {/each}
             </select>
           {/if}
+          <Button
+            variant="outline"
+            class="border-destructive/60 text-destructive hover:bg-destructive/10"
+            disabled={busy || !selectedChannelId || channelsLoading}
+            onclick={() => (clearMessagesConfirmOpen = true)}
+            title="Remove all messages in this channel"
+          >
+            <FileX2 size={15} /> Clear messages
+          </Button>
+          <Button variant="outline" onclick={cycleChatAudioSpeed} title="Cycle playback speed (applies to all clips)">
+            {formatChatAudioSpeedLabel($chatAudioPlaybackRate)}
+          </Button>
           <Button variant="outline" onclick={refreshCurrent}><RefreshCw size={15} /> Refresh</Button>
         </div>
       </div>
 
-      {#if channelsLoading}
-        <p class="text-muted-foreground">Loading chat channels...</p>
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        {#if channelsLoading}
+        <p class="shrink-0 text-muted-foreground">Loading chat channels...</p>
       {:else if channelsError}
-        <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+        <div class="shrink-0 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
           <strong class="font-sans">Could not load chat channels</strong>
           <span class="block text-sm">{channelsError}</span>
         </div>
       {:else if channels.length === 0}
-        <p class="text-muted-foreground">No conversation channels. Create one on the Channels tab.</p>
+        <p class="shrink-0 text-muted-foreground">No conversation channels. Create one on the Channels tab.</p>
       {:else if messagesLoading}
-        <p class="text-muted-foreground">Loading messages...</p>
+        <p class="shrink-0 text-muted-foreground">Loading messages...</p>
       {:else if messagesError}
-        <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+        <div class="shrink-0 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
           <strong class="font-sans">Could not load messages</strong>
           <span class="block text-sm">{messagesError}</span>
         </div>
       {:else if messages.length === 0}
-        <p class="text-muted-foreground">No messages in this channel yet.</p>
+        <p class="shrink-0 text-muted-foreground">No messages in this channel yet.</p>
       {:else}
-        <div class="max-h-[70vh] overflow-y-auto rounded-md border bg-background/45 p-4">
+        <div class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-md border bg-background/45 p-4">
           <div class="grid max-w-3xl gap-3">
             {#each messages as message (message.id)}
               {@const isUser = message.sender_type === 'user'}
+              {@const textBody = historyMessageText(message)}
+              {@const audioItem = historyMessageFirstAudio(message)}
               <div class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}>
                 <div
                   class={cn(
-                    'grid max-w-[85%] gap-1 rounded-2xl px-4 py-2 shadow-sm',
-                    isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
+                    'grid max-w-[85%] gap-1.5 rounded-2xl px-4 py-2.5 shadow-sm',
+                    isUser
+                      ? 'bg-primary text-primary-foreground'
+                      : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
                   )}
                 >
-                  <p class="whitespace-pre-wrap break-words font-sans text-sm">
-                    {message.body || 'No text body'}
-                  </p>
-                  <span class="font-sans text-xs opacity-70">{senderMeta(message)}</span>
+                  {#if textBody}
+                    <p class="whitespace-pre-wrap break-words font-sans text-sm">{textBody}</p>
+                  {:else if !audioItem}
+                    <p class="whitespace-pre-wrap break-words font-sans text-sm opacity-80">No text body</p>
+                  {/if}
+                  {#if audioItem && selectedChannelId}
+                    <ChatMessageAttachmentAudio
+                      channelId={Number(selectedChannelId)}
+                      externalMessageId={message.id}
+                      audioItem={audioItem}
+                    />
+                  {/if}
                   {#if message.created_at}
-                    <span class="font-sans text-xs opacity-50">{formatDate(message.created_at)}</span>
+                    <div class="flex justify-end pt-0.5">
+                      <span
+                        class={cn(
+                          'tabular-nums font-sans text-[10px] leading-none opacity-40',
+                          isUser && 'opacity-50'
+                        )}
+                      >
+                        {formatChatTimestamp(message.created_at)}
+                      </span>
+                    </div>
                   {/if}
                 </div>
               </div>
@@ -569,11 +681,33 @@
           </div>
         </div>
       {/if}
+      </div>
     </section>
   {/if}
 </section>
 
 <ToastHost {toast} />
+
+<Modal
+  open={clearMessagesConfirmOpen}
+  title="Clear all messages in this channel?"
+  onClose={() => {
+    if (!busy) clearMessagesConfirmOpen = false;
+  }}
+>
+  <p class="font-sans text-sm text-muted-foreground">
+    This removes every message and attachment in
+    <strong class="text-foreground">{selectedChannel?.name ?? 'this channel'}</strong>
+    on the server. The channel itself stays. Hiro devices pick this up on the next
+    <span class="font-mono text-xs">channels.list</span> sync.
+  </p>
+  {#snippet footer()}
+    <Button variant="outline" disabled={busy} onclick={() => (clearMessagesConfirmOpen = false)}>
+      Cancel
+    </Button>
+    <Button variant="destructive" disabled={busy} onclick={submitClearMessages}>Clear messages</Button>
+  {/snippet}
+</Modal>
 
 <Modal
   open={formOpen}

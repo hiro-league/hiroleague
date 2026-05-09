@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..domain.conversation_channel import (
+    clear_channel_messages,
     create_channel,
     delete_channel,
     update_channel,
@@ -71,6 +72,12 @@ class ConversationChannelUpdateResult:
 @dataclass
 class ConversationChannelDeleteResult:
     deleted_channel_id: int
+
+
+@dataclass
+class ConversationChannelClearMessagesResult:
+    channel_id: int
+    last_deleted: int
 
 
 @dataclass
@@ -216,6 +223,32 @@ class ConversationChannelDeleteTool(Tool):
         resolved = workspace_path or _resolve_path(workspace)
         delete_channel(resolved, channel_id)
         return ConversationChannelDeleteResult(deleted_channel_id=channel_id)
+
+
+class ConversationChannelClearMessagesTool(Tool):
+    name = "conversation_channel_clear_messages"
+    description = (
+        "Delete all messages and attachments in a conversation channel (channel row unchanged). "
+        "Increments last_deleted on the channel for device sync."
+    )
+    params = {
+        "channel_id": ToolParam(int, "Channel integer id"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(
+        self,
+        channel_id: int,
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+    ) -> ConversationChannelClearMessagesResult:
+        resolved = workspace_path or _resolve_path(workspace)
+        new_epoch = clear_channel_messages(resolved, channel_id)
+        return ConversationChannelClearMessagesResult(
+            channel_id=channel_id,
+            last_deleted=new_epoch,
+        )
 
 
 class MessageHistoryTool(Tool):

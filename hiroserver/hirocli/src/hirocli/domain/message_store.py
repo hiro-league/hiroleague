@@ -413,6 +413,8 @@ def _history_row(
 
     return {
         "id": message_id,
+        # DB PK for admin (e.g. media URLs) — device clients may ignore ``message_pk``.
+        "message_pk": int(row["id"]),
         "channel_id": row["channel_id"],
         "sender_type": row["sender_type"],
         "sender_id": row["sender_id"],

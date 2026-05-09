@@ -1,5 +1,6 @@
 from .base import Tool
 from .conversation import (
+    ConversationChannelClearMessagesTool,
     ConversationChannelCreateTool,
     ConversationChannelDeleteTool,
     ConversationChannelGetTool,
@@ -88,6 +89,7 @@ def all_tools() -> list[Tool]:
         ConversationChannelCreateTool(),
         ConversationChannelUpdateTool(),
         ConversationChannelDeleteTool(),
+        ConversationChannelClearMessagesTool(),
         ConversationChannelGetTool(),
         MessageHistoryTool(),
         WorkspaceListTool(),

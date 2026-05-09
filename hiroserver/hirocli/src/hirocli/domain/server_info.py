@@ -44,6 +44,7 @@ class ChannelListEntry(BaseModel):
     thumbnail_mtime_ns: int = 0
     created_at: str
     last_message_at: str | None = None
+    last_deleted: int = 0
     character: ServerInfoCharacter
     capabilities: MediaPreferences
 
@@ -200,6 +201,7 @@ def build_channel_list_entries(
                 thumbnail_mtime_ns=channel_thumbnail_mtimens(workspace_path, channel.id),
                 created_at=channel.created_at,
                 last_message_at=channel.last_message_at,
+                last_deleted=channel.last_deleted,
                 character=ServerInfoCharacter(id=character.id, name=character.name),
                 capabilities=resolve_channel_capabilities(
                     workspace_path,

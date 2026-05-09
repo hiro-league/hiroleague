@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import base64
+import sqlite3
 from pathlib import Path
+from time import perf_counter
 from typing import Any
+
+from hiro_commons.log import Logger
 
 from hirocli.domain.conversation_channel import (
     min_channel_id,
@@ -14,9 +18,13 @@ from hirocli.domain.conversation_channel_photo import (
     read_channel_thumbnail_bytes,
     write_channel_thumbnail_from_file,
 )
-from hirocli.domain.message_store import _sync_list
+from hirocli.domain.data_store import data_db_path, ensure_data_db
+from hirocli.domain.files_resolver import resolve_ref
+from hirocli.domain.message_attachments import attachment_ref
+from hirocli.domain.message_store import _sync_history
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.tools.conversation import (
+    ConversationChannelClearMessagesTool,
     ConversationChannelCreateTool,
     ConversationChannelDeleteTool,
     ConversationChannelListTool,
@@ -26,6 +34,27 @@ from hirocli.tools.conversation import (
 from hirocli.admin.shared.result import Result
 
 _MAX_INLINE_PHOTO_BYTES = 2_000_000
+
+_log = Logger.get("ADMIN.CHANNELS")
+
+
+def _external_message_id_in_channel(
+    workspace_path: Path,
+    channel_id: int,
+    external_message_id: str,
+) -> bool:
+    """True when ``external_id`` belongs to ``channel_id`` (admin media authz)."""
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM messages
+            WHERE external_id = ? AND channel_id = ?
+            LIMIT 1
+            """,
+            (external_message_id, channel_id),
+        ).fetchone()
+    return row is not None
 
 
 def _inline_image_data_url(thumb: bytes) -> str:
@@ -128,6 +157,36 @@ class ChatChannelsService:
             return Result.failure(str(exc))
         return Result.success(channel_id)
 
+    def clear_messages(self, workspace_id: str | None, channel_id: int) -> Result[dict[str, Any]]:
+        """Bulk-delete all messages in the channel (channel row unchanged; bumps ``last_deleted``)."""
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+        started = perf_counter()
+        try:
+            out = ConversationChannelClearMessagesTool().execute(
+                channel_id, workspace=workspace_id
+            )
+        except Exception as exc:
+            _log.warning(
+                "⚠️ Messages clear failed — HiroAdmin · conversation_channel",
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            return Result.failure(str(exc))
+        # Admin HTTP bypasses ``RequestHandler`` — no ``request:channels.clear_messages`` line unless we log here.
+        _log.info(
+            "✅ Messages cleared — HiroAdmin · conversation_channel",
+            channel_id=out.channel_id,
+            last_deleted=out.last_deleted,
+            workspace_id=workspace_id,
+            elapsed_ms=int((perf_counter() - started) * 1000),
+        )
+        return Result.success(
+            {"channel_id": out.channel_id, "last_deleted": out.last_deleted}
+        )
+
     def upload_channel_photo(
         self,
         workspace_id: str | None,
@@ -158,7 +217,40 @@ class ChatChannelsService:
             wp = self._workspace_path(workspace_id)
             if wp is None:
                 return Result.failure("Workspace path could not be resolved.")
-            messages = _sync_list(wp, channel_id, limit=None)
+            # Same normalized ``content[]`` as ``messages.history`` (+ ``message_pk``), not raw ``messages`` rows.
+            messages = _sync_history(wp, channel_id, limit=None)
         except Exception as exc:
             return Result.failure(str(exc))
         return Result.success(messages)
+
+    def resolve_message_attachment_media(
+        self,
+        workspace_id: str | None,
+        channel_id: int,
+        external_message_id: str,
+        slot_index: int,
+    ) -> Result[tuple[str, str]]:
+        """Resolve attachment file path and MIME for admin playback.
+
+        Returns ``(absolute_path_str, media_type)`` or failure (not found /
+        unresolved).
+        """
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+        wp = self._workspace_path(workspace_id)
+        if wp is None:
+            return Result.failure("Workspace path could not be resolved.")
+        try:
+            if not _external_message_id_in_channel(wp, channel_id, external_message_id):
+                return Result.failure("Message not found in channel.")
+            ref = attachment_ref(external_message_id.strip(), slot_index)
+            path, media_type, _blob = resolve_ref(
+                wp,
+                ref,
+                requesting_device_id=None,
+            )
+        except FileNotFoundError as exc:
+            return Result.failure(str(exc))
+        except (PermissionError, ValueError, OSError) as exc:
+            return Result.failure(str(exc))
+        return Result.success((str(path), media_type))

@@ -38,12 +38,16 @@ def test_list_success() -> None:
     ]
 
 
-def test_messages_all_uses_raw_rows_for_admin_ui() -> None:
+def test_messages_all_uses_sync_history_for_admin_ui() -> None:
     with (
         patch.object(ChatChannelsService, "_workspace_path", lambda self, _ws: Path(".")),
-        patch("hirocli.admin.features.chat_channels.service._sync_list") as list_messages,
+        patch("hirocli.admin.features.chat_channels.service._sync_history") as hist,
     ):
-        list_messages.return_value = [{"body": "x"}]
+        hist.return_value = [
+            {"id": "ext-1", "message_pk": 7, "content": [], "channel_id": 3},
+        ]
         r = ChatChannelsService().list_messages_all("ws-1", 3)
-    assert r.ok and r.data == [{"body": "x"}]
-    list_messages.assert_called_once_with(Path("."), 3, limit=None)
+    assert r.ok and r.data == [
+        {"id": "ext-1", "message_pk": 7, "content": [], "channel_id": 3},
+    ]
+    hist.assert_called_once_with(Path("."), 3, limit=None)

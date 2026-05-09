@@ -7,12 +7,14 @@ import sqlite3
 import pytest
 
 from hirocli.domain.conversation_channel import (
+    clear_channel_messages,
     create_channel,
     delete_channel,
     update_channel,
+    _get_channel_by_id,
 )
 from hirocli.domain.data_store import data_db_path, ensure_data_db
-from hirocli.domain.message_attachments import insert_attachment
+from hirocli.domain.message_attachments import insert_attachment, media_file_path
 from hirocli.domain.message_store import _sync_list, _sync_save
 
 
@@ -58,6 +60,98 @@ def test_update_channel_duplicate_name_raises(tmp_path) -> None:
     second = create_channel(tmp_path, name="Two", character_id="a", user_id=uid)
     with pytest.raises(ValueError, match="already exists"):
         update_channel(tmp_path, second.id, name="One")
+
+
+def test_clear_channel_messages_removes_messages_keeps_channel(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch = create_channel(tmp_path, name="WipeMsg", character_id="a", user_id=uid)
+    assert ch.last_deleted == 0
+    _insert_message(tmp_path, ch.id, external_id="ext-clear-1")
+    _insert_message(tmp_path, ch.id, external_id="ext-clear-2")
+    epoch = clear_channel_messages(tmp_path, ch.id)
+    assert epoch == 1
+    reloaded = _get_channel_by_id(tmp_path, ch.id)
+    assert reloaded is not None
+    assert reloaded.last_deleted == 1
+    assert reloaded.last_message_at is None
+    with sqlite3.connect(str(data_db_path(tmp_path))) as conn:
+        m = conn.execute("SELECT COUNT(*) FROM messages WHERE channel_id = ?", (ch.id,)).fetchone()
+        c = conn.execute("SELECT COUNT(*) FROM channels WHERE id = ?", (ch.id,)).fetchone()
+        a = conn.execute("SELECT COUNT(*) FROM message_attachments").fetchone()
+    assert int(m[0]) == 0
+    assert int(c[0]) == 1
+    assert int(a[0]) == 0
+
+
+def test_clear_channel_messages_unlinks_file_when_blob_exclusive(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch = create_channel(tmp_path, name="BlobOne", character_id="a", user_id=uid)
+    _insert_message(tmp_path, ch.id, external_id="e-blob")
+    pk = _sync_list(tmp_path, ch.id, limit=1)[0]["id"]
+    rel = "media/bychannel/exclusive.m4a"
+    blob = "sha256:" + ("b" * 64)
+    insert_attachment(
+        tmp_path,
+        message_pk=pk,
+        slot_index=0,
+        content_type="audio",
+        blob_id=blob,
+        media_type="audio/m4a",
+        size=4,
+        media_path=rel,
+    )
+    abs_mp = media_file_path(tmp_path, rel)
+    abs_mp.parent.mkdir(parents=True, exist_ok=True)
+    abs_mp.write_bytes(b"wxyz")
+    clear_channel_messages(tmp_path, ch.id)
+    assert not abs_mp.exists()
+
+
+def test_clear_channel_messages_keeps_blob_file_when_other_channel_references_blob(
+    tmp_path,
+) -> None:
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch1 = create_channel(tmp_path, name="A", character_id="a", user_id=uid)
+    ch2 = create_channel(tmp_path, name="B", character_id="a", user_id=uid)
+    _insert_message(tmp_path, ch1.id, external_id="m1")
+    _insert_message(tmp_path, ch2.id, external_id="m2")
+    pk1 = _sync_list(tmp_path, ch1.id, limit=1)[0]["id"]
+    pk2 = _sync_list(tmp_path, ch2.id, limit=1)[0]["id"]
+    blob = "sha256:" + ("c" * 64)
+    rel1 = "media/shared/other1.m4a"
+    rel2 = "media/shared/other2.m4a"
+    insert_attachment(
+        tmp_path,
+        message_pk=pk1,
+        slot_index=0,
+        content_type="audio",
+        blob_id=blob,
+        media_type="audio/m4a",
+        size=1,
+        media_path=rel1,
+    )
+    insert_attachment(
+        tmp_path,
+        message_pk=pk2,
+        slot_index=0,
+        content_type="audio",
+        blob_id=blob,
+        media_type="audio/m4a",
+        size=1,
+        media_path=rel2,
+    )
+    p1 = media_file_path(tmp_path, rel1)
+    p2 = media_file_path(tmp_path, rel2)
+    p1.parent.mkdir(parents=True, exist_ok=True)
+    p2.parent.mkdir(parents=True, exist_ok=True)
+    p1.write_bytes(b"a")
+    p2.write_bytes(b"b")
+    clear_channel_messages(tmp_path, ch1.id)
+    assert p1.exists()
+    assert p2.exists()
 
 
 def test_delete_channel_removes_messages(tmp_path) -> None:

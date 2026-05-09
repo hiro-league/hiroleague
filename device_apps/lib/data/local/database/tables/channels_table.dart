@@ -14,6 +14,10 @@ class Channels extends Table {
   // messages share the same ``created_at``, the server orders by external_id
   // — without this we'd lose rows at page boundaries.
   TextColumn get lastHistorySyncedExternalId => text().nullable()();
+  /// Highest ``channels.list`` ``last_deleted`` we have reconciled (full local wipe applied).
+  /// Server bump without client wipe would leave stale messages — see Phase 2 channel bulk clear design.
+  IntColumn get appliedServerLastDeleted =>
+      integer().withDefault(const Constant(0))();
   IntColumn get thumbnailMtimeNs => integer().nullable()();
   TextColumn get capabilitiesJson => text().nullable()();
 

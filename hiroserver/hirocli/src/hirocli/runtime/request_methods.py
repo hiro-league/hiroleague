@@ -25,6 +25,7 @@ from ..domain.character import resolve_character_photo_file_for_http
 from ..domain.files_resolver import resolve_blob_id_with_kind
 from ..tools.character import CharacterListTool
 from ..tools.conversation import (
+    ConversationChannelClearMessagesTool,
     ConversationChannelListTool,
     MessageHistoryTool,
 )
@@ -52,6 +53,22 @@ async def handle_channels_list(params: dict[str, Any], ctx: RequestContext) -> d
         version=payload.get("resource_sync_version"),
     )
     return payload
+
+
+async def handle_channels_clear_messages(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    channel_id = params.get("channel_id")
+    if channel_id is None:
+        raise ValueError("channel_id is required")
+    started = perf_counter()
+    tool = ConversationChannelClearMessagesTool()
+    result = tool.execute(channel_id=int(channel_id), workspace_path=ctx.workspace_path)
+    log.info(
+        "⬇️ Mutation — request:channels.clear_messages",
+        channel_id=result.channel_id,
+        last_deleted=result.last_deleted,
+        elapsed_ms=int((perf_counter() - started) * 1000),
+    )
+    return {"channel_id": result.channel_id, "last_deleted": result.last_deleted}
 
 
 async def handle_messages_history(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
@@ -272,6 +289,7 @@ async def handle_files_get(params: dict[str, Any], ctx: RequestContext) -> None:
 
 _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any], ...]] = (
     ("channels.list", handle_channels_list),
+    ("channels.clear_messages", handle_channels_clear_messages),
     ("characters.list", handle_characters_list),
     ("files.head", handle_files_head),
     ("files.get", handle_files_get),

@@ -147,12 +147,13 @@ async def test_message_history_returns_audio_metadata_without_bytes(tmp_path) ->
         ],
     )
 
-    await persist_inbound(tmp_path, msg)
+    message_pk = await persist_inbound(tmp_path, msg)
     result = MessageHistoryTool().execute(channel_id, workspace_path=tmp_path)
 
     assert len(result.messages) == 1
     history_message = result.messages[0]
     assert history_message["id"] == "msg-history-audio"
+    assert history_message["message_pk"] == message_pk
     assert "external_id" not in history_message
     assert "media_path" not in history_message
     assert history_message["content"][0] == {

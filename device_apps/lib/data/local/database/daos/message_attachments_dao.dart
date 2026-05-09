@@ -143,4 +143,48 @@ class MessageAttachmentsDao extends DatabaseAccessor<AppDatabase>
       ),
     );
   }
+
+  /// Attachment rows tied to messages in [channelLocalId].
+  Future<List<MessageAttachmentRecord>> listAttachmentRowsForChannel(
+    String channelLocalId,
+  ) async {
+    final rows =
+        await (select(
+              messageAttachments,
+            ).join([
+              innerJoin(
+                messages,
+                messages.id.equalsExp(messageAttachments.messageId),
+              ),
+            ])..where(
+              messages.channelId.equals(channelLocalId),
+            ))
+            .get();
+    return rows
+        .map((row) => row.readTable(messageAttachments))
+        .toList(growable: false);
+  }
+
+  /// Rows with [blobId] attached to messages in any channel except [excludeChannelId].
+  Future<int> countBlobReferencesOutsideChannel(
+    String blobId,
+    String excludeChannelLocalId,
+  ) async {
+    final countExp = messageAttachments.blobId.count();
+    final joined =
+        selectOnly(messageAttachments, distinct: false)
+          ..addColumns([countExp])
+          ..join([
+            innerJoin(
+              messages,
+              messages.id.equalsExp(messageAttachments.messageId),
+            ),
+          ])
+          ..where(
+            messageAttachments.blobId.equals(blobId) &
+                messages.channelId.equals(excludeChannelLocalId).not(),
+          );
+    final row = await joined.getSingle();
+    return row.read(countExp) ?? 0;
+  }
 }

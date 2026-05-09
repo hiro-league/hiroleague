@@ -89,6 +89,22 @@ abstract final class AppStrings {
   static const String gatewayConnecting = 'Connecting…';
   static const String reloadConversationsTitle = 'Reload conversations';
 
+  /// Bulk clear (server-side) — same semantics as Admin **Clear messages**.
+  static const String clearChannelMessagesTitle = 'Clear all messages';
+  static const String clearChannelMessagesSubtitle =
+      'Deletes every message on the server for this channel. Devices update on the next channel sync.';
+  static const String clearChannelMessagesConfirmTitle = 'Clear all messages?';
+  static const String clearChannelMessagesConfirmBody =
+      'This removes the full conversation history on the server for this channel. '
+      'The channel itself stays.';
+  static const String clearChannelMessagesConfirmAction = 'Clear';
+  static const String clearChannelMessagesDisconnected =
+      'Connect to the gateway to clear messages.';
+  static const String clearChannelMessagesNoServerId =
+      'Still loading channels from the gateway. Wait a moment and try again.';
+  static const String clearChannelMessagesSuccess = 'Messages cleared.';
+  static const String clearChannelMessagesFailed = 'Could not clear messages';
+
   // Chat — channel info
   static const String channelInfoTitle = 'Channel info';
   static const String channelPhotoCaption = 'Channel';

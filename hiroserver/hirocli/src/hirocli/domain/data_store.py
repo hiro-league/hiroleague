@@ -100,6 +100,8 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("channels", "description",     "TEXT NOT NULL DEFAULT ''"),
     ("channels", "created_at",      "TEXT NOT NULL DEFAULT ''"),
     ("channels", "last_message_at", "TEXT"),
+    # Monotonic epoch: server clears all messages in channel → incremented (see conversation_channel.clear_channel_messages).
+    ("channels", "last_deleted", "INTEGER NOT NULL DEFAULT 0"),
     # messages
     ("messages", "external_id",  "TEXT NOT NULL DEFAULT ''"),
     ("messages", "channel_id",   "INTEGER NOT NULL DEFAULT 0"),

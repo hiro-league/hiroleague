@@ -62,8 +62,8 @@ BACKSTORY_MD_NAME = "backstory.md"
 
 # Default system prompt text for new workspaces (seeded into default character prompt.md).
 DEFAULT_PROMPT_TEXT = """\
-You are a helpful home assistant running on Hiro.
-Answer questions concisely and helpfully.
+You are a happy, funny and very cheerful friend, named Hiro. 
+Spread the joy answering user's questions. be brief.
 """
 
 DEFAULT_BACKSTORY_TEXT = ""

@@ -4,6 +4,7 @@ import '../../core/utils/logger.dart';
 import '../../data/local/database/app_database.dart';
 import '../../data/repositories/channel_repository_impl.dart';
 import '../../data/remote/gateway/gateway_request_client.dart';
+import '../../domain/repositories/channel_repository.dart';
 import '../../domain/models/server_info/server_info.dart';
 import '../policy/policy_notifier.dart';
 import '../../platform/storage/audio_storage_service.dart';
@@ -19,6 +20,10 @@ final _log = Logger.get('ResourceSync');
 /// triggering a background re-pull. Per ``docs/message-audio-history-storage.md``
 /// §15 — small enough to feel fresh, large enough to absorb rapid screen toggles.
 const Duration kMessageHistoryStaleTtl = Duration(seconds: 60);
+
+/// [Ref] (notifier / tests) and [WidgetRef] (consumer widgets) both expose ``.read``;
+/// centralized so resource sync helpers work from gateway or screens.
+dynamic _providersRead(Object? ref) => ref as dynamic;
 
 /// Highest ``resource_sync_version`` from an inbound ``resource.changed`` event payload.
 int? readResourceSyncVersion(Map<String, dynamic> data) {
@@ -66,8 +71,23 @@ Future<void> refreshPolicy(Ref ref, GatewayRequestClient? client) async {
   }
 }
 
-Future<void> refreshChannels(Ref ref, GatewayRequestClient? client) async {
+/// Pull [channels.list] and merge locally (runs from gateway [Ref]).
+Future<void> refreshChannels(Ref ref, GatewayRequestClient? client) async =>
+    _refreshChannelsMirror(ref, client);
+
+/// Same as [refreshChannels] but callable from consumer widgets ([WidgetRef]).
+Future<void> refreshChannelsWidgetRef(
+  WidgetRef ref,
+  GatewayRequestClient? client,
+) async =>
+    _refreshChannelsMirror(ref, client);
+
+Future<void> _refreshChannelsMirror(
+  Object? ref,
+  GatewayRequestClient? client,
+) async {
   if (client == null) return;
+  final r = _providersRead(ref);
   try {
     final response = await client.request('channels.list');
     final data = response['data'];
@@ -76,22 +96,27 @@ Future<void> refreshChannels(Ref ref, GatewayRequestClient? client) async {
     final syncVer = readResourceSyncVersion(payload);
     final channels = payload['channels'];
     if (channels is! List) return;
-    await ref
-        .read(channelRepositoryProvider)
-        .syncFromServer(
-          channels
-              .whereType<Map>()
-              .map((channel) => Map<String, dynamic>.from(channel))
-              .toList(),
-        );
-    if (syncVer != null) {
-      await ref
+    final repo =
+        r.read(channelRepositoryProvider) as ChannelRepository;
+    final clearedMirror = await repo.syncFromServer(
+      channels
+          .whereType<Map>()
+          .map((channel) => Map<String, dynamic>.from(channel))
+          .toList(),
+    );
+    if (clearedMirror) {
+      final sync = _buildSync(ref, client);
+      await sync.syncAllServerBackedChannels();
+      await refreshPendingMessageAttachments(ref, client);
+      await r
           .read(resourceSyncVersionStoreProvider.notifier)
+          .markPullSucceeded('messages');
+    }
+    if (syncVer != null) {
+      await (r.read(resourceSyncVersionStoreProvider.notifier))
           .recordAuthoritative('channels', syncVer);
     }
-    await ref
-        .read(resourceSyncVersionStoreProvider.notifier)
-        .markPullSucceeded('channels');
+    await (r.read(resourceSyncVersionStoreProvider.notifier)).markPullSucceeded('channels');
     _log.info('Refreshed channel list', fields: {'channels': channels.length});
   } catch (e) {
     _log.warning(
@@ -171,8 +196,8 @@ Future<void> refreshMessageHistoryForChannel(
   }
 }
 
-MessageHistorySync _buildSync(Ref ref, GatewayRequestClient client) {
-  final db = ref.read(appDatabaseProvider);
+MessageHistorySync _buildSync(Object? ref, GatewayRequestClient client) {
+  final db = _providersRead(ref).read(appDatabaseProvider) as AppDatabase;
   return MessageHistorySync(
     channelsDao: db.channelsDao,
     messagesDao: db.messagesDao,
@@ -183,15 +208,16 @@ MessageHistorySync _buildSync(Ref ref, GatewayRequestClient client) {
 }
 
 Future<void> refreshPendingMessageAttachments(
-  Ref ref,
+  Object? ref,
   GatewayRequestClient? client,
 ) async {
   if (client == null) return;
-  final db = ref.read(appDatabaseProvider);
+  final r = _providersRead(ref);
+  final db = r.read(appDatabaseProvider) as AppDatabase;
   final fetcher = AttachmentFetchService(
     attachmentsDao: db.messageAttachmentsDao,
     fetchBytes: client.filesGet,
-    saveBytes: ref.read(audioStorageProvider).saveBytes,
+    saveBytes: r.read(audioStorageProvider).saveBytes,
   );
   await fetcher.tick();
 }

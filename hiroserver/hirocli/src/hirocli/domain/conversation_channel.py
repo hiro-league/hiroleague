@@ -12,6 +12,7 @@ from hiro_commons.timestamps import utc_iso, utc_now
 
 from .data_store import data_db_path, ensure_data_db, get_default_user_id
 from .conversation_channel_photo import remove_channel_photo_dir
+from .message_attachments import media_file_path
 from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ class ConversationChannel(BaseModel):
     description: str = ""
     created_at: str
     last_message_at: str | None = None
+    # Server-owned epoch incremented when channel messages are bulk-cleared (`clear_channel_messages`).
+    last_deleted: int = 0
 
 
 # Keep the default channel name aligned with data_store.py seeding.
@@ -249,6 +252,122 @@ def update_channel(
         return updated
 
 
+def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
+    """Delete every message and attachment in the channel; keep the channel row.
+
+    Increments ``last_deleted``, clears ``last_message_at``, removes attachment
+    files on disk only when no other channel still references the same ``blob_id``.
+    Publishes ``channel.changed`` for resource sync.
+
+    DB work runs under ``BEGIN IMMEDIATE`` so blob eligibility + deletes + epoch bump
+    are isolated from concurrent writers. Unlinking files on disk happens **after**
+    ``COMMIT`` (best-effort cleanup; orphaned bytes are acceptable if the process dies mid-unlink).
+
+    Returns:
+        The new ``last_deleted`` epoch.
+
+    Raises:
+        ValueError: channel id does not exist.
+    """
+    if _get_channel_by_id(workspace_path, channel_id) is None:
+        raise ValueError(f"No conversation channel with id {channel_id}.")
+
+    ensure_data_db(workspace_path)
+    blob_paths_to_unlink: list[tuple[str, str]] = []
+
+    db_path = str(data_db_path(workspace_path))
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    committed = False
+    try:
+        # Immediate lock: blob-eligibility reads + deletes + epoch bump stay atomic vs other writers.
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """
+            SELECT ma.blob_id AS blob_id, MIN(ma.media_path) AS media_path
+            FROM message_attachments ma
+            INNER JOIN messages m ON ma.message_pk = m.id
+            WHERE m.channel_id = ?
+            GROUP BY ma.blob_id
+            """,
+            (channel_id,),
+        ).fetchall()
+        for row in rows:
+            blob_id = str(row["blob_id"])
+            other = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM message_attachments ma
+                INNER JOIN messages m ON ma.message_pk = m.id
+                WHERE ma.blob_id = ? AND m.channel_id != ?
+                """,
+                (blob_id, channel_id),
+            ).fetchone()
+            assert other is not None
+            if int(other["c"]) == 0:
+                blob_paths_to_unlink.append((blob_id, str(row["media_path"])))
+
+        conn.execute(
+            """
+            DELETE FROM message_attachments
+            WHERE message_pk IN (
+                SELECT id FROM messages WHERE channel_id = ?
+            )
+            """,
+            (channel_id,),
+        )
+        conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
+        cur = conn.execute(
+            """
+            UPDATE channels
+            SET last_deleted = COALESCE(last_deleted, 0) + 1,
+                last_message_at = NULL
+            WHERE id = ?
+            """,
+            (channel_id,),
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                f"Bulk clear updated unexpected row count for channels id={channel_id}"
+            )
+        lr = conn.execute(
+            "SELECT last_deleted FROM channels WHERE id = ?",
+            (channel_id,),
+        ).fetchone()
+        conn.commit()
+        committed = True
+        if lr is None:
+            raise RuntimeError(f"Channel id={channel_id} missing after bulk clear")
+        new_epoch = int(lr["last_deleted"])
+    except BaseException:
+        if not committed:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+        raise
+    finally:
+        conn.close()
+
+    for blob_id, rel_path in blob_paths_to_unlink:
+        absolute = media_file_path(workspace_path, rel_path)
+        try:
+            absolute.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "⚠️ Clear channel messages — media file unlink failed · blob %s",
+                blob_id[:32],
+                exc_info=True,
+            )
+
+    logger.info(
+        "✅ Clear channel messages — conversation channel · bulk-complete (channel_id=%s last_deleted=%s)",
+        channel_id,
+        new_epoch,
+    )
+    _notify_channel_changed(workspace_path, channel_id)
+    return new_epoch
+
+
 def delete_channel(workspace_path: Path, channel_id: int) -> None:
     """Remove a conversation channel and all of its messages (FK-safe).
 
@@ -282,6 +401,11 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
 def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:
     keys = row.keys()
     raw_desc = str(row["description"]) if "description" in keys else ""
+    last_deleted = (
+        int(row["last_deleted"])
+        if "last_deleted" in keys and row["last_deleted"] is not None
+        else 0
+    )
     return ConversationChannel(
         id=row["id"],
         name=row["name"],
@@ -291,4 +415,5 @@ def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:
         description=raw_desc.strip(),
         created_at=row["created_at"],
         last_message_at=row["last_message_at"],
+        last_deleted=last_deleted,
     )

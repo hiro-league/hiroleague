@@ -77,4 +77,18 @@ class ChannelsDao extends DatabaseAccessor<AppDatabase>
   Future<ChannelRecord?> getFirst() {
     return (select(channels)..limit(1)).getSingleOrNull();
   }
+
+  /// After server bulk-clear: drop history watermark and persist reconciled epoch.
+  Future<void> clearHistoryWatermarkAndSetAppliedServerLastDeleted(
+    String channelId, {
+    required int appliedServerLastDeleted,
+  }) async {
+    await (update(channels)..where((c) => c.id.equals(channelId))).write(
+      ChannelsCompanion(
+        lastHistorySyncedAt: const Value(null),
+        lastHistorySyncedExternalId: const Value(null),
+        appliedServerLastDeleted: Value(appliedServerLastDeleted),
+      ),
+    );
+  }
 }
