@@ -102,6 +102,16 @@ class ChatChannelPhotoUploadRequest(BaseModel):
     data_url: str
 
 
+class ChatChannelMessageSendRequest(BaseModel):
+    """POST admin → workspace server ``message_send`` (text or recorded audio)."""
+
+    text: str | None = None
+    audio_base64: str | None = None
+    audio_mime_type: str | None = None
+    audio_duration_ms: int | None = None
+    request_voice_reply: bool = False
+
+
 class LogsTailRequest(BaseModel):
     """POST /logs/tail — live tail snapshot. ``since_seconds_ago`` is ignored when ``last_session_only``."""
 

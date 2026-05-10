@@ -30,11 +30,22 @@ class Tool(ABC):
       - params:      flat dict of ToolParam — single source of truth for
                      both CLI argument specs and LLM tool schemas
       - execute():   the actual logic, returns a plain dataclass result
+      - runtime:     class attribute; True when the tool needs a live
+                     ``CommunicationManager`` (see ToolRegistry RuntimeContext).
+
+    Workspace-scoped tools use ``runtime = False`` (default). Tools that expose
+    ``execute_async()`` are invoked via ``ToolRegistry.invoke_async`` from the
+    server HTTP handler so the asyncio event loop is not deadlocked.
     """
 
     name: str
     description: str
     params: dict[str, ToolParam]
+    # Class-level marker — instance lookup via ``type(self).runtime``
+    runtime: bool = False
+
+    def attach_runtime(self, ctx: Any) -> None:
+        """Inject registry runtime context — no-op unless a subclass overrides."""
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> Any: ...

@@ -46,7 +46,7 @@ from hirocli.runtime.server_context import ServerContext
 from hirocli.services.metrics import MetricsCollector
 from hirocli.services.tts import create_tts_service
 from hirocli.tools import all_tools
-from hirocli.tools.registry import ToolRegistry
+from hirocli.tools.registry import RuntimeContext, ToolRegistry
 
 log = Logger.get("SERVER")
 
@@ -192,12 +192,8 @@ async def _main(
     seed_default_characters(workspace_path)
     ensure_data_db(workspace_path)
 
-    # --- Wire HTTP + tools ---
+    # --- HTTP app state (tools registered after CommunicationManager exists — see below).
     http_app.state.ctx = ctx
-    tool_registry = ToolRegistry()
-    tool_registry.register_all(all_tools())
-    http_app.state.tool_registry = tool_registry
-    log.info(f"✅ Loaded Tool Definitions: ({len(tool_registry._tools)})")
 
     # --- Metrics ---
     effective_metrics = ctx.config.metrics_enabled or metrics or os.environ.get(ENV_METRICS) == "1"
@@ -213,6 +209,13 @@ async def _main(
     comm_manager, channel_manager, resource_change_broadcaster = _wire_runtime(ctx)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
+
+    tool_registry = ToolRegistry(
+        runtime=RuntimeContext(comm_manager=comm_manager, loop=ctx.loop),
+    )
+    tool_registry.register_all(all_tools())
+    http_app.state.tool_registry = tool_registry
+    log.info(f"✅ Loaded Tool Definitions: ({len(tool_registry.names())})")
 
     # --- Wire agent ---
     from hirocli.runtime.agent_manager import AgentManager

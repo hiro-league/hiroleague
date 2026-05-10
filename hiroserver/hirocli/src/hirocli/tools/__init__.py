@@ -7,6 +7,7 @@ from .conversation import (
     ConversationChannelListTool,
     ConversationChannelUpdateTool,
     MessageHistoryTool,
+    MessageSendTool,
 )
 from .logs import LogSearchTool, LogTailTool
 from .llm_catalog import (
@@ -92,6 +93,7 @@ def all_tools() -> list[Tool]:
         ConversationChannelClearMessagesTool(),
         ConversationChannelGetTool(),
         MessageHistoryTool(),
+        MessageSendTool(),
         WorkspaceListTool(),
         WorkspaceCreateTool(),
         WorkspaceRemoveTool(),

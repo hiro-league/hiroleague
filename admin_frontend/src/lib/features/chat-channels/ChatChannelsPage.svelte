@@ -1,7 +1,19 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Edit, FileX2, ImageIcon, MessageSquare, Plus, RefreshCw, Trash2, Upload } from '@lucide/svelte';
+  import {
+    Edit,
+    FileX2,
+    ImageIcon,
+    MessageSquare,
+    Mic,
+    Plus,
+    RefreshCw,
+    Send,
+    Square,
+    Trash2,
+    Upload
+  } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import {
     clearChatMessages,
@@ -11,6 +23,7 @@
     historyMessageText,
     listChatChannels,
     listChatMessages,
+    sendChatMessage,
     updateChatChannel,
     uploadChatChannelPhoto,
     type ChatChannelPayload,
@@ -73,6 +86,14 @@
   let formBaseline = $state<FormBaseline | null>(null);
   let deleteTarget = $state<ChatChannelRow | null>(null);
   let clearMessagesConfirmOpen = $state(false);
+  /** Voice reply routing flag for outgoing admin tool calls (parity with Flutter). */
+  let requestVoiceReplyUi = $state(false);
+  let draftMessage = $state('');
+  /** Browser mic recorder — outbound audio uses same UnifiedMessage wire shape as Flutter. */
+  let mediaRecorderObj: MediaRecorder | null = null;
+  let recordingChunks: Blob[] = [];
+  let recordingStartedAt = $state<number | null>(null);
+  let composingBusy = $state(false);
 
   const selectedChannel = $derived(
     selectedChannelId
@@ -427,6 +448,137 @@
     }
   }
 
+  function pickRecordingMime(): string | undefined {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+    if (typeof MediaRecorder === 'undefined') return undefined;
+    for (const c of candidates) {
+      if (MediaRecorder.isTypeSupported(c)) return c;
+    }
+    return undefined;
+  }
+
+  function uint8ToBase64(u8: Uint8Array): string {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < u8.length; i += chunkSize) {
+      binary += String.fromCharCode(...u8.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  async function submitDraftText() {
+    const id = selectedChannelId ? Number(selectedChannelId) : NaN;
+    const text = draftMessage.trim();
+    if (!Number.isFinite(id) || !text) return;
+    composingBusy = true;
+    try {
+      await sendChatMessage(id, {
+        text,
+        request_voice_reply: requestVoiceReplyUi || undefined,
+      });
+      draftMessage = '';
+      notify('success', 'Message sent.');
+      await loadMessages();
+      await loadChannels();
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Send failed.');
+    } finally {
+      composingBusy = false;
+    }
+  }
+
+  /** Start microphone capture — same WebM/Opus + base64 pipeline as Hiro mobile. */
+  async function beginRecording() {
+    if (!selectedChannelId || recordingStartedAt !== null) return;
+    if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      notify('error', 'Microphone recording is unavailable in this browser.');
+      return;
+    }
+    const id = Number(selectedChannelId);
+    if (!Number.isFinite(id)) return;
+    composingBusy = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = pickRecordingMime();
+      const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      recordingChunks = [];
+      mr.ondataavailable = (ev: BlobEvent) => {
+        if (ev.data && ev.data.size > 0) recordingChunks.push(ev.data);
+      };
+      mr.start(250);
+      mediaRecorderObj = mr;
+      recordingStartedAt = performance.now();
+    } catch (err) {
+      recordingStartedAt = null;
+      mediaRecorderObj = null;
+      notify('error', err instanceof Error ? err.message : 'Could not start microphone.');
+    } finally {
+      composingBusy = false;
+    }
+  }
+
+  /** Stop recorder, assemble blob, POST ``message_send`` with ``audio_*`` params. */
+  async function finalizeRecording() {
+    if (!mediaRecorderObj || recordingStartedAt === null) return;
+    const mr = mediaRecorderObj;
+    const started = recordingStartedAt;
+    const id = Number(selectedChannelId);
+
+    recordingStartedAt = null;
+    mediaRecorderObj = null;
+
+    await new Promise<void>((resolve) => {
+      mr.addEventListener('stop', () => resolve(), { once: true });
+      try {
+        mr.stop();
+      } catch {
+        resolve();
+      }
+    });
+    mr.stream.getTracks().forEach((t) => t.stop());
+
+    composingBusy = true;
+    try {
+      const mimeType =
+        mr.mimeType || (recordingChunks[0]?.type ?? 'audio/webm');
+      const blob = new Blob(recordingChunks, { type: mimeType });
+      recordingChunks = [];
+      const duration_ms = Math.max(1, Math.round(performance.now() - started));
+      const buf = await blob.arrayBuffer();
+      const b64 = uint8ToBase64(new Uint8Array(buf));
+      await sendChatMessage(id, {
+        audio_base64: b64,
+        audio_mime_type: mimeType,
+        audio_duration_ms: duration_ms,
+        request_voice_reply: requestVoiceReplyUi || undefined,
+      });
+      notify('success', 'Voice message sent.');
+      await loadMessages();
+      await loadChannels();
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Send failed.');
+    } finally {
+      composingBusy = false;
+    }
+  }
+
+  async function discardRecording() {
+    if (!mediaRecorderObj || recordingStartedAt === null) return;
+    const mr = mediaRecorderObj;
+    recordingStartedAt = null;
+    mediaRecorderObj = null;
+    recordingChunks = [];
+    mr.stream.getTracks().forEach((t) => t.stop());
+    await new Promise<void>((resolve) => {
+      mr.addEventListener('stop', () => resolve(), { once: true });
+      try {
+        mr.stop();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   onMount(async () => {
     initializeNavigation();
     await loadCharacters();
@@ -633,52 +785,103 @@
           <strong class="font-sans">Could not load messages</strong>
           <span class="block text-sm">{messagesError}</span>
         </div>
-      {:else if messages.length === 0}
-        <p class="shrink-0 text-muted-foreground">No messages in this channel yet.</p>
       {:else}
-        <div class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-md border bg-background/45 p-4">
-          <div class="grid max-w-3xl gap-3">
-            {#each messages as message (message.id)}
-              {@const isUser = message.sender_type === 'user'}
-              {@const textBody = historyMessageText(message)}
-              {@const audioItem = historyMessageFirstAudio(message)}
-              <div class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}>
-                <div
-                  class={cn(
-                    'grid max-w-[85%] gap-1.5 rounded-2xl px-4 py-2.5 shadow-sm',
-                    isUser
-                      ? 'bg-primary text-primary-foreground'
-                      : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
-                  )}
-                >
-                  {#if textBody}
-                    <p class="whitespace-pre-wrap break-words font-sans text-sm">{textBody}</p>
-                  {:else if !audioItem}
-                    <p class="whitespace-pre-wrap break-words font-sans text-sm opacity-80">No text body</p>
-                  {/if}
-                  {#if audioItem && selectedChannelId}
-                    <ChatMessageAttachmentAudio
-                      channelId={Number(selectedChannelId)}
-                      externalMessageId={message.id}
-                      audioItem={audioItem}
-                    />
-                  {/if}
-                  {#if message.created_at}
-                    <div class="flex justify-end pt-0.5">
-                      <span
-                        class={cn(
-                          'tabular-nums font-sans text-[10px] leading-none opacity-40',
-                          isUser && 'opacity-50'
-                        )}
-                      >
-                        {formatChatTimestamp(message.created_at)}
-                      </span>
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
+          {#if messages.length === 0}
+            <p class="shrink-0 text-muted-foreground">No messages in this channel yet.</p>
+          {:else}
+            <div class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-md border bg-background/45 p-4">
+              <div class="grid max-w-3xl gap-3">
+                {#each messages as message (message.id)}
+                  {@const isUser = message.sender_type === 'user'}
+                  {@const textBody = historyMessageText(message)}
+                  {@const audioItem = historyMessageFirstAudio(message)}
+                  <div class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}>
+                    <div
+                      class={cn(
+                        'grid max-w-[85%] gap-1.5 rounded-2xl px-4 py-2.5 shadow-sm',
+                        isUser
+                          ? 'bg-primary text-primary-foreground'
+                          : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
+                      )}
+                    >
+                      {#if textBody}
+                        <p class="whitespace-pre-wrap break-words font-sans text-sm">{textBody}</p>
+                      {:else if !audioItem}
+                        <p class="whitespace-pre-wrap break-words font-sans text-sm opacity-80">No text body</p>
+                      {/if}
+                      {#if audioItem && selectedChannelId}
+                        <ChatMessageAttachmentAudio
+                          channelId={Number(selectedChannelId)}
+                          externalMessageId={message.id}
+                          audioItem={audioItem}
+                        />
+                      {/if}
+                      {#if message.created_at}
+                        <div class="flex justify-end pt-0.5">
+                          <span
+                            class={cn(
+                              'tabular-nums font-sans text-[10px] leading-none opacity-40',
+                              isUser && 'opacity-50'
+                            )}
+                          >
+                            {formatChatTimestamp(message.created_at)}
+                          </span>
+                        </div>
+                      {/if}
                     </div>
-                  {/if}
-                </div>
+                  </div>
+                {/each}
               </div>
-            {/each}
-          </div>
+            </div>
+          {/if}
+          {#if selectedChannelId && channels.length > 0 && !channelsError}
+            <div class="shrink-0 space-y-2 border-border border-t pt-3 font-sans text-sm">
+              <label class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" bind:checked={requestVoiceReplyUi} class="accent-primary h-4 w-4 shrink-0" />
+                Ask for voice reply (same as mobile routing flag)
+              </label>
+              {#if recordingStartedAt !== null}
+                <div class="flex flex-wrap items-center gap-3">
+                  <span class="font-medium text-destructive tabular-nums">Recording…</span>
+                  <Button size="sm" onclick={() => finalizeRecording()} disabled={composingBusy}>
+                    <Square size={14} /> Stop & send
+                  </Button>
+                  <Button size="sm" variant="outline" onclick={() => discardRecording()} disabled={composingBusy}>
+                    Cancel
+                  </Button>
+                </div>
+              {:else}
+                <div class="flex flex-wrap items-end gap-2">
+                  <textarea
+                    class="focus-visible:ring-ring min-h-[2.75rem] flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 md:min-w-[16rem]"
+                    placeholder="Send as workspace owner…"
+                    rows="2"
+                    bind:value={draftMessage}
+                    onkeydown={(ev) => {
+                      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') void submitDraftText();
+                    }}
+                    disabled={composingBusy}
+                  ></textarea>
+                  <Button
+                    title="Send (Ctrl/Cmd + Enter)"
+                    disabled={composingBusy || !draftMessage.trim()}
+                    onclick={submitDraftText}
+                  >
+                    <Send size={15} />
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    title="Hold to capture (click to start)"
+                    disabled={composingBusy}
+                    onclick={() => beginRecording()}
+                  >
+                    <Mic size={15} /> Mic
+                  </Button>
+                </div>
+              {/if}
+            </div>
+          {/if}
         </div>
       {/if}
       </div>

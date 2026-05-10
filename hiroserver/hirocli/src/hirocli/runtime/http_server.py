@@ -5,7 +5,7 @@ Endpoints:
   GET  /status             — server and WS connection status
   GET  /channels           — connected channel plugin names and info
   GET  /tools              — list all registered tools and their schemas
-  POST /invoke             — execute a tool by name with a flat params dict
+  POST /invoke             — execute a tool by name (``invoke_async``; async tools supported)
   GET  /characters         — list character profiles (id, name, description, has_photo) for Flutter
   GET  /characters/{id}/profile — single character profile + updated_at cache hint
   GET  /characters/{id}/photo   — character image (or packaged default when no upload)
@@ -38,7 +38,7 @@ from ..domain.character import (
     resolve_character_photo_file_for_http,
 )
 from ..constants import APP_NAME, PID_FILENAME
-from ..tools.registry import ToolExecutionError, ToolNotFoundError
+from ..tools.registry import ToolAsyncOnlyError, ToolExecutionError, ToolNotFoundError
 from .asgi import ShutdownCancellationGuard
 
 if TYPE_CHECKING:
@@ -176,9 +176,14 @@ async def invoke_tool(body: InvokeRequest, request: Request) -> JSONResponse:
         raise HTTPException(status_code=503, detail="Tool registry not initialised")
 
     try:
-        invoke_result = registry.invoke(body.tool, body.params)
+        invoke_result = await registry.invoke_async(body.tool, body.params)
     except ToolNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ToolAsyncOnlyError as exc:
+        # Defensive: invoke_async accepts both sync + async tools, so this should
+        # not normally reach here. Raised if a future code path bypasses the
+        # async dispatcher — surface as 400 instead of an opaque 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ToolExecutionError as exc:
         log.error("Tool execution error", tool=body.tool, error=str(exc.cause), exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

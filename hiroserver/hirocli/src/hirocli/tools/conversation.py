@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hiro_channel_sdk.constants import MESSAGE_TYPE_MESSAGE
+from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
+from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
+
+from ..domain.blob_store import DEFAULT_CHUNK_SIZE, blob_id_for_bytes, chunk_count_for_size
 from ..domain.conversation_channel import (
     clear_channel_messages,
     create_channel,
@@ -16,6 +23,7 @@ from ..domain.conversation_channel import (
     _get_default_channel,
 )
 from ..domain.server_info import build_channel_list_entries
+from ..domain.data_store import get_default_user_id
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 
@@ -84,6 +92,173 @@ class ConversationChannelClearMessagesResult:
 class MessageHistoryResult:
     messages: list[dict[str, Any]] = field(default_factory=list)
     channel_id: int = 0
+
+
+@dataclass
+class MessageSendResult:
+    """Return value from injecting a synthetic inbound user ``UnifiedMessage``."""
+
+    message_id: str
+    channel_id: int
+
+
+# Sentinel sender_id stamped on synthetic admin/CLI messages. ``routing.channel``
+# is the delivery sink (``MANDATORY_CHANNEL_NAME``); ``routing.metadata.origin``
+# preserves the source label for downstream filtering.
+SYNTHETIC_ADMIN_SENDER_ID = "admin"
+SYNTHETIC_ADMIN_ORIGIN = "admin"
+
+
+class MessageSendTool(Tool):
+    """Enqueue a workspace-owner user message via ``InboundPipeline.receive`` (live server only)."""
+
+    runtime = True
+    name = "message_send"
+    description = (
+        "Send a text or audio message into a conversation channel as the workspace owner user. "
+        "Requires the Hiro workspace server to be running (in-process ToolRegistry runtime)."
+    )
+    params = {
+        "channel_id": ToolParam(int, "Conversation channel id"),
+        "text": ToolParam(str, "UTF-8 body; use exactly one of text, audio_path, audio_base64", required=False),
+        "audio_path": ToolParam(str, "Server-local audio file path (CLI)", required=False),
+        "audio_base64": ToolParam(str, "Base64-encoded audio bytes (browser / admin UI)", required=False),
+        "audio_mime_type": ToolParam(str, "e.g. audio/webm, audio/m4a (required with audio)", required=False),
+        "audio_duration_ms": ToolParam(int, "Recorded duration in ms (required with audio)", required=False),
+        "request_voice_reply": ToolParam(bool, "Set routing.metadata.request_voice_reply when true", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        # Reason: runtime-scoped tools need the server's CommunicationManager; set on register.
+        self._runtime = ctx
+
+    def execute(self, **kwargs: Any) -> MessageSendResult:
+        raise RuntimeError(
+            "message_send is async-only — use POST /invoke on the Hiro server "
+            "or ToolRegistry.invoke_async(); offline CLI forwards via HTTP.",
+        )
+
+    async def execute_async(
+        self,
+        channel_id: int,
+        workspace: str | None = None,
+        *,
+        workspace_path: Path | None = None,
+        text: str | None = None,
+        audio_path: str | None = None,
+        audio_base64: str | None = None,
+        audio_mime_type: str | None = None,
+        audio_duration_ms: int | None = None,
+        request_voice_reply: bool = False,
+    ) -> MessageSendResult:
+        rt = getattr(self, "_runtime", None)
+        if rt is None:
+            raise RuntimeError(
+                "message_send has no runtime context — register tools with ToolRegistry(runtime=…).",
+            )
+
+        # Use the running server's workspace only: a single Hiro process owns one DB + CommManager pair.
+        resolved_workspace_path = rt.comm_manager.ctx.workspace_path.resolve()
+        if workspace_path is not None:
+            explicit = Path(workspace_path).expanduser().resolve()
+            if explicit != resolved_workspace_path:
+                raise ValueError(
+                    "workspace_path does not match this server's workspace filesystem root.",
+                )
+        elif workspace is not None:
+            ws_entry, _ = resolve_workspace(workspace)
+            caller_path = Path(ws_entry.path).resolve()
+            if caller_path != resolved_workspace_path:
+                raise ValueError(
+                    "workspace parameter does not match this server's workspace — "
+                    f"started on {resolved_workspace_path}, caller asked for {caller_path}.",
+                )
+
+        owner_id = get_default_user_id(resolved_workspace_path)
+        channel_row = _get_channel_by_id(resolved_workspace_path, channel_id)
+        if channel_row is None:
+            raise ValueError(f"Conversation channel id {channel_id} not found.")
+        if channel_row.user_id != owner_id:
+            raise ValueError("Channel does not belong to the workspace owner user.")
+        del owner_id  # only used for the ownership check; sender_id is the synthetic sentinel.
+
+        text_ok = bool(text and str(text).strip())
+        path_ok = bool(audio_path and str(audio_path).strip())
+        b64_ok = bool(audio_base64 and str(audio_base64).strip())
+        if int(text_ok) + int(path_ok) + int(b64_ok) != 1:
+            raise ValueError("Provide exactly one of: text, audio_path, or audio_base64.")
+
+        if path_ok or b64_ok:
+            if not audio_mime_type or not str(audio_mime_type).strip():
+                raise ValueError("audio_mime_type is required for audio messages.")
+            if audio_duration_ms is None or int(audio_duration_ms) < 0:
+                raise ValueError("audio_duration_ms is required and must be non-negative for audio messages.")
+
+        if text_ok:
+            items = [ContentItem(content_type="text", body=str(text).strip())]
+        else:
+            if path_ok:
+                p = Path(str(audio_path).strip()).expanduser().resolve()
+                if not p.is_file():
+                    raise ValueError(f"Audio file not found: {p}")
+                raw = p.read_bytes()
+            else:
+                try:
+                    raw = base64.b64decode(str(audio_base64).strip(), validate=False)
+                except Exception as exc:
+                    raise ValueError("Invalid audio_base64 payload.") from exc
+            if not raw:
+                raise ValueError("Audio payload is empty.")
+            bid = blob_id_for_bytes(raw)
+            chunk_size = DEFAULT_CHUNK_SIZE
+            chunk_count = chunk_count_for_size(len(raw), chunk_size)
+            body_b64 = base64.b64encode(raw).decode("ascii")
+            items = [
+                ContentItem(
+                    content_type="audio",
+                    body=body_b64,
+                    metadata={
+                        "duration_ms": int(audio_duration_ms),
+                        "mime_type": str(audio_mime_type).strip(),
+                        "blob_id": bid,
+                        "size": len(raw),
+                        "chunk_size": chunk_size,
+                        "chunk_count": chunk_count,
+                    },
+                ),
+            ]
+
+        meta: dict[str, Any] = {
+            "chat_channel_id": channel_id,
+            # Source label so logs / future filters can tell admin/CLI sends apart
+            # from device-originated traffic. Delivery sink is ``routing.channel``.
+            "origin": SYNTHETIC_ADMIN_ORIGIN,
+        }
+        if request_voice_reply:
+            meta["request_voice_reply"] = True
+
+        msg_id = str(uuid.uuid4())
+        envelope = UnifiedMessage(
+            message_type=MESSAGE_TYPE_MESSAGE,
+            routing=MessageRouting(
+                id=msg_id,
+                # ``routing.channel`` is read by ``OutboundPipeline`` as the sink
+                # name. Use the mandatory devices channel so the ack + agent reply
+                # fan out to all paired devices live, just like a real device send.
+                channel=MANDATORY_CHANNEL_NAME,
+                direction="inbound",
+                sender_id=SYNTHETIC_ADMIN_SENDER_ID,
+                metadata=meta,
+            ),
+            content=items,
+        )
+
+        payload = envelope.model_dump(mode="json")
+        # await_message_flow=True so persistence + agent enqueue finish before we
+        # return — the Admin UI's immediate /messages refresh then sees the row.
+        await rt.comm_manager.receive(payload, await_message_flow=True)
+        return MessageSendResult(message_id=msg_id, channel_id=channel_id)
 
 
 class ConversationChannelListTool(Tool):

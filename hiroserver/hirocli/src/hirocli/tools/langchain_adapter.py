@@ -29,15 +29,27 @@ def to_langchain(tool: Tool) -> Any:
     args_model = create_model(f"{tool.name}_args", **fields)
 
     _tool = tool
+    exec_async = getattr(tool, "execute_async", None)
+
+    if callable(exec_async):
+        async def _arun(**kwargs: Any) -> Any:
+            return await exec_async(**kwargs)
+
+        return StructuredTool.from_function(
+            coroutine=_arun,
+            name=tool.name,
+            description=tool.description,
+            args_schema=args_model,
+        )
 
     def _run(**kwargs: Any) -> Any:
         return _tool.execute(**kwargs)
 
-    return StructuredTool(
+    return StructuredTool.from_function(
+        func=_run,
         name=tool.name,
         description=tool.description,
         args_schema=args_model,
-        func=_run,
     )
 
 

@@ -109,6 +109,38 @@ def test_clear_channel_messages_unlinks_file_when_blob_exclusive(tmp_path) -> No
     assert not abs_mp.exists()
 
 
+def test_clear_channel_messages_wipes_agent_checkpoint(tmp_path) -> None:
+    """Bulk-clear must also drop the channel's LangGraph thread so the agent
+    forgets the conversation. Thread id matches ``str(channel.id)`` per
+    ``agent_manager._resolve_thread_character``."""
+    from langgraph.checkpoint.base import empty_checkpoint
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    from hirocli.domain.db import db_path
+
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch1 = create_channel(tmp_path, name="A", character_id="a", user_id=uid)
+    ch2 = create_channel(tmp_path, name="B", character_id="a", user_id=uid)
+    workspace_db = str(db_path(tmp_path))
+    with SqliteSaver.from_conn_string(workspace_db) as saver:
+        for cid in (ch1.id, ch2.id):
+            saver.put(
+                {"configurable": {"thread_id": str(cid), "checkpoint_ns": ""}},
+                empty_checkpoint(),
+                {"source": "input"},
+                {},
+            )
+        assert len(list(saver.list({"configurable": {"thread_id": str(ch1.id)}}))) == 1
+        assert len(list(saver.list({"configurable": {"thread_id": str(ch2.id)}}))) == 1
+    _insert_message(tmp_path, ch1.id, external_id="ext-cp-1")
+    clear_channel_messages(tmp_path, ch1.id)
+    with SqliteSaver.from_conn_string(workspace_db) as saver:
+        assert list(saver.list({"configurable": {"thread_id": str(ch1.id)}})) == []
+        # Other channels' threads must not be touched.
+        assert len(list(saver.list({"configurable": {"thread_id": str(ch2.id)}}))) == 1
+
+
 def test_clear_channel_messages_unlinks_only_target_channel_files(
     tmp_path,
 ) -> None:

@@ -99,6 +99,23 @@ export async function listChatMessages(channelId: number) {
   return apiRequest<ChatHistoryMessage[]>(`/chat-channels/${channelId}/messages`);
 }
 
+/** Proxy to workspace Hiro POST /invoke message_send — server must be running. */
+export async function sendChatMessage(
+  channelId: number,
+  body: {
+    text?: string;
+    audio_base64?: string;
+    audio_mime_type?: string;
+    audio_duration_ms?: number;
+    request_voice_reply?: boolean;
+  }
+) {
+  return apiRequest<{ message_id: string; channel_id: number }>(
+    `/chat-channels/${channelId}/messages/send`,
+    { method: 'POST', body }
+  );
+}
+
 /** Bulk-delete conversation messages — channel stays; bumps ``last_deleted`` on devices. */
 export async function clearChatMessages(channelId: number) {
   return apiRequest<{ channel_id: number; last_deleted: number }>(

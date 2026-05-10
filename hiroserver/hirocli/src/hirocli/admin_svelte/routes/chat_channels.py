@@ -15,7 +15,7 @@ from hirocli.admin.features.chat_channels.service import ChatChannelsService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.photo_decode import _decode_photo_data_url
 from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
-from hirocli.admin_svelte.schemas import ChatChannelPhotoUploadRequest, ChatChannelSaveRequest
+from hirocli.admin_svelte.schemas import ChatChannelMessageSendRequest, ChatChannelPhotoUploadRequest, ChatChannelSaveRequest
 
 chat_channels_router = APIRouter()
 
@@ -89,6 +89,28 @@ async def clear_chat_channel_messages(
         ChatChannelsService().clear_messages,
         workspace_id,
         channel_id,
+    )
+    return _api_from_result(result)
+
+
+@chat_channels_router.post("/chat-channels/{channel_id}/messages/send")
+async def send_chat_channel_message(
+    channel_id: int,
+    body: ChatChannelMessageSendRequest,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """Proxy to workspace Hiro ``POST /invoke`` → ``message_send`` (live server)."""
+    result = await run_in_threadpool(
+        partial(
+            ChatChannelsService().send_chat_message,
+            workspace_id,
+            channel_id,
+            text=body.text,
+            audio_base64=body.audio_base64,
+            audio_mime_type=body.audio_mime_type,
+            audio_duration_ms=body.audio_duration_ms,
+            request_voice_reply=body.request_voice_reply,
+        )
     )
     return _api_from_result(result)
 

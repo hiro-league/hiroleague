@@ -16,6 +16,7 @@ from .root import register as register_root_commands
 from .catalog import register as register_catalog_commands
 from .provider import register as register_provider_commands
 from .provider import register_models_command
+from .message import register as register_message_commands
 from .workspace import register as register_workspace_commands
 
 app = typer.Typer(
@@ -90,6 +91,11 @@ provider_app = typer.Typer(
     help="Manage workspace provider credentials (API keys, local endpoints).",
     add_completion=False,
 )
+message_app = typer.Typer(
+    name="message",
+    help="Send chat messages as the workspace owner (live server tools).",
+    add_completion=False,
+)
 
 app.add_typer(channel_app, name="channel")
 app.add_typer(character_app, name="character")
@@ -99,6 +105,7 @@ app.add_typer(metrics_app, name="metrics")
 app.add_typer(workspace_app, name="workspaces")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(provider_app, name="provider")
+app.add_typer(message_app, name="message")
 
 register_root_commands(app, console)
 register_models_command(app, console)
@@ -110,3 +117,4 @@ register_metrics_commands(metrics_app, console)
 register_workspace_commands(workspace_app, console)
 register_catalog_commands(catalog_app, console)
 register_provider_commands(provider_app, console)
+register_message_commands(message_app, console)

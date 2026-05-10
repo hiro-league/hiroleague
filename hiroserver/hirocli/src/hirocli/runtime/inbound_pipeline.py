@@ -71,8 +71,18 @@ class InboundPipeline:
         # Direction arrow on the line already encodes inbound/outbound.
         return f"{comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}"
 
-    async def receive(self, data: dict[str, Any]) -> None:
-        """Validate the raw dict, run permission check, and dispatch by type."""
+    async def receive(
+        self,
+        data: dict[str, Any],
+        *,
+        await_message_flow: bool = False,
+    ) -> None:
+        """Validate the raw dict, run permission check, and dispatch by type.
+
+        ``await_message_flow=True`` blocks until the ``message`` adapter pipeline
+        + post-adapt hooks complete — used by in-process injectors that need
+        persistence to be visible before returning. Ignored for non-message types.
+        """
         try:
             msg = UnifiedMessage.model_validate(data)
         except Exception as exc:
@@ -107,7 +117,7 @@ class InboundPipeline:
         ):
             match msg.message_type:
                 case _ if msg.message_type == MESSAGE_TYPE_MESSAGE:
-                    await self._message_flow.handle(msg)
+                    await self._message_flow.handle(msg, await_dispatch=await_message_flow)
 
                 case _ if msg.message_type == MESSAGE_TYPE_REQUEST:
                     await self._dispatch_request(msg)

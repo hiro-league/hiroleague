@@ -32,13 +32,13 @@ from .post_adapt_hooks import (
     PersistenceHook,
     PostAdaptHook,
 )
+from .server_context import ServerContext
 
 if TYPE_CHECKING:
     from .event_handler import EventHandler
     from .message_adapter import MessageAdapterPipeline
     from .outbound_sink import OutboundSink
     from .request_handler import RequestHandler
-    from .server_context import ServerContext
 
 log = Logger.get("COMM_MAN")
 
@@ -112,13 +112,34 @@ class CommunicationManager:
     # ------------------------------------------------------------------
 
     @property
+    def ctx(self) -> ServerContext:
+        """Workspace ``ServerContext`` (same instance passed to ``__init__(ctx=…)``).
+
+        Reason: runtime tools such as ``message_send`` need ``workspace_path`` without
+        reaching into private ``_ctx``.
+        """
+
+        return self._ctx
+
+    @property
     def outbound_queue(self) -> asyncio.Queue[UnifiedMessage]:
         """Backwards-compatible alias for inspection / testing."""
         return self._outbound.queue
 
-    async def receive(self, data: dict[str, Any]) -> None:
-        """ChannelManager's ``on_message`` callback target."""
-        await self._inbound.receive(data)
+    async def receive(
+        self,
+        data: dict[str, Any],
+        *,
+        await_message_flow: bool = False,
+    ) -> None:
+        """ChannelManager's ``on_message`` callback target.
+
+        ``await_message_flow=True`` makes ``message``-type payloads block until
+        the adapter pipeline + persistence + agent-enqueue have run. Synthetic
+        injectors (Admin UI / CLI ``message_send``) opt in so the immediate
+        follow-up HTTP refresh sees the just-sent row.
+        """
+        await self._inbound.receive(data, await_message_flow=await_message_flow)
 
     async def enqueue_outbound(self, msg: UnifiedMessage) -> None:
         """Place a message on the outbound queue to be sent to its channel."""

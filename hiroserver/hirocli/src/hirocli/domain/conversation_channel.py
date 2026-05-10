@@ -13,10 +13,38 @@ from hiro_commons.timestamps import utc_iso, utc_now
 
 from .data_store import data_db_path, ensure_data_db, get_default_user_id
 from .conversation_channel_photo import remove_channel_photo_dir
+from .db import db_path
 from .message_attachments import media_file_path
 from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 logger = logging.getLogger(__name__)
+
+
+def _delete_agent_thread(workspace_path: Path, channel_id: int) -> None:
+    """Wipe the LangGraph checkpoint thread tied to ``channel_id``.
+
+    Agent thread id in ``agent_manager._resolve_thread_character`` is
+    ``str(channel.id)``; the checkpointer (``AsyncSqliteSaver``) lives in
+    ``workspace.db``. When users clear a channel's messages the agent must
+    also forget the conversation, otherwise LangGraph keeps replaying old
+    history on the next turn.
+
+    Best-effort: a checkpoint cleanup failure must never prevent the
+    message-store clear that already committed.
+    """
+    try:
+        # Imported lazily so domain code paths that never clear messages don't
+        # pay the langgraph import cost.
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        with SqliteSaver.from_conn_string(str(db_path(workspace_path))) as saver:
+            saver.delete_thread(str(channel_id))
+    except Exception:
+        logger.warning(
+            "⚠️ Agent thread checkpoint clear failed — conversation channel · channel_id=%s",
+            channel_id,
+            exc_info=True,
+        )
 
 
 def _notify_channel_changed(workspace_path: Path, channel_id: int) -> None:
@@ -370,6 +398,10 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
                 exc_info=True,
             )
 
+    # Reset LangGraph agent memory for this channel so the LLM doesn't keep
+    # replaying the just-deleted conversation history on the next turn.
+    _delete_agent_thread(workspace_path, channel_id)
+
     logger.info(
         "✅ Clear channel messages — conversation channel · bulk-complete (channel_id=%s last_deleted=%s)",
         channel_id,
@@ -405,6 +437,9 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
         conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
         conn.commit()
+    # Drop the agent's LangGraph thread so a recreated channel reusing this id
+    # (or just sanity for orphaned checkpoints) doesn't inherit stale memory.
+    _delete_agent_thread(workspace_path, channel_id)
     remove_channel_photo_dir(workspace_path, channel_id)
     _notify_channel_changed(workspace_path, channel_id)
 

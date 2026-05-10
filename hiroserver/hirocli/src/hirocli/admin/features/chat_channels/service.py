@@ -23,6 +23,7 @@ from hirocli.domain.files_resolver import resolve_ref
 from hirocli.domain.message_attachments import attachment_ref
 from hirocli.domain.message_store import _sync_history
 from hirocli.domain.workspace import resolve_workspace
+from hirocli.domain.workspace_server_client import post_invoke_sync
 from hirocli.tools.conversation import (
     ConversationChannelClearMessagesTool,
     ConversationChannelCreateTool,
@@ -222,6 +223,67 @@ class ChatChannelsService:
         except Exception as exc:
             return Result.failure(str(exc))
         return Result.success(messages)
+
+    def send_chat_message(
+        self,
+        workspace_id: str | None,
+        channel_id: int,
+        *,
+        text: str | None = None,
+        audio_base64: str | None = None,
+        audio_mime_type: str | None = None,
+        audio_duration_ms: int | None = None,
+        request_voice_reply: bool = False,
+    ) -> Result[dict[str, Any]]:
+        """Deliver a synthetic user message through the workspace server's ``InboundPipeline``."""
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+
+        wp = self._workspace_path(workspace_id)
+        if wp is None:
+            return Result.failure("Workspace path could not be resolved.")
+
+        text_ok = bool(text and str(text).strip())
+        b64_ok = bool(audio_base64 and str(audio_base64).strip())
+        if int(text_ok) + int(b64_ok) != 1:
+            return Result.failure("Provide exactly one of text or audio_base64.")
+        params: dict[str, Any] = {
+            "channel_id": channel_id,
+            "request_voice_reply": request_voice_reply,
+            "workspace": workspace_id,
+        }
+        if text_ok:
+            params["text"] = str(text).strip()
+        else:
+            if audio_mime_type is None or not str(audio_mime_type).strip():
+                return Result.failure("audio_mime_type is required with audio.")
+            if audio_duration_ms is None or int(audio_duration_ms) < 0:
+                return Result.failure("audio_duration_ms is required with audio.")
+            params["audio_base64"] = str(audio_base64).strip()
+            params["audio_mime_type"] = str(audio_mime_type).strip()
+            params["audio_duration_ms"] = int(audio_duration_ms)
+
+        started = perf_counter()
+        try:
+            out = post_invoke_sync(wp, "message_send", params)
+        except Exception as exc:
+            _log.warning(
+                "⚠️ Chat message send failed — HiroAdmin · message_send proxy",
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            return Result.failure(str(exc))
+
+        _log.info(
+            "✅ Chat message sent — HiroAdmin · message_send proxy",
+            channel_id=channel_id,
+            message_id=out.get("message_id"),
+            workspace_id=workspace_id,
+            elapsed_ms=int((perf_counter() - started) * 1000),
+        )
+        return Result.success(out)
 
     def resolve_message_attachment_media(
         self,

@@ -47,17 +47,27 @@ class MessageFlow:
         self._hooks = post_hooks
         self._emit = emit_outbound
 
-    async def handle(self, msg: UnifiedMessage) -> None:
-        """Ack immediately, then spawn the adapt-and-dispatch background task."""
+    async def handle(self, msg: UnifiedMessage, *, await_dispatch: bool = False) -> None:
+        """Ack immediately, then run (or spawn) the adapt-and-dispatch task.
+
+        ``await_dispatch=True`` is used by synthetic injectors (e.g. the
+        ``message_send`` tool driving the Admin UI / CLI), which need persistence
+        + agent-enqueue to be observable by the immediate next HTTP refresh.
+        Channel-callback callers leave it ``False`` so the device round-trip
+        stays non-blocking.
+        """
         await self._emit(EnvelopeFactory.ack_event(msg))
 
-        asyncio.create_task(
-            self._adapt_and_dispatch(msg),
-            name=f"adapt-{msg.routing.id}",
-        )
+        if await_dispatch:
+            await self._adapt_and_dispatch(msg)
+        else:
+            asyncio.create_task(
+                self._adapt_and_dispatch(msg),
+                name=f"adapt-{msg.routing.id}",
+            )
 
         log.fineinfo(
-            f"{LOG_IN} Message acked, adapter spawned — {comm_peer_label(msg, self._ctx)}",
+            f"{LOG_IN} Message acked, adapter {'awaited' if await_dispatch else 'spawned'} — {comm_peer_label(msg, self._ctx)}",
             **comm_extras(
                 msg,
                 channel=msg.routing.channel,

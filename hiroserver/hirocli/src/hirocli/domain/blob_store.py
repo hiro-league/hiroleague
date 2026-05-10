@@ -19,6 +19,16 @@ def sha256_hex_of_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def sha256_hex_of_bytes(data: bytes) -> str:
+    """Return lowercase hex sha256 of in-memory bytes."""
+    return hashlib.sha256(data).hexdigest()
+
+
+def blob_id_for_bytes(data: bytes) -> str:
+    """Return canonical blob id ``sha256:<hex>`` for raw bytes."""
+    return f"sha256:{sha256_hex_of_bytes(data)}"
+
+
 def blob_id_for_file(path: Path) -> str:
     """Return canonical blob id for bytes at ``path``."""
     return f"sha256:{sha256_hex_of_file(path)}"
