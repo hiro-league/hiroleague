@@ -42,10 +42,8 @@ async def persist_inbound(workspace_path: Path, msg: UnifiedMessage) -> int:
     channel, extracts text from enriched content items, and saves any binary
     media to disk.
     """
-    from ..tools.conversation import ConversationChannelGetTool
-    from .data_store import get_default_user_id
     from .conversation_channel import (
-        DEFAULT_CONVERSATION_CHANNEL_NAME,
+        resolve_chat_channel_from_metadata,
         update_last_message_at,
     )
     from .blob_store import blob_id_for_file
@@ -53,20 +51,14 @@ async def persist_inbound(workspace_path: Path, msg: UnifiedMessage) -> int:
     from .media_store import decode_and_save
     from .message_attachments import insert_attachment
 
-    # WhatsApp/Telegram model: one user, one conversation, regardless of device.
-    # The channel is keyed by the workspace owner — never by routing.sender_id
-    # (which is the originating device id). All of the user's devices write
-    # into the same conversation thread.
-    user_id = get_default_user_id(workspace_path)
-    channel_result = ConversationChannelGetTool().execute(
-        channel_name=DEFAULT_CONVERSATION_CHANNEL_NAME,
-        workspace_path=workspace_path,
-        user_id=user_id,
+    # Transport channel is not the conversation. The device/admin supplies the
+    # target conversation in routing.metadata.chat_channel_id.
+    chat_channel = resolve_chat_channel_from_metadata(
+        workspace_path,
+        msg.routing.metadata,
     )
-    if channel_result.channel is None:
-        raise RuntimeError("No conversation channel available for inbound message")
-    channel_id = int(channel_result.channel["id"])
-    channel_user_id = channel_result.channel.get("user_id")
+    channel_id = int(chat_channel.id)
+    channel_user_id = chat_channel.user_id
 
     body_parts: list[str] = []
     primary_content_type = "text"

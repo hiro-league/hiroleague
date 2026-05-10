@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -51,6 +52,8 @@ class ConversationChannel(BaseModel):
 
 # Keep the default channel name aligned with data_store.py seeding.
 DEFAULT_CONVERSATION_CHANNEL_NAME = "General"
+CHAT_CHANNEL_ID_METADATA_KEY = "chat_channel_id"
+CHAT_CHANNEL_LOCAL_ID_PREFIX = "server-"
 
 
 def min_channel_id(workspace_path: Path) -> int | None:
@@ -139,6 +142,41 @@ def _get_default_channel(
             (DEFAULT_CONVERSATION_CHANNEL_NAME,),
         ).fetchone()
         return _row_to_channel(row) if row else None
+
+
+def parse_chat_channel_id(value: Any) -> int:
+    """Parse wire ``routing.metadata.chat_channel_id`` into a server DB id."""
+    if isinstance(value, bool):
+        raise ValueError("chat_channel_id must be a positive integer.")
+    if isinstance(value, int):
+        if value > 0:
+            return value
+        raise ValueError("chat_channel_id must be positive.")
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw.startswith(CHAT_CHANNEL_LOCAL_ID_PREFIX):
+            raw = raw[len(CHAT_CHANNEL_LOCAL_ID_PREFIX):]
+        if raw.isdigit():
+            parsed = int(raw)
+            if parsed > 0:
+                return parsed
+        raise ValueError(
+            "chat_channel_id must be a positive integer or server-<id> value."
+        )
+    raise ValueError("chat_channel_id is required in routing metadata.")
+
+
+def resolve_chat_channel_from_metadata(
+    workspace_path: Path,
+    metadata: dict[str, Any] | None,
+) -> ConversationChannel:
+    """Resolve the conversation channel addressed by routing metadata."""
+    raw = (metadata or {}).get(CHAT_CHANNEL_ID_METADATA_KEY)
+    channel_id = parse_chat_channel_id(raw)
+    channel = _get_channel_by_id(workspace_path, channel_id)
+    if channel is None:
+        raise ValueError(f"No conversation channel with id {channel_id}.")
+    return channel
 
 
 def update_last_message_at(

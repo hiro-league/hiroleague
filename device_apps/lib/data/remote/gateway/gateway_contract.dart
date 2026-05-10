@@ -64,7 +64,7 @@ abstract final class GatewayPairingWire {
 }
 
 abstract final class MetadataWire {
-  static const channelId = 'channel_id';
+  static const chatChannelId = 'chat_channel_id';
   static const deviceName = 'device_name';
   static const senderDeviceId = 'sender_device_id';
   static const friendlyName = 'friendly_name';

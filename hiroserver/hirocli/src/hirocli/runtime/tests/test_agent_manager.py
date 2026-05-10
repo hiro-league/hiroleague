@@ -7,7 +7,7 @@ import pytest
 
 from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
 from hirocli.domain.blob_store import DEFAULT_CHUNK_SIZE, blob_id_for_file, chunk_count_for_size
-from hirocli.domain.conversation_channel import create_channel
+from hirocli.domain.conversation_channel import CHAT_CHANNEL_ID_METADATA_KEY, create_channel
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.domain.message_attachments import list_attachments_for_message
 from hirocli.domain.message_store import save_message
@@ -55,6 +55,34 @@ def test_audio_extension_for_media_type() -> None:
     assert _audio_extension_for_media_type("audio/mp3") == "mp3"
     assert _audio_extension_for_media_type("audio/wav") == "wav"
     assert _audio_extension_for_media_type("audio/mp4") == "m4a"
+
+
+def test_resolve_thread_character_uses_chat_channel_metadata(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    import sqlite3
+
+    with sqlite3.connect(str(data_db_path(tmp_path))) as conn:
+        uid = int(conn.execute("SELECT id FROM users ORDER BY id ASC LIMIT 1").fetchone()[0])
+    channel = create_channel(tmp_path, name="selected", character_id="agent-a", user_id=uid)
+    inbound = UnifiedMessage(
+        routing=MessageRouting(
+            id="user-msg-selected",
+            channel="devices",
+            direction="inbound",
+            sender_id="u1",
+            metadata={CHAT_CHANNEL_ID_METADATA_KEY: f"server-{channel.id}"},
+        ),
+        content=[ContentItem(content_type="text", body="hello")],
+    )
+
+    ctx = SimpleNamespace(workspace_path=tmp_path)
+    mgr = AgentManager(ctx, SimpleNamespace(), tts_service=None)
+
+    assert mgr._resolve_thread_character(inbound) == (
+        str(channel.id),
+        channel.id,
+        "agent-a",
+    )
 
 
 @pytest.mark.asyncio

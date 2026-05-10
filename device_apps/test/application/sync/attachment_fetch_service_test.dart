@@ -407,7 +407,7 @@ void main() {
             'channel': 'devices',
             'direction': UnifiedMessageWire.directionOutbound,
             'sender_id': 'device-2',
-            'metadata': {MetadataWire.channelId: 'server-42'},
+            'metadata': {MetadataWire.chatChannelId: 'server-42'},
           },
           'content': [
             {'content_type': ContentWire.text, 'body': 'hello from phone'},
@@ -449,7 +449,7 @@ void main() {
               'channel': 'devices',
               'direction': UnifiedMessageWire.directionOutbound,
               'sender_id': 'device-2',
-              'metadata': {MetadataWire.channelId: 'server-42'},
+              'metadata': {MetadataWire.chatChannelId: 'server-42'},
             },
             'content': [
               {

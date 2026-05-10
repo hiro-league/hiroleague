@@ -393,7 +393,7 @@ class MessageRepositoryImpl implements MessageRepository {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
     final channelId =
-        msg.routing.metadata[MetadataWire.channelId]?.toString() ??
+        msg.routing.metadata[MetadataWire.chatChannelId]?.toString() ??
         await _resolveDefaultChannelId();
     final timestamp = DateTime.now().toUtc();
     final isOutbound = isUserSideSenderId(senderId);
@@ -535,7 +535,7 @@ class MessageRepositoryImpl implements MessageRepository {
     final id = msg.routing.id;
     final senderId = msg.routing.senderId;
     final channelId =
-        msg.routing.metadata[MetadataWire.channelId]?.toString() ??
+        msg.routing.metadata[MetadataWire.chatChannelId]?.toString() ??
         await _resolveDefaultChannelId();
     final timestamp = DateTime.now().toUtc();
     final isOutbound = isUserSideSenderId(senderId);
@@ -561,7 +561,7 @@ class MessageRepositoryImpl implements MessageRepository {
   // ---------------------------------------------------------------------------
 
   /// Resolve the first available local channel id as a fallback when
-  /// the server doesn't include channel_id in routing metadata.
+  /// the server doesn't include chat_channel_id in routing metadata.
   Future<String> _resolveDefaultChannelId() async {
     final first = await _channelsDao.getFirst();
     return first?.id ?? 'unknown';

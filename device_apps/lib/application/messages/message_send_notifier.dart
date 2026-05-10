@@ -77,7 +77,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
             senderId: identity.deviceId,
             timestamp: now.toIso8601String(),
             metadata: {
-              MetadataWire.channelId: channelId,
+              MetadataWire.chatChannelId: channelId,
               if (requestVoiceReply) MetadataWire.requestVoiceReply: true,
             },
           ),
@@ -193,7 +193,7 @@ class MessageSendNotifier extends _$MessageSendNotifier {
             senderId: identity.deviceId,
             timestamp: now.toIso8601String(),
             metadata: {
-              MetadataWire.channelId: channelId,
+              MetadataWire.chatChannelId: channelId,
               if (requestVoiceReply) MetadataWire.requestVoiceReply: true,
             },
           ),

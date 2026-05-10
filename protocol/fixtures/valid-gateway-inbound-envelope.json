@@ -10,7 +10,7 @@
       "sender_id": "device-1",
       "timestamp": "2026-04-28T18:00:00Z",
       "metadata": {
-        "channel_id": "1"
+        "chat_channel_id": "1"
       }
     },
     "content": [

@@ -315,34 +315,17 @@ class AgentManager:
             )
             return load_character_from_disk(wp, fallback)
 
-    def _resolve_thread_character(
-        self, msg: UnifiedMessage
-    ) -> tuple[str, int, str]:
-        """Return (thread_id, channel_id, character_id) for the user's single conversation.
-
-        WhatsApp/Telegram model: one user, one conversation thread, regardless of
-        which device sent the inbound message. ``msg.routing.sender_id`` is the
-        device id and is intentionally **not** part of the channel/thread key —
-        otherwise every paired device would get its own LangGraph memory and
-        history would never converge across devices.
-        """
-        del msg  # routing.sender_id deliberately unused — see docstring.
-        from ..domain.data_store import get_default_user_id
+    def _resolve_thread_character(self, msg: UnifiedMessage) -> tuple[str, int, str]:
+        """Return (thread_id, channel_id, character_id) for the addressed chat channel."""
         from ..domain.character import default_character_id
-        from ..domain.conversation_channel import DEFAULT_CONVERSATION_CHANNEL_NAME
-        from ..tools.conversation import ConversationChannelGetTool
+        from ..domain.conversation_channel import resolve_chat_channel_from_metadata
 
-        user_id = get_default_user_id(self._ctx.workspace_path)
-        channel_result = ConversationChannelGetTool().execute(
-            channel_name=DEFAULT_CONVERSATION_CHANNEL_NAME,
-            workspace_path=self._ctx.workspace_path,
-            user_id=user_id,
+        channel = resolve_chat_channel_from_metadata(
+            self._ctx.workspace_path,
+            msg.routing.metadata,
         )
-        if channel_result.channel is None:
-            raise RuntimeError("No conversation channel available for agent thread resolution")
-        row = channel_result.channel
-        channel_id = int(row["id"])
-        character_id = (row.get("character_id") or "").strip()
+        channel_id = int(channel.id)
+        character_id = (channel.character_id or "").strip()
         if not character_id:
             character_id = default_character_id(self._ctx.workspace_path)
         return str(channel_id), channel_id, character_id

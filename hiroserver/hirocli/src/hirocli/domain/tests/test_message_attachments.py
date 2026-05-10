@@ -15,6 +15,7 @@ from hirocli.domain.blob_store import (
     chunk_count_for_size,
 )
 from hirocli.domain.conversation_channel import (
+    CHAT_CHANNEL_ID_METADATA_KEY,
     DEFAULT_CONVERSATION_CHANNEL_NAME,
     _get_channel_by_name,
     create_channel,
@@ -70,7 +71,8 @@ def test_messages_schema_no_longer_has_media_path(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_persist_inbound_audio_creates_attachment_row(tmp_path) -> None:
     ensure_data_db(tmp_path)
-    _default_user_id(tmp_path)  # seeds the workspace owner + General channel
+    uid = _default_user_id(tmp_path)
+    channel_id = _default_channel_id(tmp_path, uid)
 
     raw_audio = b"fake m4a bytes"
     msg = UnifiedMessage(
@@ -79,6 +81,7 @@ async def test_persist_inbound_audio_creates_attachment_row(tmp_path) -> None:
             channel="devices",
             direction="inbound",
             sender_id="u1",
+            metadata={CHAT_CHANNEL_ID_METADATA_KEY: f"server-{channel_id}"},
         ),
         content=[
             ContentItem(
@@ -123,8 +126,8 @@ async def test_persist_inbound_audio_creates_attachment_row(tmp_path) -> None:
 async def test_message_history_returns_audio_metadata_without_bytes(tmp_path) -> None:
     ensure_data_db(tmp_path)
     uid = _default_user_id(tmp_path)
-    # Single per-user conversation: persist_inbound writes to the seeded ``General`` channel.
-    channel_id = _default_channel_id(tmp_path, uid)
+    channel = create_channel(tmp_path, name="history", character_id="hiro", user_id=uid)
+    channel_id = channel.id
 
     raw_audio = b"history audio bytes"
     msg = UnifiedMessage(
@@ -133,6 +136,7 @@ async def test_message_history_returns_audio_metadata_without_bytes(tmp_path) ->
             channel="devices",
             direction="inbound",
             sender_id="u1",
+            metadata={CHAT_CHANNEL_ID_METADATA_KEY: f"server-{channel_id}"},
         ),
         content=[
             ContentItem(
@@ -179,7 +183,8 @@ async def test_message_history_returns_audio_metadata_without_bytes(tmp_path) ->
 @pytest.mark.asyncio
 async def test_message_attachment_ref_and_blob_id_resolve_to_saved_audio(tmp_path) -> None:
     ensure_data_db(tmp_path)
-    _default_user_id(tmp_path)  # seeds the workspace owner + General channel
+    uid = _default_user_id(tmp_path)
+    channel_id = _default_channel_id(tmp_path, uid)
 
     raw_audio = b"resolver audio bytes"
     msg = UnifiedMessage(
@@ -188,6 +193,7 @@ async def test_message_attachment_ref_and_blob_id_resolve_to_saved_audio(tmp_pat
             channel="devices",
             direction="inbound",
             sender_id="u1",
+            metadata={CHAT_CHANNEL_ID_METADATA_KEY: f"server-{channel_id}"},
         ),
         content=[
             ContentItem(
@@ -251,13 +257,7 @@ async def test_message_history_after_filters_by_created_at(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_persist_inbound_routes_all_devices_into_one_user_channel(tmp_path) -> None:
-    """Regression: two devices = two ``sender_id`` values, but ONE shared channel.
-
-    Guards against the historical drift where channels were keyed by
-    ``f"{routing.channel}:{routing.sender_id}"``, which gave each device its
-    own conversation thread. The end-state contract is WhatsApp-style:
-    one user, one conversation, regardless of which device sent the message.
-    """
+    """Two devices with the same chat_channel_id write into the same conversation."""
     ensure_data_db(tmp_path)
     uid = _default_user_id(tmp_path)
     expected_channel_id = _default_channel_id(tmp_path, uid)
@@ -268,6 +268,7 @@ async def test_persist_inbound_routes_all_devices_into_one_user_channel(tmp_path
             channel="devices",
             direction="inbound",
             sender_id="device-a-uuid",
+            metadata={CHAT_CHANNEL_ID_METADATA_KEY: f"server-{expected_channel_id}"},
         ),
         content=[ContentItem(content_type="text", body="hi from A")],
     )
@@ -277,6 +278,7 @@ async def test_persist_inbound_routes_all_devices_into_one_user_channel(tmp_path
             channel="devices",
             direction="inbound",
             sender_id="device-b-uuid",
+            metadata={CHAT_CHANNEL_ID_METADATA_KEY: f"server-{expected_channel_id}"},
         ),
         content=[ContentItem(content_type="text", body="hi from B")],
     )
@@ -296,3 +298,22 @@ async def test_persist_inbound_routes_all_devices_into_one_user_channel(tmp_path
     )
     # Only the seeded ``General`` channel should exist — no per-device channels.
     assert channel_count == 1
+
+
+@pytest.mark.asyncio
+async def test_persist_inbound_requires_chat_channel_id(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    _default_user_id(tmp_path)
+
+    msg = UnifiedMessage(
+        routing=MessageRouting(
+            id="msg-missing-chat-channel",
+            channel="devices",
+            direction="inbound",
+            sender_id="device-a-uuid",
+        ),
+        content=[ContentItem(content_type="text", body="hi")],
+    )
+
+    with pytest.raises(ValueError, match="chat_channel_id"):
+        await persist_inbound(tmp_path, msg)

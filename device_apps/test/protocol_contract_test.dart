@@ -59,7 +59,7 @@ void main() {
         direction: UnifiedMessageWire.directionOutbound,
         senderId: 'device-1',
         timestamp: '2026-04-28T18:00:00Z',
-        metadata: {MetadataWire.channelId: '1'},
+        metadata: {MetadataWire.chatChannelId: '1'},
       ),
       content: const [
         ContentItem(contentType: ContentWire.text, body: 'Hello Hiro'),
