@@ -27,6 +27,29 @@ inbound `UnifiedMessage(message_type="message")`. The tool builds the dict
 and calls it. Ack, adapters (transcription for audio), persistence, agent
 reply, and outbound fan-out all happen unchanged.
 
+### Live fan-out to sibling devices — `UserMessageMirrorHook`
+
+The "every paired device sees every message live" guarantee for real device
+sends is an emergent property of the gateway broker: a device sends a
+UnifiedMessage with no `target_device_id`, and the gateway broadcasts that
+frame to every other connected peer. In-process producers — admin UI, CLI,
+and AI agent calling this tool — bypass the gateway entirely, so siblings
+would never see the row live and would only catch up at the next explicit
+`messages.history` trigger.
+
+`CommunicationManager` therefore registers a `UserMessageMirrorHook` in the
+post-adapt chain that re-emits every inbound user `message` as an outbound
+**broadcast** (no `recipient_id`). The mirror preserves `routing.id` and
+`routing.timestamp`, so device-side upserts are idempotent across the live
+broadcast and any future `messages.history` upsert. The originating device
+(when one exists) is excluded by the gateway's `did != sender_id` filter, so
+nobody sees their own send twice.
+
+Net effect: the `message_send` tool produces the same live device fan-out as
+a real device send — without any special-casing of the synthetic `admin`
+sender. See
+[Communication Manager — User message mirror](https://docs.hiroleague.com/architecture/concepts/communication-manager#user-message-mirror).
+
 ## Tool
 
 **Name:** `message_send`
@@ -185,3 +208,11 @@ not reinvent them.
 - `mintdocs/architecture/concepts/communication-manager.mdx` — note that
   `InboundPipeline.receive()` is the canonical entry point for *all*
   inbound message producers, including in-process ones.
+  **Done — also added the `UserMessageMirrorHook` and `user_message_mirror`
+  envelope to the hooks / factory tables, plus a "User message mirror"
+  subsection explaining why in-process producers need an explicit
+  server-owned broadcast.**
+- `mintdocs/architecture/concepts/message-persistence/device-history-sync.mdx`
+  — added a "User message mirror (live tier for non-device producers)"
+  subsection under *Live event integration* explaining how the live mirror
+  and the history catch-up converge on the same `routing.id`.

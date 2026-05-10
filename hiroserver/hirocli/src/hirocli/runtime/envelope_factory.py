@@ -18,6 +18,7 @@ from hiro_channel_sdk.constants import (
     EVENT_TYPE_RESOURCE_CHANGED,
     EVENT_TYPE_MESSAGE_TRANSCRIBED,
     MESSAGE_TYPE_EVENT,
+    MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_RESPONSE,
     MESSAGE_TYPE_STREAM,
 )
@@ -142,6 +143,50 @@ class EnvelopeFactory:
                 ref_id=origin.routing.id,
                 data={"transcript": transcript},
             ),
+        )
+
+    @staticmethod
+    def user_message_mirror(origin: UnifiedMessage) -> UnifiedMessage:
+        """Mirror an inbound user ``message`` back out as an outbound broadcast.
+
+        Why this exists: real device sends fan out to sibling devices because the
+        gateway broadcasts frames with no ``target_device_id`` (see
+        ``hiroserver/gateway/src/hirogateway/relay.py``). In-process producers
+        (admin / CLI / agent ``message_send`` tool) call
+        ``CommunicationManager.receive`` directly and never traverse the
+        gateway, so siblings would never see the row live. This envelope is the
+        explicit, server-owned mirror that closes that gap, regardless of
+        producer.
+
+        Idempotency: ``routing.id`` and ``routing.timestamp`` are preserved so
+        the live insert on connected devices and the eventual
+        ``messages.history`` upsert key on the same id (devices use
+        ``insertOrIgnore`` / ``insertOnConflictUpdate`` on that id).
+
+        Sender: ``origin.routing.sender_id`` is preserved (e.g. a real device
+        id, or the synthetic ``"admin"`` sentinel from ``message_send``). The
+        gateway will not echo the frame back to that device because
+        ``relay_message`` filters ``did != sender_id`` on broadcast — so the
+        originating device never receives a duplicate of its own message.
+        """
+        meta = dict(origin.routing.metadata or {})
+        _pv = message_text_preview_from_content(origin)
+        if _pv:
+            meta[METADATA_LOG_TEXT_PREVIEW] = _pv
+        meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_BROADCAST
+        meta[METADATA_LOG_TRAFFIC_SUBCLASS] = "user_message_mirror"
+
+        return UnifiedMessage(
+            message_type=MESSAGE_TYPE_MESSAGE,
+            routing=MessageRouting(
+                id=origin.routing.id,
+                channel=origin.routing.channel,
+                direction="outbound",
+                sender_id=origin.routing.sender_id,
+                timestamp=origin.routing.timestamp,
+                metadata=meta,
+            ),
+            content=list(origin.content),
         )
 
     @staticmethod

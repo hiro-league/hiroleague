@@ -70,6 +70,55 @@ class AdapterErrorLogHook:
                 )
 
 
+class UserMessageMirrorHook:
+    """Mirror inbound user ``message`` envelopes back out as a broadcast.
+
+    Real device sends already fan out to sibling devices because the gateway
+    broadcasts frames with no ``target_device_id``. In-process producers
+    (admin / CLI / agent ``message_send`` tool) call
+    ``CommunicationManager.receive`` directly and never traverse the gateway,
+    so siblings never see the row live.
+
+    This hook closes that gap by emitting a server-originated outbound
+    ``message`` (no ``recipient_id`` ⇒ gateway broadcasts to every paired
+    device) that preserves ``routing.id``. Devices upsert by id, so:
+
+      - the originating device (when it exists) is excluded by the gateway's
+        ``did != sender_id`` filter and never sees a duplicate of its own send;
+      - sibling devices that received the live mirror **and** later see the row
+        again on ``messages.history`` upsert on the same id (no duplicate);
+      - devices that were offline at send time miss the live mirror but pick
+        the row up from history catch-up at next gateway-connect.
+
+    The hook runs after ``AudioTranscriptHook`` and ``PersistenceHook`` so the
+    canonical ``created_at`` is already in the DB when the mirror flies out:
+    that keeps the device-side row, the live-mirror row, and the future
+    history-pull row all anchored to one persisted timestamp.
+    """
+
+    def __init__(self, ctx: ServerContext) -> None:
+        self._ctx = ctx
+
+    async def run(self, msg: UnifiedMessage, emit: EmitOutbound) -> None:
+        if msg.routing.direction != "inbound":
+            # Defensive: post-adapt hooks always see inbound messages today,
+            # but keep the guard so a future re-entry from an outbound source
+            # cannot loop on itself.
+            return
+
+        mirror = EnvelopeFactory.user_message_mirror(msg)
+        await emit(mirror)
+        log.info(
+            f"{LOG_OUT} User message mirrored to paired devices — {comm_peer_label(mirror, self._ctx)}",
+            **comm_extras(
+                mirror,
+                origin_msg_id=msg.routing.id,
+                origin_sender_id=msg.routing.sender_id,
+                content_types=[item.content_type for item in mirror.content],
+            ),
+        )
+
+
 class AudioTranscriptHook:
     """For each audio content item with a transcript, emit a ``message.transcribed`` event.
 

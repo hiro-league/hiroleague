@@ -14,6 +14,7 @@ from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 
 from ..domain.blob_store import DEFAULT_CHUNK_SIZE, blob_id_for_bytes, chunk_count_for_size
 from ..domain.conversation_channel import (
+    CHAT_CHANNEL_LOCAL_ID_PREFIX,
     clear_channel_messages,
     create_channel,
     delete_channel,
@@ -230,7 +231,13 @@ class MessageSendTool(Tool):
             ]
 
         meta: dict[str, Any] = {
-            "chat_channel_id": channel_id,
+            # Use the same ``server-<id>`` form Flutter clients send. The server's
+            # ``parse_chat_channel_id`` accepts both forms, but the live broadcast
+            # mirror / agent reply pass this metadata through untouched, and the
+            # device-side live handlers key the local channel row on the exact
+            # string. Sending the raw int caused ``Received message for unknown
+            # channel: 1`` and silently mis-filed rows that the chat UI never saw.
+            "chat_channel_id": f"{CHAT_CHANNEL_LOCAL_ID_PREFIX}{channel_id}",
             # Source label so logs / future filters can tell admin/CLI sends apart
             # from device-originated traffic. Delivery sink is ``routing.channel``.
             "origin": SYNTHETIC_ADMIN_ORIGIN,

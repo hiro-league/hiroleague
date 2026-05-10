@@ -12,7 +12,10 @@ import pytest
 
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hirocli.domain.data_store import ensure_data_db
-from hirocli.domain.conversation_channel import create_channel
+from hirocli.domain.conversation_channel import (
+    CHAT_CHANNEL_LOCAL_ID_PREFIX,
+    create_channel,
+)
 from hirocli.tools.base import Tool, ToolParam
 from hirocli.tools.conversation import (
     SYNTHETIC_ADMIN_ORIGIN,
@@ -102,7 +105,13 @@ async def test_registry_invoke_async_uses_execute_async_when_present(tmp_path: P
     assert routing["channel"] == MANDATORY_CHANNEL_NAME
     assert routing["sender_id"] == SYNTHETIC_ADMIN_SENDER_ID
     assert routing["metadata"]["origin"] == SYNTHETIC_ADMIN_ORIGIN
-    assert routing["metadata"]["chat_channel_id"] == ch.id
+    # Wire ``chat_channel_id`` matches the form Flutter clients send
+    # (``server-<id>``) so the live broadcast mirror is filed against the
+    # device's local channel row, not against the raw int.
+    assert (
+        routing["metadata"]["chat_channel_id"]
+        == f"{CHAT_CHANNEL_LOCAL_ID_PREFIX}{ch.id}"
+    )
     assert call["data"]["content"][0]["content_type"] == "text"
     assert call["data"]["content"][0]["body"] == "hello"
 

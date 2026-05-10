@@ -5,6 +5,8 @@ export const PREF_KEYS = {
   serverActiveTab: 'hiro.admin.server.activeTab',
   channelsDevicesActiveTab: 'hiro.admin.channelsDevices.activeTab',
   chatChannelsActiveTab: 'hiro.admin.chatChannels.activeTab',
+  /** "Ask for voice reply" checkbox on Messages tab (local UX preference). */
+  chatChannelsVoiceReply: 'hiro.admin.chatChannels.voiceReply',
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab'
 } as const;

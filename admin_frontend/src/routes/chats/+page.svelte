@@ -2,4 +2,6 @@
   import ChatChannelsPage from '$lib/features/chat-channels/ChatChannelsPage.svelte';
 </script>
 
-<ChatChannelsPage />
+<div class="h-full min-h-0">
+  <ChatChannelsPage />
+</div>

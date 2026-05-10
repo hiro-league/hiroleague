@@ -31,6 +31,7 @@ from .post_adapt_hooks import (
     InboundEnqueueHook,
     PersistenceHook,
     PostAdaptHook,
+    UserMessageMirrorHook,
 )
 from .server_context import ServerContext
 
@@ -84,11 +85,17 @@ class CommunicationManager:
         #   2. Emit the transcript event BEFORE persisting so the device gets
         #      the modality mirror even if the DB write later fails.
         #   3. Persist (non-fatal — failures are logged but do not block).
-        #   4. Enqueue for the AgentManager (always last; signals "ready").
+        #   4. Mirror the user message to every paired device. Runs AFTER
+        #      persistence so the row exists before sibling devices receive
+        #      the live broadcast and might race a follow-up history sync.
+        #      Closes the in-process-producer gap (admin / CLI / agent tools
+        #      that bypass the gateway broker's natural broadcast).
+        #   5. Enqueue for the AgentManager (always last; signals "ready").
         post_hooks: list[PostAdaptHook] = [
             AdapterErrorLogHook(ctx),
             AudioTranscriptHook(ctx),
             PersistenceHook(ctx),
+            UserMessageMirrorHook(ctx),
             InboundEnqueueHook(self.inbound_queue, ctx),
         ]
 
