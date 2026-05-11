@@ -224,11 +224,8 @@ def run_onboarding_defaults_flow(
                 label = {"chat": "Chat", "tts": "TTS", "stt": "STT"}.get(
                     s.catalog_kind, s.catalog_kind,
                 )
-                extra = ""
-                if s.catalog_kind == "chat" and prefs.llm.default_summarization == s.model_id:
-                    extra = "  [dim](summarization same as chat)[/dim]"
                 console.print(
-                    f"  [bold]{label}[/bold]:  {s.model_id}  ({s.display_name}){extra}"
+                    f"  [bold]{label}[/bold]:  {s.model_id}  ({s.display_name})"
                 )
     return applied
 

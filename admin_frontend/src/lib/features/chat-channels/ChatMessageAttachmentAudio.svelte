@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import {
     chatAudioPlaybackRate,
     takeoverChatAudioPlayback,
@@ -21,17 +20,30 @@
   let errorText = $state<string | null>(null);
   let audioEl = $state<HTMLAudioElement | null>(null);
 
-  onMount(() => {
+  $effect(() => {
     let revoked = false;
     let url: string | null = null;
     const slot = parseMessageAttachmentSlot(audioItem.body) ?? 0;
+    const optimisticAudioUrl = audioItem.metadata?.optimistic_audio_url;
+
+    if (typeof optimisticAudioUrl === 'string' && optimisticAudioUrl) {
+      url = optimisticAudioUrl;
+      audioUrl = url;
+      return () => {
+        revoked = true;
+        if (url) URL.revokeObjectURL(url);
+      };
+    }
 
     void (async () => {
       try {
         const blob = await fetchChatMessageAttachmentBlob(channelId, externalMessageId, slot);
         url = URL.createObjectURL(blob);
-        if (!revoked) audioUrl = url;
-        else URL.revokeObjectURL(url);
+        if (!revoked) {
+          audioUrl = url;
+        } else {
+          URL.revokeObjectURL(url);
+        }
       } catch (e) {
         if (!revoked) {
           errorText = e instanceof Error ? e.message : 'Could not load audio.';
@@ -42,6 +54,8 @@
     return () => {
       revoked = true;
       if (url) URL.revokeObjectURL(url);
+      audioUrl = null;
+      errorText = null;
     };
   });
 

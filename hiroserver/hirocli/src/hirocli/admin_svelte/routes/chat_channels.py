@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -18,6 +18,8 @@ from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failu
 from hirocli.admin_svelte.schemas import ChatChannelMessageSendRequest, ChatChannelPhotoUploadRequest, ChatChannelSaveRequest
 
 chat_channels_router = APIRouter()
+
+_MAX_MESSAGE_PK_RESYNC = 16
 
 
 @chat_channels_router.get("/chat-channels")
@@ -119,11 +121,51 @@ async def send_chat_channel_message(
 async def list_chat_channel_messages(
     channel_id: int,
     workspace_id: SelectedWorkspaceIdDep,
+    after: str | None = None,
+    after_id: str | None = None,
+    limit: int | None = None,
+    message_pk: list[int] | None = Query(default=None),
 ) -> dict[str, Any]:
+    has_cursor_param = after is not None or after_id is not None
+    has_message_pk = message_pk is not None and len(message_pk) > 0
+    if has_message_pk and (has_cursor_param or limit is not None):
+        raise HTTPException(
+            status_code=400,
+            detail="message_pk cannot be combined with cursor or limit parameters.",
+        )
+    if has_message_pk and len(message_pk) > _MAX_MESSAGE_PK_RESYNC:
+        raise HTTPException(
+            status_code=400,
+            detail=f"message_pk is limited to {_MAX_MESSAGE_PK_RESYNC} values.",
+        )
+    if (after is None) != (after_id is None):
+        raise HTTPException(
+            status_code=400,
+            detail="after and after_id must be provided together.",
+        )
+    if has_cursor_param and limit is None:
+        raise HTTPException(
+            status_code=400,
+            detail="limit is required with after and after_id.",
+        )
+    if limit is not None and not has_cursor_param:
+        raise HTTPException(
+            status_code=400,
+            detail="limit is only supported with after and after_id.",
+        )
+    if limit is not None and limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be positive.")
+
     result = await run_in_threadpool(
-        ChatChannelsService().list_messages_all,
-        workspace_id,
-        channel_id,
+        partial(
+            ChatChannelsService().list_messages_all,
+            workspace_id,
+            channel_id,
+            after=after,
+            after_id=after_id,
+            limit=limit,
+            message_pks=message_pk if has_message_pk else None,
+        )
     )
     payload = _api_from_result(result)
     payload["data"] = payload["data"] or []

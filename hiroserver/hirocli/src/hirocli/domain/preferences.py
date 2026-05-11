@@ -54,7 +54,6 @@ class LLMPreferences(BaseModel):
     default_chat: str | None = None
     default_stt: str | None = None
     default_tts: str | None = None
-    default_summarization: str | None = None
     tuning: dict[str, ModelTuning] = Field(default_factory=dict)
 
 
@@ -84,24 +83,12 @@ class MediaPreferences(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Short-term memory (LangGraph + LangMem summarization)
+# Short-term memory
 # ---------------------------------------------------------------------------
 
 
 class MemoryPreferences(BaseModel):
-    """Token-bounded conversation context before the chat LLM."""
-
-    summarization_enabled: bool = True
-    max_context_tokens: int = Field(default=4096, ge=512)
-    max_tokens_before_summary: int | None = Field(
-        default=None,
-        description="None = same as max_context_tokens",
-    )
-    max_summary_tokens: int = Field(default=256, ge=64)
-    summarization_llm_id: str | None = Field(
-        default=None,
-        description="Optional canonical model id for summaries; overrides default_summarization when set.",
-    )
+    """Conversation memory is trimmed to the latest six messages at runtime."""
 
 
 # ---------------------------------------------------------------------------
@@ -225,55 +212,6 @@ def resolve_llm(
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
     )
-
-
-def resolve_summarization_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Summarization model: memory override, then default_summarization, then chat default.
-
-    Order matches ``MemoryPreferences.summarization_llm_id`` (per-conversation summarizer)
-    overriding the LLM-section default.
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(get_model_catalog(), store)
-
-    # Memory-specific id wins over llm.default_summarization, then chat default.
-    candidates: list[str | None] = [
-        prefs.memory.summarization_llm_id,
-        prefs.llm.default_summarization,
-        prefs.llm.default_chat,
-    ]
-    cat = get_model_catalog()
-    for mid in candidates:
-        if not mid:
-            continue
-        spec = cat.get_model(mid)
-        if spec is None or spec.model_kind != "chat":
-            continue
-        if ams.is_model_available(mid):
-            tuning = prefs.llm.tuning.get(mid, ModelTuning())
-            return ResolvedModel(
-                model_id=mid,
-                temperature=tuning.temperature,
-                max_tokens=tuning.max_tokens,
-            )
-    return None
 
 
 def resolve_character_llm(

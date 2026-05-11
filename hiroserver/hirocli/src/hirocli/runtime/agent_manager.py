@@ -5,9 +5,8 @@ Responsibilities:
   - Builds agent input from text ContentItems and from metadata["description"]
     on non-text items (audio transcripts, image descriptions set by adapters).
   - Skips messages that yield no input text after checking both sources.
-  - Passes each message to a LangChain v1 agent (create_agent, or when
-    ``preferences.memory.summarization_enabled`` is true, a custom LangGraph
-    graph with LangMem SummarizationNode — see summarizing_agent_graph).
+  - Passes each message to a LangGraph agent that trims checkpointed chat
+    history to the latest six messages before invoking the model.
   - Maintains per-conversation persistent memory keyed by conversation_channels.id
     (a UUID) using LangGraph's AsyncSqliteSaver checkpointer backed by workspace.db.
   - Constructs a reply UnifiedMessage and places it on the outbound queue.
@@ -166,20 +165,18 @@ class AgentManager:
         *,
         llm_entry,
         system_prompt: str,
-        prefs,
     ):
         """Compile LangGraph/LangChain agent for a resolved chat model and persona prompt."""
         from ..domain.model_factory import create_chat_model
 
         try:
-            from langchain.agents import create_agent
-
-            from ..domain.preferences import resolve_summarization_llm
             from ..tools import all_tools
             from ..tools.langchain_adapter import to_langchain_list
-            from .summarizing_agent_graph import build_summarizing_agent_graph
+            from .trimming_agent_graph import TRIMMED_MESSAGE_LIMIT, build_trimming_agent_graph
 
-            tools = to_langchain_list(all_tools())
+            tools = [] 
+            # temporary disable tools
+            # tools = to_langchain_list(all_tools())
 
             log.fineinfo(
                 f"Building agent — chat · {llm_entry.model_id}",
@@ -196,49 +193,11 @@ class AgentManager:
                 credential_store=credential_store,
             )
 
-            if prefs.memory.summarization_enabled:
-                sum_entry = resolve_summarization_llm(
-                    prefs,
-                    self._ctx.workspace_path,
-                    credential_store=credential_store,
-                )
-                if sum_entry is None:
-                    log.warning(
-                        "⚠️ Summarization on but no LLM resolved — HiroServer · falling back to agent without summarization",
-                    )
-                    return create_agent(
-                        model=model,
-                        tools=tools,
-                        system_prompt=system_prompt,
-                        checkpointer=checkpointer,
-                    )
-                summarization_model = create_chat_model(
-                    sum_entry.model_id,
-                    workspace_path=self._ctx.workspace_path,
-                    temperature=sum_entry.temperature,
-                    max_tokens=sum_entry.max_tokens,
-                    credential_store=credential_store,
-                )
-                log.info(
-                    "✅ Agent summarization — preferences · LangMem SummarizationNode",
-                    max_context_tokens=prefs.memory.max_context_tokens,
-                    max_tokens_before_summary=(
-                        prefs.memory.max_tokens_before_summary
-                        or prefs.memory.max_context_tokens
-                    ),
-                    max_summary_tokens=prefs.memory.max_summary_tokens,
-                    summarizer=sum_entry.model_id,
-                )
-                return build_summarizing_agent_graph(
-                    model=model,
-                    summarization_model=summarization_model,
-                    tools=tools,
-                    system_prompt=system_prompt,
-                    checkpointer=checkpointer,
-                    memory=prefs.memory,
-                )
-
-            return create_agent(
+            log.info(
+                "✅ Agent memory trimming — HiroServer · latest messages only",
+                message_limit=TRIMMED_MESSAGE_LIMIT,
+            )
+            return build_trimming_agent_graph(
                 model=model,
                 tools=tools,
                 system_prompt=system_prompt,
@@ -252,33 +211,18 @@ class AgentManager:
             )
             raise
 
-    def _summarization_cache_token(self, prefs) -> str:
-        """Summarization configuration fingerprint for compiled agent cache keys."""
-        from ..domain.preferences import resolve_summarization_llm
-
-        if not prefs.memory.summarization_enabled:
-            return "sum:off"
-        se = resolve_summarization_llm(
-            prefs,
-            self._ctx.workspace_path,
-            credential_store=self._credential_store,
-        )
-        if se is None:
-            return "sum:none"
-        return f"sum:{se.model_id}"
-
-    def _agent_cache_key(self, llm_entry, system_prompt: str, prefs) -> tuple[Any, ...]:
+    def _agent_cache_key(self, llm_entry, system_prompt: str) -> tuple[Any, ...]:
         fp = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
         return (
             llm_entry.model_id,
             round(float(llm_entry.temperature), 6),
             int(llm_entry.max_tokens),
-            self._summarization_cache_token(prefs),
+            "trim:6",
             fp,
         )
 
-    def _get_or_create_agent(self, llm_entry, system_prompt: str, prefs):
-        key = self._agent_cache_key(llm_entry, system_prompt, prefs)
+    def _get_or_create_agent(self, llm_entry, system_prompt: str):
+        key = self._agent_cache_key(llm_entry, system_prompt)
         agent = self._agent_cache.get(key)
         if agent is not None:
             self._agent_cache.move_to_end(key)
@@ -289,7 +233,6 @@ class AgentManager:
             self._credential_store,
             llm_entry=llm_entry,
             system_prompt=system_prompt,
-            prefs=prefs,
         )
         self._agent_cache[key] = agent
         self._agent_cache.move_to_end(key)
@@ -627,7 +570,7 @@ class AgentManager:
             return
 
         try:
-            agent = self._get_or_create_agent(llm_entry, system_prompt, prefs)
+            agent = self._get_or_create_agent(llm_entry, system_prompt)
         except Exception as exc:
             log.error(
                 f"❌ Agent build failed for message — {peer} · {comm_kind(msg)}",

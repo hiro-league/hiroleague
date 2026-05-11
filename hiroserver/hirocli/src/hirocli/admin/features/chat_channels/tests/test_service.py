@@ -50,4 +50,42 @@ def test_messages_all_uses_sync_history_for_admin_ui() -> None:
     assert r.ok and r.data == [
         {"id": "ext-1", "message_pk": 7, "content": [], "channel_id": 3},
     ]
-    hist.assert_called_once_with(Path("."), 3, limit=None)
+    hist.assert_called_once_with(Path("."), 3, after=None, after_id=None, limit=None)
+
+
+def test_messages_tail_uses_sync_history_cursor() -> None:
+    with (
+        patch.object(ChatChannelsService, "_workspace_path", lambda self, _ws: Path(".")),
+        patch("hirocli.admin.features.chat_channels.service._sync_history") as hist,
+    ):
+        hist.return_value = []
+        r = ChatChannelsService().list_messages_all(
+            "ws-1",
+            3,
+            after="2026-05-11T10:00:00Z",
+            after_id="ext-1",
+            limit=50,
+        )
+    assert r.ok and r.data == []
+    hist.assert_called_once_with(
+        Path("."),
+        3,
+        after="2026-05-11T10:00:00Z",
+        after_id="ext-1",
+        limit=50,
+    )
+
+
+def test_messages_by_pk_uses_scoped_hydrator() -> None:
+    with (
+        patch.object(ChatChannelsService, "_workspace_path", lambda self, _ws: Path(".")),
+        patch("hirocli.admin.features.chat_channels.service._sync_history_by_pks") as by_pks,
+    ):
+        by_pks.return_value = [
+            {"id": "ext-2", "message_pk": 8, "content": [], "channel_id": 3},
+        ]
+        r = ChatChannelsService().list_messages_all("ws-1", 3, message_pks=[8])
+    assert r.ok and r.data == [
+        {"id": "ext-2", "message_pk": 8, "content": [], "channel_id": 3},
+    ]
+    by_pks.assert_called_once_with(Path("."), 3, [8])

@@ -21,7 +21,7 @@ from hirocli.domain.conversation_channel_photo import (
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.domain.files_resolver import resolve_ref
 from hirocli.domain.message_attachments import attachment_ref
-from hirocli.domain.message_store import _sync_history
+from hirocli.domain.message_store import _attachment_row_to_dict, _history_row, _sync_history
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.domain.workspace_server_client import post_invoke_sync
 from hirocli.tools.conversation import (
@@ -35,6 +35,7 @@ from hirocli.tools.conversation import (
 from hirocli.admin.shared.result import Result
 
 _MAX_INLINE_PHOTO_BYTES = 2_000_000
+_MAX_MESSAGE_PK_RESYNC = 16
 
 _log = Logger.get("ADMIN.CHANNELS")
 
@@ -68,6 +69,63 @@ def _inline_image_data_url(thumb: bytes) -> str:
     else:
         mime = "image/png"
     return f"data:{mime};base64,{base64.b64encode(thumb).decode()}"
+
+
+def _sync_history_by_pks(
+    workspace_path: Path,
+    channel_id: int,
+    message_pks: list[int],
+) -> list[dict[str, Any]]:
+    """Hydrate selected message PKs in the normalized history contract."""
+    if len(message_pks) > _MAX_MESSAGE_PK_RESYNC:
+        raise ValueError(
+            f"message_pk resync is limited to {_MAX_MESSAGE_PK_RESYNC} ids."
+        )
+    unique_pks = sorted({int(pk) for pk in message_pks if int(pk) > 0})
+    if not unique_pks:
+        return []
+
+    ensure_data_db(workspace_path)
+    placeholders = ",".join("?" for _ in unique_pks)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        message_rows = conn.execute(
+            f"""
+            SELECT *
+            FROM messages
+            WHERE channel_id = ? AND id IN ({placeholders})
+            ORDER BY created_at ASC, external_id ASC
+            """,
+            (channel_id, *unique_pks),
+        ).fetchall()
+        if not message_rows:
+            return []
+
+        found_pks = [int(row["id"]) for row in message_rows]
+        attachment_placeholders = ",".join("?" for _ in found_pks)
+        attachment_rows = conn.execute(
+            f"""
+            SELECT *
+            FROM message_attachments
+            WHERE message_pk IN ({attachment_placeholders})
+            ORDER BY message_pk ASC, slot_index ASC
+            """,
+            found_pks,
+        ).fetchall()
+
+    attachments_by_message: dict[int, list[dict[str, Any]]] = {
+        pk: [] for pk in found_pks
+    }
+    for row in attachment_rows:
+        attachment = _attachment_row_to_dict(row)
+        attachments_by_message.setdefault(int(attachment["message_pk"]), []).append(
+            attachment
+        )
+
+    return [
+        _history_row(dict(row), attachments_by_message.get(int(row["id"]), []))
+        for row in message_rows
+    ]
 
 
 class ChatChannelsService:
@@ -211,6 +269,11 @@ class ChatChannelsService:
         self,
         workspace_id: str | None,
         channel_id: int,
+        *,
+        after: str | None = None,
+        after_id: str | None = None,
+        limit: int | None = None,
+        message_pks: list[int] | None = None,
     ) -> Result[list[dict[str, Any]]]:
         if not workspace_id:
             return Result.failure("No workspace selected.")
@@ -219,7 +282,16 @@ class ChatChannelsService:
             if wp is None:
                 return Result.failure("Workspace path could not be resolved.")
             # Same normalized ``content[]`` as ``messages.history`` (+ ``message_pk``), not raw ``messages`` rows.
-            messages = _sync_history(wp, channel_id, limit=None)
+            if message_pks is not None:
+                messages = _sync_history_by_pks(wp, channel_id, message_pks)
+            else:
+                messages = _sync_history(
+                    wp,
+                    channel_id,
+                    after=after,
+                    after_id=after_id,
+                    limit=limit,
+                )
         except Exception as exc:
             return Result.failure(str(exc))
         return Result.success(messages)

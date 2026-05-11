@@ -84,11 +84,7 @@ def apply_suggested_defaults(
     prefs: WorkspacePreferences,
     suggestions: list[DefaultSuggestion],
 ) -> list[DefaultSuggestion]:
-    """Write suggestions into empty LLM preference fields.
-
-    When a chat default is applied, ``default_summarization`` is set to the same model id
-    if that slot is still empty (summarization uses chat-kind models).
-    """
+    """Write suggestions into empty LLM preference fields."""
     applied: list[DefaultSuggestion] = []
     for s in suggestions:
         attr = _kind_to_pref_attr(s.catalog_kind)
@@ -96,8 +92,6 @@ def apply_suggested_defaults(
             continue
         setattr(prefs.llm, attr, s.model_id)
         applied.append(s)
-        if s.catalog_kind == "chat" and prefs.llm.default_summarization is None:
-            prefs.llm.default_summarization = s.model_id
     return applied
 
 

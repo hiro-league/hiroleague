@@ -95,8 +95,48 @@ export async function uploadChatChannelPhoto(channelId: number, dataUrl: string)
   });
 }
 
-export async function listChatMessages(channelId: number) {
-  return apiRequest<ChatHistoryMessage[]>(`/chat-channels/${channelId}/messages`);
+export type ListChatMessagesOptions = {
+  after?: string;
+  afterId?: string;
+  limit?: number;
+  messagePks?: number[];
+};
+
+export async function listChatMessages(
+  channelId: number,
+  options: ListChatMessagesOptions = {}
+) {
+  const params = new URLSearchParams();
+  const hasAfter = options.after !== undefined;
+  const hasAfterId = options.afterId !== undefined;
+  const hasMessagePks = (options.messagePks?.length ?? 0) > 0;
+  if (hasMessagePks && (hasAfter || hasAfterId || options.limit !== undefined)) {
+    throw new Error('messagePks cannot be combined with cursor options.');
+  }
+  if (hasAfter !== hasAfterId) {
+    throw new Error('after and afterId must be provided together.');
+  }
+  if (hasAfter && options.limit === undefined) {
+    throw new Error('limit is required with after and afterId.');
+  }
+  if (!hasAfter && !hasMessagePks && options.limit !== undefined) {
+    throw new Error('limit is only supported with after and afterId.');
+  }
+
+  if (hasAfter && hasAfterId) {
+    params.set('after', options.after!);
+    params.set('after_id', options.afterId!);
+    params.set('limit', String(options.limit));
+  }
+  if (hasMessagePks) {
+    for (const pk of options.messagePks ?? []) {
+      params.append('message_pk', String(pk));
+    }
+  }
+  const query = params.toString();
+  return apiRequest<ChatHistoryMessage[]>(
+    `/chat-channels/${channelId}/messages${query ? `?${query}` : ''}`
+  );
 }
 
 /** Proxy to workspace Hiro POST /invoke message_send — server must be running. */

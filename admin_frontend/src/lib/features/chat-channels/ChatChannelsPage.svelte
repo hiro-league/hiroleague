@@ -27,6 +27,7 @@
   onMount(() => {
     void ctrl.mount();
     return () => {
+      ctrl.dispose();
       void ctrl.disposeActiveRecording();
     };
   });
@@ -111,6 +112,9 @@
       messages={ctrl.messages}
       messagesLoading={ctrl.messagesLoading}
       messagesError={ctrl.messagesError}
+      liveUpdatesPaused={ctrl.liveUpdatesPaused}
+      agentTyping={ctrl.agentTyping}
+      agentVoiceGeneratingMessageId={ctrl.agentVoiceGeneratingMessageId}
       busy={ctrl.busy}
       headerPhotoSrc={ctrl.messagesHeaderPhotoSrc}
       headerChannelHint={ctrl.messagesHeaderChannelHint}

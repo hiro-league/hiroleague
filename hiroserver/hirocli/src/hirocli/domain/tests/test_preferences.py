@@ -12,14 +12,12 @@ from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     LLMPreferences,
     MediaPreferences,
-    MemoryPreferences,
     ModalityFlags,
     ModelTuning,
     WorkspacePreferences,
     load_preferences,
     preferences_file,
     resolve_llm,
-    resolve_summarization_llm,
     save_preferences,
 )
 from hirocli.domain.server_info import (
@@ -137,19 +135,6 @@ def test_resolve_llm_with_default_and_credentials(
     assert r.max_tokens == 512
 
 
-def test_resolve_summarization_fallback_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _fixture_workspace(tmp_path, monkeypatch)
-    _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(default_chat="openai:gpt-test"),
-        memory=MemoryPreferences(summarization_llm_id=None),
-    )
-    r = resolve_summarization_llm(prefs, tmp_path)
-    assert r is not None and r.model_id == "openai:gpt-test"
-
-
 def test_resolve_character_llm_prefers_character_list_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -256,24 +241,6 @@ def test_resolve_character_voice_applies_character_tts_fields(
         tts_voice_by_provider={"openai": "ash"},
     )
     assert r2 is not None and r2.model == "tts-one" and r2.voice == "ash" and r2.instructions == "Hi."
-
-
-def test_resolve_summarization_memory_id_overrides_default_summarization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _fixture_workspace(tmp_path, monkeypatch)
-    _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(
-            default_summarization="openai:gpt-test",
-            default_chat="openai:gpt-other",
-        ),
-        memory=MemoryPreferences(summarization_llm_id="openai:gpt-other"),
-    )
-    r = resolve_summarization_llm(prefs, tmp_path)
-    assert r is not None and r.model_id == "openai:gpt-other"
 
 
 def test_build_policy_snapshot_and_channel_list_voice_capabilities(

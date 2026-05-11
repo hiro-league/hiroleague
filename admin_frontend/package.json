@@ -8,6 +8,7 @@
     "build": "svelte-kit sync && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test:unit": "vitest run",
     "package:python": "npm run build"
   },
   "devDependencies": {
@@ -22,7 +23,8 @@
     "svelte-check": "^4.3.3",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "@lucide/svelte": "^1.14.0",

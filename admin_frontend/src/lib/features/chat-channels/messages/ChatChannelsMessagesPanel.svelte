@@ -1,11 +1,15 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import { fly } from 'svelte/transition';
   import {
+    ArrowDown,
     FileX2,
     ImageIcon,
     Mic,
     RefreshCw,
     Send,
-    Square
+    Square,
+    Volume2
   } from '@lucide/svelte';
   import {
     historyMessageFirstAudio,
@@ -20,6 +24,8 @@
   import Button from '$lib/components/ui/button.svelte';
   import { cn } from '$lib/utils';
 
+  const SCROLL_BOTTOM_THRESHOLD_PX = 32;
+
   type Props = {
     channels: ChatChannelRow[];
     channelsLoading: boolean;
@@ -27,6 +33,9 @@
     messages: ChatHistoryMessage[];
     messagesLoading: boolean;
     messagesError: string | null;
+    liveUpdatesPaused: boolean;
+    agentTyping: boolean;
+    agentVoiceGeneratingMessageId: string | null;
     busy: boolean;
     /** Header thumbnail: character/channel photo or null for placeholder icon. */
     headerPhotoSrc: string | null;
@@ -61,6 +70,9 @@
     messages,
     messagesLoading,
     messagesError,
+    liveUpdatesPaused,
+    agentTyping,
+    agentVoiceGeneratingMessageId,
     busy,
     headerPhotoSrc,
     headerChannelHint,
@@ -84,6 +96,93 @@
     voiceReplyCheckboxDisabled,
     voiceReplyCheckboxHint
   }: Props = $props();
+
+  let messagesScroller = $state<HTMLDivElement | null>(null);
+  let draftTextareaEl = $state<HTMLTextAreaElement | null>(null);
+  let isPinnedToBottom = $state(true);
+  let hasUnreadMessages = $state(false);
+  let previousSelectedChannelId: string | null = null;
+  let previousMessageCount = 0;
+  let previousAgentTyping = false;
+  let focusedReadyChannelId: string | null = null;
+
+  function scrollerIsAtBottom(): boolean {
+    if (!messagesScroller) return true;
+    return (
+      messagesScroller.scrollHeight - messagesScroller.scrollTop - messagesScroller.clientHeight <=
+      SCROLL_BOTTOM_THRESHOLD_PX
+    );
+  }
+
+  async function scrollMessagesToBottom(behavior: ScrollBehavior = 'auto') {
+    await tick();
+    if (!messagesScroller) return;
+    messagesScroller.scrollTo({ top: messagesScroller.scrollHeight, behavior });
+    isPinnedToBottom = true;
+    hasUnreadMessages = false;
+  }
+
+  async function focusDraftTextarea() {
+    await tick();
+    draftTextareaEl?.focus();
+  }
+
+  async function submitDraftAndRefocus() {
+    await onSubmitDraft();
+    await focusDraftTextarea();
+  }
+
+  async function finalizeRecordingAndRefocus() {
+    await onFinalizeRecording();
+    await focusDraftTextarea();
+  }
+
+  function handleMessagesScroll() {
+    isPinnedToBottom = scrollerIsAtBottom();
+    if (isPinnedToBottom) {
+      hasUnreadMessages = false;
+    }
+  }
+
+  $effect(() => {
+    const channelChanged = selectedChannelId !== previousSelectedChannelId;
+    const countIncreased = !channelChanged && messages.length > previousMessageCount;
+    const typingStarted = agentTyping && !previousAgentTyping;
+    const firstLoad = messages.length > 0 && (channelChanged || previousMessageCount === 0);
+    const shouldStickToBottom = firstLoad || isPinnedToBottom;
+
+    previousSelectedChannelId = selectedChannelId;
+    previousMessageCount = messages.length;
+    previousAgentTyping = agentTyping;
+
+    if (messages.length === 0) {
+      isPinnedToBottom = true;
+      hasUnreadMessages = false;
+      return;
+    }
+
+    if (shouldStickToBottom && (messages.length > 0 || typingStarted)) {
+      void scrollMessagesToBottom();
+      return;
+    }
+    if (countIncreased) {
+      hasUnreadMessages = true;
+    }
+  });
+
+  $effect(() => {
+    if (
+      !selectedChannelId ||
+      messagesLoading ||
+      composingBusy ||
+      recordingStartedAt !== null ||
+      focusedReadyChannelId === selectedChannelId
+    ) {
+      return;
+    }
+    focusedReadyChannelId = selectedChannelId;
+    void focusDraftTextarea();
+  });
 
   /** Tick while recording so elapsed seconds update without touching controller state. */
   let recordingNowPerf = $state(0);
@@ -189,54 +288,110 @@
       <InlineDestructiveAlert class="shrink-0" title="Could not load messages" message={messagesError} />
     {:else}
       <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
+        {#if liveUpdatesPaused}
+          <MutedStatusLine text="Live updates paused - retrying" class="shrink-0" />
+        {/if}
         {#if messages.length === 0}
-          <MutedStatusLine text="No messages in this channel yet." class="shrink-0" />
+          <div
+            class="flex min-h-0 min-w-0 flex-1 items-center justify-center rounded-md border bg-background/45 p-4"
+          >
+            <MutedStatusLine text="No messages in this channel yet." />
+          </div>
         {:else}
-          <div class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-md border bg-background/45 p-4">
-            <div class="grid max-w-3xl gap-3">
-              {#each messages as message (message.id)}
-                {@const isUser = message.sender_type === 'user'}
-                {@const textBody = historyMessageText(message)}
-                {@const audioItem = historyMessageFirstAudio(message)}
-                <div class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}>
+          <div class="relative min-h-0 min-w-0 flex-1">
+            <div
+              bind:this={messagesScroller}
+              class="h-full min-h-0 min-w-0 overflow-y-auto rounded-md border bg-background/45 p-4"
+              onscroll={handleMessagesScroll}
+            >
+              <div class="grid max-w-3xl gap-3">
+                {#each messages as message (message.id)}
+                  {@const isUser = message.sender_type === 'user'}
+                  {@const textBody = historyMessageText(message)}
+                  {@const audioItem = historyMessageFirstAudio(message)}
                   <div
-                    class={cn(
-                      'grid max-w-[85%] gap-1.5 rounded-2xl px-4 py-2.5 shadow-sm',
-                      isUser
-                        ? 'bg-primary text-primary-foreground'
-                        : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
-                    )}
+                    class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}
+                    in:fly={{ y: 8, duration: 160 }}
                   >
-                    {#if textBody}
-                      <p class="whitespace-pre-wrap break-words font-sans text-sm">{textBody}</p>
-                    {:else if !audioItem}
-                      <p class="whitespace-pre-wrap break-words font-sans text-sm opacity-80">
-                        No text body
-                      </p>
-                    {/if}
-                    {#if audioItem && selectedChannelId}
-                      <ChatMessageAttachmentAudio
-                        channelId={Number(selectedChannelId)}
-                        externalMessageId={message.id}
-                        audioItem={audioItem}
-                      />
-                    {/if}
-                    {#if message.created_at}
-                      <div class="flex justify-end pt-0.5">
-                        <span
-                          class={cn(
-                            'tabular-nums font-sans text-[10px] leading-none opacity-40',
-                            isUser && 'opacity-50'
-                          )}
-                        >
-                          {formatChatTimestamp(message.created_at)}
-                        </span>
-                      </div>
-                    {/if}
+                    <div
+                      class={cn(
+                        'grid max-w-[85%] gap-1.5 rounded-2xl px-4 py-2.5 shadow-sm',
+                        isUser
+                          ? 'bg-primary text-primary-foreground'
+                          : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
+                      )}
+                    >
+                      {#if textBody}
+                        <div class="flex min-w-0 items-start gap-2">
+                          <p class="min-w-0 whitespace-pre-wrap break-words font-sans text-sm">
+                            {textBody}
+                          </p>
+                          {#if !isUser && !audioItem && agentVoiceGeneratingMessageId === message.id}
+                            <Volume2
+                              size={15}
+                              class="mt-0.5 shrink-0 animate-pulse opacity-75 [animation-duration:1800ms]"
+                              aria-label="Voice reply is being generated"
+                            />
+                          {/if}
+                        </div>
+                      {:else if !audioItem}
+                        <p class="whitespace-pre-wrap break-words font-sans text-sm opacity-80">
+                          No text body
+                        </p>
+                      {/if}
+                      {#if audioItem && selectedChannelId}
+                        <ChatMessageAttachmentAudio
+                          channelId={Number(selectedChannelId)}
+                          externalMessageId={message.id}
+                          audioItem={audioItem}
+                        />
+                      {/if}
+                      {#if message.created_at}
+                        <div class="flex justify-end pt-0.5">
+                          <span
+                            class={cn(
+                              'tabular-nums font-sans text-[10px] leading-none opacity-40',
+                              isUser && 'opacity-50'
+                            )}
+                          >
+                            {formatChatTimestamp(message.created_at)}
+                          </span>
+                        </div>
+                      {/if}
+                    </div>
                   </div>
-                </div>
-              {/each}
+                {/each}
+                {#if agentTyping}
+                  <div
+                    class="flex w-full justify-start"
+                    in:fly={{ y: 8, duration: 160 }}
+                    aria-label="Agent is typing"
+                  >
+                    <div
+                      class="flex items-center gap-1.5 rounded-2xl border border-border bg-secondary px-4 py-3 text-secondary-foreground shadow-sm dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80"
+                    >
+                      <span class="size-1.5 animate-bounce rounded-full bg-current opacity-55"></span>
+                      <span
+                        class="size-1.5 animate-bounce rounded-full bg-current opacity-70 [animation-delay:120ms]"
+                      ></span>
+                      <span
+                        class="size-1.5 animate-bounce rounded-full bg-current opacity-85 [animation-delay:240ms]"
+                      ></span>
+                    </div>
+                  </div>
+                {/if}
+              </div>
             </div>
+            {#if hasUnreadMessages}
+              <Button
+                size="sm"
+                variant="secondary"
+                class="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 shadow-lg"
+                onclick={() => void scrollMessagesToBottom('smooth')}
+              >
+                <ArrowDown size={14} /> New unread Messages
+              </Button>
+            {/if}
           </div>
         {/if}
         {#if selectedChannelId && channels.length > 0 && !channelsError}
@@ -267,7 +422,7 @@
                 <span class="font-medium text-destructive tabular-nums">
                   Recording… {#if recordingElapsedLabel}<span class="opacity-90">({recordingElapsedLabel})</span>{/if}
                 </span>
-                <Button size="sm" onclick={() => void onFinalizeRecording()} disabled={composingBusy}>
+                <Button size="sm" onclick={() => void finalizeRecordingAndRefocus()} disabled={composingBusy}>
                   <Square size={14} /> Stop & send
                 </Button>
                 <Button
@@ -282,6 +437,7 @@
             {:else}
               <div class="flex flex-wrap items-stretch gap-2">
                 <textarea
+                  bind:this={draftTextareaEl}
                   class="focus-visible:ring-ring min-h-11 flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-snug outline-none focus-visible:ring-2 md:min-w-[16rem]"
                   placeholder="Send as workspace owner… (Enter to send, Shift+Enter for new line)"
                   rows="2"
@@ -289,12 +445,12 @@
                   onkeydown={(ev) => {
                     if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
                       ev.preventDefault();
-                      void onSubmitDraft();
+                      void submitDraftAndRefocus();
                       return;
                     }
                     if (ev.key === 'Enter' && !ev.shiftKey) {
                       ev.preventDefault();
-                      void onSubmitDraft();
+                      void submitDraftAndRefocus();
                     }
                   }}
                   disabled={composingBusy}
@@ -303,7 +459,7 @@
                   class="h-11 min-w-11 self-stretch px-0"
                   title="Send message (Enter)"
                   disabled={composingBusy || !draftMessage.trim()}
-                  onclick={() => void onSubmitDraft()}
+                  onclick={() => void submitDraftAndRefocus()}
                 >
                   <Send size={20} />
                 </Button>

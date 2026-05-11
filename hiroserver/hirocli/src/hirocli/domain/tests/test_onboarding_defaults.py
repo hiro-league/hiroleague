@@ -108,7 +108,7 @@ def test_compute_skips_filled_slot(
     assert suggestions == []
 
 
-def test_apply_sets_summarization_with_chat(
+def test_apply_sets_chat_default_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cat = _minimal_catalog(tmp_path)
@@ -128,7 +128,6 @@ def test_apply_sets_summarization_with_chat(
     applied = apply_suggested_defaults(prefs, suggestions)
     assert len(applied) == 1
     assert prefs.llm.default_chat == "a:chat1"
-    assert prefs.llm.default_summarization == "a:chat1"
 
 
 def test_apply_onboarding_defaults_to_preferences_persists(

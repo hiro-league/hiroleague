@@ -1,4 +1,6 @@
 import { page } from '$app/state';
+import { browser } from '$app/environment';
+import { untrack } from 'svelte';
 import {
   clearChatMessages,
   createChatChannel,
@@ -30,6 +32,20 @@ import {
   persistChatChannelsNavToUrl
 } from '$lib/features/chat-channels/state/chat-channels-nav';
 import { createChatChannelsDialogs } from '$lib/features/chat-channels/state/chat-channels-dialogs.svelte';
+import {
+  cursorFromMessages,
+  mergeChatHistoryMessages,
+  recentMessagePks,
+  sortChatHistoryMessages,
+  type ChatTailCursor
+} from '$lib/features/chat-channels/state/chat-channel-message-merge';
+import {
+  BACKOFF_STEPS_MS,
+  LIVE_UPDATES_PAUSED_AFTER_FAILURES,
+  POLL_INTERVAL_MS,
+  RECENT_RESYNC_K,
+  TAIL_LIMIT
+} from '$lib/features/chat-channels/state/chat-channels-poll-config';
 import { PREF_KEYS, type ChatChannelsTabPreference } from '$lib/preferences/keys';
 import {
   characterResolvedAllowsVoiceRequest,
@@ -64,6 +80,16 @@ export function createChatChannelsPageController() {
   let draftMessage = $state('');
   let recordingStartedAt = $state<number | null>(null);
   let composingBusy = $state(false);
+  let tailCursor = $state<ChatTailCursor | null>(null);
+  let syncing = $state(false);
+  let pollErrorStreak = $state(0);
+  let messagesSectionMounted = $state(false);
+  let documentVisible = $state(true);
+  let pollTimer: number | null = null;
+  let pollTickInFlight = false;
+  let optimisticMessagePk = -1;
+  let agentTyping = $state(false);
+  let agentVoicePendingSince = $state<string | null>(null);
 
   /** ``GET /characters/:id/resolved`` for the selected channel’s character — same basis as the Characters page voice block. */
   let characterResolvedForMessages = $state<CharacterResolvedPayload | null>(null);
@@ -118,6 +144,17 @@ export function createChatChannelsPageController() {
     selectedChannel ? `${selectedChannel.name} · id ${selectedChannel.id}` : ''
   );
 
+  const liveUpdatesEligible = $derived(
+    activeTab === 'messages' &&
+      selectedChannelId !== null &&
+      documentVisible &&
+      messagesSectionMounted
+  );
+
+  const liveUpdatesPaused = $derived(
+    pollErrorStreak >= LIVE_UPDATES_PAUSED_AFTER_FAILURES
+  );
+
   const formTitle = $derived(
     formMode === 'create' ? 'New conversation channel' : 'Edit conversation channel'
   );
@@ -129,11 +166,193 @@ export function createChatChannelsPageController() {
         : null)
   );
 
+  $effect(() => {
+    if (!browser) return;
+    if (liveUpdatesEligible) {
+      untrack(startPolling);
+      return () => untrack(stopPolling);
+    }
+    untrack(stopPolling);
+  });
+
   function notify(kind: NotifyKind, message: string) {
     toast = { kind, message };
     window.setTimeout(() => {
       toast = null;
     }, 4500);
+  }
+
+  function currentPollIntervalMs() {
+    const idx = Math.min(Math.max(pollErrorStreak - 1, 0), BACKOFF_STEPS_MS.length - 1);
+    return pollErrorStreak <= 0 ? POLL_INTERVAL_MS : BACKOFF_STEPS_MS[idx];
+  }
+
+  function startPolling() {
+    if (!browser || pollTimer !== null) return;
+    void pollMessagesOnce();
+    pollTimer = window.setInterval(() => {
+      void pollMessagesOnce();
+    }, currentPollIntervalMs());
+  }
+
+  function stopPolling() {
+    if (pollTimer !== null) {
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    syncing = false;
+  }
+
+  function restartPollingTimer() {
+    if (!browser || !liveUpdatesEligible) return;
+    stopPolling();
+    pollTimer = window.setInterval(() => {
+      void pollMessagesOnce();
+    }, currentPollIntervalMs());
+  }
+
+  function resetPollErrors() {
+    const hadBackoff = pollErrorStreak > 0;
+    pollErrorStreak = 0;
+    if (hadBackoff) restartPollingTimer();
+  }
+
+  function updateTailCursor() {
+    tailCursor = cursorFromMessages(messages);
+  }
+
+  function updateAgentTypingFromIncoming(incoming: ChatHistoryMessage[]) {
+    if (agentTyping && incoming.some((message) => message.sender_type !== 'user')) {
+      agentTyping = false;
+    }
+  }
+
+  function messageHasAudio(message: ChatHistoryMessage): boolean {
+    return message.content.some((item) => item.content_type === 'audio');
+  }
+
+  function messageHasText(message: ChatHistoryMessage): boolean {
+    return message.content.some((item) => item.content_type === 'text' && item.body.trim());
+  }
+
+  function updateAgentVoicePendingFromIncoming(incoming: ChatHistoryMessage[]) {
+    const since = agentVoicePendingSince;
+    if (!since) return;
+    if (
+      incoming.some(
+        (message) =>
+          message.sender_type !== 'user' &&
+          message.created_at >= since &&
+          messageHasAudio(message)
+      )
+    ) {
+      agentVoicePendingSince = null;
+    }
+  }
+
+  const agentVoiceGeneratingMessageId = $derived.by(() => {
+    const since = agentVoicePendingSince;
+    if (!since) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (
+        message &&
+        message.sender_type !== 'user' &&
+        message.created_at >= since &&
+        messageHasText(message) &&
+        !messageHasAudio(message)
+      ) {
+        return message.id;
+      }
+    }
+    return null as string | null;
+  });
+
+  function handleVisibilityChange() {
+    documentVisible = document.visibilityState === 'visible';
+  }
+
+  async function pollMessagesOnce() {
+    if (pollTickInFlight || !liveUpdatesEligible || messagesLoading) return;
+    const rawChannelId = selectedChannelId;
+    const channelId = rawChannelId ? Number(rawChannelId) : NaN;
+    if (!Number.isFinite(channelId)) return;
+
+    if (tailCursor === null) {
+      updateTailCursor();
+      if (tailCursor === null) {
+        if (!messages.some((message) => message.message_pk < 0)) return;
+        pollTickInFlight = true;
+        syncing = true;
+        try {
+          const payload = await listChatMessages(channelId);
+          if (selectedChannelId !== rawChannelId || !liveUpdatesEligible) return;
+          updateAgentTypingFromIncoming(payload.data);
+          updateAgentVoicePendingFromIncoming(payload.data);
+          messages = mergeChatHistoryMessages(messages, payload.data);
+          updateTailCursor();
+          resetPollErrors();
+        } catch {
+          pollErrorStreak += 1;
+          restartPollingTimer();
+        } finally {
+          if (selectedChannelId === rawChannelId) {
+            syncing = false;
+          }
+          pollTickInFlight = false;
+        }
+        return;
+      }
+    }
+
+    pollTickInFlight = true;
+    syncing = true;
+    try {
+      const cursor = tailCursor;
+      const tailPayload = await listChatMessages(channelId, {
+        after: cursor.created_at,
+        afterId: cursor.external_id,
+        limit: TAIL_LIMIT
+      });
+      if (selectedChannelId !== rawChannelId || !liveUpdatesEligible) return;
+      if (tailPayload.data.length > 0) {
+        updateAgentTypingFromIncoming(tailPayload.data);
+        updateAgentVoicePendingFromIncoming(tailPayload.data);
+        messages = mergeChatHistoryMessages(messages, tailPayload.data);
+        updateTailCursor();
+      }
+
+      if (!liveUpdatesEligible) return;
+      const messagePks = recentMessagePks(messages, RECENT_RESYNC_K);
+      if (messagePks.length > 0) {
+        const resyncPayload = await listChatMessages(channelId, { messagePks });
+        if (selectedChannelId !== rawChannelId || !liveUpdatesEligible) return;
+        if (resyncPayload.data.length > 0) {
+          updateAgentVoicePendingFromIncoming(resyncPayload.data);
+          messages = mergeChatHistoryMessages(messages, resyncPayload.data);
+          updateTailCursor();
+        }
+      }
+      resetPollErrors();
+    } catch {
+      pollErrorStreak += 1;
+      restartPollingTimer();
+    } finally {
+      if (selectedChannelId === rawChannelId) {
+        syncing = false;
+      }
+      pollTickInFlight = false;
+    }
+  }
+
+  function addOptimisticMessage(message: ChatHistoryMessage) {
+    if (
+      message.message_pk < 0 &&
+      messages.some((existing) => existing.id === message.id && existing.message_pk > 0)
+    ) {
+      return;
+    }
+    messages = mergeChatHistoryMessages(messages, [message]);
   }
 
   /** Restore tab/channel from ``readChatChannelsNavFromLocation``. */
@@ -151,7 +370,14 @@ export function createChatChannelsPageController() {
     if (selectedChannelId && channels.some((channel) => String(channel.id) === selectedChannelId)) {
       return selectedChannelId;
     }
-    selectedChannelId = channels.length > 0 ? String(channels[0].id) : null;
+    const nextChannelId = channels.length > 0 ? String(channels[0].id) : null;
+    if (selectedChannelId !== nextChannelId) {
+      messages = [];
+      tailCursor = null;
+      agentTyping = false;
+      agentVoicePendingSince = null;
+    }
+    selectedChannelId = nextChannelId;
     return selectedChannelId;
   }
 
@@ -213,6 +439,10 @@ export function createChatChannelsPageController() {
       channels = payload.data;
       if (selectedChannelId && !channels.some((channel) => String(channel.id) === selectedChannelId)) {
         selectedChannelId = null;
+        messages = [];
+        tailCursor = null;
+        agentTyping = false;
+        agentVoicePendingSince = null;
       }
     } catch (err) {
       channelsError = err instanceof Error ? err.message : 'Failed to load chat channels.';
@@ -225,6 +455,9 @@ export function createChatChannelsPageController() {
     const channelId = ensureSelectedChannel();
     if (!channelId) {
       messages = [];
+      tailCursor = null;
+      agentTyping = false;
+      agentVoicePendingSince = null;
       messagesError = null;
       clearCharacterResolvedForMessages();
       return;
@@ -232,9 +465,17 @@ export function createChatChannelsPageController() {
 
     messagesLoading = true;
     messagesError = null;
+    messages = [];
+    tailCursor = null;
     try {
       const payload = await listChatMessages(Number(channelId));
-      messages = payload.data;
+      if (payload.data.at(-1)?.sender_type !== 'user') {
+        agentTyping = false;
+      }
+      updateAgentVoicePendingFromIncoming(payload.data);
+      messages = sortChatHistoryMessages(payload.data);
+      updateTailCursor();
+      resetPollErrors();
     } catch (err) {
       messagesError = err instanceof Error ? err.message : 'Failed to load messages.';
     } finally {
@@ -244,6 +485,7 @@ export function createChatChannelsPageController() {
   }
 
   async function refreshCurrent() {
+    resetPollErrors();
     await loadChannels();
     if (activeTab === 'messages') {
       ensureSelectedChannel();
@@ -265,6 +507,12 @@ export function createChatChannelsPageController() {
 
   async function openMessages(row: ChatChannelRow) {
     activeTab = 'messages';
+    if (selectedChannelId !== String(row.id)) {
+      messages = [];
+      tailCursor = null;
+      agentTyping = false;
+      agentVoicePendingSince = null;
+    }
     selectedChannelId = String(row.id);
     await syncUrl();
     await loadMessages();
@@ -385,6 +633,9 @@ export function createChatChannelsPageController() {
       if (selectedChannelId === String(deletedId)) {
         selectedChannelId = null;
         messages = [];
+        tailCursor = null;
+        agentTyping = false;
+        agentVoicePendingSince = null;
       }
       await refreshCurrent();
     } catch (err) {
@@ -422,14 +673,25 @@ export function createChatChannelsPageController() {
     if (!Number.isFinite(id) || !text) return;
     composingBusy = true;
     try {
-      await sendChatMessage(id, {
+      const requestVoiceReply = effectiveRequestVoiceReplyForSend();
+      const sent = await sendChatMessage(id, {
         text,
-        request_voice_reply: effectiveRequestVoiceReplyForSend() || undefined
+        request_voice_reply: requestVoiceReply || undefined
       });
+      const sentAt = new Date().toISOString();
       draftMessage = '';
+      addOptimisticMessage({
+        id: sent.data.message_id,
+        message_pk: optimisticMessagePk--,
+        channel_id: id,
+        sender_type: 'user',
+        sender_id: 'admin',
+        created_at: sentAt,
+        content: [{ content_type: 'text', body: text }]
+      });
+      agentTyping = true;
+      agentVoicePendingSince = requestVoiceReply ? sentAt : null;
       notify('success', 'Message sent.');
-      await loadMessages();
-      await loadChannels();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Send failed.');
     } finally {
@@ -484,15 +746,36 @@ export function createChatChannelsPageController() {
       const { blob, effectiveMime } = buildRecordingBlobFromChunks(chunkSnapshot, mr.mimeType);
       const duration_ms = Math.max(1, Math.round(performance.now() - started));
       const b64 = await recordingBlobToBase64(blob);
-      await sendChatMessage(id, {
+      const requestVoiceReply = effectiveRequestVoiceReplyForSend();
+      const sent = await sendChatMessage(id, {
         audio_base64: b64,
         audio_mime_type: effectiveMime,
         audio_duration_ms: duration_ms,
-        request_voice_reply: effectiveRequestVoiceReplyForSend() || undefined
+        request_voice_reply: requestVoiceReply || undefined
       });
+      const sentAt = new Date().toISOString();
+      addOptimisticMessage({
+        id: sent.data.message_id,
+        message_pk: optimisticMessagePk--,
+        channel_id: id,
+        sender_type: 'user',
+        sender_id: 'admin',
+        created_at: sentAt,
+        content: [
+          {
+            content_type: 'audio',
+            body: `optimistic_audio:${sent.data.message_id}`,
+            metadata: {
+              duration_ms,
+              media_type: effectiveMime,
+              optimistic_audio_url: URL.createObjectURL(blob)
+            }
+          }
+        ]
+      });
+      agentTyping = true;
+      agentVoicePendingSince = requestVoiceReply ? sentAt : null;
       notify('success', 'Voice message sent.');
-      await loadMessages();
-      await loadChannels();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Send failed.');
     } finally {
@@ -523,6 +806,11 @@ export function createChatChannelsPageController() {
   }
 
   async function mount() {
+    messagesSectionMounted = true;
+    if (browser) {
+      documentVisible = document.visibilityState === 'visible';
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
     try {
       const raw = localStorage.getItem(PREF_KEYS.chatChannelsVoiceReply);
       if (raw === '1') requestVoiceReplyUi = true;
@@ -540,8 +828,17 @@ export function createChatChannelsPageController() {
     }
   }
 
+  function dispose() {
+    messagesSectionMounted = false;
+    if (browser) {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
+    stopPolling();
+  }
+
   return {
     mount,
+    dispose,
 
     loadChannels,
     refreshCurrent,
@@ -587,6 +884,12 @@ export function createChatChannelsPageController() {
       return selectedChannelId;
     },
     set selectedChannelId(v: string | null) {
+      if (selectedChannelId !== v) {
+        messages = [];
+        tailCursor = null;
+        agentTyping = false;
+        agentVoicePendingSince = null;
+      }
       selectedChannelId = v;
     },
     get requestVoiceReplyUi() {
@@ -624,6 +927,18 @@ export function createChatChannelsPageController() {
     },
     get messagesError(): string | null {
       return messagesError;
+    },
+    get messagesSyncing(): boolean {
+      return syncing;
+    },
+    get agentTyping(): boolean {
+      return agentTyping;
+    },
+    get agentVoiceGeneratingMessageId(): string | null {
+      return agentVoiceGeneratingMessageId;
+    },
+    get liveUpdatesPaused(): boolean {
+      return liveUpdatesPaused;
     },
     get busy(): boolean {
       return busy;
