@@ -11,6 +11,8 @@ import {
   type LogSourceFilter,
   type LogsLayout
 } from '$lib/api/logs';
+import { openWorkspaceFolder } from '$lib/api/server';
+import type { Notify } from '$lib/features/server/types';
 import type { LogsPreferences } from './logs-preferences.svelte';
 import {
   logIdFromRowKey,
@@ -507,6 +509,21 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     return scopeMsgChipStripeByRowKey.get(rowKey) ?? false;
   }
 
+  /** Opens the resolved workspace log directory in the OS file manager (same API as workspaces tab). */
+  async function openLogsFolder(notify: Notify) {
+    const dir = layout?.log_dir?.trim();
+    if (!dir) {
+      notify('error', 'Log folder path is not available yet.');
+      return;
+    }
+    try {
+      await openWorkspaceFolder(dir);
+      notify('info', `Opening folder: ${dir}`);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Open folder failed.');
+    }
+  }
+
   return {
     get layout() {
       return layout;
@@ -588,6 +605,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     handleTableKeydown,
     reloadLiveTail,
     dispose,
+    openLogsFolder,
     getScopeMsgOrdinal,
     getScopeMsgChipStripeAlt
   };

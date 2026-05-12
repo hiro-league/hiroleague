@@ -3,6 +3,7 @@
     ArrowDownUp,
     ChevronDown,
     ChevronUp,
+    FolderOpen,
     PanelRightClose,
     PanelRightOpen,
     Pause,
@@ -45,6 +46,9 @@
     clearingLogs: boolean;
     /** True when server search or local scope filters narrow the result set. */
     filtered: boolean;
+    logsFolderDisabled: boolean;
+    logsFolderPath: string | null;
+    onOpenLogsFolder: () => void;
   };
 
   let {
@@ -73,7 +77,10 @@
     loadedCount,
     searchBusy,
     clearingLogs,
-    filtered
+    filtered,
+    logsFolderDisabled,
+    logsFolderPath,
+    onOpenLogsFolder
   }: Props = $props();
 
   const timeRangeLabels: Record<LogTimeRange, string> = {
@@ -91,7 +98,19 @@
   <div class="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-1">
     <div>
       <p class="font-sans text-xs font-extrabold uppercase text-primary">Operations</p>
-      <h2 class="brand-text-gradient mt-1 text-3xl font-semibold">Logs</h2>
+      <div class="mt-1 flex items-center gap-1.5">
+        <h2 class="brand-text-gradient text-3xl font-semibold">Logs</h2>
+        <button
+          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
+          type="button"
+          disabled={logsFolderDisabled}
+          onclick={onOpenLogsFolder}
+          title={logsFolderPath ? `Open logs folder: ${logsFolderPath}` : 'Open logs folder'}
+          aria-label={logsFolderPath ? `Open logs folder: ${logsFolderPath}` : 'Open logs folder'}
+        >
+          <FolderOpen size={13} />
+        </button>
+      </div>
     </div>
     <p class="pb-1 font-sans text-xs text-muted-foreground">
       {visibleCount} visible / {loadedCount} loaded

@@ -8,6 +8,8 @@
   import LogsFiltersPanel from './LogsFiltersPanel.svelte';
   import LogsPageHeader from './LogsPageHeader.svelte';
   import LogsTablePanel from './LogsTablePanel.svelte';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import type { NotifyKind } from '$lib/features/server/types';
   import { createLogsPageController } from './state/logs-controller.svelte';
   import { createLogsPreferences } from './state/logs-preferences.svelte';
   import { LOGS_FILTER_REGION_ID } from './shared/logs-a11y';
@@ -20,6 +22,18 @@
   let autoScroll = $state(true);
   let tableScroller = $state<HTMLDivElement | null>(null);
   let clearLogsConfirmOpen = $state(false);
+  let toast = $state<{ kind: NotifyKind; message: string } | null>(null);
+
+  function notify(kind: NotifyKind, message: string) {
+    toast = { kind, message };
+    window.setTimeout(() => {
+      toast = null;
+    }, 4500);
+  }
+
+  function openLogsFolder() {
+    void ctrl.openLogsFolder(notify);
+  }
 
   function selectRow(row: RenderLogRow) {
     ctrl.setActiveRow(row);
@@ -117,6 +131,9 @@
     searchBusy={ctrl.searchBusy}
     clearingLogs={ctrl.clearingLogs}
     filtered={ctrl.isSearchMode || ctrl.hasScopeFilters}
+    logsFolderDisabled={!ctrl.layout?.log_dir?.trim()}
+    logsFolderPath={ctrl.layout?.log_dir?.trim() ?? null}
+    onOpenLogsFolder={openLogsFolder}
   />
 
   <div
@@ -183,6 +200,8 @@
     </Button>
   {/snippet}
 </Modal>
+
+<ToastHost {toast} />
 
 <style>
   /* Class name must match LOGS_NO_DOCUMENT_SCROLL_CLASS in shared/logs-page-lifecycle.ts */

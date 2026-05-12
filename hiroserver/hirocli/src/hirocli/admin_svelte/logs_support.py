@@ -53,6 +53,7 @@ def _logs_layout(workspace_id: str | None) -> Result[dict[str, Any]]:
             return Result.failure(info.error or "Failed to inspect log directory.")
         return Result.success(
             {
+                "log_dir": str(log_dir),
                 "available_channels": info.data.available_channels,
                 "has_gateway": info.data.has_gateway,
                 "has_cli": info.data.has_cli,

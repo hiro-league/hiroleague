@@ -87,6 +87,8 @@ export type LogRow = {
 };
 
 export type LogsLayout = {
+  /** Resolved workspace log directory (config override or `<workspace>/logs`). */
+  log_dir: string;
   available_channels: string[];
   has_gateway: boolean;
   has_cli: boolean;
