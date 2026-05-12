@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { BookOpen, RefreshCw, RotateCcw, Save, Settings2 } from '@lucide/svelte';
+  import { BookOpen, KeyRound, RefreshCw, RotateCcw, Save, Settings2 } from '@lucide/svelte';
   import { goto } from '$app/navigation';
+  import { base } from '$app/paths';
   import Button from '$lib/components/ui/button.svelte';
   import {
     listActiveProviders,
@@ -317,6 +318,9 @@
       </a>
     </nav>
     <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+      <Button variant="outline" disabled={busy} onclick={() => void goto(`${base}/active-providers/`)}>
+        <KeyRound size={16} /> Active providers
+      </Button>
       <Button variant="outline" disabled={busy} onclick={() => void goto('/catalog/')}>
         <BookOpen size={16} /> Model catalog
       </Button>

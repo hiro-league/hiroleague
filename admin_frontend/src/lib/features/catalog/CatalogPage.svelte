@@ -215,6 +215,11 @@
     )
   );
 
+  /** Credential-store workspace providers — highlight matching catalog rows with a green dot. */
+  const configuredWorkspaceProviderIds = $derived(
+    new Set(activeProviders.map((p) => p.provider_id))
+  );
+
   let catalogReloadBusy = $state(false);
 
   function notify(kind: 'success' | 'error' | 'info' | 'warning', message: string) {
@@ -347,6 +352,7 @@
         `Catalog v${payload.data.catalog_version} reloaded (${payload.data.provider_count} providers, ${payload.data.model_count} models).`
       );
       await loadProviders();
+      await loadActiveProviders();
       if (prefs.activeTab === 'models') {
         await loadModels();
       }
@@ -374,9 +380,15 @@
 
   async function switchTab(tab: 'providers' | 'models') {
     await prefs.setActiveTab(tab, tab === 'models' ? modelsTabSearchParams() : {});
+    void loadActiveProviders();
     if (tab === 'models' && models.length === 0 && !modelsLoading) {
       await loadModels();
     }
+  }
+
+  async function refreshCatalogProviders() {
+    await loadProviders();
+    await loadActiveProviders();
   }
 
   async function openModelsForProvider(providerId: string) {
@@ -583,7 +595,7 @@
   onMount(async () => {
     prefs.initialize();
     initializeFiltersFromUrl();
-    await loadProviders();
+    await Promise.all([loadProviders(), loadActiveProviders()]);
     if (prefs.activeTab === 'models') {
       await loadModels();
     }
@@ -643,7 +655,9 @@
             {providerCounts.total} providers / {providerCounts.cloud} cloud / {providerCounts.local} local
           </span>
         </div>
-        <Button variant="outline" onclick={loadProviders}><RefreshCw size={15} /> Refresh</Button>
+        <Button variant="outline" onclick={() => void refreshCatalogProviders()}>
+          <RefreshCw size={15} /> Refresh
+        </Button>
       </div>
 
       {#if providersLoading}
@@ -669,12 +683,20 @@
               <div class="grid min-h-16 grid-cols-[1.1fr_100px_1fr_1.4fr_120px] gap-3 border-t px-3 py-3">
                 <span class="min-w-0">
                   <button
-                    class="block max-w-full truncate font-sans text-sm font-semibold text-primary hover:underline"
+                    class="flex max-w-full items-center gap-2 text-left font-sans text-sm font-semibold text-primary hover:underline"
                     type="button"
                     onclick={() => openModelsForProvider(provider.id)}
                     title={`View models for ${provider.display_name}`}
                   >
-                    {provider.display_name}
+                    {#if configuredWorkspaceProviderIds.has(provider.id)}
+                      <span
+                        class="size-2 shrink-0 rounded-full bg-green-600 dark:bg-green-500"
+                        title="Configured for this workspace"
+                        aria-hidden="true"
+                      ></span>
+                      <span class="sr-only">Configured for this workspace. </span>
+                    {/if}
+                    <span class="min-w-0 truncate">{provider.display_name}</span>
                   </button>
                   <small class="block truncate text-xs text-muted-foreground">{provider.id}</small>
                 </span>
@@ -817,7 +839,17 @@
               {@const HostingIcon = hostingUi.Icon}
               {@const priceHref = pricingSourceHref(model)}
               <div class="grid min-h-16 grid-cols-[1fr_1.25fr_120px_110px_100px_100px_1fr_1.35fr] gap-3 border-t px-3 py-3">
-                <span class="truncate text-sm">{providerLabels[model.provider_id] ?? model.provider_id}</span>
+                <span class="flex min-w-0 items-center gap-2 truncate text-sm">
+                  {#if configuredWorkspaceProviderIds.has(model.provider_id)}
+                    <span
+                      class="size-2 shrink-0 rounded-full bg-green-600 dark:bg-green-500"
+                      title="Configured for this workspace"
+                      aria-hidden="true"
+                    ></span>
+                    <span class="sr-only">Configured workspace provider. </span>
+                  {/if}
+                  <span class="truncate">{providerLabels[model.provider_id] ?? model.provider_id}</span>
+                </span>
                 <span class="min-w-0">
                   <strong class="flex min-w-0 items-baseline gap-1 font-sans text-sm">
                     {#if recommendedCatalogModelIds.has(model.id)}

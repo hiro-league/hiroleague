@@ -42,6 +42,11 @@ class VisionService:
         self._model = None
         self._credential_store = None  # Lazily built when workspace_path is set (avoids repeated disk reads).
 
+    def invalidate_workspace_credentials(self) -> None:
+        """Drop cached credential store and vision model after ``providers.json`` / keyring changes."""
+        self._credential_store = None
+        self._model = None
+
     def _workspace_credential_store(self):
         """Return ``(store, workspace_id)`` or None if workspace is not registry-backed."""
         if self._workspace_path is None:

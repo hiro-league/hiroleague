@@ -23,12 +23,38 @@ AuthMethod = Literal["api_key", "local_endpoint", "oauth"]
 KEYRING_USERNAME = "api_key"
 
 
+def _providers_file_mtime_ns(path: Path) -> int | None:
+    """Best-effort nanosecond mtime for reload detection (cross-platform)."""
+    if not path.exists():
+        return None
+    st = path.stat()
+    return getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def _service_name(workspace_id: str, provider_id: str) -> str:
     return f"hiroleague:{workspace_id}:{provider_id}"
+
+
+def _publish_providers_changed(workspace_path: Path, *, reason: str) -> None:
+    """Notify runtime that ``providers.json`` was written (secrets metadata changed).
+
+    Handlers clear compiled-graph caches and rebuild STT/Vision bindings so the
+    agent picks up new keys without restart. Safe from any thread when the domain
+    bus loop is attached; dropped with a warning otherwise (CLI-only paths).
+    """
+    from .events import DomainEvent, DomainEventType, get_domain_event_bus
+
+    get_domain_event_bus().publish(
+        DomainEvent(
+            type=DomainEventType.PROVIDERS_CHANGED,
+            workspace_path=workspace_path,
+            payload={"reason": reason},
+        ),
+    )
 
 
 class ProviderMetadata(BaseModel):
@@ -73,6 +99,7 @@ class CredentialStore:
         self._workspace_id = workspace_id
         self._test_secrets = _test_secrets
         self._doc = self._load_doc()
+        self._providers_mtime_ns = _providers_file_mtime_ns(self.providers_file())
         if _test_secrets is None:
             kr = keyring.get_keyring()
             # DEBUG: CredentialStore is constructed frequently (resolve_llm, tools, STT);
@@ -99,12 +126,29 @@ class CredentialStore:
 
     def _save_doc(self) -> None:
         self._workspace_path.mkdir(parents=True, exist_ok=True)
-        self.providers_file().write_text(
+        path = self.providers_file()
+        path.write_text(
             self._doc.model_dump_json(indent=2),
             encoding="utf-8",
         )
+        self._providers_mtime_ns = _providers_file_mtime_ns(path)
+        _publish_providers_changed(self._workspace_path, reason="credential_store_save")
+
+    def _ensure_doc_current(self) -> None:
+        """Reload ``providers.json`` when another process/store instance wrote it."""
+        path = self.providers_file()
+        cur = _providers_file_mtime_ns(path)
+        if cur == self._providers_mtime_ns:
+            return
+        self._doc = self._load_doc()
+        self._providers_mtime_ns = cur
+
+    def sync_providers_document_from_disk(self) -> None:
+        """Public alias for tests and runtime hooks (mtime-based reload)."""
+        self._ensure_doc_current()
 
     def _meta_for(self, provider_id: str) -> ProviderMetadata | None:
+        self._ensure_doc_current()
         for p in self._doc.providers:
             if p.provider_id == provider_id:
                 return p
@@ -242,6 +286,7 @@ class CredentialStore:
         )
 
     def list_configured(self) -> list[ProviderMetadata]:
+        self._ensure_doc_current()
         return sorted(self._doc.providers, key=lambda p: p.provider_id)
 
     def is_configured(self, provider_id: str) -> bool:

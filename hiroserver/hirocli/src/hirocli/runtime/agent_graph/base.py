@@ -95,14 +95,17 @@ class BaseAgentGraph:
         self._preferences = preferences
 
     # ------------------------------------------------------------------
-    # Live service swaps — used by preference reactions to rebuild media
-    # services without restarting the server. ``stt_node`` reads ``self._stt``
-    # on every call, so updating the attribute is enough; the compiled-graph
-    # cache in AgentManager does not need invalidation.
+    # Live service swaps — used by preference / provider reactions to rebuild media
+    # services without restarting the server. ``stt_node`` reads ``self._stt`` and
+    # ``tts_node`` reads ``self._tts`` per call, so updating the attributes is enough;
+    # chat LLM compiled-graph invalidation is handled separately in AgentManager.
     # ------------------------------------------------------------------
 
     def set_stt_service(self, stt_service: "STTService | None") -> None:
         self._stt = stt_service
+
+    def set_tts_service(self, tts_service: "TTSService | None") -> None:
+        self._tts = tts_service
 
     # ------------------------------------------------------------------
     # Override point — subclasses wire the StateGraph here.

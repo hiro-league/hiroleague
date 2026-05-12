@@ -31,6 +31,7 @@ from hiro_channel_sdk.log_scope_fields import (
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
+from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from .agent_graph import ChatAgentGraph
 from .agent_graph.base import BaseAgentGraph, _normalize_reply_content
 from .comm_log import (
@@ -92,6 +93,9 @@ class AgentManager:
         # Compiled-graph cache keyed by (system_prompt_hash, model fingerprint).
         self._compiled_cache: OrderedDict[tuple[Any, ...], "CompiledStateGraph"] = OrderedDict()
         self._compiled_cache_max = 24
+        # Serialize PROVIDERS_CHANGED handling — burst admin writes were racing
+        # cache clears and service swaps.
+        self._providers_change_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -141,14 +145,23 @@ class AgentManager:
                 checkpointer=checkpointer,
                 preferences=self._ctx.preferences,
             )
-            # Hot-reload STT when ``llm.default_stt`` actually changes. The graph's
-            # ``stt_node`` reads ``self._stt`` per call, so swapping the attribute
-            # in is enough — no compiled-graph invalidation needed.
+            # Hot-reload STT/TTS when workspace model defaults change. Nodes read
+            # ``self._stt`` / ``self._tts`` per call, so swapping attributes is enough
+            # (compiled graphs are for chat LLM only).
             self._ctx.preference_reactor.on_change(
                 "llm.default_stt",
                 self._reload_stt_on_change,
                 key="agent.stt",
             )
+            self._ctx.preference_reactor.on_change(
+                "llm.default_tts",
+                self._reload_tts_on_change,
+                key="agent.tts",
+            )
+            # Providers/admin mutations write ``providers.json`` via another
+            # ``CredentialStore`` instance — keep graph caches and media services in sync.
+            bus = get_domain_event_bus()
+            bus.subscribe(DomainEventType.PROVIDERS_CHANGED, self._handle_providers_changed)
             log.info(
                 "✅ AgentManager started — workspace · graph runner ready",
                 db=db,
@@ -156,6 +169,7 @@ class AgentManager:
             try:
                 await self._ctx.stop_event.wait()
             finally:
+                bus.unsubscribe(DomainEventType.PROVIDERS_CHANGED, self._handle_providers_changed)
                 self._compiled_cache.clear()
                 self._graph = None
                 self._checkpointer = None
@@ -459,6 +473,103 @@ class AgentManager:
 
         return load_preferences(self._ctx.workspace_path)
 
+    async def _handle_providers_changed(self, event: DomainEvent) -> None:
+        """Refresh credential metadata from disk, drop compiled graphs, rebuild STT/TTS/Vision.
+
+        ``CredentialStore`` publishes ``PROVIDERS_CHANGED`` after every ``providers.json``
+        write so admin/CLI mutations propagate without restarting HiroServer.
+        """
+        if event.workspace_path != self._ctx.workspace_path:
+            return
+        async with self._providers_change_lock:
+            reason = event.payload.get("reason", "")
+            log.info(
+                "🔌 Providers updated — HiroServer · reloading agent bindings · providers.changed",
+                reason=reason,
+            )
+            if self._credentials is not None:
+                self._credentials.sync_providers_document_from_disk()
+            self._compiled_cache.clear()
+            if self._vision is not None:
+                self._vision.invalidate_workspace_credentials()
+
+            stt_ok = await self._attach_new_stt_service(context="providers change")
+            tts_ok = await self._attach_new_tts_service(context="providers change")
+            if stt_ok and tts_ok:
+                log.info(
+                    "✅ Providers change applied — HiroServer · media rebound · vision cache cleared",
+                    stt_ok=stt_ok,
+                    tts_ok=tts_ok,
+                )
+            elif stt_ok or tts_ok:
+                log.warning(
+                    "⚠️ Providers change partially applied — HiroServer · media rebound",
+                    stt_ok=stt_ok,
+                    tts_ok=tts_ok,
+                )
+            else:
+                log.warning(
+                    "❌ Providers change — STT and TTS rebound both failed — HiroServer",
+                    stt_ok=stt_ok,
+                    tts_ok=tts_ok,
+                )
+
+    async def _attach_new_stt_service(self, *, context: str) -> bool:
+        """Build ``STTService`` from current prefs + credentials; swap onto graph."""
+        from ..services.stt import create_stt_service
+
+        try:
+            new_stt = await asyncio.to_thread(
+                create_stt_service,
+                self._ctx.workspace_path,
+                prefs=self._current_preferences(),
+            )
+        except Exception as exc:
+            log.error(
+                f"❌ STT rebuild failed — HiroServer · {context} · keeping previous instance",
+                error=str(exc),
+                exc_info=True,
+            )
+            return False
+
+        self._stt = new_stt
+        if self._graph is not None:
+            self._graph.set_stt_service(new_stt)
+        log.fineinfo(
+            "STT rebound — HiroServer",
+            context=context,
+            available=new_stt.is_available() if new_stt is not None else False,
+        )
+        return True
+
+    async def _attach_new_tts_service(self, *, context: str) -> bool:
+        """Build ``TTSService`` from current prefs + credentials; swap onto graph."""
+        from ..services.tts import create_tts_service
+
+        try:
+            new_tts = await asyncio.to_thread(
+                create_tts_service,
+                self._ctx.workspace_path,
+                prefs=self._current_preferences(),
+            )
+        except Exception as exc:
+            log.error(
+                f"❌ TTS rebuild failed — HiroServer · {context} · keeping previous instance",
+                error=str(exc),
+                exc_info=True,
+            )
+            return False
+
+        self._tts = new_tts
+        if self._graph is not None:
+            self._graph.set_tts_service(new_tts)
+        log.fineinfo(
+            "TTS rebound — HiroServer",
+            context=context,
+            available=new_tts.is_available() if new_tts is not None else False,
+        )
+        return True
+
     async def _reload_stt_on_change(
         self,
         workspace_path,
@@ -471,34 +582,31 @@ class AgentManager:
         ``STTService`` and swaps it onto both the manager and the live graph
         so the next message uses the new model.
         """
-        from ..services.stt import create_stt_service
-
         old_value, new_value = changes.get("llm.default_stt", (None, None))
-        try:
-            new_stt = await asyncio.to_thread(
-                create_stt_service,
-                self._ctx.workspace_path,
-                prefs=self._current_preferences(),
-            )
-        except Exception as exc:
-            log.error(
-                "❌ STT reload failed — keeping previous instance",
-                error=str(exc),
+        ok = await self._attach_new_stt_service(context="preferences.default_stt")
+        if ok:
+            log.info(
+                "✅ STT reloaded — preferences",
                 old=old_value,
                 new=new_value,
-                exc_info=True,
+                available=self._stt.is_available() if self._stt is not None else False,
             )
-            return
 
-        self._stt = new_stt
-        if self._graph is not None:
-            self._graph.set_stt_service(new_stt)
-        log.info(
-            "✅ STT reloaded — preferences",
-            old=old_value,
-            new=new_value,
-            available=new_stt.is_available() if new_stt is not None else False,
-        )
+    async def _reload_tts_on_change(
+        self,
+        workspace_path,
+        changes: dict[str, tuple[Any, Any]],
+    ) -> None:
+        """Rebuild ``TTSService`` after ``llm.default_tts`` changes."""
+        old_value, new_value = changes.get("llm.default_tts", (None, None))
+        ok = await self._attach_new_tts_service(context="preferences.default_tts")
+        if ok:
+            log.info(
+                "✅ TTS reloaded — preferences",
+                old=old_value,
+                new=new_value,
+                available=self._tts.is_available() if self._tts is not None else False,
+            )
 
 
 # Deliberate use to silence the unused-import lint while keeping a hook for

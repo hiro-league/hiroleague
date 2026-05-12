@@ -10,6 +10,7 @@
     List,
     Menu,
     MessageSquare,
+    MessagesSquare,
     Moon,
     PanelLeftClose,
     PanelLeftOpen,
@@ -35,6 +36,8 @@
   const prefs = createShellPreferences();
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
+  /** Chat channels page, Messages tab — header shortcut (see ``readChatChannelsNavFromLocation``). */
+  const chatMessagesHref = `${base}/chats/?tab=messages`;
   const headerWorkspaceName = $derived(adminConfig.workspace_name ?? 'unknown');
   const headerStatus = $derived(liveStatus.payload?.workspace_status ?? 'stopped');
   const headerStatusLabel = $derived(
@@ -213,6 +216,14 @@
         aria-label={headerStatusLabel}
       ></span>
       <div class="ml-auto flex items-center gap-2">
+        <a
+          class="inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border border-primary/50 bg-primary/15 px-3 text-primary shadow-md shadow-primary/20 ring-1 ring-primary/25 transition-colors hover:bg-primary/25 hover:text-primary hover:ring-primary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          href={chatMessagesHref}
+          aria-label="Open Chat channels — Messages tab"
+          title="Chat channels — Messages"
+        >
+          <MessagesSquare size={22} strokeWidth={2.25} aria-hidden="true" />
+        </a>
         <a
           class="inline-flex h-9 w-11 shrink-0 items-center justify-center gap-1 rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
           href={adminDocsUrl}

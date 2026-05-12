@@ -37,6 +37,7 @@ class DomainEventType:
     CHARACTER_PHOTO_CHANGED = "character.photo_changed"
     CHANNEL_CHANGED = "channel.changed"
     PREFERENCES_SAVED = "preferences.saved"
+    PROVIDERS_CHANGED = "providers.changed"
 
 
 @dataclass(frozen=True)

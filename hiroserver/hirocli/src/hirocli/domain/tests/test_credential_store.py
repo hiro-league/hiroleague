@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 import yaml
 
 from hirocli.domain.credential_store import CredentialStore
+from hirocli.domain.events import DomainEventType, get_domain_event_bus
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 
 
@@ -43,6 +46,49 @@ def test_providers_json_round_trip(tmp_path: Path) -> None:
     assert path.exists()
     store2 = CredentialStore(tmp_path, "ws-2", _test_secrets=secrets)
     assert store2.is_configured("openai")
+
+
+def test_reader_store_reloads_providers_json_after_other_instance_writes(
+    tmp_path: Path,
+) -> None:
+    """Mtime-based reload: two CredentialStores for one workspace stay consistent."""
+    secrets: dict[tuple[str, str], str] = {}
+    reader = CredentialStore(tmp_path, "ws-mtime", _test_secrets=secrets)
+    assert not reader.is_configured("openai")
+    writer = CredentialStore(tmp_path, "ws-mtime", _test_secrets=secrets)
+    writer.set_api_key("openai", "k-shared")
+    assert reader.is_configured("openai")
+
+
+@pytest_asyncio.fixture
+async def _domain_bus_loop():
+    bus = get_domain_event_bus()
+    bus.reset()
+    bus.attach_loop(asyncio.get_running_loop())
+    yield bus
+    bus.reset()
+
+
+@pytest.mark.asyncio
+async def test_save_doc_publishes_providers_changed(
+    tmp_path: Path,
+    _domain_bus_loop,
+) -> None:
+    received: list[str] = []
+
+    async def capture(ev):
+        received.append(ev.type)
+
+    bus = get_domain_event_bus()
+    bus.subscribe(DomainEventType.PROVIDERS_CHANGED, capture)
+    try:
+        secrets: dict[tuple[str, str], str] = {}
+        store = CredentialStore(tmp_path, "ws-bus", _test_secrets=secrets)
+        store.set_api_key("openai", "sk-test")
+        await asyncio.sleep(0.06)
+        assert received == [DomainEventType.PROVIDERS_CHANGED]
+    finally:
+        bus.unsubscribe(DomainEventType.PROVIDERS_CHANGED, capture)
 
 
 def test_local_endpoint_no_keyring_secret(tmp_path: Path) -> None:

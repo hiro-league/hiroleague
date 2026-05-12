@@ -26,6 +26,15 @@
 
   const SCROLL_BOTTOM_THRESHOLD_PX = 32;
 
+  /** Sample prompts — click a number to replace the draft box (voice-reply UX smoke tests). */
+  const QUICK_PROMPT_TEMPLATES = [
+    'What is the capital of Spain? Reply with one word only.',
+    'Who experimented with lightning and electricity using a kite (full name)? Reply with one sentence only.',
+    'What is 8 × 7? Reply with one word only.',
+    'What is photosynthesis in one sentence only?',
+    'Name a gas we breathe out. Reply with one word only.'
+  ] as const;
+
   type Props = {
     channels: ChatChannelRow[];
     channelsLoading: boolean;
@@ -202,6 +211,13 @@
     const s = sec % 60;
     return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
   });
+
+  function applyQuickPromptTemplate(index: number) {
+    const text = QUICK_PROMPT_TEMPLATES[index];
+    if (text === undefined) return;
+    draftMessage = text;
+    void focusDraftTextarea();
+  }
 </script>
 
 <section
@@ -396,22 +412,42 @@
         {/if}
         {#if selectedChannelId && channels.length > 0 && !channelsError}
           <div class="shrink-0 space-y-2 border-border border-t pt-3 font-sans text-sm">
-            <label
-              class={cn(
-                'flex items-center gap-2 text-xs text-muted-foreground',
-                voiceReplyCheckboxDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
-              )}
-              title={voiceReplyCheckboxHint ||
-                'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
-            >
-              <input
-                type="checkbox"
-                bind:checked={requestVoiceReplyUi}
-                disabled={voiceReplyCheckboxDisabled}
-                class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
-              />
-              Get voice reply
-            </label>
+            <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <label
+                class={cn(
+                  'flex items-center gap-2 text-xs text-muted-foreground',
+                  voiceReplyCheckboxDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
+                )}
+                title={voiceReplyCheckboxHint ||
+                  'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
+              >
+                <input
+                  type="checkbox"
+                  bind:checked={requestVoiceReplyUi}
+                  disabled={voiceReplyCheckboxDisabled}
+                  class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
+                />
+                Get voice reply
+              </label>
+              <div
+                class="flex shrink-0 items-center gap-1"
+                role="group"
+                aria-label="Fill message box with a sample prompt"
+              >
+                {#each QUICK_PROMPT_TEMPLATES as prompt, i (i)}
+                  <button
+                    type="button"
+                    class="grid size-8 place-items-center rounded border border-input bg-background font-sans text-xs font-semibold tabular-nums text-muted-foreground shadow-xs transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    title={prompt}
+                    aria-label={`Sample prompt ${i + 1}: ${prompt}`}
+                    disabled={composingBusy}
+                    onclick={() => applyQuickPromptTemplate(i)}
+                  >
+                    {i + 1}
+                  </button>
+                {/each}
+              </div>
+            </div>
             {#if voiceReplyCheckboxDisabled && voiceReplyCheckboxHint}
               <p class="max-w-prose text-[11px] leading-snug text-muted-foreground">
                 {voiceReplyCheckboxHint}
