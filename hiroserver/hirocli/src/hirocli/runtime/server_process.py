@@ -38,7 +38,6 @@ from hirocli.runtime.communication_manager import CommunicationManager
 from hirocli.runtime.event_handler import EventHandler
 from hirocli.runtime.http_server import app as http_app, run_http_server
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
-from hirocli.runtime.message_adapter import create_adapter_pipeline
 from hirocli.runtime.request_handler import RequestHandler
 from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaster
 from hirocli.runtime.resource_versioning import ResourceVersionStore
@@ -76,16 +75,12 @@ def _build_context(
 def _wire_runtime(
     ctx: ServerContext,
 ) -> tuple[CommunicationManager, ChannelManager, ResourceChangeBroadcaster]:
-    """Build adapter pipeline, handlers, ChannelManager, and CommunicationManager.
+    """Build handlers, ChannelManager, and CommunicationManager.
 
-    Construction order is now: leaf collaborators → ChannelManager (no upstream
-    callbacks yet) → CommunicationManager (gets ChannelManager as its
-    OutboundSink and the RequestHandler/EventHandler at construction). Then we
-    install the upstream callbacks on ChannelManager via set_message_handler /
-    set_event_handler. This replaces the old set_request_handler /
-    set_channel_manager pair on CommunicationManager.
+    The agent graph (formerly the adapter pipeline + post-adapt hooks) is
+    owned by ``AgentManager`` now; STT/vision/TTS services are constructed
+    inside ``AgentManager.serve()`` so this wiring shrinks accordingly.
     """
-    adapter_pipeline = create_adapter_pipeline(ctx.workspace_path)
     event_handler = EventHandler()
     resource_versions = ResourceVersionStore()
     request_handler = RequestHandler(ctx, resource_versions=resource_versions)
@@ -103,7 +98,6 @@ def _wire_runtime(
     comm_manager = CommunicationManager(
         ctx=ctx,
         sink=channel_manager,
-        adapter_pipeline=adapter_pipeline,
         event_handler=event_handler,
         request_handler=request_handler,
     )
@@ -117,7 +111,6 @@ def _wire_runtime(
     channel_manager.set_message_handler(comm_manager.receive)
     channel_manager.set_event_handler(channel_event_handler.handle)
     # InfraEventHandlers still needs the ChannelManager for pairing responses.
-    # That cycle is out of scope for this PR — see communication-manager-refactor.md §6.
     infra_handlers.set_channel_manager(channel_manager)
     infra_handlers.set_resource_change_broadcaster(resource_change_broadcaster)
 
@@ -223,6 +216,9 @@ async def _main(
     log.info("🕒 Loading Text-to-Speech services")
     tts_service = create_tts_service(workspace_path)
     agent_manager = AgentManager(ctx, comm_manager, tts_service=tts_service)
+    # Bind the runner so InboundPipeline can dispatch ``message`` payloads
+    # straight into the graph runner without going through a queue.
+    comm_manager.attach_agent_manager(agent_manager)
 
     _register_signal_handlers(stop_event)
 
@@ -239,7 +235,7 @@ async def _main(
         run_http_server(ctx),
         channel_manager.run(),
         comm_manager.serve(),
-        agent_manager.run(),
+        agent_manager.serve(),
         metrics_collector.run(),
     ]
     if admin:

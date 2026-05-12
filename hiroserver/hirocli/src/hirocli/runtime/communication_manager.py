@@ -1,43 +1,33 @@
-"""CommunicationManager — façade that wires the inbound + outbound pipelines.
+"""CommunicationManager — wire + outbound subscriber facade.
 
-After the refactor this module is **pure wiring**. The actual work lives in
-small, testable collaborators:
+After the agent-graph redesign this module is a tiny composition root:
 
-  - ``InboundPipeline``   — validate · permission · route by message_type
-  - ``MessageFlow``       — ack + adapter pipeline + post-adapt hook chain
-  - ``OutboundPipeline``  — queue · permission · dispatch via OutboundSink
-  - ``EnvelopeFactory``   — build server-originated UnifiedMessages
-  - ``post_adapt_hooks``  — TranscriptHook, PersistenceHook, EnqueueHook, …
+  - ``InboundPipeline``      — validate · permission · route by message_type.
+  - ``OutboundPipeline``     — queue · permission · dispatch via OutboundSink.
+  - ``GraphEventSubscriber`` — bridges agent-graph events to outbound
+    envelopes + storage side effects (persist, mirror, transcribed, text
+    reply, voiced, error fallback).
 
-The façade exists so the rest of the runtime keeps a single, stable surface
-(``receive``, ``enqueue_outbound``, ``inbound_queue``, ``outbound_queue``,
-``serve``) regardless of how the internals are split.
+The old ``MessageFlow``, ``MessageAdapterPipeline``, post-adapt hooks, and
+``inbound_queue`` are gone. All STT/vision/TTS work lives inside the
+agent graph; outbound side effects subscribe to the graph events.
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger
 
+from .graph_event_subscriber import GraphEventSubscriber
 from .inbound_pipeline import InboundPipeline
-from .message_flow import MessageFlow
 from .outbound_pipeline import OutboundPipeline
-from .post_adapt_hooks import (
-    AdapterErrorLogHook,
-    AudioTranscriptHook,
-    InboundEnqueueHook,
-    PersistenceHook,
-    PostAdaptHook,
-    UserMessageMirrorHook,
-)
 from .server_context import ServerContext
 
 if TYPE_CHECKING:
+    from .agent_manager import AgentManager
     from .event_handler import EventHandler
-    from .message_adapter import MessageAdapterPipeline
     from .outbound_sink import OutboundSink
     from .request_handler import RequestHandler
 
@@ -45,93 +35,52 @@ log = Logger.get("COMM_MAN")
 
 
 class CommunicationManager:
-    """Routes messages between channel plugins and the application core.
-
-    Usage::
-
-        pipeline = MessageAdapterPipeline([AudioTranscriptionAdapter(), ...])
-        event_handler = EventHandler()
-        request_handler = RequestHandler(ctx)
-        register_request_methods(request_handler)
-
-        comm = CommunicationManager(
-            ctx=ctx,
-            sink=channel_manager,             # any OutboundSink
-            adapter_pipeline=pipeline,
-            event_handler=event_handler,
-            request_handler=request_handler,
-        )
-        channel_manager.set_message_handler(comm.receive)
-
-        await asyncio.gather(..., comm.serve())
-        await comm.enqueue_outbound(msg)
-    """
+    """Routes messages between channel plugins and the agent graph runner."""
 
     def __init__(
         self,
         ctx: ServerContext,
-        sink: OutboundSink,
-        adapter_pipeline: MessageAdapterPipeline | None = None,
-        event_handler: EventHandler | None = None,
-        request_handler: RequestHandler | None = None,
+        sink: "OutboundSink",
+        event_handler: "EventHandler | None" = None,
+        request_handler: "RequestHandler | None" = None,
     ) -> None:
         self._ctx = ctx
-
         self._outbound = OutboundPipeline(ctx=ctx, sink=sink)
-        self.inbound_queue: asyncio.Queue[UnifiedMessage] = asyncio.Queue()
-
-        # Hook order matters:
-        #   1. Log per-item adapter errors first so the failure is visible.
-        #   2. Emit the transcript event BEFORE persisting so the device gets
-        #      the modality mirror even if the DB write later fails.
-        #   3. Persist (non-fatal — failures are logged but do not block).
-        #   4. Mirror the user message to every paired device. Runs AFTER
-        #      persistence so the row exists before sibling devices receive
-        #      the live broadcast and might race a follow-up history sync.
-        #      Closes the in-process-producer gap (admin / CLI / agent tools
-        #      that bypass the gateway broker's natural broadcast).
-        #   5. Enqueue for the AgentManager (always last; signals "ready").
-        post_hooks: list[PostAdaptHook] = [
-            AdapterErrorLogHook(ctx),
-            AudioTranscriptHook(ctx),
-            PersistenceHook(ctx),
-            UserMessageMirrorHook(ctx),
-            InboundEnqueueHook(self.inbound_queue, ctx),
-        ]
-
-        message_flow = MessageFlow(
+        # Subscribers attach to graph events; the AgentManager forwards
+        # ``custom`` stream entries to ``graph_subscriber.dispatch``.
+        self.graph_subscriber = GraphEventSubscriber(
             ctx=ctx,
-            adapter_pipeline=adapter_pipeline,
-            post_hooks=post_hooks,
             emit_outbound=self.enqueue_outbound,
         )
-
+        self._agent_manager: "AgentManager | None" = None
         self._inbound = InboundPipeline(
             ctx=ctx,
-            message_flow=message_flow,
+            run_message=self._dispatch_to_agent,
             emit_outbound=self.enqueue_outbound,
             request_handler=request_handler,
             event_handler=event_handler,
         )
 
     # ------------------------------------------------------------------
-    # Public surface
+    # Wiring
     # ------------------------------------------------------------------
+
+    def attach_agent_manager(self, agent_manager: "AgentManager") -> None:
+        """Wire the agent runner. Called by the composition root after build."""
+        self._agent_manager = agent_manager
 
     @property
     def ctx(self) -> ServerContext:
-        """Workspace ``ServerContext`` (same instance passed to ``__init__(ctx=…)``).
-
-        Reason: runtime tools such as ``message_send`` need ``workspace_path`` without
-        reaching into private ``_ctx``.
-        """
-
         return self._ctx
 
     @property
-    def outbound_queue(self) -> asyncio.Queue[UnifiedMessage]:
-        """Backwards-compatible alias for inspection / testing."""
+    def outbound_queue(self):
+        """Backwards-compatible alias kept for tests / inspection."""
         return self._outbound.queue
+
+    # ------------------------------------------------------------------
+    # Public surface
+    # ------------------------------------------------------------------
 
     async def receive(
         self,
@@ -139,25 +88,59 @@ class CommunicationManager:
         *,
         await_message_flow: bool = False,
     ) -> None:
-        """ChannelManager's ``on_message`` callback target.
+        """Channel Manager's ``on_message`` callback target.
 
-        ``await_message_flow=True`` makes ``message``-type payloads block until
-        the adapter pipeline + persistence + agent-enqueue have run. Synthetic
-        injectors (Admin UI / CLI ``message_send``) opt in so the immediate
-        follow-up HTTP refresh sees the just-sent row.
+        ``await_message_flow=True`` blocks until the inbound persistence
+        subscriber has run for ``message`` payloads. Used by synthetic
+        injectors (Admin UI / CLI ``message_send``) so a follow-up HTTP
+        refresh sees the persisted row.
         """
         await self._inbound.receive(data, await_message_flow=await_message_flow)
 
     async def enqueue_outbound(self, msg: UnifiedMessage) -> None:
-        """Place a message on the outbound queue to be sent to its channel."""
+        """Place a message on the outbound queue."""
         await self._outbound.enqueue(msg)
 
     async def serve(self) -> None:
-        """Run the outbound worker. Add to ``asyncio.gather`` alongside ChannelManager.
-
-        Inbound is callback-driven (``receive`` is invoked by ChannelManager
-        directly), so only outbound has a long-running worker. Symmetrising
-        with an inbound queue + worker is tracked in the refactor doc §8.
-        """
+        """Run the outbound worker. Add to ``asyncio.gather`` alongside ChannelManager."""
         log.info("✅ Communication Manager started")
         await self._outbound.run()
+
+    # ------------------------------------------------------------------
+    # Internal — InboundPipeline calls this for ``message_type == "message"``.
+    # ------------------------------------------------------------------
+
+    async def _dispatch_to_agent(
+        self,
+        msg: UnifiedMessage,
+        *,
+        await_persisted: bool,
+    ) -> None:
+        """Hand a validated inbound message to the agent graph.
+
+        ``await_persisted=True`` blocks until the inbound persistence
+        subscriber finishes (used by ``message_send``). The graph keeps
+        running in the background after the event fires.
+        """
+        import asyncio
+
+        if self._agent_manager is None:
+            log.error(
+                "❌ AgentManager not attached — message dropped",
+                msg_id=msg.routing.id,
+            )
+            return
+
+        if not await_persisted:
+            asyncio.create_task(
+                self._agent_manager.handle(msg),
+                name=f"agent-{msg.routing.id}",
+            )
+            return
+
+        persisted = asyncio.Event()
+        asyncio.create_task(
+            self._agent_manager.handle(msg, persisted_event=persisted),
+            name=f"agent-{msg.routing.id}",
+        )
+        await persisted.wait()

@@ -3,19 +3,20 @@
 The Channel Manager's ``on_message`` callback lands here. ``receive()`` returns
 immediately in all cases:
 
-  - ``message`` → handed to ``MessageFlow.handle`` (which acks then forks).
-  - ``request`` → handed to ``RequestHandler.handle`` in a background task;
+  - ``message`` → emits the immediate ``message.received`` ack, then hands
+    the message to the AgentManager via the ``run_message`` callback.
+  - ``request`` → dispatched to ``RequestHandler.handle`` in a background task;
     the returned response is enqueued by the task wrapper.
-  - ``event``   → handed to ``EventHandler.handle`` in a background task.
+  - ``event``   → dispatched to ``EventHandler.handle`` in a background task.
   - unknown     → routing-error response is enqueued and the message is dropped.
 
-The pipeline owns no state of its own — it's pure dispatch — so it's easy to
-test with fakes for every collaborator.
+The pipeline owns no message-flow state; the agent graph + outbound subscribers
+own all post-validation work.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from hiro_channel_sdk.constants import (
     MESSAGE_TYPE_EVENT,
@@ -29,25 +30,24 @@ from hiro_commons.log import Logger, log_scope
 
 from .comm_log import LOG_IN, comm_extras, comm_kind, comm_peer_label
 from .envelope_factory import EnvelopeFactory
-from .post_adapt_hooks import EmitOutbound
 
 if TYPE_CHECKING:
-    import asyncio
-
     from .event_handler import EventHandler
-    from .message_flow import MessageFlow
     from .request_handler import RequestHandler
     from .server_context import ServerContext
+
 
 log = Logger.get("INBOUND")
 
 
-def _check_permissions(msg: UnifiedMessage) -> None:
-    """Placeholder for inbound user/channel permission checks.
+# Callback signature: dispatch a validated inbound ``message`` to the agent.
+# Implemented by ``CommunicationManager._dispatch_to_agent``.
+RunMessage = Callable[..., Awaitable[None]]
+EmitOutbound = Callable[[UnifiedMessage], Awaitable[None]]
 
-    Will enforce access control rules once the permission system is designed.
-    Raise PermissionError to block the message.
-    """
+
+def _check_permissions(msg: UnifiedMessage) -> None:
+    """Placeholder for inbound user/channel permission checks."""
 
 
 class InboundPipeline:
@@ -55,20 +55,19 @@ class InboundPipeline:
 
     def __init__(
         self,
-        ctx: ServerContext,
-        message_flow: MessageFlow,
+        ctx: "ServerContext",
+        run_message: RunMessage,
         emit_outbound: EmitOutbound,
-        request_handler: RequestHandler | None = None,
-        event_handler: EventHandler | None = None,
+        request_handler: "RequestHandler | None" = None,
+        event_handler: "EventHandler | None" = None,
     ) -> None:
         self._ctx = ctx
-        self._message_flow = message_flow
+        self._run_message = run_message
         self._emit = emit_outbound
         self._request_handler = request_handler
         self._event_handler = event_handler
 
     def _routing_tag(self, msg: UnifiedMessage) -> str:
-        # Direction arrow on the line already encodes inbound/outbound.
         return f"{comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}"
 
     async def receive(
@@ -79,9 +78,9 @@ class InboundPipeline:
     ) -> None:
         """Validate the raw dict, run permission check, and dispatch by type.
 
-        ``await_message_flow=True`` blocks until the ``message`` adapter pipeline
-        + post-adapt hooks complete — used by in-process injectors that need
-        persistence to be visible before returning. Ignored for non-message types.
+        ``await_message_flow=True`` blocks ``message`` payloads until the
+        inbound-persistence subscriber finishes. Other message types ignore
+        the flag.
         """
         try:
             msg = UnifiedMessage.model_validate(data)
@@ -99,48 +98,53 @@ class InboundPipeline:
             return
 
         (
-            _scope_device_id,
-            _scope_msg_id,
-            _scope_method,
-            _scope_text_preview,
-            _scope_traffic_class,
-            _scope_traffic_subclass,
+            _dev, _mid, _meth, _pv, _tc, _tsc,
         ) = unified_message_log_scope(msg, direction="inbound")
-
         with log_scope(
-            device_id=_scope_device_id,
-            msg_id=_scope_msg_id,
-            method=_scope_method,
-            text_preview=_scope_text_preview,
-            traffic_class=_scope_traffic_class,
-            traffic_subclass=_scope_traffic_subclass,
+            device_id=_dev, msg_id=_mid, method=_meth,
+            text_preview=_pv, traffic_class=_tc, traffic_subclass=_tsc,
         ):
-            match msg.message_type:
-                case _ if msg.message_type == MESSAGE_TYPE_MESSAGE:
-                    await self._message_flow.handle(msg, await_dispatch=await_message_flow)
+            await self._dispatch(msg, await_message_flow=await_message_flow)
 
-                case _ if msg.message_type == MESSAGE_TYPE_REQUEST:
-                    await self._dispatch_request(msg)
+    async def _dispatch(
+        self,
+        msg: UnifiedMessage,
+        *,
+        await_message_flow: bool,
+    ) -> None:
+        match msg.message_type:
+            case _ if msg.message_type == MESSAGE_TYPE_MESSAGE:
+                # Immediate delivery ack so the device shows a tick before
+                # the graph even starts.
+                await self._emit(EnvelopeFactory.ack_event(msg))
+                log.fineinfo(
+                    f"{LOG_IN} message acked — {self._routing_tag(msg)}",
+                    **comm_extras(msg, channel=msg.routing.channel),
+                )
+                await self._run_message(msg, await_persisted=await_message_flow)
 
-                case _ if msg.message_type == MESSAGE_TYPE_STREAM:
-                    log.info(
-                        f"{LOG_IN} Stream frame ignored (server is download-only in Phase 1) — {self._routing_tag(msg)}",
-                        **comm_extras(msg),
+            case _ if msg.message_type == MESSAGE_TYPE_REQUEST:
+                await self._dispatch_request(msg)
+
+            case _ if msg.message_type == MESSAGE_TYPE_STREAM:
+                log.info(
+                    f"{LOG_IN} stream frame ignored (download-only) — {self._routing_tag(msg)}",
+                    **comm_extras(msg),
+                )
+
+            case _ if msg.message_type == MESSAGE_TYPE_EVENT:
+                await self._dispatch_event(msg)
+
+            case _:
+                log.warning(
+                    f"⚠️ {LOG_IN} Unknown message_type, dropping — {self._routing_tag(msg)}",
+                    **comm_extras(msg, message_type=msg.message_type),
+                )
+                await self._emit(
+                    EnvelopeFactory.routing_error_response(
+                        msg, f"Unknown message_type: {msg.message_type}",
                     )
-
-                case _ if msg.message_type == MESSAGE_TYPE_EVENT:
-                    await self._dispatch_event(msg)
-
-                case _:
-                    log.warning(
-                        f"⚠️ {LOG_IN} Unknown message_type, dropping — {self._routing_tag(msg)}",
-                        **comm_extras(msg, message_type=msg.message_type),
-                    )
-                    await self._emit(
-                        EnvelopeFactory.routing_error_response(
-                            msg, f"Unknown message_type: {msg.message_type}"
-                        )
-                    )
+                )
 
     async def _dispatch_request(self, msg: UnifiedMessage) -> None:
         if self._request_handler is None:
@@ -150,7 +154,7 @@ class InboundPipeline:
             )
             return
 
-        import asyncio  # local: avoid pulling asyncio when this branch is unused
+        import asyncio
         asyncio.create_task(
             self._safe_handle_request(msg),
             name=f"request-{msg.routing.id}",

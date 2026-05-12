@@ -67,6 +67,57 @@ def insert_attachment(
         return cursor.lastrowid  # type: ignore[return-value]
 
 
+def update_attachment_metadata(
+    workspace_path: Path,
+    *,
+    message_pk: int,
+    slot_index: int,
+    metadata_patch: dict[str, Any],
+) -> None:
+    """Merge ``metadata_patch`` into the attachment row at ``(message_pk, slot)``.
+
+    Used by the STT subscriber to backfill ``metadata.transcript`` after
+    speech-to-text completes for an audio attachment that was already
+    persisted by the ingest subscriber. Missing rows are a no-op (the
+    attachment may not have been written yet for non-binary slots).
+    """
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT metadata FROM message_attachments
+            WHERE message_pk = ? AND slot_index = ?
+            """,
+            (message_pk, slot_index),
+        ).fetchone()
+        if row is None:
+            return
+        existing: dict[str, Any] = {}
+        raw = row["metadata"]
+        if isinstance(raw, str) and raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    existing = parsed
+            except json.JSONDecodeError:
+                existing = {}
+        existing.update(metadata_patch)
+        conn.execute(
+            """
+            UPDATE message_attachments
+            SET metadata = ?
+            WHERE message_pk = ? AND slot_index = ?
+            """,
+            (
+                json.dumps(existing, ensure_ascii=False, separators=(",", ":")),
+                message_pk,
+                slot_index,
+            ),
+        )
+        conn.commit()
+
+
 def list_attachments_for_message(
     workspace_path: Path,
     message_pk: int,

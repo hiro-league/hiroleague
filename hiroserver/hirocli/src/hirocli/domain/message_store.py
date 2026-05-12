@@ -200,6 +200,35 @@ async def save_message(
     )
 
 
+async def update_message_body(
+    workspace_path: Path,
+    message_pk: int,
+    body: str,
+) -> None:
+    """Replace a persisted message's text body in-place.
+
+    Used after speech-to-text completes for an inbound audio message: the
+    ingest subscriber writes the row first (so the live mirror has a stable
+    id), then this function fills in the transcript so history reload (admin
+    UI / cold device) sees the full text.
+    """
+    await asyncio.to_thread(_sync_update_body, workspace_path, message_pk, body)
+
+
+def _sync_update_body(
+    workspace_path: Path,
+    message_pk: int,
+    body: str,
+) -> None:
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        conn.execute(
+            "UPDATE messages SET body = ? WHERE id = ?",
+            (body, message_pk),
+        )
+        conn.commit()
+
+
 async def list_messages(
     workspace_path: Path,
     channel_id: int,

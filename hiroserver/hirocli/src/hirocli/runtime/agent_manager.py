@@ -1,47 +1,40 @@
-"""AgentManager — LLM agent worker for Hiro.
+"""AgentManager — graph runner + event bridge.
 
-Responsibilities:
-  - Reads inbound messages from CommunicationManager.inbound_queue.
-  - Builds agent input from text ContentItems and from metadata["description"]
-    on non-text items (audio transcripts, image descriptions set by adapters).
-  - Skips messages that yield no input text after checking both sources.
-  - Passes each message to a LangGraph agent that trims checkpointed chat
-    history to the latest six messages before invoking the model.
-  - Maintains per-conversation persistent memory keyed by conversation_channels.id
-    (a UUID) using LangGraph's AsyncSqliteSaver checkpointer backed by workspace.db.
-  - Constructs a reply UnifiedMessage and places it on the outbound queue.
-  - On LLM errors, enqueues a human-readable fallback reply instead.
+Replaces the prior queue-draining worker. Now:
+
+  - ``serve()`` opens the LangGraph checkpointer, builds the ``ChatAgentGraph``
+    instance once per workspace, and waits on ``ctx.stop_event``.
+  - ``handle(msg)`` is invoked per inbound message by ``InboundPipeline``.
+    It resolves the chat channel + character, builds the initial graph state,
+    streams the graph via ``astream(stream_mode=["updates", "custom"])``,
+    and forwards every custom domain event to the
+    ``GraphEventSubscriber`` owned by ``CommunicationManager``.
+
+The graph (LangGraph) owns reasoning, tools, STT, vision and TTS as nodes.
+Outbound side effects (persistence, mirror, transcript event, text reply,
+voiced event, error fallback) live as graph-event subscribers on the comm
+side — see ``graph_event_subscriber.py``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
+import contextlib
 import hashlib
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.log_scope_fields import (
-    METADATA_LOG_TRAFFIC_CLASS,
-    METADATA_LOG_TRAFFIC_SUBCLASS,
-    TRAFFIC_CLASS_OUTBOUND_LIFECYCLE,
-    TRAFFIC_CLASS_OUTBOUND_REPLY,
-    METADATA_LOG_REPLY_TO_MSG_ID,
-    METADATA_LOG_TEXT_PREVIEW,
-    log_preview_snippet,
     unified_message_log_scope,
-    unified_message_text_preview,
 )
-# UnifiedMessage for TTS follow-up needs SDK literals; omitting them raised NameError after successful synthesis.
-from hiro_channel_sdk.constants import EVENT_TYPE_MESSAGE_VOICED, MESSAGE_TYPE_EVENT
-from hiro_channel_sdk.models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
+from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
-# Reuse comm-log helpers so AGENT lines share peer, kind, and content_hint ordering with COMM_MAN.
+from .agent_graph import ChatAgentGraph
+from .agent_graph.base import BaseAgentGraph, _normalize_reply_content
 from .comm_log import (
     LOG_IN,
-    LOG_OUT,
     comm_extras,
     comm_kind,
     comm_peer_label,
@@ -49,18 +42,21 @@ from .comm_log import (
 )
 
 if TYPE_CHECKING:
-    from ..services.tts.service import TTSService
+    from langgraph.graph.state import CompiledStateGraph
+
+    from ..services.tts import TTSService
     from .communication_manager import CommunicationManager
     from .server_context import ServerContext
 
 log = Logger.get("AGENT")
 
-_FALLBACK_ERROR_BODY = (
-    "Sorry, I encountered an error processing your message. Please try again."
-)
-_VOICE_INPUT_DISABLED_BODY = (
-    "Voice messages are currently disabled for this server. Please send your request as text."
-)
+# Keep the public helpers the old test surface imports.
+__all__ = [
+    "AgentManager",
+    "_normalize_reply_content",
+    "_audio_extension_for_media_type",
+    "_reply_content_type",
+]
 
 
 def _reply_content_type(content: Any) -> str:
@@ -69,424 +65,150 @@ def _reply_content_type(content: Any) -> str:
     return type(content).__name__
 
 
-def _normalize_reply_content(content: Any) -> str:
-    """Convert LangChain/provider message content into Hiro's plain text body."""
-    if isinstance(content, str):
-        return content
-    if content is None:
-        return ""
-    if not isinstance(content, list):
-        return str(content)
-
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-            continue
-        if not isinstance(block, dict):
-            parts.append(str(block))
-            continue
-
-        text = block.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-            continue
-
-        content_value = block.get("content")
-        if isinstance(content_value, str):
-            parts.append(content_value)
-
-    return "\n".join(p for p in parts if p)
-
-
-def _make_reply(inbound: UnifiedMessage, body: str) -> UnifiedMessage:
-    if not isinstance(body, str):
-        raise TypeError(f"reply body must be str, got {type(body).__name__}")
-    # Correlate outbound replies with the inbound user message for log_scope / admin filters.
-    meta = dict(inbound.routing.metadata or {})
-    meta[METADATA_LOG_REPLY_TO_MSG_ID] = inbound.routing.id
-    # Logs UI should anchor correlated lines on the user's words, not on the outbound agent reply body.
-    _user_pv = unified_message_text_preview(inbound)
-    if _user_pv:
-        meta[METADATA_LOG_TEXT_PREVIEW] = _user_pv
-    meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_REPLY
-    meta[METADATA_LOG_TRAFFIC_SUBCLASS] = "text"
-    # No ``recipient_id``: the user has one shared conversation across all of
-    # their paired devices, so the gateway broadcasts the reply to every device
-    # and they all stay in sync (device B's chat scrolls even when device A
-    # asked the question).
-    return UnifiedMessage(
-        routing=MessageRouting(
-            channel=inbound.routing.channel,
-            direction="outbound",
-            sender_id="server",
-            metadata=meta,
-        ),
-        content=[ContentItem(content_type="text", body=body)],
-    )
-
-
 def _audio_extension_for_media_type(media_type: str) -> str:
-    """Return a stable file extension for a TTS MIME type."""
-    # Thin re-export so existing imports (and tests) keep working — the real
-    # mapping lives next to the bytes-on-disk helpers in domain.media_store.
+    """Re-export so tests that imported from agent_manager keep working."""
     from ..domain.media_store import audio_extension_for_media_type
 
     return audio_extension_for_media_type(media_type)
 
 
 class AgentManager:
-    """Consumes inbound text messages and produces agent replies.
-
-    Usage::
-
-        agent_mgr = AgentManager(ctx, comm_manager, tts_service=tts)
-        await asyncio.gather(..., agent_mgr.run())
-    """
+    """Owns the agent graph instance and dispatches per-message graph runs."""
 
     def __init__(
         self,
-        ctx: ServerContext,
-        comm_manager: CommunicationManager,
-        tts_service: TTSService | None = None,
+        ctx: "ServerContext",
+        comm_manager: "CommunicationManager",
+        tts_service: "TTSService | None" = None,
     ) -> None:
         self._ctx = ctx
         self._comm = comm_manager
-        self._tts_service = tts_service
+        self._tts = tts_service
+        self._stt = None  # built in serve()
+        self._vision = None
+        self._credentials = None
         self._checkpointer = None
-        self._credential_store = None
-        self._agent_cache: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
-        self._agent_cache_max = 24
+        self._graph: BaseAgentGraph | None = None
+        # Compiled-graph cache keyed by (system_prompt_hash, model fingerprint).
+        self._compiled_cache: OrderedDict[tuple[Any, ...], "CompiledStateGraph"] = OrderedDict()
+        self._compiled_cache_max = 24
 
-    def _build_agent(
-        self,
-        checkpointer,
-        credential_store,
-        *,
-        llm_entry,
-        system_prompt: str,
-    ):
-        """Compile LangGraph/LangChain agent for a resolved chat model and persona prompt."""
-        from ..domain.model_factory import create_chat_model
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
-        try:
-            from ..tools import all_tools
-            from ..tools.langchain_adapter import to_langchain_list
-            from .trimming_agent_graph import TRIMMED_MESSAGE_LIMIT, build_trimming_agent_graph
+    async def serve(self) -> None:
+        """Open the checkpointer + media services, build the graph, then wait.
 
-            tools = [] 
-            # temporary disable tools
-            # tools = to_langchain_list(all_tools())
+        The async context for the SQLite checkpointer must stay open for the
+        lifetime of the server, so ``serve`` keeps it open until
+        ``ctx.stop_event`` fires. Per-message work is dispatched from
+        ``InboundPipeline`` via :meth:`handle`.
+        """
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-            log.fineinfo(
-                f"Building agent — chat · {llm_entry.model_id}",
-                temperature=llm_entry.temperature,
-                max_tokens=llm_entry.max_tokens,
-                tools=len(tools),
-            )
+        from ..domain.credential_store import CredentialStore
+        from ..domain.db import db_path
+        from ..domain.workspace import workspace_id_for_path
+        from ..services.stt import create_stt_service
+        from ..services.vision_service import VisionService
 
-            model = create_chat_model(
-                llm_entry.model_id,
+        wid = workspace_id_for_path(self._ctx.workspace_path)
+        self._credentials = (
+            CredentialStore(self._ctx.workspace_path, wid) if wid is not None else None
+        )
+
+        # Build the media services here (formerly in create_adapter_pipeline).
+        log.info("🕒 Loading STT service")
+        self._stt = create_stt_service(self._ctx.workspace_path)
+        log.info("🕒 Loading Vision service")
+        self._vision = VisionService(workspace_path=self._ctx.workspace_path)
+
+        self._log_agent_config()
+
+        db = str(db_path(self._ctx.workspace_path))
+        async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
+            self._checkpointer = checkpointer
+            self._graph = ChatAgentGraph(
                 workspace_path=self._ctx.workspace_path,
-                temperature=llm_entry.temperature,
-                max_tokens=llm_entry.max_tokens,
-                credential_store=credential_store,
-            )
-
-            log.info(
-                "✅ Agent memory trimming — HiroServer · latest messages only",
-                message_limit=TRIMMED_MESSAGE_LIMIT,
-            )
-            return build_trimming_agent_graph(
-                model=model,
-                tools=tools,
-                system_prompt=system_prompt,
+                stt_service=self._stt,
+                vision_service=self._vision,
+                tts_service=self._tts,
+                credential_store=self._credentials,
                 checkpointer=checkpointer,
             )
-        except Exception as exc:
-            log.error(
-                "❌ Agent build failed — HiroServer · chat",
-                error=str(exc),
-                exc_info=True,
+            log.info(
+                "✅ AgentManager started — workspace · graph runner ready",
+                db=db,
             )
-            raise
+            try:
+                await self._ctx.stop_event.wait()
+            finally:
+                self._compiled_cache.clear()
+                self._graph = None
+                self._checkpointer = None
 
-    def _agent_cache_key(self, llm_entry, system_prompt: str) -> tuple[Any, ...]:
-        fp = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
-        return (
-            llm_entry.model_id,
-            round(float(llm_entry.temperature), 6),
-            int(llm_entry.max_tokens),
-            "trim:6",
-            fp,
-        )
+    # ------------------------------------------------------------------
+    # Per-message entry point
+    # ------------------------------------------------------------------
 
-    def _get_or_create_agent(self, llm_entry, system_prompt: str):
-        key = self._agent_cache_key(llm_entry, system_prompt)
-        agent = self._agent_cache.get(key)
-        if agent is not None:
-            self._agent_cache.move_to_end(key)
-            return agent
-        assert self._checkpointer is not None
-        agent = self._build_agent(
-            self._checkpointer,
-            self._credential_store,
-            llm_entry=llm_entry,
-            system_prompt=system_prompt,
-        )
-        self._agent_cache[key] = agent
-        self._agent_cache.move_to_end(key)
-        while len(self._agent_cache) > self._agent_cache_max:
-            self._agent_cache.popitem(last=False)
-        return agent
-
-    def _load_character_for_channel(self, character_id: str):
-        from ..domain.character import default_character_id, load_character_from_disk
-
-        wp = self._ctx.workspace_path
-        cid = (character_id or "").strip()
-        if not cid:
-            cid = default_character_id(wp)
-        try:
-            return load_character_from_disk(wp, cid)
-        except FileNotFoundError:
-            fallback = default_character_id(wp)
-            log.warning(
-                "⚠️ Character folder missing — HiroServer · using default character",
-                requested=cid,
-                fallback=fallback,
-            )
-            return load_character_from_disk(wp, fallback)
-
-    def _resolve_thread_character(self, msg: UnifiedMessage) -> tuple[str, int, str]:
-        """Return (thread_id, channel_id, character_id) for the addressed chat channel."""
-        from ..domain.character import default_character_id
-        from ..domain.conversation_channel import resolve_chat_channel_from_metadata
-
-        channel = resolve_chat_channel_from_metadata(
-            self._ctx.workspace_path,
-            msg.routing.metadata,
-        )
-        channel_id = int(channel.id)
-        character_id = (channel.character_id or "").strip()
-        if not character_id:
-            character_id = default_character_id(self._ctx.workspace_path)
-        return str(channel_id), channel_id, character_id
-
-    def _voice_reply_allowed(self, prefs, character) -> bool:
-        from ..domain.preferences import resolve_character_voice
-
-        if not prefs.media.output.voice:
-            return False
-        if self._tts_service is None:
-            return False
-        return (
-            resolve_character_voice(
-                character.voice_models,
-                prefs,
-                self._ctx.workspace_path,
-                credential_store=self._credential_store,
-                tts_instructions=character.tts_instructions,
-                tts_voice_by_provider=dict(character.tts_voice_by_provider),
-            )
-            is not None
-        )
-
-    async def _send_voice_input_disabled_reply(
+    async def handle(
         self,
         msg: UnifiedMessage,
         *,
-        thread_id: str,
+        persisted_event: asyncio.Event | None = None,
     ) -> None:
-        reply = _make_reply(msg, _VOICE_INPUT_DISABLED_BODY)
-        await self._comm.enqueue_outbound(reply)
-        log.warning(
-            f"⚠️ Voice input blocked — {comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}",
-            reason="policy_disabled",
-            **comm_extras(msg, thread_id=thread_id),
-        )
+        """Run the graph for a single inbound message.
 
-    async def _synthesize_and_send(
-        self,
-        inbound: UnifiedMessage,
-        text_reply: UnifiedMessage,
-        text: str,
-        *,
-        channel_id: int,
-        reply_message_pk: int | None,
-        character_voice_models: list[str],
-        tts_instructions: str = "",
-        tts_voice_by_provider: dict[str, str] | None = None,
-    ) -> None:
-        """Synthesize speech from the agent's text reply and send a message.voiced event.
-
-        Runs as a fire-and-forget task. On failure, logs the error — the text
-        reply has already been delivered so the user is never left without a response.
+        ``persisted_event`` is set as soon as the inbound persistence
+        subscriber finishes (used by synthetic injectors that need the row
+        visible in the DB before returning — e.g. the ``message_send`` tool).
         """
-        try:
-            from ..domain.preferences import load_preferences, resolve_character_voice
-
-            prefs = load_preferences(self._ctx.workspace_path)
-            peer = comm_peer_label(inbound, self._ctx)
-
-            resolved = resolve_character_voice(
-                character_voice_models,
-                prefs,
-                self._ctx.workspace_path,
-                credential_store=self._credential_store,
-                tts_instructions=tts_instructions,
-                tts_voice_by_provider=tts_voice_by_provider,
+        if self._graph is None:
+            log.warning(
+                "⚠️ Graph not ready — message dropped",
+                msg_id=msg.routing.id,
             )
-            # Voice preset / instructions come from the character (optional); prefs supply default_tts fallback.
-            if resolved is None:
-                log.warning(
-                    f"⚠️ Voice reply skipped — {peer} · no TTS model resolved "
-                    "(set character voice_models and/or llm.default_tts)",
-                    ref_id=text_reply.routing.id,
+            if persisted_event is not None:
+                persisted_event.set()
+            return
+
+        # Re-open log scope: this runs in a task spawned by InboundPipeline.
+        (
+            _dev, _mid, _meth, _pv, _tc, _tsc,
+        ) = unified_message_log_scope(msg, direction="inbound")
+        with log_scope(
+            device_id=_dev, msg_id=_mid, method=_meth,
+            text_preview=_pv, traffic_class=_tc, traffic_subclass=_tsc,
+        ):
+            try:
+                await self._handle_inner(msg, persisted_event=persisted_event)
+            except Exception as exc:
+                log.error(
+                    f"❌ graph run failed — {comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}",
+                    error=str(exc),
+                    **comm_extras(msg),
+                    exc_info=True,
                 )
-                return
-            result = await self._tts_service.synthesize(
-                text,
-                model=resolved.model,
-                voice=resolved.voice,
-                instructions=resolved.instructions,
-            )
+                if persisted_event is not None and not persisted_event.is_set():
+                    # Unblock callers that were waiting on persistence.
+                    persisted_event.set()
 
-            attachment_data: dict[str, object] = {}
-            if reply_message_pk is not None:
-                try:
-                    from ..domain.blob_store import (
-                        DEFAULT_CHUNK_SIZE,
-                        blob_id_for_file,
-                        chunk_count_for_size,
-                    )
-                    from ..domain.data_store import data_dir
-                    from ..domain.media_store import save_media_file
-                    from ..domain.message_attachments import attachment_ref, insert_attachment
-
-                    ext = _audio_extension_for_media_type(result.mime_type)
-                    media_path = save_media_file(
-                        self._ctx.workspace_path,
-                        channel_id,
-                        reply_message_pk,
-                        result.audio_bytes,
-                        ext,
-                        slot_index=0,
-                    )
-                    abs_path = data_dir(self._ctx.workspace_path) / media_path
-                    blob_id = blob_id_for_file(abs_path)
-                    size = abs_path.stat().st_size
-                    ref = attachment_ref(text_reply.routing.id, 0)
-                    insert_attachment(
-                        self._ctx.workspace_path,
-                        message_pk=reply_message_pk,
-                        slot_index=0,
-                        content_type="audio",
-                        blob_id=blob_id,
-                        media_type=result.mime_type,
-                        size=size,
-                        media_path=media_path,
-                        filename=abs_path.name,
-                        duration_ms=result.duration_ms,
-                        metadata={
-                            "source": "character_tts",
-                            "reply_to_message_id": inbound.routing.id,
-                            "model": result.model,
-                            "voice": result.voice,
-                        },
-                    )
-                    attachment_data = {
-                        "blob_id": blob_id,
-                        "ref": ref,
-                        "size": size,
-                        "chunk_size": DEFAULT_CHUNK_SIZE,
-                        "chunk_count": chunk_count_for_size(size, DEFAULT_CHUNK_SIZE),
-                    }
-                    log.info(
-                        f"{LOG_OUT} TTS attachment stored — {peer} · audio",
-                        blob_id=blob_id,
-                        size=size,
-                        duration_ms=result.duration_ms,
-                        model=result.model,
-                        voice=result.voice,
-                        ref_id=text_reply.routing.id,
-                    )
-                except Exception as exc:
-                    log.error(
-                        f"❌ TTS attachment skipped — {peer} · persistence_failed",
-                        error=str(exc),
-                        reason="persistence_failed",
-                        ref_id=text_reply.routing.id,
-                        exc_info=True,
-                    )
-            else:
-                log.warning(
-                    f"⚠️ TTS attachment skipped — {peer} · reply_not_persisted",
-                    reason="reply_not_persisted",
-                    ref_id=text_reply.routing.id,
-                )
-
-            audio_b64 = base64.b64encode(result.audio_bytes).decode()
-            _voiced_meta = dict(inbound.routing.metadata or {})
-            _voiced_meta[METADATA_LOG_REPLY_TO_MSG_ID] = inbound.routing.id
-            # Same anchoring convention as `_make_reply`: prefer the user's utterance snippet.
-            _user_pv_voice = unified_message_text_preview(inbound)
-            _voiced_meta[METADATA_LOG_TEXT_PREVIEW] = (
-                _user_pv_voice if _user_pv_voice else log_preview_snippet(text)
-            )
-            _voiced_meta[METADATA_LOG_TRAFFIC_CLASS] = TRAFFIC_CLASS_OUTBOUND_LIFECYCLE
-            _voiced_meta[METADATA_LOG_TRAFFIC_SUBCLASS] = EVENT_TYPE_MESSAGE_VOICED
-            # Same broadcast rationale as `_make_reply`: every paired device of
-            # the user gets the voiced event so playback state stays consistent.
-            voiced_event = UnifiedMessage(
-                message_type=MESSAGE_TYPE_EVENT,
-                routing=MessageRouting(
-                    channel=inbound.routing.channel,
-                    direction="outbound",
-                    sender_id="server",
-                    metadata=_voiced_meta,
-                ),
-                event=EventPayload(
-                    type=EVENT_TYPE_MESSAGE_VOICED,
-                    ref_id=text_reply.routing.id,
-                    data={
-                        "audio": audio_b64,
-                        "mime_type": result.mime_type,
-                        "duration_ms": result.duration_ms,
-                        **attachment_data,
-                    },
-                ),
-            )
-            await self._comm.enqueue_outbound(voiced_event)
-            log.info(
-                f"{LOG_OUT} Voiced event enqueued — {peer} · event:{EVENT_TYPE_MESSAGE_VOICED}",
-                duration_ms=result.duration_ms,
-                mime_type=result.mime_type,
-                audio_bytes=len(result.audio_bytes),
-                model=result.model,
-                voice=result.voice,
-                ref_id=text_reply.routing.id,
-            )
-        except Exception as exc:
-            # Graceful degradation: text was already delivered, just log.
-            # ``reason=synthesis_failed`` matches the §11 logging table so
-            # downstream filters can group all TTS-failure events.
-            peer = comm_peer_label(inbound, self._ctx)
-            log.error(
-                f"⚠️ TTS attachment skipped — {peer} · synthesis_failed",
-                error=str(exc),
-                reason="synthesis_failed",
-                ref_id=text_reply.routing.id,
-                exc_info=True,
-            )
-
-    async def _process(self, msg: UnifiedMessage) -> None:
+    async def _handle_inner(
+        self,
+        msg: UnifiedMessage,
+        *,
+        persisted_event: asyncio.Event | None,
+    ) -> None:
         from ..domain.character import effective_character_system_prompt
-        from ..domain.preferences import load_preferences, resolve_character_llm, resolve_llm
+        from ..domain.preferences import (
+            load_preferences,
+            resolve_character_llm,
+            resolve_llm,
+        )
 
         peer = comm_peer_label(msg, self._ctx)
         thread_id, channel_id, character_id = self._resolve_thread_character(msg)
-        config = {"configurable": {"thread_id": thread_id}}
         prefs = load_preferences(self._ctx.workspace_path)
         voice_input_allowed = bool(
             prefs.media.input.voice
@@ -494,59 +216,11 @@ class AgentManager:
                 prefs,
                 self._ctx.workspace_path,
                 "stt",
-                credential_store=self._credential_store,
+                credential_store=self._credentials,
             )
             is not None
         )
-
-        if any(item.content_type == "audio" for item in msg.content) and not voice_input_allowed:
-            # Policy wins over device intent: do not transcribe audio when voice input is disabled.
-            text_items = [item for item in msg.content if item.content_type == "text" and item.body]
-            if not text_items:
-                await self._send_voice_input_disabled_reply(msg, thread_id=thread_id)
-                return
-            log.warning(
-                f"⚠️ Audio ignored by policy — {peer} · {comm_kind(msg)}",
-                reason="policy_disabled",
-                **comm_extras(msg, thread_id=thread_id),
-            )
-
-        # Build agent input from all content items first (avoid compiling graphs for empty input).
-        parts: list[str] = []
-        for item in msg.content:
-            if item.content_type == "text":
-                if item.body:
-                    parts.append(item.body)
-            elif "description" in item.metadata:
-                desc = item.metadata["description"]
-                if item.content_type == "audio":
-                    parts.append(desc)
-                else:
-                    parts.append(f"[{item.content_type}]: {desc}")
-            else:
-                log.warning(
-                    f"⚠️ Skipping content item — {peer} · {item.content_type}",
-                    adapter_error=item.metadata.get("adapter_error"),
-                    msg_id=msg.routing.id,
-                )
-
-        text_body = "\n".join(parts)
-
-        if not text_body:
-            adapter_errors = [
-                i.metadata["adapter_error"]
-                for i in msg.content
-                if "adapter_error" in i.metadata
-            ]
-            log.warning(
-                f"{LOG_IN} No usable input — {peer} · {comm_kind(msg)}",
-                **comm_extras(
-                    msg,
-                    content_types=[i.content_type for i in msg.content],
-                    adapter_errors=adapter_errors or None,
-                ),
-            )
-            return
+        request_voice_reply = routing_requests_voice_reply(msg.routing.metadata)
 
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
@@ -554,303 +228,219 @@ class AgentManager:
             ch.llm_models,
             prefs,
             self._ctx.workspace_path,
-            credential_store=self._credential_store,
+            credential_store=self._credentials,
         )
         if llm_entry is None:
-            reply = _make_reply(
-                msg,
-                "The agent is not available — no chat LLM is configured. "
-                "Please register an LLM in preferences.json.",
-            )
-            await self._comm.enqueue_outbound(reply)
-            log.info(
-                f"{LOG_OUT} Fallback reply enqueued — {peer} · {comm_kind(msg)}",
-                **comm_extras(msg, reason="no_chat_llm"),
-            )
+            await self._send_no_llm_reply(msg)
+            if persisted_event is not None:
+                persisted_event.set()
             return
 
         try:
-            agent = self._get_or_create_agent(llm_entry, system_prompt)
+            compiled = self._get_or_compile(llm_entry, system_prompt)
         except Exception as exc:
             log.error(
-                f"❌ Agent build failed for message — {peer} · {comm_kind(msg)}",
+                f"❌ Agent build failed — {peer} · {comm_kind(msg)}",
                 error=str(exc),
                 **comm_extras(msg, character_id=character_id, model_id=llm_entry.model_id),
                 exc_info=True,
             )
-            reply = _make_reply(
-                msg,
-                "The assistant could not load its model for this conversation. "
-                "Check workspace LLM configuration and try again.",
-            )
-            await self._comm.enqueue_outbound(reply)
+            await self._send_build_failed_reply(msg)
+            if persisted_event is not None:
+                persisted_event.set()
             return
 
-        vr_on = routing_requests_voice_reply(msg.routing.metadata)
-        vr_suffix = " · voice_reply=yes" if vr_on else " · voice_reply=no"
         log.info(
-            f"{LOG_IN} Agent processing — {peer} · {comm_kind(msg)}{vr_suffix}",
+            f"{LOG_IN} graph run — {peer} · {comm_kind(msg)} · voice_reply={'yes' if request_voice_reply else 'no'}",
             **comm_extras(
                 msg,
                 thread_id=thread_id,
                 character_id=character_id,
                 model_id=llm_entry.model_id,
-                text_preview=text_body[:200],
-                body_length=len(text_body),
-                voice_reply_requested=vr_on,
             ),
         )
-        try:
-            agent_input = {"messages": [{"role": "user", "content": text_body}]}
 
-            # Log the full conversation state the LLM will see (checkpoint + new message).
-            state = await agent.aget_state(config)
-            history = state.values.get("messages", []) if state.values else []
-            log.fineinfo(
-                f"{LOG_IN} Agent invocation context — {peer} · {comm_kind(msg)}",
-                **comm_extras(
-                    msg,
-                    thread_id=thread_id,
-                    history_len=len(history),
-                    history_summary=[
-                        {
-                            "role": getattr(m, "type", "?"),
-                            "len": len(m.content) if isinstance(m.content, str) else "tool_calls",
-                            "preview": (
-                                m.content[:80]
-                                if isinstance(m.content, str)
-                                else str(m.content)[:80]
-                            ),
-                        }
-                        for m in history[-10:]  # last 10 messages for brevity
-                    ],
-                    new_input=text_body[:200],
-                ),
+        # Initial state. ``inbound_envelope`` carries bytes (audio body) into
+        # the ingest node; ingest splits them out into per-modality fan-out
+        # inputs and gather clears them so they never persist in checkpoint.
+        initial_state = {
+            "inbound_id": msg.routing.id,
+            "chat_channel_id": channel_id,
+            "thread_id": thread_id,
+            "character_id": character_id,
+            "request_voice_reply": request_voice_reply,
+            "voice_input_allowed": voice_input_allowed,
+            "routing_metadata": dict(msg.routing.metadata or {}),
+            "inbound_envelope": msg.model_dump(mode="json"),
+            "transcripts": [],
+            "visions": [],
+            "errors": [],
+            "messages": [],
+        }
+        config = {"configurable": {"thread_id": thread_id}}
+
+        # Register per-run state slot for the subscriber. ``persisted_event``
+        # is signaled by the subscriber once persist_inbound completes.
+        self._comm.graph_subscriber.begin_run(msg.routing.id)
+        if persisted_event is not None:
+            self._comm.graph_subscriber.attach_persisted_event(
+                msg.routing.id, persisted_event,
             )
 
-            _t0 = time.perf_counter()
-            result = await agent.ainvoke(
-                agent_input,
+        t0 = time.perf_counter()
+        try:
+            async for stream_mode, chunk in compiled.astream(
+                initial_state,
                 config=config,
+                stream_mode=["updates", "custom"],
+            ):
+                if stream_mode == "custom":
+                    event_name = chunk.get("event")
+                    payload = chunk.get("payload") or {}
+                    if isinstance(event_name, str):
+                        await self._comm.graph_subscriber.dispatch(
+                            msg, event_name, payload,
+                        )
+                # ``updates`` chunks are useful for fineinfo only; per-node
+                # human-first lines are emitted by the nodes themselves.
+        finally:
+            self._comm.graph_subscriber.end_run(msg.routing.id)
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            log.fineinfo(
+                f"graph done — {peer} · {comm_kind(msg)} · {elapsed_ms}ms",
+                **comm_extras(msg, thread_id=thread_id, elapsed_ms=elapsed_ms),
             )
-            _elapsed_ms = int((time.perf_counter() - _t0) * 1000)
-            raw_reply_content = result["messages"][-1].content
-            # LangChain can preserve provider-native content blocks; Hiro replies require text.
-            reply_body = _normalize_reply_content(raw_reply_content)
-            if not reply_body:
-                raise ValueError("agent returned empty reply content")
-            log.info(
-                f"✅ Agent reply — {peer} · {comm_kind(msg)}",
-                **comm_extras(
-                    msg,
-                    reply_preview=reply_body[:200],
-                    output_length=len(reply_body),
-                    raw_content_type=_reply_content_type(raw_reply_content),
-                    elapsed_ms=_elapsed_ms,
-                    thread_id=thread_id,
-                ),
-            )
-        except Exception as exc:
-            log.error(
-                f"❌ Agent invocation failed — {peer} · {comm_kind(msg)}",
-                error=str(exc),
-                **comm_extras(msg, thread_id=thread_id),
-                exc_info=True,
-            )
-            reply_body = _FALLBACK_ERROR_BODY
+            if persisted_event is not None and not persisted_event.is_set():
+                # Defensive: never leave a synchronous caller blocked.
+                persisted_event.set()
 
-        try:
-            reply = _make_reply(msg, reply_body)
-        except Exception as exc:
-            log.error(
-                f"❌ Reply construction failed — {peer} · {comm_kind(msg)}",
-                error=str(exc),
-                reply_body_type=type(reply_body).__name__,
-                **comm_extras(msg, thread_id=thread_id),
-                exc_info=True,
-            )
-            raise
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        # Persist the outbound reply to data.db
-        reply_message_pk: int | None = None
-        try:
-            from ..domain.message_store import save_message
-            reply_message_pk = await save_message(
-                self._ctx.workspace_path,
-                external_id=reply.routing.id,
-                channel_id=channel_id,
-                sender_type="agent",
-                sender_id="server",
-                content_type="text",
-                body=reply_body,
-            )
-        except Exception as exc:
-            log.warning(
-                f"⚠️ Reply save failed — {peer}",
-                error=str(exc),
-                in_reply_to=msg.routing.id,
-                thread_id=thread_id,
-            )
-
-        try:
-            await self._comm.enqueue_outbound(reply)
-        except Exception as exc:
-            log.error(
-                f"❌ Reply enqueue failed — {comm_peer_label(reply, self._ctx)} · {comm_kind(reply)}",
-                error=str(exc),
-                **comm_extras(reply, in_reply_to=msg.routing.id, thread_id=thread_id),
-                exc_info=True,
-            )
-            raise
-        log.fineinfo(
-            f"{LOG_OUT} Text reply enqueued — {comm_peer_label(reply, self._ctx)} · {comm_kind(reply)}",
-            **comm_extras(
-                reply,
-                in_reply_to=msg.routing.id,
-                thread_id=thread_id,
-            ),
+    def _compile_key(self, llm_entry, system_prompt: str) -> tuple[Any, ...]:
+        fp = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        return (
+            llm_entry.model_id,
+            round(float(llm_entry.temperature), 6),
+            int(llm_entry.max_tokens),
+            "chat-graph-v1",
+            fp,
         )
 
-        # TTS post-processing: fire-and-forget so it never blocks the next message.
-        # Text reply is already delivered — if TTS fails, the user still has the text.
-        try:
-            voice_requested = routing_requests_voice_reply(msg.routing.metadata)
-            voice_allowed = self._voice_reply_allowed(prefs, ch)
-            if voice_requested and voice_allowed:
-                asyncio.create_task(
-                    self._synthesize_and_send(
-                        msg,
-                        reply,
-                        reply_body,
-                        channel_id=channel_id,
-                        reply_message_pk=reply_message_pk,
-                        character_voice_models=ch.voice_models,
-                        tts_instructions=ch.tts_instructions,
-                        tts_voice_by_provider=dict(ch.tts_voice_by_provider),
-                    ),
-                    name=f"tts-{reply.routing.id}",
-                )
-            elif voice_requested and not voice_allowed:
-                # The device asked for voice, but the channel cannot do it right now.
-                log.warning(
-                    f"⚠️ Voice reply requested but unavailable — {peer} · output.voice=false",
-                    reason="policy_or_character_unavailable",
-                    ref_id=reply.routing.id,
-                    **comm_extras(msg, thread_id=thread_id),
-                )
-        except Exception as exc:
-            log.error(
-                f"❌ TTS scheduling failed — {peer} · text reply already sent",
-                error=str(exc),
-                ref_id=reply.routing.id,
-                **comm_extras(msg, thread_id=thread_id),
-                exc_info=True,
-            )
+    def _get_or_compile(self, llm_entry, system_prompt: str):
+        from ..domain.model_factory import create_chat_model
 
-    def _log_agent_config(self, credential_store=None) -> None:
-        """Log workspace default chat resolution (per-message agent uses character prefs first)."""
+        key = self._compile_key(llm_entry, system_prompt)
+        compiled = self._compiled_cache.get(key)
+        if compiled is not None:
+            self._compiled_cache.move_to_end(key)
+            return compiled
+
+        assert self._graph is not None
+        log.fineinfo(
+            "Building agent — chat · %s",
+            llm_entry.model_id,
+            temperature=llm_entry.temperature,
+            max_tokens=llm_entry.max_tokens,
+        )
+        model = create_chat_model(
+            llm_entry.model_id,
+            workspace_path=self._ctx.workspace_path,
+            temperature=llm_entry.temperature,
+            max_tokens=llm_entry.max_tokens,
+            credential_store=self._credentials,
+        )
+        # Tools are temporarily disabled; matches the prior agent_manager behavior.
+        compiled = self._graph.build(
+            model=model,
+            tools=[],
+            system_prompt=system_prompt,
+        )
+        self._compiled_cache[key] = compiled
+        self._compiled_cache.move_to_end(key)
+        while len(self._compiled_cache) > self._compiled_cache_max:
+            self._compiled_cache.popitem(last=False)
+        return compiled
+
+    def _load_character_for_channel(self, character_id: str):
+        from ..domain.character import default_character_id, load_character_from_disk
+
+        wp = self._ctx.workspace_path
+        cid = (character_id or "").strip() or default_character_id(wp)
+        try:
+            return load_character_from_disk(wp, cid)
+        except FileNotFoundError:
+            fallback = default_character_id(wp)
+            log.warning(
+                "⚠️ Character folder missing — using default character",
+                requested=cid, fallback=fallback,
+            )
+            return load_character_from_disk(wp, fallback)
+
+    def _resolve_thread_character(self, msg: UnifiedMessage) -> tuple[str, int, str]:
+        """Return ``(thread_id, channel_id, character_id)`` for this conversation."""
+        from ..domain.character import default_character_id
+        from ..domain.conversation_channel import resolve_chat_channel_from_metadata
+
+        channel = resolve_chat_channel_from_metadata(
+            self._ctx.workspace_path, msg.routing.metadata,
+        )
+        channel_id = int(channel.id)
+        character_id = (channel.character_id or "").strip() or default_character_id(
+            self._ctx.workspace_path,
+        )
+        return str(channel_id), channel_id, character_id
+
+    async def _send_no_llm_reply(self, msg: UnifiedMessage) -> None:
+        from .graph_event_subscriber import _build_reply_envelope
+
+        reply = _build_reply_envelope(
+            msg,
+            "The agent is not available — no chat LLM is configured. "
+            "Please register an LLM in preferences.json.",
+            reply_id="",
+        )
+        await self._comm.enqueue_outbound(reply)
+        log.info(
+            "⬆️ Fallback reply enqueued — %s · no_chat_llm",
+            comm_peer_label(msg, self._ctx),
+        )
+
+    async def _send_build_failed_reply(self, msg: UnifiedMessage) -> None:
+        from .graph_event_subscriber import _build_reply_envelope
+
+        reply = _build_reply_envelope(
+            msg,
+            "The assistant could not load its model for this conversation. "
+            "Check workspace LLM configuration and try again.",
+            reply_id="",
+        )
+        await self._comm.enqueue_outbound(reply)
+
+    def _log_agent_config(self) -> None:
         try:
             from ..domain.preferences import load_preferences, resolve_llm
 
             prefs = load_preferences(self._ctx.workspace_path)
             llm = resolve_llm(
-                prefs,
-                self._ctx.workspace_path,
-                "chat",
-                credential_store=credential_store,
+                prefs, self._ctx.workspace_path, "chat",
+                credential_store=self._credentials,
             )
             if llm:
                 log.info(
-                    "✅ Workspace chat default — preferences · "
-                    f"{llm.model_id} (characters may override via llm_models)",
-                    temperature=llm.temperature,
-                    max_tokens=llm.max_tokens,
+                    "✅ Workspace chat default — %s (characters may override)",
+                    llm.model_id,
+                    temperature=llm.temperature, max_tokens=llm.max_tokens,
                 )
             else:
                 log.error(
-                    "❌ No chat LLM configured — HiroServer will reply with fallbacks · preferences\n"
-                    "Set llm.default_chat and configure providers (hiro provider add / scan-env)."
+                    "❌ No chat LLM configured — replies will be canned fallbacks",
                 )
         except Exception as exc:
-            log.error(
-                "❌ Failed to load agent config — preferences",
-                error=str(exc),
-                exc_info=True,
-            )
+            log.error("❌ Failed to load agent config", error=str(exc), exc_info=True)
 
-    async def run(self) -> None:
-        """Open the LangGraph checkpointer and drain inbound_queue (agents built per message)."""
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-        from ..domain.credential_store import CredentialStore
-        from ..domain.db import db_path
-        from ..domain.preferences import load_preferences, resolve_llm
-        from ..domain.workspace import workspace_id_for_path
-
-        wid = workspace_id_for_path(self._ctx.workspace_path)
-        credential_store = (
-            CredentialStore(self._ctx.workspace_path, wid) if wid is not None else None
-        )
-        self._credential_store = credential_store
-        self._log_agent_config(credential_store=credential_store)
-        db = str(db_path(self._ctx.workspace_path))
-
-        # AsyncSqliteSaver manages its own checkpoint tables inside workspace.db.
-        # They coexist with the application tables without conflict.
-        async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
-            self._checkpointer = checkpointer
-            self._agent_cache.clear()
-
-            prefs = load_preferences(self._ctx.workspace_path)
-            probe = (
-                resolve_llm(
-                    prefs,
-                    self._ctx.workspace_path,
-                    "chat",
-                    credential_store=credential_store,
-                )
-                if credential_store is not None
-                else None
-            )
-            if probe is None:
-                log.warning(
-                    "⚠️ AgentManager started — workspace · no default chat LLM (per-channel fallback replies only)",
-                    db=db,
-                )
-            else:
-                log.info(
-                    "✅ AgentManager started — workspace · per-channel character agents",
-                    db=db,
-                )
-            while True:
-                msg: UnifiedMessage = await self._comm.inbound_queue.get()
-                try:
-                    # Re-open scope here: the queue hop breaks the asyncio task context
-                    # set by InboundPipeline, so the agent and TTS tasks need their own.
-                    (
-                        _agent_dev,
-                        _agent_msg_id,
-                        _agent_method,
-                        _agent_text_preview,
-                        _agent_traffic_class,
-                        _agent_traffic_subclass,
-                    ) = unified_message_log_scope(msg, direction="inbound")
-                    with log_scope(
-                        device_id=_agent_dev,
-                        msg_id=_agent_msg_id,
-                        method=_agent_method,
-                        text_preview=_agent_text_preview,
-                        traffic_class=_agent_traffic_class,
-                        traffic_subclass=_agent_traffic_subclass,
-                    ):
-                        await self._process(msg)
-                except Exception as exc:
-                    # Keep the worker alive so one malformed provider response cannot block later messages.
-                    log.error(
-                        f"❌ Agent message handling failed — {comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}",
-                        error=str(exc),
-                        **comm_extras(msg),
-                        exc_info=True,
-                    )
-                finally:
-                    self._comm.inbound_queue.task_done()
+# Deliberate use to silence the unused-import lint while keeping a hook for
+# future contextlib-based scoping in ``handle``.
+_ = contextlib  # pragma: no cover
