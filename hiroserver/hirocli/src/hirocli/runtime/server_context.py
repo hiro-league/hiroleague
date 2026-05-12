@@ -19,6 +19,8 @@ from hiro_commons.log import Logger
 
 from hirocli.domain.config import Config, resolve_log_dir
 from hirocli.domain.pairing import get_device_name
+from hirocli.runtime.preference_reactor import PreferenceReactor
+from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 
 log = Logger.get("CTX")
 
@@ -67,6 +69,8 @@ class ServerContext:
     loop: asyncio.AbstractEventLoop = field(init=False)
     log_dir: Path = field(init=False)
     device_names: DeviceNameResolver = field(init=False)
+    preferences: WorkspacePreferencesRuntime = field(init=False)
+    preference_reactor: PreferenceReactor = field(init=False)
 
     # Mutable restart state — set by /_restart endpoint, read by shutdown handler.
     restart_requested: bool = field(default=False, init=False)
@@ -76,3 +80,5 @@ class ServerContext:
         self.loop = asyncio.get_running_loop()
         self.log_dir = resolve_log_dir(self.workspace_path, self.config)
         self.device_names = DeviceNameResolver(self.workspace_path)
+        self.preferences = WorkspacePreferencesRuntime(self.workspace_path)
+        self.preference_reactor = PreferenceReactor(self.workspace_path)

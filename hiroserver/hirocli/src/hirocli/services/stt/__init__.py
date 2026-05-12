@@ -13,6 +13,7 @@ Public API
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hiro_commons.log import Logger
 
@@ -20,6 +21,9 @@ from .gemini_provider import GeminiSTTProvider
 from .openai_provider import OpenAISTTProvider
 from .provider import ModelInfo, STTProvider
 from .service import STTService
+
+if TYPE_CHECKING:
+    from hirocli.domain.preferences import WorkspacePreferences
 
 __all__ = [
     "STTProvider",
@@ -41,7 +45,11 @@ _PROVIDER_MAP: dict[str, type[STTProvider]] = {
 }
 
 
-def create_stt_service(workspace_path: Path) -> STTService:
+def create_stt_service(
+    workspace_path: Path,
+    *,
+    prefs: "WorkspacePreferences | None" = None,
+) -> STTService:
     """Build an STTService from workspace preferences.
 
     Moved here from server_process.py so the STT package owns its own
@@ -52,7 +60,7 @@ def create_stt_service(workspace_path: Path) -> STTService:
     from hirocli.domain.preferences import load_preferences, resolve_llm
     from hirocli.domain.workspace import workspace_id_for_path
 
-    prefs = load_preferences(workspace_path)
+    prefs = prefs or load_preferences(workspace_path)
     wid = workspace_id_for_path(workspace_path)
     store = CredentialStore(workspace_path, wid) if wid is not None else None
     stt_resolved = resolve_llm(prefs, workspace_path, "stt", credential_store=store)

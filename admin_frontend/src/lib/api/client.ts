@@ -13,6 +13,7 @@ const apiBase = `${base}/api`;
 type RequestOptions = {
   method?: string;
   body?: unknown;
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(
@@ -30,11 +31,15 @@ export async function apiRequest<T>(
     headers.set('x-hiro-workspace', selectedWorkspace);
   }
 
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 20000);
+
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method ?? 'GET',
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: controller.signal
+  }).finally(() => window.clearTimeout(timeout));
 
   let payload: ApiResponse<T>;
   try {

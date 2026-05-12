@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -24,15 +24,97 @@ from .events import DomainEvent, DomainEventType, get_domain_event_bus
 logger = logging.getLogger(__name__)
 
 
-def _notify_preferences_saved(workspace_path: Path, prefs: "WorkspacePreferences") -> None:
-    """Publish that ``preferences.json`` was written. ``prefs`` is included for handlers that need it."""
+class PreferenceSection(BaseModel):
+    """First-level preferences section metadata for admin presentation."""
+
+    key: str
+    label: str
+    description: str = ""
+
+
+PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
+    PreferenceSection(
+        key="llm",
+        label="Models",
+        description="Workspace model defaults and per-model tuning.",
+    ),
+    PreferenceSection(
+        key="media",
+        label="Media",
+        description="Workspace input and output modality policy.",
+    ),
+    PreferenceSection(
+        key="memory",
+        label="Agent Memory",
+        description="Short-term conversation memory behavior.",
+    ),
+)
+
+
+def _notify_preferences_saved(
+    workspace_path: Path,
+    prefs: "WorkspacePreferences",
+    *,
+    effective_changes: dict[str, tuple[Any, Any]] | None = None,
+) -> None:
+    """Publish that ``preferences.json`` was written.
+
+    ``effective_changes`` maps leaf dot-paths to ``(old, new)`` tuples for values
+    that actually differed between the previous and new persisted state. Empty
+    dict ⇒ a no-op save (still published so subscribers can observe writes).
+    """
     get_domain_event_bus().publish(
         DomainEvent(
             type=DomainEventType.PREFERENCES_SAVED,
             workspace_path=workspace_path,
-            payload={"prefs": prefs},
+            payload={
+                "prefs": prefs,
+                "effective_changes": dict(effective_changes or {}),
+            },
         )
     )
+
+
+def compute_effective_changes(
+    old: "WorkspacePreferences | None",
+    new: "WorkspacePreferences",
+) -> dict[str, tuple[Any, Any]]:
+    """Deep-diff two preferences objects, return ``{dotted_path: (old, new)}``.
+
+    Walks both ``model_dump(mode="python")`` trees in lockstep. Leaves are any
+    non-dict value (scalars, lists, ``None``); dicts of dicts recurse. When a
+    subtree exists on only one side, every leaf below it is reported with
+    ``None`` on the missing side.
+
+    Used by ``save_preferences`` to publish a precise change set on the domain
+    bus so reactors only fire on real value transitions.
+    """
+    old_data = old.model_dump(mode="python") if old is not None else {}
+    new_data = new.model_dump(mode="python")
+    changes: dict[str, tuple[Any, Any]] = {}
+    _diff_into(changes, "", old_data, new_data)
+    return changes
+
+
+def _diff_into(
+    out: dict[str, tuple[Any, Any]],
+    prefix: str,
+    old: Any,
+    new: Any,
+) -> None:
+    # Recurse whenever either side is a dict so a missing subtree (old=None,
+    # new={...} or vice versa) still resolves to leaf-level (path, old, new)
+    # tuples — reactors target leaves, never whole subtrees.
+    if isinstance(old, dict) or isinstance(new, dict):
+        old_dict = old if isinstance(old, dict) else {}
+        new_dict = new if isinstance(new, dict) else {}
+        keys = set(old_dict.keys()) | set(new_dict.keys())
+        for key in keys:
+            child_prefix = f"{prefix}.{key}" if prefix else str(key)
+            _diff_into(out, child_prefix, old_dict.get(key), new_dict.get(key))
+        return
+    if old != new:
+        out[prefix] = (old, new)
 
 # ---------------------------------------------------------------------------
 # LLM selection (canonical catalog ids: ``openai:gpt-5.4``)
@@ -87,8 +169,13 @@ class MediaPreferences(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+DEFAULT_MEMORY_MAX_MESSAGES = 6
+
+
 class MemoryPreferences(BaseModel):
-    """Conversation memory is trimmed to the latest six messages at runtime."""
+    """Short-term conversation memory settings."""
+
+    max_messages: int = Field(default=DEFAULT_MEMORY_MAX_MESSAGES, ge=1, le=100)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +186,7 @@ class MemoryPreferences(BaseModel):
 class WorkspacePreferences(BaseModel):
     """Root preferences object persisted as preferences.json."""
 
-    version: int = 2
+    version: int = 3
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
@@ -131,12 +218,42 @@ def load_preferences(workspace_path: Path) -> WorkspacePreferences:
     return prefs
 
 
-def save_preferences(workspace_path: Path, prefs: WorkspacePreferences) -> None:
+def save_preferences(
+    workspace_path: Path,
+    prefs: WorkspacePreferences,
+    *,
+    previous: WorkspacePreferences | None = None,
+) -> None:
+    """Persist ``prefs`` and publish ``preferences.saved`` with a precise diff.
+
+    ``previous`` is the in-memory state before this write; callers that already
+    hold it (e.g. ``WorkspacePreferencesRuntime.update_many``) should pass it
+    to skip an extra disk read. When omitted, the existing file is parsed (if
+    present) so the published ``effective_changes`` reflects real value
+    transitions, not just "the file was rewritten".
+    """
     workspace_path.mkdir(parents=True, exist_ok=True)
+
+    if previous is None:
+        # Reading the file directly avoids ``load_preferences``' "write defaults
+        # if missing" side effect, which would recurse through save_preferences.
+        f = preferences_file(workspace_path)
+        if f.exists():
+            try:
+                previous = WorkspacePreferences.model_validate_json(
+                    f.read_text(encoding="utf-8")
+                )
+            except Exception:
+                previous = None
+
     preferences_file(workspace_path).write_text(
         prefs.model_dump_json(indent=2), encoding="utf-8",
     )
-    _notify_preferences_saved(workspace_path, prefs)
+
+    effective_changes = compute_effective_changes(previous, prefs)
+    _notify_preferences_saved(
+        workspace_path, prefs, effective_changes=effective_changes,
+    )
 
 
 # ---------------------------------------------------------------------------

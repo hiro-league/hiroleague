@@ -214,7 +214,7 @@ async def _main(
     from hirocli.runtime.agent_manager import AgentManager
 
     log.info("🕒 Loading Text-to-Speech services")
-    tts_service = create_tts_service(workspace_path)
+    tts_service = create_tts_service(workspace_path, prefs=ctx.preferences.current)
     agent_manager = AgentManager(ctx, comm_manager, tts_service=tts_service)
     # Bind the runner so InboundPipeline can dispatch ``message`` payloads
     # straight into the graph runner without going through a queue.
@@ -257,6 +257,7 @@ async def _main(
         pass
     finally:
         resource_change_broadcaster.close()
+        ctx.preference_reactor.close()
         get_domain_event_bus().detach_loop()
 
     if ctx.restart_requested:

@@ -120,7 +120,10 @@ class AgentManager:
 
         # Build the media services here (formerly in create_adapter_pipeline).
         log.info("🕒 Loading STT service")
-        self._stt = create_stt_service(self._ctx.workspace_path)
+        self._stt = create_stt_service(
+            self._ctx.workspace_path,
+            prefs=self._current_preferences(),
+        )
         log.info("🕒 Loading Vision service")
         self._vision = VisionService(workspace_path=self._ctx.workspace_path)
 
@@ -136,6 +139,15 @@ class AgentManager:
                 tts_service=self._tts,
                 credential_store=self._credentials,
                 checkpointer=checkpointer,
+                preferences=self._ctx.preferences,
+            )
+            # Hot-reload STT when ``llm.default_stt`` actually changes. The graph's
+            # ``stt_node`` reads ``self._stt`` per call, so swapping the attribute
+            # in is enough — no compiled-graph invalidation needed.
+            self._ctx.preference_reactor.on_change(
+                "llm.default_stt",
+                self._reload_stt_on_change,
+                key="agent.stt",
             )
             log.info(
                 "✅ AgentManager started — workspace · graph runner ready",
@@ -202,14 +214,13 @@ class AgentManager:
     ) -> None:
         from ..domain.character import effective_character_system_prompt
         from ..domain.preferences import (
-            load_preferences,
             resolve_character_llm,
             resolve_llm,
         )
 
         peer = comm_peer_label(msg, self._ctx)
         thread_id, channel_id, character_id = self._resolve_thread_character(msg)
-        prefs = load_preferences(self._ctx.workspace_path)
+        prefs = self._current_preferences()
         voice_input_allowed = bool(
             prefs.media.input.voice
             and resolve_llm(
@@ -420,9 +431,9 @@ class AgentManager:
 
     def _log_agent_config(self) -> None:
         try:
-            from ..domain.preferences import load_preferences, resolve_llm
+            from ..domain.preferences import resolve_llm
 
-            prefs = load_preferences(self._ctx.workspace_path)
+            prefs = self._current_preferences()
             llm = resolve_llm(
                 prefs, self._ctx.workspace_path, "chat",
                 credential_store=self._credentials,
@@ -439,6 +450,55 @@ class AgentManager:
                 )
         except Exception as exc:
             log.error("❌ Failed to load agent config", error=str(exc), exc_info=True)
+
+    def _current_preferences(self):
+        prefs_runtime = getattr(self._ctx, "preferences", None)
+        if prefs_runtime is not None:
+            return prefs_runtime.current
+        from ..domain.preferences import load_preferences
+
+        return load_preferences(self._ctx.workspace_path)
+
+    async def _reload_stt_on_change(
+        self,
+        workspace_path,
+        changes: dict[str, tuple[Any, Any]],
+    ) -> None:
+        """Rebuild ``STTService`` after ``llm.default_stt`` changes.
+
+        Called by ``PreferenceReactor`` when an effective change to
+        ``llm.default_stt`` is observed for this workspace. Builds a fresh
+        ``STTService`` and swaps it onto both the manager and the live graph
+        so the next message uses the new model.
+        """
+        from ..services.stt import create_stt_service
+
+        old_value, new_value = changes.get("llm.default_stt", (None, None))
+        try:
+            new_stt = await asyncio.to_thread(
+                create_stt_service,
+                self._ctx.workspace_path,
+                prefs=self._current_preferences(),
+            )
+        except Exception as exc:
+            log.error(
+                "❌ STT reload failed — keeping previous instance",
+                error=str(exc),
+                old=old_value,
+                new=new_value,
+                exc_info=True,
+            )
+            return
+
+        self._stt = new_stt
+        if self._graph is not None:
+            self._graph.set_stt_service(new_stt)
+        log.info(
+            "✅ STT reloaded — preferences",
+            old=old_value,
+            new=new_value,
+            available=new_stt.is_available() if new_stt is not None else False,
+        )
 
 
 # Deliberate use to silence the unused-import lint while keeping a hook for

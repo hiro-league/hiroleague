@@ -14,6 +14,7 @@
     PanelLeftClose,
     PanelLeftOpen,
     Server,
+    Settings2,
     Sun,
     User
   } from '@lucide/svelte';
@@ -56,6 +57,7 @@
     list: List,
     message: MessageSquare,
     server: Server,
+    settings: Settings2,
     user: User
   };
 

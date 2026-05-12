@@ -14,6 +14,7 @@ Public API
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hiro_commons.log import Logger
 
@@ -21,6 +22,9 @@ from .gemini_provider import GeminiTTSProvider
 from .openai_provider import OpenAITTSProvider
 from .provider import TTSModelInfo, TTSProvider, TTSResult
 from .service import TTSService
+
+if TYPE_CHECKING:
+    from hirocli.domain.preferences import WorkspacePreferences
 
 __all__ = [
     "TTSProvider",
@@ -41,7 +45,11 @@ _PROVIDER_MAP: dict[str, type[TTSProvider]] = {
 }
 
 
-def create_tts_service(workspace_path: Path) -> TTSService | None:
+def create_tts_service(
+    workspace_path: Path,
+    *,
+    prefs: "WorkspacePreferences | None" = None,
+) -> TTSService | None:
     """Build a TTSService from workspace credentials and catalog availability.
 
     Resolves the TTS model from ``preferences.llm.default_tts`` through the
@@ -52,7 +60,7 @@ def create_tts_service(workspace_path: Path) -> TTSService | None:
     from hirocli.domain.preferences import load_preferences, resolve_llm
     from hirocli.domain.workspace import workspace_id_for_path
 
-    prefs = load_preferences(workspace_path)
+    prefs = prefs or load_preferences(workspace_path)
 
     wid = workspace_id_for_path(workspace_path)
     store = CredentialStore(workspace_path, wid) if wid is not None else None

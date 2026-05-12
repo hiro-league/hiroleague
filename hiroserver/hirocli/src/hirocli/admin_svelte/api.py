@@ -20,6 +20,7 @@ from hirocli.admin_svelte.routes.events import events_router
 from hirocli.admin_svelte.routes.gateways import gateways_router
 from hirocli.admin_svelte.routes.logs import logs_router
 from hirocli.admin_svelte.routes.metrics import metrics_router
+from hirocli.admin_svelte.routes.preferences import preferences_router
 from hirocli.admin_svelte.routes.providers import providers_router
 from hirocli.admin_svelte.routes.workspaces import workspaces_router
 
@@ -29,6 +30,7 @@ api_router.include_router(gateways_router)
 api_router.include_router(config_router)
 api_router.include_router(catalog_router)
 api_router.include_router(providers_router)
+api_router.include_router(preferences_router)
 api_router.include_router(characters_router)
 api_router.include_router(chat_channels_router)
 api_router.include_router(channels_router)

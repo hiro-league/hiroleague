@@ -37,6 +37,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer, Send, StreamWriter
 
+from ...domain.preferences import DEFAULT_MEMORY_MAX_MESSAGES
 from .events import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
@@ -60,14 +61,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...domain.credential_store import CredentialStore
+    from ...runtime.preferences_runtime import WorkspacePreferencesRuntime
     from ...services.stt import STTService
     from ...services.tts import TTSService
     from ...services.vision_service import VisionService
 
 log = Logger.get("AGENT.GRAPH")
 
-# Memory trim cap; matches the prior trimming graph contract.
-TRIMMED_MESSAGE_LIMIT = 6
+# Compatibility default for callers that have not been wired to runtime prefs.
+TRIMMED_MESSAGE_LIMIT = DEFAULT_MEMORY_MAX_MESSAGES
 
 
 class BaseAgentGraph:
@@ -82,6 +84,7 @@ class BaseAgentGraph:
         tts_service: "TTSService | None",
         credential_store: "CredentialStore | None",
         checkpointer: Checkpointer | None,
+        preferences: "WorkspacePreferencesRuntime | None" = None,
     ) -> None:
         self._workspace_path = workspace_path
         self._stt = stt_service
@@ -89,6 +92,17 @@ class BaseAgentGraph:
         self._tts = tts_service
         self._credentials = credential_store
         self._checkpointer = checkpointer
+        self._preferences = preferences
+
+    # ------------------------------------------------------------------
+    # Live service swaps — used by preference reactions to rebuild media
+    # services without restarting the server. ``stt_node`` reads ``self._stt``
+    # on every call, so updating the attribute is enough; the compiled-graph
+    # cache in AgentManager does not need invalidation.
+    # ------------------------------------------------------------------
+
+    def set_stt_service(self, stt_service: "STTService | None") -> None:
+        self._stt = stt_service
 
     # ------------------------------------------------------------------
     # Override point — subclasses wire the StateGraph here.
@@ -362,12 +376,13 @@ class BaseAgentGraph:
         now expressed as a graph node like everything else.
         """
         messages: list[AnyMessage] = list(state.get("messages", []) or [])
-        if len(messages) <= TRIMMED_MESSAGE_LIMIT:
+        limit = self._memory_max_messages()
+        if len(messages) <= limit:
             return {}
         from langchain_core.messages import RemoveMessage
         from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-        keep = messages[-TRIMMED_MESSAGE_LIMIT:]
+        keep = messages[-limit:]
         log.info(
             "✅ memory_in — trim · before=%d after=%d",
             len(messages), len(keep),
@@ -487,7 +502,7 @@ class BaseAgentGraph:
             return {}
 
         from ...domain.character import load_character_from_disk
-        from ...domain.preferences import load_preferences, resolve_character_voice
+        from ...domain.preferences import resolve_character_voice
 
         try:
             ch = load_character_from_disk(self._workspace_path, state.get("character_id", ""))
@@ -497,7 +512,7 @@ class BaseAgentGraph:
             })
             return {}
 
-        prefs = load_preferences(self._workspace_path)
+        prefs = self._current_preferences()
         resolved = resolve_character_voice(
             ch.voice_models,
             prefs,
@@ -568,6 +583,19 @@ class BaseAgentGraph:
             "audio_b64": audio_b64,
         }
         return {"reply_audio": attachment}
+
+    def _current_preferences(self):
+        if self._preferences is not None:
+            return self._preferences.current
+        from ...domain.preferences import load_preferences
+
+        return load_preferences(self._workspace_path)
+
+    def _memory_max_messages(self) -> int:
+        try:
+            return int(self._current_preferences().memory.max_messages)
+        except Exception:
+            return TRIMMED_MESSAGE_LIMIT
 
 
 # ---------------------------------------------------------------------------

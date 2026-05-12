@@ -13,6 +13,7 @@ export const navItems: NavItem[] = [
   { group: 'Communication', label: 'Channels & Devices', path: '/channels-devices/', icon: 'cpu' },
   { group: 'Communication', label: 'Characters', path: '/characters/', icon: 'user' },
   { group: 'Communication', label: 'Chat channels', path: '/chats/', icon: 'message' },
+  { group: 'Operations', label: 'Preferences', path: '/preferences/', icon: 'settings' },
   { group: 'Operations', label: 'Logs', path: '/logs/', icon: 'list' },
   { group: 'Operations', label: 'Metrics', path: '/metrics/', icon: 'activity' }
 ];

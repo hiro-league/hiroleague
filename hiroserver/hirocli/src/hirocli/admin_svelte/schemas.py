@@ -74,6 +74,10 @@ class ProviderAddApiKeyRequest(BaseModel):
     api_key: str
 
 
+class PreferencesPatchRequest(BaseModel):
+    edits: dict[str, Any]
+
+
 class CharacterSaveRequest(BaseModel):
     character_id: str | None = None
     name: str = ""

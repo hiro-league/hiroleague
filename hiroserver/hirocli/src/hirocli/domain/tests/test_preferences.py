@@ -14,6 +14,7 @@ from hirocli.domain.preferences import (
     MediaPreferences,
     ModalityFlags,
     ModelTuning,
+    PREFERENCE_SECTIONS,
     WorkspacePreferences,
     load_preferences,
     preferences_file,
@@ -102,6 +103,11 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.media.output.voice is False
     assert prefs.media.input.image is False
     assert prefs.media.output.file is False
+    assert prefs.memory.max_messages == 6
+
+
+def test_preference_sections_are_first_level_only() -> None:
+    assert [section.key for section in PREFERENCE_SECTIONS] == ["llm", "media", "memory"]
 
 
 def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None:
@@ -109,8 +115,9 @@ def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None
     assert not preferences_file(ws).exists()
     prefs = load_preferences(ws)
     assert preferences_file(ws).is_file()
-    assert prefs.version == 2
+    assert prefs.version == 3
     assert prefs.media.input.voice is True
+    assert prefs.memory.max_messages == 6
 
 
 def test_resolve_llm_with_default_and_credentials(
