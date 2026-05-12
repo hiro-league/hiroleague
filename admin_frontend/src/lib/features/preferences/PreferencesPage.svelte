@@ -321,12 +321,6 @@
       <Button variant="outline" disabled={busy} onclick={() => void goto(`${base}/active-providers/`)}>
         <KeyRound size={16} /> Active providers
       </Button>
-      <Button variant="outline" disabled={busy} onclick={() => void goto('/catalog/')}>
-        <BookOpen size={16} /> Model catalog
-      </Button>
-      <Button variant="outline" disabled={busy || catalogReloadBusy} onclick={() => void reloadCatalogForPage()}>
-        <RefreshCw size={16} class={catalogReloadBusy ? 'animate-spin' : ''} /> Reload catalog
-      </Button>
       {#if dirty}
         <Button variant="outline" disabled={busy} onclick={() => void resetDraft()}>
           <RotateCcw size={16} /> Reset
@@ -363,7 +357,30 @@
         emptyModelsForProvider="No chat models for this provider."
         onSelect={(id) => setDefaultModel('default_chat', id)}
         onChange={markDirty}
-      />
+      >
+        {#snippet toolbar()}
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            disabled={busy}
+            title="Open Model Catalog (bundled providers and models)"
+            onclick={() => void goto(`${base}/catalog/`)}
+          >
+            <BookOpen size={14} /> Model catalog
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            disabled={busy || catalogReloadBusy}
+            title="Reload bundled catalog.yaml on the server (clears in-memory cache)"
+            onclick={() => void reloadCatalogForPage()}
+          >
+            <RefreshCw size={14} class={catalogReloadBusy ? 'animate-spin' : ''} /> Reload catalog
+          </Button>
+        {/snippet}
+      </SingleModelPicker>
       <SingleModelPicker
         label="Default speech-to-text model"
         hint="Used for voice input transcription when voice input is enabled."
@@ -377,7 +394,30 @@
         emptyModelsForProvider="No speech-to-text models for this provider."
         onSelect={(id) => setDefaultModel('default_stt', id)}
         onChange={markDirty}
-      />
+      >
+        {#snippet toolbar()}
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            disabled={busy}
+            title="Open Model Catalog (bundled providers and models)"
+            onclick={() => void goto(`${base}/catalog/`)}
+          >
+            <BookOpen size={14} /> Model catalog
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            disabled={busy || catalogReloadBusy}
+            title="Reload bundled catalog.yaml on the server (clears in-memory cache)"
+            onclick={() => void reloadCatalogForPage()}
+          >
+            <RefreshCw size={14} class={catalogReloadBusy ? 'animate-spin' : ''} /> Reload catalog
+          </Button>
+        {/snippet}
+      </SingleModelPicker>
       <SingleModelPicker
         label="Default text-to-speech model"
         hint="Used as the voice reply fallback when a character has no available TTS model."

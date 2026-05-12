@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { Check, Plus, Trash2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
@@ -16,7 +17,8 @@
     emptyProviders,
     emptyModelsForProvider,
     onSelect,
-    onChange
+    onChange,
+    toolbar
   }: {
     label: string;
     hint: string;
@@ -30,6 +32,8 @@
     emptyModelsForProvider: string;
     onSelect: (id: string | null) => void;
     onChange?: () => void;
+    /** Optional row (e.g. catalog link + reload) shown under the section title. */
+    toolbar?: Snippet;
   } = $props();
 
   let pickProviderId = $state('');
@@ -85,9 +89,18 @@
 </script>
 
 <section class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
-  <div class="grid gap-1">
-    <h4 class="font-sans text-base font-semibold text-foreground">{label}</h4>
-    <p class="text-sm text-muted-foreground">{hint}</p>
+  <div class="grid gap-2">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div class="grid min-w-0 gap-1">
+        <h4 class="font-sans text-base font-semibold text-foreground">{label}</h4>
+        <p class="text-sm text-muted-foreground">{hint}</p>
+      </div>
+      {#if toolbar}
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {@render toolbar()}
+        </div>
+      {/if}
+    </div>
   </div>
 
   <div class="flex flex-col gap-4 xl:flex-row xl:items-start">
