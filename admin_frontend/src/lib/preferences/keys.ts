@@ -7,6 +7,8 @@ export const PREF_KEYS = {
   chatChannelsActiveTab: 'hiro.admin.chatChannels.activeTab',
   /** "Ask for voice reply" checkbox on Messages tab (local UX preference). */
   chatChannelsVoiceReply: 'hiro.admin.chatChannels.voiceReply',
+  /** Show agent tool stack + token counts on Messages tab (default on). */
+  chatChannelsShowAgentTelemetry: 'hiro.admin.chatChannels.showAgentTelemetry',
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab'
 } as const;

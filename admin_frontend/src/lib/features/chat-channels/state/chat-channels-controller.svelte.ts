@@ -77,6 +77,8 @@ export function createChatChannelsPageController() {
   let pendingPhotoDataUrl = $state<string | null>(null);
   let formBaseline = $state<ChatChannelFormBaseline | null>(null);
   let requestVoiceReplyUi = $state(false);
+  /** Tools + token counters on Messages bubbles; persisted like voice-reply pref. */
+  let showAgentToolsTokensUi = $state(true);
   let draftMessage = $state('');
   let recordingStartedAt = $state<number | null>(null);
   let composingBusy = $state(false);
@@ -115,12 +117,15 @@ export function createChatChannelsPageController() {
       : null
   );
 
+  /** Character browse photo only (no channel thumbnail fallback). */
   const messagesHeaderPhotoSrc = $derived.by(() => {
     const ch = selectedChannel;
     if (!ch) return null;
     const row = characters.find((c) => c.id === ch.character_id);
-    return row?.photo_data_url ?? ch.photo_data_url ?? null;
+    return row?.photo_data_url ?? null;
   });
+
+  const messagesHeaderChannelName = $derived.by(() => selectedChannel?.name ?? null);
 
   const messagesHeaderCharacterName = $derived.by(() => {
     const ch = selectedChannel;
@@ -140,9 +145,12 @@ export function createChatChannelsPageController() {
     return null as string | null;
   });
 
-  const messagesHeaderChannelHint = $derived.by(() =>
-    selectedChannel ? `${selectedChannel.name} · id ${selectedChannel.id}` : ''
-  );
+  const messagesHeaderChannelHint = $derived.by(() => {
+    const ch = selectedChannel;
+    if (!ch) return '';
+    const charPart = messagesHeaderCharacterName ? `${messagesHeaderCharacterName} · ` : '';
+    return `${charPart}${ch.name} · id ${ch.id}`;
+  });
 
   const liveUpdatesEligible = $derived(
     activeTab === 'messages' &&
@@ -815,6 +823,9 @@ export function createChatChannelsPageController() {
       const raw = localStorage.getItem(PREF_KEYS.chatChannelsVoiceReply);
       if (raw === '1') requestVoiceReplyUi = true;
       if (raw === '0') requestVoiceReplyUi = false;
+      const rawTelemetry = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTelemetry);
+      if (rawTelemetry === '0') showAgentToolsTokensUi = false;
+      if (rawTelemetry === '1') showAgentToolsTokensUi = true;
     } catch {
       /* ignore quota / private mode */
     }
@@ -899,6 +910,17 @@ export function createChatChannelsPageController() {
       requestVoiceReplyUi = v;
       try {
         localStorage.setItem(PREF_KEYS.chatChannelsVoiceReply, v ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+    get showAgentToolsTokensUi() {
+      return showAgentToolsTokensUi;
+    },
+    set showAgentToolsTokensUi(v: boolean) {
+      showAgentToolsTokensUi = v;
+      try {
+        localStorage.setItem(PREF_KEYS.chatChannelsShowAgentTelemetry, v ? '1' : '0');
       } catch {
         /* ignore */
       }
@@ -1011,6 +1033,9 @@ export function createChatChannelsPageController() {
     },
     get messagesHeaderChannelHint(): string {
       return messagesHeaderChannelHint;
+    },
+    get messagesHeaderChannelName(): string | null {
+      return messagesHeaderChannelName;
     },
     get messagesHeaderCharacterName(): string | null {
       return messagesHeaderCharacterName;

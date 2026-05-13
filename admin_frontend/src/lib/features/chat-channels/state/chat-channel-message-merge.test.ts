@@ -62,6 +62,62 @@ describe('chat channel message merge', () => {
     expect(merged[0]).toBe(incoming);
   });
 
+  it('keeps agent usage when PK resync omits output_tokens (admin poll merge)', () => {
+    const existing = message({
+      id: 'reply-live',
+      message_pk: 41,
+      sender_type: 'agent',
+      metadata: { agent: { usage_total: { output_tokens: 31 }, status: 'completed' } }
+    });
+    const incoming = message({
+      id: 'reply-live',
+      message_pk: 41,
+      sender_type: 'agent',
+      metadata: {}
+    });
+
+    const merged = mergeChatHistoryMessages([existing], [incoming]);
+
+    expect(
+      (merged[0]?.metadata?.agent as { usage_total?: { output_tokens?: number } })?.usage_total
+        ?.output_tokens
+    ).toBe(31);
+  });
+
+  it('reuses the same row reference when resync strips agent usage but content is unchanged (audio + text)', () => {
+    const existing = message({
+      id: 'reply-audio',
+      message_pk: 41,
+      sender_type: 'agent',
+      content: [
+        { content_type: 'text', body: 'hi' },
+        {
+          content_type: 'audio',
+          body: 'message_attachment:reply-audio:0',
+          metadata: { duration_ms: 1000, media_type: 'audio/mpeg' }
+        }
+      ],
+      metadata: { agent: { usage_total: { output_tokens: 31 } } }
+    });
+    const incoming = message({
+      id: 'reply-audio',
+      message_pk: 41,
+      sender_type: 'agent',
+      content: [
+        { content_type: 'text', body: 'hi' },
+        {
+          content_type: 'audio',
+          body: 'message_attachment:reply-audio:0',
+          metadata: { duration_ms: 1000, media_type: 'audio/mpeg' }
+        }
+      ],
+      metadata: {}
+    });
+
+    const merged = mergeChatHistoryMessages([existing], [incoming]);
+    expect(merged[0]).toBe(existing);
+  });
+
   it('replaces an optimistic row with the real row when external ids match', () => {
     const optimistic = message({
       id: 'same-external-id',

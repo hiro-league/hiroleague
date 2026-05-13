@@ -3,6 +3,8 @@
   import { fly } from 'svelte/transition';
   import {
     ArrowDown,
+    Eye,
+    EyeOff,
     FileX2,
     ImageIcon,
     Mic,
@@ -55,11 +57,13 @@
     agentTyping: boolean;
     agentVoiceGeneratingMessageId: string | null;
     busy: boolean;
-    /** Header thumbnail: character/channel photo or null for placeholder icon. */
+    /** Header thumbnail: character browse photo only (no channel image). */
     headerPhotoSrc: string | null;
-    /** Tooltip strings for avatar and channel select. */
+    /** Tooltip for avatar (character · channel · id). */
     headerChannelHint: string;
-    /** Subtitle next to "Messages" when a channel is selected. */
+    /** Primary header title: selected channel name. */
+    headerChannelName: string | null;
+    /** Subtitle: character label when a channel is selected. */
     headerCharacterLabel: string | null;
     headerDeviceId: string | null;
     hasSelectedChannel: boolean;
@@ -79,6 +83,7 @@
     draftMessage: string;
     voiceReplyCheckboxDisabled: boolean;
     voiceReplyCheckboxHint: string;
+    showAgentToolsTokensUi?: boolean;
   };
 
   let {
@@ -94,6 +99,7 @@
     busy,
     headerPhotoSrc,
     headerChannelHint,
+    headerChannelName,
     headerCharacterLabel,
     headerDeviceId,
     hasSelectedChannel,
@@ -110,6 +116,7 @@
     onFinalizeRecording,
     onDiscardRecording,
     requestVoiceReplyUi = $bindable(),
+    showAgentToolsTokensUi = $bindable(true),
     draftMessage = $bindable(),
     voiceReplyCheckboxDisabled,
     voiceReplyCheckboxHint
@@ -273,7 +280,9 @@
         </div>
       {/if}
       <div class="min-w-0">
-        <h3 class="text-lg font-semibold leading-tight">Messages</h3>
+        <h3 class="truncate text-lg font-semibold leading-tight" title={headerChannelHint}>
+          {headerChannelName ?? 'Messages'}
+        </h3>
         {#if hasSelectedChannel && headerCharacterLabel}
           <p class="mt-0.5 truncate font-sans text-sm leading-tight" title={headerChannelHint}>
             <span class="font-semibold text-foreground">{headerCharacterLabel}</span>
@@ -308,14 +317,36 @@
         onclick={onClearMessages}
         title="Remove all messages in this channel"
       >
-        <FileX2 size={15} /> Clear messages
+        <FileX2 size={15} /> Clear Channel
       </Button>
       <Button variant="outline" onclick={onCycleAudioSpeed} title="Cycle playback speed (applies to all clips)">
         {audioSpeedLabel}
       </Button>
-      <Button variant="outline" onclick={() => onRefresh()}
-        ><RefreshCw size={15} /> Refresh</Button
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={showAgentToolsTokensUi ? 'Hide tools and token stats' : 'Show tools and token stats'}
+        aria-pressed={showAgentToolsTokensUi}
+        title={showAgentToolsTokensUi ? 'Hide tools and token stats' : 'Show tools and token stats'}
+        onclick={() => {
+          showAgentToolsTokensUi = !showAgentToolsTokensUi;
+        }}
       >
+        {#if showAgentToolsTokensUi}
+          <Eye size={15} />
+        {:else}
+          <EyeOff size={15} />
+        {/if}
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label="Refresh messages"
+        title="Refresh messages"
+        onclick={() => onRefresh()}
+      >
+        <RefreshCw size={15} />
+      </Button>
     </div>
   </div>
 
@@ -361,6 +392,8 @@
                   {@const outputTokens = showAgentMeta ? agentOutputTokens(agentMeta) : 0}
                   {@const toolCalls = showAgentMeta ? agentTools(agentMeta) : []}
                   {@const tokenTooltip = usageBreakdownTitle(agentMeta?.usage_total)}
+                  {@const showToolsUi = showAgentToolsTokensUi && toolCalls.length > 0}
+                  {@const showTokensUi = showAgentToolsTokensUi && outputTokens > 0}
                   <div
                     class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}
                     in:fly={{ y: 8, duration: 160 }}
@@ -373,7 +406,7 @@
                           : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
                       )}
                     >
-                      {#if toolCalls.length > 0}
+                      {#if showToolsUi}
                         <AgentToolStack tools={toolCalls} />
                       {/if}
                       {#if textBody}
@@ -401,9 +434,9 @@
                           audioItem={audioItem}
                         />
                       {/if}
-                      {#if outputTokens > 0 || message.created_at}
+                      {#if showTokensUi || message.created_at}
                         <div class="flex min-w-0 items-center justify-between gap-3 pt-0.5">
-                          {#if outputTokens > 0}
+                          {#if showTokensUi}
                             <AgentTokenCounter
                               value={outputTokens}
                               tooltip={tokenTooltip}

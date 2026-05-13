@@ -41,6 +41,60 @@ export function chatHistoryMessagesEqual(
   );
 }
 
+function _agentOutputTok(m: ChatHistoryMessage): number | null {
+  const agent = m.metadata?.agent as { usage_total?: { output_tokens?: number } } | undefined;
+  const v = agent?.usage_total?.output_tokens;
+  return typeof v === 'number' && !Number.isNaN(v) ? v : null;
+}
+
+/** Same identity + content as ``chatHistoryMessagesEqual`` but ignores message-level metadata (agent telemetry lives there). */
+function messageCoreAndContentEqual(a: ChatHistoryMessage, b: ChatHistoryMessage): boolean {
+  return (
+    a.id === b.id &&
+    a.message_pk === b.message_pk &&
+    a.channel_id === b.channel_id &&
+    a.sender_type === b.sender_type &&
+    a.sender_id === b.sender_id &&
+    a.created_at === b.created_at &&
+    a.content.length === b.content.length &&
+    a.content.every((item, index) => contentItemsEqual(item, b.content[index]!))
+  );
+}
+
+/**
+ * Pick which row version to store after a poll/resync. ``_sync_history_by_pks`` can return
+ * the same assistant row without ``metadata.agent.usage_total`` even though the client
+ * already merged a richer snapshot from the tail; blindly taking ``incoming`` would strip
+ * token telemetry until a full reload.
+ *
+ * When resync repeats the same text/audio content but strips agent usage, prefer the existing
+ * object reference so Svelte does not treat the row as new every poll (avoids token/audio UI flicker).
+ */
+function pickMergedChatRow(
+  existing: ChatHistoryMessage | undefined,
+  incoming: ChatHistoryMessage
+): ChatHistoryMessage {
+  if (!existing) return incoming;
+  if (chatHistoryMessagesEqual(existing, incoming)) return existing;
+
+  const te = _agentOutputTok(existing);
+  const ti = _agentOutputTok(incoming);
+  if (ti !== null && (te === null || ti >= te)) {
+    return incoming;
+  }
+  const agent = existing.metadata?.agent;
+  if (te !== null && ti === null && agent !== undefined && typeof agent === 'object') {
+    if (messageCoreAndContentEqual(existing, incoming)) {
+      return existing;
+    }
+    return {
+      ...incoming,
+      metadata: { ...(incoming.metadata ?? {}), agent }
+    };
+  }
+  return incoming;
+}
+
 export function mergeChatHistoryMessages(
   current: ChatHistoryMessage[],
   incoming: ChatHistoryMessage[]
@@ -58,10 +112,8 @@ export function mergeChatHistoryMessages(
       byPk.delete(previousPk);
     }
     const existing = byPk.get(message.message_pk);
-    byPk.set(
-      message.message_pk,
-      existing && chatHistoryMessagesEqual(existing, message) ? existing : message
-    );
+    const chosen = pickMergedChatRow(existing, message);
+    byPk.set(message.message_pk, chosen);
     pkByExternalId.set(message.id, message.message_pk);
   }
   return sortChatHistoryMessages([...byPk.values()]);

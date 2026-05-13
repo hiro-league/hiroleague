@@ -105,6 +105,7 @@
     <ChatChannelsMessagesPanel
       bind:selectedChannelId={ctrl.selectedChannelId}
       bind:requestVoiceReplyUi={ctrl.requestVoiceReplyUi}
+      bind:showAgentToolsTokensUi={ctrl.showAgentToolsTokensUi}
       bind:draftMessage={ctrl.draftMessage}
       channels={ctrl.channels}
       channelsLoading={ctrl.channelsLoading}
@@ -118,6 +119,7 @@
       busy={ctrl.busy}
       headerPhotoSrc={ctrl.messagesHeaderPhotoSrc}
       headerChannelHint={ctrl.messagesHeaderChannelHint}
+      headerChannelName={ctrl.messagesHeaderChannelName}
       headerCharacterLabel={ctrl.messagesHeaderCharacterName}
       headerDeviceId={ctrl.messagesHeaderDeviceId}
       hasSelectedChannel={ctrl.selectedChannelExists}
