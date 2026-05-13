@@ -39,12 +39,15 @@ from hiro_channel_sdk.models import (
     UnifiedMessage,
 )
 from hiro_commons.log import Logger
+from hiro_commons.timestamps import utc_iso, utc_now
 
 from .agent_graph import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
+    GRAPH_LLM_USAGE,
     GRAPH_REPLY_COMPLETED,
     GRAPH_STT_COMPLETED,
+    GRAPH_TOOL_COMPLETED,
     GRAPH_TTS_COMPLETED,
 )
 from .comm_log import LOG_OUT, comm_extras, comm_peer_label
@@ -104,6 +107,8 @@ class GraphEventSubscriber:
                 self._persist_transcript,
                 self._emit_transcribed,
             ],
+            GRAPH_LLM_USAGE: [self._persist_llm_usage],
+            GRAPH_TOOL_COMPLETED: [self._persist_tool_completed],
             GRAPH_REPLY_COMPLETED: [
                 self._persist_reply,
                 self._emit_text_reply,
@@ -160,6 +165,41 @@ class GraphEventSubscriber:
     # Handlers — keep tight, push complex work into domain modules.
     # ------------------------------------------------------------------
 
+    def _agent_meta(self, inbound_id: str) -> dict[str, Any]:
+        run = self._run_state.setdefault(inbound_id, {})
+        agent = run.get("agent_meta")
+        if not isinstance(agent, dict):
+            agent = {
+                "status": "processing",
+                "llm_calls": [],
+                "usage_total": {},
+                "tools": [],
+            }
+            run["agent_meta"] = agent
+        return agent
+
+    async def _patch_agent_metadata(self, inbound_id: str) -> None:
+        run = self._run_state.get(inbound_id, {})
+        agent = run.get("agent_meta")
+        if not isinstance(agent, dict):
+            return
+        try:
+            from ..domain.message_store import patch_message_metadata
+
+            for key in ("inbound_msg_pk", "reply_pk"):
+                msg_pk = run.get(key)
+                if isinstance(msg_pk, int):
+                    await patch_message_metadata(
+                        self._ctx.workspace_path,
+                        msg_pk,
+                        {"agent": agent},
+                    )
+        except Exception as exc:
+            log.warning(
+                "âš ï¸ agent metadata patch failed (non-fatal)",
+                error=str(exc),
+            )
+
     async def _persist_inbound(
         self,
         inbound: UnifiedMessage,
@@ -180,12 +220,19 @@ class GraphEventSubscriber:
             return
         # Stash row PK + the text portion of the body so the STT subscriber
         # can backfill the transcript without losing any user-typed text.
-        run = self._run_state.setdefault(payload.get("inbound_id", ""), {})
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        run = self._run_state.setdefault(inbound_id, {})
         run["inbound_msg_pk"] = int(inbound_pk)
         run["inbound_text_body"] = "\n".join(
             item.body for item in inbound.content
             if item.content_type == CONTENT_TYPE_TEXT and item.body
         )
+        agent = self._agent_meta(inbound_id)
+        agent["status"] = "processing"
+        agent["character_id"] = str(payload.get("character_id") or "")
+        agent["model_id"] = str(payload.get("model_id") or "")
+        agent.setdefault("started_at", utc_iso(utc_now()))
+        await self._patch_agent_metadata(inbound_id)
         # Mark persistence done so synchronous senders (message_send tool)
         # can release as soon as the row is in the DB.
         evt: asyncio.Event | None = run.get("persisted")
@@ -287,6 +334,74 @@ class GraphEventSubscriber:
             **comm_extras(event, ref_msg_id=inbound.routing.id),
         )
 
+    async def _persist_llm_usage(
+        self,
+        inbound: UnifiedMessage,
+        payload: dict[str, Any],
+        emit: EmitOutbound,
+    ) -> None:
+        """Append one LLM usage snapshot to the run's compact metadata."""
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        agent = self._agent_meta(inbound_id)
+        calls = agent.setdefault("llm_calls", [])
+        if not isinstance(calls, list):
+            calls = []
+            agent["llm_calls"] = calls
+
+        entry: dict[str, Any] = {
+            "index": len(calls) + 1,
+            "stage": "call_model",
+            "model_id": str(payload.get("model_id") or agent.get("model_id") or ""),
+            "usage_available": bool(payload.get("usage_available")),
+        }
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+            "reasoning_tokens",
+            "estimated_input_tokens",
+        ):
+            value = payload.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                entry[key] = value
+        calls.append(entry)
+        agent["usage_total"] = _usage_totals(calls)
+        await self._patch_agent_metadata(inbound_id)
+
+    async def _persist_tool_completed(
+        self,
+        inbound: UnifiedMessage,
+        payload: dict[str, Any],
+        emit: EmitOutbound,
+    ) -> None:
+        """Append or update one compact tool-call record."""
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        agent = self._agent_meta(inbound_id)
+        tools = agent.setdefault("tools", [])
+        if not isinstance(tools, list):
+            tools = []
+            agent["tools"] = tools
+
+        tool_call_id = str(payload.get("tool_call_id") or "")
+        entry = {
+            "id": tool_call_id,
+            "name": str(payload.get("tool_name") or ""),
+            "status": str(payload.get("status") or "completed"),
+            "elapsed_ms": int(payload.get("elapsed_ms") or 0),
+        }
+        error = payload.get("error")
+        if isinstance(error, str) and error:
+            entry["error"] = error[:500]
+
+        for idx, existing in enumerate(tools):
+            if isinstance(existing, dict) and existing.get("id") == tool_call_id:
+                tools[idx] = entry
+                break
+        else:
+            tools.append(entry)
+        await self._patch_agent_metadata(inbound_id)
+
     async def _persist_reply(
         self,
         inbound: UnifiedMessage,
@@ -299,6 +414,11 @@ class GraphEventSubscriber:
         chat_channel_id = int(payload.get("chat_channel_id") or 0)
         if not reply_id or not reply_text or not chat_channel_id:
             return
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        agent = self._agent_meta(inbound_id)
+        agent["status"] = "completed"
+        agent["reply_id"] = reply_id
+        agent["completed_at"] = utc_iso(utc_now())
         try:
             from ..domain.message_store import save_message
 
@@ -310,6 +430,7 @@ class GraphEventSubscriber:
                 sender_id="server",
                 content_type="text",
                 body=reply_text,
+                metadata={"agent": agent},
             )
         except Exception as exc:
             log.warning(
@@ -319,7 +440,8 @@ class GraphEventSubscriber:
             )
             return
         # tts subscriber needs reply_pk to attach audio later.
-        self._run_state.setdefault(payload.get("inbound_id", ""), {})["reply_pk"] = reply_pk
+        self._run_state.setdefault(inbound_id, {})["reply_pk"] = reply_pk
+        await self._patch_agent_metadata(inbound_id)
 
     async def _emit_text_reply(
         self,
@@ -547,6 +669,24 @@ def _build_voiced_envelope(
             },
         ),
     )
+
+
+def _usage_totals(calls: list[Any]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for call in calls:
+        if not isinstance(call, dict) or not call.get("usage_available"):
+            continue
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+            "reasoning_tokens",
+        ):
+            value = call.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                totals[key] = totals.get(key, 0) + value
+    return totals
 
 
 # ``contextlib`` import is retained because this module may grow context

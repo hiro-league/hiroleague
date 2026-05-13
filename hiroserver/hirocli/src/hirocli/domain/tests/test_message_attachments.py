@@ -23,7 +23,7 @@ from hirocli.domain.conversation_channel import (
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.domain.files_resolver import resolve_blob_id, resolve_ref
 from hirocli.domain.message_attachments import attachment_ref, list_attachments_for_message
-from hirocli.domain.message_store import persist_inbound, save_message
+from hirocli.domain.message_store import patch_message_metadata, persist_inbound, save_message
 from hirocli.tools.conversation import MessageHistoryTool
 
 
@@ -253,6 +253,45 @@ async def test_message_history_after_filters_by_created_at(tmp_path) -> None:
     )
 
     assert [message["id"] for message in result.messages] == ["new-msg"]
+
+
+@pytest.mark.asyncio
+async def test_message_history_exposes_patched_message_metadata(tmp_path) -> None:
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    channel = create_channel(tmp_path, name="metadata", character_id="hiro", user_id=uid)
+    message_pk = await save_message(
+        tmp_path,
+        external_id="msg-with-agent-meta",
+        channel_id=channel.id,
+        user_id=uid,
+        sender_type="user",
+        sender_id="admin",
+        content_type="text",
+        body="hello",
+        metadata={"source": "admin-ui"},
+    )
+
+    await patch_message_metadata(
+        tmp_path,
+        message_pk,
+        {
+            "agent": {
+                "status": "processing",
+                "llm_calls": [{"index": 1, "usage_available": False}],
+            }
+        },
+    )
+
+    result = MessageHistoryTool().execute(channel.id, workspace_path=tmp_path)
+
+    assert result.messages[0]["metadata"] == {
+        "source": "admin-ui",
+        "agent": {
+            "status": "processing",
+            "llm_calls": [{"index": 1, "usage_available": False}],
+        },
+    }
 
 
 @pytest.mark.asyncio

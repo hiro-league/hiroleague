@@ -19,6 +19,15 @@
   } from '$lib/api/chat-channels';
   import ChatMessageAttachmentAudio from '$lib/features/chat-channels/ChatMessageAttachmentAudio.svelte';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
+  import AgentTokenCounter from '$lib/features/chat-channels/messages/AgentTokenCounter.svelte';
+  import AgentToolStack from '$lib/features/chat-channels/messages/AgentToolStack.svelte';
+  import {
+    agentMetadataByReplyId,
+    agentOutputTokens,
+    agentTools,
+    messageAgentMetadata,
+    usageBreakdownTitle
+  } from '$lib/features/chat-channels/messages/agent-message-meta';
   import InlineDestructiveAlert from '$lib/features/chat-channels/shared/InlineDestructiveAlert.svelte';
   import MutedStatusLine from '$lib/features/chat-channels/shared/MutedStatusLine.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -218,6 +227,28 @@
     draftMessage = text;
     void focusDraftTextarea();
   }
+
+  const inboundAgentMetaByReplyId = $derived.by(() => agentMetadataByReplyId(messages));
+
+  function resolvedAgentMetadata(message: ChatHistoryMessage, isUser: boolean) {
+    return messageAgentMetadata(message) ?? (!isUser ? inboundAgentMetaByReplyId.get(message.id) ?? null : null);
+  }
+
+  function shouldShowAgentTelemetry(
+    message: ChatHistoryMessage,
+    agent: ReturnType<typeof messageAgentMetadata>,
+    isUser: boolean
+  ): boolean {
+    if (!agent || agentOutputTokens(agent) <= 0) return false;
+    if (!isUser) return true;
+    const replyId = agent.reply_id;
+    return !messages.some(
+      (candidate) =>
+        candidate.sender_type !== 'user' &&
+        candidate.id === replyId &&
+        agentOutputTokens(messageAgentMetadata(candidate)) > 0
+    );
+  }
 </script>
 
 <section
@@ -325,6 +356,11 @@
                   {@const isUser = message.sender_type === 'user'}
                   {@const textBody = historyMessageText(message)}
                   {@const audioItem = historyMessageFirstAudio(message)}
+                  {@const agentMeta = resolvedAgentMetadata(message, isUser)}
+                  {@const showAgentMeta = shouldShowAgentTelemetry(message, agentMeta, isUser)}
+                  {@const outputTokens = showAgentMeta ? agentOutputTokens(agentMeta) : 0}
+                  {@const toolCalls = showAgentMeta ? agentTools(agentMeta) : []}
+                  {@const tokenTooltip = usageBreakdownTitle(agentMeta?.usage_total)}
                   <div
                     class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}
                     in:fly={{ y: 8, duration: 160 }}
@@ -337,6 +373,9 @@
                           : 'border border-border bg-secondary text-secondary-foreground dark:border-border dark:bg-secondary/40 dark:text-foreground dark:ring-1 dark:ring-border/80'
                       )}
                     >
+                      {#if toolCalls.length > 0}
+                        <AgentToolStack tools={toolCalls} />
+                      {/if}
                       {#if textBody}
                         <div class="flex min-w-0 items-start gap-2">
                           <p class="min-w-0 whitespace-pre-wrap break-words font-sans text-sm">
@@ -362,16 +401,27 @@
                           audioItem={audioItem}
                         />
                       {/if}
-                      {#if message.created_at}
-                        <div class="flex justify-end pt-0.5">
+                      {#if outputTokens > 0 || message.created_at}
+                        <div class="flex min-w-0 items-center justify-between gap-3 pt-0.5">
+                          {#if outputTokens > 0}
+                            <AgentTokenCounter
+                              value={outputTokens}
+                              tooltip={tokenTooltip}
+                              className={isUser ? 'text-amber-100' : 'text-emerald-700 dark:text-emerald-300'}
+                            />
+                          {:else}
+                            <span></span>
+                          {/if}
+                          {#if message.created_at}
                           <span
                             class={cn(
-                              'tabular-nums font-sans text-[10px] leading-none opacity-40',
+                              'shrink-0 tabular-nums font-sans text-[10px] leading-none opacity-40',
                               isUser && 'opacity-50'
                             )}
                           >
                             {formatChatTimestamp(message.created_at)}
                           </span>
+                          {/if}
                         </div>
                       {/if}
                     </div>

@@ -215,7 +215,12 @@ async def _main(
 
     log.info("🕒 Loading Text-to-Speech services")
     tts_service = create_tts_service(workspace_path, prefs=ctx.preferences.current)
-    agent_manager = AgentManager(ctx, comm_manager, tts_service=tts_service)
+    agent_manager = AgentManager(
+        ctx,
+        comm_manager,
+        tts_service=tts_service,
+        tool_registry=tool_registry,
+    )
     # Bind the runner so InboundPipeline can dispatch ``message`` payloads
     # straight into the graph runner without going through a queue.
     comm_manager.attach_agent_manager(agent_manager)

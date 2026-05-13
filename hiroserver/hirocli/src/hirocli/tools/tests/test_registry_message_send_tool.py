@@ -224,3 +224,11 @@ async def test_message_send_execute_async_requires_exactly_one_body_source(tmp_p
 
     with pytest.raises(ValueError, match="exactly one"):
         await tool.execute_async(ch.id, text="a", audio_base64="eA==")
+
+
+def test_tool_registry_tool_instances_sorted_by_name() -> None:
+    """tool_instances returns tools sorted by name regardless of registration order."""
+    reg = ToolRegistry()
+    reg.register(TracksRuntimeTool())
+    reg.register(EchoTool())
+    assert [t.name for t in reg.tool_instances()] == ["echo_registry_test", "tracks_runtime_registry_test"]

@@ -26,6 +26,30 @@ export type ChatMessageContentItem = {
   metadata?: Record<string, unknown>;
 };
 
+export type AgentUsageTotals = {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cached_input_tokens?: number;
+  reasoning_tokens?: number;
+};
+
+export type AgentToolCall = {
+  id?: string;
+  name?: string;
+  status?: string;
+  elapsed_ms?: number;
+  error?: string;
+};
+
+export type AgentMessageMetadata = {
+  status?: string;
+  reply_id?: string;
+  usage_total?: AgentUsageTotals;
+  llm_calls?: { usage?: AgentUsageTotals; model_id?: string; at?: string }[];
+  tools?: AgentToolCall[];
+};
+
 /** Normalized history row from ``_sync_history`` (admin chat Messages tab). */
 export type ChatHistoryMessage = {
   /** Protocol / external message id (UUID hex, etc.). */
@@ -36,6 +60,7 @@ export type ChatHistoryMessage = {
   sender_id: string;
   created_at: string;
   content: ChatMessageContentItem[];
+  metadata?: Record<string, unknown> & { agent?: AgentMessageMetadata };
 };
 
 export type ChatChannelPayload = {

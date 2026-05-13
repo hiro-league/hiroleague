@@ -215,6 +215,15 @@ async def update_message_body(
     await asyncio.to_thread(_sync_update_body, workspace_path, message_pk, body)
 
 
+async def patch_message_metadata(
+    workspace_path: Path,
+    message_pk: int,
+    patch: dict[str, Any],
+) -> None:
+    """Merge top-level keys into ``messages.metadata`` without touching others."""
+    await asyncio.to_thread(_sync_patch_metadata, workspace_path, message_pk, patch)
+
+
 def _sync_update_body(
     workspace_path: Path,
     message_pk: int,
@@ -225,6 +234,36 @@ def _sync_update_body(
         conn.execute(
             "UPDATE messages SET body = ? WHERE id = ?",
             (body, message_pk),
+        )
+        conn.commit()
+
+
+def _sync_patch_metadata(
+    workspace_path: Path,
+    message_pk: int,
+    patch: dict[str, Any],
+) -> None:
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        row = conn.execute(
+            "SELECT metadata FROM messages WHERE id = ?",
+            (message_pk,),
+        ).fetchone()
+        if row is None:
+            return
+        try:
+            current = json.loads(row[0] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            current = {}
+        if not isinstance(current, dict):
+            current = {}
+        current.update(patch)
+        conn.execute(
+            "UPDATE messages SET metadata = ? WHERE id = ?",
+            (
+                json.dumps(current, ensure_ascii=False, separators=(",", ":")),
+                message_pk,
+            ),
         )
         conn.commit()
 
@@ -432,7 +471,7 @@ def _history_row(
             }
         )
 
-    return {
+    result = {
         "id": message_id,
         # DB PK for admin (e.g. media URLs) — device clients may ignore ``message_pk``.
         "message_pk": int(row["id"]),
@@ -442,6 +481,10 @@ def _history_row(
         "created_at": row["created_at"],
         "content": content,
     }
+    metadata = row.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        result["metadata"] = metadata
+    return result
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

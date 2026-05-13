@@ -12,12 +12,9 @@ only) would subclass ``BaseAgentGraph`` similarly.
 
 from __future__ import annotations
 
-from functools import partial
-
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import ToolNode
 from langgraph.types import RetryPolicy
 
 from .base import BaseAgentGraph
@@ -34,6 +31,7 @@ class ChatAgentGraph(BaseAgentGraph):
         *,
         model: BaseChatModel,
         tools: list,
+        model_id: str,
         system_prompt: str | None,
     ) -> CompiledStateGraph:
         b = self._new_state_graph()
@@ -46,13 +44,18 @@ class ChatAgentGraph(BaseAgentGraph):
         b.add_node("context_build", self.context_build_node)
         b.add_node(
             "call_model",
-            self.make_call_model_node(model=model, tools=tools, system_prompt=system_prompt),
+            self.make_call_model_node(
+                model=model,
+                tools=tools,
+                model_id=model_id,
+                system_prompt=system_prompt,
+            ),
         )
         b.add_node("memory_out", self.memory_out_node)
         b.add_node("tts", self.tts_node, retry=_RETRY_TWICE)
 
         if tools:
-            b.add_node("tools", ToolNode(tools))
+            b.add_node("tools", self.make_tools_node(tools))
 
         # Wiring
         b.add_edge(START, "ingest")

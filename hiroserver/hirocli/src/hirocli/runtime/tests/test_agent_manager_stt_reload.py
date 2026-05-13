@@ -52,6 +52,8 @@ def _make_agent_manager(workspace_path: Path) -> AgentManager:
     mgr = AgentManager.__new__(AgentManager)
     mgr._ctx = ctx
     mgr._comm = None
+    mgr._tool_registry = None
+    mgr._lc_agent_tools = None
     mgr._tts = _tts_double("initial-tts")
     mgr._stt = _stt_double("initial")
     mgr._vision = None

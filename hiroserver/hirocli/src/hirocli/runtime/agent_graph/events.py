@@ -19,6 +19,8 @@ from typing import Any, TypedDict
 GRAPH_INGEST_COMPLETED = "graph.ingest.completed"
 GRAPH_STT_COMPLETED = "graph.stt.completed"
 GRAPH_VISION_COMPLETED = "graph.vision.completed"
+GRAPH_LLM_USAGE = "graph.llm.usage"
+GRAPH_TOOL_COMPLETED = "graph.tool.completed"
 GRAPH_REPLY_COMPLETED = "graph.reply.completed"
 GRAPH_TTS_COMPLETED = "graph.tts.completed"
 GRAPH_ERROR = "graph.error"
@@ -49,6 +51,30 @@ class VisionCompletedPayload(TypedDict):
     chat_channel_id: int
     item_index: int
     description: str
+
+
+class LlmUsagePayload(TypedDict, total=False):
+    inbound_id: str
+    chat_channel_id: int
+    model_id: str
+    call_index: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cached_input_tokens: int
+    reasoning_tokens: int
+    estimated_input_tokens: int
+    usage_available: bool
+
+
+class ToolCompletedPayload(TypedDict):
+    inbound_id: str
+    chat_channel_id: int
+    tool_call_id: str
+    tool_name: str
+    status: str
+    elapsed_ms: int
+    error: str | None
 
 
 class ReplyCompletedPayload(TypedDict):

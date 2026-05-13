@@ -19,6 +19,7 @@ descriptions are merged back through reducers.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -31,7 +32,13 @@ from hiro_channel_sdk.constants import (
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -41,8 +48,10 @@ from ...domain.preferences import DEFAULT_MEMORY_MAX_MESSAGES
 from .events import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
+    GRAPH_LLM_USAGE,
     GRAPH_REPLY_COMPLETED,
     GRAPH_STT_COMPLETED,
+    GRAPH_TOOL_COMPLETED,
     GRAPH_TTS_COMPLETED,
     GRAPH_VISION_COMPLETED,
     make_event,
@@ -116,6 +125,7 @@ class BaseAgentGraph:
         *,
         model: BaseChatModel,
         tools: list,
+        model_id: str,
         system_prompt: str | None,
     ) -> CompiledStateGraph:
         raise NotImplementedError
@@ -193,6 +203,8 @@ class BaseAgentGraph:
             {
                 "inbound_id": state.get("inbound_id", ""),
                 "chat_channel_id": state.get("chat_channel_id", 0),
+                "character_id": state.get("character_id", ""),
+                "model_id": state.get("model_id", ""),
                 "audio_count": len(audio_items),
                 "image_count": len(image_items),
                 "text_count": len(text_inputs),
@@ -405,12 +417,13 @@ class BaseAgentGraph:
         *,
         model: BaseChatModel,
         tools: list,
+        model_id: str,
         system_prompt: str | None,
     ):
         """Return a closed-over ``call_model`` node bound to this character/model."""
         bound = model.bind_tools(tools) if tools else model
 
-        async def call_model(state: GraphState) -> dict[str, Any]:
+        async def call_model(state: GraphState, writer: StreamWriter) -> dict[str, Any]:
             messages: list[AnyMessage] = list(state.get("messages", []) or [])
             if not messages:
                 return {}
@@ -419,14 +432,82 @@ class BaseAgentGraph:
                 if system_prompt
                 else messages
             )
+            input_estimate = count_tokens_approximately(inputs)
             log.fineinfo(
                 "call_model — input · count=%d tokens≈%d",
-                len(inputs), count_tokens_approximately(inputs),
+                len(inputs), input_estimate,
             )
             response = await bound.ainvoke(inputs)
+            self._emit(
+                writer,
+                GRAPH_LLM_USAGE,
+                _llm_usage_payload(
+                    response,
+                    inbound_id=state.get("inbound_id", ""),
+                    chat_channel_id=int(state.get("chat_channel_id") or 0),
+                    model_id=model_id or str(state.get("model_id") or ""),
+                    estimated_input_tokens=input_estimate,
+                ),
+            )
             return {"messages": [response]}
 
         return call_model
+
+    def make_tools_node(self, tools: list):
+        """Return a ToolNode-compatible node that emits compact telemetry."""
+        tools_by_name = {getattr(tool, "name", ""): tool for tool in tools}
+
+        async def tools_node(state: GraphState, writer: StreamWriter) -> dict[str, Any]:
+            messages: list[AnyMessage] = list(state.get("messages", []) or [])
+            if not messages:
+                return {}
+            last = messages[-1]
+            if not isinstance(last, AIMessage) or not last.tool_calls:
+                return {}
+
+            out: list[ToolMessage] = []
+            for call in last.tool_calls:
+                tool_call_id = _tool_call_id(call)
+                tool_name = _tool_call_name(call)
+                args = _tool_call_args(call)
+                tool = tools_by_name.get(tool_name)
+                started = time.perf_counter()
+                status = "completed"
+                error: str | None = None
+                try:
+                    if tool is None:
+                        raise KeyError(f"unknown tool: {tool_name}")
+                    result = await tool.ainvoke(args)
+                    content = _tool_result_content(result)
+                except Exception as exc:
+                    status = "failed"
+                    error = str(exc)
+                    content = f"Error: {error}"
+
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                self._emit(
+                    writer,
+                    GRAPH_TOOL_COMPLETED,
+                    {
+                        "inbound_id": state.get("inbound_id", ""),
+                        "chat_channel_id": int(state.get("chat_channel_id") or 0),
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "status": status,
+                        "elapsed_ms": elapsed_ms,
+                        "error": error,
+                    },
+                )
+                out.append(
+                    ToolMessage(
+                        content=content,
+                        tool_call_id=tool_call_id or tool_name,
+                    )
+                )
+
+            return {"messages": out}
+
+        return tools_node
 
     def should_continue(self, state: GraphState) -> str:
         """Tools-loop conditional edge: route to ``tools`` when the LLM asked for one."""
@@ -631,3 +712,77 @@ def _normalize_reply_content(content: Any) -> str:
         if isinstance(cv, str):
             parts.append(cv)
     return "\n".join(p for p in parts if p)
+
+
+def _llm_usage_payload(
+    message: AIMessage,
+    *,
+    inbound_id: str,
+    chat_channel_id: int,
+    model_id: str,
+    estimated_input_tokens: int,
+) -> dict[str, Any]:
+    usage = _usage_from_metadata(message.usage_metadata or {})
+    payload: dict[str, Any] = {
+        "inbound_id": inbound_id,
+        "chat_channel_id": chat_channel_id,
+        "model_id": model_id,
+        "usage_available": bool(usage),
+    }
+    if usage:
+        payload.update(usage)
+    else:
+        payload["estimated_input_tokens"] = estimated_input_tokens
+    return payload
+
+
+def _usage_from_metadata(raw: dict[str, Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        value = _int_token(raw.get(key))
+        if value is not None:
+            out[key] = value
+
+    input_details = raw.get("input_token_details")
+    if isinstance(input_details, dict):
+        cached = _int_token(input_details.get("cache_read"))
+        if cached is not None:
+            out["cached_input_tokens"] = cached
+
+    output_details = raw.get("output_token_details")
+    if isinstance(output_details, dict):
+        reasoning = _int_token(output_details.get("reasoning"))
+        if reasoning is not None:
+            out["reasoning_tokens"] = reasoning
+
+    return out
+
+
+def _int_token(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _tool_call_id(call: dict[str, Any]) -> str:
+    return str(call.get("id") or "")
+
+
+def _tool_call_name(call: dict[str, Any]) -> str:
+    return str(call.get("name") or "")
+
+
+def _tool_call_args(call: dict[str, Any]) -> dict[str, Any]:
+    args = call.get("args") or {}
+    return args if isinstance(args, dict) else {}
+
+
+def _tool_result_content(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except TypeError:
+        return str(result)

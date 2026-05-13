@@ -35,6 +35,7 @@ export function chatHistoryMessagesEqual(
     a.sender_type === b.sender_type &&
     a.sender_id === b.sender_id &&
     a.created_at === b.created_at &&
+    JSON.stringify(a.metadata ?? {}) === JSON.stringify(b.metadata ?? {}) &&
     a.content.length === b.content.length &&
     a.content.every((item, index) => contentItemsEqual(item, b.content[index]!))
   );

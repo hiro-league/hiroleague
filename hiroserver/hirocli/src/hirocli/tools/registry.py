@@ -83,6 +83,10 @@ class ToolRegistry:
         """Return all registered tool names."""
         return list(self._tools.keys())
 
+    def tool_instances(self) -> list[Tool]:
+        """Return registered tools in deterministic name order (for stable agent binding)."""
+        return [self._tools[k] for k in sorted(self._tools.keys())]
+
     def schema(self) -> list[dict[str, Any]]:
         """Return a JSON-serialisable schema for all registered tools."""
         result = []

@@ -49,6 +49,19 @@ describe('chat channel message merge', () => {
     expect(merged[0]).toBe(existing);
   });
 
+  it('replaces the existing object when message metadata changes', () => {
+    const existing = message({
+      metadata: { agent: { status: 'processing', usage_total: { output_tokens: 9 } } }
+    });
+    const incoming = message({
+      metadata: { agent: { status: 'processing', usage_total: { output_tokens: 12 } } }
+    });
+
+    const merged = mergeChatHistoryMessages([existing], [incoming]);
+
+    expect(merged[0]).toBe(incoming);
+  });
+
   it('replaces an optimistic row with the real row when external ids match', () => {
     const optimistic = message({
       id: 'same-external-id',

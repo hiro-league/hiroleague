@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from ..services.tts import TTSService
+    from ..tools.registry import ToolRegistry
     from .communication_manager import CommunicationManager
     from .server_context import ServerContext
 
@@ -81,10 +82,15 @@ class AgentManager:
         ctx: "ServerContext",
         comm_manager: "CommunicationManager",
         tts_service: "TTSService | None" = None,
+        *,
+        tool_registry: "ToolRegistry | None" = None,
     ) -> None:
         self._ctx = ctx
         self._comm = comm_manager
         self._tts = tts_service
+        self._tool_registry = tool_registry
+        # Lazily built from full ToolRegistry via langchain_adapter on first compile.
+        self._lc_agent_tools: list[Any] | None = None
         self._stt = None  # built in serve()
         self._vision = None
         self._credentials = None
@@ -293,6 +299,7 @@ class AgentManager:
             "chat_channel_id": channel_id,
             "thread_id": thread_id,
             "character_id": character_id,
+            "model_id": llm_entry.model_id,
             "request_voice_reply": request_voice_reply,
             "voice_input_allowed": voice_input_allowed,
             "routing_metadata": dict(msg.routing.metadata or {}),
@@ -353,6 +360,15 @@ class AgentManager:
             fp,
         )
 
+    def _langchain_tools_for_agent(self) -> list[Any]:
+        """All Hiro tools from the server registry, as LangChain StructuredTools."""
+        reg = self._tool_registry
+        if reg is None:
+            return []
+        from ..tools.langchain_adapter import to_langchain_list
+
+        return to_langchain_list(reg.tool_instances())
+
     def _get_or_compile(self, llm_entry, system_prompt: str):
         from ..domain.model_factory import create_chat_model
 
@@ -376,10 +392,12 @@ class AgentManager:
             max_tokens=llm_entry.max_tokens,
             credential_store=self._credentials,
         )
-        # Tools are temporarily disabled; matches the prior agent_manager behavior.
+        if self._lc_agent_tools is None:
+            self._lc_agent_tools = self._langchain_tools_for_agent()
         compiled = self._graph.build(
             model=model,
-            tools=[],
+            tools=self._lc_agent_tools,
+            model_id=llm_entry.model_id,
             system_prompt=system_prompt,
         )
         self._compiled_cache[key] = compiled
