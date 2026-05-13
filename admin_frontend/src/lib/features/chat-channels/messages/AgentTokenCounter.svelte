@@ -1,37 +1,60 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { ArrowDown, ArrowUp, Clock3 } from '@lucide/svelte';
   import { formatTokenCount } from './agent-message-meta';
 
   type Props = {
-    value: number;
+    inputValue: number;
+    outputValue: number;
+    costLabel?: string;
+    elapsedLabel?: string;
     tooltip?: string;
     className?: string;
-    /** When false, show the count immediately (agent run finished in metadata). */
+    /** Separates estimated price from token counts (distinct hue on both bubbles). */
+    costClassName?: string;
     animate?: boolean;
   };
 
-  let { value, tooltip = '', className = '', animate = true }: Props = $props();
-  let displayValue = $state(0);
-  let currentTarget = 0;
+  let {
+    inputValue,
+    outputValue,
+    costLabel = '',
+    elapsedLabel = '',
+    tooltip = '',
+    className = '',
+    costClassName = '',
+    animate = true
+  }: Props = $props();
+
+  let displayInput = $state(0);
+  let displayOutput = $state(0);
+  let targetInput = 0;
+  let targetOutput = 0;
 
   $effect(() => {
-    const next = Math.max(0, Math.trunc(value));
+    const nextIn = Math.max(0, Math.trunc(inputValue));
+    const nextOut = Math.max(0, Math.trunc(outputValue));
 
     if (!animate) {
-      currentTarget = next;
-      displayValue = next;
+      targetInput = nextIn;
+      targetOutput = nextOut;
+      displayInput = nextIn;
+      displayOutput = nextOut;
       return;
     }
 
-    if (next === currentTarget) return;
-    currentTarget = next;
+    if (nextIn === targetInput && nextOut === targetOutput) return;
+    targetInput = nextIn;
+    targetOutput = nextOut;
 
     if (typeof window === 'undefined') {
-      displayValue = next;
+      displayInput = nextIn;
+      displayOutput = nextOut;
       return;
     }
 
-    const from = untrack(() => displayValue);
+    const fromIn = untrack(() => displayInput);
+    const fromOut = untrack(() => displayOutput);
     const startedAt = performance.now();
     const durationMs = 420;
     let frame = 0;
@@ -39,7 +62,8 @@
     function step(now: number) {
       const progress = Math.min(1, (now - startedAt) / durationMs);
       const eased = 1 - Math.pow(1 - progress, 3);
-      displayValue = Math.round(from + (next - from) * eased);
+      displayInput = Math.round(fromIn + (nextIn - fromIn) * eased);
+      displayOutput = Math.round(fromOut + (nextOut - fromOut) * eased);
       if (progress < 1) frame = window.requestAnimationFrame(step);
     }
 
@@ -49,9 +73,30 @@
 </script>
 
 <span
-  class={`inline-flex w-fit items-center rounded-sm px-0.5 font-sans text-[10px] font-semibold leading-none tabular-nums ${className}`}
+  class={`inline-flex w-fit max-w-full flex-wrap items-center gap-x-1 gap-y-0.5 rounded-sm px-0.5 font-sans text-[10px] font-semibold leading-none tabular-nums ${className}`}
   title={tooltip}
-  aria-label={`${displayValue} output tokens`}
+  aria-label={`${displayInput} input tokens (incl. cached), ${displayOutput} output tokens${
+    costLabel ? `, estimated cost ${costLabel}` : ''
+  }${elapsedLabel ? `, completed in ${elapsedLabel}` : ''}`}
 >
-  {formatTokenCount(displayValue)} tokens
+  <span class="inline-flex items-center gap-0.5">
+    <ArrowUp size={10} class="shrink-0 opacity-90" aria-hidden="true" />
+    <span> {formatTokenCount(displayInput)} t</span>
+  </span>
+  <span class="opacity-70" aria-hidden="true">&middot;</span>
+  <span class="inline-flex items-center gap-0.5">
+    <ArrowDown size={10} class="shrink-0 opacity-90" aria-hidden="true" />
+    <span> {formatTokenCount(displayOutput)} t</span>
+  </span>
+  {#if costLabel}
+    <span class="opacity-70" aria-hidden="true">&middot;</span>
+    <span class={costClassName || 'opacity-95'}>{costLabel}</span>
+  {/if}
+  {#if elapsedLabel}
+    <span class="opacity-70" aria-hidden="true">&middot;</span>
+    <span class="inline-flex items-center gap-0.5 opacity-95">
+      <Clock3 size={10} class="shrink-0 opacity-90" aria-hidden="true" />
+      <span>{elapsedLabel}</span>
+    </span>
+  {/if}
 </span>

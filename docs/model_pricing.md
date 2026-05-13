@@ -13,7 +13,7 @@
 | `whisper-1`                 |           `$0.006` |                           — |                        — |
 | `gpt-4o-mini-transcribe`    |                  — |                           `$1.25` |                      `$5.00` |
 | `gpt-4o-transcribe`         |                  — |                           `$2.50` |                     `$10.00` |
-| `gpt-4o-transcribe-diarize` |                  — | use model’s current audio input price | use model’s current output price |
+
 
 ## Gemini STT cost table — Gemini 3 / 3.1
 
@@ -21,7 +21,7 @@
 | Models | Inputs + exact path | Formula|
 | ------- | ------------------ | ------- |
 | `gemini-3.1-flash-lite`<br>`gemini-3.1-flash-lite-preview`<br>`gemini-3-flash-preview`<br>`gemini-3.1-pro-preview` | `audio_tokens = usageMetadata.promptTokensDetails[].tokenCount` where `modality = "AUDIO"`<br>`output_tokens = usageMetadata.candidatesTokenCount`<br>`audio_input_price_per_1M`<br>`output_price_per_1M` | `cost = ((audio_tokens × audio_input_price_per_1M) + (output_tokens × output_price_per_1M)) / 1_000_000` |
-| `gemini-3.1-flash-live-preview` | `duration_minutes` or `audio_tokens`<br>`output_tokens` only if output is text<br>`audio_input_price_per_minute` or `audio_input_price_per_1M`<br>`output_price_per_1M` | For audio input by minute:<br>`cost = duration_minutes × audio_input_price_per_minute`<br><br>For token billing:<br>`cost = ((audio_tokens × audio_input_price_per_1M) + (output_tokens × output_price_per_1M)) / 1_000_000` |
+
 
 ## Current price values to plug in — Standard tier
 
@@ -31,7 +31,7 @@
 | `gemini-3.1-flash-lite-preview` |                           `$0.50` |                     `$1.50` |
 | `gemini-3-flash-preview`        |                           `$1.00` |                     `$3.00` |
 | `gemini-3.1-pro-preview`        | not separately listed for audio; use standard input price by context size |               `$12.00` if prompt ≤ 200k tokens; `$18.00` if prompt > 200k tokens |
-| `gemini-3.1-flash-live-preview` |               `$3.00 / 1M audio tokens` **or** `$0.005 / min audio input` | `$4.50 / 1M text output tokens`; audio output is `$12.00 / 1M` or `$0.018 / min` |
+
 
 
 ## OpenAI TTS cost table
@@ -48,4 +48,4 @@
 
 | Models                                           | Inputs + exact path                                                                                                                                                                                                                                         | Formula                                                                                                                  |
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `gemini-3.1-flash-tts-preview`                   | `input_text_tokens = usageMetadata.promptTokensDetails[].tokenCount where modality="TEXT"`<br>`output_audio_tokens = usageMetadata.candidatesTokensDetails[].tokenCount where modality="AUDIO"`<br>`text_input_price_per_1M`<br>`audio_output_price_per_1M` | `cost = ((input_text_tokens × text_input_price_per_1M) + (output_audio_tokens × audio_output_price_per_1M)) / 1_000_000` |
+| `gemini-3.1-flash-tts-preview`     or any other model              | `input_text_tokens = usageMetadata.promptTokensDetails[].tokenCount where modality="TEXT"`<br>`output_audio_tokens = usageMetadata.candidatesTokensDetails[].tokenCount where modality="AUDIO"`<br>`text_input_price_per_1M`<br>`audio_output_price_per_1M` | `cost = ((input_text_tokens × text_input_price_per_1M) + (output_audio_tokens × audio_output_price_per_1M)) / 1_000_000` |

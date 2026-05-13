@@ -88,7 +88,7 @@ class ReplyCompletedPayload(TypedDict):
     request_voice_reply: bool
 
 
-class TtsCompletedPayload(TypedDict):
+class TtsCompletedPayload(TypedDict, total=False):
     inbound_id: str
     chat_channel_id: int
     reply_id: str
@@ -97,6 +97,14 @@ class TtsCompletedPayload(TypedDict):
     size: int
     duration_ms: int | None
     audio_b64: str
+    provider: str
+    model: str
+    voice: str
+    input_characters: int
+    input_text_tokens: int
+    generated_audio_seconds: float
+    output_audio_tokens: int
+    usage_metadata: dict[str, Any]
 
 
 class RunCompletedPayload(TypedDict, total=False):

@@ -129,6 +129,161 @@ def test_validate_model_ids_buckets(tmp_path: Path) -> None:
     assert vr.deprecated[0].replacement_id == "p1:new"
 
 
+def test_estimate_token_usage_cost_uses_catalog_pricing(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "p1",
+                "display_name": "P1",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+            }
+        ],
+        "models": [
+            {
+                "id": "p1:chat",
+                "provider_id": "p1",
+                "display_name": "Chat",
+                "model_kind": "chat",
+                "pricing": {
+                    "input_per_1m_tokens": 2.0,
+                    "cached_input_per_1m_tokens": 0.5,
+                    "output_per_1m_tokens": 10.0,
+                    "pricing_updated_at": "2026-01-01",
+                },
+            },
+        ],
+    }
+    path = tmp_path / "cat.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cat = ModelCatalog.load_from_path(path)
+
+    estimate = cat.estimate_token_usage_cost(
+        model_id="p1:chat",
+        input_tokens=1_000,
+        cached_input_tokens=250,
+        output_tokens=2_000,
+    )
+
+    assert estimate.currency == "USD"
+    assert estimate.pricing_available is True
+    assert estimate.estimated_total == pytest.approx(0.021625)
+    assert estimate.reason is None
+
+
+def test_gemini_3_flash_preview_cost_uses_cached_input_rate() -> None:
+    cat = get_model_catalog()
+
+    first = cat.estimate_token_usage_cost(
+        model_id="google:gemini-3-flash-preview",
+        input_tokens=7_466,
+        cached_input_tokens=5_931,
+        output_tokens=73,
+    )
+    second = cat.estimate_token_usage_cost(
+        model_id="google:gemini-3-flash-preview",
+        input_tokens=7_750,
+        cached_input_tokens=5_931,
+        output_tokens=88,
+    )
+
+    assert first.pricing_available is True
+    assert first.estimated_total == pytest.approx(0.00128305)
+    assert second.estimated_total == pytest.approx(0.00147005)
+    assert first.estimated_total + second.estimated_total == pytest.approx(0.0027531)
+
+
+def test_estimate_tts_usage_cost_openai_character_priced() -> None:
+    cat = get_model_catalog()
+
+    estimate = cat.estimate_tts_usage_cost(
+        provider_id="openai",
+        model_id="tts-1",
+        input_characters=1_000,
+    )
+
+    assert estimate.currency == "USD"
+    assert estimate.pricing_available is True
+    assert estimate.estimated_total == pytest.approx(0.015)
+
+
+def test_estimate_tts_usage_cost_openai_mini_uses_tokens_and_audio_seconds() -> None:
+    cat = get_model_catalog()
+
+    estimate = cat.estimate_tts_usage_cost(
+        provider_id="openai",
+        model_id="gpt-4o-mini-tts",
+        input_text_tokens=250,
+        generated_audio_seconds=48,
+    )
+
+    assert estimate.pricing_available is True
+    assert estimate.estimated_total == pytest.approx(0.01215)
+
+
+def test_estimate_tts_usage_cost_gemini_uses_text_and_audio_tokens() -> None:
+    cat = get_model_catalog()
+
+    estimate = cat.estimate_tts_usage_cost(
+        provider_id="gemini",
+        model_id="gemini-3.1-flash-tts-preview",
+        input_text_tokens=100,
+        output_audio_tokens=200,
+    )
+
+    assert estimate.pricing_available is True
+    assert estimate.estimated_total == pytest.approx(0.0041)
+
+
+def test_estimate_tts_usage_cost_unsupported_provider_is_unpriced() -> None:
+    cat = get_model_catalog()
+
+    estimate = cat.estimate_tts_usage_cost(
+        provider_id="other",
+        model_id="voice",
+        input_characters=1_000,
+    )
+
+    assert estimate.pricing_available is False
+    assert estimate.estimated_total == 0
+    assert estimate.reason == "unsupported_tts_provider"
+
+
+def test_estimate_token_usage_cost_reports_missing_pricing(tmp_path: Path) -> None:
+    doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "p1",
+                "display_name": "P1",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+            }
+        ],
+        "models": [
+            {
+                "id": "p1:chat",
+                "provider_id": "p1",
+                "display_name": "Chat",
+                "model_kind": "chat",
+            },
+        ],
+    }
+    path = tmp_path / "cat.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cat = ModelCatalog.load_from_path(path)
+
+    estimate = cat.estimate_token_usage_cost(model_id="p1:chat", input_tokens=1)
+
+    assert estimate.currency == "USD"
+    assert estimate.estimated_total == 0
+    assert estimate.pricing_available is False
+    assert estimate.reason == "pricing_missing"
+
+
 def test_invalid_provider_reference_rejected(tmp_path: Path) -> None:
     doc = {
         "catalog_version": "1.0.0",

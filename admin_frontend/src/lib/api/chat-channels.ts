@@ -42,19 +42,26 @@ export type AgentToolCall = {
   error?: string;
 };
 
+export type AgentCostSummary = {
+  currency?: string;
+  estimated_total?: number;
+  pricing_available?: boolean;
+  reason?: string;
+};
+
 export type AgentMessageMetadata = {
   status?: string;
   current_step?: string | null;
   last_event?: string;
   reply_id?: string;
-  text_reply_completed_at?: string;
-  completed_at?: string;
+  elapsed_ms?: number;
   error?: {
     message?: string;
     code?: string;
     node?: string;
   };
   usage_total?: AgentUsageTotals;
+  cost?: AgentCostSummary;
   tools?: AgentToolCall[];
 };
 

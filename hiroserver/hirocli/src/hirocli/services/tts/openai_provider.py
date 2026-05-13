@@ -157,4 +157,5 @@ class OpenAITTSProvider(TTSProvider):
             duration_ms=duration_ms,
             model=effective_model,
             voice=effective_voice,
+            provider=self.name,
         )

@@ -14,6 +14,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import numbers
+import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -39,8 +42,6 @@ from hiro_channel_sdk.models import (
     UnifiedMessage,
 )
 from hiro_commons.log import Logger
-from hiro_commons.timestamps import utc_iso, utc_now
-
 from .agent_graph import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
@@ -141,7 +142,8 @@ class GraphEventSubscriber:
 
     def begin_run(self, inbound_id: str) -> None:
         """Allocate per-run state. Called by ``AgentManager.handle``."""
-        self._run_state.setdefault(inbound_id, {})
+        run = self._run_state.setdefault(inbound_id, {})
+        run["started_perf"] = time.perf_counter()
 
     def attach_persisted_event(
         self,
@@ -261,7 +263,6 @@ class GraphEventSubscriber:
         agent["status"] = "processing"
         agent["character_id"] = str(payload.get("character_id") or "")
         agent["model_id"] = str(payload.get("model_id") or "")
-        agent.setdefault("started_at", utc_iso(utc_now()))
         await self._patch_agent_metadata(inbound_id)
         # Mark persistence done so synchronous senders (message_send tool)
         # can release as soon as the row is in the DB.
@@ -390,7 +391,126 @@ class GraphEventSubscriber:
             if isinstance(value, int) and not isinstance(value, bool):
                 existing = totals.get(key)
                 totals[key] = (existing if isinstance(existing, int) else 0) + value
+        self._accumulate_llm_cost(inbound_id, payload)
         await self._patch_agent_metadata(inbound_id)
+
+    def _accumulate_llm_cost(self, inbound_id: str, payload: dict[str, Any]) -> None:
+        """Accumulate catalog-backed LLM cost in run state, not message metadata."""
+        run = self._run_state.setdefault(inbound_id, {})
+        agent = self._agent_meta(inbound_id)
+        model_id = str(payload.get("model_id") or agent.get("model_id") or "")
+        try:
+            from ..domain.model_catalog import get_model_catalog
+
+            estimate = get_model_catalog().estimate_token_usage_cost(
+                model_id=model_id,
+                input_tokens=_int_payload(payload, "input_tokens"),
+                output_tokens=_int_payload(payload, "output_tokens"),
+                cached_input_tokens=_int_payload(payload, "cached_input_tokens"),
+            )
+        except Exception as exc:
+            log.warning(
+                "cost estimate failed (non-fatal)",
+                model_id=model_id,
+                error=str(exc),
+            )
+            estimate = None
+
+        run["cost_seen"] = True
+        if estimate is None:
+            run["cost_pricing_available"] = False
+            run.setdefault("cost_unavailable_reason", "cost_estimate_failed")
+            return
+        run["cost_currency"] = estimate.currency
+        if estimate.pricing_available:
+            current = run.get("cost_estimated_total")
+            run["cost_estimated_total"] = (
+                current if isinstance(current, (int, float)) else 0.0
+            ) + estimate.estimated_total
+            if "cost_pricing_available" not in run:
+                run["cost_pricing_available"] = True
+            return
+        run["cost_pricing_available"] = False
+        if estimate.reason:
+            run.setdefault("cost_unavailable_reason", estimate.reason)
+
+    def _accumulate_tts_cost(self, inbound_id: str, payload: dict[str, Any]) -> None:
+        """Add supported TTS cost to the same per-run estimate as LLM cost."""
+        run = self._run_state.setdefault(inbound_id, {})
+        provider = str(payload.get("provider") or "")
+        model_id = str(payload.get("model") or "")
+        usage_metadata = payload.get("usage_metadata")
+        if not isinstance(usage_metadata, dict):
+            usage_metadata = {}
+
+        payload_input_text_tokens = _int_payload(payload, "input_text_tokens")
+        payload_output_audio_tokens = _int_payload(payload, "output_audio_tokens")
+        input_text_tokens = payload_input_text_tokens
+        output_audio_tokens = payload_output_audio_tokens
+        if provider.lower() in {"gemini", "google"}:
+            input_text_tokens = _modality_token_count(
+                usage_metadata,
+                detail_keys=("promptTokensDetails", "prompt_tokens_details"),
+                modality="TEXT",
+            )
+            output_audio_tokens = _modality_token_count(
+                usage_metadata,
+                detail_keys=("candidatesTokensDetails", "candidates_tokens_details"),
+                modality="AUDIO",
+            )
+            # google-genai payloads sometimes expose *Details as Mapping rows / non-list
+            # sequences; modality extraction can still yield 0 while aggregate counts match.
+            input_text_tokens, output_audio_tokens = (
+                _gemini_tts_usage_aggregate_fallback(
+                    usage_metadata,
+                    input_text_tokens=input_text_tokens,
+                    output_audio_tokens=output_audio_tokens,
+                )
+            )
+
+        generated_audio_seconds = _float_payload(payload, "generated_audio_seconds")
+        if generated_audio_seconds <= 0:
+            duration_ms = _float_payload(payload, "duration_ms")
+            if duration_ms > 0:
+                generated_audio_seconds = duration_ms / 1000
+
+        try:
+            from ..domain.model_catalog import get_model_catalog
+
+            estimate = get_model_catalog().estimate_tts_usage_cost(
+                provider_id=provider,
+                model_id=model_id,
+                input_characters=_int_payload(payload, "input_characters"),
+                input_text_tokens=input_text_tokens,
+                generated_audio_seconds=generated_audio_seconds,
+                output_audio_tokens=output_audio_tokens,
+            )
+        except Exception as exc:
+            log.warning(
+                "tts cost estimate failed (non-fatal)",
+                provider=provider,
+                model_id=model_id,
+                error=str(exc),
+            )
+            return
+
+        if not estimate.pricing_available:
+            log.warning(
+                "tts cost skipped",
+                provider=provider,
+                model_id=model_id,
+                reason=estimate.reason or "pricing_unavailable",
+            )
+            return
+
+        run["cost_seen"] = True
+        run["cost_currency"] = estimate.currency
+        current = run.get("cost_estimated_total")
+        run["cost_estimated_total"] = (
+            current if isinstance(current, (int, float)) else 0.0
+        ) + estimate.estimated_total
+        if "cost_pricing_available" not in run:
+            run["cost_pricing_available"] = True
 
     async def _persist_tool_completed(
         self,
@@ -440,7 +560,6 @@ class GraphEventSubscriber:
         inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
         agent = self._agent_meta(inbound_id)
         agent["reply_id"] = reply_id
-        agent["text_reply_completed_at"] = utc_iso(utc_now())
         try:
             from ..domain.message_store import save_message
 
@@ -476,12 +595,38 @@ class GraphEventSubscriber:
         agent = self._agent_meta(inbound_id)
         agent["status"] = "completed"
         agent["current_step"] = None
-        agent["completed_at"] = utc_iso(utc_now())
+        self._set_elapsed_ms(inbound_id)
         reply_id = str(payload.get("reply_id") or "")
         if reply_id:
             agent["reply_id"] = reply_id
+        self._finalize_cost_metadata(inbound_id)
         agent.pop("error", None)
         await self._patch_agent_metadata(inbound_id)
+
+    def _set_elapsed_ms(self, inbound_id: str) -> None:
+        run = self._run_state.get(inbound_id, {})
+        started = run.get("started_perf")
+        if not isinstance(started, (int, float)):
+            return
+        agent = self._agent_meta(inbound_id)
+        agent["elapsed_ms"] = max(0, int((time.perf_counter() - started) * 1000))
+
+    def _finalize_cost_metadata(self, inbound_id: str) -> None:
+        run = self._run_state.get(inbound_id, {})
+        if not run.get("cost_seen"):
+            return
+        agent = self._agent_meta(inbound_id)
+        total = run.get("cost_estimated_total")
+        estimated_total = float(total if isinstance(total, (int, float)) else 0.0)
+        cost: dict[str, Any] = {
+            "currency": str(run.get("cost_currency") or "USD"),
+            "estimated_total": round(estimated_total, 12),
+            "pricing_available": run.get("cost_pricing_available") is not False,
+        }
+        reason = run.get("cost_unavailable_reason")
+        if cost["pricing_available"] is False and isinstance(reason, str) and reason:
+            cost["reason"] = reason
+        agent["cost"] = cost
 
     async def _persist_run_failed(
         self,
@@ -494,7 +639,7 @@ class GraphEventSubscriber:
         agent = self._agent_meta(inbound_id)
         agent["status"] = "failed"
         agent["current_step"] = None
-        agent["completed_at"] = utc_iso(utc_now())
+        self._set_elapsed_ms(inbound_id)
         message = str(payload.get("message") or "I couldn't finish generating a reply.")
         code = str(payload.get("code") or "reply_generation_failed")
         error: dict[str, Any] = {
@@ -540,7 +685,10 @@ class GraphEventSubscriber:
         if not reply_id or not audio_b64 or size <= 0:
             return
 
-        run = self._run_state.get(payload.get("inbound_id", ""), {})
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        self._accumulate_tts_cost(inbound_id, payload)
+
+        run = self._run_state.get(inbound_id, {})
         reply_pk = run.get("reply_pk")
 
         attachment_data: dict[str, Any] = {}
@@ -733,6 +881,156 @@ def _build_voiced_envelope(
             },
         ),
     )
+
+
+def _int_payload(payload: dict[str, Any], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _float_payload(payload: dict[str, Any], key: str) -> float:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _tts_usage_detail_rows(details: Any) -> list[Any]:
+    """Normalize Gemini usage *Details fields (list, tuple, protobuf repeated, …)."""
+    if details is None:
+        return []
+    if isinstance(details, (str, bytes, dict)):
+        return []
+    if isinstance(details, list):
+        return details
+    if isinstance(details, Sequence):
+        try:
+            return list(details)
+        except Exception:
+            return []
+    try:
+        return list(details)
+    except TypeError:
+        return []
+
+
+def _tts_usage_row_mapping(item: Any) -> Mapping[str, Any]:
+    if isinstance(item, Mapping):
+        return item
+    model_dump = getattr(item, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(by_alias=True, exclude_none=True)
+        if isinstance(dumped, dict):
+            return dumped
+    return {}
+
+
+def _tts_modality_label(raw: Any) -> str:
+    if raw is None:
+        return ""
+    val = getattr(raw, "value", raw)
+    if isinstance(val, bytes):
+        try:
+            val = val.decode("ascii")
+        except Exception:
+            val = str(val)
+    label = str(val).strip().upper()
+    if "." in label:
+        label = label.rsplit(".", 1)[-1]
+    return label
+
+
+def _tts_coerce_positive_int(token_raw: Any) -> int | None:
+    """Parse token counters from protobuf / pydantic / google-genai shapes."""
+    if token_raw is None:
+        return None
+    if isinstance(token_raw, bool):
+        return None
+    if isinstance(token_raw, numbers.Integral):
+        return int(token_raw)
+    if isinstance(token_raw, float) and token_raw.is_integer():
+        return int(token_raw)
+    if isinstance(token_raw, str):
+        try:
+            return int(token_raw.strip())
+        except ValueError:
+            return None
+    nested = getattr(token_raw, "value", None)
+    if nested is not None and nested is not token_raw:
+        return _tts_coerce_positive_int(nested)
+    try:
+        return int(token_raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _gemini_tts_usage_aggregate_fallback(
+    usage_metadata: dict[str, Any],
+    *,
+    input_text_tokens: int,
+    output_audio_tokens: int,
+) -> tuple[int, int]:
+    """When per-modality rows fail to parse, use API aggregate prompt/candidates counts."""
+    text_out = input_text_tokens
+    audio_out = output_audio_tokens
+    if text_out <= 0:
+        v = _tts_coerce_positive_int(usage_metadata.get("promptTokenCount"))
+        if v is None:
+            v = _tts_coerce_positive_int(usage_metadata.get("prompt_token_count"))
+        if v is not None:
+            text_out = v
+    if audio_out <= 0:
+        v = _tts_coerce_positive_int(usage_metadata.get("candidatesTokenCount"))
+        if v is None:
+            v = _tts_coerce_positive_int(usage_metadata.get("candidates_token_count"))
+        if v is not None:
+            audio_out = v
+    return text_out, audio_out
+
+
+def _modality_token_count(
+    usage_metadata: dict[str, Any],
+    *,
+    detail_keys: tuple[str, ...],
+    modality: str,
+) -> int:
+    expected = _tts_modality_label(modality)
+    for key in detail_keys:
+        rows = _tts_usage_detail_rows(usage_metadata.get(key))
+        if not rows:
+            continue
+        total = 0
+        for item in rows:
+            mapping = _tts_usage_row_mapping(item)
+            raw_mod = mapping.get("modality") or mapping.get("modalityType")
+            item_modality = _tts_modality_label(raw_mod)
+            if item_modality != expected:
+                continue
+            raw_tc = mapping.get("tokenCount")
+            if raw_tc is None:
+                raw_tc = mapping.get("token_count")
+            n = _tts_coerce_positive_int(raw_tc)
+            if n is not None:
+                total += n
+        if total > 0:
+            return total
+    return 0
 
 
 # ``contextlib`` import is retained because this module may grow context

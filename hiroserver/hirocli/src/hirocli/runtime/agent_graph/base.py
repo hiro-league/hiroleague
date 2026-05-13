@@ -20,6 +20,7 @@ descriptions are merged back through reducers.
 from __future__ import annotations
 
 import json
+import math
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -646,6 +647,14 @@ class BaseAgentGraph:
 
         audio_b64 = base64.b64encode(result.audio_bytes).decode()
         reply_id = state.get("reply_id") or ""
+        duration_ms = result.duration_ms
+        provider = str(getattr(result, "provider", "") or "")
+        usage_metadata = getattr(result, "usage_metadata", None)
+        if not isinstance(usage_metadata, dict):
+            usage_metadata = {}
+        metered_text = text
+        if provider == "openai" and result.model == "gpt-4o-mini-tts" and resolved.instructions:
+            metered_text = f"{resolved.instructions}\n{text}"
         payload = {
             "inbound_id": inbound_id,
             "chat_channel_id": state.get("chat_channel_id", 0),
@@ -653,10 +662,17 @@ class BaseAgentGraph:
             "blob_id": "",  # filled by subscriber after disk write + hash
             "media_type": result.mime_type,
             "size": len(result.audio_bytes),
-            "duration_ms": result.duration_ms,
+            "duration_ms": duration_ms,
             "audio_b64": audio_b64,
+            "provider": provider,
             "model": result.model,
             "voice": result.voice,
+            "input_characters": len(text),
+            "input_text_tokens": _estimate_text_tokens(metered_text),
+            "generated_audio_seconds": (
+                duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0.0
+            ),
+            "usage_metadata": usage_metadata,
         }
         self._emit(writer, GRAPH_TTS_COMPLETED, payload)
 
@@ -811,7 +827,21 @@ def _int_token(value: Any) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
     return None
+
+
+def _estimate_text_tokens(text: str) -> int:
+    stripped = str(text or "")
+    if not stripped:
+        return 0
+    return max(1, math.ceil(len(stripped) / 4))
 
 
 def _tool_call_id(call: dict[str, Any]) -> str:

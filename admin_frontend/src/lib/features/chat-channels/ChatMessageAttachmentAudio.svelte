@@ -80,11 +80,6 @@
   function onEnded() {
     if (audioEl) releaseChatAudioPlayback(audioEl);
   }
-
-  const durationLabel = $derived.by(() => {
-    const ms = audioItem.metadata?.duration_ms;
-    return typeof ms === 'number' && ms > 0 ? `${Math.round(ms / 1000)}s` : null;
-  });
 </script>
 
 <div class="min-w-0">
@@ -95,22 +90,15 @@
       <Volume2 size={14} aria-hidden="true" /> Loading audio…
     </span>
   {:else}
-    <div class="flex min-w-0 items-center gap-2">
-      <audio
-        class="h-10 min-h-10 min-w-0 max-w-full flex-1 opacity-95"
-        bind:this={audioEl}
-        controls
-        preload="none"
-        src={audioUrl}
-        title="Message audio"
-        onplay={onPlay}
-        onended={onEnded}
-      ></audio>
-      {#if durationLabel}
-        <span class="shrink-0 whitespace-nowrap font-sans tabular-nums text-[11px] leading-none opacity-65">
-          {durationLabel}
-        </span>
-      {/if}
-    </div>
+    <audio
+      class="h-10 min-h-10 min-w-0 max-w-full opacity-95"
+      bind:this={audioEl}
+      controls
+      preload="none"
+      src={audioUrl}
+      title="Message audio"
+      onplay={onPlay}
+      onended={onEnded}
+    ></audio>
   {/if}
 </div>

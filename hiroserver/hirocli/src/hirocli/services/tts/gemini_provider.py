@@ -23,6 +23,7 @@ and lameenc are importable.
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from hiro_commons.log import Logger
 
@@ -73,6 +74,26 @@ def _pcm_to_mp3(pcm_bytes: bytes) -> bytes:
     encoder.set_bit_rate(128)
     encoder.set_quality(2)
     return encoder.encode(pcm_bytes) + encoder.flush()
+
+
+def _usage_metadata_dict(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        data = dump(by_alias=True, exclude_none=True)
+        return data if isinstance(data, dict) else None
+    to_json_dict = getattr(value, "to_json_dict", None)
+    if callable(to_json_dict):
+        data = to_json_dict()
+        return data if isinstance(data, dict) else None
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        data = to_dict()
+        return data if isinstance(data, dict) else None
+    return None
 
 
 class GeminiTTSProvider(TTSProvider):
@@ -150,7 +171,7 @@ class GeminiTTSProvider(TTSProvider):
             wait=wait_exponential(min=1, max=20, multiplier=2),
             stop=stop_after_attempt(4),
         )
-        async def _call() -> bytes:
+        async def _call() -> tuple[bytes, dict[str, Any] | None]:
             response = await client.aio.models.generate_content(
                 model=effective_model,
                 contents=synthesis_text,
@@ -165,10 +186,12 @@ class GeminiTTSProvider(TTSProvider):
                     ),
                 ),
             )
-            return response.candidates[0].content.parts[0].inline_data.data
+            pcm = response.candidates[0].content.parts[0].inline_data.data
+            usage = _usage_metadata_dict(getattr(response, "usage_metadata", None))
+            return pcm, usage
 
         t0 = time.perf_counter()
-        pcm_bytes = await _call()
+        pcm_bytes, usage_metadata = await _call()
         duration_ms = _pcm_duration_ms(pcm_bytes)
 
         # Convert raw PCM to MP3 for universal playback
@@ -191,4 +214,6 @@ class GeminiTTSProvider(TTSProvider):
             duration_ms=duration_ms,
             model=effective_model,
             voice=effective_voice,
+            provider=self.name,
+            usage_metadata=usage_metadata,
         )

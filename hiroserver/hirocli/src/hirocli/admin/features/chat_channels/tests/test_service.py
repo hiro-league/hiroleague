@@ -5,7 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from hirocli.admin.features.chat_channels.service import ChatChannelsService
+import pytest
+
+from hirocli.admin.features.chat_channels.service import (
+    ChatChannelsService,
+    _sync_history_by_pks,
+)
+from hirocli.domain.conversation_channel import create_channel
+from hirocli.domain.data_store import ensure_data_db
+from hirocli.domain.message_store import save_message
 
 
 def test_list_no_workspace() -> None:
@@ -89,3 +97,54 @@ def test_messages_by_pk_uses_scoped_hydrator() -> None:
         {"id": "ext-2", "message_pk": 8, "content": [], "channel_id": 3},
     ]
     by_pks.assert_called_once_with(Path("."), 3, [8])
+
+
+@pytest.mark.asyncio
+async def test_messages_by_pk_hydrator_parses_agent_metadata(tmp_path: Path) -> None:
+    ensure_data_db(tmp_path)
+    channel = create_channel(tmp_path, name="Cost test", character_id="hiro", user_id=1)
+    message_pk = await save_message(
+        tmp_path,
+        external_id="reply-with-cost",
+        channel_id=channel.id,
+        sender_type="agent",
+        sender_id="server",
+        content_type="text",
+        body="hi",
+        metadata={
+            "agent": {
+                "status": "completed",
+                "usage_total": {"output_tokens": 6},
+                "cost": {
+                    "currency": "USD",
+                    "estimated_total": 0.00003675,
+                    "pricing_available": True,
+                },
+            }
+        },
+    )
+
+    rows = _sync_history_by_pks(tmp_path, channel.id, [message_pk])
+
+    assert rows == [
+        {
+            "id": "reply-with-cost",
+            "message_pk": message_pk,
+            "channel_id": channel.id,
+            "sender_type": "agent",
+            "sender_id": "server",
+            "created_at": rows[0]["created_at"],
+            "content": [{"content_type": "text", "body": "hi"}],
+            "metadata": {
+                "agent": {
+                    "status": "completed",
+                    "usage_total": {"output_tokens": 6},
+                    "cost": {
+                        "currency": "USD",
+                        "estimated_total": 0.00003675,
+                        "pricing_available": True,
+                    },
+                }
+            },
+        }
+    ]

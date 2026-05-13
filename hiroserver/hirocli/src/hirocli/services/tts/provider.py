@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,8 @@ class TTSResult:
     duration_ms: int
     model: str
     voice: str
+    provider: str = ""
+    usage_metadata: dict[str, Any] | None = None
 
 
 class TTSProvider(ABC):

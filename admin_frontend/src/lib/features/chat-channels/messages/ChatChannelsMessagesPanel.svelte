@@ -25,11 +25,14 @@
   import AgentToolStack from '$lib/features/chat-channels/messages/AgentToolStack.svelte';
   import {
     agentMetadataByReplyId,
+    agentCostLabel,
+    agentElapsedLabel,
+    agentInputTokensIncludingCached,
     agentOutputTokens,
     agentTokensShouldAnimate,
     agentTools,
     messageAgentMetadata,
-    usageBreakdownTitle
+    telemetryBreakdownTitle
   } from '$lib/features/chat-channels/messages/agent-message-meta';
   import InlineDestructiveAlert from '$lib/features/chat-channels/shared/InlineDestructiveAlert.svelte';
   import MutedStatusLine from '$lib/features/chat-channels/shared/MutedStatusLine.svelte';
@@ -242,19 +245,28 @@
     return messageAgentMetadata(message) ?? (!isUser ? inboundAgentMetaByReplyId.get(message.id) ?? null : null);
   }
 
+  function hasVisibleAgentTelemetry(agent: ReturnType<typeof messageAgentMetadata>): boolean {
+    return Boolean(
+      agent &&
+        (agentOutputTokens(agent) + agentInputTokensIncludingCached(agent) > 0 ||
+          agentCostLabel(agent) ||
+          agentElapsedLabel(agent))
+    );
+  }
+
   function shouldShowAgentTelemetry(
     message: ChatHistoryMessage,
     agent: ReturnType<typeof messageAgentMetadata>,
     isUser: boolean
   ): boolean {
-    if (!agent || agentOutputTokens(agent) <= 0) return false;
+    if (!agent || !hasVisibleAgentTelemetry(agent)) return false;
     if (!isUser) return true;
     const replyId = agent.reply_id;
     return !messages.some(
       (candidate) =>
         candidate.sender_type !== 'user' &&
         candidate.id === replyId &&
-        agentOutputTokens(messageAgentMetadata(candidate)) > 0
+        hasVisibleAgentTelemetry(messageAgentMetadata(candidate))
     );
   }
 </script>
@@ -391,12 +403,17 @@
                   {@const agentMeta = resolvedAgentMetadata(message, isUser)}
                   {@const showAgentMeta = shouldShowAgentTelemetry(message, agentMeta, isUser)}
                   {@const outputTokens = showAgentMeta ? agentOutputTokens(agentMeta) : 0}
+                  {@const inputTokensIncl = showAgentMeta ? agentInputTokensIncludingCached(agentMeta) : 0}
                   {@const toolCalls = showAgentMeta ? agentTools(agentMeta) : []}
                   {@const tokenCountAnimates =
                     showAgentMeta && agentTokensShouldAnimate(agentMeta)}
-                  {@const tokenTooltip = usageBreakdownTitle(agentMeta?.usage_total)}
+                  {@const costLabel = showAgentMeta ? agentCostLabel(agentMeta) : ''}
+                  {@const elapsedLabel = showAgentMeta ? agentElapsedLabel(agentMeta) : ''}
+                  {@const tokenTooltip = telemetryBreakdownTitle(agentMeta?.usage_total)}
                   {@const showToolsUi = showAgentToolsTokensUi && toolCalls.length > 0}
-                  {@const showTokensUi = showAgentToolsTokensUi && outputTokens > 0}
+                  {@const showTokensUi =
+                    showAgentToolsTokensUi &&
+                    (outputTokens > 0 || inputTokensIncl > 0 || costLabel || elapsedLabel)}
                   <div
                     class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}
                     in:fly={{ y: 8, duration: 160 }}
@@ -441,10 +458,18 @@
                         <div class="flex min-w-0 items-center justify-between gap-3 pt-0.5">
                           {#if showTokensUi}
                             <AgentTokenCounter
-                              value={outputTokens}
+                              inputValue={inputTokensIncl}
+                              outputValue={outputTokens}
+                              {costLabel}
+                              {elapsedLabel}
                               animate={tokenCountAnimates}
                               tooltip={tokenTooltip}
                               className={isUser ? 'text-amber-100' : 'text-emerald-700 dark:text-emerald-300'}
+                              costClassName={
+                                isUser
+                                  ? 'font-semibold text-cyan-200'
+                                  : 'font-semibold text-violet-600 dark:text-violet-400'
+                              }
                             />
                           {:else}
                             <span></span>

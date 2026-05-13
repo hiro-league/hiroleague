@@ -223,6 +223,16 @@ class ValidationResult:
     deprecated: list[DeprecatedModelInfo]
 
 
+@dataclass(frozen=True)
+class CostEstimate:
+    """Compact USD cost estimate from bundled catalog pricing."""
+
+    currency: str
+    estimated_total: float
+    pricing_available: bool
+    reason: str | None = None
+
+
 class ModelCatalog:
     """In-memory view of catalog.yaml."""
 
@@ -335,6 +345,204 @@ class ModelCatalog:
             return {}
         return dict(prov.recommended_models)
 
+    def estimate_token_usage_cost(
+        self,
+        *,
+        model_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cached_input_tokens: int = 0,
+    ) -> CostEstimate:
+        """Estimate token cost using this catalog's PricingBlock."""
+        spec = self.get_model(model_id)
+        if spec is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_in_catalog",
+            )
+        pricing = spec.pricing
+        if pricing is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="pricing_missing",
+            )
+
+        input_n = max(0, int(input_tokens))
+        output_n = max(0, int(output_tokens))
+        cached_n = min(max(0, int(cached_input_tokens)), input_n)
+        uncached_input_n = input_n - cached_n
+
+        total = 0.0
+        if input_n > 0:
+            input_rate = pricing.input_per_1m_tokens
+            if input_rate is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="input_pricing_missing",
+                )
+            cached_rate = pricing.cached_input_per_1m_tokens
+            total += uncached_input_n * input_rate / 1_000_000
+            effective_cached_rate = (
+                cached_rate if cached_rate is not None else input_rate
+            )
+            total += cached_n * effective_cached_rate / 1_000_000
+        if output_n > 0:
+            output_rate = pricing.output_per_1m_tokens
+            if output_rate is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="output_pricing_missing",
+                )
+            total += output_n * output_rate / 1_000_000
+
+        return CostEstimate(
+            currency="USD",
+            estimated_total=total,
+            pricing_available=True,
+        )
+
+    def estimate_tts_usage_cost(
+        self,
+        *,
+        provider_id: str,
+        model_id: str,
+        input_characters: int = 0,
+        input_text_tokens: int = 0,
+        generated_audio_seconds: float = 0.0,
+        output_audio_tokens: int = 0,
+    ) -> CostEstimate:
+        """Estimate TTS cost from provider/model-specific metering fields."""
+        normalized_provider = _normalize_tts_provider_id(provider_id)
+        if normalized_provider not in {"openai", "google"}:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="unsupported_tts_provider",
+            )
+
+        canonical_model_id = _canonical_model_id(normalized_provider, model_id)
+        spec = self.get_model(canonical_model_id)
+        if spec is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_in_catalog",
+            )
+        if not spec.supports_kind("tts"):
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_tts",
+            )
+        pricing = spec.pricing
+        if pricing is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="pricing_missing",
+            )
+
+        short_model = canonical_model_id.split(":", 1)[1]
+        if normalized_provider == "openai" and short_model in {"tts-1", "tts-1-hd"}:
+            chars = max(0, int(input_characters))
+            rate_per_char = pricing.per_character
+            if rate_per_char is None and pricing.estimated_usd_per_1k_chars_speech is not None:
+                rate_per_char = pricing.estimated_usd_per_1k_chars_speech / 1_000
+            if rate_per_char is None and pricing.output_per_1m_tokens is not None:
+                rate_per_char = pricing.output_per_1m_tokens / 1_000_000
+            if rate_per_char is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="character_pricing_missing",
+                )
+            return CostEstimate(
+                currency="USD",
+                estimated_total=chars * rate_per_char,
+                pricing_available=True,
+            )
+
+        if normalized_provider == "openai" and short_model == "gpt-4o-mini-tts":
+            text_tokens = max(0, int(input_text_tokens))
+            audio_seconds = max(0.0, float(generated_audio_seconds))
+            if pricing.input_per_1m_tokens is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="input_pricing_missing",
+                )
+            if pricing.output_per_1m_tokens is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="output_pricing_missing",
+                )
+            total = (
+                text_tokens * pricing.input_per_1m_tokens / 1_000_000
+                + audio_seconds * pricing.output_per_1m_tokens / 48_000
+            )
+            return CostEstimate(
+                currency="USD",
+                estimated_total=total,
+                pricing_available=True,
+            )
+
+        if normalized_provider == "google":
+            text_tokens = max(0, int(input_text_tokens))
+            audio_tokens = max(0, int(output_audio_tokens))
+            if text_tokens <= 0 or audio_tokens <= 0:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="tts_usage_metadata_missing",
+                )
+            if pricing.input_per_1m_tokens is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="input_pricing_missing",
+                )
+            if pricing.output_per_1m_tokens is None:
+                return CostEstimate(
+                    currency="USD",
+                    estimated_total=0.0,
+                    pricing_available=False,
+                    reason="output_pricing_missing",
+                )
+            total = (
+                text_tokens * pricing.input_per_1m_tokens
+                + audio_tokens * pricing.output_per_1m_tokens
+            ) / 1_000_000
+            return CostEstimate(
+                currency="USD",
+                estimated_total=total,
+                pricing_available=True,
+            )
+
+        return CostEstimate(
+            currency="USD",
+            estimated_total=0.0,
+            pricing_available=False,
+            reason="unsupported_tts_model",
+        )
+
 
 @lru_cache(maxsize=1)
 def get_model_catalog() -> ModelCatalog:
@@ -375,3 +583,17 @@ def clear_model_catalog_cache() -> None:
     Used by tests, ``reload_model_catalog()``, and admin/CLI reload flows.
     """
     get_model_catalog.cache_clear()
+
+
+def _normalize_tts_provider_id(provider_id: str) -> str:
+    value = str(provider_id or "").strip().lower()
+    if value == "gemini":
+        return "google"
+    return value
+
+
+def _canonical_model_id(provider_id: str, model_id: str) -> str:
+    value = str(model_id or "").strip()
+    if ":" in value:
+        return value
+    return f"{provider_id}:{value}"

@@ -21,7 +21,12 @@ from hirocli.domain.conversation_channel_photo import (
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.domain.files_resolver import resolve_ref
 from hirocli.domain.message_attachments import attachment_ref
-from hirocli.domain.message_store import _attachment_row_to_dict, _history_row, _sync_history
+from hirocli.domain.message_store import (
+    _attachment_row_to_dict,
+    _history_row,
+    _row_to_dict,
+    _sync_history,
+)
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.domain.workspace_server_client import post_invoke_sync
 from hirocli.tools.conversation import (
@@ -123,7 +128,7 @@ def _sync_history_by_pks(
         )
 
     return [
-        _history_row(dict(row), attachments_by_message.get(int(row["id"]), []))
+        _history_row(_row_to_dict(row), attachments_by_message.get(int(row["id"]), []))
         for row in message_rows
     ]
 
