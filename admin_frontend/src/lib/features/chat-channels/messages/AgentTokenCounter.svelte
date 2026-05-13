@@ -6,14 +6,23 @@
     value: number;
     tooltip?: string;
     className?: string;
+    /** When false, show the count immediately (agent run finished in metadata). */
+    animate?: boolean;
   };
 
-  let { value, tooltip = '', className = '' }: Props = $props();
+  let { value, tooltip = '', className = '', animate = true }: Props = $props();
   let displayValue = $state(0);
   let currentTarget = 0;
 
   $effect(() => {
     const next = Math.max(0, Math.trunc(value));
+
+    if (!animate) {
+      currentTarget = next;
+      displayValue = next;
+      return;
+    }
+
     if (next === currentTarget) return;
     currentTarget = next;
 

@@ -32,7 +32,7 @@ from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
-from .agent_graph import ChatAgentGraph
+from .agent_graph import GRAPH_RUN_FAILED, ChatAgentGraph
 from .agent_graph.base import BaseAgentGraph, _normalize_reply_content
 from .comm_log import (
     LOG_IN,
@@ -335,6 +335,22 @@ class AgentManager:
                         )
                 # ``updates`` chunks are useful for fineinfo only; per-node
                 # human-first lines are emitted by the nodes themselves.
+        except Exception as exc:
+            log.error(
+                "❌ graph failed — %s · %s",
+                peer, comm_kind(msg),
+                error=str(exc), exc_info=True,
+            )
+            await self._comm.graph_subscriber.dispatch(
+                msg,
+                GRAPH_RUN_FAILED,
+                {
+                    "inbound_id": msg.routing.id,
+                    "chat_channel_id": channel_id,
+                    "code": "reply_generation_failed",
+                    "message": "I couldn't finish generating a reply.",
+                },
+            )
         finally:
             self._comm.graph_subscriber.end_run(msg.routing.id)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)

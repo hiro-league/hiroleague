@@ -26,6 +26,7 @@
   import {
     agentMetadataByReplyId,
     agentOutputTokens,
+    agentTokensShouldAnimate,
     agentTools,
     messageAgentMetadata,
     usageBreakdownTitle
@@ -391,6 +392,8 @@
                   {@const showAgentMeta = shouldShowAgentTelemetry(message, agentMeta, isUser)}
                   {@const outputTokens = showAgentMeta ? agentOutputTokens(agentMeta) : 0}
                   {@const toolCalls = showAgentMeta ? agentTools(agentMeta) : []}
+                  {@const tokenCountAnimates =
+                    showAgentMeta && agentTokensShouldAnimate(agentMeta)}
                   {@const tokenTooltip = usageBreakdownTitle(agentMeta?.usage_total)}
                   {@const showToolsUi = showAgentToolsTokensUi && toolCalls.length > 0}
                   {@const showTokensUi = showAgentToolsTokensUi && outputTokens > 0}
@@ -439,6 +442,7 @@
                           {#if showTokensUi}
                             <AgentTokenCounter
                               value={outputTokens}
+                              animate={tokenCountAnimates}
                               tooltip={tokenTooltip}
                               className={isUser ? 'text-amber-100' : 'text-emerald-700 dark:text-emerald-300'}
                             />

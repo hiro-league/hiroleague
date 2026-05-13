@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatHistoryMessage } from '$lib/api/chat-channels';
-import { agentMetadataByReplyId, formatTokenCount, usageBreakdownTitle } from './agent-message-meta';
+import {
+  agentMetadataByReplyId,
+  agentTokensShouldAnimate,
+  formatTokenCount,
+  usageBreakdownTitle
+} from './agent-message-meta';
 
 describe('agent message metadata display', () => {
   it('formats output token counts using the admin compact thresholds', () => {
@@ -67,5 +72,13 @@ describe('agent message metadata display', () => {
     ];
 
     expect(agentMetadataByReplyId(messages).has('reply-1')).toBe(false);
+  });
+
+  it('animates token count only while agent status is processing', () => {
+    expect(agentTokensShouldAnimate({ status: 'processing' })).toBe(true);
+    expect(agentTokensShouldAnimate({ status: 'completed' })).toBe(false);
+    expect(agentTokensShouldAnimate({ status: 'failed' })).toBe(false);
+    expect(agentTokensShouldAnimate({ status: undefined })).toBe(false);
+    expect(agentTokensShouldAnimate(null)).toBe(false);
   });
 });

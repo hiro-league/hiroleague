@@ -11,9 +11,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
 from hirocli.domain.conversation_channel import CHAT_CHANNEL_ID_METADATA_KEY, create_channel
 from hirocli.domain.data_store import data_db_path, ensure_data_db
+from hirocli.runtime.agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED
+from hirocli.runtime.agent_graph.base import BaseAgentGraph, _trim_chat_history
 from hirocli.runtime.agent_manager import (
     AgentManager,
     _audio_extension_for_media_type,
@@ -85,3 +89,94 @@ def test_resolve_thread_character_uses_chat_channel_metadata(tmp_path) -> None:
         channel.id,
         "agent-a",
     )
+
+
+def test_trim_chat_history_drops_orphaned_tool_exchange_prefix() -> None:
+    messages = [
+        HumanMessage(content="what is your name and server status?"),
+        AIMessage(
+            content=[],
+            tool_calls=[{"name": "status", "args": {}, "id": "call-status"}],
+        ),
+        ToolMessage(content="running", tool_call_id="call-status"),
+        AIMessage(content=[], tool_calls=[{"name": "character_list", "args": {}, "id": "call-chars"}]),
+        ToolMessage(content="Hiro", tool_call_id="call-chars"),
+        AIMessage(content="My name is Hiro and the server is running."),
+        HumanMessage(content="What is 8 x 7?"),
+    ]
+
+    keep = _trim_chat_history(messages, limit=5)
+
+    assert keep == [
+        messages[-1],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_finalize_node_emits_terminal_run_event(tmp_path) -> None:
+    graph = BaseAgentGraph(
+        workspace_path=tmp_path,
+        stt_service=None,
+        vision_service=None,
+        tts_service=None,
+        credential_store=None,
+        checkpointer=None,
+    )
+    events: list[dict] = []
+
+    await graph.finalize_node(
+        {
+            "inbound_id": "user-msg-final",
+            "chat_channel_id": 42,
+            "reply_text": "hello",
+            "reply_id": "reply-final",
+        },
+        events.append,
+    )
+
+    assert events == [
+        {
+            "event": GRAPH_RUN_COMPLETED,
+            "payload": {
+                "inbound_id": "user-msg-final",
+                "chat_channel_id": 42,
+                "reply_id": "reply-final",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_finalize_node_emits_failed_when_text_reply_missing(tmp_path) -> None:
+    graph = BaseAgentGraph(
+        workspace_path=tmp_path,
+        stt_service=None,
+        vision_service=None,
+        tts_service=None,
+        credential_store=None,
+        checkpointer=None,
+    )
+    events: list[dict] = []
+
+    await graph.finalize_node(
+        {
+            "inbound_id": "user-msg-failed",
+            "chat_channel_id": 42,
+            "reply_text": None,
+            "reply_id": None,
+        },
+        events.append,
+    )
+
+    assert events == [
+        {
+            "event": GRAPH_RUN_FAILED,
+            "payload": {
+                "inbound_id": "user-msg-failed",
+                "chat_channel_id": 42,
+                "code": "reply_generation_failed",
+                "message": "I couldn't finish generating a reply.",
+                "node": "finalize",
+            },
+        }
+    ]

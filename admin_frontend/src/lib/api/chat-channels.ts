@@ -44,7 +44,16 @@ export type AgentToolCall = {
 
 export type AgentMessageMetadata = {
   status?: string;
+  current_step?: string | null;
+  last_event?: string;
   reply_id?: string;
+  text_reply_completed_at?: string;
+  completed_at?: string;
+  error?: {
+    message?: string;
+    code?: string;
+    node?: string;
+  };
   usage_total?: AgentUsageTotals;
   llm_calls?: { usage?: AgentUsageTotals; model_id?: string; at?: string }[];
   tools?: AgentToolCall[];

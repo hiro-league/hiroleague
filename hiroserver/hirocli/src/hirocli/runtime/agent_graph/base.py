@@ -50,6 +50,8 @@ from .events import (
     GRAPH_INGEST_COMPLETED,
     GRAPH_LLM_USAGE,
     GRAPH_REPLY_COMPLETED,
+    GRAPH_RUN_COMPLETED,
+    GRAPH_RUN_FAILED,
     GRAPH_STT_COMPLETED,
     GRAPH_TOOL_COMPLETED,
     GRAPH_TTS_COMPLETED,
@@ -392,12 +394,12 @@ class BaseAgentGraph:
         """
         messages: list[AnyMessage] = list(state.get("messages", []) or [])
         limit = self._memory_max_messages()
-        if len(messages) <= limit:
+        keep = _trim_chat_history(messages, limit)
+        if keep == messages:
             return {}
         from langchain_core.messages import RemoveMessage
         from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-        keep = messages[-limit:]
         log.info(
             "✅ memory_in — trim · before=%d after=%d",
             len(messages), len(keep),
@@ -565,11 +567,11 @@ class BaseAgentGraph:
     def tts_gate(self, state: GraphState) -> str:
         """Decide whether to enter the TTS branch after the reply completes."""
         if not state.get("reply_text"):
-            return "__end__"
+            return "finalize"
         if not state.get("request_voice_reply"):
-            return "__end__"
+            return "finalize"
         if self._tts is None or not self._tts.is_available():
-            return "__end__"
+            return "finalize"
         return "tts"
 
     async def tts_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
@@ -668,6 +670,42 @@ class BaseAgentGraph:
         }
         return {"reply_audio": attachment}
 
+    async def finalize_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
+        """Emit the terminal graph-run lifecycle event.
+
+        The aggregate agent status is about the whole graph run, not a node like
+        ``memory_out``. A missing text reply is the first-pass fatal condition;
+        everything after a text reply (for example TTS) is degradable.
+        """
+        inbound_id = state.get("inbound_id", "")
+        chat_channel_id = int(state.get("chat_channel_id") or 0)
+        reply_id = state.get("reply_id") or ""
+        reply_text = state.get("reply_text") or ""
+        if reply_text and reply_id:
+            self._emit(
+                writer,
+                GRAPH_RUN_COMPLETED,
+                {
+                    "inbound_id": inbound_id,
+                    "chat_channel_id": chat_channel_id,
+                    "reply_id": reply_id,
+                },
+            )
+            return {}
+
+        self._emit(
+            writer,
+            GRAPH_RUN_FAILED,
+            {
+                "inbound_id": inbound_id,
+                "chat_channel_id": chat_channel_id,
+                "code": "reply_generation_failed",
+                "message": "I couldn't finish generating a reply.",
+                "node": "finalize",
+            },
+        )
+        return {}
+
     def _current_preferences(self):
         if self._preferences is not None:
             return self._preferences.current
@@ -712,6 +750,16 @@ def _normalize_reply_content(content: Any) -> str:
         if isinstance(cv, str):
             parts.append(cv)
     return "\n".join(p for p in parts if p)
+
+
+def _trim_chat_history(messages: list[AnyMessage], limit: int) -> list[AnyMessage]:
+    """Return a bounded chat suffix that does not start inside a tool exchange."""
+    if limit <= 0:
+        return []
+    keep = list(messages[-limit:])
+    while keep and not isinstance(keep[0], HumanMessage):
+        keep.pop(0)
+    return keep
 
 
 def _llm_usage_payload(

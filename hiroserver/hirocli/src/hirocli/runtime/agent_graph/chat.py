@@ -4,7 +4,7 @@ The flow is:
 
     ingest → dispatch_media (Send fan-out) → stt | vision | (none)
            → gather → memory_in → context_build → call_model
-           → tools (loop) → memory_out → tts? → END
+           → tools (loop) → memory_out → tts? → finalize → END
 
 Single graph variant for now (chat). Future variants (voice-only, transcribe-
 only) would subclass ``BaseAgentGraph`` similarly.
@@ -53,6 +53,7 @@ class ChatAgentGraph(BaseAgentGraph):
         )
         b.add_node("memory_out", self.memory_out_node)
         b.add_node("tts", self.tts_node, retry=_RETRY_TWICE)
+        b.add_node("finalize", self.finalize_node)
 
         if tools:
             b.add_node("tools", self.make_tools_node(tools))
@@ -73,7 +74,8 @@ class ChatAgentGraph(BaseAgentGraph):
         else:
             b.add_edge("call_model", "memory_out")
 
-        b.add_conditional_edges("memory_out", self.tts_gate, ["tts", END])
-        b.add_edge("tts", END)
+        b.add_conditional_edges("memory_out", self.tts_gate, ["tts", "finalize"])
+        b.add_edge("tts", "finalize")
+        b.add_edge("finalize", END)
 
         return b.compile(checkpointer=self._checkpointer)

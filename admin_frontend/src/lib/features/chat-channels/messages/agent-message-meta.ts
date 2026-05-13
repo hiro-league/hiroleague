@@ -15,6 +15,11 @@ export function agentOutputTokens(agent: AgentMessageMetadata | null): number {
   return Math.max(0, Math.trunc(agent?.usage_total?.output_tokens ?? 0));
 }
 
+/** True while hirocli marks the agent run as in progress (metadata.agent.status === 'processing'). */
+export function agentTokensShouldAnimate(agent: AgentMessageMetadata | null): boolean {
+  return agent?.status === 'processing';
+}
+
 export function agentMetadataByReplyId(
   messages: ChatHistoryMessage[]
 ): Map<string, AgentMessageMetadata> {

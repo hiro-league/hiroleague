@@ -46,9 +46,12 @@ from .agent_graph import (
     GRAPH_INGEST_COMPLETED,
     GRAPH_LLM_USAGE,
     GRAPH_REPLY_COMPLETED,
+    GRAPH_RUN_COMPLETED,
+    GRAPH_RUN_FAILED,
     GRAPH_STT_COMPLETED,
     GRAPH_TOOL_COMPLETED,
     GRAPH_TTS_COMPLETED,
+    GRAPH_VISION_COMPLETED,
 )
 from .comm_log import LOG_OUT, comm_extras, comm_peer_label
 from .envelope_factory import EnvelopeFactory
@@ -72,6 +75,19 @@ Handler = Callable[
 _FALLBACK_ERROR_BODY = (
     "Sorry, I encountered an error processing your message. Please try again."
 )
+
+_CURRENT_STEP_BY_EVENT: dict[str, str | None] = {
+    GRAPH_INGEST_COMPLETED: "received",
+    GRAPH_STT_COMPLETED: "transcribed",
+    GRAPH_VISION_COMPLETED: "image_read",
+    GRAPH_LLM_USAGE: "thinking",
+    GRAPH_TOOL_COMPLETED: "tool_used",
+    GRAPH_REPLY_COMPLETED: "reply_ready",
+    GRAPH_TTS_COMPLETED: "voice_ready",
+    GRAPH_RUN_COMPLETED: None,
+    GRAPH_RUN_FAILED: None,
+    GRAPH_ERROR: "error",
+}
 
 
 class GraphEventSubscriber:
@@ -114,6 +130,8 @@ class GraphEventSubscriber:
                 self._emit_text_reply,
             ],
             GRAPH_TTS_COMPLETED: [self._emit_voiced],
+            GRAPH_RUN_COMPLETED: [self._persist_run_completed],
+            GRAPH_RUN_FAILED: [self._persist_run_failed],
             GRAPH_ERROR: [self._emit_error_fallback],
         }
 
@@ -149,7 +167,13 @@ class GraphEventSubscriber:
     ) -> None:
         """Run all handlers registered for this event, in order."""
         handlers = self._handlers.get(event_name, [])
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        note_event = event_name in _CURRENT_STEP_BY_EVENT
+        if note_event:
+            self._note_agent_event(inbound_id, event_name)
         if not handlers:
+            if note_event:
+                await self._patch_agent_metadata(inbound_id)
             return
         for handler in handlers:
             try:
@@ -160,6 +184,8 @@ class GraphEventSubscriber:
                     handler.__name__, event_name,
                     error=str(exc), exc_info=True,
                 )
+        if note_event:
+            await self._patch_agent_metadata(inbound_id)
 
     # ------------------------------------------------------------------
     # Handlers — keep tight, push complex work into domain modules.
@@ -177,6 +203,11 @@ class GraphEventSubscriber:
             }
             run["agent_meta"] = agent
         return agent
+
+    def _note_agent_event(self, inbound_id: str, event_name: str) -> None:
+        agent = self._agent_meta(inbound_id)
+        agent["last_event"] = event_name
+        agent["current_step"] = _CURRENT_STEP_BY_EVENT.get(event_name)
 
     async def _patch_agent_metadata(self, inbound_id: str) -> None:
         run = self._run_state.get(inbound_id, {})
@@ -416,9 +447,8 @@ class GraphEventSubscriber:
             return
         inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
         agent = self._agent_meta(inbound_id)
-        agent["status"] = "completed"
         agent["reply_id"] = reply_id
-        agent["completed_at"] = utc_iso(utc_now())
+        agent["text_reply_completed_at"] = utc_iso(utc_now())
         try:
             from ..domain.message_store import save_message
 
@@ -441,6 +471,48 @@ class GraphEventSubscriber:
             return
         # tts subscriber needs reply_pk to attach audio later.
         self._run_state.setdefault(inbound_id, {})["reply_pk"] = reply_pk
+        await self._patch_agent_metadata(inbound_id)
+
+    async def _persist_run_completed(
+        self,
+        inbound: UnifiedMessage,
+        payload: dict[str, Any],
+        emit: EmitOutbound,
+    ) -> None:
+        """Mark the aggregate graph run complete after the finalizer node."""
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        agent = self._agent_meta(inbound_id)
+        agent["status"] = "completed"
+        agent["current_step"] = None
+        agent["completed_at"] = utc_iso(utc_now())
+        reply_id = str(payload.get("reply_id") or "")
+        if reply_id:
+            agent["reply_id"] = reply_id
+        agent.pop("error", None)
+        await self._patch_agent_metadata(inbound_id)
+
+    async def _persist_run_failed(
+        self,
+        inbound: UnifiedMessage,
+        payload: dict[str, Any],
+        emit: EmitOutbound,
+    ) -> None:
+        """Mark the aggregate graph run failed with a short user-friendly hint."""
+        inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
+        agent = self._agent_meta(inbound_id)
+        agent["status"] = "failed"
+        agent["current_step"] = None
+        agent["completed_at"] = utc_iso(utc_now())
+        message = str(payload.get("message") or "I couldn't finish generating a reply.")
+        code = str(payload.get("code") or "reply_generation_failed")
+        error: dict[str, Any] = {
+            "message": message[:500],
+            "code": code,
+        }
+        node = payload.get("node")
+        if isinstance(node, str) and node:
+            error["node"] = node
+        agent["error"] = error
         await self._patch_agent_metadata(inbound_id)
 
     async def _emit_text_reply(

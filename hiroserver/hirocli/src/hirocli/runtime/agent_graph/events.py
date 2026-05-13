@@ -23,6 +23,8 @@ GRAPH_LLM_USAGE = "graph.llm.usage"
 GRAPH_TOOL_COMPLETED = "graph.tool.completed"
 GRAPH_REPLY_COMPLETED = "graph.reply.completed"
 GRAPH_TTS_COMPLETED = "graph.tts.completed"
+GRAPH_RUN_COMPLETED = "graph.run.completed"
+GRAPH_RUN_FAILED = "graph.run.failed"
 GRAPH_ERROR = "graph.error"
 
 
@@ -95,6 +97,20 @@ class TtsCompletedPayload(TypedDict):
     size: int
     duration_ms: int | None
     audio_b64: str
+
+
+class RunCompletedPayload(TypedDict, total=False):
+    inbound_id: str
+    chat_channel_id: int
+    reply_id: str
+
+
+class RunFailedPayload(TypedDict, total=False):
+    inbound_id: str
+    chat_channel_id: int
+    code: str
+    message: str
+    node: str
 
 
 class ErrorPayload(TypedDict):
