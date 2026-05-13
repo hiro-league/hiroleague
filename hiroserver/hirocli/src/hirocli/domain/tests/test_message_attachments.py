@@ -278,7 +278,7 @@ async def test_message_history_exposes_patched_message_metadata(tmp_path) -> Non
         {
             "agent": {
                 "status": "processing",
-                "llm_calls": [{"index": 1, "usage_available": False}],
+                "usage_total": {"output_tokens": 12},
             }
         },
     )
@@ -289,7 +289,7 @@ async def test_message_history_exposes_patched_message_metadata(tmp_path) -> Non
         "source": "admin-ui",
         "agent": {
             "status": "processing",
-            "llm_calls": [{"index": 1, "usage_available": False}],
+            "usage_total": {"output_tokens": 12},
         },
     }
 

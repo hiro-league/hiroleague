@@ -197,7 +197,6 @@ class GraphEventSubscriber:
         if not isinstance(agent, dict):
             agent = {
                 "status": "processing",
-                "llm_calls": [],
                 "usage_total": {},
                 "tools": [],
             }
@@ -371,33 +370,26 @@ class GraphEventSubscriber:
         payload: dict[str, Any],
         emit: EmitOutbound,
     ) -> None:
-        """Append one LLM usage snapshot to the run's compact metadata."""
+        """Accumulate LLM token usage into the run's compact metadata."""
         inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
         agent = self._agent_meta(inbound_id)
-        calls = agent.setdefault("llm_calls", [])
-        if not isinstance(calls, list):
-            calls = []
-            agent["llm_calls"] = calls
-
-        entry: dict[str, Any] = {
-            "index": len(calls) + 1,
-            "stage": "call_model",
-            "model_id": str(payload.get("model_id") or agent.get("model_id") or ""),
-            "usage_available": bool(payload.get("usage_available")),
-        }
+        if not payload.get("usage_available"):
+            return
+        totals = agent.setdefault("usage_total", {})
+        if not isinstance(totals, dict):
+            totals = {}
+            agent["usage_total"] = totals
         for key in (
             "input_tokens",
             "output_tokens",
             "total_tokens",
             "cached_input_tokens",
             "reasoning_tokens",
-            "estimated_input_tokens",
         ):
             value = payload.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
-                entry[key] = value
-        calls.append(entry)
-        agent["usage_total"] = _usage_totals(calls)
+                existing = totals.get(key)
+                totals[key] = (existing if isinstance(existing, int) else 0) + value
         await self._patch_agent_metadata(inbound_id)
 
     async def _persist_tool_completed(
@@ -741,24 +733,6 @@ def _build_voiced_envelope(
             },
         ),
     )
-
-
-def _usage_totals(calls: list[Any]) -> dict[str, int]:
-    totals: dict[str, int] = {}
-    for call in calls:
-        if not isinstance(call, dict) or not call.get("usage_available"):
-            continue
-        for key in (
-            "input_tokens",
-            "output_tokens",
-            "total_tokens",
-            "cached_input_tokens",
-            "reasoning_tokens",
-        ):
-            value = call.get(key)
-            if isinstance(value, int) and not isinstance(value, bool):
-                totals[key] = totals.get(key, 0) + value
-    return totals
 
 
 # ``contextlib`` import is retained because this module may grow context

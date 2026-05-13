@@ -55,7 +55,6 @@ export type AgentMessageMetadata = {
     node?: string;
   };
   usage_total?: AgentUsageTotals;
-  llm_calls?: { usage?: AgentUsageTotals; model_id?: string; at?: string }[];
   tools?: AgentToolCall[];
 };
 

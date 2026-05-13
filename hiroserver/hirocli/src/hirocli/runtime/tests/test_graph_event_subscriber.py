@@ -82,6 +82,19 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
     )
     await sub.dispatch(
         inbound,
+        GRAPH_LLM_USAGE,
+        {
+            "inbound_id": inbound.routing.id,
+            "chat_channel_id": channel.id,
+            "model_id": "openai:gpt-test",
+            "usage_available": True,
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "total_tokens": 5,
+        },
+    )
+    await sub.dispatch(
+        inbound,
         GRAPH_TOOL_COMPLETED,
         {
             "inbound_id": inbound.routing.id,
@@ -118,10 +131,11 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
     assert "text_reply_completed_at" in inbound_agent
     assert "completed_at" not in inbound_agent
     assert inbound_agent["usage_total"] == {
-        "input_tokens": 10,
-        "output_tokens": 4,
-        "total_tokens": 14,
+        "input_tokens": 13,
+        "output_tokens": 6,
+        "total_tokens": 19,
     }
+    assert "llm_calls" not in inbound_agent
     assert inbound_agent["tools"] == [
         {
             "id": "call-1",

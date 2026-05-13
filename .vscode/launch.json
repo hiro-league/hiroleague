@@ -2,28 +2,28 @@
     "version": "0.2.0",
     "configurations": [
       {
-        "name": "Server + Gateway - Rebuild Components",
-        "type": "node-terminal",
-        "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync.sh"
-      },
-      {
         "name": "Server + Gateway - Rebuild Components (fast)",
         "type": "node-terminal",
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh"
       },
       {
-        "name": "PyPI Publish",
-        "type": "node-terminal",
-        "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./scripts/publish-pypi.sh"
-      },
-      {
         "name": "Bash startup (Windows Terminal)",
         "type": "node-terminal",
         "request": "launch",
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./bash-startup.sh"
+      },
+      {
+        "name": "Server + Gateway - Rebuild Components",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync.sh"
+      },
+      {
+        "name": "PyPI Publish",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./scripts/publish-pypi.sh"
       },
       {
         "name": "Gateway Start",
