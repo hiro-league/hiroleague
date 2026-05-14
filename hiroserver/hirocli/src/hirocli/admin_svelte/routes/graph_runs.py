@@ -53,6 +53,21 @@ async def tail_graph_runs(
     }
 
 
+@graph_runs_router.get("/graph-runs/{run_id}/langsmith-url")
+async def get_graph_run_langsmith_url(
+    run_id: str,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """Resolve LangSmith trace URL (may call LangSmith API — keep off the inspect path so node rows load fast)."""
+    _ = workspace_id
+    url = await run_in_threadpool(langsmith_url_for_run, run_id)
+    return {
+        "ok": True,
+        "error": None,
+        "data": {"langsmith_url": url},
+    }
+
+
 @graph_runs_router.get("/graph-runs/{run_id}")
 async def get_graph_run(
     run_id: str,
@@ -66,13 +81,11 @@ async def get_graph_run(
     if not result.ok or result.data is None:
         return _api_from_result(result)
     snapshot = result.data
-    langsmith_url = await run_in_threadpool(langsmith_url_for_run, run_id)
     return {
         "ok": True,
         "error": None,
         "data": {
             "rows": snapshot.timeline,
             "aggregate": snapshot.aggregate_row,
-            "langsmith_url": langsmith_url,
         },
     }

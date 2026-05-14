@@ -186,6 +186,9 @@ def _shape_row(raw: dict[str, Any]) -> dict[str, Any] | None:
         "cached_input_tokens",
         "reasoning_tokens",
         "tts_chars",
+        "tts_text_tokens",
+        "tts_audio_tokens",
+        "stt_audio_tokens",
     ):
         row[key] = _int_or_blank(row.get(key))
     row["id"] = (

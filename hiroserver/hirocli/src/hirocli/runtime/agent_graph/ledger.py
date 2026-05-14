@@ -46,7 +46,10 @@ GRAPH_LEDGER_COLUMNS = [
     "cached_input_tokens",
     "reasoning_tokens",
     "tts_chars",
+    "tts_text_tokens",
+    "tts_audio_tokens",
     "stt_audio_seconds",
+    "stt_audio_tokens",
     "tts_audio_seconds",
     "cost_usd",
     "pricing_version",
@@ -119,7 +122,10 @@ class RunAccumulator:
     cached_input_tokens: int = 0
     reasoning_tokens: int = 0
     tts_chars: int = 0
+    tts_text_tokens: int = 0
+    tts_audio_tokens: int = 0
     stt_audio_seconds: float = 0.0
+    stt_audio_tokens: int = 0
     tts_audio_seconds: float = 0.0
     cost_usd: float = 0.0
     pricing_version: str = ""
@@ -137,7 +143,10 @@ class RunAccumulator:
         self.cached_input_tokens += _to_int(row.get("cached_input_tokens"))
         self.reasoning_tokens += _to_int(row.get("reasoning_tokens"))
         self.tts_chars += _to_int(row.get("tts_chars"))
+        self.tts_text_tokens += _to_int(row.get("tts_text_tokens"))
+        self.tts_audio_tokens += _to_int(row.get("tts_audio_tokens"))
         self.stt_audio_seconds += _to_float(row.get("stt_audio_seconds"))
+        self.stt_audio_tokens += _to_int(row.get("stt_audio_tokens"))
         self.tts_audio_seconds += _to_float(row.get("tts_audio_seconds"))
         self.cost_usd += _to_float(row.get("cost_usd"))
         if row.get("pricing_version"):
@@ -168,7 +177,10 @@ class LedgerEntry:
     cached_input_tokens: int | str = ""
     reasoning_tokens: int | str = ""
     tts_chars: int | str = ""
+    tts_text_tokens: int | str = ""
+    tts_audio_tokens: int | str = ""
     stt_audio_seconds: float | str = ""
+    stt_audio_tokens: int | str = ""
     tts_audio_seconds: float | str = ""
     decision_kind: str = ""
     decision_detail: str = ""
@@ -189,7 +201,10 @@ class LedgerEntry:
         cached_input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
         tts_chars: int | None = None,
+        tts_text_tokens: int | None = None,
+        tts_audio_tokens: int | None = None,
         stt_audio_seconds: float | None = None,
+        stt_audio_tokens: int | None = None,
         tts_audio_seconds: float | None = None,
     ) -> None:
         if provider is not None:
@@ -206,8 +221,14 @@ class LedgerEntry:
             self.reasoning_tokens = max(0, int(reasoning_tokens))
         if tts_chars is not None:
             self.tts_chars = max(0, int(tts_chars))
+        if tts_text_tokens is not None:
+            self.tts_text_tokens = max(0, int(tts_text_tokens))
+        if tts_audio_tokens is not None:
+            self.tts_audio_tokens = max(0, int(tts_audio_tokens))
         if stt_audio_seconds is not None:
             self.stt_audio_seconds = max(0.0, float(stt_audio_seconds))
+        if stt_audio_tokens is not None:
+            self.stt_audio_tokens = max(0, int(stt_audio_tokens))
         if tts_audio_seconds is not None:
             self.tts_audio_seconds = max(0.0, float(tts_audio_seconds))
 
@@ -296,7 +317,10 @@ class LedgerEntry:
             "cached_input_tokens": self.cached_input_tokens,
             "reasoning_tokens": self.reasoning_tokens,
             "tts_chars": self.tts_chars,
+            "tts_text_tokens": self.tts_text_tokens,
+            "tts_audio_tokens": self.tts_audio_tokens,
             "stt_audio_seconds": self.stt_audio_seconds,
+            "stt_audio_tokens": self.stt_audio_tokens,
             "tts_audio_seconds": self.tts_audio_seconds,
             "decision_kind": self.decision_kind,
             "decision_detail": self.decision_detail,
@@ -313,7 +337,10 @@ class LedgerEntry:
                 "cached_input_tokens",
                 "reasoning_tokens",
                 "tts_chars",
+                "tts_text_tokens",
+                "tts_audio_tokens",
                 "stt_audio_seconds",
+                "stt_audio_tokens",
                 "tts_audio_seconds",
             ):
                 row[key] = ""
@@ -446,7 +473,10 @@ class LedgerSink:
                     "cached_input_tokens": accumulator.cached_input_tokens or "",
                     "reasoning_tokens": accumulator.reasoning_tokens or "",
                     "tts_chars": accumulator.tts_chars or "",
+                    "tts_text_tokens": accumulator.tts_text_tokens or "",
+                    "tts_audio_tokens": accumulator.tts_audio_tokens or "",
                     "stt_audio_seconds": _blank_zero_float(accumulator.stt_audio_seconds),
+                    "stt_audio_tokens": accumulator.stt_audio_tokens or "",
                     "tts_audio_seconds": _blank_zero_float(accumulator.tts_audio_seconds),
                     "cost_usd": _format_cost(accumulator.cost_usd)
                     if accumulator.cost_usd
@@ -478,15 +508,29 @@ class LedgerSink:
         try:
             catalog = get_model_catalog()
             if row.get("tts_chars") not in ("", None):
+                # ``tts_text_tokens`` is the metered text-token count parsed from provider
+                # ``usage_metadata`` (Gemini TEXT modality / OpenAI text-tier counts). Falls back
+                # to the local ``_estimate_text_tokens`` value that ``tts_node`` writes to
+                # ``input_tokens`` so OpenAI ``gpt-4o-mini-tts`` keeps pricing without provider
+                # usage metadata.
+                tts_text_tokens = _to_int(row.get("tts_text_tokens")) or _to_int(
+                    row.get("input_tokens")
+                )
                 estimate = catalog.estimate_tts_usage_cost(
                     provider_id=provider,
                     model_id=model,
                     input_characters=_to_int(row.get("tts_chars")),
-                    input_text_tokens=_to_int(row.get("input_tokens")),
+                    input_text_tokens=tts_text_tokens,
                     generated_audio_seconds=_to_float(row.get("tts_audio_seconds")),
+                    output_audio_tokens=_to_int(row.get("tts_audio_tokens")),
                 )
-            elif row.get("stt_audio_seconds") not in ("", None):
-                # STT pricing is not wired yet; keep raw seconds for future repricing.
+            elif (
+                row.get("stt_audio_seconds") not in ("", None)
+                or row.get("stt_audio_tokens") not in ("", None)
+            ):
+                # STT pricing is not wired yet — see ``estimate_stt_usage_cost`` follow-up.
+                # ``stt_audio_tokens`` / ``stt_audio_seconds`` are persisted now so future
+                # repricing has all the inputs from ``docs/model_pricing.md``.
                 return {**row, "cost_usd": "", "pricing_version": ""}
             else:
                 estimate = catalog.estimate_token_usage_cost(

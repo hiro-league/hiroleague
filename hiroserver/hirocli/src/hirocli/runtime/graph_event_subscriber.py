@@ -14,9 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import numbers
 import time
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -40,6 +38,10 @@ from hiro_channel_sdk.models import (
     EventPayload,
     MessageRouting,
     UnifiedMessage,
+)
+from hiro_commons.llm_usage import (
+    gemini_usage_aggregate_fallback,
+    modality_token_count,
 )
 from hiro_commons.log import Logger
 from .agent_graph import (
@@ -448,24 +450,22 @@ class GraphEventSubscriber:
         input_text_tokens = payload_input_text_tokens
         output_audio_tokens = payload_output_audio_tokens
         if provider.lower() in {"gemini", "google"}:
-            input_text_tokens = _modality_token_count(
+            input_text_tokens = modality_token_count(
                 usage_metadata,
                 detail_keys=("promptTokensDetails", "prompt_tokens_details"),
                 modality="TEXT",
             )
-            output_audio_tokens = _modality_token_count(
+            output_audio_tokens = modality_token_count(
                 usage_metadata,
                 detail_keys=("candidatesTokensDetails", "candidates_tokens_details"),
                 modality="AUDIO",
             )
             # google-genai payloads sometimes expose *Details as Mapping rows / non-list
             # sequences; modality extraction can still yield 0 while aggregate counts match.
-            input_text_tokens, output_audio_tokens = (
-                _gemini_tts_usage_aggregate_fallback(
-                    usage_metadata,
-                    input_text_tokens=input_text_tokens,
-                    output_audio_tokens=output_audio_tokens,
-                )
+            input_text_tokens, output_audio_tokens = gemini_usage_aggregate_fallback(
+                usage_metadata,
+                input_text_tokens=input_text_tokens,
+                output_audio_tokens=output_audio_tokens,
             )
 
         generated_audio_seconds = _float_payload(payload, "generated_audio_seconds")
@@ -909,128 +909,6 @@ def _float_payload(payload: dict[str, Any], key: str) -> float:
         except ValueError:
             return 0.0
     return 0.0
-
-
-def _tts_usage_detail_rows(details: Any) -> list[Any]:
-    """Normalize Gemini usage *Details fields (list, tuple, protobuf repeated, …)."""
-    if details is None:
-        return []
-    if isinstance(details, (str, bytes, dict)):
-        return []
-    if isinstance(details, list):
-        return details
-    if isinstance(details, Sequence):
-        try:
-            return list(details)
-        except Exception:
-            return []
-    try:
-        return list(details)
-    except TypeError:
-        return []
-
-
-def _tts_usage_row_mapping(item: Any) -> Mapping[str, Any]:
-    if isinstance(item, Mapping):
-        return item
-    model_dump = getattr(item, "model_dump", None)
-    if callable(model_dump):
-        dumped = model_dump(by_alias=True, exclude_none=True)
-        if isinstance(dumped, dict):
-            return dumped
-    return {}
-
-
-def _tts_modality_label(raw: Any) -> str:
-    if raw is None:
-        return ""
-    val = getattr(raw, "value", raw)
-    if isinstance(val, bytes):
-        try:
-            val = val.decode("ascii")
-        except Exception:
-            val = str(val)
-    label = str(val).strip().upper()
-    if "." in label:
-        label = label.rsplit(".", 1)[-1]
-    return label
-
-
-def _tts_coerce_positive_int(token_raw: Any) -> int | None:
-    """Parse token counters from protobuf / pydantic / google-genai shapes."""
-    if token_raw is None:
-        return None
-    if isinstance(token_raw, bool):
-        return None
-    if isinstance(token_raw, numbers.Integral):
-        return int(token_raw)
-    if isinstance(token_raw, float) and token_raw.is_integer():
-        return int(token_raw)
-    if isinstance(token_raw, str):
-        try:
-            return int(token_raw.strip())
-        except ValueError:
-            return None
-    nested = getattr(token_raw, "value", None)
-    if nested is not None and nested is not token_raw:
-        return _tts_coerce_positive_int(nested)
-    try:
-        return int(token_raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _gemini_tts_usage_aggregate_fallback(
-    usage_metadata: dict[str, Any],
-    *,
-    input_text_tokens: int,
-    output_audio_tokens: int,
-) -> tuple[int, int]:
-    """When per-modality rows fail to parse, use API aggregate prompt/candidates counts."""
-    text_out = input_text_tokens
-    audio_out = output_audio_tokens
-    if text_out <= 0:
-        v = _tts_coerce_positive_int(usage_metadata.get("promptTokenCount"))
-        if v is None:
-            v = _tts_coerce_positive_int(usage_metadata.get("prompt_token_count"))
-        if v is not None:
-            text_out = v
-    if audio_out <= 0:
-        v = _tts_coerce_positive_int(usage_metadata.get("candidatesTokenCount"))
-        if v is None:
-            v = _tts_coerce_positive_int(usage_metadata.get("candidates_token_count"))
-        if v is not None:
-            audio_out = v
-    return text_out, audio_out
-
-
-def _modality_token_count(
-    usage_metadata: dict[str, Any],
-    *,
-    detail_keys: tuple[str, ...],
-    modality: str,
-) -> int:
-    expected = _tts_modality_label(modality)
-    for key in detail_keys:
-        rows = _tts_usage_detail_rows(usage_metadata.get(key))
-        if not rows:
-            continue
-        total = 0
-        for item in rows:
-            mapping = _tts_usage_row_mapping(item)
-            raw_mod = mapping.get("modality") or mapping.get("modalityType")
-            item_modality = _tts_modality_label(raw_mod)
-            if item_modality != expected:
-                continue
-            raw_tc = mapping.get("tokenCount")
-            if raw_tc is None:
-                raw_tc = mapping.get("token_count")
-            n = _tts_coerce_positive_int(raw_tc)
-            if n is not None:
-                total += n
-        if total > 0:
-            return total
-    return 0
 
 
 # ``contextlib`` import is retained because this module may grow context

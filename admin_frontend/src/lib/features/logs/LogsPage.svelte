@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { page } from '$app/state';
   import type { LogTimeRange } from '$lib/api/logs';
   import Button from '$lib/components/ui/button.svelte';
   import Modal from '$lib/ui/Modal.svelte';
@@ -100,7 +101,13 @@
     void ctrl.clearAllLogs();
   }
 
-  onMount(() => setupLogsPageRuntime({ prefs, ctrl }));
+  onMount(() =>
+    setupLogsPageRuntime({
+      prefs,
+      ctrl,
+      urlMsgId: page.url.searchParams.get('msg_id')
+    })
+  );
 </script>
 
 <section class="logs-page flex h-full min-h-0 flex-col gap-4 overflow-hidden">

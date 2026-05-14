@@ -10,7 +10,9 @@ export const PREF_KEYS = {
   /** Show agent tool stack + token counts on Messages tab (default on). */
   chatChannelsShowAgentTelemetry: 'hiro.admin.chatChannels.showAgentTelemetry',
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
-  charactersActiveTab: 'hiro.admin.characters.activeTab'
+  charactersActiveTab: 'hiro.admin.characters.activeTab',
+  /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
+  graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';

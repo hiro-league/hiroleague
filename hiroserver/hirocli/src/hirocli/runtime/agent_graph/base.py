@@ -31,6 +31,10 @@ from hiro_channel_sdk.constants import (
     CONTENT_TYPE_TEXT,
 )
 from hiro_channel_sdk.models import UnifiedMessage
+from hiro_commons.llm_usage import (
+    gemini_usage_aggregate_fallback,
+    modality_token_count,
+)
 from hiro_commons.log import Logger
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -821,12 +825,33 @@ class BaseAgentGraph:
         metered_text = text
         if provider == "openai" and result.model == "gpt-4o-mini-tts" and resolved.instructions:
             metered_text = f"{resolved.instructions}\n{text}"
+        # Gemini TTS prices off ``usageMetadata`` text/audio modality tokens (see
+        # ``docs/model_pricing.md``); persist them on the ledger so ``_with_cost``
+        # can call ``estimate_tts_usage_cost`` for Google models. OpenAI providers
+        # do not return these — leave at 0 so the catalog falls back to ``input_tokens``.
+        tts_text_tokens = modality_token_count(
+            usage_metadata,
+            detail_keys=("promptTokensDetails", "prompt_tokens_details"),
+            modality="TEXT",
+        )
+        tts_audio_tokens = modality_token_count(
+            usage_metadata,
+            detail_keys=("candidatesTokensDetails", "candidates_tokens_details"),
+            modality="AUDIO",
+        )
+        tts_text_tokens, tts_audio_tokens = gemini_usage_aggregate_fallback(
+            usage_metadata,
+            input_text_tokens=tts_text_tokens,
+            output_audio_tokens=tts_audio_tokens,
+        )
         if entry := current_entry.get():
             entry.add_usage(
                 provider=provider,
                 model=result.model,
                 input_tokens=_estimate_text_tokens(metered_text),
                 tts_chars=len(text),
+                tts_text_tokens=tts_text_tokens or None,
+                tts_audio_tokens=tts_audio_tokens or None,
                 tts_audio_seconds=(
                     duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0.0
                 ),

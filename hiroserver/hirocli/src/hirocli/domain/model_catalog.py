@@ -260,7 +260,12 @@ class ModelCatalog:
 
     @property
     def pricing_version(self) -> str:
-        """Stable identifier for the pricing snapshot used in cost estimates."""
+        """Stable fingerprint for repricing rows: ``{catalog_version}:{hash12}``.
+
+        Written to ``graph.log`` as a single CSV cell (colon is intentional, not a parse bug):
+        catalog YAML ``catalog_version`` plus the first 12 hex chars of SHA-256 over sorted model
+        ``id`` + ``pricing`` payloads.
+        """
         return self._pricing_version
 
     @classmethod

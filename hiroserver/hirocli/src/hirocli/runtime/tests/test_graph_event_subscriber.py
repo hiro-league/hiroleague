@@ -22,11 +22,11 @@ from hirocli.runtime.agent_graph import (
     GRAPH_TOOL_COMPLETED,
     GRAPH_TTS_COMPLETED,
 )
-from hirocli.runtime.graph_event_subscriber import (
-    GraphEventSubscriber,
-    _gemini_tts_usage_aggregate_fallback,
-    _modality_token_count,
+from hiro_commons.llm_usage import (
+    gemini_usage_aggregate_fallback as _gemini_tts_usage_aggregate_fallback,
+    modality_token_count as _modality_token_count,
 )
+from hirocli.runtime.graph_event_subscriber import GraphEventSubscriber
 
 
 class _DeviceNames:

@@ -11,11 +11,20 @@ export const LOGS_NO_DOCUMENT_SCROLL_CLASS = 'admin-logs-no-document-scroll';
 export const LOGS_POLL_INTERVAL_MS = 500;
 
 /** Document scroll lock, session hydrate, initial load, polling interval, and teardown. */
-export function setupLogsPageRuntime(opts: { prefs: LogsPreferences; ctrl: LogsPageController }) {
-  const { prefs, ctrl } = opts;
+export function setupLogsPageRuntime(opts: {
+  prefs: LogsPreferences;
+  ctrl: LogsPageController;
+  /** When set (e.g. from ``/logs?msg_id=``), overrides session-restored ``scopeMsgId`` before the first fetch. */
+  urlMsgId?: string | null;
+}) {
+  const { prefs, ctrl, urlMsgId } = opts;
 
   document.documentElement.classList.add(LOGS_NO_DOCUMENT_SCROLL_CLASS);
   prefs.hydrateFromSession();
+  const fromUrl = (urlMsgId ?? '').trim();
+  if (fromUrl) {
+    prefs.scopeMsgId = fromUrl;
+  }
   void ctrl.initialize();
   const interval = window.setInterval(() => void ctrl.poll(), LOGS_POLL_INTERVAL_MS);
 

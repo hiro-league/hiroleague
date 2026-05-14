@@ -75,10 +75,13 @@ SQLite column when an ingester is added.
 | `output_tokens` | int | LLM output |
 | `cached_input_tokens` | int | LLM cached input |
 | `reasoning_tokens` | int | LLM reasoning |
-| `tts_chars` | int | TTS only |
-| `stt_audio_seconds` | float | STT only |
+| `tts_chars` | int | TTS only (OpenAI `tts-1`/`tts-1-hd` formula input) |
+| `tts_text_tokens` | int | TTS text-prompt tokens from provider ``usage_metadata`` (Gemini TEXT modality / OpenAI ``input_token_details`` when present) — required to price Gemini TTS and the recommended path for OpenAI ``gpt-4o-mini-tts`` |
+| `tts_audio_tokens` | int | TTS generated-audio tokens from provider ``usage_metadata`` (Gemini AUDIO modality on ``candidatesTokensDetails``) — required to price Gemini TTS |
+| `stt_audio_seconds` | float | STT only (OpenAI ``whisper-1`` formula input) |
+| `stt_audio_tokens` | int | STT audio-prompt tokens from provider ``usage_metadata`` (OpenAI ``input_token_details.audio_tokens`` / Gemini AUDIO modality on ``promptTokensDetails``) — required to price token-billed STT models (``gpt-4o-transcribe``, Gemini 3.x). Persisted but not yet wired into cost (placeholder for ``estimate_stt_usage_cost``). |
 | `cost_usd` | float | computed at write time, see Cost Snapshot |
-| `pricing_version` | string | catalog rev/timestamp at write |
+| `pricing_version` | string | `catalog_version` + `:` + 12-char SHA-256 of sorted model pricing payloads (single cell; repricing/debug ID) |
 | `decision_kind` | string | bounded enum, see Decision Field |
 | `decision_detail` | string | short slug; never prose |
 | `error_code` | string | short slug only; full trace stays in `server.log` |
@@ -212,10 +215,24 @@ Two rules:
   is wired).
 - **Always store the raw counts** (token / character / second columns) in
   addition to `cost_usd`, so a future repricing job can recompute.
-- `pricing_version` is a stable identifier of the catalog state at write
-  time. Cheapest correct value: the catalog file's mtime as ISO-8601 UTC,
-  or a short hash of the pricing block. The exact form is implementer's
-  choice; the contract is "given this string, the price could be replayed".
+- Raw counts required by `docs/model_pricing.md` are persisted per row:
+  - LLM (chat) — `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`.
+  - TTS OpenAI `tts-1`/`tts-1-hd` — `tts_chars`.
+  - TTS OpenAI `gpt-4o-mini-tts` — `tts_text_tokens` (preferred) or `input_tokens` (legacy
+    fallback) + `tts_audio_seconds`.
+  - TTS Gemini — `tts_text_tokens` (TEXT modality on `promptTokensDetails`) +
+    `tts_audio_tokens` (AUDIO modality on `candidatesTokensDetails`); both come from
+    provider ``usage_metadata`` via `hiro_commons.llm_usage.modality_token_count`.
+  - STT OpenAI `whisper-1` — `stt_audio_seconds`.
+  - STT OpenAI `gpt-4o-transcribe*` and Gemini 3.x — `stt_audio_tokens` (AUDIO modality
+    on prompt details / `input_token_details.audio_tokens`) + `output_tokens`. *Persisted
+    today; pricing wire-up is a follow-up.*
+- `pricing_version` is a stable fingerprint of the bundled catalog pricing
+  snapshot at write time: `{catalog_version}:{hash12}`, where `hash12` is the
+  first 12 hex characters of SHA-256 over JSON of every model's `id` + `pricing`
+  (sorted, compact separators). Implementation: ``ModelCatalog`` in
+  `hirocli/domain/model_catalog.py`. The colon is intentional (one CSV field),
+  not multiple columns concatenated by mistake.
 - If pricing is unavailable for a (provider, model) at write time:
   `cost_usd` empty, `pricing_version` empty, `decision_detail` may carry
   a slug like `pricing_missing`. The row still writes — the analytics view
@@ -235,10 +252,14 @@ keep is the catalog version, not a frozen price table.
   This is `langgraph_tips.md` item 3 and is a prerequisite for ledger rows
   to be correlatable to LangSmith.
 - **Store `run_id` in every ledger row.** Do **not** store the LangSmith
-  URL. The admin API resolves the browser link with **langsmith** ``Client().read_run`` on
+  URL. The admin API exposes **GET `/graph-runs/{run_id}`** for ledger rows
+  only, and **GET `/graph-runs/{run_id}/langsmith-url`** for the browser link
+  so the node timeline is not blocked on LangSmith latency. Resolution uses
+  **langsmith** ``Client().read_run`` on
   **UUID5(NAMESPACE_URL, ledger `run_id`)** (same id as ``RunnableConfig["run_id"]``), then
   ``run.url`` or ``get_run_url``. Requires ``LANGCHAIN_API_KEY`` / ``LANGSMITH_API_KEY``;
-  returns no URL if the run is not in LangSmith yet. One HTTP round-trip per open-run request.
+  returns no URL if the run is not in LangSmith yet. One LangSmith HTTP round-trip
+  per langsmith-url request (the SPA fires it after rows load).
 
 ## Admin UI Surface
 
@@ -319,9 +340,9 @@ Implementer checklist — all of these must hold or the writer is unsafe:
   `ainvoke`, build `RunnableConfig` with `run_id = f"chat-{inbound_id}"`,
   `run_name="chat"`, and tags. Open the workspace ledger sink at server
   start (alongside `Logger.open_log_dir`).
-- `hiroserver/hirocli/src/hirocli/domain/model_catalog.py` — expose the
-  `pricing_version` value (mtime ISO-8601 UTC or short hash) so the
-  ledger can stamp it on every priced row.
+- `hiroserver/hirocli/src/hirocli/domain/model_catalog.py` — expose ``pricing_version``
+  as `{catalog_version}:{hash12}` (see Cost Snapshot above) so the ledger can stamp
+  it on every priced row.
 - `hiroserver/hirocli/src/hirocli/admin/features/graph_runs/` (new) —
   `GraphLedgerService` (tail / filter / by-run-id reads of `graph.log`),
   admin route, list/inspector responses.
@@ -399,7 +420,8 @@ Updated `GRAPH_LEDGER_COLUMNS` (insertion points only — column order at
 implementer's discretion):
 
 - after `status`: `row_kind`
-- after `tts_chars`: `tts_audio_seconds`
+- after `tts_chars`: `tts_text_tokens`, `tts_audio_tokens`, `tts_audio_seconds`
+- after `stt_audio_seconds`: `stt_audio_tokens`
 - after `decision_detail`: `input_preview`, `output_preview`
 
 ## Run-Row Population
@@ -418,9 +440,9 @@ node-row contract):
 | identity (`inbound_id`, `chat_channel_id`, `device_id`, `user_id`, `character_id`) | denormalized, same as node rows |
 | `provider`, `model` | the **primary `call_model`** provider/model (the one driving the text reply). Other model calls in the run are visible only in the per-node drill-down. |
 | `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens` | sum across all `call_model` rows in the run |
-| `tts_chars`, `stt_audio_seconds`, `tts_audio_seconds` | sum across the run |
+| `tts_chars`, `tts_text_tokens`, `tts_audio_tokens`, `stt_audio_seconds`, `stt_audio_tokens`, `tts_audio_seconds` | sum across the run |
 | `cost_usd` | **sum of per-node `cost_usd`** — never recomputed from token sums (avoids rounding drift across pricing-version boundaries) |
-| `pricing_version` | latest catalog rev observed during the run |
+| `pricing_version` | `{catalog_version}:{hash12}` snapshot on priced nodes (typically same across a run unless catalog reload mid-run) |
 | `decision_kind` / `decision_detail` | terminal reason (e.g. `completed`/`text_reply`, `failed`/`provider_error`) |
 | `error_code` | empty on success; failure-class slug on `failed` / `cancelled` |
 | `input_preview` | first ≤140 chars of the user turn text |
@@ -464,7 +486,8 @@ every `finally` to fold per-node values into the aggregate.
 State carried:
 
 - `run_id` (key), `started_at` (perf_counter), denormalized identity
-- running totals: tokens (4 fields), `tts_chars`, `stt_audio_seconds`,
+- running totals: tokens (4 fields), `tts_chars`, `tts_text_tokens`,
+  `tts_audio_tokens`, `stt_audio_seconds`, `stt_audio_tokens`,
   `tts_audio_seconds`, `cost_usd`
 - `primary_model` / `primary_provider` — set the first time a
   `call_model` row reports usage; subsequent `call_model`s do not
@@ -516,7 +539,8 @@ Crashed runs no longer disappear from the list view.
 Additive to the original "Implementation Touch Points" section:
 
 - `hiroserver/hirocli/src/hirocli/runtime/agent_graph/ledger.py`
-  - extend `GRAPH_LEDGER_COLUMNS` with `row_kind`, `tts_audio_seconds`,
+  - extend `GRAPH_LEDGER_COLUMNS` with `row_kind`, `tts_text_tokens`,
+    `tts_audio_tokens`, `tts_audio_seconds`, `stt_audio_tokens`,
     `input_preview`, `output_preview`
   - add `RunAccumulator` dataclass + contextvar
   - add `LedgerSink.write_run_row(accumulator, *, status, error_code,
@@ -551,7 +575,8 @@ Additive to the original "Implementation Touch Points" section:
 ## Build Reflection (Delta)
 
 - `graph.log` rows written before this change have empty `row_kind`,
-  empty `tts_audio_seconds`, empty `input_preview` / `output_preview`.
+  empty `tts_audio_seconds`, empty `tts_text_tokens` / `tts_audio_tokens`
+  / `stt_audio_tokens`, and empty `input_preview` / `output_preview`.
   Readers must treat empty `row_kind` as `node` so historical rows still
   appear in the inspector. No file truncation needed.
 - No workspace reset, no config change. New columns are additive in

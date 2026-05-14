@@ -247,6 +247,50 @@ def test_tts_audio_seconds_are_persisted(tmp_path: Path) -> None:
     assert row["tts_audio_seconds"] == "2.5"
 
 
+def test_gemini_tts_prices_with_audio_tokens(tmp_path: Path) -> None:
+    """Gemini TTS rows must be priced once ``tts_text_tokens`` and ``tts_audio_tokens`` land.
+
+    Reproduces the cost-of-zero gap: the catalog's Google TTS branch needs both
+    modality token counts; without them every row was unpriced.
+    """
+    graph = _graph(tmp_path)
+
+    priced = graph._ledger_sink._with_cost(
+        {
+            "provider": "gemini",
+            "model": "gemini-2.5-flash-preview-tts",
+            "tts_chars": 80,
+            "tts_text_tokens": 18,
+            "tts_audio_tokens": 240,
+            "tts_audio_seconds": 4.0,
+            "input_tokens": 18,
+        }
+    )
+
+    assert priced["cost_usd"] not in ("", None)
+    assert float(priced["cost_usd"]) > 0
+    assert priced["pricing_version"]
+
+
+def test_gemini_tts_without_audio_tokens_stays_unpriced(tmp_path: Path) -> None:
+    """Missing AUDIO modality tokens (e.g. older usage_metadata shapes) still no-price."""
+    graph = _graph(tmp_path)
+
+    priced = graph._ledger_sink._with_cost(
+        {
+            "provider": "gemini",
+            "model": "gemini-2.5-flash-preview-tts",
+            "tts_chars": 80,
+            "tts_text_tokens": 18,
+            "tts_audio_seconds": 4.0,
+            "input_tokens": 18,
+        }
+    )
+
+    assert priced["cost_usd"] == ""
+    assert priced["pricing_version"] == ""
+
+
 @pytest.mark.asyncio
 async def test_run_accumulator_writes_aggregate_and_evicts_run(tmp_path: Path) -> None:
     graph = _graph(tmp_path)
