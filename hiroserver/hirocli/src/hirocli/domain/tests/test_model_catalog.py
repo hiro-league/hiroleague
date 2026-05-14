@@ -173,6 +173,48 @@ def test_estimate_token_usage_cost_uses_catalog_pricing(tmp_path: Path) -> None:
     assert estimate.reason is None
 
 
+def test_pricing_version_is_stable_and_changes_with_pricing(tmp_path: Path) -> None:
+    base_doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "p1",
+                "display_name": "P1",
+                "hosting": "cloud",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+            }
+        ],
+        "models": [
+            {
+                "id": "p1:chat",
+                "provider_id": "p1",
+                "display_name": "Chat",
+                "model_kind": "chat",
+                "pricing": {
+                    "input_per_1m_tokens": 2.0,
+                    "output_per_1m_tokens": 10.0,
+                    "pricing_updated_at": "2026-01-01",
+                },
+            },
+        ],
+    }
+    path = tmp_path / "cat.yaml"
+    path.write_text(yaml.safe_dump(base_doc), encoding="utf-8")
+    first = ModelCatalog.load_from_path(path)
+    second = ModelCatalog.load_from_path(path)
+
+    changed_doc = dict(base_doc)
+    changed_doc["models"] = [dict(base_doc["models"][0])]
+    changed_doc["models"][0]["pricing"] = dict(base_doc["models"][0]["pricing"])
+    changed_doc["models"][0]["pricing"]["input_per_1m_tokens"] = 3.0
+    path.write_text(yaml.safe_dump(changed_doc), encoding="utf-8")
+    changed = ModelCatalog.load_from_path(path)
+
+    assert first.pricing_version == second.pricing_version
+    assert first.pricing_version != changed.pricing_version
+
+
 def test_gemini_3_flash_preview_cost_uses_cached_input_rate() -> None:
     cat = get_model_catalog()
 

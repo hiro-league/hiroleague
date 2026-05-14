@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import hashlib
 import time
+import uuid
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
@@ -309,7 +310,19 @@ class AgentManager:
             "errors": [],
             "messages": [],
         }
-        config = {"configurable": {"thread_id": thread_id}}
+        ledger_run_id = f"chat-{msg.routing.id}"
+        langsmith_run_id = uuid.uuid5(uuid.NAMESPACE_URL, ledger_run_id)
+        config = {
+            "run_id": langsmith_run_id,
+            "run_name": "chat",
+            "tags": [
+                f"character:{character_id}",
+                f"chat_channel_id:{channel_id}",
+                f"voice_input:{bool(voice_input_allowed)}",
+            ],
+            "metadata": {"ledger_run_id": ledger_run_id},
+            "configurable": {"thread_id": thread_id, "run_id": ledger_run_id},
+        }
 
         # Register per-run state slot for the subscriber. ``persisted_event``
         # is signaled by the subscriber once persist_inbound completes.

@@ -268,6 +268,22 @@ class _CsvRenderer:
         return buf.getvalue().rstrip("\r\n")
 
 
+class _FlatCsvRenderer:
+    """Render a flat structured event dict using a caller-supplied column order."""
+
+    def __init__(self, columns: list[str]) -> None:
+        self.columns = list(columns)
+        buf = io.StringIO()
+        csv.writer(buf).writerow(self.columns)
+        self.header = buf.getvalue().rstrip("\r\n")
+
+    def __call__(self, logger, method_name, event_dict):
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([event_dict.get(column, "") for column in self.columns])
+        return buf.getvalue().rstrip("\r\n")
+
+
 class _NullRenderer:
     """Discards all console output; used when console=False."""
 
@@ -581,6 +597,7 @@ class Logger:
         backup_count: int = LOG_ROTATION_BACKUP_COUNT,
         use_json: bool = False,
         use_csv: bool = False,
+        csv_columns: list[str] | tuple[str, ...] | None = None,
         include_prefix: str | None = None,
         exclude_prefix: str | tuple[str, ...] | None = None,
     ) -> logging.Handler:
@@ -616,11 +633,20 @@ class Logger:
         if use_json:
             renderer = structlog.processors.JSONRenderer()
         elif use_csv:
-            renderer = _CsvRenderer()
+            renderer = (
+                _FlatCsvRenderer(list(csv_columns))
+                if csv_columns is not None
+                else _CsvRenderer()
+            )
             if is_new_file:
                 try:
                     with open(path, mode, encoding="utf-8") as fh:
-                        fh.write(_CsvRenderer.HEADER + "\n")
+                        header = (
+                            renderer.header
+                            if isinstance(renderer, _FlatCsvRenderer)
+                            else _CsvRenderer.HEADER
+                        )
+                        fh.write(header + "\n")
                 except OSError:
                     pass
         else:
@@ -662,7 +688,7 @@ class Logger:
         cls.add_file_sink(
             str(log_dir / "server.log"),
             use_csv=True,
-            exclude_prefix=("CLI.",),
+            exclude_prefix=("CLI.", "AGENT.GRAPH.LEDGER"),
         )
         cls.add_file_sink(
             str(log_dir / "cli.log"),

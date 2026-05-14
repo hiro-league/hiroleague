@@ -125,6 +125,15 @@ class LogsTailRequest(BaseModel):
     since_seconds_ago: int | None = None
 
 
+class GraphRunsTailRequest(BaseModel):
+    """POST /graph-runs/tail - live graph ledger snapshot."""
+
+    after_offsets: dict[str, int] | None = None
+    lines: int | None = None
+    since_seconds_ago: int | None = 86_400
+    filters: dict[str, str] | None = None
+
+
 class MetricsConfigureRequest(BaseModel):
     enabled: bool | None = None
     interval: float | None = None

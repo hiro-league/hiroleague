@@ -7,6 +7,8 @@ factory will consume this data separately.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
@@ -240,10 +242,26 @@ class ModelCatalog:
         self._doc = doc
         self._providers_by_id: dict[str, Provider] = {p.id: p for p in doc.providers}
         self._models_by_id: dict[str, ModelSpec] = {m.id: m for m in doc.models}
+        pricing_payload = [
+            {
+                "id": m.id,
+                "pricing": m.pricing.model_dump(mode="json") if m.pricing is not None else None,
+            }
+            for m in doc.models
+        ]
+        pricing_hash = hashlib.sha256(
+            json.dumps(pricing_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:12]
+        self._pricing_version = f"{doc.catalog_version}:{pricing_hash}"
 
     @property
     def catalog_version(self) -> str:
         return self._doc.catalog_version
+
+    @property
+    def pricing_version(self) -> str:
+        """Stable identifier for the pricing snapshot used in cost estimates."""
+        return self._pricing_version
 
     @classmethod
     def load_from_path(cls, path: Path) -> ModelCatalog:

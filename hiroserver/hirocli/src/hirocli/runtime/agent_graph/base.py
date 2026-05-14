@@ -59,6 +59,13 @@ from .events import (
     GRAPH_VISION_COMPLETED,
     make_event,
 )
+from .ledger import (
+    LedgerSink,
+    current_entry,
+    graph_logged,
+    wrap_graph_callable,
+    wrap_graph_node,
+)
 from .state import (
     AudioItem,
     GraphState,
@@ -87,6 +94,19 @@ TRIMMED_MESSAGE_LIMIT = DEFAULT_MEMORY_MAX_MESSAGES
 class BaseAgentGraph:
     """Holds services and reusable node methods for chat agent graphs."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        seen: set[str] = set()
+        for base in reversed(cls.mro()[1:]):
+            for name, attr in getattr(base, "__dict__", {}).items():
+                if name in seen or not _is_graph_node_method(name, attr):
+                    continue
+                seen.add(name)
+                setattr(cls, name, wrap_graph_node(_node_label(name), attr))
+        for name, attr in list(cls.__dict__.items()):
+            if _is_graph_node_method(name, attr):
+                setattr(cls, name, wrap_graph_node(_node_label(name), attr))
+
     def __init__(
         self,
         *,
@@ -105,6 +125,7 @@ class BaseAgentGraph:
         self._credentials = credential_store
         self._checkpointer = checkpointer
         self._preferences = preferences
+        self._ledger_sink = LedgerSink(workspace_path)
 
     # ------------------------------------------------------------------
     # Live service swaps — used by preference / provider reactions to rebuild media
@@ -237,6 +258,8 @@ class BaseAgentGraph:
                         "audio_item": item,
                         "inbound_id": state.get("inbound_id", ""),
                         "chat_channel_id": state.get("chat_channel_id", 0),
+                        "routing_metadata": dict(state.get("routing_metadata") or {}),
+                        "character_id": state.get("character_id", ""),
                     },
                 )
             )
@@ -248,6 +271,8 @@ class BaseAgentGraph:
                         "image_item": item,
                         "inbound_id": state.get("inbound_id", ""),
                         "chat_channel_id": state.get("chat_channel_id", 0),
+                        "routing_metadata": dict(state.get("routing_metadata") or {}),
+                        "character_id": state.get("character_id", ""),
                     },
                 )
             )
@@ -256,11 +281,15 @@ class BaseAgentGraph:
         # No fan-out branches → take the regular edge to gather with full state.
         return "gather"
 
+    @graph_logged(captures={"usage", "decision"})
     async def stt_node(self, sub_state: dict[str, Any], writer: StreamWriter) -> dict[str, Any]:
         """Transcribe one audio item. Runs in parallel branches via Send."""
         item: AudioItem = sub_state["audio_item"]
         inbound_id = sub_state.get("inbound_id", "")
         if self._stt is None or not self._stt.is_available():
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "stt_unavailable")
+                entry.set_error("stt_unavailable")
             err: NodeError = {
                 "node": "stt",
                 "item_index": item["item_index"],
@@ -275,6 +304,9 @@ class BaseAgentGraph:
         try:
             text = await self._stt.transcribe(item["body"], mime_type=item["mime_type"])
         except Exception as exc:
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "exception")
+                entry.set_error("provider_error")
             log.error(
                 "❌ stt — %s · item=%d", inbound_id, item["item_index"],
                 error=str(exc), exc_info=True,
@@ -286,6 +318,19 @@ class BaseAgentGraph:
             return {"errors": [err]}
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        if entry := current_entry.get():
+            model_id = str(getattr(self._stt, "_default_model", "") or "")
+            provider = ""
+            provider_map = getattr(self._stt, "_model_to_provider", {})
+            provider_obj = provider_map.get(model_id) if isinstance(provider_map, dict) else None
+            if provider_obj is not None:
+                provider = str(getattr(provider_obj, "name", "") or "")
+            entry.add_usage(
+                provider=provider,
+                model=model_id,
+                stt_audio_seconds=(float(item.get("duration_ms") or 0) / 1000),
+            )
+            entry.set_decision("transcribed" if text.strip() else "silence", provider)
         log.info(
             "✅ stt — %s · item=%d", inbound_id, item["item_index"],
             elapsed_ms=elapsed_ms,
@@ -311,11 +356,15 @@ class BaseAgentGraph:
         )
         return {"transcripts": [result]}
 
+    @graph_logged(captures={"decision"})
     async def vision_node(self, sub_state: dict[str, Any], writer: StreamWriter) -> dict[str, Any]:
         """Describe one image item. Runs in parallel branches via Send."""
         item: ImageItem = sub_state["image_item"]
         inbound_id = sub_state.get("inbound_id", "")
         if self._vision is None or not self._vision.is_available():
+            if entry := current_entry.get():
+                entry.set_decision("skipped_unsupported", "vision_unavailable")
+                entry.set_skipped("vision_unavailable")
             err: NodeError = {
                 "node": "vision",
                 "item_index": item["item_index"],
@@ -330,6 +379,9 @@ class BaseAgentGraph:
         try:
             description = await self._vision.describe(item["body"])
         except Exception as exc:
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "exception")
+                entry.set_error("provider_error")
             log.error(
                 "❌ vision — %s · item=%d", inbound_id, item["item_index"],
                 error=str(exc), exc_info=True,
@@ -341,6 +393,8 @@ class BaseAgentGraph:
             return {"errors": [err]}
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        if entry := current_entry.get():
+            entry.set_decision("described", "image")
         log.info(
             "✅ vision — %s · item=%d", inbound_id, item["item_index"],
             elapsed_ms=elapsed_ms,
@@ -426,9 +480,12 @@ class BaseAgentGraph:
         """Return a closed-over ``call_model`` node bound to this character/model."""
         bound = model.bind_tools(tools) if tools else model
 
+        @graph_logged(captures={"usage", "decision"})
         async def call_model(state: GraphState, writer: StreamWriter) -> dict[str, Any]:
             messages: list[AnyMessage] = list(state.get("messages", []) or [])
             if not messages:
+                if entry := current_entry.get():
+                    entry.set_decision("empty", "no_messages")
                 return {}
             inputs: list[AnyMessage] = (
                 [SystemMessage(content=system_prompt), *messages]
@@ -441,25 +498,40 @@ class BaseAgentGraph:
                 len(inputs), input_estimate,
             )
             response = await bound.ainvoke(inputs)
+            usage_payload = _llm_usage_payload(
+                response,
+                inbound_id=state.get("inbound_id", ""),
+                chat_channel_id=int(state.get("chat_channel_id") or 0),
+                model_id=model_id or str(state.get("model_id") or ""),
+                estimated_input_tokens=input_estimate,
+            )
+            if entry := current_entry.get():
+                effective_model = model_id or str(state.get("model_id") or "")
+                provider = effective_model.split(":", 1)[0] if ":" in effective_model else ""
+                entry.add_usage(
+                    provider=provider,
+                    model=effective_model,
+                    input_tokens=int(usage_payload.get("input_tokens") or input_estimate or 0),
+                    output_tokens=int(usage_payload.get("output_tokens") or 0),
+                    cached_input_tokens=int(usage_payload.get("cached_input_tokens") or 0),
+                    reasoning_tokens=int(usage_payload.get("reasoning_tokens") or 0),
+                )
+                decision_kind, decision_detail = _llm_decision(response)
+                entry.set_decision(decision_kind, decision_detail)
             self._emit(
                 writer,
                 GRAPH_LLM_USAGE,
-                _llm_usage_payload(
-                    response,
-                    inbound_id=state.get("inbound_id", ""),
-                    chat_channel_id=int(state.get("chat_channel_id") or 0),
-                    model_id=model_id or str(state.get("model_id") or ""),
-                    estimated_input_tokens=input_estimate,
-                ),
+                usage_payload,
             )
             return {"messages": [response]}
 
-        return call_model
+        return self._wrap_dynamic_node("call_model", call_model)
 
     def make_tools_node(self, tools: list):
         """Return a ToolNode-compatible node that emits compact telemetry."""
         tools_by_name = {getattr(tool, "name", ""): tool for tool in tools}
 
+        @graph_logged(captures={"decision"}, flush=False)
         async def tools_node(state: GraphState, writer: StreamWriter) -> dict[str, Any]:
             messages: list[AnyMessage] = list(state.get("messages", []) or [])
             if not messages:
@@ -469,7 +541,8 @@ class BaseAgentGraph:
                 return {}
 
             out: list[ToolMessage] = []
-            for call in last.tool_calls:
+            parent_entry = current_entry.get()
+            for idx, call in enumerate(last.tool_calls):
                 tool_call_id = _tool_call_id(call)
                 tool_name = _tool_call_name(call)
                 args = _tool_call_args(call)
@@ -488,6 +561,18 @@ class BaseAgentGraph:
                     content = f"Error: {error}"
 
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
+                if parent_entry is not None:
+                    child = parent_entry.spawn_child(
+                        node=f"tools/{_error_slug(tool_name) or 'unknown'}",
+                        status="ok" if status == "completed" else "error",
+                        elapsed_ms=elapsed_ms,
+                        branch_index=idx,
+                    )
+                    if status == "completed":
+                        child.set_decision("ok", "ok")
+                    else:
+                        child.set_decision("client_error", _error_slug(error or "tool_error"))
+                        child.set_error("tool_error")
                 self._emit(
                     writer,
                     GRAPH_TOOL_COMPLETED,
@@ -510,7 +595,7 @@ class BaseAgentGraph:
 
             return {"messages": out}
 
-        return tools_node
+        return self._wrap_dynamic_node("tools", tools_node)
 
     def should_continue(self, state: GraphState) -> str:
         """Tools-loop conditional edge: route to ``tools`` when the LLM asked for one."""
@@ -575,6 +660,7 @@ class BaseAgentGraph:
             return "finalize"
         return "tts"
 
+    @graph_logged(captures={"usage", "decision"})
     async def tts_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Synthesize speech for ``reply_text`` and emit ``tts.completed``.
 
@@ -586,6 +672,9 @@ class BaseAgentGraph:
         text = state.get("reply_text") or ""
         inbound_id = state.get("inbound_id", "")
         if not text:
+            if entry := current_entry.get():
+                entry.set_decision("skipped_no_text", "empty")
+                entry.set_skipped("empty")
             return {}
 
         from ...domain.character import load_character_from_disk
@@ -594,6 +683,9 @@ class BaseAgentGraph:
         try:
             ch = load_character_from_disk(self._workspace_path, state.get("character_id", ""))
         except FileNotFoundError as exc:
+            if entry := current_entry.get():
+                entry.set_decision("skipped_no_voice", "character_missing")
+                entry.set_skipped("character_missing")
             self._emit(writer, GRAPH_ERROR, {
                 "inbound_id": inbound_id, "node": "tts", "error": str(exc),
             })
@@ -609,6 +701,9 @@ class BaseAgentGraph:
             tts_voice_by_provider=dict(ch.tts_voice_by_provider),
         )
         if resolved is None:
+            if entry := current_entry.get():
+                entry.set_decision("skipped_no_voice", "voice_unresolved")
+                entry.set_skipped("voice_unresolved")
             log.warning(
                 "⚠️ tts — %s · no_voice_resolved (set character voice_models / llm.default_tts)",
                 inbound_id,
@@ -627,6 +722,9 @@ class BaseAgentGraph:
                 instructions=resolved.instructions,
             )
         except Exception as exc:
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "exception")
+                entry.set_error("provider_error")
             log.error("❌ tts — %s", inbound_id, error=str(exc), exc_info=True)
             self._emit(writer, GRAPH_ERROR, {
                 "inbound_id": inbound_id, "node": "tts", "error": str(exc),
@@ -655,6 +753,17 @@ class BaseAgentGraph:
         metered_text = text
         if provider == "openai" and result.model == "gpt-4o-mini-tts" and resolved.instructions:
             metered_text = f"{resolved.instructions}\n{text}"
+        if entry := current_entry.get():
+            entry.add_usage(
+                provider=provider,
+                model=result.model,
+                input_tokens=_estimate_text_tokens(metered_text),
+                tts_chars=len(text),
+                tts_audio_seconds=(
+                    duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0.0
+                ),
+            )
+            entry.set_decision("voiced", provider)
         payload = {
             "inbound_id": inbound_id,
             "chat_channel_id": state.get("chat_channel_id", 0),
@@ -686,6 +795,7 @@ class BaseAgentGraph:
         }
         return {"reply_audio": attachment}
 
+    @graph_logged(captures={"decision"})
     async def finalize_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Emit the terminal graph-run lifecycle event.
 
@@ -698,6 +808,8 @@ class BaseAgentGraph:
         reply_id = state.get("reply_id") or ""
         reply_text = state.get("reply_text") or ""
         if reply_text and reply_id:
+            if entry := current_entry.get():
+                entry.set_decision("completed", "ok")
             self._emit(
                 writer,
                 GRAPH_RUN_COMPLETED,
@@ -709,6 +821,9 @@ class BaseAgentGraph:
             )
             return {}
 
+        if entry := current_entry.get():
+            entry.set_decision("failed", "reply_generation_failed")
+            entry.set_error("reply_generation_failed")
         self._emit(
             writer,
             GRAPH_RUN_FAILED,
@@ -735,10 +850,42 @@ class BaseAgentGraph:
         except Exception:
             return TRIMMED_MESSAGE_LIMIT
 
+    def _wrap_dynamic_node(self, node_name: str, fn):
+        return wrap_graph_callable(self, node_name, fn)
+
 
 # ---------------------------------------------------------------------------
 # Module-level helpers (no state needed, hence not methods)
 # ---------------------------------------------------------------------------
+
+
+def _is_graph_node_method(name: str, attr: Any) -> bool:
+    if name.startswith("_") or not callable(attr):
+        return False
+    return name.endswith("_node") or name.startswith("node_")
+
+
+def _node_label(name: str) -> str:
+    if name.endswith("_node"):
+        return name[: -len("_node")]
+    if name.startswith("node_"):
+        return name[len("node_") :]
+    return name
+
+
+def _error_slug(value: Any) -> str:
+    text = str(value or "").strip().lower().replace(" ", "_")
+    return "".join(ch for ch in text if ch.isalnum() or ch in {"_", "-", ".", "/"})[:80]
+
+
+def _llm_decision(message: AIMessage) -> tuple[str, str]:
+    tool_calls = getattr(message, "tool_calls", None) or []
+    if tool_calls:
+        return "tool_call", _tool_call_name(tool_calls[0])
+    content = _normalize_reply_content(message.content)
+    if content.strip():
+        return "text_reply", "ok"
+    return "empty", "no_content"
 
 
 def _normalize_reply_content(content: Any) -> str:

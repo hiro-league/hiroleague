@@ -17,7 +17,8 @@
     Server,
     Settings2,
     Sun,
-    User
+    User,
+    Workflow
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
@@ -61,7 +62,8 @@
     message: MessageSquare,
     server: Server,
     settings: Settings2,
-    user: User
+    user: User,
+    workflow: Workflow
   };
 
   function navHref(path: string) {
