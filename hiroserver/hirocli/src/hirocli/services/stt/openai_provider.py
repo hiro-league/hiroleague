@@ -41,6 +41,35 @@ _MIME_TO_EXT: dict[str, str] = {
     "audio/flac": ".flac",
 }
 
+
+def _ext_for_mime(mime_type: str | None) -> str:
+    """Map an audio MIME type to the filename extension OpenAI infers from.
+
+    Browsers (e.g. Chrome's MediaRecorder) send parameterized MIME strings such
+    as ``audio/webm;codecs=opus``. A naive dict lookup misses, falls through to
+    ``.m4a``, and OpenAI then tries to parse WebM/Opus bytes as MP4 — returning
+    400 "Audio file might be corrupted or unsupported". Strip parameters and
+    fall back to substring matching for resilience.
+    """
+    base = (mime_type or "").split(";", 1)[0].strip().lower()
+    if not base:
+        return ".m4a"
+    if base in _MIME_TO_EXT:
+        return _MIME_TO_EXT[base]
+    if "webm" in base:
+        return ".webm"
+    if "ogg" in base:
+        return ".ogg"
+    if "wav" in base:
+        return ".wav"
+    if "flac" in base:
+        return ".flac"
+    if "mp3" in base or "mpeg" in base or "mpga" in base:
+        return ".mp3"
+    if "mp4" in base or "m4a" in base or "aac" in base:
+        return ".m4a"
+    return ".m4a"
+
 _MODELS: list[ModelInfo] = [
     ModelInfo(
         model_id="gpt-4o-mini-transcribe",
@@ -116,7 +145,7 @@ class OpenAISTTProvider(STTProvider):
         effective_model = model or _DEFAULT_MODEL
         client = AsyncOpenAI(api_key=self._api_key)
 
-        ext = _MIME_TO_EXT.get(mime_type, ".m4a")
+        ext = _ext_for_mime(mime_type)
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = f"audio{ext}"
 

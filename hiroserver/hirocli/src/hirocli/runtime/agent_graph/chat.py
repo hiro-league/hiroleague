@@ -3,8 +3,16 @@
 The flow is:
 
     ingest → dispatch_media (Send fan-out) → stt | vision | (none)
-           → gather → memory_in → context_build → call_model
-           → tools (loop) → memory_out → tts? → finalize → END
+           → gather → input_gate
+                       ├── memory_in → context_build → call_model
+                       │      → tools (loop) → memory_out → tts? → finalize → END
+                       └── media_failed → tts? → finalize → END
+
+``input_gate`` short-circuits the LLM hop when ``gather`` produced no
+``user_text`` (e.g. audio-only inbound where STT errored). Without this,
+``call_model`` would be invoked against the prior message history with no
+new turn appended and burn the full context for nothing — see
+``media_failed_node`` in ``BaseAgentGraph`` for the canned-reply emission.
 
 Single graph variant for now (chat). Future variants (voice-only, transcribe-
 only) would subclass ``BaseAgentGraph`` similarly.
@@ -40,6 +48,7 @@ class ChatAgentGraph(BaseAgentGraph):
         b.add_node("stt", self.stt_node, retry=_RETRY_TWICE)
         b.add_node("vision", self.vision_node, retry=_RETRY_TWICE)
         b.add_node("gather", self.gather_node)
+        b.add_node("media_failed", self.media_failed_node)
         b.add_node("memory_in", self.memory_in_node)
         b.add_node("context_build", self.context_build_node)
         b.add_node(
@@ -64,7 +73,9 @@ class ChatAgentGraph(BaseAgentGraph):
         b.add_conditional_edges("ingest", self.dispatch_media, ["stt", "vision", "gather"])
         b.add_edge("stt", "gather")
         b.add_edge("vision", "gather")
-        b.add_edge("gather", "memory_in")
+        # Skip the LLM entirely when this turn produced no usable user_text
+        # (audio-only inbound + STT failure being the typical case).
+        b.add_conditional_edges("gather", self.input_gate, ["memory_in", "media_failed"])
         b.add_edge("memory_in", "context_build")
         b.add_edge("context_build", "call_model")
 
@@ -75,6 +86,7 @@ class ChatAgentGraph(BaseAgentGraph):
             b.add_edge("call_model", "memory_out")
 
         b.add_conditional_edges("memory_out", self.tts_gate, ["tts", "finalize"])
+        b.add_conditional_edges("media_failed", self.tts_gate, ["tts", "finalize"])
         b.add_edge("tts", "finalize")
         b.add_edge("finalize", END)
 

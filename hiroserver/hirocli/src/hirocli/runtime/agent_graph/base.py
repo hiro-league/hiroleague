@@ -441,6 +441,74 @@ class BaseAgentGraph:
             "image_items": [],
         }
 
+    def input_gate(self, state: GraphState) -> str:
+        """Short-circuit when this turn produced no usable input.
+
+        Triggered when ``gather_node`` failed to compose ``user_text`` (typical
+        for audio-only inbounds whose STT branches errored). Calling the LLM
+        with an unchanged message history burns the full context for nothing
+        and tends to either parrot the previous reply or return empty content.
+        Route to ``media_failed`` instead, which produces a canned apology.
+        """
+        user_text = state.get("user_text") or ""
+        if user_text.strip():
+            return "memory_in"
+        return "media_failed"
+
+    @graph_logged(captures={"decision"})
+    async def media_failed_node(
+        self, state: GraphState, writer: StreamWriter
+    ) -> dict[str, Any]:
+        """Emit a canned reply when this turn yielded no usable user input.
+
+        Reached via ``input_gate`` when ``user_text`` is empty after gather.
+        Sets ``reply_text`` / ``reply_id`` and emits ``graph.reply.completed``
+        so downstream subscribers persist and send the fallback the same way
+        they handle real LLM replies. ``tts_gate`` then decides whether to
+        voice the apology based on the original ``request_voice_reply`` flag.
+        """
+        inbound_id = state.get("inbound_id", "")
+        errs = state.get("errors", []) or []
+        stt_failed = any(e.get("node") == "stt" for e in errs)
+        vision_failed = any(e.get("node") == "vision" for e in errs)
+
+        if stt_failed and vision_failed:
+            reply_text = "Sorry, I couldn't process the audio or image. Please try again."
+            detail = "stt_and_vision_failed"
+        elif stt_failed:
+            reply_text = "Sorry, I couldn't understand the audio. Please try again."
+            detail = "stt_failed"
+        elif vision_failed:
+            reply_text = "Sorry, I couldn't process the image. Please try again."
+            detail = "vision_failed"
+        else:
+            reply_text = (
+                "Sorry, I didn't catch any content in your message. Please try again."
+            )
+            detail = "no_content"
+
+        if entry := current_entry.get():
+            entry.set_decision("skipped_no_input", detail)
+
+        reply_id = f"reply-{uuid.uuid4()}"
+        log.info(
+            "⚠️ media_failed — %s · %s · len=%d",
+            inbound_id, detail, len(reply_text),
+        )
+        self._emit(
+            writer,
+            GRAPH_REPLY_COMPLETED,
+            {
+                "inbound_id": inbound_id,
+                "chat_channel_id": state.get("chat_channel_id", 0),
+                "thread_id": state.get("thread_id", ""),
+                "reply_text": reply_text,
+                "reply_id": reply_id,
+                "request_voice_reply": bool(state.get("request_voice_reply", False)),
+            },
+        )
+        return {"reply_text": reply_text, "reply_id": reply_id}
+
     async def memory_in_node(self, state: GraphState) -> dict[str, Any]:
         """Trim chat history to the latest ``TRIMMED_MESSAGE_LIMIT`` messages.
 

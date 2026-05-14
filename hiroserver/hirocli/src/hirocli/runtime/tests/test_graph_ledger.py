@@ -9,7 +9,13 @@ import pytest
 
 from hiro_commons.log import Logger
 from hirocli.runtime.agent_graph.base import BaseAgentGraph
-from hirocli.runtime.agent_graph.ledger import LedgerSink, current_entry, graph_logged
+from hirocli.runtime.agent_graph.ledger import (
+    LedgerSink,
+    RunAccumulator,
+    current_entry,
+    current_run,
+    graph_logged,
+)
 
 
 class LedgerProbeGraph(BaseAgentGraph):
@@ -46,6 +52,21 @@ class LedgerProbeGraph(BaseAgentGraph):
         entry = current_entry.get()
         assert entry is not None
         entry.add_usage(provider="openai", model="openai:gpt-5.4", input_tokens=10)
+        entry.set_decision("text_reply", "ok")
+        return {}
+
+    @graph_logged(captures={"usage", "decision"})
+    async def call_model_node(self, state: dict[str, Any]) -> dict[str, Any]:
+        entry = current_entry.get()
+        assert entry is not None
+        entry.add_usage(
+            provider="openai",
+            model="openai:gpt-5.4",
+            input_tokens=100,
+            output_tokens=20,
+            cached_input_tokens=10,
+            reasoning_tokens=3,
+        )
         entry.set_decision("text_reply", "ok")
         return {}
 
@@ -224,6 +245,82 @@ def test_tts_audio_seconds_are_persisted(tmp_path: Path) -> None:
 
     row = _rows(tmp_path)[0]
     assert row["tts_audio_seconds"] == "2.5"
+
+
+@pytest.mark.asyncio
+async def test_run_accumulator_writes_aggregate_and_evicts_run(tmp_path: Path) -> None:
+    graph = _graph(tmp_path)
+    acc = RunAccumulator(
+        sink=graph._ledger_sink,
+        run_id="chat-in-run",
+        inbound_id="in-run",
+        chat_channel_id=5,
+        device_id="dev-1",
+        user_id="user-1",
+        character_id="hiro",
+    )
+    token = current_run.set(acc)
+    try:
+        await graph.call_model_node(_state("in-run"))
+        graph._ledger_sink.write_run_row(
+            acc,
+            status="completed",
+            decision_kind="completed",
+            decision_detail="text_reply",
+            input_preview="hello " * 40,
+            output_preview="world " * 40,
+        )
+        graph._ledger_sink.evict_run(acc.run_id)
+    finally:
+        current_run.reset(token)
+
+    rows = _rows(tmp_path)
+    node_row = [row for row in rows if row["row_kind"] == "node"][0]
+    run_row = [row for row in rows if row["row_kind"] == "run"][0]
+    assert run_row["node"] == "@run"
+    assert run_row["step_index"] == ""
+    assert run_row["status"] == "completed"
+    assert run_row["input_tokens"] == "100"
+    assert run_row["output_tokens"] == "20"
+    assert run_row["cached_input_tokens"] == "10"
+    assert run_row["reasoning_tokens"] == "3"
+    assert run_row["model"] == "openai:gpt-5.4"
+    assert run_row["cost_usd"] == node_row["cost_usd"]
+    assert len(run_row["input_preview"]) == 140
+    assert len(run_row["output_preview"]) == 140
+    assert "chat-in-run" not in graph._ledger_sink._step_indexes
+    assert not graph._ledger_sink._attempt_indexes
+
+
+@pytest.mark.parametrize(
+    ("status", "error_code"),
+    [("failed", "provider_error"), ("cancelled", "cancelled")],
+)
+def test_run_row_records_terminal_failure_statuses(
+    tmp_path: Path,
+    status: str,
+    error_code: str,
+) -> None:
+    graph = _graph(tmp_path)
+    acc = RunAccumulator(
+        sink=graph._ledger_sink,
+        run_id=f"chat-{status}",
+        inbound_id=status,
+        chat_channel_id=5,
+    )
+
+    graph._ledger_sink.write_run_row(
+        acc,
+        status=status,
+        error_code=error_code,
+        decision_kind=status,
+        decision_detail=error_code,
+    )
+
+    row = _rows(tmp_path)[0]
+    assert row["row_kind"] == "run"
+    assert row["status"] == status
+    assert row["error_code"] == error_code
 
 
 def _state(inbound_id: str) -> dict[str, Any]:

@@ -235,8 +235,10 @@ keep is the catalog version, not a frozen price table.
   This is `langgraph_tips.md` item 3 and is a prerequisite for ledger rows
   to be correlatable to LangSmith.
 - **Store `run_id` in every ledger row.** Do **not** store the LangSmith
-  URL. The admin UI builds the deep link client-side from a configured
-  base URL + project + `run_id`. URL changes don't break old rows.
+  URL. The admin API resolves the browser link with **langsmith** ``Client().read_run`` on
+  **UUID5(NAMESPACE_URL, ledger `run_id`)** (same id as ``RunnableConfig["run_id"]``), then
+  ``run.url`` or ``get_run_url``. Requires ``LANGCHAIN_API_KEY`` / ``LANGSMITH_API_KEY``;
+  returns no URL if the run is not in LangSmith yet. One HTTP round-trip per open-run request.
 
 ## Admin UI Surface
 
@@ -533,12 +535,11 @@ Additive to the original "Implementation Touch Points" section:
 - `hiroserver/hirocli/src/hirocli/admin/features/graph_runs/service.py`
   - add `row_kind` to filter pipeline; `tail_initial` returns
     aggregate-only by default
-  - add `run_timeline(run_id)` already exists; ensure it returns
-    `node`-kind rows only (and excludes the `run` row, which the UI
-    renders in the inspector header from the list selection)
+  - `inspect_run(run_id)` returns `node`-kind rows for the timeline and
+    the latest aggregate row (`row_kind=run`) for the run-detail header (single CSV read).
 - `admin_frontend/src/lib/features/graph-runs/`
-  - master/detail layout: list view (run rows) → inspector (node rows
-    for one run_id) with header card built from the selected run row
+  - tabbed layout: runs list vs run tab — header shows every ledger field
+    on the aggregate row; node rows in a spreadsheet-style table (`GRAPH_RUN_NODE_TABLE_FIELDS`).
 - Tests:
   - aggregate row written on success / exception / `CancelledError`
   - `RunAccumulator` correctly evicts `LedgerSink` per-run state

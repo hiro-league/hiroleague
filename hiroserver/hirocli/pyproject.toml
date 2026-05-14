@@ -38,6 +38,7 @@ dependencies = [
     "langchain>=1.0",
     "langgraph>=1.0",
     "langgraph-checkpoint-sqlite>=2.0",
+    "langsmith>=0.8.0",
     "langchain-openai>=0.3",
     "langchain-anthropic>=1.4",
     "langchain-google-genai>=4.2",

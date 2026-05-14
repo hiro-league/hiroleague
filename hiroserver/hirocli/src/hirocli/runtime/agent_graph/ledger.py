@@ -53,12 +53,19 @@ GRAPH_LEDGER_COLUMNS = [
     "decision_kind",
     "decision_detail",
     "error_code",
+    "row_kind",
+    "input_preview",
+    "output_preview",
 ]
 
 LEDGER_LOGGER_PREFIX = "AGENT.GRAPH.LEDGER"
 
 current_entry: ContextVar["LedgerEntry | None"] = ContextVar(
     "graph_ledger_entry",
+    default=None,
+)
+current_run: ContextVar["RunAccumulator | None"] = ContextVar(
+    "graph_ledger_run",
     default=None,
 )
 
@@ -91,6 +98,54 @@ def graph_logged(
 
 def graph_logged_spec(fn: Callable[..., Any]) -> GraphLoggedSpec | None:
     return getattr(fn, "_graph_logged_spec", None)
+
+
+@dataclass
+class RunAccumulator:
+    """Per-turn aggregate folded from priced node rows."""
+
+    sink: "LedgerSink"
+    run_id: str
+    inbound_id: str = ""
+    chat_channel_id: int | str = ""
+    device_id: str = ""
+    user_id: str = ""
+    character_id: str = ""
+    started: float = field(default_factory=time.perf_counter)
+    provider: str = ""
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_input_tokens: int = 0
+    reasoning_tokens: int = 0
+    tts_chars: int = 0
+    stt_audio_seconds: float = 0.0
+    tts_audio_seconds: float = 0.0
+    cost_usd: float = 0.0
+    pricing_version: str = ""
+
+    def fold_row(self, row: dict[str, Any]) -> None:
+        if _row_kind(row) != "node" or row.get("run_id") != self.run_id:
+            return
+
+        if str(row.get("node") or "") == "call_model" and row.get("model") and not self.model:
+            self.provider = str(row.get("provider") or "")
+            self.model = str(row.get("model") or "")
+
+        self.input_tokens += _to_int(row.get("input_tokens"))
+        self.output_tokens += _to_int(row.get("output_tokens"))
+        self.cached_input_tokens += _to_int(row.get("cached_input_tokens"))
+        self.reasoning_tokens += _to_int(row.get("reasoning_tokens"))
+        self.tts_chars += _to_int(row.get("tts_chars"))
+        self.stt_audio_seconds += _to_float(row.get("stt_audio_seconds"))
+        self.tts_audio_seconds += _to_float(row.get("tts_audio_seconds"))
+        self.cost_usd += _to_float(row.get("cost_usd"))
+        if row.get("pricing_version"):
+            self.pricing_version = str(row.get("pricing_version") or "")
+
+    @property
+    def elapsed_ms(self) -> int:
+        return int((time.perf_counter() - self.started) * 1000)
 
 
 @dataclass
@@ -227,6 +282,7 @@ class LedgerEntry:
             "node_attempt": self.node_attempt,
             "branch_index": _blank_none(self.branch_index),
             "status": self.status,
+            "row_kind": "node",
             "elapsed_ms": self.elapsed_ms,
             "inbound_id": self.inbound_id,
             "chat_channel_id": self.chat_channel_id,
@@ -244,6 +300,8 @@ class LedgerEntry:
             "tts_audio_seconds": self.tts_audio_seconds,
             "decision_kind": self.decision_kind,
             "decision_detail": self.decision_detail,
+            "input_preview": "",
+            "output_preview": "",
             "error_code": self.error_code,
         }
         if "usage" not in self.captures:
@@ -346,9 +404,70 @@ class LedgerSink:
 
     def write_rows(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
-            priced = self._with_cost(row)
+            priced = self._with_cost(row) if _row_kind(row) == "node" else row
+            accumulator = current_run.get()
+            if accumulator is not None:
+                accumulator.fold_row(priced)
             payload = {column: priced.get(column, "") for column in GRAPH_LEDGER_COLUMNS}
             self._logger.info("graph_ledger", **payload)
+
+    def write_run_row(
+        self,
+        accumulator: RunAccumulator,
+        *,
+        status: str,
+        error_code: str = "",
+        decision_kind: str = "",
+        decision_detail: str = "",
+        input_preview: str = "",
+        output_preview: str = "",
+    ) -> None:
+        self.write_rows(
+            [
+                {
+                    "ts": time.time(),
+                    "run_id": accumulator.run_id,
+                    "step_index": "",
+                    "node": "@run",
+                    "node_attempt": "",
+                    "branch_index": "",
+                    "status": _slug(status),
+                    "row_kind": "run",
+                    "elapsed_ms": accumulator.elapsed_ms,
+                    "inbound_id": accumulator.inbound_id,
+                    "chat_channel_id": accumulator.chat_channel_id,
+                    "device_id": accumulator.device_id,
+                    "user_id": accumulator.user_id,
+                    "character_id": accumulator.character_id,
+                    "provider": accumulator.provider,
+                    "model": accumulator.model,
+                    "input_tokens": accumulator.input_tokens or "",
+                    "output_tokens": accumulator.output_tokens or "",
+                    "cached_input_tokens": accumulator.cached_input_tokens or "",
+                    "reasoning_tokens": accumulator.reasoning_tokens or "",
+                    "tts_chars": accumulator.tts_chars or "",
+                    "stt_audio_seconds": _blank_zero_float(accumulator.stt_audio_seconds),
+                    "tts_audio_seconds": _blank_zero_float(accumulator.tts_audio_seconds),
+                    "cost_usd": _format_cost(accumulator.cost_usd)
+                    if accumulator.cost_usd
+                    else "",
+                    "pricing_version": accumulator.pricing_version,
+                    "decision_kind": _slug(decision_kind or status),
+                    "decision_detail": _slug(decision_detail),
+                    "input_preview": _preview(input_preview),
+                    "output_preview": _preview(output_preview),
+                    "error_code": _slug(error_code),
+                }
+            ]
+        )
+
+    def evict_run(self, run_id: str) -> None:
+        key = run_id or ""
+        with self._lock:
+            self._step_indexes.pop(key, None)
+            for attempt_key in list(self._attempt_indexes):
+                if attempt_key[0] == key:
+                    self._attempt_indexes.pop(attempt_key, None)
 
     def _with_cost(self, row: dict[str, Any]) -> dict[str, Any]:
         provider = str(row.get("provider") or "")
@@ -657,6 +776,23 @@ def _error_code(exc: BaseException) -> str:
 
 def _blank_none(value: Any) -> Any:
     return "" if value is None else value
+
+
+def _blank_zero_float(value: float) -> float | str:
+    return "" if value <= 0 else value
+
+
+def _format_cost(value: float) -> str:
+    return f"{value:.10f}".rstrip("0").rstrip(".")
+
+
+def _row_kind(row: dict[str, Any]) -> str:
+    return str(row.get("row_kind") or "node")
+
+
+def _preview(value: str) -> str:
+    compact = " ".join(str(value or "").split())
+    return compact[:140]
 
 
 def _to_int(value: Any) -> int:

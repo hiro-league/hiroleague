@@ -59,17 +59,20 @@ async def get_graph_run(
     workspace_id: SelectedWorkspaceIdDep,
 ) -> dict[str, Any]:
     result = await run_in_threadpool(
-        GraphLedgerService().run_timeline,
+        GraphLedgerService().inspect_run,
         workspace_id,
         run_id,
     )
-    if not result.ok:
+    if not result.ok or result.data is None:
         return _api_from_result(result)
+    snapshot = result.data
+    langsmith_url = await run_in_threadpool(langsmith_url_for_run, run_id)
     return {
         "ok": True,
         "error": None,
         "data": {
-            "rows": result.data or [],
-            "langsmith_url": langsmith_url_for_run(run_id),
+            "rows": snapshot.timeline,
+            "aggregate": snapshot.aggregate_row,
+            "langsmith_url": langsmith_url,
         },
     }

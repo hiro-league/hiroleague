@@ -33,8 +33,9 @@ from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
-from .agent_graph import GRAPH_RUN_FAILED, ChatAgentGraph
+from .agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED, ChatAgentGraph
 from .agent_graph.base import BaseAgentGraph, _normalize_reply_content
+from .agent_graph.ledger import RunAccumulator, current_run
 from .comm_log import (
     LOG_IN,
     comm_extras,
@@ -66,6 +67,36 @@ def _reply_content_type(content: Any) -> str:
     if isinstance(content, list):
         return f"list[{len(content)}]"
     return type(content).__name__
+
+
+def _message_input_preview(msg: UnifiedMessage) -> str:
+    texts: list[str] = []
+    for item in msg.content or []:
+        content_type = str(getattr(item, "content_type", "") or "")
+        if content_type == "text":
+            texts.append(str(getattr(item, "body", "") or ""))
+    return _preview(" ".join(texts))
+
+
+def _update_text_preview(chunk: Any, field: str) -> str:
+    if not isinstance(chunk, dict):
+        return ""
+    for value in chunk.values():
+        if isinstance(value, dict) and value.get(field):
+            return _preview(str(value.get(field) or ""))
+    return ""
+
+
+def _preview(value: str) -> str:
+    return " ".join(str(value or "").split())[:140]
+
+
+def _error_slug(exc: BaseException) -> str:
+    name = exc.__class__.__name__.replace("Error", "").replace("Exception", "")
+    return (
+        "".join(ch for ch in name.lower() if ch.isalnum() or ch in {"_", "-", "."})[:80]
+        or "error"
+    )
 
 
 def _audio_extension_for_media_type(media_type: str) -> str:
@@ -332,6 +363,32 @@ class AgentManager:
                 msg.routing.id, persisted_event,
             )
 
+        routing_metadata = dict(msg.routing.metadata or {})
+        input_preview = _message_input_preview(msg)
+        output_preview = ""
+        terminal_status = "completed"
+        terminal_decision = "completed"
+        terminal_detail = "text_reply"
+        terminal_error = ""
+        ledger_sink = getattr(self._graph, "_ledger_sink", None)
+        accumulator = (
+            RunAccumulator(
+                sink=ledger_sink,
+                run_id=ledger_run_id,
+                inbound_id=msg.routing.id,
+                chat_channel_id=channel_id,
+                device_id=str(
+                    getattr(msg.routing, "sender_id", "")
+                    or routing_metadata.get("device_id")
+                    or ""
+                ),
+                user_id=str(routing_metadata.get("user_id") or ""),
+                character_id=character_id,
+            )
+            if ledger_sink is not None
+            else None
+        )
+        run_token = current_run.set(accumulator) if accumulator is not None else None
         t0 = time.perf_counter()
         try:
             async for stream_mode, chunk in compiled.astream(
@@ -343,12 +400,37 @@ class AgentManager:
                     event_name = chunk.get("event")
                     payload = chunk.get("payload") or {}
                     if isinstance(event_name, str):
+                        if event_name == GRAPH_RUN_COMPLETED:
+                            terminal_status = "completed"
+                            terminal_decision = "completed"
+                            terminal_detail = "text_reply"
+                            terminal_error = ""
+                        elif event_name == GRAPH_RUN_FAILED:
+                            terminal_status = "failed"
+                            terminal_decision = "failed"
+                            terminal_detail = str(
+                                payload.get("code") or "reply_generation_failed"
+                            )
+                            terminal_error = terminal_detail
                         await self._comm.graph_subscriber.dispatch(
                             msg, event_name, payload,
                         )
+                elif stream_mode == "updates":
+                    input_preview = input_preview or _update_text_preview(chunk, "user_text")
+                    output_preview = output_preview or _update_text_preview(chunk, "reply_text")
                 # ``updates`` chunks are useful for fineinfo only; per-node
                 # human-first lines are emitted by the nodes themselves.
+        except asyncio.CancelledError:
+            terminal_status = "cancelled"
+            terminal_decision = "cancelled"
+            terminal_detail = "cancelled"
+            terminal_error = "cancelled"
+            raise
         except Exception as exc:
+            terminal_status = "failed"
+            terminal_decision = "failed"
+            terminal_detail = "reply_generation_failed"
+            terminal_error = _error_slug(exc)
             log.error(
                 "❌ graph failed — %s · %s",
                 peer, comm_kind(msg),
@@ -365,6 +447,19 @@ class AgentManager:
                 },
             )
         finally:
+            if accumulator is not None:
+                accumulator.sink.write_run_row(
+                    accumulator,
+                    status=terminal_status,
+                    error_code=terminal_error,
+                    decision_kind=terminal_decision,
+                    decision_detail=terminal_detail,
+                    input_preview=input_preview,
+                    output_preview=output_preview,
+                )
+                accumulator.sink.evict_run(ledger_run_id)
+            if run_token is not None:
+                current_run.reset(run_token)
             self._comm.graph_subscriber.end_run(msg.routing.id)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             log.fineinfo(

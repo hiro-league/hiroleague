@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import csv
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from hirocli.admin.features.graph_runs.service import GraphLedgerService, langsmith_url_for_run
+from hirocli.admin.features.graph_runs.service import (
+    GraphLedgerService,
+    langsmith_url_for_run,
+)
 from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS
 
 
@@ -16,8 +20,9 @@ def test_tail_initial_filters_rows(tmp_path: Path) -> None:
             {
                 "ts": "1000",
                 "run_id": "chat-1",
+                "row_kind": "run",
                 "step_index": "1",
-                "node": "call_model",
+                "node": "@run",
                 "chat_channel_id": "1",
                 "character_id": "hiro",
                 "model": "openai:gpt-5.4",
@@ -26,8 +31,9 @@ def test_tail_initial_filters_rows(tmp_path: Path) -> None:
             {
                 "ts": "1001",
                 "run_id": "chat-2",
+                "row_kind": "run",
                 "step_index": "1",
-                "node": "tts",
+                "node": "@run",
                 "chat_channel_id": "2",
                 "character_id": "mika",
                 "model": "openai:tts-1",
@@ -53,10 +59,11 @@ def test_tail_initial_filters_rows(tmp_path: Path) -> None:
     assert result.data.file_offsets
 
 
-def test_run_timeline_sorts_by_step_index(tmp_path: Path) -> None:
+def test_inspect_run_sorts_nodes_and_returns_aggregate(tmp_path: Path) -> None:
     _write_graph_log(
         tmp_path,
         [
+            {"ts": "1003", "run_id": "chat-1", "row_kind": "run", "node": "@run"},
             {"ts": "1002", "run_id": "chat-1", "step_index": "2", "node": "tools/search"},
             {"ts": "1000", "run_id": "chat-1", "step_index": "1", "node": "call_model"},
             {"ts": "1001", "run_id": "chat-other", "step_index": "1", "node": "call_model"},
@@ -64,19 +71,21 @@ def test_run_timeline_sorts_by_step_index(tmp_path: Path) -> None:
     )
 
     with _workspace_patch(tmp_path):
-        result = GraphLedgerService().run_timeline("ws", "chat-1")
+        result = GraphLedgerService().inspect_run("ws", "chat-1")
 
     assert result.ok and result.data is not None
-    assert [row["node"] for row in result.data] == ["call_model", "tools/search"]
+    assert [row["node"] for row in result.data.timeline] == ["call_model", "tools/search"]
+    assert result.data.aggregate_row is not None
+    assert result.data.aggregate_row.get("node") == "@run"
 
 
 def test_tail_initial_filters_before_line_limit(tmp_path: Path) -> None:
     _write_graph_log(
         tmp_path,
         [
-            {"ts": "1000", "run_id": "chat-1", "step_index": "1", "node": "call_model", "model": "target"},
-            {"ts": "1001", "run_id": "chat-2", "step_index": "1", "node": "call_model", "model": "other"},
-            {"ts": "1002", "run_id": "chat-3", "step_index": "1", "node": "call_model", "model": "other"},
+            {"ts": "1000", "run_id": "chat-1", "row_kind": "run", "node": "@run", "model": "target"},
+            {"ts": "1001", "run_id": "chat-2", "row_kind": "run", "node": "@run", "model": "other"},
+            {"ts": "1002", "run_id": "chat-3", "row_kind": "run", "node": "@run", "model": "other"},
         ],
     )
 
@@ -92,14 +101,44 @@ def test_tail_initial_filters_before_line_limit(tmp_path: Path) -> None:
     assert [row["run_id"] for row in result.data.rows] == ["chat-1"]
 
 
-def test_langsmith_url_uses_configured_base_project(monkeypatch) -> None:
-    monkeypatch.setenv("LANGSMITH_BASE_URL", "https://smith.example")
-    monkeypatch.setenv("LANGSMITH_PROJECT", "Hiro Project")
+def test_langsmith_url_none_without_api_key(monkeypatch) -> None:
+    for key in ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
 
-    url = langsmith_url_for_run("chat-inbound-1")
+    assert langsmith_url_for_run("chat-inbound-1") is None
 
-    assert url is not None
-    assert url.startswith("https://smith.example/projects/Hiro%20Project/r/")
+
+def test_langsmith_url_prefers_run_url_from_client(monkeypatch) -> None:
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "test-key")
+    ledger_id = "chat-xyz"
+    trace_id = str(uuid.uuid5(uuid.NAMESPACE_URL, ledger_id))
+    mock_run = MagicMock()
+    mock_run.url = "https://smith.example/o/org/projects/p/p/r/x"
+
+    with patch("langsmith.Client") as client_cls:
+        client_cls.return_value.read_run.return_value = mock_run
+        assert langsmith_url_for_run(ledger_id) == mock_run.url
+        client_cls.return_value.read_run.assert_called_once_with(trace_id, load_child_runs=False)
+
+
+def test_langsmith_url_uses_get_run_url_when_no_direct_url(monkeypatch) -> None:
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "test-key")
+    mock_run = MagicMock()
+    mock_run.url = None
+
+    with patch("langsmith.Client") as client_cls:
+        inst = client_cls.return_value
+        inst.read_run.return_value = mock_run
+        inst.get_run_url.return_value = "https://smith.example/built"
+        assert langsmith_url_for_run("chat-a") == "https://smith.example/built"
+        inst.get_run_url.assert_called_once_with(run=mock_run)
+
+
+def test_langsmith_url_none_when_read_run_fails(monkeypatch) -> None:
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "test-key")
+    with patch("langsmith.Client") as client_cls:
+        client_cls.return_value.read_run.side_effect = OSError("network")
+        assert langsmith_url_for_run("chat-b") is None
 
 
 def _write_graph_log(tmp_path: Path, rows: list[dict[str, str]]) -> None:

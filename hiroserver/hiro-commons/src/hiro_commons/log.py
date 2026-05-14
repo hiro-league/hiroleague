@@ -638,15 +638,33 @@ class Logger:
                 if csv_columns is not None
                 else _CsvRenderer()
             )
+            header = (
+                renderer.header
+                if isinstance(renderer, _FlatCsvRenderer)
+                else _CsvRenderer.HEADER
+            )
             if is_new_file:
                 try:
                     with open(path, mode, encoding="utf-8") as fh:
-                        header = (
-                            renderer.header
-                            if isinstance(renderer, _FlatCsvRenderer)
-                            else _CsvRenderer.HEADER
-                        )
                         fh.write(header + "\n")
+                except OSError:
+                    pass
+            elif isinstance(renderer, _FlatCsvRenderer):
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        lines = fh.readlines()
+                    if not lines:
+                        with open(path, "w", encoding="utf-8") as fh:
+                            fh.write(header + "\n")
+                    else:
+                        old_columns = next(csv.reader([lines[0].rstrip("\r\n")]))
+                        if (
+                            old_columns != renderer.columns
+                            and old_columns == renderer.columns[: len(old_columns)]
+                        ):
+                            lines[0] = header + "\n"
+                            with open(path, "w", encoding="utf-8") as fh:
+                                fh.writelines(lines)
                 except OSError:
                     pass
         else:

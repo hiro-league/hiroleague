@@ -62,13 +62,21 @@ export function formatTokenInteger(value: number): string {
   return INTEGER_FORMAT.format(Math.max(0, Math.trunc(value)));
 }
 
+/**
+ * Tiered USD display — matches agent message footer cost (`AgentTokenCounter`).
+ * Use for ledger `cost_usd` and any other USD line items in admin.
+ */
+export function formatUsdCostDisplay(value: number): string {
+  return formatMonetaryAmount(value, 'USD');
+}
+
 export function agentCostLabel(agent: AgentMessageMetadata | null): string {
   return formatEstimatedCost(agent?.cost);
 }
 
-/** Multi-line `title` on token telemetry (usage only; no price — cost stays on the bubble). */
-export function agentElapsedLabel(agent: AgentMessageMetadata | null): string {
-  const value = agent?.elapsed_ms;
+/** Wall-clock duration — same rules as chat message footer (`AgentTokenCounter` elapsed). */
+export function formatAgentElapsedMs(value: number | '' | null | undefined): string {
+  if (value === '' || value === null || value === undefined) return '';
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
   const totalMs = Math.trunc(value);
   if (totalMs < 1000) return `${(totalMs / 1000).toFixed(2)}s`;
@@ -77,6 +85,11 @@ export function agentElapsedLabel(agent: AgentMessageMetadata | null): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}m`;
+}
+
+/** Multi-line `title` on token telemetry (usage only; no price — cost stays on the bubble). */
+export function agentElapsedLabel(agent: AgentMessageMetadata | null): string {
+  return formatAgentElapsedMs(agent?.elapsed_ms);
 }
 
 export function telemetryBreakdownTitle(usage: AgentUsageTotals | undefined): string {
@@ -106,16 +119,21 @@ export function agentTools(agent: AgentMessageMetadata | null): AgentToolCall[] 
   return agent?.tools ?? [];
 }
 
-function formatEstimatedCost(cost: AgentCostSummary | undefined): string {
-  if (cost?.pricing_available === false) return '';
-  const value = cost?.estimated_total;
+function formatMonetaryAmount(value: number, currency: string): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
-  const currency = cost?.currency || 'USD';
   const symbol = currency === 'USD' ? '$' : `${currency} `;
   if (value >= 1) return `${symbol}${value.toFixed(2)}`;
   if (value >= 0.01) return `${symbol}${value.toFixed(3)}`;
   if (value >= 0.0001) return `${symbol}${value.toFixed(4)}`;
   return `${symbol}${value.toFixed(6)}`;
+}
+
+function formatEstimatedCost(cost: AgentCostSummary | undefined): string {
+  if (cost?.pricing_available === false) return '';
+  const value = cost?.estimated_total;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
+  const currency = cost?.currency || 'USD';
+  return formatMonetaryAmount(value, currency);
 }
 
 function trimFixed(value: number, digits: number): string {
