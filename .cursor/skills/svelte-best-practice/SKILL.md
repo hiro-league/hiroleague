@@ -1,8 +1,15 @@
+---
+name: svelte-best-practice
+description: Use when designing, refactoring, or implementing new features in the svelte admin frontend.
+---
+
+## Svelte Best Practices
+
+**Applies to: admin frontend only.** If the task is not related to the admin frontend, ignore this skill.
+
 # Svelte (admin frontend) — component and styling best practices
 
 This document captures conventions for large Svelte 5 feature pages in `admin_frontend`, especially when a `.svelte` file grows past a few hundred lines. It is derived from refactoring guidance for feature pages such as Characters.
-
-We are in **initial development mode**: no backward compatibility or migration shims are required unless explicitly stated for a change.
 
 ---
 
