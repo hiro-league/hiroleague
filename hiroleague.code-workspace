@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../hiro-docs"
+		},
+		{
+			"path": "../hiro-code-reports"
 		}
 	],
 	"settings": {
