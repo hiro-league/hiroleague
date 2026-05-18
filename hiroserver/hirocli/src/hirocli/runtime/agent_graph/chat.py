@@ -49,7 +49,7 @@ class ChatAgentGraph(BaseAgentGraph):
         b.add_node("vision", self.vision_node, retry=_RETRY_TWICE)
         b.add_node("gather", self.gather_node)
         b.add_node("media_failed", self.media_failed_node)
-        b.add_node("memory_in", self.memory_in_node)
+        b.add_node("memory_in", self.memory_in_node, retry=_RETRY_TWICE)
         b.add_node("context_build", self.context_build_node)
         b.add_node(
             "call_model",
@@ -60,7 +60,7 @@ class ChatAgentGraph(BaseAgentGraph):
                 system_prompt=system_prompt,
             ),
         )
-        b.add_node("memory_out", self.memory_out_node)
+        b.add_node("memory_out", self.memory_out_node, retry=_RETRY_TWICE)
         b.add_node("tts", self.tts_node, retry=_RETRY_TWICE)
         b.add_node("finalize", self.finalize_node)
 

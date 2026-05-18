@@ -49,6 +49,8 @@
   let chatOptions = $state<CatalogModelRow[]>([]);
   let sttOptions = $state<CatalogModelRow[]>([]);
   let ttsOptions = $state<CatalogModelRow[]>([]);
+  let memoryLlmOptions = $state<CatalogModelRow[]>([]);
+  let embeddingOptions = $state<CatalogModelRow[]>([]);
   let catalogAllProviders = $state<CatalogProviderRow[]>([]);
   let activeProviders = $state<ActiveProviderRow[]>([]);
   let workspaceActiveProvidersResolved = $state(false);
@@ -85,6 +87,9 @@
   );
   const ttsActiveProviderIds = $derived(
     new Set(activeProviders.filter((row) => row.has_tts).map((row) => row.provider_id))
+  );
+  const embeddingActiveProviderIds = $derived(
+    new Set(activeProviders.filter((row) => row.has_embedding).map((row) => row.provider_id))
   );
 
   const unsaved = createUnsavedGuard(
@@ -125,25 +130,40 @@
     loading = true;
     error = null;
     try {
-      const [prefsPayload, chatPayload, sttPayload, ttsPayload, providersPayload] =
+      const [prefsPayload, chatPayload, sttPayload, ttsPayload, embeddingPayload, providersPayload] =
         await Promise.all([
           getPreferences(),
           listCatalogModels({ model_kind: 'chat' }),
           listCatalogModels({ model_kind: 'stt' }),
           listCatalogModels({ model_kind: 'tts' }),
+          listCatalogModels({ model_kind: 'embedding' }),
           listCatalogProviders()
         ]);
       sections = prefsPayload.data.sections ?? [];
       setDraft(prefsPayload.data.preferences);
       chatOptions = prefsPayload.data.preferences.llm.default_chat
-        ? includeUnknownModel(chatPayload.data.models, prefsPayload.data.preferences.llm.default_chat)
+        ? includeUnknownModel(chatPayload.data.models, prefsPayload.data.preferences.llm.default_chat, 'chat')
         : chatPayload.data.models;
       sttOptions = prefsPayload.data.preferences.llm.default_stt
-        ? includeUnknownModel(sttPayload.data.models, prefsPayload.data.preferences.llm.default_stt)
+        ? includeUnknownModel(sttPayload.data.models, prefsPayload.data.preferences.llm.default_stt, 'stt')
         : sttPayload.data.models;
       ttsOptions = prefsPayload.data.preferences.llm.default_tts
-        ? includeUnknownModel(ttsPayload.data.models, prefsPayload.data.preferences.llm.default_tts)
+        ? includeUnknownModel(ttsPayload.data.models, prefsPayload.data.preferences.llm.default_tts, 'tts')
         : ttsPayload.data.models;
+      memoryLlmOptions = prefsPayload.data.preferences.memory.default_llm
+        ? includeUnknownModel(
+            chatPayload.data.models,
+            prefsPayload.data.preferences.memory.default_llm,
+            'chat'
+          )
+        : chatPayload.data.models;
+      embeddingOptions = prefsPayload.data.preferences.memory.default_embedding_model
+        ? includeUnknownModel(
+            embeddingPayload.data.models,
+            prefsPayload.data.preferences.memory.default_embedding_model,
+            'embedding'
+          )
+        : embeddingPayload.data.models;
       catalogAllProviders = providersPayload.data;
       await loadActiveProviders();
     } catch (err) {
@@ -165,7 +185,11 @@
     }
   }
 
-  function includeUnknownModel(models: CatalogModelRow[], id: string): CatalogModelRow[] {
+  function includeUnknownModel(
+    models: CatalogModelRow[],
+    id: string,
+    modelKind: CatalogModelRow['model_kind']
+  ): CatalogModelRow[] {
     if (models.some((model) => model.id === id)) return models;
     const [providerId = 'unknown'] = id.split(':', 1);
     return [
@@ -174,7 +198,7 @@
         id,
         provider_id: providerId || 'unknown',
         display_name: id,
-        model_kind: 'chat'
+        model_kind: modelKind
       }
     ];
   }
@@ -186,6 +210,13 @@
   function setDefaultModel(path: 'default_chat' | 'default_stt' | 'default_tts', id: string | null) {
     if (!draft) return;
     draft.llm[path] = id;
+    markDirty();
+  }
+
+  function setMemoryModel(path: 'default_llm' | 'default_embedding_model', id: string | null) {
+    if (!draft) return;
+    draft.memory[path] = id;
+    draft.memory.enabled = Boolean(draft.memory.default_llm && draft.memory.default_embedding_model);
     markDirty();
   }
 
@@ -212,6 +243,17 @@
     add('llm.default_stt', baseline.llm.default_stt, draft.llm.default_stt || null);
     add('llm.default_tts', baseline.llm.default_tts, draft.llm.default_tts || null);
     add('llm.tuning', baseline.llm.tuning, parsedTuning);
+    add('memory.default_llm', baseline.memory.default_llm, draft.memory.default_llm || null);
+    add(
+      'memory.default_embedding_model',
+      baseline.memory.default_embedding_model,
+      draft.memory.default_embedding_model || null
+    );
+    add(
+      'memory.enabled',
+      baseline.memory.enabled,
+      Boolean(draft.memory.default_llm && draft.memory.default_embedding_model)
+    );
     for (const key of modalityKeys) {
       add(`media.input.${key}`, baseline.media.input[key], draft.media.input[key]);
       add(`media.output.${key}`, baseline.media.output[key], draft.media.output[key]);
@@ -249,15 +291,18 @@
     catalogReloadBusy = true;
     try {
       const payload = await reloadModelCatalog();
-      const [chatPayload, sttPayload, ttsPayload, providersPayload] = await Promise.all([
+      const [chatPayload, sttPayload, ttsPayload, embeddingPayload, providersPayload] = await Promise.all([
         listCatalogModels({ model_kind: 'chat' }),
         listCatalogModels({ model_kind: 'stt' }),
         listCatalogModels({ model_kind: 'tts' }),
+        listCatalogModels({ model_kind: 'embedding' }),
         listCatalogProviders()
       ]);
       chatOptions = chatPayload.data.models;
       sttOptions = sttPayload.data.models;
       ttsOptions = ttsPayload.data.models;
+      memoryLlmOptions = chatPayload.data.models;
+      embeddingOptions = embeddingPayload.data.models;
       catalogAllProviders = providersPayload.data;
       await loadActiveProviders();
       notify(
@@ -488,6 +533,34 @@
         </h3>
         <p class="mt-1 text-sm text-muted-foreground">{sectionDescription('memory')}</p>
       </div>
+      <SingleModelPicker
+        label="Memory LLM model"
+        hint="Used by the memory service for memory extraction."
+        selectedId={draft.memory.default_llm}
+        catalogModels={memoryLlmOptions}
+        {catalogAllProviders}
+        {workspaceActiveProvidersResolved}
+        workspaceActiveProviderIds={chatActiveProviderIds}
+        {busy}
+        emptyProviders="No chat providers in catalog."
+        emptyModelsForProvider="No chat models for this provider."
+        onSelect={(id) => setMemoryModel('default_llm', id)}
+        onChange={markDirty}
+      />
+      <SingleModelPicker
+        label="Memory embedding model"
+        hint="Used by the memory service for vector search."
+        selectedId={draft.memory.default_embedding_model}
+        catalogModels={embeddingOptions}
+        {catalogAllProviders}
+        {workspaceActiveProvidersResolved}
+        workspaceActiveProviderIds={embeddingActiveProviderIds}
+        {busy}
+        emptyProviders="No embedding providers in catalog."
+        emptyModelsForProvider="No embedding models for this provider."
+        onSelect={(id) => setMemoryModel('default_embedding_model', id)}
+        onChange={markDirty}
+      />
       <label class="grid max-w-sm gap-2">
         <span class="font-sans text-sm font-semibold text-muted-foreground">Max retained messages</span>
         <input

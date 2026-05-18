@@ -52,6 +52,12 @@ def _minimal_catalog(tmp_path: Path) -> ModelCatalog:
                 "model_kind": "tts",
             },
             {
+                "id": "pa:embed1",
+                "provider_id": "pa",
+                "display_name": "E1",
+                "model_kind": "embedding",
+            },
+            {
                 "id": "pb:chat2",
                 "provider_id": "pb",
                 "display_name": "Chat2",
@@ -74,8 +80,23 @@ def test_list_available_only_configured_provider(
     store.set_api_key("pa", "key")
     ams = AvailableModelsService(cat, store)
     ids = {m.id for m in ams.list_available_models()}
-    assert ids == {"pa:chat1", "pa:tts1"}
+    assert ids == {"pa:chat1", "pa:tts1", "pa:embed1"}
     assert not ams.is_model_available("pb:chat2")
+
+
+def test_list_configured_providers_reports_embedding_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cat = _minimal_catalog(tmp_path)
+    monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
+    secrets: dict[tuple[str, str], str] = {}
+    store = CredentialStore(tmp_path, "w1", _test_secrets=secrets)
+    store.set_api_key("pa", "key")
+    ams = AvailableModelsService(cat, store)
+    [summary] = ams.list_configured_providers()
+    assert summary.has_chat is True
+    assert summary.has_tts is True
+    assert summary.has_embedding is True
 
 
 def test_validate_character_models_buckets(

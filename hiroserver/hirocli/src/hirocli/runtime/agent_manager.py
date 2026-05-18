@@ -47,6 +47,7 @@ from .comm_log import (
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from ..domain.memory import MemoryService
     from ..services.tts import TTSService
     from ..tools.registry import ToolRegistry
     from .communication_manager import CommunicationManager
@@ -125,6 +126,7 @@ class AgentManager:
         self._lc_agent_tools: list[Any] | None = None
         self._stt = None  # built in serve()
         self._vision = None
+        self._memory: "MemoryService | None" = None
         self._credentials = None
         self._checkpointer = None
         self._graph: BaseAgentGraph | None = None
@@ -152,6 +154,7 @@ class AgentManager:
         from ..domain.credential_store import CredentialStore
         from ..domain.db import db_path
         from ..domain.workspace import workspace_id_for_path
+        from ..services.memory import create_memory_service
         from ..services.stt import create_stt_service
         from ..services.vision_service import VisionService
 
@@ -168,6 +171,12 @@ class AgentManager:
         )
         log.info("🕒 Loading Vision service")
         self._vision = VisionService(workspace_path=self._ctx.workspace_path)
+        log.info("Loading Memory service")
+        self._memory = create_memory_service(
+            self._ctx.workspace_path,
+            prefs=self._current_preferences(),
+            credential_store=self._credentials,
+        )
 
         self._log_agent_config()
 
@@ -179,6 +188,7 @@ class AgentManager:
                 stt_service=self._stt,
                 vision_service=self._vision,
                 tts_service=self._tts,
+                memory_service=self._memory,
                 credential_store=self._credentials,
                 checkpointer=checkpointer,
                 preferences=self._ctx.preferences,
@@ -195,6 +205,11 @@ class AgentManager:
                 "llm.default_tts",
                 self._reload_tts_on_change,
                 key="agent.tts",
+            )
+            self._ctx.preference_reactor.on_change(
+                "memory",
+                self._reload_memory_on_change,
+                key="agent.memory",
             )
             # Providers/admin mutations write ``providers.json`` via another
             # ``CredentialStore`` instance — keep graph caches and media services in sync.
@@ -637,23 +652,27 @@ class AgentManager:
 
             stt_ok = await self._attach_new_stt_service(context="providers change")
             tts_ok = await self._attach_new_tts_service(context="providers change")
-            if stt_ok and tts_ok:
+            memory_ok = await self._attach_new_memory_service(context="providers change")
+            if stt_ok and tts_ok and memory_ok:
                 log.info(
-                    "✅ Providers change applied — HiroServer · media rebound · vision cache cleared",
+                    "Providers change applied - services rebound; vision cache cleared",
                     stt_ok=stt_ok,
                     tts_ok=tts_ok,
+                    memory_ok=memory_ok,
                 )
-            elif stt_ok or tts_ok:
+            elif stt_ok or tts_ok or memory_ok:
                 log.warning(
-                    "⚠️ Providers change partially applied — HiroServer · media rebound",
+                    "Providers change partially applied - services rebound",
                     stt_ok=stt_ok,
                     tts_ok=tts_ok,
+                    memory_ok=memory_ok,
                 )
             else:
                 log.warning(
-                    "❌ Providers change — STT and TTS rebound both failed — HiroServer",
+                    "Providers change - service rebound failed",
                     stt_ok=stt_ok,
                     tts_ok=tts_ok,
+                    memory_ok=memory_ok,
                 )
 
     async def _attach_new_stt_service(self, *, context: str) -> bool:
@@ -712,6 +731,35 @@ class AgentManager:
         )
         return True
 
+    async def _attach_new_memory_service(self, *, context: str) -> bool:
+        """Build long-term memory service from current prefs + credentials; swap onto graph."""
+        from ..services.memory import create_memory_service
+
+        try:
+            new_memory = await asyncio.to_thread(
+                create_memory_service,
+                self._ctx.workspace_path,
+                self._current_preferences(),
+                credential_store=self._credentials,
+            )
+        except Exception as exc:
+            log.error(
+                f"Memory rebuild failed - HiroServer - {context} - keeping previous instance",
+                error=str(exc),
+                exc_info=True,
+            )
+            return False
+
+        self._memory = new_memory
+        if self._graph is not None:
+            self._graph.set_memory_service(new_memory)
+        log.fineinfo(
+            "Memory rebound - HiroServer",
+            context=context,
+            available=new_memory is not None,
+        )
+        return True
+
     async def _reload_stt_on_change(
         self,
         workspace_path,
@@ -748,6 +796,27 @@ class AgentManager:
                 old=old_value,
                 new=new_value,
                 available=self._tts.is_available() if self._tts is not None else False,
+            )
+
+    async def _reload_memory_on_change(
+        self,
+        workspace_path,
+        changes: dict[str, tuple[Any, Any]],
+    ) -> None:
+        """Rebuild long-term memory after memory model/enablement preferences change."""
+        relevant_paths = {
+            "memory.enabled",
+            "memory.default_llm",
+            "memory.default_embedding_model",
+        }
+        if not any(path in relevant_paths for path in changes):
+            return
+        ok = await self._attach_new_memory_service(context="preferences.memory")
+        if ok:
+            log.info(
+                "Memory reloaded - preferences",
+                paths=sorted(changes.keys()),
+                available=self._memory is not None,
             )
 
 

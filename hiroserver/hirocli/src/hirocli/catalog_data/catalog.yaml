@@ -33,7 +33,7 @@ providers:
       - { id: sage, display_name: Sage }
       - { id: shimmer, display_name: Shimmer }
       - { id: verse, display_name: Verse }
-    metadata_updated_at: "2026-05-03"
+    metadata_updated_at: "2026-05-18"
 
   - id: google
     display_name: Google (Gemini)
@@ -138,6 +138,22 @@ models:
       pricing_updated_at: "2026-05-14"
       pricing_source: https://openai.com/api/pricing
 
+  # GPT-5.5 pro: OpenAI docs — streaming not supported; no cached-input discount; Responses/Batch oriented.
+  - id: openai:gpt-5.5-pro
+    provider_id: openai
+    display_name: GPT-5.5 pro
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1050000
+    modalities: [text, image_in]
+    features: [tools, structured_output, parallel_tools, json_mode]
+    notes: Pro tier (more compute than GPT-5.5). Streaming not supported per OpenAI model docs; long jobs may need background mode. No cached-input pricing tier (verify openai.com/api/pricing).
+    pricing:
+      input_per_1m_tokens: 30.00
+      output_per_1m_tokens: 180.00
+      pricing_updated_at: "2026-05-18"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-5.5-pro
+
   - id: openai:gpt-5.4
     provider_id: openai
     display_name: GPT-5.4
@@ -152,6 +168,22 @@ models:
       output_per_1m_tokens: 15.00
       pricing_updated_at: "2026-05-14"
       pricing_source: https://openai.com/api/pricing
+
+  # GPT-5.4 pro: OpenAI docs — structured outputs not supported; long-context surcharges match GPT-5.4 above 272K input.
+  - id: openai:gpt-5.4-pro
+    provider_id: openai
+    display_name: GPT-5.4 pro
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1050000
+    modalities: [text, image_in]
+    features: [tools, parallel_tools, streaming, json_mode]
+    notes: Pro tier; structured outputs not supported per OpenAI docs. Responses API–centric for advanced flows; prompts with >272K input tokens use 2x input and 1.5x output for the full session (same long-context rule as GPT-5.4).
+    pricing:
+      input_per_1m_tokens: 30.00
+      output_per_1m_tokens: 180.00
+      pricing_updated_at: "2026-05-18"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-5.4-pro
 
   - id: openai:gpt-5.4-mini
     provider_id: openai
@@ -182,6 +214,70 @@ models:
       output_per_1m_tokens: 1.25
       pricing_updated_at: "2026-05-14"
       pricing_source: https://openai.com/api/pricing
+
+  # Prior GPT-5 generation (API ids gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro). OpenAI recommends newer GPT-5.x for new work.
+  - id: openai:gpt-5
+    provider_id: openai
+    display_name: GPT-5
+    model_kind: chat
+    model_class: reasoning
+    context_window: 400000
+    modalities: [text, image_in]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    notes: Previous-gen reasoning model; OpenAI points new projects to GPT-5.1+ (see latest model guide). reasoning.effort minimal–high.
+    pricing:
+      input_per_1m_tokens: 1.25
+      cached_input_per_1m_tokens: 0.125
+      output_per_1m_tokens: 10.00
+      pricing_updated_at: "2026-05-18"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-5
+
+  - id: openai:gpt-5-mini
+    provider_id: openai
+    display_name: GPT-5 mini
+    model_kind: chat
+    model_class: fast
+    context_window: 400000
+    modalities: [text, image_in]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    notes: Cost/latency tier vs GPT-5; OpenAI recommends GPT-5.4 mini for new high-volume workloads.
+    pricing:
+      input_per_1m_tokens: 0.25
+      cached_input_per_1m_tokens: 0.025
+      output_per_1m_tokens: 2.00
+      pricing_updated_at: "2026-05-18"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-5-mini
+
+  - id: openai:gpt-5-nano
+    provider_id: openai
+    display_name: GPT-5 nano
+    model_kind: chat
+    model_class: fast
+    context_window: 400000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, json_mode]
+    notes: Fastest/cheapest GPT-5 variant; OpenAI recommends GPT-5.4 nano for new speed-sensitive workloads.
+    pricing:
+      input_per_1m_tokens: 0.05
+      cached_input_per_1m_tokens: 0.005
+      output_per_1m_tokens: 0.40
+      pricing_updated_at: "2026-05-18"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-5-nano
+
+  - id: openai:gpt-5-pro
+    provider_id: openai
+    display_name: GPT-5 pro
+    model_kind: chat
+    model_class: reasoning
+    context_window: 400000
+    modalities: [text, image_in]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    notes: Highest-compute GPT-5; defaults to reasoning.effort high only. Oriented to Responses API; long requests may need background mode. Cached-input tier not listed on model pricing table — verify vendor.
+    pricing:
+      input_per_1m_tokens: 15.00
+      output_per_1m_tokens: 120.00
+      pricing_updated_at: "2026-05-18"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-5-pro
 
   - id: openai:gpt-image-2
     provider_id: openai

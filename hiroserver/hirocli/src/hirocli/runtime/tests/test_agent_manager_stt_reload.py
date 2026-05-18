@@ -35,6 +35,10 @@ def _tts_double(tag: str):
     return SimpleNamespace(tag=tag, is_available=lambda: True)
 
 
+def _memory_double(tag: str):
+    return SimpleNamespace(tag=tag)
+
+
 def _make_agent_manager(workspace_path: Path) -> AgentManager:
     """Construct an AgentManager wired against a real reactor + preferences runtime.
 
@@ -56,6 +60,7 @@ def _make_agent_manager(workspace_path: Path) -> AgentManager:
     mgr._lc_agent_tools = None
     mgr._tts = _tts_double("initial-tts")
     mgr._stt = _stt_double("initial")
+    mgr._memory = None
     mgr._vision = None
     mgr._credentials = None
     mgr._checkpointer = None
@@ -67,6 +72,7 @@ def _make_agent_manager(workspace_path: Path) -> AgentManager:
         stt_service=mgr._stt,
         vision_service=None,
         tts_service=mgr._tts,
+        memory_service=mgr._memory,
         credential_store=None,
         checkpointer=None,
         preferences=runtime,
@@ -123,8 +129,10 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
     mgr._compiled_cache["dummy"] = object()
     new_stt = _stt_double("after-providers-stt")
     new_tts = _tts_double("after-providers-tts")
+    new_memory = _memory_double("after-providers-memory")
     stt_rebuilds: list[Path] = []
     tts_rebuilds: list[Path] = []
+    memory_rebuilds: list[Path] = []
 
     def fake_create_stt_service(workspace_path: Path, *, prefs=None):
         stt_rebuilds.append(workspace_path)
@@ -134,6 +142,10 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
         tts_rebuilds.append(workspace_path)
         return new_tts
 
+    def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
+        memory_rebuilds.append(workspace_path)
+        return new_memory
+
     with (
         patch(
             "hirocli.services.stt.create_stt_service",
@@ -142,6 +154,10 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
         patch(
             "hirocli.services.tts.create_tts_service",
             side_effect=fake_create_tts_service,
+        ),
+        patch(
+            "hirocli.services.memory.create_memory_service",
+            side_effect=fake_create_memory_service,
         ),
     ):
         bus = get_domain_event_bus()
@@ -161,10 +177,13 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
     assert mgr._compiled_cache == {}
     assert stt_rebuilds == [tmp_path]
     assert tts_rebuilds == [tmp_path]
+    assert memory_rebuilds == [tmp_path]
     assert mgr._stt is new_stt
     assert mgr._graph._stt is new_stt
     assert mgr._tts is new_tts
     assert mgr._graph._tts is new_tts
+    assert mgr._memory is new_memory
+    assert mgr._graph._memory is new_memory
 
 
 @pytest.mark.asyncio
@@ -206,6 +225,48 @@ async def test_default_tts_change_swaps_tts_on_manager_and_graph(
 
 
 @pytest.mark.asyncio
+async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
+    tmp_path: Path,
+) -> None:
+    mgr = _make_agent_manager(tmp_path)
+    reactor: PreferenceReactor = mgr._ctx.preference_reactor
+
+    new_memory = _memory_double("rebuilt-memory")
+    rebuilds: list[tuple[Path, object | None]] = []
+
+    def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
+        rebuilds.append((workspace_path, credential_store))
+        return new_memory
+
+    try:
+        reactor.on_change(
+            "memory",
+            mgr._reload_memory_on_change,
+            key="agent.memory",
+            debounce_ms=10,
+        )
+
+        with patch(
+            "hirocli.services.memory.create_memory_service",
+            side_effect=fake_create_memory_service,
+        ):
+            mgr._ctx.preferences.update_many(
+                {
+                    "memory.default_llm": "openai:gpt-test",
+                    "memory.default_embedding_model": "openai:text-embedding-3-small",
+                    "memory.enabled": True,
+                }
+            )
+            await asyncio.sleep(0.1)
+
+        assert rebuilds == [(tmp_path, None)]
+        assert mgr._memory is new_memory
+        assert mgr._graph._memory is new_memory
+    finally:
+        reactor.close()
+
+
+@pytest.mark.asyncio
 async def test_providers_changed_event_ignored_for_other_workspace(
     tmp_path: Path,
 ) -> None:
@@ -215,6 +276,7 @@ async def test_providers_changed_event_ignored_for_other_workspace(
     mgr._compiled_cache["keep"] = object()
     initial_stt = mgr._stt
     initial_tts = mgr._tts
+    initial_memory = mgr._memory
 
     with (
         patch(
@@ -224,6 +286,10 @@ async def test_providers_changed_event_ignored_for_other_workspace(
         patch(
             "hirocli.services.tts.create_tts_service",
             side_effect=lambda *a, **k: _tts_double("should-not-run"),
+        ),
+        patch(
+            "hirocli.services.memory.create_memory_service",
+            side_effect=lambda *a, **k: _memory_double("should-not-run"),
         ),
     ):
         bus = get_domain_event_bus()
@@ -245,6 +311,7 @@ async def test_providers_changed_event_ignored_for_other_workspace(
     assert "keep" in mgr._compiled_cache
     assert mgr._stt is initial_stt
     assert mgr._tts is initial_tts
+    assert mgr._memory is initial_memory
 
 
 @pytest.mark.asyncio
@@ -255,9 +322,11 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
     reactor: PreferenceReactor = mgr._ctx.preference_reactor
     initial_stt = mgr._stt
     initial_tts = mgr._tts
+    initial_memory = mgr._memory
 
     stt_rebuilds: list[Path] = []
     tts_rebuilds: list[Path] = []
+    memory_rebuilds: list[Path] = []
 
     def fake_create_stt_service(workspace_path: Path, *, prefs=None):
         stt_rebuilds.append(workspace_path)
@@ -266,6 +335,10 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
     def fake_create_tts_service(workspace_path: Path, *, prefs=None):
         tts_rebuilds.append(workspace_path)
         return _tts_double("rebuilt")
+
+    def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
+        memory_rebuilds.append(workspace_path)
+        return _memory_double("rebuilt")
 
     try:
         reactor.on_change(
@@ -280,6 +353,12 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
             key="agent.tts",
             debounce_ms=10,
         )
+        reactor.on_change(
+            "memory",
+            mgr._reload_memory_on_change,
+            key="agent.memory",
+            debounce_ms=10,
+        )
 
         with (
             patch(
@@ -290,13 +369,19 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
                 "hirocli.services.tts.create_tts_service",
                 side_effect=fake_create_tts_service,
             ),
+            patch(
+                "hirocli.services.memory.create_memory_service",
+                side_effect=fake_create_memory_service,
+            ),
         ):
             mgr._ctx.preferences.update("memory.max_messages", 9)
             await asyncio.sleep(0.05)
 
         assert stt_rebuilds == []
         assert tts_rebuilds == []
+        assert memory_rebuilds == []
         assert mgr._stt is initial_stt
         assert mgr._tts is initial_tts
+        assert mgr._memory is initial_memory
     finally:
         reactor.close()

@@ -105,6 +105,7 @@ class GraphState(TypedDict, total=False):
 
     # Built by context_build / call_model
     user_text: str | None
+    retrieved_memories: list[dict[str, Any]]
     messages: Annotated[list[BaseMessage], add_messages]
     reply_text: str | None
     # ``reply_id`` is set by ``memory_out_node`` and consumed by ``tts_node``

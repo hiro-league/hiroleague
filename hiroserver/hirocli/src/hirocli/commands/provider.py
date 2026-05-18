@@ -60,6 +60,8 @@ def print_provider_summary_table(console: Console, *, workspace: str | None) -> 
             kinds.append("tts")
         if p.get("has_stt"):
             kinds.append("stt")
+        if p.get("has_embedding"):
+            kinds.append("embedding")
         kind_str = ", ".join(kinds) if kinds else "—"
         table.add_row(
             p["provider_id"],

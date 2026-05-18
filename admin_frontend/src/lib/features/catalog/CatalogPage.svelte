@@ -428,6 +428,7 @@
     if (provider.has_chat) kinds.push('chat');
     if (provider.has_tts) kinds.push('tts');
     if (provider.has_stt) kinds.push('stt');
+    if (provider.has_embedding) kinds.push('embedding');
     return kinds.length ? kinds.join(', ') : '-';
   }
 

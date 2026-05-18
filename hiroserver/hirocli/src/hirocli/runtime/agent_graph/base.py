@@ -49,11 +49,14 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer, Send, StreamWriter
 
+from ...domain.memory import DEFAULT_USER_ID
 from ...domain.preferences import DEFAULT_MEMORY_MAX_MESSAGES
 from .events import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
     GRAPH_LLM_USAGE,
+    GRAPH_MEMORY_RETRIEVED,
+    GRAPH_MEMORY_STORED,
     GRAPH_REPLY_COMPLETED,
     GRAPH_RUN_COMPLETED,
     GRAPH_RUN_FAILED,
@@ -84,6 +87,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...domain.credential_store import CredentialStore
+    from ...domain.memory import MemoryService
     from ...runtime.preferences_runtime import WorkspacePreferencesRuntime
     from ...services.stt import STTService
     from ...services.tts import TTSService
@@ -120,12 +124,14 @@ class BaseAgentGraph:
         tts_service: "TTSService | None",
         credential_store: "CredentialStore | None",
         checkpointer: Checkpointer | None,
+        memory_service: "MemoryService | None" = None,
         preferences: "WorkspacePreferencesRuntime | None" = None,
     ) -> None:
         self._workspace_path = workspace_path
         self._stt = stt_service
         self._vision = vision_service
         self._tts = tts_service
+        self._memory = memory_service
         self._credentials = credential_store
         self._checkpointer = checkpointer
         self._preferences = preferences
@@ -143,6 +149,9 @@ class BaseAgentGraph:
 
     def set_tts_service(self, tts_service: "TTSService | None") -> None:
         self._tts = tts_service
+
+    def set_memory_service(self, memory_service: "MemoryService | None") -> None:
+        self._memory = memory_service
 
     # ------------------------------------------------------------------
     # Override point — subclasses wire the StateGraph here.
@@ -513,7 +522,8 @@ class BaseAgentGraph:
         )
         return {"reply_text": reply_text, "reply_id": reply_id}
 
-    async def memory_in_node(self, state: GraphState) -> dict[str, Any]:
+    @graph_logged(captures={"decision"})
+    async def memory_in_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Trim chat history to the latest ``TRIMMED_MESSAGE_LIMIT`` messages.
 
         Replaces the prior ``trimming_agent_graph``: same fixed-window memory,
@@ -522,16 +532,66 @@ class BaseAgentGraph:
         messages: list[AnyMessage] = list(state.get("messages", []) or [])
         limit = self._memory_max_messages()
         keep = _trim_chat_history(messages, limit)
+        result: dict[str, Any] = {}
         if keep == messages:
-            return {}
-        from langchain_core.messages import RemoveMessage
-        from langgraph.graph.message import REMOVE_ALL_MESSAGES
+            pass
+        else:
+            from langchain_core.messages import RemoveMessage
+            from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-        log.info(
-            "✅ memory_in — trim · before=%d after=%d",
-            len(messages), len(keep),
+            log.info(
+                "memory_in trim - before=%d after=%d",
+                len(messages), len(keep),
+            )
+            result["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES), *keep]
+
+        text = state.get("user_text") or ""
+        if not text.strip() or self._memory is None:
+            if entry := current_entry.get():
+                entry.set_decision("empty", "disabled" if self._memory is None else "no_query")
+            return result
+
+        if not bool(getattr(getattr(self._current_preferences(), "memory", None), "enabled", False)):
+            if entry := current_entry.get():
+                entry.set_decision("empty", "disabled")
+            return result
+
+        t0 = time.perf_counter()
+        try:
+            hits = await self._memory.search(
+                text,
+                user_id=DEFAULT_USER_ID,
+                agent_id=state.get("character_id", ""),
+                limit=8,
+            )
+        except Exception as exc:
+            if entry := current_entry.get():
+                entry.set_decision("failed", _error_slug(exc))
+                entry.set_error("memory_search_failed")
+            log.warning(
+                "memory_in search failed - %s",
+                state.get("inbound_id", "?"),
+                error=str(exc),
+            )
+            return result
+
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        if entry := current_entry.get():
+            entry.set_decision("retrieved" if hits else "empty", str(len(hits)))
+        log.info("memory_in retrieved - n=%d", len(hits), elapsed_ms=elapsed_ms)
+        self._emit(
+            writer,
+            GRAPH_MEMORY_RETRIEVED,
+            {
+                "inbound_id": state.get("inbound_id", ""),
+                "chat_channel_id": state.get("chat_channel_id", 0),
+                "character_id": state.get("character_id", ""),
+                "count": len(hits),
+                "elapsed_ms": elapsed_ms,
+            },
         )
-        return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *keep]}
+        result["retrieved_memories"] = hits
+        return result
 
     async def context_build_node(self, state: GraphState) -> dict[str, Any]:
         """Append the new user turn to the (trimmed) message history."""
@@ -539,6 +599,9 @@ class BaseAgentGraph:
         if not text:
             # No usable input — leave messages untouched; call_model will short-circuit.
             return {}
+        memory_context = _format_memory_context(state.get("retrieved_memories", []) or [])
+        if memory_context:
+            text = f"{memory_context}\n\n{text}"
         return {"messages": [HumanMessage(content=text)]}
 
     def make_call_model_node(
@@ -679,12 +742,12 @@ class BaseAgentGraph:
             return "tools"
         return "memory_out"
 
+    @graph_logged(captures={"usage", "decision"})
     async def memory_out_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Finalize the reply text and emit ``reply.completed``.
 
-        Memory write is implicit: ``messages`` is checkpointed by LangGraph at
-        the end of the super-step. This node's main job is to surface the
-        normalized reply text and announce it to subscribers.
+        This node surfaces the normalized reply text, announces it to subscribers,
+        then stores the user/assistant turn in long-term memory when enabled.
         """
         msgs = state.get("messages", []) or []
         reply_text = ""
@@ -720,6 +783,7 @@ class BaseAgentGraph:
                 "request_voice_reply": bool(state.get("request_voice_reply", False)),
             },
         )
+        await self._store_turn_memory(state, writer, reply_text)
         return {"reply_text": reply_text, "reply_id": reply_id}
 
     def tts_gate(self, state: GraphState) -> str:
@@ -731,6 +795,56 @@ class BaseAgentGraph:
         if self._tts is None or not self._tts.is_available():
             return "finalize"
         return "tts"
+
+    async def _store_turn_memory(
+        self,
+        state: GraphState,
+        writer: StreamWriter,
+        reply_text: str,
+    ) -> None:
+        if self._memory is None or not bool(getattr(self._current_preferences().memory, "enabled", False)):
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "disabled")
+            return
+
+        t0 = time.perf_counter()
+        try:
+            await self._memory.add(
+                f"User: {state.get('user_text') or ''}\nAssistant: {reply_text}",
+                user_id=DEFAULT_USER_ID,
+                agent_id=state.get("character_id", ""),
+                metadata={
+                    "thread_id": state.get("thread_id", ""),
+                    "channel_id": state.get("chat_channel_id", 0),
+                    "source": "conversation",
+                },
+            )
+        except Exception as exc:
+            if entry := current_entry.get():
+                entry.set_decision("failed", _error_slug(exc))
+                entry.set_error("memory_store_failed")
+            log.warning(
+                "memory_out store failed - %s",
+                state.get("inbound_id", "?"),
+                error=str(exc),
+            )
+            return
+
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        if entry := current_entry.get():
+            entry.set_decision("stored", "ok")
+        log.info("memory_out stored - %dms", elapsed_ms)
+        self._emit(
+            writer,
+            GRAPH_MEMORY_STORED,
+            {
+                "inbound_id": state.get("inbound_id", ""),
+                "chat_channel_id": state.get("chat_channel_id", 0),
+                "character_id": state.get("character_id", ""),
+                "count": 1,
+                "elapsed_ms": elapsed_ms,
+            },
+        )
 
     @graph_logged(captures={"usage", "decision"})
     async def tts_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
@@ -1006,6 +1120,24 @@ def _normalize_reply_content(content: Any) -> str:
         if isinstance(cv, str):
             parts.append(cv)
     return "\n".join(p for p in parts if p)
+
+
+def _format_memory_context(memories: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for item in memories[:8]:
+        text = (
+            item.get("memory")
+            or item.get("text")
+            or item.get("content")
+            or item.get("data")
+            or ""
+        )
+        text = " ".join(str(text or "").split())
+        if text:
+            lines.append(f"- {text[:500]}")
+    if not lines:
+        return ""
+    return "Memory context:\n" + "\n".join(lines)
 
 
 def _trim_chat_history(messages: list[AnyMessage], limit: int) -> list[AnyMessage]:

@@ -54,6 +54,7 @@ export type ActiveProviderRow = {
   has_chat: boolean;
   has_tts: boolean;
   has_stt: boolean;
+  has_embedding: boolean;
 };
 
 export type AddableProviderRow = {

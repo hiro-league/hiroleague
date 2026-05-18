@@ -12,6 +12,7 @@ from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     LLMPreferences,
     MediaPreferences,
+    MemoryPreferences,
     ModalityFlags,
     ModelTuning,
     PREFERENCE_SECTIONS,
@@ -103,7 +104,19 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.media.output.voice is False
     assert prefs.media.input.image is False
     assert prefs.media.output.file is False
+    assert prefs.memory.enabled is False
     assert prefs.memory.max_messages == 6
+
+
+def test_memory_preferences_null_model_disables_memory() -> None:
+    prefs = WorkspacePreferences(
+        memory=MemoryPreferences(
+            enabled=True,
+            default_llm="openai:gpt-test",
+            default_embedding_model=None,
+        )
+    )
+    assert prefs.memory.enabled is False
 
 
 def test_preference_sections_are_first_level_only() -> None:

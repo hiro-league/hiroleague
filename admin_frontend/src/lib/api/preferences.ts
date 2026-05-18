@@ -25,6 +25,9 @@ export type WorkspacePreferences = {
     output: ModalityFlags;
   };
   memory: {
+    enabled: boolean;
+    default_llm: string | null;
+    default_embedding_model: string | null;
     max_messages: number;
   };
 };

@@ -21,6 +21,8 @@ GRAPH_STT_COMPLETED = "graph.stt.completed"
 GRAPH_VISION_COMPLETED = "graph.vision.completed"
 GRAPH_LLM_USAGE = "graph.llm.usage"
 GRAPH_TOOL_COMPLETED = "graph.tool.completed"
+GRAPH_MEMORY_RETRIEVED = "graph.memory.retrieved"
+GRAPH_MEMORY_STORED = "graph.memory.stored"
 GRAPH_REPLY_COMPLETED = "graph.reply.completed"
 GRAPH_TTS_COMPLETED = "graph.tts.completed"
 GRAPH_RUN_COMPLETED = "graph.run.completed"
@@ -77,6 +79,22 @@ class ToolCompletedPayload(TypedDict):
     status: str
     elapsed_ms: int
     error: str | None
+
+
+class MemoryRetrievedPayload(TypedDict):
+    inbound_id: str
+    chat_channel_id: int
+    character_id: str
+    count: int
+    elapsed_ms: int
+
+
+class MemoryStoredPayload(TypedDict):
+    inbound_id: str
+    chat_channel_id: int
+    character_id: str
+    count: int
+    elapsed_ms: int
 
 
 class ReplyCompletedPayload(TypedDict):

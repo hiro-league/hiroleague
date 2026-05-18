@@ -47,6 +47,7 @@ from .gateway import (
     GatewayTeardownTool,
 )
 from .media import DescribeImageTool, TranscribeTool
+from .memory import MemoryClearTool, MemoryListTool
 from .server import (
     RestartTool,
     SetupTool,
@@ -115,6 +116,8 @@ def all_tools() -> list[Tool]:
         GatewayTeardownTool(),
         TranscribeTool(),
         DescribeImageTool(),
+        MemoryListTool(),
+        MemoryClearTool(),
         LogSearchTool(),
         LogTailTool(),
         LlmCatalogListProvidersTool(),

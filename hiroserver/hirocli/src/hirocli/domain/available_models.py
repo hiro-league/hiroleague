@@ -23,6 +23,7 @@ class ConfiguredProviderSummary:
     has_chat: bool
     has_tts: bool
     has_stt: bool
+    has_embedding: bool
 
 
 @dataclass
@@ -54,6 +55,7 @@ class AvailableModelsService:
             has_chat = any(m.supports_kind("chat") for m in models)
             has_tts = any(m.supports_kind("tts") for m in models)
             has_stt = any(m.supports_kind("stt") for m in models)
+            has_embedding = any(m.supports_kind("embedding") for m in models)
             summaries.append(
                 ConfiguredProviderSummary(
                     provider_id=meta.provider_id,
@@ -64,6 +66,7 @@ class AvailableModelsService:
                     has_chat=has_chat,
                     has_tts=has_tts,
                     has_stt=has_stt,
+                    has_embedding=has_embedding,
                 )
             )
         return sorted(summaries, key=lambda s: s.provider_id)

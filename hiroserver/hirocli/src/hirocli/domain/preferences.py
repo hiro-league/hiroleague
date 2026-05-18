@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
@@ -46,7 +46,7 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
     PreferenceSection(
         key="memory",
         label="Agent Memory",
-        description="Short-term conversation memory behavior.",
+        description="Long-term agent memory settings.",
     ),
 )
 
@@ -173,9 +173,18 @@ DEFAULT_MEMORY_MAX_MESSAGES = 6
 
 
 class MemoryPreferences(BaseModel):
-    """Short-term conversation memory settings."""
+    """Agent memory settings."""
 
+    enabled: bool = False
+    default_llm: str | None = None
+    default_embedding_model: str | None = None
     max_messages: int = Field(default=DEFAULT_MEMORY_MAX_MESSAGES, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def _disable_without_models(self) -> "MemoryPreferences":
+        if not self.default_llm or not self.default_embedding_model:
+            self.enabled = False
+        return self
 
 
 # ---------------------------------------------------------------------------
