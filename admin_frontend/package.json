@@ -17,7 +17,7 @@
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",
     "shadcn-svelte": "^1.2.7",
-    "svelte": "^5.43.14",
+    "svelte": "^5.55.8",
     "svelte-check": "^4.3.3",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
