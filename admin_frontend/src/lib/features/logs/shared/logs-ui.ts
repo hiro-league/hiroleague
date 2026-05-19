@@ -1,6 +1,7 @@
 import {
   LOG_LEVELS,
   LOG_TIME_RANGES,
+  type LogExtraSegment,
   type LogLevel,
   type LogRow,
   type LogSourceFilter,
@@ -64,6 +65,45 @@ export function logRowSourceLabel(rowSource: string): string {
     return SOURCE_LABELS[filter];
   }
   return rowSource.trim() || '—';
+}
+
+function formatExtraSegmentsForClipboard(segments: LogExtraSegment[]): string {
+  if (segments.length === 0) return '—';
+  return segments
+    .map((seg) => {
+      const title = seg.key ?? 'value';
+      const body = (seg.pretty ?? seg.value).trim() || '—';
+      return `${title}:\n${body}`;
+    })
+    .join('\n\n');
+}
+
+/** Plain-text snapshot of the log details panel (matches on-screen sections) for clipboard export. */
+export function formatLogDetailsClipboardText(row: RenderLogRow): string {
+  const message =
+    row.message_pretty?.trim() ? row.message_pretty : row.message?.trim() ? row.message : '—';
+
+  const parts = [
+    `Level: ${row.level}`,
+    `Source: ${logRowSourceLabel(row.source)}`,
+    `Module: ${row.module || '—'}`,
+    `Message:\n${message}`,
+    `Device scope: ${row.scope_device_id ?? '—'}`,
+    `Request method scope: ${row.scope_method ?? '—'}`
+  ];
+
+  // Same visibility rule as ``LogsDetailPanel`` message text preview block.
+  if (row.scope_msg_id || (row.scope_text_preview ?? '').trim()) {
+    const previewBody = (row.scope_text_preview ?? '').trim() ? row.scope_text_preview! : 'N/A';
+    parts.push(`Message text preview:\n${previewBody}`);
+  }
+
+  parts.push(`Extra:\n${formatExtraSegmentsForClipboard(row.extra_segments)}`);
+  parts.push(`Message scope: ${row.scope_msg_id ?? '—'}`);
+  parts.push(`Timestamp (epoch): ${row.timestamp}`);
+  parts.push(`When: ${row.date_display} · ${row.timestamp_display}`);
+
+  return parts.join('\n\n');
 }
 
 export function sourcesForLayout(nextLayout: LogsLayout | null): LogSourceFilter[] {

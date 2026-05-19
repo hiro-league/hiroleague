@@ -14,12 +14,35 @@ Initial-development mode: no backward compatibility, no migration, no wrappers.
 |---|---|---|
 | `AsyncSqliteSaver` checkpoint | per-thread message history (short-term) | per thread |
 | `memory_in_node` trim | bounded window into checkpoint | per turn |
+| Mem0 SQLite `messages` table (`workspace/memory/history.db`) | last-10 raw turns per `session_scope`, fed back into mem0's extraction prompt as `last_k_messages` | per channel/thread, rolling |
+| Mem0 Qdrant collection (`workspace/memory/qdrant`) | extracted facts/preferences scoped per user × character | persistent in workspace |
 | Conversation JSONL (existing, unwired) | raw episodic log | append-only |
-| **Memory Service (new)** | extracted facts/preferences scoped per user × character | persistent in workspace |
+| **Memory Service (new)** | thin async wrapper around the two mem0 stores above | — |
 | `RunAccumulator` / ledger | per-node metrics | one row per node call |
 
 The Memory Service is the long-term layer. It does not replace the checkpoint or
 the trim; it sits alongside them.
+
+### Clear-channel × memory coordination
+
+`clear_channel_messages` (in `domain/conversation_channel.py`) wipes:
+
+1. `data.db` messages and attachments for the channel.
+2. The LangGraph checkpoint thread (`thread_id = str(channel_id)`).
+3. Mem0's `messages` table rows for the channel/thread scope
+   (`run_id=<channel id>&user_id=<data.db user id>`) — **not** the Qdrant facts.
+
+That matches the user expectation "clear the conversation but remember what you
+learned about me". To also forget the facts, users invoke the separate
+`memory_clear` tool, which calls `MemoryService.clear_all` → mem0
+`delete_all` against Qdrant. `Memory.reset()` is intentionally not wired:
+it is unscoped (drops every collection in the workspace) and would also
+nuke other characters' memories.
+
+`history_db_path` is pinned to `workspace_path / "memory" / "history.db"` in
+`Mem0MemoryService.__init__` so the wipe is deterministic and isolated per
+workspace (mem0's default `~/.mem0/history.db` would be shared across every
+workspace on the machine).
 
 ## Stack
 
@@ -47,27 +70,31 @@ Service mirrors the shape of `services/tts/`, `services/stt/`, `services/vision/
 
 ## Partitioning
 
-- `user_id`: single hardcoded constant (`DEFAULT_USER_ID`). One human, many
-  devices, all in sync. Future: family members become additional user_ids.
-- `agent_id`: `character_id` from the resolved channel (already on graph state).
-- Default scope: **shared partition per user, every memory tagged with
-  `agent_id`**. Retrieval filters by `agent_id OR shared=true`. This sets up
-  cross-character sharing later without restructuring storage.
-- Metadata on every write: `{thread_id, channel_id, source: "conversation"}`.
+- `user_id`: `data.db` user id (`users.id`, from `get_default_user_id` or
+  `channel.user_id` on graph state as `data_user_id`). Passed to mem0 as
+  `str(user_id)` (mem0 requires strings).
+- `character_id`: character slug from the resolved channel (graph state).
+  Stored in Qdrant metadata and used for retrieval filters. **Not** mem0's
+  `agent_id` (reserved for future multi-agent identity).
+- Mem0 session buffer (last-k turns in `history.db`) is isolated per
+  channel/thread via `run_id=str(channel_id)` on `memory.add`.
+- Default scope: memories tagged with `metadata.character_id`. Retrieval filters
+  by `character_id OR shared=true`.
+- Metadata on every write: `{thread_id, channel_id, source, character_id}`.
 
 ## Service contract
 
 ```python
 # domain/memory.py
 class MemoryService(Protocol):
-    async def add(self, content: str, *, user_id: str, agent_id: str,
+    async def add(self, content: str, *, user_id: int, run_id: str, character_id: str,
                   metadata: dict | None = None) -> None: ...
-    async def search(self, query: str, *, user_id: str, agent_id: str,
+    async def search(self, query: str, *, user_id: int, character_id: str,
                      limit: int = 8) -> list[dict]: ...
-    async def list_all(self, *, user_id: str,
-                       agent_id: str | None = None) -> list[dict]: ...
-    async def clear_all(self, *, user_id: str,
-                        agent_id: str | None = None) -> int: ...
+    async def list_all(self, *, user_id: int,
+                       character_id: str | None = None) -> list[dict]: ...
+    async def clear_all(self, *, user_id: int,
+                        character_id: str | None = None) -> int: ...
 ```
 
 Implementation: `services/memory/service.py::Mem0MemoryService` wraps the mem0
@@ -105,13 +132,13 @@ flowchart LR
 ```
 
 - **`memory_in_node`** — after the existing trim, if service is wired and
-  enabled, `await service.search(user_text, user_id, agent_id=character_id)`
+  enabled, `await service.search(user_text, user_id, character_id=...)`
   and stash hits on state under `retrieved_memories`.
 - **`context_build_node`** — if `retrieved_memories` present, prepend a compact
   `Memory context:\n- ...\n- ...` block to the new `HumanMessage`. Keep prompt
   assembly in one place; do not touch the system prompt.
 - **`memory_out_node`** — after emitting `GRAPH_REPLY_COMPLETED`, `await
-  service.add(turn_text, user_id, agent_id=character_id, metadata={...})`. Wrap
+  service.add(turn_text, user_id, character_id=..., metadata={...})`. Wrap
   in try/except. On failure: log via the ledger entry, do not block finalize.
 
 `turn_text` = `f"User: {user_text}\nAssistant: {reply_text}"`.
@@ -154,7 +181,7 @@ these without re-implementing logic.
 - `services/memory/__init__.py`
 - `services/memory/service.py`
 - `tools/memory.py`
-- `domain/memory.py` (Protocol + `DEFAULT_USER_ID`)
+- `domain/memory.py` (Protocol + `resolve_memory_user_id`)
 
 **Touched (5):**
 

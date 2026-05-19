@@ -89,6 +89,7 @@ class GraphState(TypedDict, total=False):
     chat_channel_id: int
     thread_id: str
     character_id: str
+    data_user_id: int
     model_id: str
     request_voice_reply: bool
     voice_input_allowed: bool

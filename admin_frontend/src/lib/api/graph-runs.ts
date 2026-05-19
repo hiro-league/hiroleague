@@ -149,20 +149,7 @@ export const GRAPH_RUN_NODE_TABLE_FIELDS = [
   'decision_detail',
   'provider',
   'model',
-  'error_code',
-  'input_tokens',
-  'output_tokens',
-  'cached_input_tokens',
-  'reasoning_tokens',
-  'tts_chars',
-  'tts_text_tokens',
-  'tts_audio_tokens',
-  'tts_audio_seconds',
-  'stt_audio_seconds',
-  'stt_audio_tokens',
-  'ts',
-  'node_attempt',
-  'branch_index'
+  'error_code'
 ] as const satisfies ReadonlyArray<keyof GraphLedgerRow>;
 
 export async function getGraphRun(runId: string): Promise<ApiResponse<GraphRunInspectResponse>> {

@@ -88,6 +88,7 @@ def test_resolve_thread_character_uses_chat_channel_metadata(tmp_path) -> None:
         str(channel.id),
         channel.id,
         "agent-a",
+        uid,
     )
 
 

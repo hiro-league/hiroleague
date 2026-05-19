@@ -33,6 +33,13 @@ def _catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModelCatalog:
                 "credential_env_keys": ["OPENAI_API_KEY"],
                 "metadata_updated_at": "2026-01-01",
             },
+            {
+                "id": "google",
+                "display_name": "Google",
+                "hosting": "cloud",
+                "credential_env_keys": ["GOOGLE_API_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
         ],
         "models": [
             {
@@ -52,6 +59,18 @@ def _catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModelCatalog:
                 "provider_id": "openai",
                 "display_name": "Text Embedding 3 Small",
                 "model_kind": "embedding",
+            },
+            {
+                "id": "google:gemini-3-flash-preview",
+                "provider_id": "google",
+                "display_name": "Gemini 3 Flash Preview",
+                "model_kind": "chat",
+            },
+            {
+                "id": "google:gemini-2.5-flash",
+                "provider_id": "google",
+                "display_name": "Gemini 2.5 Flash",
+                "model_kind": "chat",
             },
         ],
     }
@@ -127,6 +146,10 @@ def test_mem0_model_config_uses_configured_provider_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Chat models route through the langchain adapter so we have a single,
+    provider-agnostic callback path for usage capture and content
+    normalization. The configured API key must reach the underlying client.
+    """
     _catalog(tmp_path, monkeypatch)
     store = CredentialStore(tmp_path, "w1", _test_secrets={})
     store.set_api_key("openai", "sk-test")
@@ -138,10 +161,11 @@ def test_mem0_model_config_uses_configured_provider_key(
         credential_store=store,
     )
 
-    assert config == {
-        "provider": "openai",
-        "config": {"model": "gpt-test", "api_key": "sk-test"},
-    }
+    assert config["provider"] == "langchain"
+    model = config["config"]["model"]
+    assert model._default_params["model"] == "gpt-test"
+    assert model.max_tokens == 2000
+    assert model.openai_api_key.get_secret_value() == "sk-test"
 
 
 def test_mem0_model_config_uses_langchain_for_openai_gpt5(
@@ -164,6 +188,51 @@ def test_mem0_model_config_uses_langchain_for_openai_gpt5(
     assert model._default_params["model"] == "gpt-5.4"
     assert model._default_params["max_completion_tokens"] == 2000
     assert "max_tokens" not in model._default_params
+
+
+def test_mem0_model_config_pins_thinking_low_for_gemini_3(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini 3's default ``thinking_level="high"`` consumes the output budget
+    and truncates mem0's extraction JSON. The memory service must pin thinking
+    low so the response budget covers the actual JSON.
+    """
+    _catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, "w1", _test_secrets={})
+    store.set_api_key("google", "gk-test")
+
+    config = _mem0_model_config(
+        tmp_path,
+        "google:gemini-3-flash-preview",
+        required_kind="chat",
+        credential_store=store,
+    )
+
+    assert config["provider"] == "langchain"
+    model = config["config"]["model"]
+    assert model.thinking_level == "low"
+    assert model.max_output_tokens == 8192
+
+
+def test_mem0_model_config_disables_thinking_budget_for_gemini_2_5(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, "w1", _test_secrets={})
+    store.set_api_key("google", "gk-test")
+
+    config = _mem0_model_config(
+        tmp_path,
+        "google:gemini-2.5-flash",
+        required_kind="chat",
+        credential_store=store,
+    )
+
+    model = config["config"]["model"]
+    assert model.thinking_budget == 0
+    assert model.max_output_tokens == 8192
 
 
 def test_embedding_model_change_logs_error(

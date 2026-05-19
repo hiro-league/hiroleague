@@ -141,6 +141,81 @@ def test_clear_channel_messages_wipes_agent_checkpoint(tmp_path) -> None:
         assert len(list(saver.list({"configurable": {"thread_id": str(ch2.id)}}))) == 1
 
 
+def test_clear_channel_messages_wipes_mem0_session_messages(tmp_path) -> None:
+    """Bulk-clear must also drop mem0's last-k message buffer for the channel's
+    session scope. Without this, the next ``memory_out`` extraction LLM call
+    keeps replaying turns from before the clear (see
+    ``mem0/memory/main.py::_add_to_vector_store`` Phase 0).
+
+    Scope is per channel/thread via mem0 ``run_id``, so clearing channel A must
+    not wipe another channel, even when both use the same character.
+    """
+    from hirocli.domain.memory import mem0_history_db_path, mem0_session_scope
+
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch_a = create_channel(tmp_path, name="A", character_id="char-a", user_id=uid)
+    ch_b = create_channel(tmp_path, name="B", character_id="char-a", user_id=uid)
+
+    # Seed mem0's history.db with messages for two channel scopes; only channel
+    # A should be wiped when ch_a is cleared.
+    db_file = mem0_history_db_path(tmp_path)
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    scope_a = mem0_session_scope(user_id=str(uid), run_id=str(ch_a.id))
+    scope_b = mem0_session_scope(user_id=str(uid), run_id=str(ch_b.id))
+    with sqlite3.connect(str(db_file)) as conn:
+        # Mirror mem0/memory/storage.py::SQLiteManager._create_messages_table.
+        conn.execute(
+            """
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                session_scope TEXT,
+                role TEXT,
+                content TEXT,
+                name TEXT,
+                created_at DATETIME
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO messages (id, session_scope, role, content, name, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("a1", scope_a, "user", "hi", None, "2026-01-01"),
+                ("a2", scope_a, "assistant", "hey", None, "2026-01-01"),
+                ("b1", scope_b, "user", "other", None, "2026-01-01"),
+            ],
+        )
+        conn.commit()
+
+    _insert_message(tmp_path, ch_a.id, external_id="ext-mem0-1")
+    clear_channel_messages(tmp_path, ch_a.id)
+
+    with sqlite3.connect(str(db_file)) as conn:
+        a_count = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_scope = ?",
+            (scope_a,),
+        ).fetchone()[0]
+        b_count = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_scope = ?",
+            (scope_b,),
+        ).fetchone()[0]
+    assert a_count == 0
+    assert b_count == 1
+
+
+def test_clear_channel_messages_when_mem0_history_absent_is_noop(tmp_path) -> None:
+    """First clear in a fresh workspace runs before mem0 has been used. The
+    helper must treat a missing ``workspace/memory/history.db`` (and a missing
+    ``messages`` table inside it) as a no-op rather than raising."""
+    ensure_data_db(tmp_path)
+    uid = _default_user_id(tmp_path)
+    ch = create_channel(tmp_path, name="Fresh", character_id="char-a", user_id=uid)
+    _insert_message(tmp_path, ch.id, external_id="ext-fresh-1")
+    # Should not raise even though workspace/memory/history.db never existed.
+    clear_channel_messages(tmp_path, ch.id)
+
+
 def test_clear_channel_messages_unlinks_only_target_channel_files(
     tmp_path,
 ) -> None:

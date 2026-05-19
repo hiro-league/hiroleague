@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hiro_commons.log import Logger
@@ -23,6 +24,9 @@ from hirocli.runtime.preference_reactor import PreferenceReactor
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 
 log = Logger.get("CTX")
+
+if TYPE_CHECKING:
+    from hirocli.domain.memory import MemoryService
 
 
 class DeviceNameResolver:
@@ -71,6 +75,7 @@ class ServerContext:
     device_names: DeviceNameResolver = field(init=False)
     preferences: WorkspacePreferencesRuntime = field(init=False)
     preference_reactor: PreferenceReactor = field(init=False)
+    memory_service: "MemoryService | None" = field(default=None, init=False)
 
     # Mutable restart state — set by /_restart endpoint, read by shutdown handler.
     restart_requested: bool = field(default=False, init=False)

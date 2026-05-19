@@ -184,7 +184,11 @@
     </div>
 
     {#if prefs.detailPanelOpen}
-      <LogsDetailPanel activeRow={ctrl.activeRow} onClose={() => (prefs.detailPanelOpen = false)} />
+      <LogsDetailPanel
+        activeRow={ctrl.activeRow}
+        onClose={() => (prefs.detailPanelOpen = false)}
+        onNotify={notify}
+      />
     {/if}
   </div>
 </section>

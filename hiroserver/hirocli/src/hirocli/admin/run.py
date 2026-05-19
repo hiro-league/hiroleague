@@ -73,6 +73,7 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     set_runtime_context(build_admin_context(ctx))
 
     admin_app = FastAPI(title="Hiro Admin")
+    admin_app.state.ctx = ctx
     include_admin_svelte_api(admin_app)
     mount_admin_svelte_static(admin_app)
 

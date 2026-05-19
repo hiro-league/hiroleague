@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import time
 import uuid
 from collections import OrderedDict
@@ -177,6 +178,7 @@ class AgentManager:
             prefs=self._current_preferences(),
             credential_store=self._credentials,
         )
+        self._ctx.memory_service = self._memory
 
         self._log_agent_config()
 
@@ -226,6 +228,9 @@ class AgentManager:
                 self._compiled_cache.clear()
                 self._graph = None
                 self._checkpointer = None
+                await _close_memory_service(self._memory)
+                self._memory = None
+                self._ctx.memory_service = None
 
     # ------------------------------------------------------------------
     # Per-message entry point
@@ -286,7 +291,7 @@ class AgentManager:
         )
 
         peer = comm_peer_label(msg, self._ctx)
-        thread_id, channel_id, character_id = self._resolve_thread_character(msg)
+        thread_id, channel_id, character_id, data_user_id = self._resolve_thread_character(msg)
         prefs = self._current_preferences()
         voice_input_allowed = bool(
             prefs.media.input.voice
@@ -346,6 +351,7 @@ class AgentManager:
             "chat_channel_id": channel_id,
             "thread_id": thread_id,
             "character_id": character_id,
+            "data_user_id": data_user_id,
             "model_id": llm_entry.model_id,
             "request_voice_reply": request_voice_reply,
             "voice_input_allowed": voice_input_allowed,
@@ -560,8 +566,8 @@ class AgentManager:
             )
             return load_character_from_disk(wp, fallback)
 
-    def _resolve_thread_character(self, msg: UnifiedMessage) -> tuple[str, int, str]:
-        """Return ``(thread_id, channel_id, character_id)`` for this conversation."""
+    def _resolve_thread_character(self, msg: UnifiedMessage) -> tuple[str, int, str, int]:
+        """Return ``(thread_id, channel_id, character_id, data_user_id)`` for this conversation."""
         from ..domain.character import default_character_id
         from ..domain.conversation_channel import resolve_chat_channel_from_metadata
 
@@ -572,7 +578,7 @@ class AgentManager:
         character_id = (channel.character_id or "").strip() or default_character_id(
             self._ctx.workspace_path,
         )
-        return str(channel_id), channel_id, character_id
+        return str(channel_id), channel_id, character_id, int(channel.user_id)
 
     async def _send_no_llm_reply(self, msg: UnifiedMessage) -> None:
         from .graph_event_subscriber import _build_reply_envelope
@@ -735,6 +741,13 @@ class AgentManager:
         """Build long-term memory service from current prefs + credentials; swap onto graph."""
         from ..services.memory import create_memory_service
 
+        old_memory = self._memory
+        self._memory = None
+        self._ctx.memory_service = None
+        if self._graph is not None:
+            self._graph.set_memory_service(None)
+        await _close_memory_service(old_memory)
+
         try:
             new_memory = await asyncio.to_thread(
                 create_memory_service,
@@ -744,13 +757,14 @@ class AgentManager:
             )
         except Exception as exc:
             log.error(
-                f"Memory rebuild failed - HiroServer - {context} - keeping previous instance",
+                f"Memory rebuild failed - HiroServer - {context}",
                 error=str(exc),
                 exc_info=True,
             )
             return False
 
         self._memory = new_memory
+        self._ctx.memory_service = new_memory
         if self._graph is not None:
             self._graph.set_memory_service(new_memory)
         log.fineinfo(
@@ -823,3 +837,12 @@ class AgentManager:
 # Deliberate use to silence the unused-import lint while keeping a hook for
 # future contextlib-based scoping in ``handle``.
 _ = contextlib  # pragma: no cover
+
+
+async def _close_memory_service(service: "MemoryService | None") -> None:
+    close = getattr(service, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result

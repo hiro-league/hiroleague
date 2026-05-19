@@ -1,20 +1,40 @@
 <script lang="ts">
-  import { X } from '@lucide/svelte';
+  import { Copy, X } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import type { Notify } from '$lib/features/server/types';
   import LogExtraSegments from './LogExtraSegments.svelte';
   import { LOGS_DETAIL_PANEL_ID } from './shared/logs-a11y';
   import { logLevelTextClass, logModuleTextClass } from './shared/logs-classes';
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
   import { cn } from '$lib/utils';
-  import { logRowSourceLabel, type RenderLogRow } from './shared/logs-ui';
+  import {
+    formatLogDetailsClipboardText,
+    logRowSourceLabel,
+    type RenderLogRow
+  } from './shared/logs-ui';
 
   type Props = {
     activeRow: RenderLogRow | null;
     onClose: () => void;
+    onNotify: Notify;
   };
 
-  let { activeRow, onClose }: Props = $props();
+  let { activeRow, onClose, onNotify }: Props = $props();
+
+  async function copyLogDetailsToClipboard() {
+    const row = activeRow;
+    if (!row) return;
+    try {
+      await navigator.clipboard.writeText(formatLogDetailsClipboardText(row));
+      onNotify('success', 'Log details copied to clipboard.');
+    } catch (err) {
+      onNotify(
+        'error',
+        err instanceof Error ? err.message : 'Could not copy log details.'
+      );
+    }
+  }
 </script>
 
 <aside
@@ -42,6 +62,16 @@
           <LogLevelIcon level={activeRow.level} size={15} class="shrink-0" />
           <span class="font-medium">{activeRow.level}</span>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-8 shrink-0"
+          aria-label="Copy all log details"
+          title="Copy all log details"
+          onclick={() => void copyLogDetailsToClipboard()}
+        >
+          <Copy size={15} />
+        </Button>
       {/if}
       <Button variant="ghost" size="icon" class="size-8 shrink-0" onclick={onClose}>
         <X size={15} />

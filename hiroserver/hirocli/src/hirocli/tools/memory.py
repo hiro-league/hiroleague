@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..domain.memory import DEFAULT_USER_ID
+from ..domain.data_store import get_default_user_id
 from ..domain.preferences import load_preferences
 from ..domain.workspace import resolve_workspace
 from ..services.memory import create_memory_service
@@ -28,12 +28,40 @@ def _runtime_workspace(runtime: Any | None) -> Path | None:
     return Path(workspace_path) if workspace_path is not None else None
 
 
+def _runtime_service(runtime: Any | None):
+    if runtime is None:
+        return None
+    comm = getattr(runtime, "comm_manager", None)
+    ctx = getattr(comm, "ctx", None)
+    return getattr(ctx, "memory_service", None)
+
+
 def _service(workspace_path: Path):
     prefs = load_preferences(workspace_path)
     service = create_memory_service(workspace_path, prefs)
     if service is None:
         raise RuntimeError("Memory service is disabled or unavailable.")
     return service
+
+
+def _memory_user_id(workspace_path: Path) -> int:
+    return get_default_user_id(workspace_path)
+
+
+def _resolve_list_clear_context(
+    runtime: Any | None,
+    workspace: str | None,
+) -> tuple[Any, int]:
+    rt_path = _runtime_workspace(runtime)
+    service = _runtime_service(runtime)
+    if service is None:
+        if rt_path is not None:
+            raise RuntimeError("Memory service is disabled or unavailable.")
+        rt_path = _resolve_path(workspace)
+        service = _service(rt_path)
+    elif rt_path is None:
+        rt_path = _resolve_path(workspace)
+    return service, _memory_user_id(rt_path)
 
 
 @dataclass
@@ -68,8 +96,8 @@ class MemoryListTool(Tool):
         resolved = workspace_path or _resolve_path(workspace)
         memories = asyncio.run(
             _service(resolved).list_all(
-                user_id=DEFAULT_USER_ID,
-                agent_id=(character_id or None),
+                user_id=_memory_user_id(resolved),
+                character_id=(character_id or None),
             )
         )
         return MemoryListResult(memories=memories)
@@ -79,11 +107,13 @@ class MemoryListTool(Tool):
         character_id: str | None = None,
         workspace: str | None = None,
     ) -> MemoryListResult:
-        rt_path = _runtime_workspace(getattr(self, "_runtime", None))
-        resolved = rt_path or _resolve_path(workspace)
-        memories = await _service(resolved).list_all(
-            user_id=DEFAULT_USER_ID,
-            agent_id=(character_id or None),
+        service, user_id = _resolve_list_clear_context(
+            getattr(self, "_runtime", None),
+            workspace,
+        )
+        memories = await service.list_all(
+            user_id=user_id,
+            character_id=(character_id or None),
         )
         return MemoryListResult(memories=memories)
 
@@ -110,8 +140,8 @@ class MemoryClearTool(Tool):
         resolved = workspace_path or _resolve_path(workspace)
         deleted = asyncio.run(
             _service(resolved).clear_all(
-                user_id=DEFAULT_USER_ID,
-                agent_id=(character_id or None),
+                user_id=_memory_user_id(resolved),
+                character_id=(character_id or None),
             )
         )
         return MemoryClearResult(deleted_count=deleted)
@@ -121,10 +151,12 @@ class MemoryClearTool(Tool):
         character_id: str | None = None,
         workspace: str | None = None,
     ) -> MemoryClearResult:
-        rt_path = _runtime_workspace(getattr(self, "_runtime", None))
-        resolved = rt_path or _resolve_path(workspace)
-        deleted = await _service(resolved).clear_all(
-            user_id=DEFAULT_USER_ID,
-            agent_id=(character_id or None),
+        service, user_id = _resolve_list_clear_context(
+            getattr(self, "_runtime", None),
+            workspace,
+        )
+        deleted = await service.clear_all(
+            user_id=user_id,
+            character_id=(character_id or None),
         )
         return MemoryClearResult(deleted_count=deleted)

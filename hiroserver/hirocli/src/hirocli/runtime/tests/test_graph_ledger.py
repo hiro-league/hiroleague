@@ -247,6 +247,25 @@ def test_tts_audio_seconds_are_persisted(tmp_path: Path) -> None:
     assert row["tts_audio_seconds"] == "2.5"
 
 
+def test_node_previews_are_persisted_and_capped(tmp_path: Path) -> None:
+    graph = _graph(tmp_path)
+    entry = graph._ledger_sink.open_entry(
+        "memory_in",
+        _state("in-preview"),
+        captures=frozenset({"decision"}),
+    )
+    entry.set_input_preview("search: " + ("hello " * 40))
+    entry.set_output_preview("results: 2; " + ("memory " * 40))
+
+    graph._ledger_sink.write_rows(entry.rows(include_parent=True))
+
+    row = _rows(tmp_path)[0]
+    assert row["input_preview"].startswith("search: hello")
+    assert row["output_preview"].startswith("results: 2; memory")
+    assert len(row["input_preview"]) == 140
+    assert len(row["output_preview"]) == 140
+
+
 def test_gemini_tts_prices_with_audio_tokens(tmp_path: Path) -> None:
     """Gemini TTS rows must be priced once ``tts_text_tokens`` and ``tts_audio_tokens`` land.
 

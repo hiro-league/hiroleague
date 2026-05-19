@@ -49,7 +49,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer, Send, StreamWriter
 
-from ...domain.memory import DEFAULT_USER_ID
+from ...domain.memory import resolve_memory_user_id
 from ...domain.preferences import DEFAULT_MEMORY_MAX_MESSAGES
 from .events import (
     GRAPH_ERROR,
@@ -299,10 +299,13 @@ class BaseAgentGraph:
         """Transcribe one audio item. Runs in parallel branches via Send."""
         item: AudioItem = sub_state["audio_item"]
         inbound_id = sub_state.get("inbound_id", "")
+        if entry := current_entry.get():
+            entry.set_input_preview(_audio_item_preview(item))
         if self._stt is None or not self._stt.is_available():
             if entry := current_entry.get():
                 entry.set_decision("provider_error", "stt_unavailable")
                 entry.set_error("stt_unavailable")
+                entry.set_output_preview("error: stt_unavailable")
             err: NodeError = {
                 "node": "stt",
                 "item_index": item["item_index"],
@@ -320,6 +323,7 @@ class BaseAgentGraph:
             if entry := current_entry.get():
                 entry.set_decision("provider_error", "exception")
                 entry.set_error("provider_error")
+                entry.set_output_preview(f"error: {exc}")
             log.error(
                 "❌ stt — %s · item=%d", inbound_id, item["item_index"],
                 error=str(exc), exc_info=True,
@@ -344,6 +348,7 @@ class BaseAgentGraph:
                 stt_audio_seconds=(float(item.get("duration_ms") or 0) / 1000),
             )
             entry.set_decision("transcribed" if text.strip() else "silence", provider)
+            entry.set_output_preview(f"transcript: {text}" if text.strip() else "transcript: <empty>")
         log.info(
             "✅ stt — %s · item=%d", inbound_id, item["item_index"],
             elapsed_ms=elapsed_ms,
@@ -374,10 +379,13 @@ class BaseAgentGraph:
         """Describe one image item. Runs in parallel branches via Send."""
         item: ImageItem = sub_state["image_item"]
         inbound_id = sub_state.get("inbound_id", "")
+        if entry := current_entry.get():
+            entry.set_input_preview(_image_item_preview(item))
         if self._vision is None or not self._vision.is_available():
             if entry := current_entry.get():
                 entry.set_decision("skipped_unsupported", "vision_unavailable")
                 entry.set_skipped("vision_unavailable")
+                entry.set_output_preview("error: vision_unavailable")
             err: NodeError = {
                 "node": "vision",
                 "item_index": item["item_index"],
@@ -395,6 +403,7 @@ class BaseAgentGraph:
             if entry := current_entry.get():
                 entry.set_decision("provider_error", "exception")
                 entry.set_error("provider_error")
+                entry.set_output_preview(f"error: {exc}")
             log.error(
                 "❌ vision — %s · item=%d", inbound_id, item["item_index"],
                 error=str(exc), exc_info=True,
@@ -408,6 +417,7 @@ class BaseAgentGraph:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         if entry := current_entry.get():
             entry.set_decision("described", "image")
+            entry.set_output_preview(f"description: {description}")
         log.info(
             "✅ vision — %s · item=%d", inbound_id, item["item_index"],
             elapsed_ms=elapsed_ms,
@@ -502,6 +512,8 @@ class BaseAgentGraph:
 
         if entry := current_entry.get():
             entry.set_decision("skipped_no_input", detail)
+            entry.set_input_preview(f"errors: {len(errs)}; user_text: <empty>")
+            entry.set_output_preview(f"reply: {reply_text}")
 
         reply_id = f"reply-{uuid.uuid4()}"
         log.info(
@@ -546,28 +558,39 @@ class BaseAgentGraph:
             result["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES), *keep]
 
         text = state.get("user_text") or ""
+        if entry := current_entry.get():
+            entry.set_input_preview(f"search: {text}" if text.strip() else "search: <empty>")
         if not text.strip() or self._memory is None:
             if entry := current_entry.get():
                 entry.set_decision("empty", "disabled" if self._memory is None else "no_query")
+                entry.set_output_preview(
+                    "results: 0; disabled" if self._memory is None else "results: 0; no_query"
+                )
             return result
 
         if not bool(getattr(getattr(self._current_preferences(), "memory", None), "enabled", False)):
             if entry := current_entry.get():
                 entry.set_decision("empty", "disabled")
+                entry.set_output_preview("results: 0; disabled")
             return result
 
         t0 = time.perf_counter()
+        memory_user_id = resolve_memory_user_id(
+            data_user_id=state.get("data_user_id"),
+            workspace_path=self._workspace_path,
+        )
         try:
             hits = await self._memory.search(
                 text,
-                user_id=DEFAULT_USER_ID,
-                agent_id=state.get("character_id", ""),
+                user_id=memory_user_id,
+                character_id=state.get("character_id", ""),
                 limit=8,
             )
         except Exception as exc:
             if entry := current_entry.get():
                 entry.set_decision("failed", _error_slug(exc))
                 entry.set_error("memory_search_failed")
+                entry.set_output_preview(f"error: {exc}")
             log.warning(
                 "memory_in search failed - %s",
                 state.get("inbound_id", "?"),
@@ -578,6 +601,7 @@ class BaseAgentGraph:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         if entry := current_entry.get():
             entry.set_decision("retrieved" if hits else "empty", str(len(hits)))
+            entry.set_output_preview(_memory_results_preview("results", hits))
         log.info("memory_in retrieved - n=%d", len(hits), elapsed_ms=elapsed_ms)
         self._emit(
             writer,
@@ -621,12 +645,16 @@ class BaseAgentGraph:
             if not messages:
                 if entry := current_entry.get():
                     entry.set_decision("empty", "no_messages")
+                    entry.set_input_preview("messages: 0")
+                    entry.set_output_preview("reply: <empty>")
                 return {}
             inputs: list[AnyMessage] = (
                 [SystemMessage(content=system_prompt), *messages]
                 if system_prompt
                 else messages
             )
+            if entry := current_entry.get():
+                entry.set_input_preview(f"text: {_last_human_message_preview(inputs)}")
             input_estimate = count_tokens_approximately(inputs)
             log.fineinfo(
                 "call_model — input · count=%d tokens≈%d",
@@ -653,6 +681,12 @@ class BaseAgentGraph:
                 )
                 decision_kind, decision_detail = _llm_decision(response)
                 entry.set_decision(decision_kind, decision_detail)
+                reply_preview = _normalize_reply_content(response.content)
+                entry.set_output_preview(
+                    f"reply: {reply_preview}"
+                    if reply_preview.strip()
+                    else _tool_calls_preview(getattr(response, "tool_calls", None) or [])
+                )
             self._emit(
                 writer,
                 GRAPH_LLM_USAGE,
@@ -702,6 +736,10 @@ class BaseAgentGraph:
                         status="ok" if status == "completed" else "error",
                         elapsed_ms=elapsed_ms,
                         branch_index=idx,
+                    )
+                    child.set_input_preview(_tool_input_preview(tool_name, args))
+                    child.set_output_preview(
+                        f"result: {content}" if status == "completed" else f"error: {error}"
                     )
                     if status == "completed":
                         child.set_decision("ok", "ok")
@@ -754,7 +792,14 @@ class BaseAgentGraph:
         if msgs:
             reply_text = _normalize_reply_content(msgs[-1].content)
 
+        if entry := current_entry.get():
+            entry.set_input_preview(
+                f"user: {state.get('user_text') or ''}; assistant: {reply_text}"
+            )
+
         if not reply_text:
+            if entry := current_entry.get():
+                entry.set_output_preview("error: empty_reply")
             log.warning(
                 "⚠️ memory_out — empty reply · %s",
                 state.get("inbound_id", "?"),
@@ -805,14 +850,21 @@ class BaseAgentGraph:
         if self._memory is None or not bool(getattr(self._current_preferences().memory, "enabled", False)):
             if entry := current_entry.get():
                 entry.set_decision("skipped", "disabled")
+                entry.set_output_preview("stored: 0; disabled")
             return
 
         t0 = time.perf_counter()
+        memory_user_id = resolve_memory_user_id(
+            data_user_id=state.get("data_user_id"),
+            workspace_path=self._workspace_path,
+        )
+        memory_run_id = str(state.get("chat_channel_id") or state.get("thread_id") or "")
         try:
-            await self._memory.add(
+            result = await self._memory.add(
                 f"User: {state.get('user_text') or ''}\nAssistant: {reply_text}",
-                user_id=DEFAULT_USER_ID,
-                agent_id=state.get("character_id", ""),
+                user_id=memory_user_id,
+                run_id=memory_run_id,
+                character_id=state.get("character_id", ""),
                 metadata={
                     "thread_id": state.get("thread_id", ""),
                     "channel_id": state.get("chat_channel_id", 0),
@@ -820,20 +872,75 @@ class BaseAgentGraph:
                 },
             )
         except Exception as exc:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
             if entry := current_entry.get():
                 entry.set_decision("failed", _error_slug(exc))
                 entry.set_error("memory_store_failed")
+                entry.set_output_preview(f"error: {exc}")
             log.warning(
-                "memory_out store failed - %s",
+                "❌ memory_out — store failed · %s",
                 state.get("inbound_id", "?"),
                 error=str(exc),
+                elapsed_ms=elapsed_ms,
+                exc_info=True,
             )
             return
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        usage = result.usage
+        stored_count = result.stored_count
+        # Detect mem0 silently dropping the response (e.g. extraction LLM
+        # produced output but mem0's parser failed) so the ledger row reflects
+        # reality instead of always claiming "stored". An LLM was clearly
+        # invoked but nothing landed in the vector store.
+        extraction_dropped = stored_count == 0 and usage is not None and usage.call_count > 0
+        # Attribute mem0's internal LLM calls to this node's ledger row. The
+        # ``RunAccumulator`` keeps headline ``model`` from ``call_model`` only,
+        # so recording a different provider/model here does not pollute the
+        # run summary; row-level ``_with_cost`` prices it independently.
         if entry := current_entry.get():
-            entry.set_decision("stored", "ok")
-        log.info("memory_out stored - %dms", elapsed_ms)
+            if extraction_dropped:
+                entry.set_decision("failed", "extraction_dropped")
+                entry.set_error("memory_extraction_dropped")
+            elif stored_count == 0:
+                entry.set_decision("stored", "no_new_facts")
+            else:
+                entry.set_decision("stored", "ok")
+            entry.set_output_preview(
+                _memory_results_preview(
+                    "stored",
+                    list(getattr(result, "stored_items", ()) or []),
+                    stored_count,
+                )
+            )
+            if usage is not None:
+                entry.add_usage(
+                    provider=usage.provider,
+                    model=usage.model,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cached_input_tokens=usage.cached_input_tokens,
+                    reasoning_tokens=usage.reasoning_tokens,
+                )
+        if extraction_dropped:
+            log.warning(
+                "⚠️ memory_out — extraction dropped · %s · %dms",
+                state.get("inbound_id", "?"),
+                elapsed_ms,
+                input_tokens=getattr(usage, "input_tokens", 0),
+                output_tokens=getattr(usage, "output_tokens", 0),
+                llm_calls=getattr(usage, "call_count", 0),
+            )
+        else:
+            log.info(
+                "✅ memory_out — stored · %s · %dms",
+                state.get("inbound_id", "?"),
+                elapsed_ms,
+                stored=stored_count,
+                input_tokens=getattr(usage, "input_tokens", 0),
+                output_tokens=getattr(usage, "output_tokens", 0),
+                llm_calls=getattr(usage, "call_count", 0),
+            )
         self._emit(
             writer,
             GRAPH_MEMORY_STORED,
@@ -841,7 +948,7 @@ class BaseAgentGraph:
                 "inbound_id": state.get("inbound_id", ""),
                 "chat_channel_id": state.get("chat_channel_id", 0),
                 "character_id": state.get("character_id", ""),
-                "count": 1,
+                "count": stored_count,
                 "elapsed_ms": elapsed_ms,
             },
         )
@@ -857,10 +964,13 @@ class BaseAgentGraph:
         """
         text = state.get("reply_text") or ""
         inbound_id = state.get("inbound_id", "")
+        if entry := current_entry.get():
+            entry.set_input_preview(f"text: {text}" if text else "text: <empty>")
         if not text:
             if entry := current_entry.get():
                 entry.set_decision("skipped_no_text", "empty")
                 entry.set_skipped("empty")
+                entry.set_output_preview("audio: skipped empty")
             return {}
 
         from ...domain.character import load_character_from_disk
@@ -872,6 +982,7 @@ class BaseAgentGraph:
             if entry := current_entry.get():
                 entry.set_decision("skipped_no_voice", "character_missing")
                 entry.set_skipped("character_missing")
+                entry.set_output_preview("audio: skipped character_missing")
             self._emit(writer, GRAPH_ERROR, {
                 "inbound_id": inbound_id, "node": "tts", "error": str(exc),
             })
@@ -890,6 +1001,7 @@ class BaseAgentGraph:
             if entry := current_entry.get():
                 entry.set_decision("skipped_no_voice", "voice_unresolved")
                 entry.set_skipped("voice_unresolved")
+                entry.set_output_preview("audio: skipped voice_unresolved")
             log.warning(
                 "⚠️ tts — %s · no_voice_resolved (set character voice_models / llm.default_tts)",
                 inbound_id,
@@ -911,6 +1023,7 @@ class BaseAgentGraph:
             if entry := current_entry.get():
                 entry.set_decision("provider_error", "exception")
                 entry.set_error("provider_error")
+                entry.set_output_preview(f"error: {exc}")
             log.error("❌ tts — %s", inbound_id, error=str(exc), exc_info=True)
             self._emit(writer, GRAPH_ERROR, {
                 "inbound_id": inbound_id, "node": "tts", "error": str(exc),
@@ -971,6 +1084,9 @@ class BaseAgentGraph:
                 ),
             )
             entry.set_decision("voiced", provider)
+            entry.set_output_preview(
+                f"audio: {len(result.audio_bytes)} bytes; duration_ms={duration_ms}; model={result.model}"
+            )
         payload = {
             "inbound_id": inbound_id,
             "chat_channel_id": state.get("chat_channel_id", 0),
@@ -1014,9 +1130,14 @@ class BaseAgentGraph:
         chat_channel_id = int(state.get("chat_channel_id") or 0)
         reply_id = state.get("reply_id") or ""
         reply_text = state.get("reply_text") or ""
+        if entry := current_entry.get():
+            entry.set_input_preview(
+                f"reply_id: {reply_id or '<empty>'}; reply: {reply_text}"
+            )
         if reply_text and reply_id:
             if entry := current_entry.get():
                 entry.set_decision("completed", "ok")
+                entry.set_output_preview("run: completed")
             self._emit(
                 writer,
                 GRAPH_RUN_COMPLETED,
@@ -1031,6 +1152,7 @@ class BaseAgentGraph:
         if entry := current_entry.get():
             entry.set_decision("failed", "reply_generation_failed")
             entry.set_error("reply_generation_failed")
+            entry.set_output_preview("run: failed reply_generation_failed")
         self._emit(
             writer,
             GRAPH_RUN_FAILED,
@@ -1138,6 +1260,68 @@ def _format_memory_context(memories: list[dict[str, Any]]) -> str:
     if not lines:
         return ""
     return "Memory context:\n" + "\n".join(lines)
+
+
+def _memory_results_preview(
+    label: str,
+    memories: list[dict[str, Any]],
+    count: int | None = None,
+) -> str:
+    total = len(memories) if count is None else count
+    snippets = [_memory_text(item) for item in memories[:3]]
+    snippets = [item for item in snippets if item]
+    if snippets:
+        return f"{label}: {total}; " + " | ".join(snippets)
+    return f"{label}: {total}"
+
+
+def _memory_text(item: dict[str, Any]) -> str:
+    text = (
+        item.get("memory")
+        or item.get("text")
+        or item.get("content")
+        or item.get("data")
+        or item.get("value")
+        or ""
+    )
+    return " ".join(str(text or "").split())
+
+
+def _last_human_message_preview(messages: list[AnyMessage]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return _normalize_reply_content(message.content)
+    return _normalize_reply_content(messages[-1].content) if messages else ""
+
+
+def _tool_calls_preview(tool_calls: list[dict[str, Any]]) -> str:
+    if not tool_calls:
+        return "reply: <empty>"
+    names = [_tool_call_name(call) or "unknown" for call in tool_calls[:4]]
+    return f"tool_calls: {len(tool_calls)}; " + ", ".join(names)
+
+
+def _tool_input_preview(tool_name: str, args: dict[str, Any]) -> str:
+    try:
+        arg_text = json.dumps(args, ensure_ascii=False, default=str)
+    except TypeError:
+        arg_text = str(args)
+    return f"{tool_name or 'unknown'} args: {arg_text}"
+
+
+def _audio_item_preview(item: AudioItem) -> str:
+    seconds = ""
+    duration_ms = item.get("duration_ms")
+    if isinstance(duration_ms, (int, float)) and duration_ms > 0:
+        seconds = f"; duration_s={duration_ms / 1000:.2f}"
+    size = item.get("size")
+    size_text = f"; bytes={size}" if isinstance(size, int) and size > 0 else ""
+    return f"audio item {item.get('item_index')}; mime={item.get('mime_type')}{size_text}{seconds}"
+
+
+def _image_item_preview(item: ImageItem) -> str:
+    blob = item.get("blob_id") or ""
+    return f"image item {item.get('item_index')}" + (f"; blob={blob}" if blob else "")
 
 
 def _trim_chat_history(messages: list[AnyMessage], limit: int) -> list[AnyMessage]:

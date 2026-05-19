@@ -184,6 +184,8 @@ class LedgerEntry:
     tts_audio_seconds: float | str = ""
     decision_kind: str = ""
     decision_detail: str = ""
+    input_preview: str = ""
+    output_preview: str = ""
     error_code: str = ""
     captures: frozenset[str] = field(default_factory=frozenset)
     elapsed_ms: int = 0
@@ -243,6 +245,12 @@ class LedgerEntry:
     def set_decision(self, kind: str, detail: str = "") -> None:
         self.decision_kind = _slug(kind)
         self.decision_detail = _slug(detail)
+
+    def set_input_preview(self, value: Any) -> None:
+        self.input_preview = _preview(str(value or ""))
+
+    def set_output_preview(self, value: Any) -> None:
+        self.output_preview = _preview(str(value or ""))
 
     def set_error(self, code: str) -> None:
         self.status = "error"
@@ -324,8 +332,8 @@ class LedgerEntry:
             "tts_audio_seconds": self.tts_audio_seconds,
             "decision_kind": self.decision_kind,
             "decision_detail": self.decision_detail,
-            "input_preview": "",
-            "output_preview": "",
+            "input_preview": self.input_preview,
+            "output_preview": self.output_preview,
             "error_code": self.error_code,
         }
         if "usage" not in self.captures:
