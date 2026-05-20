@@ -537,6 +537,12 @@ class GraphEventSubscriber:
             "status": str(payload.get("status") or "completed"),
             "elapsed_ms": int(payload.get("elapsed_ms") or 0),
         }
+        args = payload.get("args")
+        if isinstance(args, str) and args.strip():
+            entry["args"] = args[:2000]
+        result = payload.get("result")
+        if isinstance(result, str) and result:
+            entry["result"] = result[:4000]
         error = payload.get("error")
         if isinstance(error, str) and error:
             entry["error"] = error[:500]

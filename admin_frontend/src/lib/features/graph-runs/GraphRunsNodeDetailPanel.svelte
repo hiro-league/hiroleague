@@ -53,6 +53,10 @@
       field === 'model'
     );
   }
+
+  function isPreviewField(field: keyof GraphLedgerRow): boolean {
+    return field === 'input_preview' || field === 'output_preview';
+  }
 </script>
 
 <aside
@@ -77,7 +81,11 @@
           {#each rowFields as field (field)}
             <div class="node-detail-field" class:node-detail-field--single={rowFields.length === 1}>
             <dt title={field}>{fieldLabel(field)}</dt>
-            <dd class:node-detail-field__value--wrap={shouldWrapField(field)}>
+            <dd
+              class:node-detail-field__value--wrap={shouldWrapField(field)}
+              class:node-detail-field__value--preview={isPreviewField(field)}
+              title={isPreviewField(field) ? formatLedgerField(field, row) : undefined}
+            >
               {formatLedgerField(field, row)}
             </dd>
           </div>
@@ -178,8 +186,19 @@
     color: var(--foreground, #0f172a);
   }
 
-  .node-detail-field__value--wrap {
+  /* Base ``dd`` uses nowrap + ellipsis; wrap must reset those or previews stay one line. */
+  .node-detail-field dd.node-detail-field__value--wrap {
+    overflow: visible;
+    text-overflow: unset;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+
+  .node-detail-field dd.node-detail-field__value--preview {
+    max-height: min(14rem, 35vh);
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 </style>

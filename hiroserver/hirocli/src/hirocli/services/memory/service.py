@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from hiro_commons.log import Logger
 
 from ...domain.memory import mem0_history_db_path
+from .audit_log import build_add_audit, build_search_audit, log_memory_add, log_memory_search
 from .usage_capture import (
     MemoryAddResult,
     MemoryUsage,
@@ -18,48 +20,49 @@ from .usage_capture import (
 
 log = Logger.get("SVC.MEMORY")
 
+# Bumped from ``hiro_memory`` when we moved ``character_id`` from a metadata
+# field into mem0's ``agent_id`` entity scope. Old collections are orphaned
+# by design (initial-development mode: no migration).
+MEMORY_COLLECTION_NAME = "hiro_memory_v2"
+
 
 def _mem0_user_id(user_id: int) -> str:
     return str(user_id)
 
 
-def _character_metadata_filter(character_id: str) -> dict[str, Any]:
-    return {"metadata": {"character_id": character_id}}
+def _entity_filters(user_id: int, character_id: str | None) -> dict[str, Any]:
+    """Filters dict for mem0 search / get_all using native entity scoping.
 
-
-def _search_filters(user_id: int, character_id: str) -> dict[str, Any]:
-    return {
-        "AND": [
-            {"user_id": _mem0_user_id(user_id)},
-            {
-                "OR": [
-                    _character_metadata_filter(character_id),
-                    {"metadata": {"shared": True}},
-                ]
-            },
-        ]
-    }
-
-
-def _list_filters(user_id: int, character_id: str | None) -> dict[str, Any]:
-    uid = _mem0_user_id(user_id)
+    ``character_id`` rides on mem0's ``agent_id`` (the entity slot mem0
+    reserves for "the personality talking to the user"). User scoping is
+    always applied; character is added when supplied.
+    """
+    filters: dict[str, Any] = {"user_id": _mem0_user_id(user_id)}
     if character_id:
-        return {
-            "AND": [
-                {"user_id": uid},
-                _character_metadata_filter(character_id),
-            ]
-        }
-    return {"user_id": uid}
+        filters["agent_id"] = character_id
+    return filters
 
 
-def _matches_character(row: dict[str, Any], character_id: str | None) -> bool:
-    if not character_id:
-        return True
-    meta = row.get("metadata")
-    if isinstance(meta, dict):
-        return meta.get("character_id") == character_id
-    return False
+def _merge_metadata_filters(
+    base: dict[str, Any],
+    extra: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """AND-merge caller-supplied metadata filters into the base filter dict.
+
+    Extra keys with simple values become flat equality filters; nested
+    operator dicts (``{"gte": ...}``) pass through to mem0's filter dialect.
+    """
+    if not extra:
+        return base
+    merged = dict(base)
+    for key, value in extra.items():
+        # Reserved entity slots stay as top-level keys; everything else is
+        # treated as metadata equality / operator filters per mem0 v3 syntax.
+        if key in ("user_id", "agent_id", "run_id"):
+            merged[key] = value
+        else:
+            merged[key] = value
+    return merged
 
 
 class Mem0MemoryService:
@@ -70,8 +73,11 @@ class Mem0MemoryService:
         *,
         workspace_path: Path,
         llm_model: str,
+        llm_tuning: Any | None = None,
         embedding_model: str,
         credential_store: Any | None = None,
+        search_prefs: Any | None = None,
+        reranker_prefs: Any | None = None,
     ) -> None:
         from mem0 import Memory
 
@@ -95,6 +101,7 @@ class Mem0MemoryService:
             required_kind="chat",
             credential_store=credential_store,
             callbacks=[self._usage_handler],
+            tuning=llm_tuning,
         )
         embedder = _mem0_model_config(
             self._workspace_path,
@@ -107,7 +114,7 @@ class Mem0MemoryService:
             "vector_store": {
                 "provider": "qdrant",
                 "config": {
-                    "collection_name": "hiro_memory",
+                    "collection_name": MEMORY_COLLECTION_NAME,
                     "embedding_model_dims": _embedding_dims(embedding_model),
                     "path": str(qdrant_path),
                     "on_disk": True,
@@ -117,8 +124,17 @@ class Mem0MemoryService:
             "embedder": embedder,
             "history_db_path": str(history_db),
         }
+        reranker_config = _reranker_config(reranker_prefs)
+        if reranker_config is not None:
+            config["reranker"] = reranker_config
         self._memory = Memory.from_config(config)
         self._op_lock = asyncio.Lock()
+
+        # Search defaults from preferences (per-call args still override).
+        self._search_top_k = int(getattr(search_prefs, "top_k", 8))
+        self._search_threshold = float(getattr(search_prefs, "threshold", 0.1))
+        self._search_rerank_default = bool(getattr(search_prefs, "rerank", False))
+        self._reranker_enabled = bool(getattr(reranker_prefs, "enabled", False))
 
     async def close(self) -> None:
         async with self._op_lock:
@@ -138,8 +154,9 @@ class Mem0MemoryService:
         text = str(content or "").strip()
         if not text:
             return MemoryAddResult(usage=None, stored_count=0)
-        meta = {**(metadata or {}), "character_id": character_id, "shared": False}
         mem0_user = _mem0_user_id(user_id)
+        meta = dict(metadata or {})
+        t0 = time.perf_counter()
         async with self._op_lock:
             memory = self._require_memory()
             # ``memory_usage_scope`` binds a ContextVar that the callback handler
@@ -151,9 +168,11 @@ class Mem0MemoryService:
                     memory.add,
                     text,
                     user_id=mem0_user,
+                    agent_id=character_id,
                     run_id=str(run_id),
                     metadata=meta,
                 )
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
         # mem0 returns ``{"results": [...]}`` where each item represents one
         # ADD/UPDATE/DELETE event applied to the vector store. An empty list
         # means extraction yielded no new memories *or* mem0 swallowed an
@@ -173,11 +192,29 @@ class Mem0MemoryService:
                 reasoning_tokens=acc.reasoning_tokens,
                 call_count=acc.call_count,
             )
-        return MemoryAddResult(
+        result = MemoryAddResult(
             usage=usage,
             stored_count=stored_count,
             stored_items=stored_items,
         )
+        log_memory_add(
+            log,
+            build_add_audit(
+                user_id=user_id,
+                character_id=character_id,
+                run_id=str(run_id),
+                content=text,
+                metadata=meta,
+                stored_count=stored_count,
+                stored_items=stored_items,
+                usage=usage,
+                elapsed_ms=elapsed_ms,
+            ),
+            user_id=user_id,
+            character_id=character_id,
+            run_id=str(run_id),
+        )
+        return result
 
     async def search(
         self,
@@ -185,29 +222,63 @@ class Mem0MemoryService:
         *,
         user_id: int,
         character_id: str,
-        limit: int = 8,
+        limit: int | None = None,
+        threshold: float | None = None,
+        rerank: bool | None = None,
+        metadata_filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         text = str(query or "").strip()
         if not text:
             return []
 
-        filters = _search_filters(user_id, character_id)
-        mem0_user = _mem0_user_id(user_id)
+        top_k = self._search_top_k if limit is None else int(limit)
+        eff_threshold = self._search_threshold if threshold is None else float(threshold)
+        # Don't pass rerank=True when no reranker is configured — mem0 would
+        # silently ignore it; we warn once via the log instead.
+        want_rerank = self._search_rerank_default if rerank is None else bool(rerank)
+        eff_rerank = bool(want_rerank and self._reranker_enabled)
+        if want_rerank and not self._reranker_enabled:
+            log.debug(
+                "memory.search rerank requested but reranker is disabled in preferences",
+            )
 
+        filters = _merge_metadata_filters(
+            _entity_filters(user_id, character_id),
+            metadata_filters,
+        )
+
+        t0 = time.perf_counter()
         async with self._op_lock:
             memory = self._require_memory()
-            result = await _to_thread_with_fallbacks(
+            result = await asyncio.to_thread(
                 memory.search,
-                (text,),
-                [
-                    {"filters": filters, "limit": limit},
-                    {"filters": filters, "top_k": limit},
-                    {"filters": {"user_id": mem0_user}, "limit": limit},
-                    {"user_id": mem0_user, "limit": limit},
-                ],
+                text,
+                filters=filters,
+                top_k=top_k,
+                threshold=eff_threshold,
+                rerank=eff_rerank,
             )
-        rows = _normalize_memories(result)
-        return [row for row in rows if _matches_character(row, character_id)][:limit]
+        hits = _normalize_memories(result)
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        log_memory_search(
+            log,
+            build_search_audit(
+                query=text,
+                user_id=user_id,
+                character_id=character_id,
+                top_k=top_k,
+                threshold=eff_threshold,
+                rerank_requested=want_rerank,
+                rerank_applied=eff_rerank,
+                reranker_enabled=self._reranker_enabled,
+                filters=filters,
+                results=hits,
+                elapsed_ms=elapsed_ms,
+            ),
+            user_id=user_id,
+            character_id=character_id,
+        )
+        return hits
 
     async def list_all(
         self,
@@ -215,20 +286,11 @@ class Mem0MemoryService:
         user_id: int,
         character_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        filters = _list_filters(user_id, character_id)
-        mem0_user = _mem0_user_id(user_id)
+        filters = _entity_filters(user_id, character_id)
         async with self._op_lock:
             memory = self._require_memory()
-            result = await _to_thread_with_fallbacks(
-                memory.get_all,
-                (),
-                [
-                    {"filters": filters},
-                    {"user_id": mem0_user},
-                ],
-            )
-        rows = _normalize_memories(result)
-        return [row for row in rows if _matches_character(row, character_id)]
+            result = await asyncio.to_thread(memory.get_all, filters=filters)
+        return _normalize_memories(result)
 
     async def clear_all(
         self,
@@ -237,18 +299,13 @@ class Mem0MemoryService:
         character_id: str | None = None,
     ) -> int:
         existing = await self.list_all(user_id=user_id, character_id=character_id)
-        filters = _list_filters(user_id, character_id)
         mem0_user = _mem0_user_id(user_id)
         async with self._op_lock:
             memory = self._require_memory()
-            await _to_thread_with_fallbacks(
-                memory.delete_all,
-                (),
-                [
-                    {"filters": filters},
-                    {"user_id": mem0_user},
-                ],
-            )
+            kwargs: dict[str, Any] = {"user_id": mem0_user}
+            if character_id:
+                kwargs["agent_id"] = character_id
+            await asyncio.to_thread(memory.delete_all, **kwargs)
         return len(existing)
 
     async def delete(self, memory_id: str) -> None:
@@ -265,20 +322,25 @@ class Mem0MemoryService:
         return self._memory
 
 
-async def _to_thread_with_fallbacks(
-    fn: Callable[..., Any],
-    args: tuple[Any, ...],
-    kwargs_options: list[dict[str, Any]],
-) -> Any:
-    last_error: Exception | None = None
-    for kwargs in kwargs_options:
-        try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
-        except (TypeError, ValueError) as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    return await asyncio.to_thread(fn, *args)
+def _reranker_config(reranker_prefs: Any | None) -> dict[str, Any] | None:
+    """Build mem0's ``reranker`` block from preferences, or ``None`` if disabled.
+
+    Only ``sentence_transformer`` is supported today — the local cross-encoder
+    path avoids any external API dependency for reranking.
+    """
+    if reranker_prefs is None or not bool(getattr(reranker_prefs, "enabled", False)):
+        return None
+    model = str(getattr(reranker_prefs, "model", "") or "").strip()
+    if not model:
+        return None
+    cfg: dict[str, Any] = {"model": model}
+    device = getattr(reranker_prefs, "device", None)
+    if device:
+        cfg["device"] = str(device)
+    batch_size = getattr(reranker_prefs, "batch_size", None)
+    if batch_size:
+        cfg["batch_size"] = int(batch_size)
+    return {"provider": "sentence_transformer", "config": cfg}
 
 
 def _stored_result_items(raw: Any) -> list[dict[str, Any]]:
@@ -343,6 +405,7 @@ def _mem0_model_config(
     required_kind: str,
     credential_store: Any | None,
     callbacks: list[Any] | None = None,
+    tuning: Any | None = None,
 ) -> dict[str, Any]:
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.model_catalog import get_model_catalog
@@ -371,7 +434,22 @@ def _mem0_model_config(
     # Chat models always route through the langchain adapter so we get a
     # single, provider-agnostic callback path for usage capture.
     if required_kind == "chat":
-        return _chat_langchain_config(spec.provider_id, api_model, store, callbacks or [])
+        from hirocli.domain.model_factory import build_chat_model_from_tuning
+        from hirocli.domain.preferences import ModelTuning
+
+        effective_tuning = ModelTuning(
+            temperature=float(getattr(tuning, "temperature", 0)),
+            max_tokens=int(getattr(tuning, "max_tokens", 8192)),
+            thinking=getattr(tuning, "thinking", "low"),
+        )
+        model = build_chat_model_from_tuning(
+            model_id,
+            workspace_path=workspace_path,
+            tuning=effective_tuning,
+            credential_store=store,
+            callbacks=callbacks or [],
+        )
+        return {"provider": "langchain", "config": {"model": model}}
 
     # Embedding (Phase 2 will revisit usage capture here) — keep mem0-native
     # provider mapping so existing embedder behavior is unchanged.
@@ -391,125 +469,6 @@ def _mem0_model_config(
     return {"provider": provider, "config": config}
 
 
-def _chat_langchain_config(
-    provider_id: str,
-    api_model: str,
-    store: Any,
-    callbacks: list[Any],
-) -> dict[str, Any]:
-    """Build a mem0 ``provider="langchain"`` config for any chat provider.
-
-    Routing every chat provider through a langchain ``BaseChatModel`` gives us
-    a single point to attach callbacks. The callback handler reads
-    ``usage_metadata`` from each completion, which langchain normalizes across
-    OpenAI / Anthropic / Google / Ollama / OpenAI-compatible endpoints.
-    """
-    from langchain.chat_models import init_chat_model
-
-    cred = store.get(provider_id)
-
-    if provider_id == "openai":
-        api_key = getattr(cred, "api_key", None)
-        if not api_key:
-            raise ValueError("OpenAI API key missing for memory LLM")
-        # GPT-5 / o-series reasoning models reject ``max_tokens`` and ``temperature``.
-        if _is_openai_reasoning(api_model):
-            model = init_chat_model(
-                api_model,
-                model_provider="openai",
-                api_key=api_key,
-                max_completion_tokens=2000,
-                callbacks=callbacks,
-            )
-        else:
-            model = init_chat_model(
-                api_model,
-                model_provider="openai",
-                api_key=api_key,
-                temperature=0,
-                max_tokens=2000,
-                callbacks=callbacks,
-            )
-        return {"provider": "langchain", "config": {"model": model}}
-
-    if provider_id == "anthropic":
-        api_key = getattr(cred, "api_key", None)
-        if not api_key:
-            raise ValueError("Anthropic API key missing for memory LLM")
-        model = init_chat_model(
-            api_model,
-            model_provider="anthropic",
-            api_key=api_key,
-            temperature=0,
-            max_tokens=2000,
-            callbacks=callbacks,
-        )
-        return {"provider": "langchain", "config": {"model": model}}
-
-    if provider_id == "google":
-        api_key = getattr(cred, "api_key", None)
-        if not api_key:
-            raise ValueError("Google API key missing for memory LLM")
-        # Thinking models count thinking tokens against ``max_output_tokens``.
-        # Memory extraction is a small structured-JSON task that does not need
-        # deep reasoning — pin thinking low so the response budget covers the
-        # actual JSON instead of being eaten by hidden chain-of-thought, which
-        # was producing truncated payloads ("Expecting ',' delimiter" parse
-        # errors) on Gemini 3 (default thinking_level="high").
-        google_kwargs: dict[str, Any] = {}
-        lower_model = api_model.lower()
-        if lower_model.startswith("gemini-3"):
-            google_kwargs["thinking_level"] = "low"
-        elif lower_model.startswith("gemini-2.5"):
-            google_kwargs["thinking_budget"] = 0
-        model = init_chat_model(
-            api_model,
-            model_provider="google_genai",
-            google_api_key=api_key,
-            temperature=0,
-            max_output_tokens=8192,
-            callbacks=callbacks,
-            **google_kwargs,
-        )
-        return {"provider": "langchain", "config": {"model": model}}
-
-    if provider_id == "ollama":
-        from langchain_ollama import ChatOllama
-
-        base_url = getattr(cred, "base_url", None)
-        if not base_url:
-            raise ValueError("Ollama base_url missing for memory LLM")
-        model = ChatOllama(
-            model=api_model,
-            base_url=base_url,
-            temperature=0,
-            num_predict=2000,
-            callbacks=callbacks,
-        )
-        return {"provider": "langchain", "config": {"model": model}}
-
-    if provider_id == "lm_studio":
-        from langchain_openai import ChatOpenAI
-
-        base_url = getattr(cred, "base_url", None)
-        if not base_url:
-            raise ValueError("LM Studio base_url missing for memory LLM")
-        # LM Studio is OpenAI-API-compatible; route through ChatOpenAI so the
-        # standard ``usage_metadata`` callback path applies. API key is a
-        # placeholder — LM Studio ignores it but ChatOpenAI requires non-empty.
-        model = ChatOpenAI(
-            model=api_model,
-            base_url=base_url,
-            api_key="lm-studio",
-            temperature=0,
-            max_tokens=2000,
-            callbacks=callbacks,
-        )
-        return {"provider": "langchain", "config": {"model": model}}
-
-    raise ValueError(f"Memory chat provider {provider_id!r} is not supported.")
-
-
 def _mem0_provider_id(provider_id: str) -> str:
     return {
         "google": "gemini",
@@ -522,12 +481,6 @@ def _mem0_api_model_id(provider_id: str, model_id: str, required_kind: str) -> s
     if provider_id == "google" and required_kind == "embedding":
         return f"models/{short}"
     return short
-
-
-def _is_openai_reasoning(api_model: str) -> bool:
-    """OpenAI reasoning models (GPT-5, o-series) reject ``max_tokens``/``temperature``."""
-    lower = api_model.lower()
-    return lower.startswith("gpt-5") or lower.startswith("o1") or lower.startswith("o3") or lower.startswith("o4")
 
 
 def _embedding_dims(model_id: str) -> int:

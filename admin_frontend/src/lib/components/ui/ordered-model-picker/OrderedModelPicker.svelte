@@ -1,7 +1,12 @@
 <script lang="ts">
-  import { ArrowRight, GripVertical, Plus, Trash2 } from '@lucide/svelte';
+  import { ArrowRight, Brain, GripVertical, Plus, Trash2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
+  import {
+    isThinkingCatalogModel,
+    sortCatalogModelsByDateDesc,
+    sortCatalogProvidersOnlineFirst
+  } from '$lib/catalog/catalog-picker-utils';
   import { createCatalogModelDragGhost } from '$lib/components/ui/ordered-model-picker/drag-ghost';
   import { cn } from '$lib/utils';
 
@@ -80,18 +85,15 @@
       seen.add(pid);
       ids.push(pid);
     }
-    ids.sort((a, b) => a.localeCompare(b));
-    return ids.map((id) => {
+    const rows = ids.map((id) => {
       const row = catalogAllProviders.find((p) => p.id === id);
       return { id, display_name: row?.display_name?.trim() ? row.display_name : id };
     });
+    return sortCatalogProvidersOnlineFirst(rows, providerConfigured);
   });
 
   const modelsForPicker = $derived(
-    catalogModels
-      .filter((m) => m.provider_id === pickProviderId)
-      .slice()
-      .sort((a, b) => a.display_name.localeCompare(b.display_name))
+    sortCatalogModelsByDateDesc(catalogModels.filter((m) => m.provider_id === pickProviderId))
   );
 
   function catalogRow(canonicalId: string): CatalogModelRow | undefined {
@@ -259,8 +261,16 @@
       {:else}
         {#each modelsForPicker as m (m.id)}
           <div class="flex items-center gap-1 border-b border-border/60 px-2 py-1.5 last:border-b-0">
-            <span class="min-w-0 flex-1 truncate font-sans text-sm text-foreground" title={m.id}>
-              {m.display_name}
+            <span class="flex min-w-0 flex-1 items-center gap-1.5 truncate font-sans text-sm text-foreground" title={m.id}>
+              <span class="truncate">{m.display_name}</span>
+              {#if isThinkingCatalogModel(m)}
+                <Brain
+                  size={14}
+                  class="shrink-0 text-violet-600 dark:text-violet-400"
+                  aria-label="Reasoning model"
+                  title="Reasoning / thinking model"
+                />
+              {/if}
             </span>
             <Button
               variant="outline"

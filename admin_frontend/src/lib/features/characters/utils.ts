@@ -11,6 +11,7 @@ export type CharacterForm = {
   prompt: string;
   backstory: string;
   llm_models: string[];
+  tuning_profile: string;
   voice_models: string[];
   tts_instructions: string;
   tts_voice_by_provider: Record<string, string>;
@@ -26,6 +27,7 @@ export function emptyForm(): CharacterForm {
     prompt: '',
     backstory: '',
     llm_models: [],
+    tuning_profile: '',
     voice_models: [],
     tts_instructions: '',
     tts_voice_by_provider: {},
@@ -74,6 +76,7 @@ export function formFromCharacter(character: CharacterDetail): CharacterForm {
     prompt: character.prompt ?? '',
     backstory: character.backstory ?? '',
     llm_models: Array.isArray(character.llm_models) ? character.llm_models : [],
+    tuning_profile: typeof character.tuning_profile === 'string' ? character.tuning_profile : '',
     voice_models: Array.isArray(character.voice_models) ? character.voice_models : [],
     tts_instructions:
       typeof character.tts_instructions === 'string' ? character.tts_instructions : '',
@@ -117,6 +120,7 @@ export function characterSaveBody(
     backstory: form.backstory,
     // Always send JSON arrays: '' is treated server-side as "omit field", so clearing the bucket must send [].
     llm_models_json: JSON.stringify(form.llm_models),
+    tuning_profile: form.tuning_profile,
     voice_models_json: JSON.stringify(form.voice_models),
     tts_instructions: form.tts_instructions,
     tts_voice_by_provider_json: JSON.stringify(voicePresets),

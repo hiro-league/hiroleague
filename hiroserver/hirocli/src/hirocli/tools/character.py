@@ -106,6 +106,18 @@ def _parse_json_object(label: str, raw: str | None) -> dict[str, Any] | None:
     return data
 
 
+def _validate_tuning_profile_id(workspace_path: Path, value: str | None) -> str | None:
+    profile_id = str(value or "").strip()
+    if not profile_id:
+        return None
+    from ..domain.preferences import load_preferences
+
+    prefs = load_preferences(workspace_path)
+    if profile_id not in prefs.tuning_profiles:
+        raise ValueError(f"Unknown tuning profile: {profile_id}")
+    return profile_id
+
+
 def _parse_json_voice_provider_map_optional(label: str, raw: str | None) -> dict[str, str] | None:
     """Parse optional JSON object mapping provider_id → voice preset id; None means omit."""
     if raw is None:
@@ -224,6 +236,11 @@ class CharacterCreateTool(Tool):
             'JSON array of preferred voice ids',
             required=False,
         ),
+        "tuning_profile": ToolParam(
+            str,
+            "Optional tuning profile id for this character; empty inherits workspace chat profile.",
+            required=False,
+        ),
         "tts_instructions": ToolParam(
             str,
             "Optional global TTS style instruction (one string per character).",
@@ -248,6 +265,7 @@ class CharacterCreateTool(Tool):
         backstory: str | None = None,
         llm_models_json: str | None = None,
         voice_models_json: str | None = None,
+        tuning_profile: str | None = None,
         tts_instructions: str | None = None,
         tts_voice_by_provider_json: str | None = None,
         emotions_enabled: bool | None = None,
@@ -256,6 +274,7 @@ class CharacterCreateTool(Tool):
         workspace_path = _resolve_path(workspace)
         llm_models = _parse_json_string_list("llm_models_json", llm_models_json)
         voice_models = _parse_json_string_list("voice_models_json", voice_models_json)
+        resolved_tuning_profile = _validate_tuning_profile_id(workspace_path, tuning_profile)
         extras = _parse_json_object("extras_json", extras_json)
         tts_vp = _parse_json_voice_provider_map_optional(
             "tts_voice_by_provider_json", tts_voice_by_provider_json
@@ -268,6 +287,7 @@ class CharacterCreateTool(Tool):
             prompt=prompt,
             backstory=backstory or "",
             llm_models=llm_models,
+            tuning_profile=resolved_tuning_profile,
             voice_models=voice_models,
             tts_instructions=(tts_instructions or "").strip(),
             tts_voice_by_provider=tts_vp if tts_vp is not None else {},
@@ -294,6 +314,11 @@ class CharacterUpdateTool(Tool):
         "backstory": ToolParam(str, "Static backstory markdown", required=False),
         "llm_models_json": ToolParam(str, "JSON array of preferred LLM ids", required=False),
         "voice_models_json": ToolParam(str, "JSON array of preferred voice ids", required=False),
+        "tuning_profile": ToolParam(
+            str,
+            "Optional tuning profile id for this character; empty inherits workspace chat profile.",
+            required=False,
+        ),
         "tts_instructions": ToolParam(
             str,
             "Optional global TTS style instruction for this character.",
@@ -318,6 +343,7 @@ class CharacterUpdateTool(Tool):
         backstory: str | None = None,
         llm_models_json: str | None = None,
         voice_models_json: str | None = None,
+        tuning_profile: str | None = None,
         tts_instructions: str | None = None,
         tts_voice_by_provider_json: str | None = None,
         emotions_enabled: bool | None = None,
@@ -326,6 +352,11 @@ class CharacterUpdateTool(Tool):
         workspace_path = _resolve_path(workspace)
         llm_models = _parse_json_string_list("llm_models_json", llm_models_json)
         voice_models = _parse_json_string_list("voice_models_json", voice_models_json)
+        resolved_tuning_profile = (
+            _validate_tuning_profile_id(workspace_path, tuning_profile)
+            if tuning_profile is not None
+            else None
+        )
         extras = _parse_json_object("extras_json", extras_json)
         tts_vp: dict[str, str] | None = None
         if tts_voice_by_provider_json is not None:
@@ -340,6 +371,9 @@ class CharacterUpdateTool(Tool):
             prompt=prompt,
             backstory=backstory,
             llm_models=llm_models,
+            tuning_profile=(
+                (resolved_tuning_profile or "") if tuning_profile is not None else None
+            ),
             voice_models=voice_models,
             tts_instructions=tts_instructions.strip() if tts_instructions is not None else None,
             tts_voice_by_provider=tts_vp,

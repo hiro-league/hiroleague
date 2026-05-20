@@ -27,17 +27,23 @@ def mem0_history_db_path(workspace_path: Path) -> Path:
 def mem0_session_scope(
     *,
     user_id: str,
+    agent_id: str | None = None,
     run_id: str | None = None,
 ) -> str:
     """Replicate mem0's ``session_scope`` key for rows Hiro writes.
 
     Mirrors ``mem0/memory/main.py::_build_session_scope`` (sorted keys joined
-    by ``&``). Conversation isolation uses ``run_id=<channel_id>`` because
-    mem0's ``run_id`` is also persisted on long-term records and should point
-    to the actual thread/conversation, not a character slug.
+    by ``&``). The trio matches what we pass to ``memory.add``:
+
+    - ``user_id`` — real end-user (data.db user)
+    - ``agent_id`` — character slug (mem0's "agent personality" slot)
+    - ``run_id`` — conversation thread (channel id); isolates the
+      ``messages`` last-k buffer the extraction prompt reads from.
     """
     parts: list[str] = []
-    for key, val in sorted([("user_id", user_id), ("run_id", run_id)]):
+    for key, val in sorted(
+        [("user_id", user_id), ("agent_id", agent_id), ("run_id", run_id)]
+    ):
         if val:
             parts.append(f"{key}={val}")
     return "&".join(parts)
@@ -71,7 +77,10 @@ class MemoryService(Protocol):
         *,
         user_id: int,
         character_id: str,
-        limit: int = 8,
+        limit: int | None = None,
+        threshold: float | None = None,
+        rerank: bool | None = None,
+        metadata_filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]: ...
 
     async def list_all(

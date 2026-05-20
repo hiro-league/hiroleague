@@ -25,9 +25,20 @@
   }
 
   function statusClass(status: string | undefined): string {
-    if (status === 'error') return 'text-destructive';
+    if (status === 'failed' || status === 'error') return 'text-destructive';
     if (status === 'running') return 'opacity-80';
     return 'opacity-60';
+  }
+
+  /** Pretty-print JSON tool results; pass through plain text otherwise. */
+  function formatToolBody(raw: string | undefined): string {
+    const text = String(raw ?? '').trim();
+    if (!text) return '';
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
   }
 </script>
 
@@ -72,6 +83,20 @@
               <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
                 <dt>elapsed</dt>
                 <dd>{elapsed}</dd>
+              </div>
+            {/if}
+            {#if tool.args}
+              <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+                <dt>args</dt>
+                <dd class="min-w-0 whitespace-pre-wrap break-all">{tool.args}</dd>
+              </div>
+            {/if}
+            {#if tool.result}
+              <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+                <dt>result</dt>
+                <dd class="min-w-0 max-h-48 overflow-auto whitespace-pre-wrap break-words">
+                  {formatToolBody(tool.result)}
+                </dd>
               </div>
             {/if}
             {#if tool.error}

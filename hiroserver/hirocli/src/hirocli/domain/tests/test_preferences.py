@@ -14,11 +14,12 @@ from hirocli.domain.preferences import (
     MediaPreferences,
     MemoryPreferences,
     ModalityFlags,
-    ModelTuning,
     PREFERENCE_SECTIONS,
+    TuningProfile,
     WorkspacePreferences,
     load_preferences,
     preferences_file,
+    resolve_memory_llm,
     resolve_llm,
     save_preferences,
 )
@@ -106,6 +107,10 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.media.output.file is False
     assert prefs.memory.enabled is False
     assert prefs.memory.max_messages == 6
+    assert prefs.llm.default_tuning_profile == "balanced_chat"
+    assert prefs.memory.default_tuning_profile == "memory_extraction"
+    assert prefs.tuning_profiles["balanced_chat"].locked is True
+    assert prefs.tuning_profiles["memory_extraction"].locked is True
 
 
 def test_memory_preferences_null_model_disables_memory() -> None:
@@ -145,14 +150,56 @@ def test_resolve_llm_with_default_and_credentials(
     prefs = WorkspacePreferences(
         llm=LLMPreferences(
             default_chat="openai:gpt-test",
-            tuning={"openai:gpt-test": ModelTuning(temperature=0.5, max_tokens=512)},
         ),
+        tuning_profiles={
+            "balanced_chat": TuningProfile(
+                label="Balanced chat",
+                locked=True,
+                temperature=0.5,
+                max_tokens=512,
+                thinking="low",
+            ),
+        },
     )
     r = resolve_llm(prefs, tmp_path, "chat")
     assert r is not None
     assert r.model_id == "openai:gpt-test"
     assert r.temperature == 0.5
     assert r.max_tokens == 512
+    assert r.thinking == "low"
+
+
+def test_resolve_memory_llm_uses_memory_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
+    prefs = WorkspacePreferences(
+        memory=MemoryPreferences(
+            enabled=True,
+            default_llm="openai:gpt-test",
+            default_embedding_model="openai:text-embedding-3-small",
+        ),
+        tuning_profiles={
+            "memory_extraction": TuningProfile(
+                label="Memory extraction",
+                locked=True,
+                temperature=0,
+                max_tokens=4096,
+                thinking="minimal",
+            ),
+        },
+    )
+
+    r = resolve_memory_llm(prefs, tmp_path)
+
+    assert r is not None
+    assert r.model_id == "openai:gpt-test"
+    assert r.temperature == 0
+    assert r.max_tokens == 4096
+    assert r.thinking == "minimal"
 
 
 def test_resolve_character_llm_prefers_character_list_order(
@@ -165,11 +212,15 @@ def test_resolve_character_llm_prefers_character_list_order(
     prefs = WorkspacePreferences(
         llm=LLMPreferences(
             default_chat="openai:gpt-test",
-            tuning={
-                "openai:gpt-other": ModelTuning(temperature=0.2, max_tokens=99),
-                "openai:gpt-test": ModelTuning(temperature=0.5, max_tokens=512),
-            },
         ),
+        tuning_profiles={
+            "balanced_chat": TuningProfile(
+                label="Balanced chat",
+                locked=True,
+                temperature=0.2,
+                max_tokens=99,
+            ),
+        },
     )
     from hirocli.domain.preferences import resolve_character_llm
 
@@ -182,6 +233,37 @@ def test_resolve_character_llm_prefers_character_list_order(
     assert r.model_id == "openai:gpt-other"
     assert r.temperature == 0.2
     assert r.max_tokens == 99
+
+
+def test_resolve_character_llm_uses_character_tuning_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
+    prefs = WorkspacePreferences(
+        llm=LLMPreferences(default_chat="openai:gpt-test"),
+        tuning_profiles={
+            "balanced_chat": TuningProfile(label="Balanced chat", locked=True, max_tokens=512),
+            "deep": TuningProfile(
+                label="Deep",
+                locked=False,
+                temperature=0.2,
+                max_tokens=4096,
+                thinking="medium",
+            ),
+        },
+    )
+    from hirocli.domain.preferences import resolve_character_llm
+
+    r = resolve_character_llm([], prefs, tmp_path, tuning_profile="deep")
+
+    assert r is not None
+    assert r.model_id == "openai:gpt-test"
+    assert r.temperature == 0.2
+    assert r.max_tokens == 4096
+    assert r.thinking == "medium"
 
 
 def test_resolve_character_llm_falls_back_when_list_unusable(

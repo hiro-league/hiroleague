@@ -98,6 +98,12 @@ class WorkspacePreferencesRuntime:
 
 def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
     parts = path.split(".")
+    if len(parts) == 1:
+        field = parts[0]
+        if field not in WorkspacePreferences.model_fields:
+            raise PreferencePathError(f"Unknown preference path: {path}")
+        root[field] = value
+        return
     if len(parts) < 2:
         raise PreferencePathError(f"Preference path must include a section and field: {path}")
 

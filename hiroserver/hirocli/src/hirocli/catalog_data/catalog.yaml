@@ -2,6 +2,7 @@
 # Model *names* follow vendor APIs as of 2026-05 (see developers.openai.com/api/docs/models,
 # ai.google.dev/gemini-api/docs/models, platform.claude.com/docs/.../models/overview).
 # Pricing is approximate; pricing_source points to vendor API pricing pages (verify before billing).
+# released_at: vendor model/API launch date (ISO YYYY-MM-DD); used for admin sort — verify release notes.
 # tts_voices: preset ids for bundled TTS integrations — verify against vendor docs when upgrading SDKs.
 # catalog_version: PEP 440-style string (quote so YAML does not parse as float).
 # Pinned to 0.1.3 until the hirocli/app package version is published (bump together then).
@@ -125,11 +126,12 @@ models:
   - id: openai:gpt-5.5
     provider_id: openai
     display_name: GPT-5.5
+    released_at: "2026-04-23"
     model_kind: chat
     model_class: reasoning
     context_window: 1050000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
     notes: Frontier model; prompts with >272K input tokens use 2x input and 1.5x output for the full session (see OpenAI pricing).
     pricing:
       input_per_1m_tokens: 5.00
@@ -142,11 +144,12 @@ models:
   - id: openai:gpt-5.5-pro
     provider_id: openai
     display_name: GPT-5.5 pro
+    released_at: "2026-04-23"
     model_kind: chat
     model_class: reasoning
     context_window: 1050000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, json_mode]
+    features: [tools, structured_output, parallel_tools, json_mode, reasoning]
     notes: Pro tier (more compute than GPT-5.5). Streaming not supported per OpenAI model docs; long jobs may need background mode. No cached-input pricing tier (verify openai.com/api/pricing).
     pricing:
       input_per_1m_tokens: 30.00
@@ -157,11 +160,12 @@ models:
   - id: openai:gpt-5.4
     provider_id: openai
     display_name: GPT-5.4
+    released_at: "2026-03-05"
     model_kind: chat
     model_class: agentic
     context_window: 1000000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
     pricing:
       input_per_1m_tokens: 2.50
       cached_input_per_1m_tokens: 0.25
@@ -173,11 +177,12 @@ models:
   - id: openai:gpt-5.4-pro
     provider_id: openai
     display_name: GPT-5.4 pro
+    released_at: "2026-03-05"
     model_kind: chat
     model_class: reasoning
     context_window: 1050000
     modalities: [text, image_in]
-    features: [tools, parallel_tools, streaming, json_mode]
+    features: [tools, parallel_tools, streaming, json_mode, reasoning]
     notes: Pro tier; structured outputs not supported per OpenAI docs. Responses API–centric for advanced flows; prompts with >272K input tokens use 2x input and 1.5x output for the full session (same long-context rule as GPT-5.4).
     pricing:
       input_per_1m_tokens: 30.00
@@ -188,11 +193,12 @@ models:
   - id: openai:gpt-5.4-mini
     provider_id: openai
     display_name: GPT-5.4 mini
+    released_at: "2026-03-17"
     model_kind: chat
     model_class: fast
     context_window: 400000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
     pricing:
       input_per_1m_tokens: 0.75
       cached_input_per_1m_tokens: 0.075
@@ -203,11 +209,12 @@ models:
   - id: openai:gpt-5.4-nano
     provider_id: openai
     display_name: GPT-5.4 nano
+    released_at: "2026-03-17"
     model_kind: chat
     model_class: fast
     context_window: 400000
     modalities: [text, image_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     pricing:
       input_per_1m_tokens: 0.20
       cached_input_per_1m_tokens: 0.02
@@ -219,11 +226,12 @@ models:
   - id: openai:gpt-5
     provider_id: openai
     display_name: GPT-5
+    released_at: "2025-08-07"
     model_kind: chat
     model_class: reasoning
     context_window: 400000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
     notes: Previous-gen reasoning model; OpenAI points new projects to GPT-5.1+ (see latest model guide). reasoning.effort minimal–high.
     pricing:
       input_per_1m_tokens: 1.25
@@ -235,11 +243,12 @@ models:
   - id: openai:gpt-5-mini
     provider_id: openai
     display_name: GPT-5 mini
+    released_at: "2025-08-07"
     model_kind: chat
     model_class: fast
     context_window: 400000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
     notes: Cost/latency tier vs GPT-5; OpenAI recommends GPT-5.4 mini for new high-volume workloads.
     pricing:
       input_per_1m_tokens: 0.25
@@ -251,11 +260,12 @@ models:
   - id: openai:gpt-5-nano
     provider_id: openai
     display_name: GPT-5 nano
+    released_at: "2025-08-07"
     model_kind: chat
     model_class: fast
     context_window: 400000
     modalities: [text, image_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     notes: Fastest/cheapest GPT-5 variant; OpenAI recommends GPT-5.4 nano for new speed-sensitive workloads.
     pricing:
       input_per_1m_tokens: 0.05
@@ -267,11 +277,12 @@ models:
   - id: openai:gpt-5-pro
     provider_id: openai
     display_name: GPT-5 pro
+    released_at: "2025-08-07"
     model_kind: chat
     model_class: reasoning
     context_window: 400000
     modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode]
+    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
     notes: Highest-compute GPT-5; defaults to reasoning.effort high only. Oriented to Responses API; long requests may need background mode. Cached-input tier not listed on model pricing table — verify vendor.
     pricing:
       input_per_1m_tokens: 15.00
@@ -282,6 +293,7 @@ models:
   - id: openai:gpt-image-2
     provider_id: openai
     display_name: GPT Image 2
+    released_at: "2026-04-21"
     model_kind: image_gen
     modalities: [text, image_in, image_out]
     features: []
@@ -293,42 +305,12 @@ models:
       pricing_updated_at: "2026-05-14"
       pricing_source: https://openai.com/api/pricing
 
-  - id: openai:gpt-realtime-1.5
-    provider_id: openai
-    display_name: GPT Realtime 1.5
-    model_kind: chat
-    model_class: balanced
-    context_window: 32000
-    modalities: [text, audio_in, audio_out, image_in]
-    features: [tools, streaming]
-    notes: Realtime API voice flagship; audio tokens billed separately ($32/$64 per 1M audio in/out). Text rates shown.
-    pricing:
-      input_per_1m_tokens: 4.00
-      cached_input_per_1m_tokens: 0.40
-      output_per_1m_tokens: 16.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://openai.com/api/pricing
-
-  - id: openai:gpt-audio-1.5
-    provider_id: openai
-    display_name: GPT Audio 1.5
-    model_kind: chat
-    model_class: balanced
-    context_window: 128000
-    modalities: [text, audio_in, audio_out]
-    features: [tools, streaming]
-    notes: Chat Completions audio in/out; audio tokens $32/$64 per 1M (see OpenAI pricing). Text rates shown.
-    pricing:
-      input_per_1m_tokens: 2.50
-      output_per_1m_tokens: 10.00
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://openai.com/api/pricing
-
   # OpenAI speech / TTS. Token fields = vendor list price. estimated_usd_per_1k_chars_speech = table estimate
   # for ~1k chars of script → speech (gpt-4o-mini: 250 in-tok @ $/MTok + ~6 audio tok per in-tok; tts-1/tts-1-hd: $/M char rate).
   - id: openai:gpt-4o-mini-tts
     provider_id: openai
     display_name: GPT-4o mini TTS
+    released_at: "2025-03-20"
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
@@ -343,6 +325,7 @@ models:
   - id: openai:tts-1
     provider_id: openai
     display_name: TTS-1
+    released_at: "2023-11-06"
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
@@ -357,6 +340,7 @@ models:
   - id: openai:tts-1-hd
     provider_id: openai
     display_name: TTS-1 HD
+    released_at: "2023-11-06"
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
@@ -371,6 +355,7 @@ models:
   - id: openai:gpt-4o-transcribe
     provider_id: openai
     display_name: GPT-4o Transcribe
+    released_at: "2025-03-20"
     model_kind: stt
     modalities: [audio_in, text]
     features: []
@@ -382,6 +367,7 @@ models:
   - id: openai:gpt-4o-mini-transcribe
     provider_id: openai
     display_name: GPT-4o mini Transcribe
+    released_at: "2025-03-20"
     model_kind: stt
     model_class: fast
     modalities: [audio_in, text]
@@ -394,6 +380,7 @@ models:
   - id: openai:gpt-4o-transcribe-diarize
     provider_id: openai
     display_name: GPT-4o Transcribe (diarization)
+    released_at: "2025-10-15"
     model_kind: stt
     modalities: [audio_in, text]
     features: []
@@ -406,6 +393,7 @@ models:
   - id: openai:text-embedding-3-small
     provider_id: openai
     display_name: text-embedding-3-small
+    released_at: "2024-01-25"
     model_kind: embedding
     model_class: fast
     context_window: 8191
@@ -420,11 +408,12 @@ models:
   - id: google:gemini-2.5-flash-lite
     provider_id: google
     display_name: Gemini 2.5 Flash-Lite
+    released_at: "2025-07-22"
     model_kind: chat
     model_class: fast
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     pricing:
       input_per_1m_tokens: 0.04
       cached_input_per_1m_tokens: 0.01
@@ -435,12 +424,13 @@ models:
   - id: google:gemini-2.5-flash
     provider_id: google
     display_name: Gemini 2.5 Flash
+    released_at: "2025-06-17"
     model_kind: chat
     extra_kinds: [stt]
     model_class: balanced
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     pricing:
       input_per_1m_tokens: 0.075
       cached_input_per_1m_tokens: 0.03
@@ -451,11 +441,12 @@ models:
   - id: google:gemini-2.5-pro
     provider_id: google
     display_name: Gemini 2.5 Pro
+    released_at: "2025-06-17"
     model_kind: chat
     model_class: agentic
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     pricing:
       input_per_1m_tokens: 1.25
       cached_input_per_1m_tokens: 0.125
@@ -466,12 +457,13 @@ models:
   - id: google:gemini-3-flash-preview
     provider_id: google
     display_name: Gemini 3 Flash Preview
+    released_at: "2025-12-17"
     model_kind: chat
     extra_kinds: [stt]
     model_class: balanced
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     notes: Preview model id may change; audio input billed higher per vendor pricing — see pricing page.
     pricing:
       input_per_1m_tokens: 0.50
@@ -483,12 +475,13 @@ models:
   - id: google:gemini-3.1-flash-lite-preview
     provider_id: google
     display_name: Gemini 3.1 Flash-Lite Preview
+    released_at: "2026-03-03"
     model_kind: chat
     extra_kinds: [stt]
     model_class: fast
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     notes: Preview model id may change; audio input billed higher per vendor pricing — see pricing page.
     pricing:
       input_per_1m_tokens: 0.25
@@ -500,11 +493,12 @@ models:
   - id: google:gemini-3.1-pro-preview
     provider_id: google
     display_name: Gemini 3.1 Pro Preview
+    released_at: "2026-02-19"
     model_kind: chat
     model_class: reasoning
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
     notes: Preview model id may change; check Gemini release notes before production.
     pricing:
       input_per_1m_tokens: 1.50
@@ -516,6 +510,7 @@ models:
   - id: google:gemini-embedding-001
     provider_id: google
     display_name: Gemini Embedding 001
+    released_at: "2025-07-14"
     model_kind: embedding
     context_window: 2048
     modalities: [text]
@@ -529,6 +524,7 @@ models:
   - id: google:gemini-3.1-flash-tts-preview
     provider_id: google
     display_name: Gemini 3.1 Flash TTS (preview)
+    released_at: "2026-04-16"
     model_kind: tts
     modalities: [text, audio_out]
     features: []
@@ -543,6 +539,7 @@ models:
   - id: google:gemini-2.5-flash-preview-tts
     provider_id: google
     display_name: Gemini 2.5 Flash TTS (preview)
+    released_at: "2025-12-10"
     model_kind: tts
     modalities: [text, audio_out]
     features: []
@@ -557,6 +554,7 @@ models:
   - id: google:gemini-2.5-pro-preview-tts
     provider_id: google
     display_name: Gemini 2.5 Pro TTS (preview)
+    released_at: "2025-09-30"
     model_kind: tts
     modalities: [text, audio_out]
     features: []
@@ -572,11 +570,12 @@ models:
   - id: anthropic:claude-opus-4-6
     provider_id: anthropic
     display_name: Claude Opus 4.6
+    released_at: "2026-02-05"
     model_kind: chat
     model_class: reasoning
     context_window: 1000000
     modalities: [text, image_in]
-    features: [tools, structured_output, streaming]
+    features: [tools, structured_output, streaming, reasoning]
     pricing:
       input_per_1m_tokens: 5.00
       cached_input_per_1m_tokens: 0.50
@@ -587,6 +586,7 @@ models:
   - id: anthropic:claude-sonnet-4-6
     provider_id: anthropic
     display_name: Claude Sonnet 4.6
+    released_at: "2026-02-17"
     model_kind: chat
     model_class: agentic
     context_window: 1000000
@@ -602,6 +602,7 @@ models:
   - id: anthropic:claude-haiku-4-5-20251001
     provider_id: anthropic
     display_name: Claude Haiku 4.5
+    released_at: "2025-10-15"
     model_kind: chat
     model_class: fast
     context_window: 200000
@@ -619,6 +620,7 @@ models:
   - id: ollama:llama3.2
     provider_id: ollama
     display_name: Llama 3.2
+    released_at: "2024-09-25"
     model_kind: chat
     model_class: balanced
     context_window: 131072
@@ -630,6 +632,7 @@ models:
   - id: ollama:llama3.3
     provider_id: ollama
     display_name: Llama 3.3
+    released_at: "2024-12-06"
     model_kind: chat
     model_class: agentic
     context_window: 131072
@@ -641,6 +644,7 @@ models:
   - id: ollama:nomic-embed-text
     provider_id: ollama
     display_name: nomic-embed-text
+    released_at: "2024-02-01"
     model_kind: embedding
     context_window: 8192
     modalities: [text]

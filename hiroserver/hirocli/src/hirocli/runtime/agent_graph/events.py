@@ -79,6 +79,8 @@ class ToolCompletedPayload(TypedDict):
     status: str
     elapsed_ms: int
     error: str | None
+    args: str
+    result: str | None
 
 
 class MemoryRetrievedPayload(TypedDict):

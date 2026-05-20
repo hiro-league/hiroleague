@@ -844,7 +844,7 @@ def _row_kind(row: dict[str, Any]) -> str:
 
 def _preview(value: str) -> str:
     compact = " ".join(str(value or "").split())
-    return compact[:140]
+    return compact[:280]
 
 
 def _to_int(value: Any) -> int:

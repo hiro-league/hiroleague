@@ -272,6 +272,7 @@ class CharacterService:
         voice_models = ch.get("voice_models") if isinstance(ch.get("voice_models"), list) else []
         llm_models = [str(x) for x in llm_models]
         voice_models = [str(x) for x in voice_models]
+        tuning_profile = str(ch.get("tuning_profile") or "").strip() or None
         tts_instructions = str(ch.get("tts_instructions") or "")
         vm_raw = ch.get("tts_voice_by_provider")
         tts_voice_by_provider: dict[str, str] | None = None
@@ -304,6 +305,7 @@ class CharacterService:
             llm_models,
             prefs,
             wp,
+            tuning_profile=tuning_profile,
             workspace_id=workspace_id,
             credential_store=store,
         )
@@ -324,6 +326,8 @@ class CharacterService:
                 "model_id": resolved_llm.model_id,
                 "temperature": resolved_llm.temperature,
                 "max_tokens": resolved_llm.max_tokens,
+                "thinking": resolved_llm.thinking,
+                "tuning_profile": tuning_profile or prefs.llm.default_tuning_profile,
             }
 
         voice_rows: list[dict[str, Any]] = []
@@ -415,6 +419,7 @@ class CharacterService:
         prompt: str | None = None,
         backstory: str = "",
         llm_models_json: str = "",
+        tuning_profile: str = "",
         voice_models_json: str = "",
         tts_instructions: str = "",
         tts_voice_by_provider_json: str = "",
@@ -432,6 +437,7 @@ class CharacterService:
                 prompt=prompt,
                 backstory=backstory or None,
                 llm_models_json=llm_models_json or None,
+                tuning_profile=tuning_profile,
                 voice_models_json=voice_models_json or None,
                 tts_instructions=tts_instructions,
                 tts_voice_by_provider_json=tts_voice_by_provider_json or None,
@@ -454,6 +460,7 @@ class CharacterService:
         prompt: str | None = None,
         backstory: str | None = None,
         llm_models_json: str | None = None,
+        tuning_profile: str | None = None,
         voice_models_json: str | None = None,
         tts_instructions: str | None = None,
         tts_voice_by_provider_json: str | None = None,
@@ -476,6 +483,8 @@ class CharacterService:
             kwargs["backstory"] = backstory
         if llm_models_json is not None:
             kwargs["llm_models_json"] = llm_models_json
+        if tuning_profile is not None:
+            kwargs["tuning_profile"] = tuning_profile
         if voice_models_json is not None:
             kwargs["voice_models_json"] = voice_models_json
         if tts_instructions is not None:

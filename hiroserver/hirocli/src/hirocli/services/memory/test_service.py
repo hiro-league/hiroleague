@@ -10,9 +10,21 @@ import yaml
 
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
-from hirocli.domain.preferences import MemoryPreferences, WorkspacePreferences
+from hirocli.domain.preferences import (
+    MemoryPreferences,
+    MemoryRerankerPreferences,
+    MemorySearchPreferences,
+    ResolvedModel,
+    WorkspacePreferences,
+)
 from hirocli.services.memory import create_memory_service
-from hirocli.services.memory.service import _log_embedding_model_change, _mem0_model_config
+from hirocli.services.memory.service import (
+    _entity_filters,
+    _log_embedding_model_change,
+    _mem0_model_config,
+    _merge_metadata_filters,
+    _reranker_config,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +90,7 @@ def _catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModelCatalog:
     path.write_text(yaml.safe_dump(doc), encoding="utf-8")
     cat = ModelCatalog.load_from_path(path)
     monkeypatch.setattr("hirocli.domain.model_catalog.get_model_catalog", lambda: cat)
+    monkeypatch.setattr("hirocli.domain.model_factory.get_model_catalog", lambda: cat)
     monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
     return cat
 
@@ -105,6 +118,13 @@ def test_create_memory_service_passes_memory_model_preferences(
             calls.update(kwargs)
 
     monkeypatch.setattr("hirocli.services.memory.service.Mem0MemoryService", FakeMemoryService)
+    resolved = ResolvedModel(
+        model_id="openai:gpt-test",
+        temperature=0,
+        max_tokens=8192,
+        thinking="low",
+    )
+    monkeypatch.setattr("hirocli.domain.preferences.resolve_memory_llm", lambda *a, **k: resolved)
     store = object()
     prefs = WorkspacePreferences(
         memory=MemoryPreferences(
@@ -117,12 +137,14 @@ def test_create_memory_service_passes_memory_model_preferences(
     service = create_memory_service(tmp_path, prefs, credential_store=store)
 
     assert isinstance(service, FakeMemoryService)
-    assert calls == {
-        "workspace_path": tmp_path,
-        "llm_model": "openai:gpt-test",
-        "embedding_model": "openai:text-embedding-3-small",
-        "credential_store": store,
-    }
+    assert calls["workspace_path"] == tmp_path
+    assert calls["llm_model"] == "openai:gpt-test"
+    assert calls["llm_tuning"] is resolved
+    assert calls["embedding_model"] == "openai:text-embedding-3-small"
+    assert calls["credential_store"] is store
+    # Factory forwards search + reranker prefs so the service can read its defaults.
+    assert isinstance(calls["search_prefs"], MemorySearchPreferences)
+    assert isinstance(calls["reranker_prefs"], MemoryRerankerPreferences)
 
 
 def test_mem0_model_config_requires_embedding_kind(
@@ -164,7 +186,7 @@ def test_mem0_model_config_uses_configured_provider_key(
     assert config["provider"] == "langchain"
     model = config["config"]["model"]
     assert model._default_params["model"] == "gpt-test"
-    assert model.max_tokens == 2000
+    assert model.max_tokens == 8192
     assert model.openai_api_key.get_secret_value() == "sk-test"
 
 
@@ -186,7 +208,7 @@ def test_mem0_model_config_uses_langchain_for_openai_gpt5(
     assert config["provider"] == "langchain"
     model = config["config"]["model"]
     assert model._default_params["model"] == "gpt-5.4"
-    assert model._default_params["max_completion_tokens"] == 2000
+    assert model._default_params["max_completion_tokens"] == 8192
     assert "max_tokens" not in model._default_params
 
 
@@ -231,8 +253,54 @@ def test_mem0_model_config_disables_thinking_budget_for_gemini_2_5(
     )
 
     model = config["config"]["model"]
-    assert model.thinking_budget == 0
+    assert model.thinking_budget == 1024
     assert model.max_output_tokens == 8192
+
+
+def test_entity_filters_use_native_user_and_agent_ids() -> None:
+    """``character_id`` rides on mem0's ``agent_id`` slot so retrieval uses
+    native entity filtering instead of metadata gymnastics.
+    """
+    assert _entity_filters(7, "aria") == {"user_id": "7", "agent_id": "aria"}
+    # Without a character we still scope by user — used by the global memory list.
+    assert _entity_filters(7, None) == {"user_id": "7"}
+
+
+def test_merge_metadata_filters_combines_entity_and_metadata_keys() -> None:
+    base = {"user_id": "7", "agent_id": "aria"}
+    merged = _merge_metadata_filters(base, {"source": "conversation", "channel_id": 42})
+    assert merged == {
+        "user_id": "7",
+        "agent_id": "aria",
+        "source": "conversation",
+        "channel_id": 42,
+    }
+    # Metadata filters can override entity scoping when the caller asks explicitly.
+    overridden = _merge_metadata_filters(base, {"run_id": "session-9"})
+    assert overridden == {"user_id": "7", "agent_id": "aria", "run_id": "session-9"}
+
+
+def test_reranker_config_disabled_by_default() -> None:
+    """No reranker block means mem0 won't try to import sentence-transformers."""
+    assert _reranker_config(MemoryRerankerPreferences()) is None
+
+
+def test_reranker_config_uses_sentence_transformer_provider() -> None:
+    prefs = MemoryRerankerPreferences(
+        enabled=True,
+        model="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        device="cpu",
+        batch_size=16,
+    )
+    cfg = _reranker_config(prefs)
+    assert cfg == {
+        "provider": "sentence_transformer",
+        "config": {
+            "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+            "device": "cpu",
+            "batch_size": 16,
+        },
+    }
 
 
 def test_embedding_model_change_logs_error(

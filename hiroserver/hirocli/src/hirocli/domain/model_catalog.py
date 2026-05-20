@@ -90,6 +90,10 @@ class ModelSpec(BaseModel):
     features: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     pricing: PricingBlock | None = None
+    released_at: str | None = Field(
+        default=None,
+        description="Vendor model/API launch date (ISO YYYY-MM-DD); editorial, verify against release notes.",
+    )
     deprecated_since: str | None = None
     replacement_id: str | None = None
     notes: str | None = None
@@ -100,6 +104,10 @@ class ModelSpec(BaseModel):
         if self.model_kind == k:
             return True
         return k in self.extra_kinds
+
+    def supports_reasoning(self) -> bool:
+        """True when workspace thinking/reasoning tuning applies to this model."""
+        return "reasoning" in self.features
 
     @model_validator(mode="after")
     def id_matches_provider_prefix(self) -> ModelSpec:

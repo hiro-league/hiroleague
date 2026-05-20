@@ -198,6 +198,8 @@
               modelPickerResetNonce={formApi.modelPickerResetNonce}
               resolved={ctrl.resolved}
               resolvedError={ctrl.resolvedError}
+              tuningProfiles={ctrl.tuningProfiles}
+              workspaceDefaultTuningProfile={ctrl.workspaceDefaultTuningProfile}
               dirty={formApi.dirty}
               onReloadCatalog={() => void ctrl.reloadBundledCatalogInEditor()}
               onDuplicateAttempt={() =>

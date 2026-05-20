@@ -38,11 +38,24 @@ def create_memory_service(
     from .service import Mem0MemoryService
 
     try:
+        from hirocli.domain.preferences import resolve_memory_llm
+
+        llm = resolve_memory_llm(
+            prefs,
+            workspace_path,
+            credential_store=credential_store,
+        )
+        if llm is None:
+            log.error("Memory service disabled - memory LLM is unavailable")
+            return None
         return Mem0MemoryService(
             workspace_path=workspace_path,
-            llm_model=llm_model,
+            llm_model=llm.model_id,
+            llm_tuning=llm,
             embedding_model=embedding_model,
             credential_store=credential_store,
+            search_prefs=getattr(memory_prefs, "search", None),
+            reranker_prefs=getattr(memory_prefs, "reranker", None),
         )
     except ImportError as exc:
         log.warning(

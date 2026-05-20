@@ -39,6 +39,10 @@ export type AgentToolCall = {
   name?: string;
   status?: string;
   elapsed_ms?: number;
+  /** Single-line JSON (or string) of invocation parameters. */
+  args?: string;
+  /** Tool return payload (truncated server-side when persisted). */
+  result?: string;
   error?: string;
 };
 

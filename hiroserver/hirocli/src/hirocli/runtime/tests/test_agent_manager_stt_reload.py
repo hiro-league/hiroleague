@@ -267,6 +267,72 @@ async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
 
 
 @pytest.mark.asyncio
+async def test_memory_tuning_profile_preference_reloads_memory(
+    tmp_path: Path,
+) -> None:
+    mgr = _make_agent_manager(tmp_path)
+    reactor: PreferenceReactor = mgr._ctx.preference_reactor
+
+    new_memory = _memory_double("rebuilt-memory-tuning")
+    rebuilds: list[Path] = []
+
+    def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
+        rebuilds.append(workspace_path)
+        return new_memory
+
+    try:
+        reactor.on_change(
+            "memory",
+            mgr._reload_memory_on_change,
+            key="agent.memory",
+            debounce_ms=10,
+        )
+
+        with patch(
+            "hirocli.services.memory.create_memory_service",
+            side_effect=fake_create_memory_service,
+        ):
+            mgr._ctx.preferences.update(
+                "memory.default_tuning_profile",
+                "balanced_chat",
+            )
+            await asyncio.sleep(0.1)
+
+        assert rebuilds == [tmp_path]
+        assert mgr._memory is new_memory
+        assert mgr._graph._memory is new_memory
+    finally:
+        reactor.close()
+
+
+@pytest.mark.asyncio
+async def test_llm_tuning_profile_change_evicts_compiled_cache(
+    tmp_path: Path,
+) -> None:
+    mgr = _make_agent_manager(tmp_path)
+    reactor: PreferenceReactor = mgr._ctx.preference_reactor
+    mgr._compiled_cache["cached"] = object()
+
+    try:
+        reactor.on_change(
+            "llm.default_tuning_profile",
+            mgr._evict_compiled_cache_on_llm_tuning_change,
+            key="agent.chat-cache",
+            debounce_ms=10,
+        )
+
+        mgr._ctx.preferences.update(
+            "llm.default_tuning_profile",
+            "memory_extraction",
+        )
+        await asyncio.sleep(0.1)
+
+        assert mgr._compiled_cache == {}
+    finally:
+        reactor.close()
+
+
+@pytest.mark.asyncio
 async def test_providers_changed_event_ignored_for_other_workspace(
     tmp_path: Path,
 ) -> None:

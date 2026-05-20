@@ -11,10 +11,10 @@ A reaction for prefix ``P`` triggers when an effective change at path ``C``
 either:
 
   * equals ``P`` (exact leaf match — e.g. ``llm.default_stt``), or
-  * is below ``P`` (``C`` starts with ``P + "."`` — e.g. ``llm.tuning`` covers
-    ``llm.tuning.openai:gpt-5.temperature``), or
+  * is below ``P`` (``C`` starts with ``P + "."`` — e.g. ``tuning_profiles`` covers
+    ``tuning_profiles.balanced_chat.temperature``), or
   * is above ``P`` (``P`` starts with ``C + "."`` — e.g. a reaction on
-    ``llm.tuning.openai:stt`` still fires when the whole ``llm.tuning`` dict
+    ``tuning_profiles.balanced_chat.temperature`` still fires when the whole ``tuning_profiles`` dict
     is replaced).
 
 Threading

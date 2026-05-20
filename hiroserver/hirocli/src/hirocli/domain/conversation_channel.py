@@ -51,17 +51,20 @@ def _delete_mem0_session_messages(
     workspace_path: Path,
     *,
     data_user_id: int,
+    character_id: str | None,
     run_id: str,
 ) -> None:
     """Wipe mem0's last-k message buffer for the given channel's session scope.
 
     Mem0 caches the last 10 raw turns per session in
     ``workspace/memory/history.db::messages``, keyed by ``session_scope``
-    (``run_id=<channel id>&user_id=<data.db user id>``). It feeds those rows back into
-    every ``Memory.add`` extraction prompt as ``last_k_messages`` — so without
-    this clear, the extraction LLM keeps "remembering" turns from before
-    Clear Channel even after Hiro's data.db and the LangGraph checkpoint are
-    empty (see Mem0MemoryService for the workspace-local path).
+    which sorts the entity IDs we passed to ``memory.add``:
+    ``agent_id=<character>&run_id=<channel id>&user_id=<data.db user id>``.
+    It feeds those rows back into every ``Memory.add`` extraction prompt as
+    ``last_k_messages`` — so without this clear, the extraction LLM keeps
+    "remembering" turns from before Clear Channel even after Hiro's data.db
+    and the LangGraph checkpoint are empty (see Mem0MemoryService for the
+    workspace-local path).
 
     Scope is per channel/thread. Long-term facts in Qdrant are intentionally
     untouched: they're cleared via the separate ``memory_clear`` tool when
@@ -76,7 +79,11 @@ def _delete_mem0_session_messages(
     db_file = mem0_history_db_path(workspace_path)
     if not db_file.exists():
         return
-    scope = mem0_session_scope(user_id=str(data_user_id), run_id=run_id)
+    scope = mem0_session_scope(
+        user_id=str(data_user_id),
+        agent_id=character_id,
+        run_id=run_id,
+    )
     try:
         with sqlite3.connect(str(db_file)) as conn:
             conn.execute(
@@ -461,6 +468,7 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
     _delete_mem0_session_messages(
         workspace_path,
         data_user_id=int(channel.user_id),
+        character_id=channel.character_id or None,
         run_id=str(channel_id),
     )
 

@@ -70,17 +70,67 @@ Service mirrors the shape of `services/tts/`, `services/stt/`, `services/vision/
 
 ## Partitioning
 
-- `user_id`: `data.db` user id (`users.id`, from `get_default_user_id` or
-  `channel.user_id` on graph state as `data_user_id`). Passed to mem0 as
-  `str(user_id)` (mem0 requires strings).
-- `character_id`: character slug from the resolved channel (graph state).
-  Stored in Qdrant metadata and used for retrieval filters. **Not** mem0's
-  `agent_id` (reserved for future multi-agent identity).
-- Mem0 session buffer (last-k turns in `history.db`) is isolated per
-  channel/thread via `run_id=str(channel_id)` on `memory.add`.
-- Default scope: memories tagged with `metadata.character_id`. Retrieval filters
-  by `character_id OR shared=true`.
-- Metadata on every write: `{thread_id, channel_id, source, character_id}`.
+Hiro maps its three identifiers directly onto mem0's three native entity slots
+so retrieval uses indexed entity filtering, not metadata gymnastics:
+
+| Hiro concept | Mem0 entity slot | Set on |
+|---|---|---|
+| `data.db` user id | `user_id` | `add`, `search`, `list_all`, `clear_all` |
+| Character slug | `agent_id` | `add`, `search`, `list_all`, `clear_all` |
+| Conversation thread (`channel_id`) | `run_id` | `add` only |
+
+Rationale:
+
+- **`user_id`**: passed to mem0 as `str(user_id)` (mem0 requires strings).
+- **`agent_id` = character**: mem0 reserves this slot for "the agent
+  personality talking to the user", which is exactly what a character is in
+  Hiro. Native filtering means `delete_all(user_id=..., agent_id=...)` is a
+  single SDK call and no post-filter is needed.
+- **`run_id` = channel**: included on `add` so mem0's `messages` last-k buffer
+  (in `history.db`) is per-thread. Long-term retrieval (`search`/`list_all`)
+  intentionally **does not** filter by `run_id` — memory survives conversation
+  resets and is shared across threads with the same character.
+- **Session scope**: mem0 sorts the three IDs into
+  `agent_id=<char>&run_id=<channel>&user_id=<uid>`; `clear_channel_messages`
+  rebuilds the same key when wiping the last-k buffer.
+- **Collection**: `hiro_memory_v2`. Bumped from `hiro_memory` when
+  `character_id` moved from a metadata field to `agent_id`; the old
+  collection is orphaned by design (initial-development mode — no migration).
+- **Free-form metadata** still rides on every write (`{thread_id, channel_id,
+  source, ...}`) for audit and admin display, but is no longer used for
+  scoping.
+
+## Retrieval tuning
+
+`MemoryPreferences.search` (`MemorySearchPreferences`) sets the defaults
+`Mem0MemoryService.search` applies when callers don't override:
+
+| Field | Default | Effect |
+|---|---|---|
+| `top_k` | `8` | Result cap (matches mem0's `top_k`). |
+| `threshold` | `0.1` | Drop rows with fused score below this (`0.0` disables). |
+| `rerank` | `false` | Per-call default for the cross-encoder pass. |
+
+Per-call overrides (`limit=`, `threshold=`, `rerank=`, `metadata_filters=`)
+let the agent graph and tools tighten or relax retrieval without rebuilding
+the service. `metadata_filters` AND-merges into the entity filter dict, so
+callers can add scoping like `{"source": "conversation"}` without losing
+`user_id` / `agent_id`.
+
+## Reranker
+
+`MemoryPreferences.reranker` (`MemoryRerankerPreferences`) opts into mem0's
+**local cross-encoder** path:
+
+- **Provider**: `sentence_transformer` only — no cloud reranker calls.
+- **Default model**: `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+- **Disabled by default**. When enabled, mem0 instantiates a HuggingFace
+  cross-encoder on first use; weights are cached under the Hugging Face cache
+  dir. `sentence-transformers` is a direct dependency so the import path
+  works without `mem0ai[extras]`.
+- Setting `search.rerank=true` while `reranker.enabled=false` is a no-op —
+  the service downgrades the request and logs at DEBUG; mem0 has no
+  reranker instance to call.
 
 ## Service contract
 
@@ -109,13 +159,28 @@ false, mirroring how `create_stt_service` handles unavailability.
 Extend `MemoryPreferences` minimally — keep what we use, nothing else:
 
 ```python
-class MemoryPreferences(BaseModel):
-    enabled: bool = True
-    max_messages: int = DEFAULT_MEMORY_MAX_MESSAGES  # already exists
-```
+class MemorySearchPreferences(BaseModel):
+    top_k: int = 8
+    threshold: float = 0.1
+    rerank: bool = False
 
-No provider field, no extraction-LLM override, no graph flags. Add later if a
-real need surfaces.
+
+class MemoryRerankerPreferences(BaseModel):
+    enabled: bool = False
+    model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    device: str | None = None  # None = auto (CUDA if available, else CPU)
+    batch_size: int = 32
+
+
+class MemoryPreferences(BaseModel):
+    enabled: bool = False
+    default_llm: str | None = None
+    default_embedding_model: str | None = None
+    default_tuning_profile: str = DEFAULT_MEMORY_TUNING_PROFILE_ID
+    max_messages: int = DEFAULT_MEMORY_MAX_MESSAGES
+    search: MemorySearchPreferences = Field(default_factory=MemorySearchPreferences)
+    reranker: MemoryRerankerPreferences = Field(default_factory=MemoryRerankerPreferences)
+```
 
 ## Graph integration
 

@@ -90,7 +90,7 @@ def _update_text_preview(chunk: Any, field: str) -> str:
 
 
 def _preview(value: str) -> str:
-    return " ".join(str(value or "").split())[:140]
+    return " ".join(str(value or "").split())[:280]
 
 
 def _error_slug(exc: BaseException) -> str:
@@ -213,6 +213,16 @@ class AgentManager:
                 self._reload_memory_on_change,
                 key="agent.memory",
             )
+            self._ctx.preference_reactor.on_change(
+                "llm.default_tuning_profile",
+                self._evict_compiled_cache_on_llm_tuning_change,
+                key="agent.chat-cache",
+            )
+            self._ctx.preference_reactor.on_change(
+                "tuning_profiles",
+                self._reload_tuning_profiles_on_change,
+                key="agent.tuning-profiles",
+            )
             # Providers/admin mutations write ``providers.json`` via another
             # ``CredentialStore`` instance — keep graph caches and media services in sync.
             bus = get_domain_event_bus()
@@ -311,6 +321,7 @@ class AgentManager:
             ch.llm_models,
             prefs,
             self._ctx.workspace_path,
+            tuning_profile=getattr(ch, "tuning_profile", None),
             credential_store=self._credentials,
         )
         if llm_entry is None:
@@ -501,6 +512,7 @@ class AgentManager:
             llm_entry.model_id,
             round(float(llm_entry.temperature), 6),
             int(llm_entry.max_tokens),
+            getattr(llm_entry, "thinking", None),
             "chat-graph-v1",
             fp,
         )
@@ -535,8 +547,10 @@ class AgentManager:
             workspace_path=self._ctx.workspace_path,
             temperature=llm_entry.temperature,
             max_tokens=llm_entry.max_tokens,
+            thinking=getattr(llm_entry, "thinking", None),
             credential_store=self._credentials,
         )
+        # temporarily disable tools, do not remove this code
         if self._lc_agent_tools is None:
             self._lc_agent_tools = self._langchain_tools_for_agent()
         compiled = self._graph.build(
@@ -817,13 +831,17 @@ class AgentManager:
         workspace_path,
         changes: dict[str, tuple[Any, Any]],
     ) -> None:
-        """Rebuild long-term memory after memory model/enablement preferences change."""
+        """Rebuild long-term memory after memory-related preferences change."""
         relevant_paths = {
             "memory.enabled",
             "memory.default_llm",
             "memory.default_embedding_model",
+            "memory.default_tuning_profile",
         }
-        if not any(path in relevant_paths for path in changes):
+        relevant_prefixes = ("memory.search.", "memory.reranker.")
+        if not any(path in relevant_paths for path in changes) and not any(
+            path.startswith(relevant_prefixes) for path in changes
+        ):
             return
         ok = await self._attach_new_memory_service(context="preferences.memory")
         if ok:
@@ -832,6 +850,33 @@ class AgentManager:
                 paths=sorted(changes.keys()),
                 available=self._memory is not None,
             )
+
+    async def _evict_compiled_cache_on_llm_tuning_change(
+        self,
+        workspace_path,
+        changes: dict[str, tuple[Any, Any]],
+    ) -> None:
+        """Drop compiled agent graphs after model tuning changes."""
+        self._compiled_cache.clear()
+        log.info(
+            "Chat graph cache evicted - preferences",
+            paths=sorted(changes.keys()),
+        )
+
+    async def _reload_tuning_profiles_on_change(
+        self,
+        workspace_path,
+        changes: dict[str, tuple[Any, Any]],
+    ) -> None:
+        """Apply tuning profile edits to chat cache and memory service."""
+        self._compiled_cache.clear()
+        ok = await self._attach_new_memory_service(context="preferences.tuning_profiles")
+        log.info(
+            "Tuning profiles reloaded - preferences",
+            paths=sorted(changes.keys()),
+            memory_available=self._memory is not None,
+            memory_reloaded=ok,
+        )
 
 
 # Deliberate use to silence the unused-import lint while keeping a hook for

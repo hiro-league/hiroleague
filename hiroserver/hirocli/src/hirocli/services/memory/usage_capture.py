@@ -1,7 +1,7 @@
 """LLM usage capture for mem0 calls.
 
-Mem0's ``Memory.add`` / ``Memory.search`` perform internal LLM invocations
-(extraction, ADD/UPDATE/DELETE decision) that the SDK does not surface back
+Mem0's ``Memory.add`` performs internal LLM invocations (extraction,
+ADD/UPDATE/DELETE decision) that the SDK does not surface back
 to the caller. To attribute those tokens to the ``memory_out`` ledger row,
 we attach a LangChain ``BaseCallbackHandler`` to every memory-bound chat
 model and aggregate ``usage_metadata`` across all LLM calls into a

@@ -15,6 +15,7 @@ export type CharacterDetail = CharacterRow & {
   prompt?: string | null;
   backstory?: string | null;
   llm_models?: string[];
+  tuning_profile?: string | null;
   voice_models?: string[];
   /** Single optional global hint passed to TTS (character-level). */
   tts_instructions?: string | null;
@@ -31,6 +32,7 @@ export type CharacterSaveBody = {
   prompt: string | null;
   backstory: string;
   llm_models_json: string;
+  tuning_profile: string;
   voice_models_json: string;
   tts_instructions: string;
   /** Always JSON-serialized object (may be ``{}``) so PATCH replaces the saved map. */
@@ -62,6 +64,8 @@ export type CharacterResolvedPayload = {
     model_id: string;
     temperature: number;
     max_tokens: number;
+    thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+    tuning_profile?: string | null;
   } | null;
   voice_rows: CharacterResolvedRow[];
   /** Workspace ``default_tts`` (preferences), if set — shown next to the character list. */

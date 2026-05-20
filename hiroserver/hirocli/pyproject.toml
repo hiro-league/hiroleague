@@ -44,8 +44,17 @@ dependencies = [
     "langchain-google-genai>=4.2",
     "langchain-ollama>=1.0.1",
     "langchain-community>=0.3",
-    "mem0ai>=2.0.2",
+    "mem0ai==2.0.2",
     "qdrant-client>=1.18.0",
+    # Mem0 v3 hybrid search (Qdrant): entity extraction + BM25 lemmatization.
+    # Mirrors mem0ai[nlp]; we pin directly to avoid mem0ai[extras] (old LangChain, etc.).
+    "spacy>=3.8,<4",
+    # Qdrant sparse vectors for BM25 keyword search (mem0ai[extras] also lists this).
+    "fastembed>=0.8.0",
+    # Local cross-encoder reranker (mem0 sentence_transformer provider). Pulls
+    # torch + huggingface-hub transitively; ~100MB on first install. Required
+    # because mem0ai lists sentence-transformers under its ``[extras]`` group.
+    "sentence-transformers>=5.4",
     "keyring>=25.7",
     "platformdirs>=4",
     "aiosqlite>=0.20",

@@ -6,6 +6,9 @@
 
 set -e
 
+# Mem0 hybrid deps (fastembed → py-rust-stemmers) have cp312 wheels; 3.14 forces a Rust source build on Windows.
+HIRO_UV_PYTHON="${HIRO_UV_PYTHON:-3.12}"
+
 export HIRO_ENV="${HIRO_ENV:-dev}"
 
 # --force bypasses all fingerprint caches and reinstalls everything.
@@ -92,6 +95,8 @@ fi
 
 echo "==> Syncing hiroserver workspace dependencies..."
 cd hiroserver
+uv python install "${HIRO_UV_PYTHON}"   # no-op if already present
+uv python pin "${HIRO_UV_PYTHON}"
 uv sync
 
 # Always clean up the legacy `hiroleague` meta-tool install (cheap no-op when absent).
@@ -124,7 +129,8 @@ install_tool_if_changed() {
 
   echo "==> Updating $tool_name tool binary..."
   uv tool uninstall "$tool_name" 2>/dev/null || true
-  uv tool install --editable "$tool_path" --upgrade --force
+  # uv tool install --editable "$tool_path" --upgrade --force
+  uv tool install --editable "$tool_path" --python "${HIRO_UV_PYTHON}" --upgrade --force
   cache_store "$cache_key" "$fp"
 }
 

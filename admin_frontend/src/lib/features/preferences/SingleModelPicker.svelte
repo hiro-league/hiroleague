@@ -1,8 +1,13 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { Check, Plus, Trash2 } from '@lucide/svelte';
+  import { Brain, Check, Plus, Trash2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
+  import {
+    isThinkingCatalogModel,
+    sortCatalogModelsByDateDesc,
+    sortCatalogProvidersOnlineFirst
+  } from '$lib/catalog/catalog-picker-utils';
   import { cn } from '$lib/utils';
 
   let {
@@ -47,18 +52,15 @@
       seen.add(providerId);
       ids.push(providerId);
     }
-    ids.sort((a, b) => a.localeCompare(b));
-    return ids.map((id) => {
+    const rows = ids.map((id) => {
       const row = catalogAllProviders.find((provider) => provider.id === id);
       return { id, display_name: row?.display_name?.trim() ? row.display_name : id };
     });
+    return sortCatalogProvidersOnlineFirst(rows, providerConfigured);
   });
 
   const modelsForPicker = $derived(
-    catalogModels
-      .filter((model) => model.provider_id === pickProviderId)
-      .slice()
-      .sort((a, b) => a.display_name.localeCompare(b.display_name))
+    sortCatalogModelsByDateDesc(catalogModels.filter((model) => model.provider_id === pickProviderId))
   );
 
   const selectedRow = $derived(
@@ -157,8 +159,16 @@
           {#each modelsForPicker as model (model.id)}
             <div class="flex items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0">
               <span class="min-w-0 flex-1 grid gap-0.5">
-                <span class="truncate font-sans text-sm text-foreground" title={model.id}>
-                  {model.display_name}
+                <span class="flex min-w-0 items-center gap-1.5 truncate font-sans text-sm text-foreground" title={model.id}>
+                  <span class="truncate">{model.display_name}</span>
+                  {#if isThinkingCatalogModel(model)}
+                    <Brain
+                      size={14}
+                      class="shrink-0 text-violet-600 dark:text-violet-400"
+                      aria-label="Reasoning model"
+                      title="Reasoning / thinking model"
+                    />
+                  {/if}
                 </span>
                 <code class="truncate font-mono text-xs text-muted-foreground">{model.id}</code>
               </span>
@@ -208,7 +218,17 @@
                 {selectedId}
               </code>
               {#if selectedRow}
-                <span class="font-sans text-sm text-muted-foreground">{selectedRow.display_name}</span>
+                <span class="flex items-center gap-1.5 font-sans text-sm text-muted-foreground">
+                  <span>{selectedRow.display_name}</span>
+                  {#if isThinkingCatalogModel(selectedRow)}
+                    <Brain
+                      size={14}
+                      class="shrink-0 text-violet-600 dark:text-violet-400"
+                      aria-label="Reasoning model"
+                      title="Reasoning / thinking model"
+                    />
+                  {/if}
+                </span>
               {/if}
             </span>
             <Button

@@ -1,6 +1,6 @@
 """Workspace preferences — single source of truth for configurable choices.
 
-``preferences.json`` holds LLM default selections (canonical catalog ids), per-model
+``preferences.json`` holds LLM default selections (canonical catalog ids), profile-based
 tuning, voice/audio, and memory settings. Provider secrets live in the credential
 store (``providers.json`` + OS keyring), not here.
 
@@ -36,7 +36,7 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
     PreferenceSection(
         key="llm",
         label="Models",
-        description="Workspace model defaults and per-model tuning.",
+        description="Workspace model defaults and tuning profile selection.",
     ),
     PreferenceSection(
         key="media",
@@ -121,13 +121,45 @@ def _diff_into(
 # ---------------------------------------------------------------------------
 
 LLMPurpose = Literal["chat", "stt", "tts"]
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high"]
 
 
 class ModelTuning(BaseModel):
-    """Per-model runtime overrides keyed by canonical model id."""
+    """Provider-neutral runtime model tuning."""
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
+    thinking: ThinkingLevel | None = None
+
+
+class TuningProfile(ModelTuning):
+    """Named tuning preset shared by chat and memory purposes."""
+
+    label: str = Field(default="", min_length=1)
+    locked: bool = False
+
+
+DEFAULT_CHAT_TUNING_PROFILE_ID = "balanced_chat"
+DEFAULT_MEMORY_TUNING_PROFILE_ID = "memory_extraction"
+
+
+def default_tuning_profiles() -> dict[str, TuningProfile]:
+    return {
+        DEFAULT_CHAT_TUNING_PROFILE_ID: TuningProfile(
+            label="Balanced chat",
+            locked=True,
+            temperature=0.7,
+            max_tokens=2048,
+            thinking=None,
+        ),
+        DEFAULT_MEMORY_TUNING_PROFILE_ID: TuningProfile(
+            label="Memory extraction",
+            locked=True,
+            temperature=0,
+            max_tokens=8192,
+            thinking="low",
+        ),
+    }
 
 
 class LLMPreferences(BaseModel):
@@ -136,7 +168,7 @@ class LLMPreferences(BaseModel):
     default_chat: str | None = None
     default_stt: str | None = None
     default_tts: str | None = None
-    tuning: dict[str, ModelTuning] = Field(default_factory=dict)
+    default_tuning_profile: str = DEFAULT_CHAT_TUNING_PROFILE_ID
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +203,36 @@ class MediaPreferences(BaseModel):
 
 DEFAULT_MEMORY_MAX_MESSAGES = 6
 
+DEFAULT_MEMORY_SEARCH_TOP_K = 8
+DEFAULT_MEMORY_SEARCH_THRESHOLD = 0.1
+DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+class MemorySearchPreferences(BaseModel):
+    """Retrieval-time tuning for ``MemoryService.search``."""
+
+    top_k: int = Field(default=DEFAULT_MEMORY_SEARCH_TOP_K, ge=1, le=100)
+    # Mem0 fused score in [0, 1] (semantic + BM25 + entity boost). Rows below
+    # this score are dropped pre-rerank; 0.0 disables the gate.
+    threshold: float = Field(default=DEFAULT_MEMORY_SEARCH_THRESHOLD, ge=0.0, le=1.0)
+    # Per-call default for the rerank pass. Effective only when
+    # ``reranker.enabled`` is true; otherwise mem0 has no reranker to call.
+    rerank: bool = False
+
+
+class MemoryRerankerPreferences(BaseModel):
+    """Local cross-encoder reranker (mem0 ``sentence_transformer`` provider).
+
+    Disabled by default — enabling requires ``sentence-transformers`` and pulls
+    the cross-encoder weights on first use.
+    """
+
+    enabled: bool = False
+    model: str = Field(default=DEFAULT_RERANKER_MODEL, min_length=1)
+    # ``None`` lets sentence-transformers pick (CUDA if available, else CPU).
+    device: str | None = None
+    batch_size: int = Field(default=32, ge=1, le=512)
+
 
 class MemoryPreferences(BaseModel):
     """Agent memory settings."""
@@ -178,7 +240,10 @@ class MemoryPreferences(BaseModel):
     enabled: bool = False
     default_llm: str | None = None
     default_embedding_model: str | None = None
+    default_tuning_profile: str = DEFAULT_MEMORY_TUNING_PROFILE_ID
     max_messages: int = Field(default=DEFAULT_MEMORY_MAX_MESSAGES, ge=1, le=100)
+    search: MemorySearchPreferences = Field(default_factory=MemorySearchPreferences)
+    reranker: MemoryRerankerPreferences = Field(default_factory=MemoryRerankerPreferences)
 
     @model_validator(mode="after")
     def _disable_without_models(self) -> "MemoryPreferences":
@@ -199,6 +264,28 @@ class WorkspacePreferences(BaseModel):
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
+    tuning_profiles: dict[str, TuningProfile] = Field(default_factory=default_tuning_profiles)
+
+    @model_validator(mode="after")
+    def _validate_tuning_profiles(self) -> "WorkspacePreferences":
+        defaults = default_tuning_profiles()
+        for profile_id, default_profile in defaults.items():
+            current = self.tuning_profiles.get(profile_id)
+            if current is None:
+                self.tuning_profiles[profile_id] = default_profile
+            else:
+                current.locked = True
+                if not current.label.strip():
+                    current.label = default_profile.label
+        if self.llm.default_tuning_profile not in self.tuning_profiles:
+            raise ValueError(
+                f"Unknown llm.default_tuning_profile: {self.llm.default_tuning_profile}"
+            )
+        if self.memory.default_tuning_profile not in self.tuning_profiles:
+            raise ValueError(
+                f"Unknown memory.default_tuning_profile: {self.memory.default_tuning_profile}"
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +364,7 @@ class ResolvedModel:
     model_id: str
     temperature: float
     max_tokens: int
+    thinking: ThinkingLevel | None = None
 
 
 @dataclass(frozen=True)
@@ -286,6 +374,13 @@ class ResolvedVoiceForSynthesis:
     model: str
     voice: str = ""
     instructions: str = ""
+
+
+def _profile_tuning(prefs: WorkspacePreferences, profile_id: str) -> TuningProfile:
+    profile = prefs.tuning_profiles.get(profile_id)
+    if profile is None:
+        raise ValueError(f"Unknown tuning profile: {profile_id}")
+    return profile
 
 
 def resolve_llm(
@@ -332,11 +427,55 @@ def resolve_llm(
     if not ams.is_model_available(model_id):
         return None
 
-    tuning = prefs.llm.tuning.get(model_id, ModelTuning())
+    tuning = _profile_tuning(prefs, prefs.llm.default_tuning_profile)
     return ResolvedModel(
         model_id=model_id,
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
+        thinking=tuning.thinking,
+    )
+
+
+def resolve_memory_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Return the configured memory extraction chat model with memory defaults."""
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    model_id = prefs.memory.default_llm
+    if not model_id:
+        return None
+
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind("chat"):
+        return None
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            logger.debug("resolve_memory_llm: workspace path not in registry — %s", workspace_path)
+            return None
+        store = CredentialStore(workspace_path, wid)
+
+    ams = AvailableModelsService(cat, store)
+    if not ams.is_model_available(model_id):
+        return None
+
+    tuning = _profile_tuning(prefs, prefs.memory.default_tuning_profile)
+    return ResolvedModel(
+        model_id=model_id,
+        temperature=tuning.temperature,
+        max_tokens=tuning.max_tokens,
+        thinking=tuning.thinking,
     )
 
 
@@ -345,6 +484,7 @@ def resolve_character_llm(
     prefs: WorkspacePreferences,
     workspace_path: Path,
     *,
+    tuning_profile: str | None = None,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
@@ -368,6 +508,20 @@ def resolve_character_llm(
 
     cat = get_model_catalog()
     ams = AvailableModelsService(cat, store)
+    requested_profile_id = (tuning_profile or "").strip()
+    if requested_profile_id and requested_profile_id not in prefs.tuning_profiles:
+        logger.warning(
+            "Character tuning profile missing; falling back to workspace chat profile",
+            extra={
+                "tuning_profile": requested_profile_id,
+                "fallback": prefs.llm.default_tuning_profile,
+            },
+        )
+    profile_id = (
+        requested_profile_id
+        if requested_profile_id in prefs.tuning_profiles
+        else prefs.llm.default_tuning_profile
+    )
     seen: set[str] = set()
     for mid in ordered_model_ids:
         if not mid or mid in seen:
@@ -378,18 +532,28 @@ def resolve_character_llm(
             continue
         if not ams.is_model_available(mid):
             continue
-        tuning = prefs.llm.tuning.get(mid, ModelTuning())
+        tuning = _profile_tuning(prefs, profile_id)
         return ResolvedModel(
             model_id=mid,
             temperature=tuning.temperature,
             max_tokens=tuning.max_tokens,
+            thinking=tuning.thinking,
         )
-    return resolve_llm(
+    fallback = resolve_llm(
         prefs,
         workspace_path,
         "chat",
         workspace_id=workspace_id,
         credential_store=credential_store,
+    )
+    if fallback is None:
+        return None
+    tuning = _profile_tuning(prefs, profile_id)
+    return ResolvedModel(
+        model_id=fallback.model_id,
+        temperature=tuning.temperature,
+        max_tokens=tuning.max_tokens,
+        thinking=tuning.thinking,
     )
 
 

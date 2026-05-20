@@ -50,7 +50,17 @@ class _MemoryService:
             stored_items=stored_items,
         )
 
-    async def search(self, query: str, *, user_id: int, character_id: str, limit: int = 8) -> list[dict]:
+    async def search(
+        self,
+        query: str,
+        *,
+        user_id: int,
+        character_id: str,
+        limit: int | None = None,
+        threshold: float | None = None,
+        rerank: bool | None = None,
+        metadata_filters: dict | None = None,
+    ) -> list[dict]:
         return [{"memory": "User prefers concise replies"}]
 
     async def list_all(self, *, user_id: int, character_id: str | None = None) -> list[dict]:

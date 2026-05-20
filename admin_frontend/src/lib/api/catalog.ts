@@ -35,6 +35,8 @@ export type CatalogModelRow = {
   features?: string[];
   tags?: string[];
   pricing?: Record<string, unknown> | null;
+  /** Vendor model/API launch date (ISO YYYY-MM-DD) from bundled catalog.yaml. */
+  released_at?: string | null;
   deprecated_since?: string | null;
   replacement_id?: string | null;
   notes?: string | null;

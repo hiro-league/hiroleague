@@ -584,7 +584,6 @@ class BaseAgentGraph:
                 text,
                 user_id=memory_user_id,
                 character_id=state.get("character_id", ""),
-                limit=8,
             )
         except Exception as exc:
             if entry := current_entry.get():
@@ -757,6 +756,10 @@ class BaseAgentGraph:
                         "status": status,
                         "elapsed_ms": elapsed_ms,
                         "error": error,
+                        "args": _tool_args_one_line(args),
+                        "result": _tool_result_bounded(content)
+                        if status == "completed"
+                        else None,
                     },
                 )
                 out.append(
@@ -1307,6 +1310,29 @@ def _tool_input_preview(tool_name: str, args: dict[str, Any]) -> str:
     except TypeError:
         arg_text = str(args)
     return f"{tool_name or 'unknown'} args: {arg_text}"
+
+
+# Bounded strings for admin message metadata (separate from ledger previews).
+_AGENT_TOOL_ARGS_MAX = 2000
+_AGENT_TOOL_RESULT_MAX = 4000
+
+
+def _tool_args_one_line(args: dict[str, Any], *, max_len: int = _AGENT_TOOL_ARGS_MAX) -> str:
+    try:
+        text = json.dumps(args, ensure_ascii=False, default=str, separators=(",", ":"))
+    except TypeError:
+        text = str(args)
+    compact = " ".join(text.split())
+    if len(compact) <= max_len:
+        return compact
+    return compact[: max_len - 3] + "..."
+
+
+def _tool_result_bounded(content: str, *, max_len: int = _AGENT_TOOL_RESULT_MAX) -> str:
+    text = str(content or "")
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
 
 
 def _audio_item_preview(item: AudioItem) -> str:

@@ -161,8 +161,16 @@ def test_clear_channel_messages_wipes_mem0_session_messages(tmp_path) -> None:
     # A should be wiped when ch_a is cleared.
     db_file = mem0_history_db_path(tmp_path)
     db_file.parent.mkdir(parents=True, exist_ok=True)
-    scope_a = mem0_session_scope(user_id=str(uid), run_id=str(ch_a.id))
-    scope_b = mem0_session_scope(user_id=str(uid), run_id=str(ch_b.id))
+    # Session scope must include ``agent_id`` because that is the entity slot
+    # ``Mem0MemoryService.add`` now uses for the character — mem0's
+    # ``_build_session_scope`` keys the messages table on every entity id we
+    # pass to ``memory.add``.
+    scope_a = mem0_session_scope(
+        user_id=str(uid), agent_id="char-a", run_id=str(ch_a.id)
+    )
+    scope_b = mem0_session_scope(
+        user_id=str(uid), agent_id="char-a", run_id=str(ch_b.id)
+    )
     with sqlite3.connect(str(db_file)) as conn:
         # Mirror mem0/memory/storage.py::SQLiteManager._create_messages_table.
         conn.execute(

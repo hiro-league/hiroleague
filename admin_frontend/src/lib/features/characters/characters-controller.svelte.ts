@@ -18,6 +18,7 @@ import {
   type CatalogModelRow,
   type CatalogProviderRow
 } from '$lib/api/catalog';
+import { getPreferences, type TuningProfile } from '$lib/api/preferences';
 import {
   characterSaveBody,
   emptyForm,
@@ -55,6 +56,8 @@ export function createCharactersPageController(opts: {
   let catalogTtsProviders = $state<CatalogProviderRow[]>([]);
   let workspaceActiveProviders = $state<ActiveProviderRow[]>([]);
   let workspaceActiveProvidersResolved = $state(false);
+  let tuningProfiles = $state<Record<string, TuningProfile>>({});
+  let workspaceDefaultTuningProfile = $state('balanced_chat');
 
   let deleteOpen = $state(false);
   let resolved = $state<CharacterResolvedPayload | null>(null);
@@ -88,10 +91,11 @@ export function createCharactersPageController(opts: {
 
   async function loadCatalogOptions(force = false) {
     if (catalogReady && !force) return;
-    const [chat, tts, providers] = await Promise.all([
+    const [chat, tts, providers, preferences] = await Promise.all([
       listCatalogModels({ model_kind: 'chat' }),
       listCatalogModels({ model_kind: 'tts' }),
-      listCatalogProviders()
+      listCatalogProviders(),
+      getPreferences()
     ]);
     llmOptions = chat.data.models;
     catalogAllProviders = providers.data;
@@ -99,6 +103,9 @@ export function createCharactersPageController(opts: {
       a.display_name.localeCompare(b.display_name)
     );
     catalogTtsProviders = providers.data.filter((p) => (p.tts_voices?.length ?? 0) > 0);
+    tuningProfiles = preferences.data.preferences.tuning_profiles ?? {};
+    workspaceDefaultTuningProfile =
+      preferences.data.preferences.llm.default_tuning_profile || 'balanced_chat';
     workspaceActiveProvidersResolved = false;
     try {
       const activePayload = await listActiveProviders();
@@ -358,6 +365,12 @@ export function createCharactersPageController(opts: {
     },
     get workspaceTtsActiveIds(): Set<string> {
       return new Set(workspaceActiveProviders.filter((r) => r.has_tts).map((r) => r.provider_id));
+    },
+    get tuningProfiles(): Record<string, TuningProfile> {
+      return tuningProfiles;
+    },
+    get workspaceDefaultTuningProfile(): string {
+      return workspaceDefaultTuningProfile;
     },
     get resolved(): CharacterResolvedPayload | null {
       return resolved;

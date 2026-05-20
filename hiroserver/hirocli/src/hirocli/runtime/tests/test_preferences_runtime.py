@@ -41,6 +41,17 @@ def test_runtime_update_many_is_atomic_for_valid_edits(tmp_path) -> None:
     assert persisted.media.output.voice is True
 
 
+def test_runtime_update_allows_top_level_tuning_profiles(tmp_path) -> None:
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+    profiles = runtime.current.tuning_profiles
+    profiles["balanced_chat"].max_tokens = 1234
+
+    updated = runtime.update("tuning_profiles", profiles)
+
+    assert updated.tuning_profiles["balanced_chat"].max_tokens == 1234
+    assert load_preferences(tmp_path).tuning_profiles["balanced_chat"].max_tokens == 1234
+
+
 def test_runtime_update_rejects_unknown_path(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
 

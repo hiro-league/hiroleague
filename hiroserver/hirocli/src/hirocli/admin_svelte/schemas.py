@@ -85,6 +85,7 @@ class CharacterSaveRequest(BaseModel):
     prompt: str | None = None
     backstory: str = ""
     llm_models_json: str = ""
+    tuning_profile: str = ""
     voice_models_json: str = ""
     tts_instructions: str = ""
     tts_voice_by_provider_json: str = "{}"

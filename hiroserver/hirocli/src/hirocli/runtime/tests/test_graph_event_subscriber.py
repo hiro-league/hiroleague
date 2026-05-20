@@ -112,6 +112,8 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
             "status": "completed",
             "elapsed_ms": 25,
             "error": None,
+            "args": '{"path":"/tmp"}',
+            "result": '{"ok":true}',
         },
     )
     await sub.dispatch(
@@ -150,6 +152,8 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
             "name": "files.head",
             "status": "completed",
             "elapsed_ms": 25,
+            "args": '{"path":"/tmp"}',
+            "result": '{"ok":true}',
         }
     ]
     assert reply_agent == inbound_agent

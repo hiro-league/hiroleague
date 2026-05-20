@@ -76,6 +76,7 @@ class Character(BaseModel):
     name: str
     description: str = ""
     llm_models: list[str] = Field(default_factory=list)
+    tuning_profile: str | None = None
     voice_models: list[str] = Field(default_factory=list)
     # Optional TTS tuning: one preset per provider id (catalog), one global instruction string.
     tts_instructions: str = ""
@@ -94,6 +95,7 @@ class Character(BaseModel):
             "name": self.name,
             "description": self.description,
             "llm_models": self.llm_models,
+            "tuning_profile": self.tuning_profile,
             "voice_models": self.voice_models,
             "tts_instructions": self.tts_instructions,
             "tts_voice_by_provider": dict(self.tts_voice_by_provider),
@@ -147,6 +149,7 @@ def load_character_from_disk(workspace_path: Path, character_id: str) -> Charact
         name=str(raw.get("name", character_id)),
         description=str(raw.get("description", "")),
         llm_models=list(raw.get("llm_models") or []),
+        tuning_profile=str(raw.get("tuning_profile") or "").strip() or None,
         voice_models=list(raw.get("voice_models") or []),
         tts_instructions=str(raw.get("tts_instructions") or ""),
         tts_voice_by_provider=tts_map,
@@ -228,6 +231,7 @@ def _write_inline_default_hiro_files(dest: Path) -> None:
                 "name": "Hiro",
                 "description": "Your personal AI assistant running on Hiro League.",
                 "llm_models": [],
+                "tuning_profile": None,
                 "voice_models": [],
                 "tts_instructions": "",
                 "tts_voice_by_provider": {},
@@ -375,6 +379,7 @@ def get_character_detail(workspace_path: Path, character_id: str) -> dict[str, A
         "prompt": ch.prompt,
         "backstory": ch.backstory,
         "llm_models": ch.llm_models,
+        "tuning_profile": ch.tuning_profile,
         "voice_models": ch.voice_models,
         "tts_instructions": ch.tts_instructions,
         "tts_voice_by_provider": dict(ch.tts_voice_by_provider),
@@ -443,6 +448,7 @@ def create_character(
     prompt: str | None = None,
     backstory: str = "",
     llm_models: list[str] | None = None,
+    tuning_profile: str | None = None,
     voice_models: list[str] | None = None,
     tts_instructions: str = "",
     tts_voice_by_provider: dict[str, str] | None = None,
@@ -462,6 +468,7 @@ def create_character(
         prompt=prompt_text,
         backstory=backstory,
         llm_models=list(llm_models or []),
+        tuning_profile=(tuning_profile or "").strip() or None,
         voice_models=list(voice_models or []),
         tts_instructions=tts_instructions.strip(),
         tts_voice_by_provider=dict(tts_voice_by_provider or {}),
@@ -494,6 +501,7 @@ def update_character(
     prompt: str | None = None,
     backstory: str | None = None,
     llm_models: list[str] | None = None,
+    tuning_profile: str | None = None,
     voice_models: list[str] | None = None,
     tts_instructions: str | None = None,
     tts_voice_by_provider: dict[str, str] | None = None,
@@ -514,6 +522,8 @@ def update_character(
         ch.backstory = backstory
     if llm_models is not None:
         ch.llm_models = list(llm_models)
+    if tuning_profile is not None:
+        ch.tuning_profile = tuning_profile.strip() or None
     if voice_models is not None:
         ch.voice_models = list(voice_models)
     if tts_instructions is not None:
@@ -594,6 +604,7 @@ def list_public_character_summaries(workspace_path: Path) -> list[dict[str, Any]
                 "description": r.get("description") or "",
                 "has_photo": bool(r.get("has_photo")),
                 "llm_models": llm_models,
+                "tuning_profile": None,
                 "voice_models": voice_models,
             }
         )
