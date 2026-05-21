@@ -27,6 +27,7 @@ log = Logger.get("CTX")
 
 if TYPE_CHECKING:
     from hirocli.domain.memory import MemoryService
+    from hirocli.services.knowledge import KnowledgeService
 
 
 class DeviceNameResolver:
@@ -76,6 +77,7 @@ class ServerContext:
     preferences: WorkspacePreferencesRuntime = field(init=False)
     preference_reactor: PreferenceReactor = field(init=False)
     memory_service: "MemoryService | None" = field(default=None, init=False)
+    knowledge_service: "KnowledgeService | None" = field(default=None, init=False)
 
     # Mutable restart state — set by /_restart endpoint, read by shutdown handler.
     restart_requested: bool = field(default=False, init=False)

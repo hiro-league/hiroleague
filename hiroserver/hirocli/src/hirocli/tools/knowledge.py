@@ -1,0 +1,324 @@
+"""Workspace-local knowledge tools."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any
+
+from ..domain.workspace import resolve_workspace
+from ..services.knowledge import KnowledgeService, create_knowledge_service
+from .base import Tool, ToolParam
+
+
+def _resolve_path(workspace: str | None) -> Path:
+    entry, _ = resolve_workspace(workspace)
+    return Path(entry.path)
+
+
+def _runtime_workspace(runtime: Any | None) -> Path | None:
+    if runtime is None:
+        return None
+    comm = getattr(runtime, "comm_manager", None)
+    ctx = getattr(comm, "ctx", None)
+    workspace_path = getattr(ctx, "workspace_path", None)
+    return Path(workspace_path) if workspace_path is not None else None
+
+
+def _runtime_service(runtime: Any | None) -> KnowledgeService | None:
+    if runtime is None:
+        return None
+    comm = getattr(runtime, "comm_manager", None)
+    ctx = getattr(comm, "ctx", None)
+    return getattr(ctx, "knowledge_service", None)
+
+
+def _resolve_service(runtime: Any | None, workspace: str | None) -> tuple[KnowledgeService, bool]:
+    service = _runtime_service(runtime)
+    if service is not None:
+        return service, False
+    workspace_path = _runtime_workspace(runtime) or _resolve_path(workspace)
+    return create_knowledge_service(workspace_path), True
+
+
+async def _close_if_owned(service: KnowledgeService, owned: bool) -> None:
+    if owned:
+        await service.close()
+
+
+def _tags(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    if isinstance(value, list):
+        return [str(part).strip() for part in value if str(part).strip()]
+    return []
+
+
+class KnowledgeScanFolderTool(Tool):
+    runtime = True
+    name = "knowledge_scan_folder"
+    description = "Scan a folder for knowledge-ingestible files"
+    params = {
+        "folder": ToolParam(str, "Folder path to scan"),
+        "recursive": ToolParam(bool, "Scan subfolders recursively", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, folder: str, recursive: bool = True, workspace: str | None = None) -> Any:
+        return asyncio.run(self.execute_async(folder=folder, recursive=recursive, workspace=workspace))
+
+    async def execute_async(self, folder: str, recursive: bool = True, workspace: str | None = None) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.scan_folder(folder, recursive=recursive)
+        finally:
+            await _close_if_owned(service, owned)
+
+
+class KnowledgeIngestTool(Tool):
+    runtime = True
+    name = "knowledge_ingest"
+    description = "Ingest selected markdown files into the workspace-local knowledge index"
+    params = {
+        "paths": ToolParam(list, "Absolute file paths to ingest"),
+        "owner_kind": ToolParam(str, "Owner kind: system, character, or user", required=False),
+        "owner_id": ToolParam(str, "Owner id; use 0 for system", required=False),
+        "category_id": ToolParam(int, "Category id", required=False),
+        "subcategory_id": ToolParam(int, "Subcategory id", required=False),
+        "tags": ToolParam(list, "Tags to attach", required=False),
+        "wait": ToolParam(bool, "Wait for the ingest job to finish", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(
+        self,
+        paths: list[str],
+        owner_kind: str = "system",
+        owner_id: str = "0",
+        category_id: int | None = None,
+        subcategory_id: int | None = None,
+        tags: list[str] | str | None = None,
+        wait: bool = True,
+        workspace: str | None = None,
+    ) -> Any:
+        return asyncio.run(
+            self.execute_async(
+                paths=paths,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                category_id=category_id,
+                subcategory_id=subcategory_id,
+                tags=tags,
+                wait=wait,
+                workspace=workspace,
+            )
+        )
+
+    async def execute_async(
+        self,
+        paths: list[str],
+        owner_kind: str = "system",
+        owner_id: str = "0",
+        category_id: int | None = None,
+        subcategory_id: int | None = None,
+        tags: list[str] | str | None = None,
+        wait: bool = False,
+        workspace: str | None = None,
+    ) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            kwargs = {
+                "owner_kind": owner_kind or "system",
+                "owner_id": owner_id or "0",
+                "category_id": category_id,
+                "subcategory_id": subcategory_id,
+                "tags": _tags(tags),
+            }
+            if wait:
+                return await service.ingest_and_wait(paths, **kwargs)
+            return await service.start_ingest(paths, **kwargs)
+        finally:
+            if owned and wait:
+                await _close_if_owned(service, owned)
+
+
+class KnowledgeJobStatusTool(Tool):
+    runtime = True
+    name = "knowledge_job_status"
+    description = "Return persisted status for a knowledge ingestion job"
+    params = {
+        "job_id": ToolParam(str, "Knowledge ingestion job id"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, job_id: str, workspace: str | None = None) -> Any:
+        return asyncio.run(self.execute_async(job_id=job_id, workspace=workspace))
+
+    async def execute_async(self, job_id: str, workspace: str | None = None) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.job_status(job_id)
+        finally:
+            await _close_if_owned(service, owned)
+
+
+class KnowledgeSearchTool(Tool):
+    runtime = True
+    name = "knowledge_search"
+    description = "Vector-search ingested knowledge chunks"
+    params = {
+        "query": ToolParam(str, "Search query"),
+        "top_k": ToolParam(int, "Maximum number of chunks to return", required=False),
+        "min_score": ToolParam(float, "Minimum vector score", required=False),
+        "filters": ToolParam(dict, "Qdrant payload filters", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(
+        self,
+        query: str,
+        top_k: int = 10,
+        min_score: float = 0.0,
+        filters: dict[str, Any] | None = None,
+        workspace: str | None = None,
+    ) -> Any:
+        return asyncio.run(
+            self.execute_async(query=query, top_k=top_k, min_score=min_score, filters=filters, workspace=workspace)
+        )
+
+    async def execute_async(
+        self,
+        query: str,
+        top_k: int = 10,
+        min_score: float = 0.0,
+        filters: dict[str, Any] | None = None,
+        workspace: str | None = None,
+    ) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.search(query, top_k=top_k, min_score=min_score, filters=filters)
+        finally:
+            await _close_if_owned(service, owned)
+
+
+class KnowledgeListDocumentsTool(Tool):
+    runtime = True
+    name = "knowledge_list_documents"
+    description = "List ingested knowledge documents"
+    params = {
+        "status": ToolParam(str, "Document status", required=False),
+        "owner_kind": ToolParam(str, "Owner kind filter", required=False),
+        "owner_id": ToolParam(str, "Owner id filter", required=False),
+        "title": ToolParam(str, "Title substring filter", required=False),
+        "limit": ToolParam(int, "Maximum rows", required=False),
+        "offset": ToolParam(int, "Rows to skip", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, **kwargs: Any) -> Any:
+        return asyncio.run(self.execute_async(**kwargs))
+
+    async def execute_async(
+        self,
+        status: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
+        title: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        workspace: str | None = None,
+    ) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.list_documents(
+                status=status,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                title=title,
+                limit=limit,
+                offset=offset,
+            )
+        finally:
+            await _close_if_owned(service, owned)
+
+
+class KnowledgeGetDocumentTool(Tool):
+    runtime = True
+    name = "knowledge_get_document"
+    description = "Get one knowledge document and its vector-store chunks"
+    params = {
+        "document_id": ToolParam(str, "Knowledge document id"),
+        "chunk_limit": ToolParam(int, "Maximum chunks to return", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, document_id: str, chunk_limit: int = 100, workspace: str | None = None) -> Any:
+        return asyncio.run(
+            self.execute_async(document_id=document_id, chunk_limit=chunk_limit, workspace=workspace)
+        )
+
+    async def execute_async(
+        self,
+        document_id: str,
+        chunk_limit: int = 100,
+        workspace: str | None = None,
+    ) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.get_document(document_id, chunk_limit=chunk_limit)
+        finally:
+            await _close_if_owned(service, owned)
+
+
+class KnowledgeListTagsTool(Tool):
+    runtime = True
+    name = "knowledge_list_tags"
+    description = "List knowledge tags"
+    params = {
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, workspace: str | None = None) -> Any:
+        return asyncio.run(self.execute_async(workspace=workspace))
+
+    async def execute_async(self, workspace: str | None = None) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.list_tags()
+        finally:
+            await _close_if_owned(service, owned)
+
+
+class KnowledgeListCategoriesTool(KnowledgeListTagsTool):
+    name = "knowledge_list_categories"
+    description = "List knowledge categories"
+
+    async def execute_async(self, workspace: str | None = None) -> Any:
+        service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
+        try:
+            return await service.list_categories()
+        finally:
+            await _close_if_owned(service, owned)

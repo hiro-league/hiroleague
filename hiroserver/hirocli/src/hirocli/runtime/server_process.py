@@ -184,6 +184,9 @@ async def _main(
     # Characters must exist before data.db seeds the default channel (FK by id string).
     seed_default_characters(workspace_path)
     ensure_data_db(workspace_path)
+    from hirocli.services.knowledge import create_knowledge_service
+
+    ctx.knowledge_service = create_knowledge_service(workspace_path)
 
     # --- HTTP app state (tools registered after CommunicationManager exists — see below).
     http_app.state.ctx = ctx
@@ -262,6 +265,8 @@ async def _main(
         pass
     finally:
         resource_change_broadcaster.close()
+        if ctx.knowledge_service is not None:
+            await ctx.knowledge_service.close()
         ctx.preference_reactor.close()
         get_domain_event_bus().detach_loop()
 

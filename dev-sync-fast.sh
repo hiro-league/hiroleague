@@ -6,6 +6,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/stop-hiro-dev-processes.sh
+source "$SCRIPT_DIR/scripts/stop-hiro-dev-processes.sh"
+
 # Mem0 hybrid deps (fastembed → py-rust-stemmers) have cp312 wheels; 3.14 forces a Rust source build on Windows.
 HIRO_UV_PYTHON="${HIRO_UV_PYTHON:-3.12}"
 
@@ -51,8 +55,7 @@ hiro stop 2>/dev/null || true
 hirocli stop 2>/dev/null || true
 
 echo "==> Stopping hiro-channel-devices (if running)..."
-# Git Bash/MSYS can rewrite /F-style args unless conversion is disabled.
-MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hiro-channel-devices.exe 2>/dev/null || true
+stop_orphaned_hiro_channel_devices
 
 echo "==> Stopping hirogate (if running)..."
 # Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogate.exe before reinstalling.
