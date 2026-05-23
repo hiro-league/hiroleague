@@ -24,6 +24,7 @@ from .base import Tool, ToolParam
 
 
 class GatewayStatusTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "gateway_status"
     description = "Show running status for one or all local gateway instances"
     params = {
@@ -39,6 +40,7 @@ class GatewayStatusTool(Tool):
 
 
 class GatewayStartTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "gateway_start"
     description = "Start a local gateway instance in the background"
     params = {
@@ -59,6 +61,7 @@ class GatewayStartTool(Tool):
 
 
 class GatewayStopTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "gateway_stop"
     description = "Stop a running local gateway instance"
     params = {
@@ -74,6 +77,7 @@ class GatewayStopTool(Tool):
 
 
 class GatewaySetupTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "gateway_setup"
     description = (
         "Create a new local gateway instance: register it, save config, "
@@ -124,6 +128,7 @@ class GatewaySetupTool(Tool):
 
 
 class GatewayTeardownTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "gateway_teardown"
     description = "Stop a local gateway instance and remove its auto-start registration"
     params = {

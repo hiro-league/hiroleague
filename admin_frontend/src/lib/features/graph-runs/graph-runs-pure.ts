@@ -37,6 +37,39 @@ export const RUNS_TAB = 'runs' as const;
 export const MEMORIES_TAB = 'memories' as const;
 export type ActivePane = typeof RUNS_TAB | typeof MEMORIES_TAB | string;
 
+/** Standalone knowledge answer runs written by ``KnowledgeService.answer``. */
+export const KNOWLEDGE_RUN_ID_PREFIX = 'knowledge-';
+
+export const CHAT_RUN_ID_PREFIX = 'chat-';
+
+export type GraphRunKindFilter = '' | 'chat' | 'knowledge';
+
+export function isKnowledgeStandaloneRun(runId: string): boolean {
+  return String(runId ?? '').trim().startsWith(KNOWLEDGE_RUN_ID_PREFIX);
+}
+
+export function isChatAgentRun(runId: string): boolean {
+  return String(runId ?? '').trim().startsWith(CHAT_RUN_ID_PREFIX);
+}
+
+export function graphRunKindLabel(runId: string): string {
+  if (isKnowledgeStandaloneRun(runId)) return 'Knowledge';
+  if (isChatAgentRun(runId)) return 'Chat';
+  return 'Other';
+}
+
+export function graphRunKindMatchesFilter(runId: string, filter: GraphRunKindFilter): boolean {
+  if (!filter) return true;
+  if (filter === 'knowledge') return isKnowledgeStandaloneRun(runId);
+  if (filter === 'chat') return isChatAgentRun(runId);
+  return true;
+}
+
+export function isGraphNodeSubstep(nodeName: string): boolean {
+  const node = String(nodeName ?? '');
+  return node.startsWith('tools/') || node.startsWith('knowledge/');
+}
+
 /** A11y — primary pills: workspace (graph runs subtree) vs Mem0 pane. */
 export const GRAPH_RUNS_PRIMARY_TAB_IDS = {
   runsWorkspace: 'graph-runs-tab-primary-runs',
@@ -135,6 +168,9 @@ export function listRowCharacter(
   characterMap: Record<string, CharacterRow>,
   channelById: Map<number, ChatChannelRow>
 ): { name: string; photo: string | null } {
+  if (isKnowledgeStandaloneRun(String(row.run_id ?? ''))) {
+    return { name: 'Knowledge', photo: null };
+  }
   const cid = String(row.character_id ?? '').trim();
   const cr = cid ? characterMap[cid] : undefined;
   const chan =
@@ -147,6 +183,9 @@ export function listRowCharacter(
 }
 
 export function listRowChannelName(row: GraphLedgerRow, channelById: Map<number, ChatChannelRow>): string {
+  if (isKnowledgeStandaloneRun(String(row.run_id ?? ''))) {
+    return 'Admin';
+  }
   if (row.chat_channel_id === '' || typeof row.chat_channel_id !== 'number') return '—';
   const ch = channelById.get(row.chat_channel_id);
   const n = ch?.name?.trim();

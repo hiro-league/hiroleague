@@ -46,6 +46,7 @@ class AvailableModelsListResult:
 
 
 class ProviderAddApiKeyTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "provider_add_api_key"
     description = (
         "Store an API key for a cloud catalog provider in the workspace credential store "
@@ -74,6 +75,7 @@ class ProviderAddApiKeyTool(Tool):
 
 
 class ProviderRemoveTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "provider_remove"
     description = "Remove a provider's credentials from the workspace (keyring secret + metadata)."
     params = {

@@ -64,6 +64,7 @@ class DeviceRevokeResult:
 
 
 class DeviceAddTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "device_add"
     description = "Generate a short-lived pairing code to onboard a new mobile device"
     params = {
@@ -120,6 +121,7 @@ class DeviceListTool(Tool):
 
 
 class DeviceRevokeTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "device_revoke"
     description = "Revoke a previously approved paired device"
     params = {

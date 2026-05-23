@@ -11,6 +11,7 @@ from .channel import register as register_channel_commands
 from .character import register as register_character_commands
 from .device import register as register_device_commands
 from .logs import register as register_logs_commands
+from .knowledge import register as register_knowledge_commands
 from .metrics import register as register_metrics_commands
 from .root import register as register_root_commands
 from .catalog import register as register_catalog_commands
@@ -71,6 +72,11 @@ logs_app = typer.Typer(
     help="Search and tail server, channel, and gateway log files.",
     add_completion=False,
 )
+knowledge_app = typer.Typer(
+    name="knowledge",
+    help="Ingest and search workspace-local knowledge.",
+    add_completion=False,
+)
 metrics_app = typer.Typer(
     name="metrics",
     help="View server resource metrics (CPU, memory, disk, network).",
@@ -101,6 +107,7 @@ app.add_typer(channel_app, name="channel")
 app.add_typer(character_app, name="character")
 app.add_typer(device_app, name="device")
 app.add_typer(logs_app, name="logs")
+app.add_typer(knowledge_app, name="knowledge")
 app.add_typer(metrics_app, name="metrics")
 app.add_typer(workspace_app, name="workspaces")
 app.add_typer(catalog_app, name="catalog")
@@ -113,6 +120,7 @@ register_channel_commands(channel_app, console)
 register_character_commands(character_app, console)
 register_device_commands(device_app, console)
 register_logs_commands(logs_app, console)
+register_knowledge_commands(knowledge_app, console)
 register_metrics_commands(metrics_app, console)
 register_workspace_commands(workspace_app, console)
 register_catalog_commands(catalog_app, console)

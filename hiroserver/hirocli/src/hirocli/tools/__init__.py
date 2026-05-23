@@ -49,6 +49,10 @@ from .gateway import (
 from .media import DescribeImageTool, TranscribeTool
 from .memory import MemoryClearTool, MemoryListTool
 from .knowledge import (
+    KnowledgeAnswerTool,
+    KnowledgeCreateCategoryTool,
+    KnowledgeCreateTagTool,
+    KnowledgeDeleteDocumentTool,
     KnowledgeGetDocumentTool,
     KnowledgeIngestTool,
     KnowledgeJobStatusTool,
@@ -57,6 +61,8 @@ from .knowledge import (
     KnowledgeListTagsTool,
     KnowledgeScanFolderTool,
     KnowledgeSearchTool,
+    KnowledgeReingestDocumentTool,
+    KnowledgeUpdateDocumentMetadataTool,
 )
 from .server import (
     RestartTool,
@@ -132,10 +138,16 @@ def all_tools() -> list[Tool]:
         KnowledgeIngestTool(),
         KnowledgeJobStatusTool(),
         KnowledgeSearchTool(),
+        KnowledgeAnswerTool(),
         KnowledgeListDocumentsTool(),
         KnowledgeGetDocumentTool(),
+        KnowledgeDeleteDocumentTool(),
+        KnowledgeReingestDocumentTool(),
+        KnowledgeUpdateDocumentMetadataTool(),
         KnowledgeListTagsTool(),
         KnowledgeListCategoriesTool(),
+        KnowledgeCreateCategoryTool(),
+        KnowledgeCreateTagTool(),
         LogSearchTool(),
         LogTailTool(),
         LlmCatalogListProvidersTool(),

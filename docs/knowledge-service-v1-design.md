@@ -49,7 +49,8 @@ never invalidate the other.
 ## Stack
 
 - **LangChain ≥ 1.0** — `MarkdownHeaderTextSplitter`, `RecursiveCharacterTextSplitter`,
-  `langchain-qdrant` `QdrantVectorStore`.
+  and `langchain-qdrant` `QdrantVectorStore` for **retrieval** (similarity search by
+  precomputed query vectors).
 - **LangGraph ≥ 1.0** — knowledge agent graph (search → answer).
 - **Qdrant local** (`qdrant-client`, already a dep) — own folder, own collection.
 - **FastEmbed** (already a dep via mem0) — default dense embedder via
@@ -59,6 +60,15 @@ never invalidate the other.
   user can switch to OpenAI / Gemini / Ollama embedding ids if desired.
 - **No reranker in v1.** FlashRank/Cohere planned later (see Non-Goals).
 - **No LlamaIndex.** Per the review, LangChain-native is sufficient.
+
+**Ingest vs retrieval (intentional split, D9):** ingestion is a deterministic
+async pipeline — load → chunk → `EmbeddingBackend.embed_texts` → direct
+`qdrant-client` upsert with a denormalized payload schema. Retrieval uses
+`QdrantVectorStore.similarity_search_with_score_by_vector` so LangChain owns
+filter + score plumbing. We do **not** route ingest through
+`QdrantVectorStore.add_documents`; that API cannot express our per-chunk payload
+(`ord`, `heading_path`, owner metadata) or the delete-then-upsert re-ingest
+contract without fighting the abstraction.
 
 **One new pip dep:** `langchain-qdrant`. Everything else is already in the
 lockfile because of mem0.
@@ -170,19 +180,23 @@ Owner picker in Tab 1 reuses the character/user pickers from the channel editor.
 
 ## Tools (registered in Tool Registry)
 
+Registry `Tool.name` values use **snake_case** (e.g. `knowledge_scan_folder`).
+HTTP `/invoke` and agent dispatch use these ids. Logical grouping below uses
+`knowledge_*` names matching `tools/knowledge.py`.
+
 | Tool | Purpose |
 |---|---|
-| `knowledge.scan_folder` | Enumerate a folder (recursive); return tree + sizes + ext + `already_ingested` flag. |
-| `knowledge.ingest` | Async ingest of a selected path list + metadata. Returns `job_id`. |
-| `knowledge.job_status` | Poll/stream an ingestion job. |
-| `knowledge.search` | Embed + filter + vector search. Returns chunks with scores + citations. |
-| `knowledge.answer` | Full RAG: search → build context → LLM → answer with footnote citations. |
-| `knowledge.list_documents` | Paginated, filterable list for Tab 3. |
-| `knowledge.get_document` | Document detail (metadata + chunks fetched from Qdrant). |
-| `knowledge.delete_document` | Removes Qdrant points by `document_id` filter + SQL row. **Does not touch the source file on disk** — this is a knowledge index, not file management. |
-| `knowledge.reingest_document` | Re-read file, recompute hash. If unchanged: no-op. If changed: **delete all existing Qdrant points for `document_id` first**, then re-chunk + re-embed + upsert, and update `chunk_count`. Old chunks must never coexist with new ones for the same document. |
-| `knowledge.list_categories` / `knowledge.list_tags` | Drives Tab 1 dropdowns. |
-| `knowledge.update_document_metadata` | Edit owner/category/tags; updates SQL + Qdrant payload. |
+| `knowledge_scan_folder` | Enumerate a folder (recursive); return tree + sizes + ext + `already_ingested` flag. |
+| `knowledge_ingest` | Async ingest of a selected path list + metadata. Returns `job_id`. |
+| `knowledge_job_status` | Poll/stream an ingestion job. |
+| `knowledge_search` | Embed + filter + vector search. Returns chunks with scores + citations. |
+| `knowledge_answer` | Full RAG: search → build context → LLM → answer with footnote citations. |
+| `knowledge_list_documents` | Paginated, filterable list for Tab 3. |
+| `knowledge_get_document` | Document detail (metadata + chunks fetched from Qdrant). |
+| `knowledge_delete_document` | Removes Qdrant points by `document_id` filter + SQL row. **Does not touch the source file on disk** — this is a knowledge index, not file management. |
+| `knowledge_reingest_document` | Re-read file, recompute hash. If unchanged: no-op. If changed: **delete all existing Qdrant points for `document_id` first**, then re-chunk + re-embed + upsert, and update `chunk_count`. Old chunks must never coexist with new ones for the same document. |
+| `knowledge_list_categories` / `knowledge_list_tags` | Drives Tab 1 dropdowns. |
+| `knowledge_update_document_metadata` | Edit owner/category/tags; updates SQL + Qdrant payload. |
 
 All callers (CLI, HTTP, future chat agent) go through the same tools. Same
 pattern as `tools/memory.py`.
@@ -192,7 +206,7 @@ pattern as `tools/memory.py`.
 ```mermaid
 flowchart TB
     Pick["Admin picks folder + checkboxes<br/>+ owner / category / tags"]
-    Tool["POST knowledge.ingest<br/>{ paths, metadata }"]
+    Tool["POST knowledge_ingest<br/>{ paths, metadata }"]
     Job["IngestionJob (async)"]
     Loader["LoaderRegistry.resolve(ext)<br/>v1: .md only"]
     Hash["sha256(bytes)<br/>skip if (source_uri, hash) unchanged & status=ready"]
@@ -261,11 +275,11 @@ flowchart TB
 | Node | What it does | Implementation |
 |---|---|---|
 | `parse_query` | Strip whitespace, NFC unicode normalize, normalize Arabic alef forms, detect language. | New helper `normalize_query(text) -> NormalizedQuery`. Language detection via the `langdetect` Python library (heuristic, MIT license). **Not** query rewriting / HyDE / multi-query — those are v2. |
-| `build_filters` | Convert UI filter dict into a Qdrant `Filter` (AND of payload field matches). | New helper `build_qdrant_filter(filters)`. |
-| `embed_query` | Run the configured embedder on the normalized query string. | Calls `EmbeddingService.embed_one`. |
-| `vector_search` | Async Qdrant search with `top_k`, `min_score`, payload filter. | Uses `langchain-qdrant` `QdrantVectorStore.asimilarity_search_with_score`. |
+| `build_filters` | Convert UI filter dict into a Qdrant `Filter`. Scalar fields (`owner_*`, `document_id`, `category_id`, `subcategory_id`) are ANDed; when multiple tags are selected, a chunk matches if it has **any** of those tags (OR), and that tag group is ANDed with the scalar filters. | New helper `build_qdrant_filter(filters)`. |
+| `embed_query` | Run the configured embedder on the normalized query string (single embed for the request). | `KnowledgeService.embed_query` via the LangChain embedding adapter. |
+| `vector_search` | Qdrant search with `top_k`, `min_score`, and payload filter using the **precomputed** query vector from `embed_query` (no second embed in the store). | `KnowledgeService.vector_search_by_vector` → `QdrantVectorStore.similarity_search_with_score_by_vector` (offloaded with `asyncio.to_thread`; may switch to `asimilarity_search_with_score_by_vector` when convenient). Do **not** use `asimilarity_search_with_score(query=…)` here — that would re-embed and duplicate work. |
 | `build_context` | Format chunks into a numbered context block with footnote refs. | New helper; renders `[n] {title} §{heading_path}\n{text}`. |
-| `call_model` | Standard LangGraph model node with answer-with-citations system prompt. | Reuses the chat model factory (`domain/model_factory.py`). |
+| `call_model` | Standard LangGraph model node with answer-with-citations system prompt. Skipped when `build_context` sets `no_results` (graph routes straight to `finalize`). | Reuses the chat model factory (`domain/model_factory.py`). |
 | `finalize` | Pack `{answer, sources[]}` and emit the terminal graph event. | New helper. |
 
 **Citations:** footnote style. The model is instructed to attach `[1]`, `[2]`
@@ -326,23 +340,24 @@ each subsystem owns its embedding lifecycle and re-embed gate.
 **Rule:** `knowledge.default_embedding_model` cannot be changed while the
 knowledge Qdrant collection has any points.
 
-Enforcement lives in a `PreferenceReactor` registered on
-`knowledge.default_embedding_model`:
+Enforcement lives in ``save_preferences`` via
+``_validate_pre_save_transition`` (and the admin runtime's pre-save check),
+**before** ``preferences.json`` is written:
 
 ```mermaid
 flowchart LR
-    Save["save_preferences"] --> Bus["preferences.saved"]
-    Bus --> React["PreferenceReactor<br/>(knowledge.default_embedding_model)"]
-    React --> Count["count points in hiro_knowledge"]
-    Count -->|"== 0"| Allow["accept change, log info"]
-    Count -->|"> 0"| Reject["reject: raise ValueError<br/>before write commits"]
+    Save["save_preferences"] --> Validate["_validate_pre_save_transition"]
+    Validate --> Count["count points in hiro_knowledge"]
+    Count -->|"> 0"| Reject["reject: raise ValueError<br/>before write"]
+    Count -->|"== 0"| Write["write preferences.json"]
+    Write --> Bus["preferences.saved"]
+    Bus --> Reload["KnowledgeManager<br/>embedder reload reactor"]
 ```
 
-Save path is validated **before** the file is written (mirroring how
-`MemoryPreferences._disable_without_models` validates in `model_validator`).
-The reactor is the safety net for any non-API write path. Migration tooling
-is out of scope for v1; the only ways to switch are (a) the collection is
-empty, or (b) the user explicitly deletes all documents first.
+After an allowed change, ``KnowledgeManager`` hot-reloads the embedder via
+``PreferenceReactor``. Migration tooling is out of scope for v1; the only
+ways to switch are (a) the collection is empty, or (b) the user explicitly
+deletes all documents first.
 
 ### Retrieval / answering knobs
 
@@ -352,6 +367,10 @@ empty, or (b) the user explicitly deletes all documents first.
   chat id. **Must be exposed as a picker** in the Preferences UI (typical
   use: choose a faster/cheaper chat model than the main one — e.g.
   `openai:gpt-5-mini` — since RAG answering doesn't need full reasoning).
+- `default_tuning_profile` — defaults to locked preset `knowledge_answering`
+  (lower temperature, bounded `max_tokens`). Resolution uses
+  `resolve_knowledge_answering_llm` (catalog + credentials + tuning), same
+  path as the answer graph's `call_model` node.
 - `answering.cite_sources` — toggle footnote citations.
 - `answering.language_policy` — `"match_query"` answers in the query's
   language; later: `"prefer_english"`, `"prefer_arabic"`.
@@ -365,10 +384,13 @@ what's actually running:
   italics ("Default: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (local)" for embedding; "Default:
   openai:gpt-5.4" for answering model).
 - **API surface:** the preferences read endpoint returns companion fields
-  `default_embedding_model_resolved` and `answering.model_resolved` so the UI
-  and CLI never recompute them.
-- **Tooltip:** picker hover shows where the default came from
-  (built-in constant for embedding; `llm.default_chat` for answering).
+  `default_embedding_model_resolved`, `answering.model_resolved`, and
+  `answering.model_resolved_source` so the UI and CLI never recompute them.
+  `model_resolved` is only set when the model is catalog-available and
+  credentials are configured (via `resolve_knowledge_answering_llm`).
+- **Tooltip:** picker hint shows where the default came from
+  (built-in constant for embedding; `knowledge.answering.model` or
+  `llm.default_chat` for answering).
 
 Same pattern applied to both fields. Mirrors how OS apps display "Default
 browser: Firefox" instead of just "Default".
@@ -387,9 +409,8 @@ Top-to-bottom layout:
 
 1. **Folder picker.** Browses the host filesystem; remembers the last picked
    folder per workspace.
-2. **File tree.** Recursive listing of every file under the chosen folder.
+2. **File list.** Recursive listing of every file under the chosen folder.
    - Per-file checkbox.
-   - Per-subfolder checkbox with tri-state (none / some / all).
    - Top-level "Select all" / "Deselect all" actions.
    - Each row shows: filename, relative path, size, extension badge, and an
      "already ingested" indicator when `source_uri` exists with `status=ready`.
@@ -397,10 +418,11 @@ Top-to-bottom layout:
      listed but their checkbox is disabled and the row tooltips "Not yet
      supported".
 3. **Metadata form** (applies to every checked file in this batch):
-   - **Owner kind** — radio: `system` / `character` / `user`.
-   - **Owner id** — auto-set to `0` for system; for character/user it shows
-     the matching picker (reuses the existing pickers from the chat/channel
-     editor).
+   - **Owner kind** — select: `system` / `character` / `user`.
+   - **Owner id** — hidden and auto-set to `0` for system; for character/user
+     it shows a select. Character options display character names and submit
+     character ids. User options display predefined user rows from
+     `data.db.users` and submit user ids.
    - **Category** — combobox over existing categories with an inline
      "+ Create new" option.
    - **Subcategory** — combobox scoped to the chosen category, also with
@@ -409,10 +431,12 @@ Top-to-bottom layout:
      of new ones.
 4. **"Start ingestion" button.** Disabled until at least one supported file
    is checked and required metadata is filled. Click → calls
-   `knowledge.ingest`, returns a `job_id`.
+   `knowledge_ingest`, returns a `job_id`.
 5. **Job progress panel** below the form:
    - **Current job** strip: file-by-file progress bar, counts
      (`requested / skipped / ingested / failed`), elapsed time, "Cancel" button.
+     Cancellation is a documented UI affordance for this panel, but backend
+     cancellation support is not implemented in this build step.
    - **Recent jobs** list (last N): timestamp, totals, status, "View errors"
      link for failures. Persists across page reloads (read from
      `knowledge_ingestion_jobs`).
@@ -472,7 +496,7 @@ Top-to-bottom layout:
    - **Metadata header** with all stored fields plus `source_uri`.
    - **Actions:** Re-ingest, Delete, Edit metadata (opens an inline editor
      that lets the admin change owner / category / tags; saves via
-     `knowledge.update_document_metadata`).
+     `knowledge_update_document_metadata`).
    - **Chunks list** (paged), fetched from Qdrant by `document_id` filter —
      no SQL chunk table. Each chunk row shows `ord`, `heading_path`, the
      chunk text, and the vector id.
@@ -512,7 +536,7 @@ KnowledgeManager
 ```
 
 **Inputs:** Tool invocations (CLI, HTTP, future agent), `preferences.saved`
-events (embedding-model lock reactor).
+events (embedder reload reactor after an allowed embedding-model change).
 
 **Outputs:** Domain events (`knowledge.job.progress`, `knowledge.job.completed`,
 `knowledge.job.failed`, `knowledge.ingested`, `knowledge.deleted`), tool
@@ -535,7 +559,7 @@ results.
 | Layer | Strategy | Default |
 |---|---|---|
 | Concurrent jobs | Allowed without limit (jobs are independent). | n/a |
-| Files within a job | `asyncio.Semaphore(file_concurrency)`. | 4 |
+| Files within a job | `asyncio.Semaphore(file_concurrency)`. | `min(cpu_count, 4)` for local FastEmbed; `8` for catalog/API embedders (override per ingest call) |
 | Same-`source_uri` overlap | Per-URI `asyncio.Lock` in an in-process dict. | serialized |
 | Chunks within a file | Batched into the embedder. | batch of 32 |
 | Qdrant upsert | Batched alongside the embedding batch. | batch of 32 |
@@ -567,7 +591,7 @@ without throughput gain — ONNX runtime already parallelizes internally.
   `status="running"`; mark them `"failed"` with `error="server restarted"`,
   and mark their documents whose status is not `"ready"` as `"failed"` too.
 - v1 does **not** auto-resume jobs. The user clicks "Retry" in Tab 1 (which
-  re-invokes `knowledge.ingest` with the same `params_json`). `content_hash`
+  re-invokes `knowledge_ingest` with the same `params_json`). `content_hash`
   dedupe means already-ingested files are skipped on retry — no duplicate
   vectors.
 - Same recovery pass runs on workspace open, before any new tool call is
@@ -585,7 +609,7 @@ Follows the "Human-first structured logging" rule and mirrors
   query, `✅` success, `⚠️` skipped/dedup, `❌` failure.
 - Per-file ingest log: `✅ ingest — file=… · chunks=12 · 480ms` (not per-chunk).
 - Per-job summary: `✅ ingest job — files=8 · chunks=147 · 6210ms`.
-- Search: `⬇️ knowledge.search — owner=… · cat=… · hits=N · 120ms`.
+- Search: `⬇️ knowledge_search — owner=… · cat=… · hits=N · 120ms`.
 - DEBUG for chunk dumps and per-batch embedding traces.
 - ERROR `exc_info=True` around Qdrant and embedding calls (general coding rule).
 
@@ -633,13 +657,13 @@ collection = no behavior change.
 
 ## Build order
 
-1. Vertical slice, CLI-driven: `knowledge.ingest` + `knowledge.search` end
+1. Vertical slice, CLI-driven: `knowledge_ingest` + `knowledge_search` end
    to end for `.md`, FastEmbed default, Qdrant local. No UI.
 2. Tab 1 — folder picker, file tree, metadata form, job progress via
    Domain Event Bus.
 3. Tab 2 — minimal Knowledge LangGraph, filter strip, footnote citations.
 4. Tab 3 — document table + detail drawer (chunks fetched from Qdrant).
-5. Preferences UI section + embedding-model lock reactor.
+5. Preferences UI section + pre-save embedding-model lock + embedder reload reactor.
 6. Categories / tags lightweight management UI.
 
 Each step is independently shippable.

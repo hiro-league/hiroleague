@@ -213,6 +213,7 @@ class CharacterGetTool(Tool):
 
 
 class CharacterCreateTool(Tool):
+    agent_default = False
     name = "character_create"
     description = "Create a new character with its own folder under characters/<id>/"
     params = {
@@ -303,6 +304,7 @@ class CharacterCreateTool(Tool):
 
 
 class CharacterUpdateTool(Tool):
+    agent_default = False
     name = "character_update"
     description = "Update an existing character; only provided fields are changed"
     params = {
@@ -389,6 +391,7 @@ class CharacterUpdateTool(Tool):
 
 
 class CharacterDeleteTool(Tool):
+    agent_default = False
     name = "character_delete"
     description = "Delete a character folder and its workspace.db row (cannot delete the default)"
     params = {
@@ -403,6 +406,7 @@ class CharacterDeleteTool(Tool):
 
 
 class CharacterUploadPhotoTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "character_upload_photo"
     description = "Copy an image file into the character folder as photo.<ext> (replaces prior photo.*)"
     params = {

@@ -10,6 +10,7 @@ import yaml
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
+    DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     LLMPreferences,
     MediaPreferences,
     MemoryPreferences,
@@ -17,8 +18,10 @@ from hirocli.domain.preferences import (
     PREFERENCE_SECTIONS,
     TuningProfile,
     WorkspacePreferences,
+    knowledge_answering_model_source,
     load_preferences,
     preferences_file,
+    resolve_knowledge_answering_llm,
     resolve_memory_llm,
     resolve_llm,
     save_preferences,
@@ -109,8 +112,10 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.memory.max_messages == 6
     assert prefs.llm.default_tuning_profile == "balanced_chat"
     assert prefs.memory.default_tuning_profile == "memory_extraction"
+    assert prefs.knowledge.default_tuning_profile == DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     assert prefs.tuning_profiles["balanced_chat"].locked is True
     assert prefs.tuning_profiles["memory_extraction"].locked is True
+    assert prefs.tuning_profiles[DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID].locked is True
 
 
 def test_memory_preferences_null_model_disables_memory() -> None:
@@ -125,7 +130,12 @@ def test_memory_preferences_null_model_disables_memory() -> None:
 
 
 def test_preference_sections_are_first_level_only() -> None:
-    assert [section.key for section in PREFERENCE_SECTIONS] == ["llm", "media", "memory"]
+    assert [section.key for section in PREFERENCE_SECTIONS] == [
+        "llm",
+        "media",
+        "memory",
+        "knowledge",
+    ]
 
 
 def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None:
@@ -200,6 +210,66 @@ def test_resolve_memory_llm_uses_memory_profile(
     assert r.temperature == 0
     assert r.max_tokens == 4096
     assert r.thinking == "minimal"
+
+
+def test_resolve_knowledge_answering_llm_inherits_default_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
+    prefs = WorkspacePreferences(
+        llm=LLMPreferences(default_chat="openai:gpt-test"),
+        tuning_profiles={
+            DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID: TuningProfile(
+                label="Knowledge answering",
+                locked=True,
+                temperature=0.15,
+                max_tokens=1200,
+                thinking=None,
+            ),
+        },
+    )
+
+    r = resolve_knowledge_answering_llm(prefs, tmp_path)
+
+    assert r is not None
+    assert r.model_id == "openai:gpt-test"
+    assert r.temperature == 0.15
+    assert r.max_tokens == 1200
+    assert knowledge_answering_model_source(prefs) == "llm.default_chat"
+
+
+def test_resolve_knowledge_answering_llm_explicit_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
+    prefs = WorkspacePreferences(
+        llm=LLMPreferences(default_chat="openai:gpt-test"),
+    )
+    prefs.knowledge.answering.model = "openai:gpt-other"
+
+    r = resolve_knowledge_answering_llm(prefs, tmp_path)
+
+    assert r is not None
+    assert r.model_id == "openai:gpt-other"
+    assert knowledge_answering_model_source(prefs) == "knowledge.answering.model"
+
+
+def test_resolve_knowledge_answering_llm_none_without_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    prefs = WorkspacePreferences(
+        llm=LLMPreferences(default_chat="openai:gpt-test"),
+    )
+
+    assert resolve_knowledge_answering_llm(prefs, tmp_path) is None
 
 
 def test_resolve_character_llm_prefers_character_list_order(

@@ -105,6 +105,7 @@ class ChannelListTool(Tool):
 
 
 class ChannelInstallTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "channel_install"
     description = "Install a channel plugin package via uv tool install"
     params = {
@@ -137,6 +138,7 @@ class ChannelInstallTool(Tool):
 
 
 class ChannelSetupTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "channel_setup"
     description = "Configure and register a channel plugin"
     params = {
@@ -235,6 +237,7 @@ class ChannelDisableTool(Tool):
 
 
 class ChannelRemoveTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "channel_remove"
     description = "Remove a channel plugin's configuration permanently"
     params = {

@@ -10,6 +10,7 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from ...domain.memory import mem0_history_db_path
+from ...domain.model_factory import catalog_embedding_dimensions
 from .audit_log import build_add_audit, build_search_audit, log_memory_add, log_memory_search
 from .usage_capture import (
     MemoryAddResult,
@@ -115,7 +116,7 @@ class Mem0MemoryService:
                 "provider": "qdrant",
                 "config": {
                     "collection_name": MEMORY_COLLECTION_NAME,
-                    "embedding_model_dims": _embedding_dims(embedding_model),
+                    "embedding_model_dims": catalog_embedding_dimensions(embedding_model),
                     "path": str(qdrant_path),
                     "on_disk": True,
                 },
@@ -465,7 +466,7 @@ def _mem0_model_config(
             config["lmstudio_base_url"] = cred.base_url
 
     if spec.provider_id == "google":
-        config["embedding_dims"] = _embedding_dims(model_id)
+        config["embedding_dims"] = catalog_embedding_dimensions(model_id)
     return {"provider": provider, "config": config}
 
 
@@ -481,14 +482,6 @@ def _mem0_api_model_id(provider_id: str, model_id: str, required_kind: str) -> s
     if provider_id == "google" and required_kind == "embedding":
         return f"models/{short}"
     return short
-
-
-def _embedding_dims(model_id: str) -> int:
-    return {
-        "openai:text-embedding-3-small": 1536,
-        "google:gemini-embedding-001": 768,
-        "ollama:nomic-embed-text": 512,
-    }.get(model_id, 1536)
 
 
 def _log_embedding_model_change(workspace_path: Path, embedding_model: str) -> None:

@@ -10,7 +10,11 @@ from pydantic import ValidationError
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.schemas import PreferencesPatchRequest
-from hirocli.domain.preferences import PREFERENCE_SECTIONS
+from hirocli.domain.preferences import (
+    PREFERENCE_SECTIONS,
+    knowledge_answering_model_source,
+    resolve_knowledge_answering_llm,
+)
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.preferences_runtime import (
     PreferencePathError,
@@ -37,8 +41,27 @@ def _preferences_runtime(request: Request, workspace_id: str | None) -> Workspac
     return WorkspacePreferencesRuntime(workspace_path)
 
 
-def _prefs_payload(runtime: WorkspacePreferencesRuntime) -> dict[str, Any]:
-    return runtime.current.model_dump(mode="json")
+def _prefs_payload(
+    runtime: WorkspacePreferencesRuntime,
+    *,
+    workspace_id: str | None = None,
+) -> dict[str, Any]:
+    prefs = runtime.current
+    payload = prefs.model_dump(mode="json")
+    knowledge = payload.setdefault("knowledge", {})
+    answering = knowledge.setdefault("answering", {})
+    knowledge["default_embedding_model_resolved"] = prefs.knowledge.default_embedding_model_resolved
+    resolved = resolve_knowledge_answering_llm(
+        prefs,
+        runtime._workspace_path,
+        workspace_id=workspace_id,
+    )
+    answering["model_resolved"] = resolved.model_id if resolved is not None else None
+    answering["model_resolved_source"] = knowledge_answering_model_source(prefs)
+    from hirocli.services.knowledge import count_knowledge_points
+
+    knowledge["default_embedding_model_locked"] = count_knowledge_points(runtime._workspace_path) > 0
+    return payload
 
 
 def _sections_payload() -> list[dict[str, Any]]:
@@ -56,7 +79,7 @@ async def get_preferences(
             "ok": True,
             "error": None,
             "data": {
-                "preferences": _prefs_payload(runtime),
+                "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
             },
         }
@@ -78,7 +101,7 @@ async def patch_preferences(
             "error": None,
             "data": {
                 "changed": sorted(str(path).strip() for path in body.edits),
-                "preferences": updated.model_dump(mode="json"),
+                "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
             },
         }

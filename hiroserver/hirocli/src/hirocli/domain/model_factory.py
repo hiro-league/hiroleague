@@ -7,14 +7,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from langchain.chat_models import init_chat_model
+from langchain.embeddings import init_embeddings
 from langchain_ollama import ChatOllama
 
 from .credential_store import CredentialStore
-from .model_catalog import ModelSpec, get_model_catalog
+from .model_catalog import ModelCatalog, ModelSpec, get_model_catalog
 from .preferences import ModelTuning, ThinkingLevel
 from .workspace import workspace_id_for_path
 
 if TYPE_CHECKING:
+    from langchain_core.embeddings import Embeddings
     from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
@@ -231,3 +233,108 @@ def _thinking_budget_tokens(thinking: ThinkingLevel) -> int:
         "high": 8192,
         "off": 0,
     }[thinking]
+
+
+def catalog_embedding_dimensions(model_id: str) -> int:
+    """Known output dimensions for bundled catalog embedding models."""
+    return {
+        "openai:text-embedding-3-small": 1536,
+        "google:gemini-embedding-001": 768,
+        "ollama:nomic-embed-text": 512,
+    }.get(model_id, 1536)
+
+
+def _embedding_init_provider(catalog_provider_id: str) -> str:
+    """Map Hiro catalog ``provider_id`` to ``init_embeddings`` provider key."""
+    return {
+        "google": "google_genai",
+    }.get(catalog_provider_id, catalog_provider_id)
+
+
+def _embedding_provider_kwargs(
+    catalog_provider_id: str,
+    *,
+    store: CredentialStore,
+    cat: ModelCatalog,
+) -> dict[str, Any]:
+    if catalog_provider_id == "openai":
+        key = store.get_api_key("openai")
+        if not key:
+            raise ValueError("OpenAI API key missing (keyring or OPENAI_API_KEY).")
+        return {"api_key": key}
+
+    if catalog_provider_id == "google":
+        key = store.get_api_key("google")
+        if not key:
+            raise ValueError("Google API key missing (keyring or GOOGLE_API_KEY).")
+        return {"google_api_key": key}
+
+    if catalog_provider_id == "ollama":
+        cred = store.get("ollama")
+        prov = cat.get_provider("ollama")
+        base_url = (cred.base_url if cred and cred.base_url else None) or (
+            prov.default_base_url if prov else None
+        )
+        if not base_url:
+            raise ValueError(
+                "Ollama base_url missing; run: hiro provider endpoint ollama http://localhost:11434"
+            )
+        return {"base_url": base_url}
+
+    if catalog_provider_id == "lm_studio":
+        cred = store.get("lm_studio")
+        base_url = getattr(cred, "base_url", None)
+        if not base_url:
+            raise ValueError("LM Studio base_url missing for embedding model")
+        return {"base_url": base_url, "api_key": "lm-studio"}
+
+    raise ValueError(f"Model factory does not support embedding provider {catalog_provider_id!r} yet.")
+
+
+def create_embedding_model(
+    model_id: str,
+    *,
+    workspace_path: Path,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> Embeddings:
+    """Resolve ``provider:api_id`` to a LangChain Embeddings instance with credentials injected.
+
+    Raises ``ValueError`` if the model is unknown, not an embedding model, or the provider
+    is not configured for this workspace.
+    """
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None:
+        raise ValueError(f"Unknown model id: {model_id}")
+    if not spec.supports_kind("embedding"):
+        raise ValueError(f"Model {model_id} is not an embedding model (kind={spec.model_kind})")
+
+    wid = workspace_id or workspace_id_for_path(workspace_path)
+    if wid is None and credential_store is None:
+        raise ValueError(
+            "Workspace path is not registered; cannot resolve credential scope. "
+            "Pass workspace_id explicitly or add this folder via hiro workspaces."
+        )
+
+    store = credential_store or CredentialStore(workspace_path, wid)
+    if not store.is_configured(spec.provider_id):
+        raise ValueError(
+            f"Provider {spec.provider_id!r} is not configured for this workspace. "
+            f"Run: hiro provider add {spec.provider_id}"
+        )
+
+    api_model = _api_model_id(model_id)
+    pid = spec.provider_id
+    provider_kwargs = _embedding_provider_kwargs(pid, store=store, cat=cat)
+
+    # LM Studio is OpenAI-compatible but not a built-in init_embeddings provider key.
+    if pid == "lm_studio":
+        return init_embeddings(
+            api_model,
+            provider="openai",
+            **provider_kwargs,
+        )
+
+    lc_provider = _embedding_init_provider(pid)
+    return init_embeddings(f"{lc_provider}:{api_model}", **provider_kwargs)

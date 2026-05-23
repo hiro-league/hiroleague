@@ -12,6 +12,8 @@
     "package:python": "npm run build"
   },
   "devDependencies": {
+    "@internationalized/date": "^3.12.1",
+    "@lucide/svelte": "^1.16.0",
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.49.1",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
@@ -21,13 +23,13 @@
     "shadcn-svelte": "^1.2.7",
     "svelte": "^5.43.14",
     "svelte-check": "^4.3.3",
+    "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
     "vite": "^7.2.4",
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.14.0",
     "@tanstack/svelte-table": "^9.0.0-alpha.38",
     "bits-ui": "^2.18.0",
     "clsx": "^2.1.1",

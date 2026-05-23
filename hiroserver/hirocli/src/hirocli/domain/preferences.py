@@ -48,6 +48,11 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
         label="Agent Memory",
         description="Long-term agent memory settings.",
     ),
+    PreferenceSection(
+        key="knowledge",
+        label="Knowledge",
+        description="Workspace-local RAG ingest, retrieval, and answering settings.",
+    ),
 )
 
 
@@ -133,7 +138,7 @@ class ModelTuning(BaseModel):
 
 
 class TuningProfile(ModelTuning):
-    """Named tuning preset shared by chat and memory purposes."""
+    """Named tuning preset shared by chat, memory, and knowledge answering."""
 
     label: str = Field(default="", min_length=1)
     locked: bool = False
@@ -141,6 +146,7 @@ class TuningProfile(ModelTuning):
 
 DEFAULT_CHAT_TUNING_PROFILE_ID = "balanced_chat"
 DEFAULT_MEMORY_TUNING_PROFILE_ID = "memory_extraction"
+DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID = "knowledge_answering"
 
 
 def default_tuning_profiles() -> dict[str, TuningProfile]:
@@ -158,6 +164,13 @@ def default_tuning_profiles() -> dict[str, TuningProfile]:
             temperature=0,
             max_tokens=8192,
             thinking="low",
+        ),
+        DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID: TuningProfile(
+            label="Knowledge answering",
+            locked=True,
+            temperature=0.2,
+            max_tokens=1600,
+            thinking=None,
         ),
     }
 
@@ -253,6 +266,52 @@ class MemoryPreferences(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Workspace-local knowledge
+# ---------------------------------------------------------------------------
+
+DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+class KnowledgeChunkingMarkdownPreferences(BaseModel):
+    respect_headings: bool = True
+
+
+class KnowledgeChunkingPreferences(BaseModel):
+    chunk_size: int = Field(default=1200, ge=200, le=8000)
+    chunk_overlap: int = Field(default=150, ge=0, le=2000)
+    markdown: KnowledgeChunkingMarkdownPreferences = Field(default_factory=KnowledgeChunkingMarkdownPreferences)
+
+    @model_validator(mode="after")
+    def _overlap_less_than_size(self) -> "KnowledgeChunkingPreferences":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("knowledge.chunking.chunk_overlap must be smaller than chunk_size")
+        return self
+
+
+class KnowledgeRetrievalPreferences(BaseModel):
+    top_k: int = Field(default=20, ge=1, le=100)
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class KnowledgeAnsweringPreferences(BaseModel):
+    model: str | None = None
+    cite_sources: bool = True
+    language_policy: Literal["match_query", "prefer_english", "prefer_arabic"] = "match_query"
+
+
+class KnowledgePreferences(BaseModel):
+    default_embedding_model: str | None = None
+    default_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
+    retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
+    answering: KnowledgeAnsweringPreferences = Field(default_factory=KnowledgeAnsweringPreferences)
+
+    @property
+    def default_embedding_model_resolved(self) -> str:
+        return self.default_embedding_model or DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
+
+
+# ---------------------------------------------------------------------------
 # Top-level model
 # ---------------------------------------------------------------------------
 
@@ -264,6 +323,7 @@ class WorkspacePreferences(BaseModel):
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
+    knowledge: KnowledgePreferences = Field(default_factory=KnowledgePreferences)
     tuning_profiles: dict[str, TuningProfile] = Field(default_factory=default_tuning_profiles)
 
     @model_validator(mode="after")
@@ -284,6 +344,10 @@ class WorkspacePreferences(BaseModel):
         if self.memory.default_tuning_profile not in self.tuning_profiles:
             raise ValueError(
                 f"Unknown memory.default_tuning_profile: {self.memory.default_tuning_profile}"
+            )
+        if self.knowledge.default_tuning_profile not in self.tuning_profiles:
+            raise ValueError(
+                f"Unknown knowledge.default_tuning_profile: {self.knowledge.default_tuning_profile}"
             )
         return self
 
@@ -342,14 +406,34 @@ def save_preferences(
             except Exception:
                 previous = None
 
+    effective_changes = compute_effective_changes(previous, prefs)
+    _validate_pre_save_transition(workspace_path, effective_changes)
+
     preferences_file(workspace_path).write_text(
         prefs.model_dump_json(indent=2), encoding="utf-8",
     )
-
-    effective_changes = compute_effective_changes(previous, prefs)
     _notify_preferences_saved(
         workspace_path, prefs, effective_changes=effective_changes,
     )
+
+
+def _validate_pre_save_transition(
+    workspace_path: Path,
+    effective_changes: dict[str, tuple[Any, Any]],
+) -> None:
+    transition = effective_changes.get("knowledge.default_embedding_model")
+    if transition is None:
+        return
+    old_value, new_value = transition
+    if old_value == new_value:
+        return
+    from hirocli.services.knowledge import count_knowledge_points
+
+    if count_knowledge_points(workspace_path) > 0:
+        raise ValueError(
+            "knowledge.default_embedding_model cannot be changed while the knowledge collection has points. "
+            "Delete all knowledge documents first."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +555,62 @@ def resolve_memory_llm(
         return None
 
     tuning = _profile_tuning(prefs, prefs.memory.default_tuning_profile)
+    return ResolvedModel(
+        model_id=model_id,
+        temperature=tuning.temperature,
+        max_tokens=tuning.max_tokens,
+        thinking=tuning.thinking,
+    )
+
+
+def knowledge_answering_model_source(prefs: WorkspacePreferences) -> str | None:
+    """Preference path that supplies the answering model id (D16 tooltip)."""
+    if prefs.knowledge.answering.model:
+        return "knowledge.answering.model"
+    if prefs.llm.default_chat:
+        return "llm.default_chat"
+    return None
+
+
+def resolve_knowledge_answering_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the knowledge answering chat model with catalog, credentials, and tuning."""
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    explicit = (prefs.knowledge.answering.model or "").strip() or None
+    model_id = explicit or prefs.llm.default_chat
+    if not model_id:
+        return None
+
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind("chat"):
+        return None
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            logger.debug(
+                "resolve_knowledge_answering_llm: workspace path not in registry — %s",
+                workspace_path,
+            )
+            return None
+        store = CredentialStore(workspace_path, wid)
+
+    ams = AvailableModelsService(cat, store)
+    if not ams.is_model_available(model_id):
+        return None
+
+    tuning = _profile_tuning(prefs, prefs.knowledge.default_tuning_profile)
     return ResolvedModel(
         model_id=model_id,
         temperature=tuning.temperature,

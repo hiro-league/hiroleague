@@ -51,6 +51,7 @@ from .server_models import (
 
 
 class SetupTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "setup"
     description = (
         "One-time setup: save gateway config, generate device key, "
@@ -179,6 +180,7 @@ class SetupTool(Tool):
 
 
 class StartTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "start"
     description = "Start the Hiro server for a workspace (background by default)"
     params = {
@@ -247,6 +249,7 @@ class StartTool(Tool):
 
 
 class StopTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "stop"
     description = "Stop the running Hiro server for a workspace"
     params = {
@@ -262,6 +265,7 @@ class StopTool(Tool):
 
 
 class RestartTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "restart"
     description = "Gracefully restart the Hiro server for a workspace"
     params = {
@@ -339,6 +343,7 @@ class RestartTool(Tool):
 
 
 class StatusTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "status"
     description = "Show server and WebSocket connection status for one or all workspaces"
     params = {
@@ -388,6 +393,7 @@ class StatusTool(Tool):
 
 
 class TeardownTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "teardown"
     description = "Stop server and remove all auto-start registrations for a workspace"
     params = {
@@ -429,6 +435,7 @@ class TeardownTool(Tool):
 
 
 class UninstallTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "uninstall"
     description = "Stop server, remove auto-start, and return package uninstall instructions"
     params = {
@@ -538,6 +545,7 @@ def _build_upgrade_command(method: str) -> list[str] | None:
 
 
 class UpgradeTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "upgrade"
     description = (
         "Detect how Hiro is installed and run the right upgrade command "

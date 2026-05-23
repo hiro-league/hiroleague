@@ -9,7 +9,7 @@ import yaml
 
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
-from hirocli.domain.model_factory import create_chat_model
+from hirocli.domain.model_factory import catalog_embedding_dimensions, create_chat_model, create_embedding_model
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +75,12 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "model_kind": "chat",
                 "model_class": "balanced",
                 "features": ["reasoning"],
+            },
+            {
+                "id": "openai:text-embedding-3-small",
+                "provider_id": "openai",
+                "display_name": "text-embedding-3-small",
+                "model_kind": "embedding",
             },
         ],
     }
@@ -146,3 +152,47 @@ def test_google_thinking_level_maps_for_gemini_3(
     assert model.model == "gemini-3-flash-preview"
     assert model.thinking_level == "low"
     assert model.max_output_tokens == 8192
+
+
+def test_create_embedding_model_openai(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("openai", "sk-test")
+
+    model = create_embedding_model(
+        "openai:text-embedding-3-small",
+        workspace_path=tmp_path,
+        credential_store=store,
+    )
+
+    assert model.model == "text-embedding-3-small"
+    assert catalog_embedding_dimensions("openai:text-embedding-3-small") == 1536
+
+
+def test_create_embedding_model_delegates_to_init_embeddings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("openai", "sk-test")
+    calls: dict[str, object] = {}
+
+    def fake_init_embeddings(model: str, *, provider: str | None = None, **kwargs: object) -> object:
+        calls["model"] = model
+        calls["provider"] = provider
+        calls["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("hirocli.domain.model_factory.init_embeddings", fake_init_embeddings)
+
+    create_embedding_model(
+        "openai:text-embedding-3-small",
+        workspace_path=tmp_path,
+        credential_store=store,
+    )
+
+    assert calls["model"] == "openai:text-embedding-3-small"
+    assert calls["provider"] is None
+    assert calls["kwargs"] == {"api_key": "sk-test"}

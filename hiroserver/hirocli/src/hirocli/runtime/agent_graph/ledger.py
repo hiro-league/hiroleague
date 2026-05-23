@@ -420,8 +420,11 @@ class LedgerSink:
         config: Any = None,
         captures: frozenset[str] | None = None,
     ) -> LedgerEntry:
-        identity = _identity_from_state(state, config)
-        run_id = identity.get("run_id") or f"chat-{identity.get('inbound_id', '')}"
+        identity = _resolve_ledger_identity(state, config)
+        run_id = str(identity.get("run_id") or "").strip()
+        if not run_id:
+            inbound_id = str(identity.get("inbound_id") or "")
+            run_id = f"chat-{inbound_id}" if inbound_id else "chat-"
         return LedgerEntry(
             sink=self,
             node=node,
@@ -625,7 +628,7 @@ async def _run_wrapped_plain_async(
     entry = sink.open_entry(
         node_name,
         state,
-        kwargs.get("config"),
+        _runnable_config_from_call(args, kwargs),
         captures=spec.captures if spec is not None else None,
     )
     token = current_entry.set(entry)
@@ -663,7 +666,7 @@ def _run_wrapped_plain_sync(
     entry = sink.open_entry(
         node_name,
         state,
-        kwargs.get("config"),
+        _runnable_config_from_call(args, kwargs),
         captures=spec.captures if spec is not None else None,
     )
     token = current_entry.set(entry)
@@ -701,7 +704,7 @@ async def _run_wrapped_node_async(
     entry = sink.open_entry(
         node_name,
         state,
-        kwargs.get("config"),
+        _runnable_config_from_call(args, kwargs),
         captures=spec.captures if spec is not None else None,
     )
     token = current_entry.set(entry)
@@ -739,7 +742,7 @@ def _run_wrapped_node_sync(
     entry = sink.open_entry(
         node_name,
         state,
-        kwargs.get("config"),
+        _runnable_config_from_call(args, kwargs),
         captures=spec.captures if spec is not None else None,
     )
     token = current_entry.set(entry)
@@ -759,6 +762,47 @@ def _run_wrapped_node_sync(
         return result
     finally:
         current_entry.reset(token)
+
+
+def _runnable_config_from_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    """LangGraph may pass RunnableConfig as kwargs['config'] or a positional arg after state."""
+    config = kwargs.get("config")
+    if isinstance(config, dict):
+        return config
+    for candidate in args[1:]:
+        if not isinstance(candidate, dict):
+            continue
+        if any(key in candidate for key in ("configurable", "metadata", "callbacks", "run_id", "tags")):
+            return candidate
+    return None
+
+
+def _resolve_ledger_identity(state: Any, config: Any = None) -> dict[str, Any]:
+    """Merge graph state/config with the active ``current_run`` accumulator when needed.
+
+    Standalone knowledge answer graphs set ``current_run`` but often omit ``inbound_id`` from
+    state; without this fallback node rows get ``run_id=chat-`` and do not appear in inspect.
+    """
+    identity = _identity_from_state(state, config)
+    run_id = str(identity.get("run_id") or "").strip()
+    if run_id:
+        return identity
+    parent = current_run.get()
+    if parent is None:
+        return identity
+    merged = dict(identity)
+    merged["run_id"] = parent.run_id
+    if not str(merged.get("inbound_id") or "").strip():
+        merged["inbound_id"] = parent.inbound_id
+    if not merged.get("chat_channel_id"):
+        merged["chat_channel_id"] = parent.chat_channel_id
+    if not str(merged.get("device_id") or "").strip():
+        merged["device_id"] = parent.device_id
+    if not str(merged.get("user_id") or "").strip():
+        merged["user_id"] = parent.user_id
+    if not str(merged.get("character_id") or "").strip():
+        merged["character_id"] = parent.character_id
+    return merged
 
 
 def _identity_from_state(state: Any, config: Any = None) -> dict[str, Any]:

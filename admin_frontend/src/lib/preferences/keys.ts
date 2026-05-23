@@ -12,7 +12,10 @@ export const PREF_KEYS = {
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab',
   /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
-  graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded'
+  graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
+  knowledgeLastFolderPrefix: 'hiro.admin.knowledge.lastFolder',
+  /** Browse tab: render chunk text as formatted markdown (default on). */
+  knowledgeChunkMarkdownFormat: 'hiro.admin.knowledge.chunkMarkdownFormat'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';

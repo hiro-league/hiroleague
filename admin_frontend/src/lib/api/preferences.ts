@@ -31,6 +31,31 @@ export type MemoryRerankerPreferences = {
   batch_size: number;
 };
 
+export type KnowledgePreferences = {
+  default_embedding_model: string | null;
+  default_embedding_model_resolved?: string | null;
+  default_embedding_model_locked?: boolean;
+  chunking: {
+    chunk_size: number;
+    chunk_overlap: number;
+    markdown: {
+      respect_headings: boolean;
+    };
+  };
+  retrieval: {
+    top_k: number;
+    min_score: number;
+  };
+  default_tuning_profile: string;
+  answering: {
+    model: string | null;
+    model_resolved?: string | null;
+    model_resolved_source?: string | null;
+    cite_sources: boolean;
+    language_policy: 'match_query' | 'prefer_english' | 'prefer_arabic';
+  };
+};
+
 export type WorkspacePreferences = {
   version: number;
   llm: {
@@ -52,6 +77,7 @@ export type WorkspacePreferences = {
     search: MemorySearchPreferences;
     reranker: MemoryRerankerPreferences;
   };
+  knowledge: KnowledgePreferences;
   tuning_profiles: Record<string, TuningProfile>;
 };
 
@@ -68,6 +94,27 @@ export const DEFAULT_MEMORY_RERANKER: MemoryRerankerPreferences = {
   batch_size: 32
 };
 
+export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
+  default_embedding_model: null,
+  default_embedding_model_resolved: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+  default_tuning_profile: 'knowledge_answering',
+  chunking: {
+    chunk_size: 1200,
+    chunk_overlap: 150,
+    markdown: { respect_headings: true }
+  },
+  retrieval: {
+    top_k: 20,
+    min_score: 0
+  },
+  answering: {
+    model: null,
+    model_resolved: null,
+    cite_sources: true,
+    language_policy: 'match_query'
+  }
+};
+
 /** Fill nested memory blocks when loading older preferences.json payloads. */
 export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): WorkspacePreferences {
   return {
@@ -76,6 +123,22 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       ...prefs.memory,
       search: { ...DEFAULT_MEMORY_SEARCH, ...(prefs.memory.search ?? {}) },
       reranker: { ...DEFAULT_MEMORY_RERANKER, ...(prefs.memory.reranker ?? {}) }
+    },
+    knowledge: {
+      ...DEFAULT_KNOWLEDGE,
+      ...(prefs.knowledge ?? {}),
+      chunking: {
+        ...DEFAULT_KNOWLEDGE.chunking,
+        ...(prefs.knowledge?.chunking ?? {}),
+        markdown: {
+          ...DEFAULT_KNOWLEDGE.chunking.markdown,
+          ...(prefs.knowledge?.chunking?.markdown ?? {})
+        }
+      },
+      retrieval: { ...DEFAULT_KNOWLEDGE.retrieval, ...(prefs.knowledge?.retrieval ?? {}) },
+      answering: { ...DEFAULT_KNOWLEDGE.answering, ...(prefs.knowledge?.answering ?? {}) },
+      default_tuning_profile:
+        prefs.knowledge?.default_tuning_profile ?? DEFAULT_KNOWLEDGE.default_tuning_profile
     }
   };
 }

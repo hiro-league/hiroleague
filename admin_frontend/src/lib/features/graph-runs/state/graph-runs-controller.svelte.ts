@@ -27,7 +27,11 @@ import {
   RUN_ID_FIRST_CARD_CHARS,
   RUNS_TAB,
   trimRunIdForList,
-  type ActivePane
+  isKnowledgeStandaloneRun,
+  graphRunKindLabel,
+  graphRunKindMatchesFilter,
+  type ActivePane,
+  type GraphRunKindFilter,
 } from '../graph-runs-pure';
 import { graphRunsFetchInitialLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
 import {
@@ -69,6 +73,7 @@ export function createGraphRunsPageController() {
   let filterCharacterId = $state('');
   let filterChannelId = $state('');
   let filterStatus = $state('');
+  let filterRunKind = $state<GraphRunKindFilter>('');
 
   let memorySearch = $state('');
   let memoryFilterCharacterId = $state('');
@@ -160,8 +165,12 @@ export function createGraphRunsPageController() {
     const charF = filterCharacterId.trim();
     const chanF = filterChannelId.trim();
     const stF = filterStatus;
+    const kindF = filterRunKind;
     const sorted = [...rows].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
     let filtered = sorted;
+    if (kindF) {
+      filtered = filtered.filter((r) => graphRunKindMatchesFilter(String(r.run_id ?? ''), kindF));
+    }
     if (charF) {
       filtered = filtered.filter((r) => String(r.character_id ?? '').trim() === charF);
     }
@@ -222,6 +231,9 @@ export function createGraphRunsPageController() {
   });
 
   const runTitlePrimary = $derived.by(() => {
+    if (activePane !== RUNS_TAB && activePane !== MEMORIES_TAB) {
+      if (isKnowledgeStandaloneRun(activePane)) return 'Knowledge query';
+    }
     const row = runIdentitySource;
     const name = titleCharacter?.name?.trim();
     if (name) return name;
@@ -230,6 +242,16 @@ export function createGraphRunsPageController() {
   });
 
   const runTitleSubtitle = $derived.by(() => {
+    if (activePane !== RUNS_TAB && activePane !== MEMORIES_TAB) {
+      const kind = graphRunKindLabel(activePane);
+      const parts: string[] = [kind];
+      const ch = activeChannelLabel;
+      if (ch) parts.push(ch);
+      else if (runIdentitySource?.chat_channel_id !== '' && runIdentitySource?.chat_channel_id != null) {
+        parts.push(`Channel ${runIdentitySource.chat_channel_id}`);
+      }
+      return parts.join(' · ');
+    }
     const parts: string[] = [];
     const ch = activeChannelLabel;
     if (ch) parts.push(ch);
@@ -632,6 +654,12 @@ export function createGraphRunsPageController() {
     },
     set filterStatus(v: string) {
       filterStatus = v;
+    },
+    get filterRunKind() {
+      return filterRunKind;
+    },
+    set filterRunKind(v: GraphRunKindFilter) {
+      filterRunKind = v;
     },
     get previewSearch() {
       return previewSearch;

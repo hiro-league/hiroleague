@@ -1,0 +1,81 @@
+"""Markdown chunking helpers for knowledge ingest."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from langchain_core.documents import Document
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+
+from hirocli.services.knowledge.constants import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
+
+
+def title_from_markdown(text: str, path: Path) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            title = stripped[2:].strip()
+            if title:
+                return title
+    return path.stem
+
+
+def heading_path_from_metadata(metadata: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    for level in range(1, 7):
+        value = str(metadata.get(f"Header {level}") or "").strip()
+        if value:
+            parts.append(f"{'#' * level} {value}")
+    return " / ".join(parts) if parts else None
+
+
+def markdown_chunk_error(path: Path, text: str, *, respect_headings: bool) -> str | None:
+    """Return a user-facing ingest error when markdown produces no chunks."""
+    if not text.strip():
+        return f"No extractable text in markdown file: {path}"
+    if respect_headings:
+        return (
+            f"No text chunks produced from {path}: content is whitespace-only or too short "
+            "after heading-aware chunking."
+        )
+    return (
+        f"No text chunks produced from {path}: content is whitespace-only or too short "
+        "after chunking."
+    )
+
+
+def chunk_markdown(
+    text: str,
+    *,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+    respect_headings: bool = True,
+) -> list[dict[str, str | None]]:
+    if respect_headings:
+        header_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[
+                ("#", "Header 1"),
+                ("##", "Header 2"),
+                ("###", "Header 3"),
+                ("####", "Header 4"),
+                ("#####", "Header 5"),
+                ("######", "Header 6"),
+            ],
+            strip_headers=False,
+        )
+        docs = header_splitter.split_text(text)
+    else:
+        docs = [Document(page_content=text, metadata={})] if text.strip() else []
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    split_docs = splitter.split_documents(docs)
+    chunks: list[dict[str, str | None]] = []
+    for doc in split_docs:
+        body = doc.page_content.strip()
+        if not body:
+            continue
+        chunks.append({"text": body, "heading_path": heading_path_from_metadata(doc.metadata)})
+    return chunks

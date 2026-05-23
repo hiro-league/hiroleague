@@ -10,12 +10,14 @@
     formatCost,
     formatGraphRunsListTs,
     formatRunListTokensCell,
+    graphRunKindLabel,
     highlightPreviewSegments,
     listRowChannelName,
     listRowCharacter,
     GRAPH_RUNS_PANEL_IDS,
     GRAPH_RUNS_SUBTAB_IDS,
-    trimRunIdForList
+    trimRunIdForList,
+    type GraphRunKindFilter
   } from './graph-runs-pure';
 
   /* Two-way binds for filters/search — Svelte 5 requires `$bindable()` defaults inside `$props()`, not standalone `let`. */
@@ -23,6 +25,7 @@
     filterCharacterId = $bindable(''),
     filterChannelId = $bindable(''),
     filterStatus = $bindable(''),
+    filterRunKind = $bindable('' as GraphRunKindFilter),
     previewSearch = $bindable(''),
     hidden,
     error,
@@ -39,6 +42,7 @@
     filterCharacterId?: string;
     filterChannelId?: string;
     filterStatus?: string;
+    filterRunKind?: GraphRunKindFilter;
     previewSearch?: string;
     hidden: boolean;
     error: string;
@@ -62,6 +66,11 @@
   {hidden}
 >
   <div class="filters">
+    <select bind:value={filterRunKind} class="filter-select" aria-label="Filter by run kind">
+      <option value="">All run kinds</option>
+      <option value="chat">Chat agent</option>
+      <option value="knowledge">Knowledge (standalone)</option>
+    </select>
     <select bind:value={filterCharacterId} class="filter-select" aria-label="Filter by character">
       <option value="">All characters</option>
       {#each charactersForFilterDropdown as c (c.id)}
@@ -100,6 +109,7 @@
           <th>Time</th>
           <th>Character</th>
           <th>Channel</th>
+          <th>Kind</th>
           <th>Run</th>
           <th>Input</th>
           <th>Output</th>
@@ -119,6 +129,7 @@
             <td>{formatGraphRunsListTs(row.ts)}</td>
             <GraphRunsListCharacterCell photo={listCh.photo} name={listCh.name} />
             <td class="runs-list-name-cell">{listRowChannelName(row, channelById)}</td>
+            <td class="mono runs-list-kind-cell" title={row.run_id}>{graphRunKindLabel(row.run_id)}</td>
             <td>
               <button type="button" class="link" title={row.run_id} onclick={() => onOpenRun(row.run_id)}
                 >{trimRunIdForList(row.run_id)}</button

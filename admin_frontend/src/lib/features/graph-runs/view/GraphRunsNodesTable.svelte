@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
-  import { fieldLabel, formatLedgerField } from '../graph-runs-pure';
+  import { fieldLabel, formatLedgerField, isGraphNodeSubstep } from '../graph-runs-pure';
   import GraphRunsTableShell from './GraphRunsTableShell.svelte';
 
   let {
@@ -34,7 +34,7 @@
           <tr
             class="nodes-table__data-row"
             class:nodes-table__data-row--selected={selectedNodeRowId === row.id}
-            class:substep={row.node.startsWith('tools/')}
+            class:substep={isGraphNodeSubstep(row.node)}
             tabindex="0"
             aria-selected={selectedNodeRowId === row.id ? 'true' : 'false'}
             onclick={() => onToggleNodeRow(row.id)}

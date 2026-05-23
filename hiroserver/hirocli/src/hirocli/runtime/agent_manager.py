@@ -518,13 +518,20 @@ class AgentManager:
         )
 
     def _langchain_tools_for_agent(self) -> list[Any]:
-        """All Hiro tools from the server registry, as LangChain StructuredTools."""
+        """Agent-surfaced, default-enabled Hiro tools as LangChain StructuredTools."""
         reg = self._tool_registry
         if reg is None:
             return []
         from ..tools.langchain_adapter import to_langchain_list
 
-        return to_langchain_list(reg.tool_instances())
+        tools = reg.agent_tools()
+        log.info(
+            "✅ Agent tools bound — HiroServer",
+            count=len(tools),
+            total=len(reg.tool_instances()),
+            names=[t.name for t in tools],
+        )
+        return to_langchain_list(tools)
 
     def _get_or_compile(self, llm_entry, system_prompt: str):
         from ..domain.model_factory import create_chat_model

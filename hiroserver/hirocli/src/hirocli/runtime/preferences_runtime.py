@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from hirocli.domain.preferences import (
+    KnowledgePreferences,
     LLMPreferences,
     MediaPreferences,
     MemoryPreferences,
@@ -58,6 +59,10 @@ class WorkspacePreferencesRuntime:
     def memory(self) -> MemoryPreferences:
         return self.current.memory
 
+    @property
+    def knowledge(self) -> KnowledgePreferences:
+        return self.current.knowledge
+
     def reload(self) -> WorkspacePreferences:
         """Reload preferences from disk and replace the in-memory current value."""
         prefs = load_preferences(self._workspace_path)
@@ -87,6 +92,7 @@ class WorkspacePreferencesRuntime:
                 updated = WorkspacePreferences.model_validate(data)
             except ValidationError:
                 raise
+            _validate_knowledge_embedding_transition(self._workspace_path, previous, updated, cleaned)
             save_preferences(
                 self._workspace_path,
                 updated,
@@ -148,3 +154,25 @@ def _field_schema(annotation: Any) -> Any:
     if origin is dict:
         return dict
     return annotation
+
+
+def _validate_knowledge_embedding_transition(
+    workspace_path: Path,
+    previous: WorkspacePreferences,
+    updated: WorkspacePreferences,
+    edits: dict[str, Any],
+) -> None:
+    if "knowledge.default_embedding_model" not in edits:
+        return
+    old_value = previous.knowledge.default_embedding_model
+    new_value = updated.knowledge.default_embedding_model
+    if old_value == new_value:
+        return
+    from hirocli.services.knowledge.live_registry import count_knowledge_points
+
+    point_count = count_knowledge_points(workspace_path)
+    if point_count > 0:
+        raise PreferencePathError(
+            "knowledge.default_embedding_model cannot be changed while the knowledge collection has points. "
+            "Delete all knowledge documents first."
+        )

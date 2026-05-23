@@ -83,9 +83,23 @@ class ToolRegistry:
         """Return all registered tool names."""
         return list(self._tools.keys())
 
-    def tool_instances(self) -> list[Tool]:
-        """Return registered tools in deterministic name order (for stable agent binding)."""
-        return [self._tools[k] for k in sorted(self._tools.keys())]
+    def tool_instances(self, *, surface: str | None = None) -> list[Tool]:
+        """Return registered tools in deterministic name order (for stable agent binding).
+
+        When *surface* is given, only tools whose ``surfaces`` class attribute
+        contains that string are returned (e.g. ``surface="agent"``).
+        """
+        items = [self._tools[k] for k in sorted(self._tools.keys())]
+        if surface is None:
+            return items
+        return [t for t in items if surface in type(t).surfaces]
+
+    def agent_tools(self) -> list[Tool]:
+        """Return tools that are both agent-surfaced and enabled by default."""
+        return [
+            t for t in self.tool_instances(surface="agent")
+            if type(t).agent_default
+        ]
 
     def schema(self) -> list[dict[str, Any]]:
         """Return a JSON-serialisable schema for all registered tools."""

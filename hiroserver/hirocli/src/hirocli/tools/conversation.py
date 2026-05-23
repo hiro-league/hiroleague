@@ -114,6 +114,7 @@ class MessageSendTool(Tool):
     """Enqueue a workspace-owner user message via ``InboundPipeline.receive`` (live server only)."""
 
     runtime = True
+    agent_default = False
     name = "message_send"
     description = (
         "Send a text or audio message into a conversation channel as the workspace owner user. "
@@ -388,6 +389,7 @@ class ConversationChannelUpdateTool(Tool):
 
 
 class ConversationChannelDeleteTool(Tool):
+    agent_default = False
     name = "conversation_channel_delete"
     description = "Delete a conversation channel and all messages in it"
     params = {
@@ -408,6 +410,7 @@ class ConversationChannelDeleteTool(Tool):
 
 
 class ConversationChannelClearMessagesTool(Tool):
+    agent_default = False
     name = "conversation_channel_clear_messages"
     description = (
         "Delete all messages and attachments in a conversation channel (channel row unchanged). "

@@ -25,13 +25,19 @@ class Tool(ABC):
     """Base class for all Hiro tools.
 
     Subclasses declare:
-      - name:        unique snake_case identifier used by the agent and CLI
-      - description: human/LLM-readable summary
-      - params:      flat dict of ToolParam — single source of truth for
-                     both CLI argument specs and LLM tool schemas
-      - execute():   the actual logic, returns a plain dataclass result
-      - runtime:     class attribute; True when the tool needs a live
-                     ``CommunicationManager`` (see ToolRegistry RuntimeContext).
+      - name:         unique snake_case identifier used by the agent and CLI
+      - description:  human/LLM-readable summary
+      - params:       flat dict of ToolParam — single source of truth for
+                      both CLI argument specs and LLM tool schemas
+      - execute():    the actual logic, returns a plain dataclass result
+      - runtime:      class attribute; True when the tool needs a live
+                      ``CommunicationManager`` (see ToolRegistry RuntimeContext).
+      - surfaces:     which callers this tool is exposed to. Default is all
+                      three: cli, agent, http. Override to restrict; e.g.
+                      ``frozenset({"cli", "http"})`` blocks agent exposure entirely.
+      - agent_default: when True (default) the tool is included in the agent's
+                      active tool set. Set False for tools that should remain
+                      agent-surfaced but are opt-in only (dangerous / noisy ops).
 
     Workspace-scoped tools use ``runtime = False`` (default). Tools that expose
     ``execute_async()`` are invoked via ``ToolRegistry.invoke_async`` from the
@@ -43,6 +49,10 @@ class Tool(ABC):
     params: dict[str, ToolParam]
     # Class-level marker — instance lookup via ``type(self).runtime``
     runtime: bool = False
+    # Surfaces where this tool is exposed. Override to restrict.
+    surfaces: frozenset[str] = frozenset({"cli", "agent", "http"})
+    # Included in the agent's active set by default. False = opt-in only.
+    agent_default: bool = True
 
     def attach_runtime(self, ctx: Any) -> None:
         """Inject registry runtime context — no-op unless a subclass overrides."""

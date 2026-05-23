@@ -120,6 +120,7 @@ class MemoryListTool(Tool):
 
 class MemoryClearTool(Tool):
     runtime = True
+    agent_default = False
     name = "memory_clear"
     description = "Delete long-term memories for the current user, optionally scoped to a character"
     params = {

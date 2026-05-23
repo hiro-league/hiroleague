@@ -151,6 +151,7 @@ class WorkspaceListTool(Tool):
 
 
 class WorkspaceCreateTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "workspace_create"
     description = "Create a new workspace and register it with auto-assigned ports"
     params = {
@@ -184,6 +185,7 @@ class WorkspaceCreateTool(Tool):
 
 
 class WorkspaceRemoveTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "workspace_remove"
     description = "Remove a workspace from the registry, optionally deleting its folder from disk"
     params = {
@@ -213,6 +215,7 @@ class WorkspaceRemoveTool(Tool):
 
 
 class WorkspaceUpdateTool(Tool):
+    surfaces = frozenset({"cli", "http"})
     name = "workspace_update"
     description = (
         "Update mutable workspace properties: display name, default flag, and/or gateway URL. "

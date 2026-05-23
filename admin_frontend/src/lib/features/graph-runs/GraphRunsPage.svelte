@@ -37,6 +37,7 @@
     bind:filterCharacterId={ctl.filterCharacterId}
     bind:filterChannelId={ctl.filterChannelId}
     bind:filterStatus={ctl.filterStatus}
+    bind:filterRunKind={ctl.filterRunKind}
     bind:previewSearch={ctl.previewSearch}
     hidden={ctl.activePane !== ctl.RUNS_TAB}
     error={ctl.error}

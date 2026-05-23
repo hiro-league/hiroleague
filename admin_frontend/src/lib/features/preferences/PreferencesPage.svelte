@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
   import Button from '$lib/components/ui/button.svelte';
+  import Badge from '$lib/components/ui/badge.svelte';
   import {
     listActiveProviders,
     listCatalogModels,
@@ -48,6 +49,22 @@
     { value: 'cpu', label: 'CPU' },
     { value: 'cuda', label: 'CUDA' }
   ];
+
+  const knowledgeModelSourceLabels: Record<string, string> = {
+    'knowledge.answering.model': 'knowledge answering model preference',
+    'llm.default_chat': 'workspace default chat model'
+  };
+
+  function knowledgeAnsweringModelHint(prefs: WorkspacePreferences): string {
+    const resolved = prefs.knowledge.answering.model_resolved;
+    const source = prefs.knowledge.answering.model_resolved_source;
+    const resolvedLabel = resolved ?? 'none (model unavailable or not configured)';
+    if (!prefs.knowledge.answering.model) {
+      const sourceLabel = source ? knowledgeModelSourceLabels[source] ?? source : 'default';
+      return `Null inherits ${sourceLabel}. Effective model: ${resolvedLabel}.`;
+    }
+    return `Effective model: ${resolvedLabel}.`;
+  }
 
   let loading = $state(true);
   let busy = $state(false);
@@ -160,12 +177,14 @@
     | 'preferences-models'
     | 'preferences-media'
     | 'preferences-memory'
+    | 'preferences-knowledge'
     | typeof tuningProfilesAnchorId;
 
   const preferenceSectionNav: { id: PreferencePageSectionId; label: string }[] = [
     { id: 'preferences-models', label: 'Models' },
     { id: 'preferences-media', label: 'Media' },
     { id: 'preferences-memory', label: 'Agent Memory' },
+    { id: 'preferences-knowledge', label: 'Knowledge' },
     { id: tuningProfilesAnchorId, label: 'Tuning profiles' }
   ];
 
@@ -290,10 +309,23 @@
     markDirty();
   }
 
-  function setDefaultTuningProfile(scope: 'llm' | 'memory', id: string) {
+  function setKnowledgeEmbeddingModel(id: string | null) {
+    if (!draft || draft.knowledge.default_embedding_model_locked) return;
+    draft.knowledge.default_embedding_model = id;
+    markDirty();
+  }
+
+  function setKnowledgeAnswerModel(id: string | null) {
+    if (!draft) return;
+    draft.knowledge.answering.model = id;
+    markDirty();
+  }
+
+  function setDefaultTuningProfile(scope: 'llm' | 'memory' | 'knowledge', id: string) {
     if (!draft || !draft.tuning_profiles[id]) return;
     if (scope === 'llm') draft.llm.default_tuning_profile = id;
-    else draft.memory.default_tuning_profile = id;
+    else if (scope === 'memory') draft.memory.default_tuning_profile = id;
+    else draft.knowledge.default_tuning_profile = id;
     markDirty();
   }
 
@@ -338,6 +370,9 @@
     if (draft.memory.default_tuning_profile === id) {
       draft.memory.default_tuning_profile = 'memory_extraction';
     }
+    if (draft.knowledge.default_tuning_profile === id) {
+      draft.knowledge.default_tuning_profile = 'knowledge_answering';
+    }
     markDirty();
   }
 
@@ -358,6 +393,14 @@
         temperature: 0,
         max_tokens: 8192,
         thinking: 'low'
+      };
+    } else if (id === 'knowledge_answering') {
+      draft.tuning_profiles[id] = {
+        label: 'Knowledge answering',
+        locked: true,
+        temperature: 0.2,
+        max_tokens: 1600,
+        thinking: null
       };
     }
     markDirty();
@@ -405,6 +448,28 @@
     add('memory.reranker.model', baseline.memory.reranker.model, draft.memory.reranker.model);
     add('memory.reranker.device', baseline.memory.reranker.device, draft.memory.reranker.device);
     add('memory.reranker.batch_size', baseline.memory.reranker.batch_size, draft.memory.reranker.batch_size);
+    add(
+      'knowledge.default_embedding_model',
+      baseline.knowledge.default_embedding_model,
+      draft.knowledge.default_embedding_model || null
+    );
+    add('knowledge.retrieval.top_k', baseline.knowledge.retrieval.top_k, draft.knowledge.retrieval.top_k);
+    add('knowledge.retrieval.min_score', baseline.knowledge.retrieval.min_score, draft.knowledge.retrieval.min_score);
+    add(
+      'knowledge.default_tuning_profile',
+      baseline.knowledge.default_tuning_profile,
+      draft.knowledge.default_tuning_profile
+    );
+    add('knowledge.answering.model', baseline.knowledge.answering.model, draft.knowledge.answering.model || null);
+    add('knowledge.answering.cite_sources', baseline.knowledge.answering.cite_sources, draft.knowledge.answering.cite_sources);
+    add('knowledge.answering.language_policy', baseline.knowledge.answering.language_policy, draft.knowledge.answering.language_policy);
+    add('knowledge.chunking.chunk_size', baseline.knowledge.chunking.chunk_size, draft.knowledge.chunking.chunk_size);
+    add('knowledge.chunking.chunk_overlap', baseline.knowledge.chunking.chunk_overlap, draft.knowledge.chunking.chunk_overlap);
+    add(
+      'knowledge.chunking.markdown.respect_headings',
+      baseline.knowledge.chunking.markdown.respect_headings,
+      draft.knowledge.chunking.markdown.respect_headings
+    );
     add('tuning_profiles', baseline.tuning_profiles, draft.tuning_profiles);
     return edits;
   }
@@ -879,6 +944,112 @@
         {#if !memoryRerankerEnabled}
           <p class="text-xs text-muted-foreground">Enable the local reranker above to use reranking.</p>
         {/if}
+      </div>
+    </section>
+
+    <section id="preferences-knowledge" class="scroll-mt-32 grid gap-4 border-b pb-6">
+      <div>
+        <h3 class="font-sans text-xl font-semibold text-foreground">{sectionLabel('knowledge', 'Knowledge')}</h3>
+        <p class="mt-1 text-sm text-muted-foreground">{sectionDescription('knowledge')}</p>
+      </div>
+      <div class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 class="font-sans text-base font-semibold text-foreground">Embedding model</h4>
+            <p class="mt-1 text-sm text-muted-foreground">
+              Default: <em>{draft.knowledge.default_embedding_model_resolved}</em>
+            </p>
+          </div>
+          {#if draft.knowledge.default_embedding_model_locked}
+            <Badge variant="outline">Locked while indexed</Badge>
+          {/if}
+        </div>
+        <SingleModelPicker
+          label="Knowledge embedding model"
+          hint="Null uses the local multilingual FastEmbed default shown above."
+          selectedId={draft.knowledge.default_embedding_model}
+          catalogModels={embeddingOptions}
+          {catalogAllProviders}
+          {workspaceActiveProvidersResolved}
+          workspaceActiveProviderIds={embeddingActiveProviderIds}
+          busy={busy || Boolean(draft.knowledge.default_embedding_model_locked)}
+          emptyProviders="No embedding providers in catalog."
+          emptyModelsForProvider="No embedding models for this provider."
+          onSelect={setKnowledgeEmbeddingModel}
+          onChange={markDirty}
+        />
+      </div>
+
+      <div class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
+        <h4 class="font-sans text-base font-semibold text-foreground">Retrieval defaults</h4>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="grid gap-1.5">
+            <span class="font-sans text-xs font-semibold text-muted-foreground">Results per query</span>
+            <input class="h-10 rounded-md border border-input bg-background px-3 font-sans text-sm" type="number" min="1" max="100" bind:value={draft.knowledge.retrieval.top_k} oninput={markDirty} />
+          </label>
+          <label class="grid gap-1.5">
+            <span class="font-sans text-xs font-semibold text-muted-foreground">Minimum score</span>
+            <input class="h-10 rounded-md border border-input bg-background px-3 font-sans text-sm" type="number" min="0" max="1" step="0.05" bind:value={draft.knowledge.retrieval.min_score} oninput={markDirty} />
+          </label>
+        </div>
+      </div>
+
+      <label class="grid max-w-md gap-2">
+        <span class="font-sans text-sm font-semibold text-muted-foreground">Default knowledge answering tuning profile</span>
+        <select
+          class="h-10 rounded-md border border-input bg-background px-3 font-sans text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={draft.knowledge.default_tuning_profile}
+          onchange={(event) => setDefaultTuningProfile('knowledge', event.currentTarget.value)}
+        >
+          {#each profileEntries as [id, profile] (id)}
+            <option value={id}>{profile.label}</option>
+          {/each}
+        </select>
+      </label>
+
+      <SingleModelPicker
+        label="Knowledge answering model"
+        hint={knowledgeAnsweringModelHint(draft)}
+        selectedId={draft.knowledge.answering.model}
+        catalogModels={chatOptions}
+        {catalogAllProviders}
+        {workspaceActiveProvidersResolved}
+        workspaceActiveProviderIds={chatActiveProviderIds}
+        {busy}
+        emptyProviders="No chat providers in catalog."
+        emptyModelsForProvider="No chat models for this provider."
+        onSelect={setKnowledgeAnswerModel}
+        onChange={markDirty}
+      />
+
+      <div class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
+        <h4 class="font-sans text-base font-semibold text-foreground">Answering and chunking</h4>
+        <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+          <input type="checkbox" bind:checked={draft.knowledge.answering.cite_sources} onchange={markDirty} />
+          <span class="font-sans text-sm font-medium">Cite sources</span>
+        </label>
+        <div class="grid gap-3 md:grid-cols-3">
+          <label class="grid gap-1.5">
+            <span class="font-sans text-xs font-semibold text-muted-foreground">Language policy</span>
+            <select class="h-10 rounded-md border border-input bg-background px-3 font-sans text-sm" bind:value={draft.knowledge.answering.language_policy} onchange={markDirty}>
+              <option value="match_query">Match query</option>
+              <option value="prefer_english">Prefer English</option>
+              <option value="prefer_arabic">Prefer Arabic</option>
+            </select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="font-sans text-xs font-semibold text-muted-foreground">Chunk size</span>
+            <input class="h-10 rounded-md border border-input bg-background px-3 font-sans text-sm" type="number" min="200" max="8000" bind:value={draft.knowledge.chunking.chunk_size} oninput={markDirty} />
+          </label>
+          <label class="grid gap-1.5">
+            <span class="font-sans text-xs font-semibold text-muted-foreground">Chunk overlap</span>
+            <input class="h-10 rounded-md border border-input bg-background px-3 font-sans text-sm" type="number" min="0" max="2000" bind:value={draft.knowledge.chunking.chunk_overlap} oninput={markDirty} />
+          </label>
+        </div>
+        <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+          <input type="checkbox" bind:checked={draft.knowledge.chunking.markdown.respect_headings} onchange={markDirty} />
+          <span class="font-sans text-sm font-medium">Respect markdown headings</span>
+        </label>
       </div>
     </section>
 

@@ -5,6 +5,11 @@ export function readLocalString(key: string): string | null {
   return localStorage.getItem(key);
 }
 
+export function removeLocalString(key: string) {
+  if (!browser) return;
+  localStorage.removeItem(key);
+}
+
 export function writeLocalString(key: string, value: string) {
   if (!browser) return;
   localStorage.setItem(key, value);
