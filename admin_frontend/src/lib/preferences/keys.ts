@@ -12,6 +12,8 @@ export const PREF_KEYS = {
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab',
   knowledgeActiveTab: 'hiro.admin.knowledge.activeTab',
+  /** Primary pill on Graph Runs page: workspace runs ledger vs Mem0 memories pane. */
+  graphRunsActiveTab: 'hiro.admin.graphRuns.activeTab',
   /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
   graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
   knowledgeLastFolderPrefix: 'hiro.admin.knowledge.lastFolder',
@@ -26,3 +28,4 @@ export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type CatalogTabPreference = 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
+export type GraphRunsPrimaryTabPreference = 'runs' | 'memories';

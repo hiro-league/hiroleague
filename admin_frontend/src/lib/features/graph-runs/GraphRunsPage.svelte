@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import { ADMIN_TABLIST_SHELL } from '$lib/styling/admin-tokens';
+  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { GraphRunsPrimaryTabPreference } from '$lib/preferences/keys';
   import GraphRunsDetailPanel from './GraphRunsDetailPanel.svelte';
   import GraphRunsDialogs from './GraphRunsDialogs.svelte';
   import GraphRunsMemoriesPanel from './GraphRunsMemoriesPanel.svelte';
@@ -12,59 +13,52 @@
     GRAPH_RUNS_PANEL_IDS,
     GRAPH_RUNS_PRIMARY_TAB_IDS,
     GRAPH_RUNS_PRIMARY_TABLIST_LABEL,
-    MEMORIES_TAB
+    MEMORIES_TAB,
+    RUNS_TAB
   } from './graph-runs-pure';
-  import { cnGraphRunsMainPaneTab } from './shared/graph-runs-ui';
   import { createGraphRunsPageController } from './state/graph-runs-controller.svelte';
 
   const ctl = createGraphRunsPageController();
   onMount(ctl.mount);
 
-  const pageTitle = $derived(ctl.activePane === ctl.MEMORIES_TAB ? 'Memories' : 'Graph runs');
+  const pageTitle = $derived(ctl.primaryTab === MEMORIES_TAB ? 'Memories' : 'Graph runs');
   const pageSubtitle = $derived(
-    ctl.activePane === ctl.MEMORIES_TAB
+    ctl.primaryTab === MEMORIES_TAB
       ? 'Mem0 long-term store for the selected workspace (read-only).'
       : 'Recent agent turns with aggregate cost, latency, and drill-down timelines.'
   );
-  const primaryRunsSelected = $derived(ctl.activePane !== MEMORIES_TAB);
+
+  const primaryTabDescriptors: readonly AdminTabDescriptor<GraphRunsPrimaryTabPreference>[] = [
+    {
+      id: RUNS_TAB,
+      label: 'Graph runs',
+      kind: 'pane',
+      htmlId: GRAPH_RUNS_PRIMARY_TAB_IDS.runsWorkspace,
+      ariaControls: `${GRAPH_RUNS_PANEL_IDS.runs} ${GRAPH_RUNS_PANEL_IDS.detail}`
+    },
+    {
+      id: MEMORIES_TAB,
+      label: 'Memories',
+      kind: 'pane',
+      htmlId: GRAPH_RUNS_PRIMARY_TAB_IDS.memories,
+      ariaControls: GRAPH_RUNS_PANEL_IDS.memories
+    }
+  ];
 </script>
 
 <svelte:head>
-  <title>{ctl.activePane === ctl.MEMORIES_TAB ? 'Memories' : 'Graph Runs'}</title>
+  <title>{ctl.primaryTab === MEMORIES_TAB ? 'Memories' : 'Graph Runs'}</title>
 </svelte:head>
 
 <AdminPageHeader kicker="Operations" title={pageTitle} subtitle={pageSubtitle}>
   {#snippet tabs()}
-    <div
-      class="max-w-full flex-wrap {ADMIN_TABLIST_SHELL}"
-      role="tablist"
-      aria-label={GRAPH_RUNS_PRIMARY_TABLIST_LABEL}
-    >
-      <Button
-        id={GRAPH_RUNS_PRIMARY_TAB_IDS.runsWorkspace}
-        class={cnGraphRunsMainPaneTab(primaryRunsSelected)}
-        variant={primaryRunsSelected ? 'secondary' : 'ghost'}
-        role="tab"
-        type="button"
-        aria-controls="{GRAPH_RUNS_PANEL_IDS.runs} {GRAPH_RUNS_PANEL_IDS.detail}"
-        aria-selected={primaryRunsSelected}
-        onclick={ctl.activateGraphRunsPrimaryTab}
-      >
-        Graph runs
-      </Button>
-      <Button
-        id={GRAPH_RUNS_PRIMARY_TAB_IDS.memories}
-        class={cnGraphRunsMainPaneTab(ctl.activePane === MEMORIES_TAB)}
-        variant={ctl.activePane === MEMORIES_TAB ? 'secondary' : 'ghost'}
-        role="tab"
-        type="button"
-        aria-controls={GRAPH_RUNS_PANEL_IDS.memories}
-        aria-selected={ctl.activePane === MEMORIES_TAB}
-        onclick={ctl.showMemories}
-      >
-        Memories
-      </Button>
-    </div>
+    <AdminTabStrip
+      ariaLabel={GRAPH_RUNS_PRIMARY_TABLIST_LABEL}
+      class="max-w-full flex-wrap"
+      tabs={primaryTabDescriptors}
+      active={ctl.primaryTab}
+      onSelect={ctl.setPrimaryTab}
+    />
   {/snippet}
 
   {#if ctl.activePane !== MEMORIES_TAB}

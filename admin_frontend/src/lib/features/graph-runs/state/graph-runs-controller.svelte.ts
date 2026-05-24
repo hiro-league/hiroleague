@@ -43,7 +43,15 @@ export function createGraphRunsPageController() {
   const uiPrefs = createGraphRunsPreferences();
   let rows = $state<GraphLedgerRow[]>([]);
   let openRunIds = $state<string[]>([]);
-  let activePane = $state<ActivePane>(RUNS_TAB);
+  /**
+   * Active opened-run inspector id. Independent of the primary `?tab=` pref
+   * (a run can be open while the user is on the Memories pane). The derived
+   * `activePane` below collapses both into the legacy single value.
+   */
+  let activeRunId = $state<string | null>(null);
+  const activePane = $derived<ActivePane>(
+    uiPrefs.activeTab === MEMORIES_TAB ? MEMORIES_TAB : (activeRunId ?? RUNS_TAB)
+  );
 
   let timelineByRun = $state<Record<string, GraphLedgerRow[]>>({});
   let langsmithUrlByRun = $state<Record<string, string | undefined>>({});
@@ -389,7 +397,7 @@ export function createGraphRunsPageController() {
 
   async function resolveLangsmithUrl(runId: string) {
     const res = await getGraphRunLangsmithUrl(runId);
-    if (activePane !== runId) return;
+    if (activeRunId !== runId) return;
     if (res.ok && res.data) {
       langsmithUrlByRun[runId] = res.data.langsmith_url ?? undefined;
     } else {
@@ -423,9 +431,13 @@ export function createGraphRunsPageController() {
     if (!alreadyOpen) {
       openRunIds = [...openRunIds, runId];
     }
-    activePane = runId;
+    activeRunId = runId;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
+    // Opening a run inspector implies the runs primary tab.
+    if (uiPrefs.activeTab !== RUNS_TAB) {
+      void uiPrefs.setActiveTab(RUNS_TAB);
+    }
     if (!alreadyOpen) {
       await loadRunDetail(runId);
     }
@@ -439,31 +451,47 @@ export function createGraphRunsPageController() {
     timelineByRun = { ...timelineByRun };
     aggregateByRun = { ...aggregateByRun };
     langsmithUrlByRun = { ...langsmithUrlByRun };
-    activePane = RUNS_TAB;
+    if (activeRunId === runId) {
+      activeRunId = null;
+    }
     selectedNodeRowId = null;
     nodeDetailRowId = null;
   }
 
   function showRunsOnly() {
-    activePane = RUNS_TAB;
+    activeRunId = null;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
+    if (uiPrefs.activeTab !== RUNS_TAB) {
+      void uiPrefs.setActiveTab(RUNS_TAB);
+    }
   }
 
   /** Primary “Graph runs” pill: leaves Memories without clearing an opened inspector (# two-tier tabs). */
   function activateGraphRunsPrimaryTab() {
-    if (activePane === MEMORIES_TAB) {
-      activePane = RUNS_TAB;
+    if (uiPrefs.activeTab === MEMORIES_TAB) {
+      void uiPrefs.setActiveTab(RUNS_TAB);
       selectedNodeRowId = null;
       nodeDetailRowId = null;
     }
   }
 
   function showMemories() {
-    activePane = MEMORIES_TAB;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
+    void uiPrefs.setActiveTab(MEMORIES_TAB);
     void loadMemories();
+  }
+
+  /** Wire-friendly setter for `<AdminTabStrip onSelect>`; dispatches to the
+   * right action so side-effects (load memories, preserve open inspector) are
+   * preserved. */
+  function setPrimaryTab(id: 'runs' | 'memories') {
+    if (id === MEMORIES_TAB) {
+      showMemories();
+    } else {
+      activateGraphRunsPrimaryTab();
+    }
   }
 
   function closeMemoryJsonDialog() {
@@ -631,6 +659,9 @@ export function createGraphRunsPageController() {
   return {
     get activePane() {
       return activePane;
+    },
+    get primaryTab() {
+      return uiPrefs.activeTab;
     },
     get openRunIds() {
       return openRunIds;
@@ -804,6 +835,7 @@ export function createGraphRunsPageController() {
     showRunsOnly,
     activateGraphRunsPrimaryTab,
     showMemories,
+    setPrimaryTab,
     openRunTab,
     closeRunTab,
     refreshMain,

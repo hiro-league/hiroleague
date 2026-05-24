@@ -166,8 +166,28 @@ Short pitfalls seen on complex admin pages (e.g. heavy forms + `.svelte.ts` cont
 
 ---
 
+## 12. Cross-page conventions (shared admin layer)
+
+Cross-page rules.
+
+1. **One toast notifier.** Use `createToastNotifier()` (`$lib/ui/`). No page-local `notify()` + `toast` `$state` + `setTimeout`.
+2. **Blessed inline feedback.** Use `InlineDestructiveAlert`, `InlineLoading`, `InlineEmptyState` from `$lib/ui/`. No raw `border-destructive/30 bg-destructive/10` blocks, no inline `<p>Loading…</p>`.
+3. **Page chrome via `AdminPageHeader`.** Every page renders through it; it owns the `max-w-[1420px]` left-aligned wrapper. No `mx-auto` page wrappers. Header tokens (kicker / title / intro) live only in `$lib/styling/admin-tokens.ts` — no feature-local `*_HEADER_*` copies.
+4. **Page-level tabs.** Use `AdminPageHeader` + `AdminTabStrip` (+ `AdminRecordTabChip` for "open record" tabs). Every tabbed page syncs `?tab=` via `createTabPreferences(...)` in `$lib/preferences/<feature>-preferences.svelte.ts`. Tab descriptors declare `kind: 'pane' | 'route'`.
+5. **Inner navigation is a different pattern.** Section scroll-spy navs use `SectionScrollNav` with `#hash` (not `?tab=`, not `AdminTabStrip`). Per-record dynamic subtab strips stay feature-local until a second consumer appears.
+6. **Cross-page actions are anchors.** Use `AdminPageLinkAction` (real `<a href>`) for header actions that navigate elsewhere — never `<Button onclick={goto(...)}>`. Middle-click / copy-link must work.
+7. **Sticky headers.** Opt in via `<AdminPageHeader sticky>` (publishes `--admin-page-header-h`). Second-level bars use `<AdminPageStickyToolbar>`; sticky table heads use `<AdminTableShell stickyHead>`. **The page title must stay visible** when sticky — don't hide it in favor of a lower bar.
+8. **Tables.** Use composition primitives from `$lib/components/page/table/`: `AdminTableShell`, `AdminTableHeaderCell`, `AdminFilterBar`, `AdminMasterDetail`, plus `useTableSort` / `useTableFilters` for state and URL sync. No bespoke sort-header or filter-bar markup. Virtualized log feeds are exempt.
+9. **Form inputs.** Use `FormField` (label+input) or `class={ADMIN_INPUT}` (bare). No raw `h-10 rounded-md border border-input …` soup.
+10. **Section cards.** Two blessed variants only: `<SectionCard>` (solid) and `<SectionCardMuted>` (translucent, nested).
+11. **Dialogs.** One family — `$lib/components/ui/dialog/`. No `Modal.svelte`.
+12. **Shared domain helpers.** Active providers, catalog reload, unknown-model merge live in `$lib/catalog/`. Unsaved-changes uses the canonical `createUnsavedGuard` (page-specific predicate passed in).
+13. **Panel portability.** Tab content is a `*Panel.svelte` (or `*Tab.svelte`) that: (a) has no `<svelte:head>` / `AdminPageHeader` / page wrapper; (b) accepts state and notifier as props; (c) namespaces any URL params it owns (no top-level `?tab=` assumption); (d) renders self-contained section markup; (e) uses shared loading/error/empty primitives.
+14. **Page size target ≤ 200 lines.** Above that, decompose per §1 and §8.
+
+---
+
 ## Related docs
 
 - Admin UI overview: `docs/admin-ui.md`
-- **Cross-page shared-layer refactor plan:** `docs/admin-frontend-refactor-plan.md` — the per-page rules in this skill are complemented by an app-wide plan to extract shared primitives (toast notifier, page header, tab strip, inline alerts, active-providers panel, catalog-reload helper, single unsaved guard). Read it before starting any cross-page refactor work.
 - Dev environment setup (if tooling changes): `mintdocs/build/first-time-setup.mdx`
