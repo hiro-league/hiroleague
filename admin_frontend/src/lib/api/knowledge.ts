@@ -149,6 +149,7 @@ export type KnowledgeAnswerData = {
   model_id: string | null;
   usage: Record<string, number | string | boolean | null>;
   no_results: boolean;
+  run_id?: string | null;
 };
 
 export type KnowledgeFilters = {

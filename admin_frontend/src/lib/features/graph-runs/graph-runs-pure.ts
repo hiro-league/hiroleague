@@ -101,6 +101,13 @@ export function graphRunTabId(runId: string): string {
   return `graph-runs-tab-open-${runId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 }
 
+/** Deep-link into Graph Runs with a specific run tab open. */
+export function graphRunPageUrl(runId: string): string {
+  const trimmed = String(runId ?? '').trim();
+  if (!trimmed) return '/graph-runs/';
+  return `/graph-runs/?run=${encodeURIComponent(trimmed)}`;
+}
+
 /** Run-detail tabs only — not the ledger list or Mem0 pane. */
 export function isRunDetailPane(pane: ActivePane): boolean {
   return pane !== RUNS_TAB && pane !== MEMORIES_TAB;

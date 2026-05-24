@@ -127,6 +127,7 @@ class KnowledgeAnswerResult:
     model_id: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)
     no_results: bool = False
+    run_id: str | None = None
 
 
 @dataclass(frozen=True)

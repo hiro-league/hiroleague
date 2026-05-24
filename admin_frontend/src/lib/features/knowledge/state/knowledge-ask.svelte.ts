@@ -3,6 +3,9 @@ import { buildAskFilters, optionalInt } from '../shared/knowledge-pure';
 import type { KnowledgeBrowseModel } from './knowledge-browse.svelte';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
+const DEFAULT_ASK_TOP_K = 20;
+const DEFAULT_ASK_MIN_SCORE = 0;
+
 /** Ask tab: query, filters, and answer results. */
 export function createKnowledgeAskModel(deps: {
   browse: KnowledgeBrowseModel;
@@ -10,13 +13,13 @@ export function createKnowledgeAskModel(deps: {
   setError: (message: string | null) => void;
 }) {
   let query = $state('');
-  let askTopK = $state(20);
-  let askMinScore = $state(0);
+  let askTopK = $state(DEFAULT_ASK_TOP_K);
+  let askMinScore = $state(DEFAULT_ASK_MIN_SCORE);
   let askOwnerKind = $state('');
   let askOwnerId = $state('');
   let askCategoryId = $state('');
   let askSubcategoryId = $state('');
-  let askTagsText = $state('');
+  let askTags = $state<string[]>([]);
   let askDocumentId = $state<string | null>(null);
   let queryInputEl = $state<HTMLInputElement | null>(null);
   let searching = $state(false);
@@ -28,6 +31,16 @@ export function createKnowledgeAskModel(deps: {
   const askSubcategories = $derived(
     deps.options.categories.filter((category) => category.parent_id === optionalInt(askCategoryId))
   );
+  const hasAskFilters = $derived(
+    askOwnerKind !== '' ||
+      askOwnerId !== '' ||
+      askCategoryId !== '' ||
+      askSubcategoryId !== '' ||
+      askTags.length > 0 ||
+      askDocumentId !== null ||
+      askTopK !== DEFAULT_ASK_TOP_K ||
+      askMinScore !== DEFAULT_ASK_MIN_SCORE
+  );
 
   async function runSearch() {
     if (!query.trim()) return;
@@ -38,7 +51,14 @@ export function createKnowledgeAskModel(deps: {
         query.trim(),
         askTopK,
         askMinScore,
-        buildAskFilters({ askOwnerKind, askOwnerId, askCategoryId, askSubcategoryId, askTagsText, askDocumentId })
+        buildAskFilters({
+          askOwnerKind,
+          askOwnerId,
+          askCategoryId,
+          askSubcategoryId,
+          askTags,
+          askDocumentId
+        })
       );
       answerResult = payload.data;
     } catch (err) {
@@ -46,6 +66,29 @@ export function createKnowledgeAskModel(deps: {
     } finally {
       searching = false;
     }
+  }
+
+  function handleAskOwnerKindChange() {
+    if (!askOwnerKind) {
+      askOwnerId = '';
+    } else if (askOwnerKind === 'system') {
+      askOwnerId = '0';
+    } else if (askOwnerKind === 'character') {
+      askOwnerId = String(deps.options.characters[0]?.id ?? '');
+    } else {
+      askOwnerId = String(deps.options.users[0]?.id ?? '');
+    }
+  }
+
+  function clearAskFilters() {
+    askOwnerKind = '';
+    askOwnerId = '';
+    askCategoryId = '';
+    askSubcategoryId = '';
+    askTags = [];
+    askDocumentId = null;
+    askTopK = DEFAULT_ASK_TOP_K;
+    askMinScore = DEFAULT_ASK_MIN_SCORE;
   }
 
   function clearAskDocumentScope() {
@@ -58,12 +101,14 @@ export function createKnowledgeAskModel(deps: {
     owner_id: string;
     category_id: number | null;
     subcategory_id: number | null;
+    tags?: string[];
   }) {
     askDocumentId = document.id;
     askOwnerKind = document.owner_kind;
     askOwnerId = document.owner_id;
     askCategoryId = document.category_id !== null ? String(document.category_id) : '';
     askSubcategoryId = document.subcategory_id !== null ? String(document.subcategory_id) : '';
+    askTags = [...(document.tags ?? [])];
     query = '';
     answerResult = null;
     queueMicrotask(() => queryInputEl?.focus());
@@ -112,11 +157,11 @@ export function createKnowledgeAskModel(deps: {
     set askSubcategoryId(v: string) {
       askSubcategoryId = v;
     },
-    get askTagsText() {
-      return askTagsText;
+    get askTags() {
+      return askTags;
     },
-    set askTagsText(v: string) {
-      askTagsText = v;
+    set askTags(v: string[]) {
+      askTags = v;
     },
     get queryInputEl() {
       return queryInputEl;
@@ -136,7 +181,12 @@ export function createKnowledgeAskModel(deps: {
     get askSubcategories() {
       return askSubcategories;
     },
+    get hasAskFilters() {
+      return hasAskFilters;
+    },
     runSearch,
+    handleAskOwnerKindChange,
+    clearAskFilters,
     clearAskDocumentScope,
     resetForDocument
   };

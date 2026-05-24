@@ -332,10 +332,12 @@ class KnowledgeService:
         terminal_status = "completed"
         terminal_error = ""
         state: dict[str, Any] = {}
+        ledger_run_id: str | None = None
         async with knowledge_answer_ledger(
             sink=graph_builder._ledger_sink,
             query=query,
         ) as ledger_run:
+            ledger_run_id = ledger_run.run_id
             try:
                 state = await graph.ainvoke(
                     initial_state,
@@ -372,6 +374,7 @@ class KnowledgeService:
             model_id=state.get("model_id"),
             usage=dict(state.get("usage") or {}),
             no_results=bool(state.get("no_results")),
+            run_id=ledger_run_id,
         )
         log_knowledge_answer(
             log,

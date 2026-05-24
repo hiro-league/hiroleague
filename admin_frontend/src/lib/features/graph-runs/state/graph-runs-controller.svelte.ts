@@ -607,7 +607,13 @@ export function createGraphRunsPageController() {
 
   /** Call from page `onMount` — restores prefs, starts polling, registers Esc + cleanup on destroy. */
   function mount(): () => void {
-    void loadInitial();
+    void (async () => {
+      await loadInitial();
+      const runFromUrl = new URLSearchParams(window.location.search).get('run')?.trim();
+      if (runFromUrl) {
+        await openRunTab(runFromUrl);
+      }
+    })();
     void loadChatChannels();
     void loadCharacters();
     runDetailCardsExpanded = readLocalBoolean(PREF_KEYS.graphRunsRunDetailCardsExpanded, true);

@@ -152,7 +152,7 @@ export function buildAskFilters(input: {
   askOwnerId: string;
   askCategoryId: string;
   askSubcategoryId: string;
-  askTagsText: string;
+  askTags: string[];
   askDocumentId: string | null;
 }): KnowledgeFilters {
   return {
@@ -160,7 +160,7 @@ export function buildAskFilters(input: {
     owner_id: input.askOwnerId || null,
     category_id: optionalInt(input.askCategoryId),
     subcategory_id: optionalInt(input.askSubcategoryId),
-    tags: tagsFromText(input.askTagsText),
+    tags: input.askTags,
     document_id: input.askDocumentId
   };
 }
