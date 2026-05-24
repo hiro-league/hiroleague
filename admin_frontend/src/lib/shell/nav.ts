@@ -16,6 +16,5 @@ export const navItems: NavItem[] = [
   { group: 'Operations', label: 'Knowledge', path: '/knowledge/', icon: 'database' },
   { group: 'Operations', label: 'Preferences', path: '/preferences/', icon: 'settings' },
   { group: 'Operations', label: 'Graph Runs', path: '/graph-runs/', icon: 'workflow' },
-  { group: 'Operations', label: 'Logs', path: '/logs/', icon: 'list' },
-  { group: 'Operations', label: 'Metrics', path: '/metrics/', icon: 'activity' }
+  { group: 'Operations', label: 'Logs', path: '/logs/', icon: 'list' }
 ];

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { ArrowUpRight, RefreshCw } from '@lucide/svelte';
+  import { ArrowUpRight } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import {
     allCatalogKinds,
@@ -33,9 +33,12 @@
         {ctrl.models.length} shown{ctrl.catalogVersion ? ` / catalog version ${ctrl.catalogVersion}` : ''}
       </span>
     </div>
-    <Button variant="outline" onclick={() => void ctrl.loadModels()}>
-      <RefreshCw size={15} /> Refresh
-    </Button>
+    <CatalogTabActions
+      catalogReloadBusy={ctrl.catalogReloadBusy}
+      refreshBusy={ctrl.modelsLoading}
+      onReload={() => ctrl.reloadBundledCatalog()}
+      onRefresh={() => ctrl.loadModels()}
+    />
   </div>
 
   {#if ctrl.modelsLoading}

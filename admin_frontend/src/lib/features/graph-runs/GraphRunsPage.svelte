@@ -50,7 +50,7 @@
   <title>{ctl.primaryTab === MEMORIES_TAB ? 'Memories' : 'Graph Runs'}</title>
 </svelte:head>
 
-<AdminPageHeader kicker="Operations" title={pageTitle} subtitle={pageSubtitle}>
+<AdminPageHeader sticky kicker="Operations" title={pageTitle} subtitle={pageSubtitle}>
   {#snippet tabs()}
     <AdminTabStrip
       ariaLabel={GRAPH_RUNS_PRIMARY_TABLIST_LABEL}

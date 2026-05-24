@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { RefreshCw } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
@@ -25,9 +24,12 @@
         {ctrl.providerCounts.total} providers / {ctrl.providerCounts.cloud} cloud / {ctrl.providerCounts.local} local
       </span>
     </div>
-    <Button variant="outline" onclick={() => void ctrl.refreshCatalogProviders()}>
-      <RefreshCw size={15} /> Refresh
-    </Button>
+    <CatalogTabActions
+      catalogReloadBusy={ctrl.catalogReloadBusy}
+      refreshBusy={ctrl.providersLoading}
+      onReload={() => ctrl.reloadBundledCatalog()}
+      onRefresh={() => ctrl.refreshCatalogProviders()}
+    />
   </div>
 
   {#if ctrl.providersLoading}

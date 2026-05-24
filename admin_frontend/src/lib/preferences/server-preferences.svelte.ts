@@ -1,7 +1,7 @@
 import { PREF_KEYS, type ServerTabPreference } from './keys';
 import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
-const ALLOWED: readonly ServerTabPreference[] = ['workspaces', 'gateways'] as const;
+const ALLOWED: readonly ServerTabPreference[] = ['workspaces', 'gateways', 'metrics'] as const;
 
 export function createServerPreferences(): TabPreferences<ServerTabPreference> {
   return createTabPreferences<ServerTabPreference>({

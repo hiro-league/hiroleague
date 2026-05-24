@@ -18,18 +18,43 @@ export const ADMIN_PAGE_MAX_W = 'grid max-w-[1420px] gap-5';
 
 export const ADMIN_HEADER_KICKER = 'font-sans text-xs font-extrabold uppercase text-primary';
 
-export const ADMIN_HEADER_TITLE = 'brand-text-gradient mt-1 text-3xl font-semibold';
+export const ADMIN_HEADER_TITLE = 'brand-text-gradient mt-1 text-3xl font-semibold leading-tight';
 
 export const ADMIN_HEADER_INTRO = 'font-sans text-sm text-muted-foreground';
 
+/** Inline kicker/title row when a sticky header compacts on scroll. */
+export const ADMIN_HEADER_KICKER_COMPACT =
+  'shrink-0 font-sans text-[10px] font-extrabold uppercase tracking-wide text-primary';
+
+export const ADMIN_HEADER_TITLE_COMPACT = 'brand-text-gradient truncate text-lg font-semibold leading-tight';
+
+export const ADMIN_HEADER_BREADCRUMB_SEP = 'shrink-0 font-sans text-sm font-normal text-muted-foreground/45';
+
 /**
- * Wrapper applied to `<AdminPageHeader sticky>` so the kicker/title/tabs/actions
- * stay pinned beneath the shell header (4rem). The component publishes its own
- * height via `--admin-page-header-h` so secondary toolbars can align without
- * magic pixel constants.
+ * Sticky positioning shell — always applied when `<AdminPageHeader sticky>`.
+ * Frosted chrome (`ADMIN_PAGE_STICKY_HEADER_PINNED`) is added only once pinned.
  */
-export const ADMIN_PAGE_STICKY_HEADER =
-  'sticky top-16 z-10 -mx-4 border-b border-border/70 bg-background/95 px-4 pb-4 backdrop-blur supports-[backdrop-filter]:bg-background/85 md:-mx-6 md:px-6';
+export const ADMIN_PAGE_STICKY_HEADER_POSITION =
+  'sticky top-16 z-10 -mx-4 mt-0 border-b border-transparent bg-transparent px-4 transition-[margin,padding,box-shadow,background-color,border-color,backdrop-filter] duration-200 ease-out md:-mx-6 md:px-6';
+
+/** Frosted chrome when pinned; bleeds into `<main>` padding under the shell bar. */
+export const ADMIN_PAGE_STICKY_HEADER_PINNED =
+  '-mt-4 border-border/70 bg-background/95 py-2 backdrop-blur shadow-sm supports-[backdrop-filter]:bg-background/85 md:-mt-6';
+
+/** @deprecated Use ADMIN_PAGE_STICKY_HEADER_POSITION + PINNED. */
+export const ADMIN_PAGE_STICKY_HEADER_BASE = ADMIN_PAGE_STICKY_HEADER_POSITION;
+
+/** @deprecated Pinned headers use ADMIN_PAGE_STICKY_HEADER_PINNED. */
+export const ADMIN_PAGE_STICKY_HEADER_EXPANDED = '';
+
+/** @deprecated Pinned headers use ADMIN_PAGE_STICKY_HEADER_PINNED. */
+export const ADMIN_PAGE_STICKY_HEADER_COMPACT = ADMIN_PAGE_STICKY_HEADER_PINNED;
+
+/** @deprecated Use ADMIN_PAGE_STICKY_HEADER_POSITION + PINNED. */
+export const ADMIN_PAGE_STICKY_HEADER = cn(
+  ADMIN_PAGE_STICKY_HEADER_POSITION,
+  ADMIN_PAGE_STICKY_HEADER_PINNED
+);
 
 // ── tab strip ──────────────────────────────────────────────────────────────
 

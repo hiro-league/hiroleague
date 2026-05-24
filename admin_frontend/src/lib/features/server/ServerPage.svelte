@@ -7,6 +7,7 @@
   import type { ServerTabPreference } from '$lib/preferences/keys';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
+  import MetricsTab from '$lib/features/metrics/MetricsTab.svelte';
   import GatewaysTab from './GatewaysTab.svelte';
   import WorkspacesTab from './WorkspacesTab.svelte';
 
@@ -15,7 +16,8 @@
 
   const tabDescriptors: readonly AdminTabDescriptor<ServerTabPreference>[] = [
     { id: 'workspaces', label: 'Workspaces', kind: 'pane' },
-    { id: 'gateways', label: 'Gateways', kind: 'pane' }
+    { id: 'gateways', label: 'Gateways', kind: 'pane' },
+    { id: 'metrics', label: 'Metrics', kind: 'pane' }
   ];
 
   onMount(() => {
@@ -35,8 +37,10 @@
 
   {#if prefs.activeTab === 'workspaces'}
     <WorkspacesTab notify={toasts.notify} />
-  {:else}
+  {:else if prefs.activeTab === 'gateways'}
     <GatewaysTab notify={toasts.notify} />
+  {:else}
+    <MetricsTab />
   {/if}
 </AdminPageHeader>
 

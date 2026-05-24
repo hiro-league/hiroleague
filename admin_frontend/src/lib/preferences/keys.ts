@@ -22,7 +22,7 @@ export const PREF_KEYS = {
 } as const;
 
 export type ThemePreference = 'light' | 'dark';
-export type ServerTabPreference = 'workspaces' | 'gateways';
+export type ServerTabPreference = 'workspaces' | 'gateways' | 'metrics';
 export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type CatalogTabPreference = 'providers' | 'models';
