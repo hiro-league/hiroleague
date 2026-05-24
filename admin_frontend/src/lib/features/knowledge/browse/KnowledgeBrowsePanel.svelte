@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { ArrowDown, ArrowUp, BookText, ChevronDown, ChevronUp, Code, Database, FileText, FilterX, RefreshCw, Search, Trash2 } from '@lucide/svelte';
+  import { BookText, ChevronDown, ChevronUp, Code, Database, FileText, FilterX, RefreshCw, Search, Trash2 } from '@lucide/svelte';
+  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
+  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
+  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
@@ -23,10 +29,10 @@
     formatBytes,
     optionalInt,
     readKnowledgeChunkMarkdownFormat,
-    writeKnowledgeChunkMarkdownFormat,
-    type DocumentSortColumn
+    writeKnowledgeChunkMarkdownFormat
   } from '$lib/features/knowledge/shared/knowledge-pure';
-  import ToastHost, { type ToastMessage } from '$lib/ui/ToastHost.svelte';
+  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
   import {
     KNOWLEDGE_FIELD_LABEL,
     KNOWLEDGE_FIELD_LABEL_TEXT,
@@ -35,7 +41,6 @@
     KNOWLEDGE_SECTION_CARD,
     KNOWLEDGE_SECTION_TITLE,
     KNOWLEDGE_SELECT,
-    KNOWLEDGE_TABLE,
     KNOWLEDGE_TABLE_HEAD,
     cnKnowledgeBrowseDocRow
   } from '$lib/features/knowledge/shared/knowledge-ui';
@@ -56,20 +61,14 @@
   let deleteOpen = $state(false);
   let deleteTarget = $state<KnowledgeDocument | null>(null);
   let deleting = $state(false);
-  let toast = $state<ToastMessage>(null);
+  const toasts = createToastNotifier();
+  const notify = toasts.notify;
 
   $effect(() => {
     if (!deleteOpen) {
       deleteTarget = null;
     }
   });
-
-  function notify(kind: NonNullable<ToastMessage>['kind'], message: string) {
-    toast = { kind, message };
-    window.setTimeout(() => {
-      toast = null;
-    }, 3200);
-  }
 
   async function handleUpdateMetadata() {
     const saved = await browse.saveActiveMetadata();
@@ -100,30 +99,8 @@
     previewOpen = true;
   }
 
-  function documentSortAria(column: DocumentSortColumn): 'ascending' | 'descending' | 'none' {
-    if (browse.documentSortColumn !== column) return 'none';
-    return browse.documentSortDirection === 'asc' ? 'ascending' : 'descending';
-  }
+  const documentSort = $derived(browse.documentSort);
 </script>
-
-{#snippet sortableHeader(column: DocumentSortColumn, label: string)}
-  <th class="px-3 py-2" aria-sort={documentSortAria(column)}>
-    <button
-      type="button"
-      class="inline-flex items-center gap-1 font-inherit uppercase hover:text-foreground"
-      onclick={() => browse.toggleDocumentSort(column)}
-    >
-      {label}
-      {#if browse.documentSortColumn === column}
-        {#if browse.documentSortDirection === 'asc'}
-          <ArrowUp size={12} aria-hidden="true" />
-        {:else}
-          <ArrowDown size={12} aria-hidden="true" />
-        {/if}
-      {/if}
-    </button>
-  </th>
-{/snippet}
 
 <section class="grid gap-4">
   <div class={KNOWLEDGE_SECTION_CARD}>
@@ -180,39 +157,40 @@
             </Button>
           </div>
           <div class="grid gap-3">
+            <AdminFilterBar>
+              <AdminFilterBarSearch
+                label="Title"
+                bind:value={browse.browseTitle}
+                placeholder="Search title"
+                class="w-[220px]"
+              />
+              <AdminFilterBarSelect
+                label="Status"
+                bind:value={browse.browseStatus}
+                placeholder="Any"
+                class="w-[180px]"
+                options={[
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'parsing', label: 'Parsing' },
+                  { value: 'embedding', label: 'Embedding' },
+                  { value: 'ready', label: 'Ready' },
+                  { value: 'failed', label: 'Failed' }
+                ]}
+              />
+              <AdminFilterBarSelect
+                label="Owner"
+                bind:value={browse.browseOwnerKind}
+                placeholder="Any"
+                class="w-[180px]"
+                onValueChange={() => browse.handleBrowseOwnerKindChange()}
+                options={[
+                  { value: 'system', label: 'System' },
+                  { value: 'character', label: 'Character' },
+                  { value: 'user', label: 'User' }
+                ]}
+              />
+            </AdminFilterBar>
             <div class="flex flex-wrap items-end gap-3">
-              <label class={KNOWLEDGE_FIELD_LABEL}>
-                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Title</span>
-                <input
-                  class={cn(KNOWLEDGE_INPUT, 'w-[220px]')}
-                  bind:value={browse.browseTitle}
-                  placeholder="Search title"
-                />
-              </label>
-              <label class={KNOWLEDGE_FIELD_LABEL}>
-                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Status</span>
-                <select class={cn(KNOWLEDGE_SELECT, 'w-[180px]')} bind:value={browse.browseStatus}>
-                  <option value="">Any</option>
-                  <option value="pending">Pending</option>
-                  <option value="parsing">Parsing</option>
-                  <option value="embedding">Embedding</option>
-                  <option value="ready">Ready</option>
-                  <option value="failed">Failed</option>
-                </select>
-              </label>
-              <label class={KNOWLEDGE_FIELD_LABEL}>
-                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
-                <select
-                  class={cn(KNOWLEDGE_SELECT, 'w-[180px]')}
-                  bind:value={browse.browseOwnerKind}
-                  onchange={browse.handleBrowseOwnerKindChange}
-                >
-                  <option value="">Any</option>
-                  <option value="system">System</option>
-                  <option value="character">Character</option>
-                  <option value="user">User</option>
-                </select>
-              </label>
               {#if browse.browseOwnerKind === 'character'}
                 <label class={KNOWLEDGE_FIELD_LABEL}>
                   <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
@@ -273,32 +251,33 @@
           </div>
         </div>
 
-        <div class="max-h-[280px] overflow-auto rounded-md border">
-          {#if browse.documents.length === 0}
-            <div class="px-3 py-8 text-center font-sans text-sm text-muted-foreground">No documents</div>
-          {:else}
-            <table class={KNOWLEDGE_TABLE}>
-              <thead class={KNOWLEDGE_TABLE_HEAD}>
-                <tr>
-                  {@render sortableHeader('title', 'Title')}
-                  {@render sortableHeader('owner', 'Owner')}
-                  {@render sortableHeader('category', 'Category')}
-                  {@render sortableHeader('tags', 'Tags')}
-                  {@render sortableHeader('chunks', 'Chunks')}
-                  {@render sortableHeader('ingested_at', 'Ingested')}
-                  {@render sortableHeader('type', 'Type')}
-                  {@render sortableHeader('size', 'Size')}
-                  {@render sortableHeader('path', 'Path')}
-                  {@render sortableHeader('status', 'Status')}
-                  <th class="w-10 px-2 py-2" aria-label="Actions"><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each browse.sortedDocuments as doc (doc.id)}
-                  <tr
-                    class={cnKnowledgeBrowseDocRow(doc.id === browse.activeDocumentId)}
-                    onclick={() => void browse.openDocument(doc.id)}
-                  >
+        <AdminMasterDetail layout="stack" detailOpen={Boolean(browse.activeDocument)}>
+          {#snippet list()}
+            {#if browse.documents.length === 0}
+              <div class="px-3 py-8 text-center font-sans text-sm text-muted-foreground">No documents</div>
+            {:else}
+              <AdminTableShell stickyHead maxBodyHeight="280px">
+                <thead class={KNOWLEDGE_TABLE_HEAD}>
+                  <tr>
+                    <AdminTableHeaderCell column="title" sort={documentSort}>Title</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="owner" sort={documentSort}>Owner</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="category" sort={documentSort}>Category</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="tags" sort={documentSort}>Tags</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="chunks" sort={documentSort}>Chunks</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="ingested_at" sort={documentSort}>Ingested</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="type" sort={documentSort}>Type</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="size" sort={documentSort}>Size</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="path" sort={documentSort}>Path</AdminTableHeaderCell>
+                    <AdminTableHeaderCell column="status" sort={documentSort}>Status</AdminTableHeaderCell>
+                    <th class="w-10 px-2 py-2" aria-label="Actions"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each browse.sortedDocuments as doc (doc.id)}
+                    <tr
+                      class={cnKnowledgeBrowseDocRow(doc.id === browse.activeDocumentId)}
+                      onclick={() => void browse.openDocument(doc.id)}
+                    >
                     <td class="max-w-[280px] truncate px-3 py-2 font-medium">
                       <span class="inline-flex min-w-0 items-center gap-1.5">
                         <button
@@ -363,15 +342,15 @@
                       </button>
                     </td>
                   </tr>
-                {/each}
-              </tbody>
-            </table>
-          {/if}
-        </div>
-
-        {#if browse.activeDocument}
-          {@const doc = browse.activeDocument}
-          <div class={KNOWLEDGE_METADATA_SHELL}>
+                  {/each}
+                </tbody>
+              </AdminTableShell>
+            {/if}
+          {/snippet}
+          {#snippet detail()}
+            {#if browse.activeDocument}
+              {@const doc = browse.activeDocument}
+              <div class={KNOWLEDGE_METADATA_SHELL}>
             <div class="grid gap-1">
               <div class="font-sans text-sm font-medium">Document Actions</div>
               <p class="font-sans text-xs leading-relaxed text-muted-foreground">
@@ -469,8 +448,10 @@
                 </Button>
               </div>
             </div>
-          </div>
-        {/if}
+              </div>
+            {/if}
+          {/snippet}
+        </AdminMasterDetail>
       </div>
     {/if}
   </div>
@@ -616,4 +597,4 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<ToastHost {toast} />
+<ToastHost toast={toasts.toast} />

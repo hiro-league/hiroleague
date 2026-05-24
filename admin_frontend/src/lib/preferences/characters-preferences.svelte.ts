@@ -1,75 +1,72 @@
-import { goto } from '$app/navigation';
+/**
+ * Characters page preferences. Tab handling is delegated to
+ * `createTabPreferences`; `detailMode` and `characterId` are
+ * Characters-specific extra state kept alongside.
+ *
+ * The page also has the "land on Browse when the route arrives with no query
+ * params" rule (`/characters/` from the sidebar should not restore Detail
+ * from session alone). That rule is preserved in `initialize()` below.
+ */
 import { page } from '$app/state';
 import { PREF_KEYS, type CharactersTabPreference } from './keys';
-import { readSessionString, writeSessionString } from './storage';
+import { writeSessionString } from './storage';
+import { createTabPreferences } from './create-tab-preferences.svelte';
 
 type DetailMode = 'view' | 'edit';
 
-function normalizeTab(raw: string | null): CharactersTabPreference | null {
-  return raw === 'browse' || raw === 'detail' ? raw : null;
-}
-
-function normalizeMode(raw: string | null): DetailMode {
-  return raw === 'edit' ? 'edit' : 'view';
-}
+const ALLOWED: readonly CharactersTabPreference[] = ['browse', 'detail'] as const;
 
 export function createCharactersPreferences() {
-  let activeTab = $state<CharactersTabPreference>('browse');
+  const tabs = createTabPreferences<CharactersTabPreference>({
+    storageKey: PREF_KEYS.charactersActiveTab,
+    defaultTab: 'browse',
+    allowed: ALLOWED,
+    urlParamsToReset: ['mode', 'character_id']
+  });
+
   let detailMode = $state<DetailMode>('view');
   let characterId = $state('');
 
   function initialize() {
     const params = page.url.searchParams;
-    // Sidebar link is `/characters/` with no query — always land on Browse (session alone must not keep Detail).
     const hasCharactersParams =
       params.has('tab') || params.has('mode') || params.has('character_id');
 
     if (!hasCharactersParams) {
-      activeTab = 'browse';
+      writeSessionString(PREF_KEYS.charactersActiveTab, 'browse');
       detailMode = 'view';
       characterId = '';
-      writeSessionString(PREF_KEYS.charactersActiveTab, activeTab);
+      tabs.initialize();
       return;
     }
 
-    const urlTab = normalizeTab(params.get('tab'));
-    const storedTab = normalizeTab(readSessionString(PREF_KEYS.charactersActiveTab));
-    const nextMode = normalizeMode(params.get('mode'));
-    const nextId = params.get('character_id') ?? '';
+    detailMode = params.get('mode') === 'edit' ? 'edit' : 'view';
+    characterId = params.get('character_id') ?? '';
+    tabs.initialize();
 
-    activeTab = urlTab ?? storedTab ?? 'browse';
-    detailMode = nextMode;
-    characterId = nextId;
-    if (activeTab === 'detail' && !characterId && detailMode === 'view') {
-      activeTab = 'browse';
+    if (tabs.activeTab === 'detail' && !characterId && detailMode === 'view') {
+      void tabs.setActiveTab('browse');
     }
-    writeSessionString(PREF_KEYS.charactersActiveTab, activeTab);
   }
 
-  async function setState(tab: CharactersTabPreference, mode: DetailMode = 'view', id = '') {
-    activeTab = tab;
+  async function setState(
+    tab: CharactersTabPreference,
+    mode: DetailMode = 'view',
+    id = ''
+  ) {
     detailMode = mode;
     characterId = id;
-    writeSessionString(PREF_KEYS.charactersActiveTab, tab);
-
-    const nextUrl = new URL(page.url);
-    nextUrl.searchParams.set('tab', tab);
-    nextUrl.searchParams.delete('mode');
-    nextUrl.searchParams.delete('character_id');
+    const extras: Record<string, string> = {};
     if (tab === 'detail') {
-      nextUrl.searchParams.set('mode', mode);
-      if (id) nextUrl.searchParams.set('character_id', id);
+      extras.mode = mode;
+      if (id) extras.character_id = id;
     }
-    await goto(`${nextUrl.pathname}${nextUrl.search}`, {
-      keepFocus: true,
-      noScroll: true,
-      replaceState: true
-    });
+    await tabs.setActiveTab(tab, extras);
   }
 
   return {
     get activeTab() {
-      return activeTab;
+      return tabs.activeTab;
     },
     get detailMode() {
       return detailMode;

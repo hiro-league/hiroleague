@@ -2,8 +2,7 @@
   import { Upload } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import Modal from '$lib/ui/Modal.svelte';
-
+  import * as Dialog from '$lib/components/ui/dialog';
   import { untrack } from 'svelte';
 
   let {
@@ -32,10 +31,7 @@
     onSubmitPhoto: () => void;
   } = $props();
 
-  /** Keep a local canvas ref and sync outward so crop preview math uses the modal canvas reliably. */
   let localCropCanvas = $state<HTMLCanvasElement | null>(null);
-
-  /** Avoid re-firing ``onCropCanvasChange`` on unrelated effect runs (prevents redundant ``renderCropPreview`` from parent). */
   let lastSyncedCanvasRef: HTMLCanvasElement | null = null;
 
   $effect(() => {
@@ -47,69 +43,72 @@
     });
   });
 
-  /** Range inputs use string values; coerce to keep controller sliders numeric. */
   function readSlider(e: Event, apply: (n: number) => void) {
     const raw = Number((e.currentTarget as HTMLInputElement).value);
     if (Number.isNaN(raw)) return;
     apply(raw);
   }
+
+  function handleOpenChange(next: boolean) {
+    if (next || busy) return;
+    onDismiss();
+  }
 </script>
 
-<Modal
-  {open}
-  title="Adjust square crop"
-  onClose={() => {
-    if (!busy) onDismiss();
-  }}
->
-  <div class="grid gap-4">
-    <canvas
-      class="mx-auto aspect-square w-full max-w-96 rounded-md border bg-muted"
-      width="512"
-      height="512"
-      bind:this={localCropCanvas}
-    ></canvas>
-    <FormField label="Zoom">
-      {#snippet children()}
-        <input
-          min="1"
-          max="3"
-          step="0.05"
-          type="range"
-          value={cropZoom}
-          oninput={(e) => readSlider(e, onCropZoomChange)}
-        />
-      {/snippet}
-    </FormField>
-    <div class="grid gap-3 md:grid-cols-2">
-      <FormField label="Horizontal">
+<Dialog.Root {open} onOpenChange={handleOpenChange}>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Adjust square crop</Dialog.Title>
+    </Dialog.Header>
+    <div class="grid gap-4">
+      <canvas
+        class="mx-auto aspect-square w-full max-w-96 rounded-md border bg-muted"
+        width="512"
+        height="512"
+        bind:this={localCropCanvas}
+      ></canvas>
+      <FormField label="Zoom">
         {#snippet children()}
           <input
-            min="-100"
-            max="100"
-            step="1"
+            min="1"
+            max="3"
+            step="0.05"
             type="range"
-            value={cropX}
-            oninput={(e) => readSlider(e, onCropXChange)}
+            value={cropZoom}
+            oninput={(e) => readSlider(e, onCropZoomChange)}
           />
         {/snippet}
       </FormField>
-      <FormField label="Vertical">
-        {#snippet children()}
-          <input
-            min="-100"
-            max="100"
-            step="1"
-            type="range"
-            value={cropY}
-            oninput={(e) => readSlider(e, onCropYChange)}
-          />
-        {/snippet}
-      </FormField>
+      <div class="grid gap-3 md:grid-cols-2">
+        <FormField label="Horizontal">
+          {#snippet children()}
+            <input
+              min="-100"
+              max="100"
+              step="1"
+              type="range"
+              value={cropX}
+              oninput={(e) => readSlider(e, onCropXChange)}
+            />
+          {/snippet}
+        </FormField>
+        <FormField label="Vertical">
+          {#snippet children()}
+            <input
+              min="-100"
+              max="100"
+              step="1"
+              type="range"
+              value={cropY}
+              oninput={(e) => readSlider(e, onCropYChange)}
+            />
+          {/snippet}
+        </FormField>
+      </div>
     </div>
-  </div>
-  {#snippet footer()}
-    <Button variant="outline" disabled={busy} onclick={onDismiss}>Cancel</Button>
-    <Button disabled={busy} onclick={onSubmitPhoto}><Upload size={15} /> Upload</Button>
-  {/snippet}
-</Modal>
+    <Dialog.Footer>
+      <Button variant="outline" disabled={busy} onclick={onDismiss}>Cancel</Button>
+      <Button disabled={busy} onclick={onSubmitPhoto}><Upload size={15} /> Upload</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

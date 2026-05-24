@@ -8,7 +8,12 @@
     type DeviceRow
   } from '$lib/api/channels-devices';
   import Button from '$lib/components/ui/button.svelte';
-  import Modal from '$lib/ui/Modal.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import type { Notify } from './types';
 
   let { notify }: { notify: Notify } = $props();
@@ -102,6 +107,8 @@
   }
 
   load();
+
+  const DEVICE_GRID = '180px 1.5fr 190px 190px 110px';
 </script>
 
 <section class="grid gap-4">
@@ -127,28 +134,23 @@
     </div>
 
     {#if loading}
-      <p class="text-muted-foreground">Loading devices...</p>
+      <InlineLoading label="Loading devices…" />
     {:else if error}
-      <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-        <strong class="font-sans">Could not load devices</strong>
-        <span class="block text-sm">{error}</span>
-      </div>
+      <InlineDestructiveAlert title="Could not load devices" message={error} />
     {:else if rows.length === 0}
-      <p class="text-muted-foreground">No paired devices. Use the button above to generate a pairing code.</p>
+      <InlineEmptyState message="No paired devices. Use the button above to generate a pairing code." />
     {:else}
-      <div class="overflow-x-auto rounded-md border">
-        <div class="min-w-[920px]">
-          <div
-            class="grid grid-cols-[180px_1.5fr_190px_190px_110px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground"
-          >
-            <span>Name</span>
-            <span>Device ID</span>
-            <span>Paired</span>
-            <span>Expires</span>
-            <span>Actions</span>
-          </div>
-          {#each rows as row}
-            <div class="grid min-h-16 grid-cols-[180px_1.5fr_190px_190px_110px] gap-3 border-t px-3 py-3">
+      <AdminTableShell layout="grid" minWidth={920} gridColumns={DEVICE_GRID}>
+        {#snippet headRow()}
+          <span>Name</span>
+          <span>Device ID</span>
+          <span>Paired</span>
+          <span>Expires</span>
+          <span>Actions</span>
+        {/snippet}
+        {#snippet body()}
+          {#each rows as row (row.device_id)}
+            <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={DEVICE_GRID}>
               <span class="truncate font-sans text-sm font-semibold" title={row.device_name ?? ''}>
                 {row.device_name || '-'}
               </span>
@@ -170,52 +172,58 @@
               </span>
             </div>
           {/each}
-        </div>
-      </div>
+        {/snippet}
+      </AdminTableShell>
     {/if}
   </section>
 </section>
 
-<Modal open={pairing !== null} title="Pairing code" onClose={closePairing}>
-  {#if pairing}
-    <div class="grid justify-items-center gap-3 text-center">
-      <div
-        class="grid size-48 place-items-center rounded-md border bg-white p-2 text-black [&_svg]:h-full [&_svg]:w-full"
-      >
-        {@html pairing.qr_svg}
+<Dialog.Root open={pairing !== null} onOpenChange={(next) => { if (!next) closePairing(); }}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Pairing code</Dialog.Title>
+    </Dialog.Header>
+    {#if pairing}
+      <div class="grid justify-items-center gap-3 text-center">
+        <div
+          class="grid size-48 place-items-center rounded-md border bg-white p-2 text-black [&_svg]:h-full [&_svg]:w-full"
+        >
+          {@html pairing.qr_svg}
+        </div>
+        <div class="font-mono text-5xl font-bold tracking-widest text-primary">{pairing.code}</div>
+        <p class="font-sans text-sm text-muted-foreground">Expires: {formatDate(pairing.expires_at)}</p>
+        <p class="font-sans text-sm text-muted-foreground">
+          Scan the QR code or enter the code manually in the mobile app.
+        </p>
+        <div class="flex max-w-full items-center gap-1 font-mono text-xs text-muted-foreground">
+          <Link2 size={13} />
+          <span class="truncate">{pairing.gateway_url || 'no gateway configured'}</span>
+        </div>
       </div>
-      <div class="font-mono text-5xl font-bold tracking-widest text-primary">{pairing.code}</div>
-      <p class="font-sans text-sm text-muted-foreground">Expires: {formatDate(pairing.expires_at)}</p>
-      <p class="font-sans text-sm text-muted-foreground">
-        Scan the QR code or enter the code manually in the mobile app.
-      </p>
-      <div class="flex max-w-full items-center gap-1 font-mono text-xs text-muted-foreground">
-        <Link2 size={13} />
-        <span class="truncate">{pairing.gateway_url || 'no gateway configured'}</span>
-      </div>
-    </div>
-  {/if}
-  {#snippet footer()}
-    <Button variant="outline" onclick={copyPairingPayload}>
-      {#if copied}
-        <Check class="text-emerald-500" size={15} />
-      {:else}
-        <Copy size={15} />
-      {/if}
-      Copy pairing message
-    </Button>
-    <Button onclick={closePairing}>Close</Button>
-  {/snippet}
-</Modal>
+    {/if}
+    <Dialog.Footer>
+      <Button variant="outline" onclick={copyPairingPayload}>
+        {#if copied}
+          <Check class="text-emerald-500" size={15} />
+        {:else}
+          <Copy size={15} />
+        {/if}
+        Copy pairing message
+      </Button>
+      <Button onclick={closePairing}>Close</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal
-  open={revokeTarget !== null}
-  title={`Revoke '${revokeTarget ? displayName(revokeTarget) : ''}'?`}
-  onClose={closeRevoke}
->
-  <p class="text-sm text-muted-foreground">This device will no longer be able to connect.</p>
-  {#snippet footer()}
-    <Button variant="outline" onclick={closeRevoke}>Cancel</Button>
-    <Button variant="destructive" disabled={busy} onclick={submitRevoke}>Revoke</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root open={revokeTarget !== null} onOpenChange={(next) => { if (!next) closeRevoke(); }}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Revoke '{revokeTarget ? displayName(revokeTarget) : ''}'?</Dialog.Title>
+    </Dialog.Header>
+    <p class="text-sm text-muted-foreground">This device will no longer be able to connect.</p>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={closeRevoke}>Cancel</Button>
+      <Button variant="destructive" disabled={busy} onclick={submitRevoke}>Revoke</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

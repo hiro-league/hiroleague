@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { BookOpen, RefreshCw, Settings2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import FormField from '$lib/components/ui/form-field.svelte';
   import CharacterResolvedBlock from '$lib/features/characters/CharacterResolvedBlock.svelte';
   import OrderedModelPicker from '$lib/components/ui/ordered-model-picker/OrderedModelPicker.svelte';
   import CharacterSectionCard from '$lib/features/characters/CharacterSectionCard.svelte';
@@ -121,17 +122,11 @@
       onDuplicateAttempt={onDuplicateAttempt}
       onListChange={markDirty}
     />
-    <div class="mt-4 grid max-w-lg gap-2">
-      <label
-        for="character-tuning-profile"
-        class="font-sans text-sm font-semibold text-muted-foreground"
-      >
-        Tuning profile
-      </label>
+    <FormField label="Tuning profile" class="mt-4 max-w-lg">
       <div class="flex items-center gap-2">
         <select
           id="character-tuning-profile"
-          class="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 font-sans text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class="min-w-0 flex-1"
           value={form.tuning_profile || ''}
           onchange={(event) => {
             form.tuning_profile = event.currentTarget.value;
@@ -160,7 +155,7 @@
           {formatTuningProfileSummary(selectedTuningProfile)}
         </p>
       {/if}
-    </div>
+    </FormField>
   {:else}
     <OrderedModelPicker
       variant="voice"

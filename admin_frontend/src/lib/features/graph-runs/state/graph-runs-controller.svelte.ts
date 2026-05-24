@@ -16,8 +16,7 @@ import {
   formatAgentElapsedMs,
   formatUsdCostDisplay
 } from '$lib/features/chat-channels/messages/agent-message-meta';
-import { PREF_KEYS } from '$lib/preferences/keys';
-import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
+import { createGraphRunsPreferences } from '$lib/preferences/graph-runs-preferences.svelte';
 import {
   MEMORIES_TAB,
   memoryField,
@@ -41,6 +40,7 @@ import {
 } from './graph-runs-memory-service';
 
 export function createGraphRunsPageController() {
+  const uiPrefs = createGraphRunsPreferences();
   let rows = $state<GraphLedgerRow[]>([]);
   let openRunIds = $state<string[]>([]);
   let activePane = $state<ActivePane>(RUNS_TAB);
@@ -65,7 +65,6 @@ export function createGraphRunsPageController() {
   let offsets: Record<string, number> = {};
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  let runDetailCardsExpanded = $state(true);
   let selectedNodeRowId = $state<string | null>(null);
   let nodeDetailRowId = $state<string | null>(null);
 
@@ -588,8 +587,7 @@ export function createGraphRunsPageController() {
   }
 
   function toggleRunDetailCards() {
-    runDetailCardsExpanded = !runDetailCardsExpanded;
-    writeLocalBoolean(PREF_KEYS.graphRunsRunDetailCardsExpanded, runDetailCardsExpanded);
+    uiPrefs.toggleRunDetailCards();
   }
 
   function onEscapeKey(ev: KeyboardEvent) {
@@ -616,7 +614,7 @@ export function createGraphRunsPageController() {
     })();
     void loadChatChannels();
     void loadCharacters();
-    runDetailCardsExpanded = readLocalBoolean(PREF_KEYS.graphRunsRunDetailCardsExpanded, true);
+    uiPrefs.initialize();
     timer = setInterval(poll, 2500);
     window.addEventListener('keydown', onEscapeKey);
     return dispose;
@@ -638,7 +636,7 @@ export function createGraphRunsPageController() {
       return openRunIds;
     },
     get runDetailCardsExpanded() {
-      return runDetailCardsExpanded;
+      return uiPrefs.runDetailCardsExpanded;
     },
     get memoriesLoading() {
       return memoriesLoading;

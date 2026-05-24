@@ -1,11 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import ChatChannelsBrowse from '$lib/features/chat-channels/browse/ChatChannelsBrowse.svelte';
   import ChatChannelEditorModal from '$lib/features/chat-channels/edit/ChatChannelEditorModal.svelte';
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
   import ChatChannelClearMessagesModal from '$lib/features/chat-channels/modals/ChatChannelClearMessagesModal.svelte';
   import ChatChannelDeleteModal from '$lib/features/chat-channels/modals/ChatChannelDeleteModal.svelte';
-  import ChatChannelDiscardModal from '$lib/features/chat-channels/modals/ChatChannelDiscardModal.svelte';
+  import Button from '$lib/components/ui/button.svelte';
+  import * as Dialog from '$lib/components/ui/dialog';
   import {
     cycleChatAudioSpeed,
     formatChatAudioSpeedLabel,
@@ -17,13 +21,12 @@
     CHAT_CHANNELS_TAB_IDS,
     CHAT_CHANNELS_TABLIST_LABEL
   } from '$lib/features/chat-channels/shared/chat-channels-a11y';
+  import type { ChatChannelsTabPreference } from '$lib/preferences/keys';
   import ToastHost from '$lib/ui/ToastHost.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import { cn } from '$lib/utils';
 
   const ctrl = createChatChannelsPageController();
 
-  /** Boot restores tab/channel via ``chat-channels-nav.ts`` (`readChatChannelsNavFromLocation`). */
+  /** Boot restores tab/channel via `createChatChannelsPreferences()`. */
   onMount(() => {
     void ctrl.mount();
     return () => {
@@ -31,51 +34,38 @@
       void ctrl.disposeActiveRecording();
     };
   });
+
+  const tabDescriptors: readonly AdminTabDescriptor<ChatChannelsTabPreference>[] = [
+    {
+      id: 'channels',
+      label: 'Channels',
+      kind: 'pane',
+      htmlId: CHAT_CHANNELS_TAB_IDS.channels,
+      ariaControls: CHAT_CHANNELS_PANEL_IDS.channels
+    },
+    {
+      id: 'messages',
+      label: 'Messages',
+      kind: 'pane',
+      htmlId: CHAT_CHANNELS_TAB_IDS.messages,
+      ariaControls: CHAT_CHANNELS_PANEL_IDS.messages
+    }
+  ];
 </script>
 
-<section class="flex h-full min-h-0 max-w-[1420px] flex-col gap-5">
-  <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-    <div>
-      <p class="font-sans text-xs font-extrabold uppercase text-primary">Communication</p>
-      <h2 class="brand-text-gradient mt-1 text-3xl font-semibold">Chat channels</h2>
-    </div>
-    <div
-      class="inline-flex rounded-lg border bg-card p-1"
-      role="tablist"
-      aria-label={CHAT_CHANNELS_TABLIST_LABEL}
-    >
-      <Button
-        id={CHAT_CHANNELS_TAB_IDS.channels}
-        class={cn(
-          'shadow-none',
-          ctrl.activeTab === 'channels' ? '' : 'bg-transparent text-muted-foreground hover:bg-secondary'
-        )}
-        variant={ctrl.activeTab === 'channels' ? 'secondary' : 'ghost'}
-        role="tab"
-        type="button"
-        aria-controls={CHAT_CHANNELS_PANEL_IDS.channels}
-        aria-selected={ctrl.activeTab === 'channels'}
-        onclick={() => void ctrl.setActiveTab('channels')}
-      >
-        Channels
-      </Button>
-      <Button
-        id={CHAT_CHANNELS_TAB_IDS.messages}
-        class={cn(
-          'shadow-none',
-          ctrl.activeTab === 'messages' ? '' : 'bg-transparent text-muted-foreground hover:bg-secondary'
-        )}
-        variant={ctrl.activeTab === 'messages' ? 'secondary' : 'ghost'}
-        role="tab"
-        type="button"
-        aria-controls={CHAT_CHANNELS_PANEL_IDS.messages}
-        aria-selected={ctrl.activeTab === 'messages'}
-        onclick={() => void ctrl.setActiveTab('messages')}
-      >
-        Messages
-      </Button>
-    </div>
-  </div>
+<AdminPageHeader
+  kicker="Communication"
+  title="Chat channels"
+  wrapperClass="flex h-full min-h-0 max-w-[1420px] flex-col gap-5"
+>
+  {#snippet tabs()}
+    <AdminTabStrip
+      ariaLabel={CHAT_CHANNELS_TABLIST_LABEL}
+      tabs={tabDescriptors}
+      active={ctrl.activeTab}
+      onSelect={(id) => void ctrl.setActiveTab(id)}
+    />
+  {/snippet}
 
   <div
     id={CHAT_CHANNELS_PANEL_IDS.channels}
@@ -138,7 +128,7 @@
       voiceReplyCheckboxHint={ctrl.voiceReplyCheckboxHint}
     />
   </div>
-</section>
+</AdminPageHeader>
 
 <ToastHost toast={ctrl.toast} />
 
@@ -163,15 +153,36 @@
   characterLabel={ctrl.characterLabel}
   onBeforeClose={ctrl.channelFormBeforeClose}
   onDismiss={() => ctrl.finalizeChannelForm()}
-  onCancelExplicit={() => ctrl.cancelChannelFormExplicit()}
+  onCancelExplicit={() => void ctrl.cancelChannelFormExplicit()}
   onSubmit={() => void ctrl.submitForm()}
 />
 
-<ChatChannelDiscardModal
-  open={ctrl.discardConfirmOpen}
-  onKeepEditing={() => ctrl.keepEditingAfterDismissAttempt()}
-  onDiscard={() => ctrl.discardUnsavedChannelFormAndClose()}
-/>
+<Dialog.Root
+  open={ctrl.unsaved.unsavedModalOpen}
+  onOpenChange={(next) => {
+    if (!next) ctrl.unsaved.closeUnsavedModalContinueEditing();
+  }}
+>
+  <Dialog.Content overlayClass="z-[60]" class="z-[60] sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Discard changes?</Dialog.Title>
+      <Dialog.Description>
+        You have unsaved edits for this conversation channel.
+      </Dialog.Description>
+    </Dialog.Header>
+    <p class="font-sans text-sm text-muted-foreground">
+      Discard them and close the editor, or keep editing.
+    </p>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={ctrl.unsaved.closeUnsavedModalContinueEditing}>
+        Keep editing
+      </Button>
+      <Button variant="destructive" onclick={ctrl.unsaved.confirmUnsavedModalDiscard}>
+        Discard
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <ChatChannelDeleteModal
   target={ctrl.deleteTarget}

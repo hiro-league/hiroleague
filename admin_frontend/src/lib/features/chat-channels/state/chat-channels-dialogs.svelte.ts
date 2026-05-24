@@ -1,13 +1,12 @@
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 
 /**
- * Confirm / destructive modal flags for chat channels (clear thread, delete channel, discard editor).
- * Keeps open/close rules in one place; controller stays responsible for API side-effects.
+ * Confirm / destructive modal flags for chat channels (clear thread, delete channel).
+ * Unsaved editor changes use the shared `createUnsavedGuard` in the page controller.
  */
 export function createChatChannelsDialogs(opts: { isBusy: () => boolean }) {
   let clearMessagesConfirmOpen = $state(false);
   let deleteTarget = $state<ChatChannelRow | null>(null);
-  let discardConfirmOpen = $state(false);
 
   return {
     get clearMessagesConfirmOpen(): boolean {
@@ -19,10 +18,6 @@ export function createChatChannelsDialogs(opts: { isBusy: () => boolean }) {
     },
     set deleteTarget(v: ChatChannelRow | null) {
       deleteTarget = v;
-    },
-
-    get discardConfirmOpen(): boolean {
-      return discardConfirmOpen;
     },
 
     openClearMessagesModal() {
@@ -45,14 +40,6 @@ export function createChatChannelsDialogs(opts: { isBusy: () => boolean }) {
 
     clearDeleteTarget() {
       deleteTarget = null;
-    },
-
-    openDiscardConfirmModal() {
-      discardConfirmOpen = true;
-    },
-
-    closeDiscardConfirmModal() {
-      discardConfirmOpen = false;
     }
   };
 }

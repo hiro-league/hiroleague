@@ -1,17 +1,16 @@
 /**
  * Thin composition root for Knowledge admin UI — tab navigation + slice controllers.
  */
-import { page } from '$app/state';
 import type { KnowledgeDocument } from '$lib/api/knowledge';
 import type { KnowledgeTabId } from '../shared/knowledge-pure';
-import { readKnowledgeTabFromLocation, persistKnowledgeTabToUrl } from '../shared/knowledge-nav';
+import { createKnowledgePreferences } from '$lib/preferences/knowledge-preferences.svelte';
 import { createKnowledgeAskModel } from './knowledge-ask.svelte';
 import { createKnowledgeBrowseModel } from './knowledge-browse.svelte';
 import { createKnowledgeIngestModel } from './knowledge-ingest.svelte';
 import { createKnowledgeOptionsModel } from './knowledge-options.svelte';
 
 export function createKnowledgePageController() {
-  let activeTab = $state<KnowledgeTabId>('ingest');
+  const tabPrefs = createKnowledgePreferences();
   let error = $state<string | null>(null);
 
   function setError(message: string | null) {
@@ -38,17 +37,8 @@ export function createKnowledgePageController() {
 
   const ask = createKnowledgeAskModel({ browse, options, setError });
 
-  function initializeNavigation() {
-    activeTab = readKnowledgeTabFromLocation(page.url.searchParams);
-  }
-
-  async function syncUrl() {
-    await persistKnowledgeTabToUrl(page.url, activeTab);
-  }
-
-  async function setActiveTab(tab: KnowledgeTabId) {
-    activeTab = tab;
-    await syncUrl();
+  function setActiveTab(tab: KnowledgeTabId) {
+    return tabPrefs.setActiveTab(tab);
   }
 
   function openAskForDocument(document: KnowledgeDocument) {
@@ -72,10 +62,9 @@ export function createKnowledgePageController() {
   }
 
   function mount() {
-    initializeNavigation();
+    tabPrefs.initialize();
     ingest.restoreFolderFromStorage();
     void bootstrap();
-    void syncUrl();
     const stopEvents = ingest.connectEvents();
     return () => {
       stopEvents();
@@ -84,7 +73,7 @@ export function createKnowledgePageController() {
 
   return {
     get activeTab() {
-      return activeTab;
+      return tabPrefs.activeTab;
     },
     setActiveTab,
     get error() {

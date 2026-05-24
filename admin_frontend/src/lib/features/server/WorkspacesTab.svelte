@@ -22,7 +22,13 @@
   import Button from '$lib/components/ui/button.svelte';
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import { liveStatus } from '$lib/live/status.svelte';
-  import Modal from '$lib/ui/Modal.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import FormField from '$lib/components/ui/form-field.svelte';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { createWorkspaceStore } from './workspace-store.svelte';
   import type { Notify } from './types';
   import type { WorkspaceRow } from '$lib/api/server';
@@ -83,6 +89,7 @@
     const updated = formatStderrTime(row.stderr_log_mtime);
     return `stderr.log${updated ? ` updated ${updated}` : ''} (${formatBytes(row.stderr_log_size)})`;
   }
+  const WORKSPACE_GRID = '220px 110px 125px 1.25fr 105px 445px';
 </script>
 
 <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
@@ -120,27 +127,27 @@
   </div>
 
   {#if workspace.loading}
-    <p class="text-muted-foreground">Loading workspaces...</p>
+    <InlineLoading label="Loading workspaces…" />
   {:else if workspace.error}
-    <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-      <strong class="font-sans">Could not load workspaces</strong>
-      <span class="block text-sm">{workspace.error}</span>
-    </div>
+    <InlineDestructiveAlert title="Could not load workspaces" message={workspace.error} />
   {:else if workspace.rows.length === 0}
-    <p class="text-muted-foreground">No workspaces configured yet.</p>
+    <InlineEmptyState message="No workspaces configured yet." />
   {:else}
-    <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[1180px]">
-        <div class="grid grid-cols-[220px_110px_125px_1.25fr_105px_445px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
-          <span>Name</span>
-          <span>Setup</span>
-          <span>Status</span>
-          <span>Gateway</span>
-          <span>Autostart</span>
-          <span>Actions</span>
-        </div>
-        {#each workspace.rows as row}
-          <div class="grid min-h-16 grid-cols-[220px_110px_125px_1.25fr_105px_445px] items-center gap-3 border-t px-3 py-3">
+    <AdminTableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
+      {#snippet headRow()}
+        <span>Name</span>
+        <span>Setup</span>
+        <span>Status</span>
+        <span>Gateway</span>
+        <span>Autostart</span>
+        <span>Actions</span>
+      {/snippet}
+      {#snippet body()}
+        {#each workspace.rows as row (row.id)}
+          <div
+            class="{ADMIN_TABLE_GRID_ROW} items-center"
+            style:grid-template-columns={WORKSPACE_GRID}
+          >
             <span class="min-w-0">
               <span class="flex min-w-0 items-center gap-1.5">
                 {#if row.is_default}
@@ -271,132 +278,246 @@
             </span>
           </div>
         {/each}
-      </div>
-    </div>
+      {/snippet}
+    </AdminTableShell>
   {/if}
 </section>
 
-<Modal open={workspace.dialog === 'create'} title="Create workspace" onClose={workspace.closeDialog}>
-  <label>Name<input bind:value={workspace.createForm.name} placeholder="e.g. work" /></label>
-  <label>Path <small>optional</small><input bind:value={workspace.createForm.path} placeholder="Leave blank for default location" /></label>
-  {#snippet footer()}
-    <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
-    <Button disabled={workspace.busy} onclick={workspace.submitCreate}>Create</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={workspace.dialog === 'create'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Create workspace</Dialog.Title>
+    </Dialog.Header>
+    <div class="grid gap-4">
+      <FormField label="Name">
+        {#snippet children()}
+          <input bind:value={workspace.createForm.name} placeholder="e.g. work" />
+        {/snippet}
+      </FormField>
+      <FormField label="Path (optional)">
+        {#snippet children()}
+          <input bind:value={workspace.createForm.path} placeholder="Leave blank for default location" />
+        {/snippet}
+      </FormField>
+    </div>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
+      <Button disabled={workspace.busy} onclick={workspace.submitCreate}>Create</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal open={workspace.dialog === 'edit'} title={`Edit workspace '${workspace.selected?.name ?? ''}'`} onClose={workspace.closeDialog}>
-  <label>Display name<input bind:value={workspace.editForm.name} /></label>
-  <label>Gateway WebSocket URL<input bind:value={workspace.editForm.gatewayUrl} placeholder="ws://myhost:8765" /></label>
-  <label class="check-row"><input type="checkbox" bind:checked={workspace.editForm.setDefault} /> Set as default workspace</label>
-  {#snippet footer()}
-    <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
-    <Button disabled={workspace.busy} onclick={workspace.submitEdit}>Save</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={workspace.dialog === 'edit'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Edit workspace '{workspace.selected?.name ?? ''}'</Dialog.Title>
+    </Dialog.Header>
+    <div class="grid gap-4">
+      <FormField label="Display name">
+        {#snippet children()}
+          <input bind:value={workspace.editForm.name} />
+        {/snippet}
+      </FormField>
+      <FormField label="Gateway WebSocket URL">
+        {#snippet children()}
+          <input bind:value={workspace.editForm.gatewayUrl} placeholder="ws://myhost:8765" />
+        {/snippet}
+      </FormField>
+      <label class="flex items-center gap-2 font-sans text-sm">
+        <input type="checkbox" bind:checked={workspace.editForm.setDefault} />
+        Set as default workspace
+      </label>
+    </div>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
+      <Button disabled={workspace.busy} onclick={workspace.submitEdit}>Save</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal open={workspace.dialog === 'remove'} title={`Remove workspace '${workspace.selected?.name ?? ''}'`} subtitle={workspace.selected?.path ?? ''} onClose={workspace.closeDialog}>
-  <label class="check-row"><input type="checkbox" bind:checked={workspace.removeForm.purge} /> Also delete workspace folder from disk</label>
-  {#snippet footer()}
-    <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
-    <Button variant="destructive" disabled={workspace.busy} onclick={workspace.submitRemove}>Remove</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={workspace.dialog === 'remove'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Remove workspace '{workspace.selected?.name ?? ''}'</Dialog.Title>
+      {#if workspace.selected?.path}
+        <Dialog.Description>{workspace.selected.path}</Dialog.Description>
+      {/if}
+    </Dialog.Header>
+    <label class="flex items-center gap-2 font-sans text-sm">
+      <input type="checkbox" bind:checked={workspace.removeForm.purge} />
+      Also delete workspace folder from disk
+    </label>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
+      <Button variant="destructive" disabled={workspace.busy} onclick={workspace.submitRemove}>Remove</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal open={workspace.dialog === 'restart'} title={`Restart workspace '${workspace.selected?.name ?? ''}'`} subtitle={workspace.selected?.path ?? ''} onClose={workspace.closeDialog}>
-  <label class="check-row">
-    <input type="checkbox" bind:checked={workspace.restartForm.admin} disabled={workspace.selected?.id === workspace.hostingWorkspaceId} />
-    Also start Admin UI on the restarted process
-  </label>
-  {#if workspace.selected?.id === workspace.hostingWorkspaceId}
+<Dialog.Root
+  open={workspace.dialog === 'restart'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Restart workspace '{workspace.selected?.name ?? ''}'</Dialog.Title>
+      {#if workspace.selected?.path}
+        <Dialog.Description>{workspace.selected.path}</Dialog.Description>
+      {/if}
+    </Dialog.Header>
+    <label class="flex items-center gap-2 font-sans text-sm">
+      <input
+        type="checkbox"
+        bind:checked={workspace.restartForm.admin}
+        disabled={workspace.selected?.id === workspace.hostingWorkspaceId}
+      />
+      Also start Admin UI on the restarted process
+    </label>
+    {#if workspace.selected?.id === workspace.hostingWorkspaceId}
+      <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+        This workspace is running the current Admin UI. Keep admin restart enabled.
+      </p>
+    {/if}
+    <Dialog.Footer>
+      <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
+      <Button disabled={workspace.busy} onclick={workspace.submitRestart}>Restart</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root
+  open={workspace.dialog === 'setup'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Setup workspace '{workspace.selected?.name ?? ''}'</Dialog.Title>
+      {#if workspace.selected?.path}
+        <Dialog.Description>{workspace.selected.path}</Dialog.Description>
+      {/if}
+    </Dialog.Header>
+    <div class="grid gap-4">
+      <FormField label="Gateway WebSocket URL">
+        {#snippet children()}
+          <input bind:value={workspace.setupForm.gatewayUrl} placeholder="ws://myhost:8765" />
+        {/snippet}
+      </FormField>
+      <details class="grid gap-3 rounded-md border bg-muted/40 p-3">
+        <summary class="cursor-pointer font-sans font-semibold">Advanced options</summary>
+        <FormField label="HTTP port override">
+          {#snippet children()}
+            <input
+              bind:value={workspace.setupForm.httpPort}
+              inputmode="numeric"
+              placeholder={`Auto-assigned: ${workspace.selected?.http_port ?? ''}`}
+            />
+          {/snippet}
+        </FormField>
+        <label class="flex items-center gap-2 font-sans text-sm">
+          <input type="checkbox" bind:checked={workspace.setupForm.skipAutostart} />
+          Skip auto-start registration
+          <CircleHelp size={14} title="By default, the server is registered to start automatically on login." />
+        </label>
+        <label class="flex items-center gap-2 font-sans text-sm">
+          <input type="checkbox" bind:checked={workspace.setupForm.startServer} />
+          Start server immediately after setup
+          <CircleHelp size={14} title="Start this workspace as soon as setup saves the gateway URL and keys." />
+        </label>
+        <label class="flex items-center gap-2 font-sans text-sm">
+          <input type="checkbox" bind:checked={workspace.setupForm.elevatedTask} />
+          Request elevated Task Scheduler entry
+          <CircleHelp
+            size={14}
+            title="Windows only. Triggers a UAC prompt on the server machine and registers the startup task with highest privileges."
+          />
+        </label>
+      </details>
+    </div>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
+      <Button disabled={workspace.busy} onclick={workspace.submitSetup}>Run setup</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root
+  open={workspace.dialog === 'setup-key'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Workspace '{workspace.selected?.name ?? ''}' configured</Dialog.Title>
+      <Dialog.Description>Save this public key before closing.</Dialog.Description>
+    </Dialog.Header>
     <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-      This workspace is running the current Admin UI. Keep admin restart enabled.
+      Save this key. It will not be shown again after setup. Paste it into the Desktop public key field when creating a gateway instance for this workspace.
     </p>
-  {/if}
-  {#snippet footer()}
-    <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
-    <Button disabled={workspace.busy} onclick={workspace.submitRestart}>Restart</Button>
-  {/snippet}
-</Modal>
+    <span class="font-sans text-sm font-medium text-muted-foreground">Workspace public key (Ed25519, base64)</span>
+    <div class="flex gap-2">
+      <input class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 font-mono text-sm" readonly value={workspace.setupPublicKey} />
+      <Button
+        class="size-9"
+        variant="outline"
+        size="icon"
+        onclick={() => workspace.copyText(workspace.setupPublicKey)}
+        aria-label="Copy public key"
+        title="Copy to clipboard"
+      >
+        {#if workspace.copiedText === workspace.setupPublicKey}
+          <Check class="text-emerald-500" size={16} />
+        {:else}
+          <Copy size={16} />
+        {/if}
+      </Button>
+    </div>
+    <Dialog.Footer>
+      <Button onclick={workspace.closeDialog}>I've saved the key</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal open={workspace.dialog === 'setup'} title={`Setup workspace '${workspace.selected?.name ?? ''}'`} subtitle={workspace.selected?.path ?? ''} onClose={workspace.closeDialog}>
-  <label>Gateway WebSocket URL<input bind:value={workspace.setupForm.gatewayUrl} placeholder="ws://myhost:8765" /></label>
-  <details>
-    <summary>Advanced options</summary>
-    <label>HTTP port override<input bind:value={workspace.setupForm.httpPort} inputmode="numeric" placeholder={`Auto-assigned: ${workspace.selected?.http_port ?? ''}`} /></label>
-    <label class="check-row">
-      <input type="checkbox" bind:checked={workspace.setupForm.skipAutostart} />
-      Skip auto-start registration
-      <CircleHelp size={14} title="By default, the server is registered to start automatically on login." />
-    </label>
-    <label class="check-row">
-      <input type="checkbox" bind:checked={workspace.setupForm.startServer} />
-      Start server immediately after setup
-      <CircleHelp size={14} title="Start this workspace as soon as setup saves the gateway URL and keys." />
-    </label>
-    <label class="check-row">
-      <input type="checkbox" bind:checked={workspace.setupForm.elevatedTask} />
-      Request elevated Task Scheduler entry
-      <CircleHelp size={14} title="Windows only. Triggers a UAC prompt on the server machine and registers the startup task with highest privileges." />
-    </label>
-  </details>
-  {#snippet footer()}
-    <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>
-    <Button disabled={workspace.busy} onclick={workspace.submitSetup}>Run setup</Button>
-  {/snippet}
-</Modal>
-
-<Modal open={workspace.dialog === 'setup-key'} title={`Workspace '${workspace.selected?.name ?? ''}' configured`} subtitle="Save this public key before closing." onClose={workspace.closeDialog}>
-  <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-    Save this key. It will not be shown again after setup. Paste it into the Desktop public key field when creating a gateway instance for this workspace.
-  </p>
-  <span class="font-sans text-sm font-medium text-muted-foreground">Workspace public key (Ed25519, base64)</span>
-  <div class="flex gap-2">
-    <input class="min-w-0 flex-1 font-mono" readonly value={workspace.setupPublicKey} />
-    <Button
-      class="size-9"
-      variant="outline"
-      size="icon"
-      onclick={() => workspace.copyText(workspace.setupPublicKey)}
-      aria-label="Copy public key"
-      title="Copy to clipboard"
-    >
-      {#if workspace.copiedText === workspace.setupPublicKey}
-        <Check class="text-emerald-500" size={16} />
-      {:else}
-        <Copy size={16} />
-      {/if}
-    </Button>
-  </div>
-  {#snippet footer()}
-    <Button onclick={workspace.closeDialog}>I've saved the key</Button>
-  {/snippet}
-</Modal>
-
-<Modal open={workspace.dialog === 'public-key'} title={`Public key - '${workspace.selected?.name ?? ''}'`} subtitle="Regenerating invalidates existing gateway trust." onClose={workspace.closeDialog}>
-  <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-    This key must be registered in every gateway instance that trusts this workspace. Regenerating it invalidates all existing gateway trust relationships.
-  </p>
-  <span class="font-sans text-sm font-medium text-muted-foreground">Workspace public key (Ed25519, base64)</span>
-  <div class="flex gap-2">
-    <input class="min-w-0 flex-1 font-mono" readonly value={workspace.publicKey} />
-    <Button
-      class="size-9"
-      variant="outline"
-      size="icon"
-      onclick={() => workspace.copyText(workspace.publicKey)}
-      aria-label="Copy public key"
-      title="Copy to clipboard"
-    >
-      {#if workspace.copiedText === workspace.publicKey}
-        <Check class="text-emerald-500" size={16} />
-      {:else}
-        <Copy size={16} />
-      {/if}
-    </Button>
-  </div>
-  {#snippet footer()}
-    <Button variant="destructive" disabled={workspace.busy} onclick={workspace.regenerateKey}>Regenerate key</Button>
-    <Button variant="outline" onclick={workspace.closeDialog}>Close</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={workspace.dialog === 'public-key'}
+  onOpenChange={(next) => { if (!next) workspace.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Public key - '{workspace.selected?.name ?? ''}'</Dialog.Title>
+      <Dialog.Description>Regenerating invalidates existing gateway trust.</Dialog.Description>
+    </Dialog.Header>
+    <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+      This key must be registered in every gateway instance that trusts this workspace. Regenerating it invalidates all existing gateway trust relationships.
+    </p>
+    <span class="font-sans text-sm font-medium text-muted-foreground">Workspace public key (Ed25519, base64)</span>
+    <div class="flex gap-2">
+      <input class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 font-mono text-sm" readonly value={workspace.publicKey} />
+      <Button
+        class="size-9"
+        variant="outline"
+        size="icon"
+        onclick={() => workspace.copyText(workspace.publicKey)}
+        aria-label="Copy public key"
+        title="Copy to clipboard"
+      >
+        {#if workspace.copiedText === workspace.publicKey}
+          <Check class="text-emerald-500" size={16} />
+        {:else}
+          <Copy size={16} />
+        {/if}
+      </Button>
+    </div>
+    <Dialog.Footer>
+      <Button variant="destructive" disabled={workspace.busy} onclick={workspace.regenerateKey}>Regenerate key</Button>
+      <Button variant="outline" onclick={workspace.closeDialog}>Close</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

@@ -1,10 +1,18 @@
 <script lang="ts">
   import { Eye, RefreshCw, Trash2 } from '@lucide/svelte';
+  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
+  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import type { CharacterRow } from '$lib/api/characters';
   import GraphRunsListCharacterCell from './GraphRunsListCharacterCell.svelte';
-  import GraphRunsTableShell from './view/GraphRunsTableShell.svelte';
+  import {
+    graphRunsMemoriesTableShellClass,
+    graphRunsNameCellClass
+  } from './shared/graph-runs-table-ui';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import {
     memoryChannelName,
     memoryCharacter,
@@ -20,7 +28,6 @@
     GRAPH_RUNS_PRIMARY_TAB_IDS
   } from './graph-runs-pure';
 
-  /* Two-way binds for Memories filters — same pattern as `GraphRunsRunsPanel`. */
   let {
     memorySearch = $bindable(''),
     memoryFilterCharacterId = $bindable(''),
@@ -64,6 +71,17 @@
     onViewJson: (row: Record<string, unknown>) => void;
     onDeleteRow: (row: Record<string, unknown>) => void;
   } = $props();
+
+  const characterOptions = $derived(
+    charactersForFilterDropdown.map((c) => ({ value: c.id, label: c.name || c.id }))
+  );
+
+  const channelOptions = $derived(
+    channelsForMemoryFilterDropdown.map((ch) => ({
+      value: String(ch.id),
+      label: ch.name || `Channel ${ch.id}`
+    }))
+  );
 </script>
 
 <div
@@ -74,12 +92,12 @@
   {hidden}
 >
   {#if memoriesError}
-    <p class="error m-0" role="alert">{memoriesError}</p>
+    <p class="error m-0 font-sans text-sm text-muted-foreground" role="alert">{memoriesError}</p>
   {/if}
 
   <div class="memories-panel">
     {#if memoriesLoading}
-      <p class="memories-hint">Loading…</p>
+      <InlineLoading label="Loading memories…" class="m-0" />
     {:else if memoryEnabled === false}
       <p class="memories-hint">
         Long-term memory is disabled or not configured for this workspace (preferences or missing models).
@@ -88,42 +106,35 @@
       <!-- Error banner above -->
     {:else}
       <div class="memories-controls">
-        <div class="memories-filters">
-          <select
+        <AdminFilterBar class="min-w-0 flex-1 items-end">
+          <AdminFilterBarSelect
+            label="Character"
             bind:value={memoryFilterCharacterId}
-            class="filter-select"
-            aria-label="Filter memories by character"
-          >
-            <option value="">All characters</option>
-            {#each charactersForFilterDropdown as c (c.id)}
-              <option value={c.id}>{c.name || c.id}</option>
-            {/each}
-          </select>
-          <select
-            bind:value={memoryFilterChannelId}
-            class="filter-select"
-            aria-label="Filter memories by channel"
-          >
-            <option value="">All channels</option>
-            {#each channelsForMemoryFilterDropdown as ch (ch.id)}
-              <option value={String(ch.id)}>{ch.name || `Channel ${ch.id}`}</option>
-            {/each}
-          </select>
-          <select bind:value={memoryFilterSource} class="filter-select" aria-label="Filter memories by source">
-            <option value="">All sources</option>
-            {#each sourcesForMemoryFilterDropdown as st (st.value)}
-              <option value={st.value}>{st.label}</option>
-            {/each}
-          </select>
-          <input
-            bind:value={memorySearch}
-            class="memory-search"
-            type="search"
-            placeholder="Search memory text, id, source…"
-            autocomplete="off"
-            aria-label="Search memories"
+            placeholder="All characters"
+            class="min-w-[10rem]"
+            options={characterOptions}
           />
-        </div>
+          <AdminFilterBarSelect
+            label="Channel"
+            bind:value={memoryFilterChannelId}
+            placeholder="All channels"
+            class="min-w-[10rem]"
+            options={channelOptions}
+          />
+          <AdminFilterBarSelect
+            label="Source"
+            bind:value={memoryFilterSource}
+            placeholder="All sources"
+            class="min-w-[10rem]"
+            options={sourcesForMemoryFilterDropdown}
+          />
+          <AdminFilterBarSearch
+            label="Search"
+            bind:value={memorySearch}
+            placeholder="Search memory text, id, source…"
+            class="min-w-[12rem] flex-1"
+          />
+        </AdminFilterBar>
         <div class="memories-actions">
           {#if memoriesTotalCount > 0}
             <Button
@@ -162,84 +173,77 @@
       {:else if visibleMemoriesRows.length === 0}
         <p class="memories-hint">No memories match the current filters.</p>
       {:else}
-        <GraphRunsTableShell class="memories-table-wrap">
-          <table class="memories-table">
-            <thead>
+        <AdminTableShell density="dense" class={graphRunsMemoriesTableShellClass}>
+          <thead>
+            <tr>
+              <th>Updated</th>
+              <th>Created</th>
+              <th>Character</th>
+              <th>Channel</th>
+              <th>Memory</th>
+              <th>Shared</th>
+              <th>Source</th>
+              <th>Id</th>
+              <th>Payload</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleMemoriesRows as row, idx (memoryStableKey(row, idx))}
+              {@const updated = memoryDateDisplay(memoryUpdatedRaw(row))}
+              {@const created = memoryDateDisplay(memoryCreatedRaw(row))}
+              {@const memCharacter = memoryCharacter(row, characterMap, channelById)}
               <tr>
-                <th>Updated</th>
-                <th>Created</th>
-                <th>Character</th>
-                <th>Channel</th>
-                <th>Memory</th>
-                <th>Shared</th>
-                <th>Source</th>
-                <th>Id</th>
-                <th>Payload</th>
-                <th>Actions</th>
+                <td class="memories-date-cell" title={updated.title}>
+                  <span>{updated.date}</span>
+                  <span>{updated.time}</span>
+                </td>
+                <td class="memories-date-cell" title={created.title}>
+                  <span>{created.date}</span>
+                  <span>{created.time}</span>
+                </td>
+                <GraphRunsListCharacterCell photo={memCharacter.photo} name={memCharacter.name} />
+                <td class={graphRunsNameCellClass}>{memoryChannelName(row, channelById)}</td>
+                <td class="memories-text-cell">{memoryPrimaryText(row)}</td>
+                <td>{memorySharedLabel(row)}</td>
+                <td>{memorySourceLabel(row)}</td>
+                <td class="font-mono memories-id-cell">{memoryId(row) || '—'}</td>
+                <td class="memories-payload-cell">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 gap-1 px-2 text-xs shadow-none"
+                    onclick={() => onViewJson(row)}
+                  >
+                    <Eye size={14} aria-hidden="true" />
+                    View JSON
+                  </Button>
+                </td>
+                <td class="memories-actions-cell">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    class="size-[30px] text-muted-foreground hover:text-destructive"
+                    disabled={memoryActionBusy || !memoryId(row)}
+                    title={memoryId(row) ? 'Delete memory' : 'Cannot delete: missing memory id'}
+                    aria-label="Delete memory"
+                    onclick={() => onDeleteRow(row)}
+                  >
+                    <Trash2 size={15} aria-hidden="true" />
+                  </Button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {#each visibleMemoriesRows as row, idx (memoryStableKey(row, idx))}
-                {@const updated = memoryDateDisplay(memoryUpdatedRaw(row))}
-                {@const created = memoryDateDisplay(memoryCreatedRaw(row))}
-                {@const memCharacter = memoryCharacter(row, characterMap, channelById)}
-                <tr>
-                  <td class="memories-date-cell" title={updated.title}>
-                    <span>{updated.date}</span>
-                    <span>{updated.time}</span>
-                  </td>
-                  <td class="memories-date-cell" title={created.title}>
-                    <span>{created.date}</span>
-                    <span>{created.time}</span>
-                  </td>
-                  <GraphRunsListCharacterCell photo={memCharacter.photo} name={memCharacter.name} />
-                  <td class="runs-list-name-cell">{memoryChannelName(row, channelById)}</td>
-                  <td class="memories-text-cell">{memoryPrimaryText(row)}</td>
-                  <td>{memorySharedLabel(row)}</td>
-                  <td>{memorySourceLabel(row)}</td>
-                  <td class="mono memories-id-cell">{memoryId(row) || '—'}</td>
-                  <td class="memories-payload-cell">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      class="h-7 gap-1 px-2 text-xs shadow-none"
-                      onclick={() => onViewJson(row)}
-                    >
-                      <Eye size={14} aria-hidden="true" />
-                      View JSON
-                    </Button>
-                  </td>
-                  <td class="memories-actions-cell">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      class="size-[30px] text-muted-foreground hover:text-destructive"
-                      disabled={memoryActionBusy || !memoryId(row)}
-                      title={memoryId(row) ? 'Delete memory' : 'Cannot delete: missing memory id'}
-                      aria-label="Delete memory"
-                      onclick={() => onDeleteRow(row)}
-                    >
-                      <Trash2 size={15} aria-hidden="true" />
-                    </Button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </GraphRunsTableShell>
+            {/each}
+          </tbody>
+        </AdminTableShell>
       {/if}
     {/if}
   </div>
 </div>
 
 <style>
-  p {
-    color: var(--muted-foreground, #64748b);
-    font-size: 13px;
-  }
-
   .memories-panel {
     display: flex;
     flex-direction: column;
@@ -256,18 +260,9 @@
   .memories-controls {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-end;
     gap: 12px;
     row-gap: 12px;
-  }
-
-  .memories-filters {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    align-items: center;
-    flex: 1 1 280px;
-    min-width: 0;
   }
 
   .memories-actions {
@@ -277,44 +272,6 @@
     gap: 10px;
     flex: 0 0 auto;
     margin-left: auto;
-  }
-
-  .memories-filters select,
-  .memories-filters input {
-    border: 1px solid var(--border, #d4d4d8);
-    border-radius: 6px;
-    background: var(--background, #fff);
-    color: inherit;
-    font: inherit;
-  }
-
-  .memories-filters input {
-    min-width: 0;
-    padding: 8px 10px;
-  }
-
-  .memories-filters select {
-    min-width: 0;
-    padding: 8px 10px;
-    cursor: pointer;
-  }
-
-  .filter-select {
-    flex: 0 1 200px;
-    min-width: min(100%, 160px);
-    max-width: 260px;
-  }
-
-  .memory-search {
-    flex: 1 1 280px;
-    min-width: min(100%, 200px);
-    max-width: 480px;
-  }
-
-  .runs-list-name-cell {
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .memories-date-cell {
@@ -350,17 +307,8 @@
     min-width: 64px;
   }
 
-  :global(.gr-table-shell.memories-table-wrap) :global(table) {
+  :global(.admin-table-shell-dense.memories-table-wrap) :global(table) {
     white-space: normal;
     min-width: 1120px;
-  }
-
-  .mono {
-    font-family:
-      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  }
-
-  .error {
-    color: var(--muted-foreground, #64748b);
   }
 </style>

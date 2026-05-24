@@ -1,8 +1,6 @@
 <script lang="ts">
   import { cn } from '$lib/utils';
-
-  export type ToastKind = 'success' | 'error' | 'info' | 'warning';
-  export type ToastMessage = { kind: ToastKind; message: string } | null;
+  import type { ToastMessage } from './toast-types';
 
   let { toast }: { toast: ToastMessage } = $props();
 </script>

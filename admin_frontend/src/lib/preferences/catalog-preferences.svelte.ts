@@ -1,48 +1,13 @@
-import { goto } from '$app/navigation';
-import { page } from '$app/state';
 import { PREF_KEYS, type CatalogTabPreference } from './keys';
-import { readSessionString, writeSessionString } from './storage';
+import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
-function normalizeTab(raw: string | null): CatalogTabPreference | null {
-  return raw === 'providers' || raw === 'models' ? raw : null;
-}
+const ALLOWED: readonly CatalogTabPreference[] = ['providers', 'models'] as const;
 
-export function createCatalogPreferences() {
-  let activeTab = $state<CatalogTabPreference>('providers');
-
-  function initialize() {
-    activeTab =
-      normalizeTab(page.url.searchParams.get('tab')) ??
-      normalizeTab(readSessionString(PREF_KEYS.catalogActiveTab)) ??
-      'providers';
-  }
-
-  async function setActiveTab(tab: CatalogTabPreference, params: Record<string, string> = {}) {
-    activeTab = tab;
-    writeSessionString(PREF_KEYS.catalogActiveTab, tab);
-
-    const nextUrl = new URL(page.url);
-    nextUrl.searchParams.set('tab', tab);
-    for (const key of ['provider_id', 'model_kind', 'model_class', 'hosting']) {
-      nextUrl.searchParams.delete(key);
-    }
-    for (const [key, value] of Object.entries(params)) {
-      if (value.trim()) {
-        nextUrl.searchParams.set(key, value);
-      }
-    }
-    await goto(`${nextUrl.pathname}${nextUrl.search}`, {
-      keepFocus: true,
-      noScroll: true,
-      replaceState: true
-    });
-  }
-
-  return {
-    get activeTab() {
-      return activeTab;
-    },
-    initialize,
-    setActiveTab
-  };
+export function createCatalogPreferences(): TabPreferences<CatalogTabPreference> {
+  return createTabPreferences<CatalogTabPreference>({
+    storageKey: PREF_KEYS.catalogActiveTab,
+    defaultTab: 'providers',
+    allowed: ALLOWED,
+    urlParamsToReset: ['provider_id', 'model_kind', 'model_class', 'hosting', 'sort', 'sort_dir']
+  });
 }

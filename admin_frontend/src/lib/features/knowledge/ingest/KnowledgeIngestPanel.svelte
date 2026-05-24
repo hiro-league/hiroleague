@@ -1,7 +1,5 @@
 <script lang="ts">
   import {
-    ArrowDown,
-    ArrowUp,
     Ban,
     Check,
     CircleCheck,
@@ -14,6 +12,8 @@
     RefreshCw,
     Search
   } from '@lucide/svelte';
+  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import CreatableCategorySelect from '$lib/features/knowledge/CreatableCategorySelect.svelte';
@@ -22,7 +22,7 @@
   import type { KnowledgeScannedFile } from '$lib/api/knowledge';
   import KnowledgeFilePreviewDialog from '$lib/features/knowledge/shared/file-preview/KnowledgeFilePreviewDialog.svelte';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
-  import { fileName, formatBytes, jobElapsed, optionalInt, relativeFolderPath, type ScannedFileSortColumn } from '$lib/features/knowledge/shared/knowledge-pure';
+  import { fileName, formatBytes, jobElapsed, optionalInt, relativeFolderPath } from '$lib/features/knowledge/shared/knowledge-pure';
   import {
     KNOWLEDGE_FIELD_LABEL,
     KNOWLEDGE_FIELD_LABEL_TEXT,
@@ -30,9 +30,9 @@
     KNOWLEDGE_METADATA_SHELL,
     KNOWLEDGE_SECTION_CARD,
     KNOWLEDGE_SELECT,
-    KNOWLEDGE_TABLE,
     KNOWLEDGE_TABLE_HEAD
   } from '$lib/features/knowledge/shared/knowledge-ui';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { cn } from '$lib/utils';
 
   interface Props {
@@ -66,30 +66,8 @@
     }
   });
 
-  function fileSortAria(column: ScannedFileSortColumn): 'ascending' | 'descending' | 'none' {
-    if (ingest.fileSortColumn !== column) return 'none';
-    return ingest.fileSortDirection === 'asc' ? 'ascending' : 'descending';
-  }
+  const fileSort = $derived(ingest.fileSort);
 </script>
-
-{#snippet sortableHeader(column: ScannedFileSortColumn, label: string)}
-  <th class="px-3 py-2" aria-sort={fileSortAria(column)}>
-    <button
-      type="button"
-      class="inline-flex items-center gap-1 font-inherit uppercase hover:text-foreground"
-      onclick={() => ingest.toggleFileSort(column)}
-    >
-      {label}
-      {#if ingest.fileSortColumn === column}
-        {#if ingest.fileSortDirection === 'asc'}
-          <ArrowUp size={12} aria-hidden="true" />
-        {:else}
-          <ArrowDown size={12} aria-hidden="true" />
-        {/if}
-      {/if}
-    </button>
-  </th>
-{/snippet}
 
 <section class={KNOWLEDGE_SECTION_CARD}>
   <div class="grid gap-4">
@@ -158,7 +136,7 @@
       </span>
     </div>
 
-    <div class="h-[290px] overflow-auto rounded-md border">
+    <div class="h-[290px]">
       {#if ingest.files.length === 0}
         {#if ingest.folder.trim() && !ingest.hasScanned}
           <div class="flex h-full min-h-[290px] flex-col items-center justify-center gap-3 px-3 py-8 text-center">
@@ -182,7 +160,7 @@
           No supported files in this folder
         </div>
       {:else}
-        <table class={KNOWLEDGE_TABLE}>
+        <AdminTableShell stickyHead maxBodyHeight="290px" class="h-full">
           <thead class={KNOWLEDGE_TABLE_HEAD}>
             <tr>
               <th class="w-10 px-3 py-2">
@@ -196,11 +174,11 @@
                   onchange={ingest.toggleSelectAllSupported}
                 />
               </th>
-              {@render sortableHeader('filename', 'Filename')}
-              {@render sortableHeader('relative_path', 'Relative path')}
-              {@render sortableHeader('size', 'Size')}
-              {@render sortableHeader('ext', 'Ext')}
-              {@render sortableHeader('state', 'State')}
+              <AdminTableHeaderCell column="filename" sort={fileSort}>Filename</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="relative_path" sort={fileSort}>Relative path</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="size" sort={fileSort}>Size</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="ext" sort={fileSort}>Ext</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="state" sort={fileSort}>State</AdminTableHeaderCell>
             </tr>
           </thead>
           <tbody>
@@ -254,7 +232,7 @@
               </tr>
             {/each}
           </tbody>
-        </table>
+        </AdminTableShell>
       {/if}
     </div>
     {#if ingest.supportedFiles.length > 0}
@@ -370,9 +348,12 @@
           </div>
         {/if}
         {#if Object.keys(ingest.job.errors).length > 0}
-          <details class="text-xs text-destructive">
-            <summary>View errors</summary>
-            <pre class="mt-2 whitespace-pre-wrap rounded-md bg-destructive/10 p-2">{JSON.stringify(ingest.job.errors, null, 2)}</pre>
+          <details class="text-xs">
+            <summary class="text-destructive">View errors</summary>
+            <InlineDestructiveAlert
+              class="mt-2 whitespace-pre-wrap font-mono text-xs"
+              message={JSON.stringify(ingest.job.errors, null, 2)}
+            />
           </details>
         {/if}
       </div>
@@ -409,9 +390,12 @@
                 </Button>
               {/if}
               {#if ingest.activeErrorsJobId === item.id}
-                <details class="basis-full text-destructive" open>
-                  <summary>Errors</summary>
-                  <pre class="mt-2 whitespace-pre-wrap rounded-md bg-destructive/10 p-2">{JSON.stringify(item.errors, null, 2)}</pre>
+                <details class="basis-full text-xs" open>
+                  <summary class="text-destructive">Errors</summary>
+                  <InlineDestructiveAlert
+                    class="mt-2 whitespace-pre-wrap font-mono text-xs"
+                    message={JSON.stringify(item.errors, null, 2)}
+                  />
                 </details>
               {/if}
             </div>

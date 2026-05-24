@@ -11,6 +11,7 @@ export const PREF_KEYS = {
   chatChannelsShowAgentTelemetry: 'hiro.admin.chatChannels.showAgentTelemetry',
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab',
+  knowledgeActiveTab: 'hiro.admin.knowledge.activeTab',
   /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
   graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
   knowledgeLastFolderPrefix: 'hiro.admin.knowledge.lastFolder',
@@ -24,3 +25,4 @@ export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type CatalogTabPreference = 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
+export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';

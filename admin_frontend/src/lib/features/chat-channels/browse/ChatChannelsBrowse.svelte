@@ -1,15 +1,14 @@
 <script lang="ts">
   import { Edit, MessageSquare, Plus, RefreshCw, Trash2 } from '@lucide/svelte';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
-  import InlineDestructiveAlert from '$lib/features/chat-channels/shared/InlineDestructiveAlert.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import MutedStatusLine from '$lib/features/chat-channels/shared/MutedStatusLine.svelte';
-  import {
-    chatChannelsTableDataRowClass,
-    chatChannelsTableHeaderRowClass
-  } from '$lib/features/chat-channels/shared/chat-channel-table-classes';
 
   type Props = {
     channels: ChatChannelRow[];
@@ -32,6 +31,9 @@
     onEditChannel,
     onDeleteChannel
   }: Props = $props();
+
+  const CHAT_CHANNELS_GRID =
+    '72px minmax(0,1fr) 90px minmax(0,1.1fr) minmax(0,1fr) 160px 150px';
 </script>
 
 <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
@@ -49,25 +51,25 @@
   </div>
 
   {#if channelsLoading}
-    <MutedStatusLine text="Loading chat channels..." />
+    <InlineLoading label="Loading chat channels…" />
   {:else if channelsError}
     <InlineDestructiveAlert title="Could not load chat channels" message={channelsError} />
   {:else if channels.length === 0}
     <MutedStatusLine text="No conversation channels yet." />
   {:else}
-    <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[1120px]">
-        <div class={chatChannelsTableHeaderRowClass}>
-          <span>ID</span>
-          <span>Name</span>
-          <span>Type</span>
-          <span>Description</span>
-          <span>Character</span>
-          <span>Last activity</span>
-          <span>Actions</span>
-        </div>
+    <AdminTableShell layout="grid" minWidth={1120} gridColumns={CHAT_CHANNELS_GRID}>
+      {#snippet headRow()}
+        <span>ID</span>
+        <span>Name</span>
+        <span>Type</span>
+        <span>Description</span>
+        <span>Character</span>
+        <span>Last activity</span>
+        <span>Actions</span>
+      {/snippet}
+      {#snippet body()}
         {#each channels as row (row.id)}
-          <div class={chatChannelsTableDataRowClass}>
+          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={CHAT_CHANNELS_GRID}>
             <span class="font-mono text-xs text-muted-foreground">{row.id}</span>
             <span class="flex min-w-0 items-center gap-2">
               {#if row.photo_data_url}
@@ -107,7 +109,7 @@
             </span>
           </div>
         {/each}
-      </div>
-    </div>
+      {/snippet}
+    </AdminTableShell>
   {/if}
 </section>

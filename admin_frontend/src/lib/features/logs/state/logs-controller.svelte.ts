@@ -13,7 +13,7 @@ import {
 } from '$lib/api/logs';
 import { openWorkspaceFolder } from '$lib/api/server';
 import type { Notify } from '$lib/features/server/types';
-import type { LogsPreferences } from './logs-preferences.svelte';
+import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 import {
   logIdFromRowKey,
   rowPassesFilters,

@@ -184,6 +184,14 @@ export const DEFAULT_SCANNED_FILE_SORT: {
   direction: 'asc'
 };
 
+export const SCANNED_FILE_SORT_COLUMNS = [
+  'filename',
+  'relative_path',
+  'size',
+  'ext',
+  'state'
+] as const satisfies readonly ScannedFileSortColumn[];
+
 const LOCALE_OPTS: Intl.CollatorOptions = { sensitivity: 'base', numeric: true };
 
 function compareText(a: string, b: string): number {
@@ -255,6 +263,19 @@ export const DEFAULT_DOCUMENT_SORT: {
   column: 'ingested_at',
   direction: 'desc'
 };
+
+export const DOCUMENT_SORT_COLUMNS = [
+  'title',
+  'owner',
+  'category',
+  'tags',
+  'chunks',
+  'ingested_at',
+  'type',
+  'size',
+  'path',
+  'status'
+] as const satisfies readonly DocumentSortColumn[];
 
 function parseIsoMs(iso: string | null | undefined): number | null {
   if (!iso) return null;

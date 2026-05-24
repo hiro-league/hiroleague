@@ -1,4 +1,3 @@
-import { page } from '$app/state';
 import { browser } from '$app/environment';
 import { untrack } from 'svelte';
 import {
@@ -27,10 +26,9 @@ import {
   recordingBlobToBase64,
   stopMediaRecorderAndDetach
 } from '$lib/features/chat-channels/shared/chat-channel-recording';
-import {
-  readChatChannelsNavFromLocation,
-  persistChatChannelsNavToUrl
-} from '$lib/features/chat-channels/state/chat-channels-nav';
+import { createChatChannelsPreferences } from '$lib/preferences/chat-channels-preferences.svelte';
+import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
+import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
 import { createChatChannelsDialogs } from '$lib/features/chat-channels/state/chat-channels-dialogs.svelte';
 import {
   cursorFromMessages,
@@ -52,12 +50,10 @@ import {
   characterResolvedVoiceReplyControlHint
 } from '$lib/features/characters/character-resolved-voice';
 
-type NotifyKind = 'success' | 'error' | 'info' | 'warning';
-
 /** Chat channels Messages tab orchestration — URL prefs, REST, mic capture, modal wiring. Derived fields use getters per Svelte POJO-controller pattern. */
 export function createChatChannelsPageController() {
-  let toast = $state<{ kind: NotifyKind; message: string } | null>(null);
-  let activeTab = $state<ChatChannelsTabPreference>('channels');
+  const toasts = createToastNotifier();
+  const nav = createChatChannelsPreferences();
   let selectedChannelId = $state<string | null>(null);
   let channels = $state<ChatChannelRow[]>([]);
   let characters = $state<CharacterRow[]>([]);
@@ -111,6 +107,14 @@ export function createChatChannelsPageController() {
     })
   );
 
+  const unsaved = createUnsavedGuard(
+    () => channelFormDirty,
+    () => formOpen,
+    (next) => {
+      if (!next) finalizeChannelForm();
+    }
+  );
+
   const selectedChannel = $derived(
     selectedChannelId
       ? (channels.find((channel) => String(channel.id) === selectedChannelId) ?? null)
@@ -153,7 +157,7 @@ export function createChatChannelsPageController() {
   });
 
   const liveUpdatesEligible = $derived(
-    activeTab === 'messages' &&
+    nav.activeTab === 'messages' &&
       selectedChannelId !== null &&
       documentVisible &&
       messagesSectionMounted
@@ -183,12 +187,7 @@ export function createChatChannelsPageController() {
     untrack(stopPolling);
   });
 
-  function notify(kind: NotifyKind, message: string) {
-    toast = { kind, message };
-    window.setTimeout(() => {
-      toast = null;
-    }, 4500);
-  }
+  const notify = toasts.notify;
 
   function currentPollIntervalMs() {
     const idx = Math.min(Math.max(pollErrorStreak - 1, 0), BACKOFF_STEPS_MS.length - 1);
@@ -363,15 +362,14 @@ export function createChatChannelsPageController() {
     messages = mergeChatHistoryMessages(messages, [message]);
   }
 
-  /** Restore tab/channel from ``readChatChannelsNavFromLocation``. */
+  /** Restore tab/channel from `createChatChannelsPreferences().initialize()`. */
   function initializeNavigation() {
-    const { tab, channelId } = readChatChannelsNavFromLocation(page.url.searchParams);
-    activeTab = tab;
-    selectedChannelId = channelId;
+    nav.initialize();
+    selectedChannelId = nav.readChannelIdFromLocation();
   }
 
   async function syncUrl() {
-    await persistChatChannelsNavToUrl(page.url, activeTab, selectedChannelId);
+    await nav.syncNav(selectedChannelId);
   }
 
   function ensureSelectedChannel(): string | null {
@@ -495,7 +493,7 @@ export function createChatChannelsPageController() {
   async function refreshCurrent() {
     resetPollErrors();
     await loadChannels();
-    if (activeTab === 'messages') {
+    if (nav.activeTab === 'messages') {
       ensureSelectedChannel();
       await syncUrl();
       await loadMessages();
@@ -503,26 +501,25 @@ export function createChatChannelsPageController() {
   }
 
   async function setActiveTab(tab: ChatChannelsTabPreference) {
-    activeTab = tab;
     if (tab === 'messages') {
       ensureSelectedChannel();
-      await syncUrl();
+      await nav.setActiveTab(tab, selectedChannelId);
       await loadMessages();
       return;
     }
-    await syncUrl();
+    await nav.setActiveTab(tab);
   }
 
   async function openMessages(row: ChatChannelRow) {
-    activeTab = 'messages';
-    if (selectedChannelId !== String(row.id)) {
+    const id = String(row.id);
+    if (selectedChannelId !== id) {
       messages = [];
       tailCursor = null;
       agentTyping = false;
       agentVoicePendingSince = null;
     }
-    selectedChannelId = String(row.id);
-    await syncUrl();
+    selectedChannelId = id;
+    await nav.setActiveTab('messages', id);
     await loadMessages();
   }
 
@@ -560,33 +557,30 @@ export function createChatChannelsPageController() {
     formOpen = true;
   }
 
-  /** Stack discard modal above editor when closing with dirty form. */
+  /** Stack shared unsaved guard above editor when closing with a dirty form. */
   function channelFormBeforeClose(_source: 'backdrop' | 'escape' | 'header'): boolean {
     void _source;
-    if (dlg.discardConfirmOpen) return false;
     if (!channelFormDirty) return true;
-    dlg.openDiscardConfirmModal();
+    if (unsaved.unsavedModalOpen) return false;
+    void requestChannelFormDiscardConfirm();
     return false;
+  }
+
+  async function requestChannelFormDiscardConfirm() {
+    if (await unsaved.confirmDiscard()) {
+      finalizeChannelForm();
+    }
   }
 
   function finalizeChannelForm() {
     formOpen = false;
-    dlg.closeDiscardConfirmModal();
     formBaseline = null;
     pendingPhotoDataUrl = null;
   }
 
-  function cancelChannelFormExplicit() {
+  async function cancelChannelFormExplicit() {
     if (busy) return;
-    finalizeChannelForm();
-  }
-
-  function keepEditingAfterDismissAttempt() {
-    dlg.closeDiscardConfirmModal();
-  }
-
-  function discardUnsavedChannelFormAndClose() {
-    dlg.closeDiscardConfirmModal();
+    if (channelFormDirty && !(await unsaved.confirmDiscard())) return;
     finalizeChannelForm();
   }
 
@@ -832,7 +826,7 @@ export function createChatChannelsPageController() {
     initializeNavigation();
     await loadCharacters();
     await loadChannels();
-    if (activeTab === 'messages') {
+    if (nav.activeTab === 'messages') {
       ensureSelectedChannel();
       await syncUrl();
       await loadMessages();
@@ -865,8 +859,6 @@ export function createChatChannelsPageController() {
     channelFormBeforeClose,
     finalizeChannelForm,
     cancelChannelFormExplicit,
-    keepEditingAfterDismissAttempt,
-    discardUnsavedChannelFormAndClose,
 
     submitForm,
 
@@ -884,10 +876,13 @@ export function createChatChannelsPageController() {
     disposeActiveRecording,
 
     get toast() {
-      return toast;
+      return toasts.toast;
+    },
+    get unsaved() {
+      return unsaved;
     },
     get activeTab() {
-      return activeTab;
+      return nav.activeTab;
     },
 
     /** Messages panel two-way binds read/write `$state` in this controller via getters/setters. */
@@ -991,10 +986,6 @@ export function createChatChannelsPageController() {
     },
     get composingBusy(): boolean {
       return composingBusy;
-    },
-
-    get discardConfirmOpen(): boolean {
-      return dlg.discardConfirmOpen;
     },
 
     get modalChannelPhotoSrc(): string | null {

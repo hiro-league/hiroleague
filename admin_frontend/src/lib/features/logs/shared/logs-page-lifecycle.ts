@@ -1,5 +1,5 @@
 import type { LogsPageController } from '../state/logs-controller.svelte';
-import type { LogsPreferences } from '../state/logs-preferences.svelte';
+import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 
 /**
  * Applied to ``document.documentElement`` while the logs page is mounted so the app shell

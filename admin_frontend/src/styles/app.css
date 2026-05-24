@@ -157,3 +157,9 @@
       var(--card);
   }
 }
+
+/* Logs route: lock document scroll while mounted (class toggled in logs-page-lifecycle.ts). */
+html.admin-logs-no-document-scroll,
+html.admin-logs-no-document-scroll body {
+  overflow: hidden;
+}

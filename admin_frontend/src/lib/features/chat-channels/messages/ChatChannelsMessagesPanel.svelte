@@ -34,10 +34,12 @@
     messageAgentMetadata,
     telemetryBreakdownTitle
   } from '$lib/features/chat-channels/messages/agent-message-meta';
-  import InlineDestructiveAlert from '$lib/features/chat-channels/shared/InlineDestructiveAlert.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import MutedStatusLine from '$lib/features/chat-channels/shared/MutedStatusLine.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { cn } from '$lib/utils';
+  import { ADMIN_SELECT, ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
 
   const SCROLL_BOTTOM_THRESHOLD_PX = 32;
 
@@ -312,7 +314,7 @@
     <div class="flex shrink-0 flex-wrap items-center gap-2">
       {#if channels.length > 0}
         <select
-          class="h-9 min-w-56 rounded-md border border-input bg-background px-3 font-sans text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class={cn(ADMIN_SELECT, 'min-w-56')}
           bind:value={selectedChannelId}
           onchange={() => onChannelChange()}
           aria-label="Message channel"
@@ -365,7 +367,7 @@
 
   <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
     {#if channelsLoading}
-      <MutedStatusLine text="Loading chat channels..." class="shrink-0" />
+      <InlineLoading label="Loading chat channels…" class="shrink-0" />
     {:else if channelsError}
       <InlineDestructiveAlert class="shrink-0" title="Could not load chat channels" message={channelsError} />
     {:else if channels.length === 0}
@@ -374,7 +376,7 @@
         class="shrink-0"
       />
     {:else if messagesLoading}
-      <MutedStatusLine text="Loading messages..." class="shrink-0" />
+      <InlineLoading label="Loading messages…" class="shrink-0" />
     {:else if messagesError}
       <InlineDestructiveAlert class="shrink-0" title="Could not load messages" message={messagesError} />
     {:else}
@@ -586,7 +588,7 @@
               <div class="flex flex-wrap items-stretch gap-2">
                 <textarea
                   bind:this={draftTextareaEl}
-                  class="focus-visible:ring-ring min-h-11 flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-snug outline-none focus-visible:ring-2 md:min-w-[16rem]"
+                  class={cn(ADMIN_TEXTAREA, 'flex-1 md:min-w-[16rem]')}
                   placeholder="Send as workspace owner… (Enter to send, Shift+Enter for new line)"
                   rows="2"
                   bind:value={draftMessage}

@@ -9,13 +9,14 @@ import {
 } from '$lib/api/knowledge';
 import {
   DEFAULT_DOCUMENT_SORT,
+  DOCUMENT_SORT_COLUMNS,
   KNOWLEDGE_CHUNK_FETCH_SIZE,
   KNOWLEDGE_CHUNK_PAGE_SIZE,
   optionalInt,
   sortDocuments,
-  type DocumentSortColumn,
-  type DocumentSortDirection
+  type DocumentSortColumn
 } from '../shared/knowledge-pure';
+import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
 function tagsFromChunks(chunks: KnowledgeChunk[]): string[] {
@@ -54,21 +55,25 @@ export function createKnowledgeBrowseModel(deps: {
   let chunkNextOffset = $state<string | null>(null);
   let loadingMoreChunks = $state(false);
   let filterDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let documentSortColumn = $state<DocumentSortColumn>(DEFAULT_DOCUMENT_SORT.column);
-  let documentSortDirection = $state<DocumentSortDirection>(DEFAULT_DOCUMENT_SORT.direction);
+
+  const documentSort = useTableSort<DocumentSortColumn>({
+    defaultBy: DEFAULT_DOCUMENT_SORT.column,
+    defaultDirection: DEFAULT_DOCUMENT_SORT.direction,
+    allowed: DOCUMENT_SORT_COLUMNS
+  });
 
   const sortedDocuments = $derived(
-    sortDocuments(documents, documentSortColumn, documentSortDirection, deps.options.categoryLabel)
+    sortDocuments(documents, documentSort.sortBy, documentSort.direction, deps.options.categoryLabel)
   );
 
   const browseSubcategories = $derived(
     deps.options.categories.filter((category) => category.parent_id === optionalInt(browseCategoryId))
   );
-  const activeDocumentSubcategories = $derived(
-    activeDocument
-      ? deps.options.categories.filter((category) => category.parent_id === activeDocument.category_id)
-      : []
-  );
+  const activeDocumentSubcategories = $derived.by(() => {
+    const doc = activeDocument;
+    if (!doc) return [];
+    return deps.options.categories.filter((category) => category.parent_id === doc.category_id);
+  });
 
   function queueLoadDocuments() {
     if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
@@ -248,15 +253,6 @@ export function createKnowledgeBrowseModel(deps: {
     }
   }
 
-  function toggleDocumentSort(column: DocumentSortColumn) {
-    if (documentSortColumn === column) {
-      documentSortDirection = documentSortDirection === 'asc' ? 'desc' : 'asc';
-      return;
-    }
-    documentSortColumn = column;
-    documentSortDirection = 'asc';
-  }
-
   return {
     get browseStatus() {
       return browseStatus;
@@ -333,11 +329,8 @@ export function createKnowledgeBrowseModel(deps: {
     get sortedDocuments() {
       return sortedDocuments;
     },
-    get documentSortColumn() {
-      return documentSortColumn;
-    },
-    get documentSortDirection() {
-      return documentSortDirection;
+    get documentSort() {
+      return documentSort;
     },
     get documentTotal() {
       return documentTotal;
@@ -376,7 +369,6 @@ export function createKnowledgeBrowseModel(deps: {
     deleteDocument,
     reingestActiveDocument,
     saveActiveMetadata,
-    toggleDocumentSort,
     updateActiveDocumentDraft
   };
 }

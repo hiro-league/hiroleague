@@ -169,4 +169,5 @@ Short pitfalls seen on complex admin pages (e.g. heavy forms + `.svelte.ts` cont
 ## Related docs
 
 - Admin UI overview: `docs/admin-ui.md`
+- **Cross-page shared-layer refactor plan:** `docs/admin-frontend-refactor-plan.md` — the per-page rules in this skill are complemented by an app-wide plan to extract shared primitives (toast notifier, page header, tab strip, inline alerts, active-providers panel, catalog-reload helper, single unsaved guard). Read it before starting any cross-page refactor work.
 - Dev environment setup (if tooling changes): `mintdocs/build/first-time-setup.mdx`

@@ -6,6 +6,7 @@
   import LogExtraSegments from './LogExtraSegments.svelte';
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import { logLevelAccentClass, logModuleTextClass } from './shared/logs-classes';
   import {
@@ -62,8 +63,8 @@
 
 <div class="min-h-0 min-w-0 flex-1 overflow-hidden rounded-md border bg-card/70">
   {#if ctrl.loading}
-    <div class="grid h-full min-h-80 place-items-center font-sans text-sm text-muted-foreground">
-      Loading logs...
+    <div class="grid h-full min-h-80 place-items-center">
+      <InlineLoading label="Loading logs…" />
     </div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->

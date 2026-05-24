@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -34,6 +35,8 @@ class FastEmbedBackend:
         self.cache_dir = cache_dir
         self._model: Any | None = None
         self._dimension: int | None = None
+        # FastEmbed lazy_load is not thread-safe during first model init (tokenizer race).
+        self._init_lock = threading.Lock()
 
     @property
     def dimension(self) -> int:
@@ -45,7 +48,11 @@ class FastEmbedBackend:
         return self._dimension
 
     def _ensure_model(self) -> Any:
-        if self._model is None:
+        if self._model is not None:
+            return self._model
+        with self._init_lock:
+            if self._model is not None:
+                return self._model
             from fastembed import TextEmbedding
 
             with warnings.catch_warnings():
@@ -53,11 +60,12 @@ class FastEmbedBackend:
                     "ignore",
                     message="The model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 now uses mean pooling.*",
                 )
+                # Eager load inside the lock; lazy_load has a tokenizer init race under concurrency.
                 self._model = TextEmbedding(
                     model_name=self.model_name,
                     cache_dir=str(self.cache_dir) if self.cache_dir is not None else None,
                     threads=min(os.cpu_count() or 1, 4),
-                    lazy_load=True,
+                    lazy_load=False,
                 )
         return self._model
 

@@ -1,37 +1,86 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  /** Thin composition root: delegates orchestration to `state/graph-runs-controller.svelte.ts` (step #3). */
-  import { createGraphRunsPageController } from './state/graph-runs-controller.svelte';
-  /** Presentational slices (step #2). */
+  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import Button from '$lib/components/ui/button.svelte';
+  import { ADMIN_TABLIST_SHELL } from '$lib/styling/admin-tokens';
   import GraphRunsDetailPanel from './GraphRunsDetailPanel.svelte';
   import GraphRunsDialogs from './GraphRunsDialogs.svelte';
   import GraphRunsMemoriesPanel from './GraphRunsMemoriesPanel.svelte';
-  import GraphRunsPageHeader from './GraphRunsPageHeader.svelte';
   import GraphRunsRunsPanel from './GraphRunsRunsPanel.svelte';
+  import GraphRunsSubtabNav from './GraphRunsSubtabNav.svelte';
+  import {
+    GRAPH_RUNS_PANEL_IDS,
+    GRAPH_RUNS_PRIMARY_TAB_IDS,
+    GRAPH_RUNS_PRIMARY_TABLIST_LABEL,
+    MEMORIES_TAB
+  } from './graph-runs-pure';
+  import { cnGraphRunsMainPaneTab } from './shared/graph-runs-ui';
+  import { createGraphRunsPageController } from './state/graph-runs-controller.svelte';
 
   const ctl = createGraphRunsPageController();
   onMount(ctl.mount);
+
+  const pageTitle = $derived(ctl.activePane === ctl.MEMORIES_TAB ? 'Memories' : 'Graph runs');
+  const pageSubtitle = $derived(
+    ctl.activePane === ctl.MEMORIES_TAB
+      ? 'Mem0 long-term store for the selected workspace (read-only).'
+      : 'Recent agent turns with aggregate cost, latency, and drill-down timelines.'
+  );
+  const primaryRunsSelected = $derived(ctl.activePane !== MEMORIES_TAB);
 </script>
 
 <svelte:head>
   <title>{ctl.activePane === ctl.MEMORIES_TAB ? 'Memories' : 'Graph Runs'}</title>
 </svelte:head>
 
-<section class="graph-runs-page grid max-w-[1420px] gap-5 p-6">
-  <GraphRunsPageHeader
-    activePane={ctl.activePane}
-    openRunIds={ctl.openRunIds}
-    runDetailCardsExpanded={ctl.runDetailCardsExpanded}
-    runTabDisplayLabel={ctl.runTabDisplayLabel}
-    runTabTooltip={ctl.runTabTooltip}
-    onActivatePrimaryRunsWorkspace={ctl.activateGraphRunsPrimaryTab}
-    onShowRunsOnly={ctl.showRunsOnly}
-    onShowMemories={ctl.showMemories}
-    onOpenRunTab={(rid) => void ctl.openRunTab(rid)}
-    onCloseRunTab={ctl.closeRunTab}
-    onToggleRunDetailCards={ctl.toggleRunDetailCards}
-    onRefresh={ctl.refreshMain}
-  />
+<AdminPageHeader kicker="Operations" title={pageTitle} subtitle={pageSubtitle}>
+  {#snippet tabs()}
+    <div
+      class="max-w-full flex-wrap {ADMIN_TABLIST_SHELL}"
+      role="tablist"
+      aria-label={GRAPH_RUNS_PRIMARY_TABLIST_LABEL}
+    >
+      <Button
+        id={GRAPH_RUNS_PRIMARY_TAB_IDS.runsWorkspace}
+        class={cnGraphRunsMainPaneTab(primaryRunsSelected)}
+        variant={primaryRunsSelected ? 'secondary' : 'ghost'}
+        role="tab"
+        type="button"
+        aria-controls="{GRAPH_RUNS_PANEL_IDS.runs} {GRAPH_RUNS_PANEL_IDS.detail}"
+        aria-selected={primaryRunsSelected}
+        onclick={ctl.activateGraphRunsPrimaryTab}
+      >
+        Graph runs
+      </Button>
+      <Button
+        id={GRAPH_RUNS_PRIMARY_TAB_IDS.memories}
+        class={cnGraphRunsMainPaneTab(ctl.activePane === MEMORIES_TAB)}
+        variant={ctl.activePane === MEMORIES_TAB ? 'secondary' : 'ghost'}
+        role="tab"
+        type="button"
+        aria-controls={GRAPH_RUNS_PANEL_IDS.memories}
+        aria-selected={ctl.activePane === MEMORIES_TAB}
+        onclick={ctl.showMemories}
+      >
+        Memories
+      </Button>
+    </div>
+  {/snippet}
+
+  {#if ctl.activePane !== MEMORIES_TAB}
+    <GraphRunsSubtabNav
+      activePane={ctl.activePane}
+      openRunIds={ctl.openRunIds}
+      runDetailCardsExpanded={ctl.runDetailCardsExpanded}
+      runTabDisplayLabel={ctl.runTabDisplayLabel}
+      runTabTooltip={ctl.runTabTooltip}
+      onShowRunsOnly={ctl.showRunsOnly}
+      onOpenRunTab={(rid) => void ctl.openRunTab(rid)}
+      onCloseRunTab={ctl.closeRunTab}
+      onToggleRunDetailCards={ctl.toggleRunDetailCards}
+      onRefresh={ctl.refreshMain}
+    />
+  {/if}
 
   <GraphRunsRunsPanel
     bind:filterCharacterId={ctl.filterCharacterId}
@@ -97,7 +146,7 @@
     onOpenNodeDetails={ctl.openNodeDetails}
     onCloseNodeDetails={ctl.closeNodeDetails}
   />
-</section>
+</AdminPageHeader>
 
 <GraphRunsDialogs
   memoryJsonRow={ctl.memoryJsonRow}
@@ -110,4 +159,3 @@
   onCloseDeleteMemory={ctl.closeDeleteMemoryDialog}
   onConfirmDeleteMemory={() => void ctl.confirmDeleteMemory()}
 />
-

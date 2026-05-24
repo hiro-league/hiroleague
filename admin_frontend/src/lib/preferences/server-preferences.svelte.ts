@@ -1,40 +1,12 @@
-import { goto } from '$app/navigation';
-import { page } from '$app/state';
 import { PREF_KEYS, type ServerTabPreference } from './keys';
-import { readSessionString, writeSessionString } from './storage';
+import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
-function normalizeTab(raw: string | null): ServerTabPreference | null {
-  return raw === 'workspaces' || raw === 'gateways' ? raw : null;
-}
+const ALLOWED: readonly ServerTabPreference[] = ['workspaces', 'gateways'] as const;
 
-export function createServerPreferences() {
-  let activeTab = $state<ServerTabPreference>('workspaces');
-
-  function initialize() {
-    activeTab =
-      normalizeTab(page.url.searchParams.get('tab')) ??
-      normalizeTab(readSessionString(PREF_KEYS.serverActiveTab)) ??
-      'workspaces';
-  }
-
-  async function setActiveTab(tab: ServerTabPreference) {
-    activeTab = tab;
-    writeSessionString(PREF_KEYS.serverActiveTab, tab);
-
-    const nextUrl = new URL(page.url);
-    nextUrl.searchParams.set('tab', tab);
-    await goto(`${nextUrl.pathname}${nextUrl.search}`, {
-      keepFocus: true,
-      noScroll: true,
-      replaceState: true
-    });
-  }
-
-  return {
-    get activeTab() {
-      return activeTab;
-    },
-    initialize,
-    setActiveTab
-  };
+export function createServerPreferences(): TabPreferences<ServerTabPreference> {
+  return createTabPreferences<ServerTabPreference>({
+    storageKey: PREF_KEYS.serverActiveTab,
+    defaultTab: 'workspaces',
+    allowed: ALLOWED
+  });
 }

@@ -38,7 +38,7 @@
   const prefs = createShellPreferences();
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
-  /** Chat channels page, Messages tab — header shortcut (see ``readChatChannelsNavFromLocation``). */
+  /** Chat channels page, Messages tab — header shortcut. */
   const chatMessagesHref = `${base}/chats/?tab=messages`;
   const headerWorkspaceName = $derived(adminConfig.workspace_name ?? 'unknown');
   const headerStatus = $derived(liveStatus.payload?.workspace_status ?? 'stopped');

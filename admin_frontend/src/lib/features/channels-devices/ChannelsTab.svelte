@@ -8,6 +8,11 @@
   } from '$lib/api/channels-devices';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import type { Notify } from './types';
 
   let { notify }: { notify: Notify } = $props();
@@ -48,6 +53,8 @@
   }
 
   load();
+
+  const CHANNEL_GRID = '180px 120px 1.5fr 1fr 140px';
 </script>
 
 <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
@@ -62,28 +69,23 @@
   </div>
 
   {#if loading}
-    <p class="text-muted-foreground">Loading channels...</p>
+    <InlineLoading label="Loading channels…" />
   {:else if error}
-    <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-      <strong class="font-sans">Could not load channels</strong>
-      <span class="block text-sm">{error}</span>
-    </div>
+    <InlineDestructiveAlert title="Could not load channels" message={error} />
   {:else if rows.length === 0}
-    <p class="text-muted-foreground">No channels configured for this workspace.</p>
+    <InlineEmptyState message="No channels configured for this workspace." />
   {:else}
-    <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[920px]">
-        <div
-          class="grid grid-cols-[180px_120px_1.5fr_1fr_140px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground"
-        >
-          <span>Name</span>
-          <span>Status</span>
-          <span>Command</span>
-          <span>Config keys</span>
-          <span>Actions</span>
-        </div>
-        {#each rows as row}
-          <div class="grid min-h-16 grid-cols-[180px_120px_1.5fr_1fr_140px] gap-3 border-t px-3 py-3">
+    <AdminTableShell layout="grid" minWidth={920} gridColumns={CHANNEL_GRID}>
+      {#snippet headRow()}
+        <span>Name</span>
+        <span>Status</span>
+        <span>Command</span>
+        <span>Config keys</span>
+        <span>Actions</span>
+      {/snippet}
+      {#snippet body()}
+        {#each rows as row (row.name)}
+          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={CHANNEL_GRID}>
             <span class="truncate font-sans text-sm font-semibold" title={row.name}>{row.name}</span>
             <span>
               <Badge variant={row.enabled ? 'success' : 'outline'}>
@@ -138,7 +140,7 @@
             </span>
           </div>
         {/each}
-      </div>
-    </div>
+      {/snippet}
+    </AdminTableShell>
   {/if}
 </section>

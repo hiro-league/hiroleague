@@ -3,8 +3,9 @@
   import Button from '$lib/components/ui/button.svelte';
   import { LOG_LEVELS, TRAFFIC_CLASSES } from '$lib/api/logs';
   import { cn } from '$lib/utils';
+  import { ADMIN_SELECT_SM } from '$lib/styling/admin-tokens';
   import type { LogsPageController } from './state/logs-controller.svelte';
-  import type { LogsPreferences } from './state/logs-preferences.svelte';
+  import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import { logLevelFilterChipClass, logSourceFilterChipClass } from './shared/logs-classes';
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogSourceIcon from './shared/LogSourceIcon.svelte';
@@ -62,7 +63,7 @@
           <span class="ml-2 font-sans text-sm font-semibold text-muted-foreground">Channel:</span>
           <div class="flex items-center gap-0.5">
             <select
-              class="h-8 min-w-44 rounded-md border border-input bg-background px-2 font-sans text-sm text-foreground shadow-xs outline-none focus:ring-2 focus:ring-ring"
+              class={cn(ADMIN_SELECT_SM, 'min-w-44')}
               bind:value={prefs.activeChannel}
             >
               <option value="">All channels</option>
@@ -93,7 +94,7 @@
       <div class="flex min-w-0 flex-nowrap items-center gap-3">
         <div class="flex items-center gap-0.5">
           <select
-            class="h-8 min-w-48 rounded-md border border-input bg-background px-2 font-sans text-sm text-foreground shadow-xs outline-none focus:ring-2 focus:ring-ring"
+            class={cn(ADMIN_SELECT_SM, 'min-w-48')}
             bind:value={prefs.scopeDeviceId}
             onchange={() => void ctrl.afterScopeChange()}
             title="Filter logs by device (only devices seen in currently loaded log rows)"
@@ -125,7 +126,7 @@
         </div>
         <div class="flex items-center gap-0.5">
           <select
-            class="h-8 min-w-44 rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground shadow-xs outline-none focus:ring-2 focus:ring-ring"
+            class={cn(ADMIN_SELECT_SM, 'min-w-44 font-mono')}
             bind:value={prefs.scopeMethod}
             onchange={() => void ctrl.afterScopeChange()}
             title="Filter by JSON-RPC method seen in recent logs"

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
-  import {
-    Plus,
-    UserRound,
-    X
-  } from '@lucide/svelte';
+  import { Plus, UserRound } from '@lucide/svelte';
+  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import AdminRecordTabChip from '$lib/components/page/AdminRecordTabChip.svelte';
+  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import Button from '$lib/components/ui/button.svelte';
   import CharactersBrowseSection from '$lib/features/characters/CharactersBrowseSection.svelte';
   import CharacterEditToolbar from '$lib/features/characters/CharacterEditToolbar.svelte';
@@ -18,28 +18,22 @@
   import CharacterViewPanel from '$lib/features/characters/CharacterViewPanel.svelte';
   import { createCharactersFormModel } from '$lib/features/characters/characters-form.svelte';
   import { createCharactersPageController } from '$lib/features/characters/characters-controller.svelte';
-  import { createCharactersUnsavedGuard } from '$lib/features/characters/characters-unsaved-guard.svelte';
-  import Modal from '$lib/ui/Modal.svelte';
+  import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import * as Dialog from '$lib/components/ui/dialog';
   import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
-  import { cn } from '$lib/utils';
-
-  type NotifyKind = 'success' | 'error' | 'info' | 'warning';
+  import type { CharactersTabPreference } from '$lib/preferences/keys';
 
   const prefs = createCharactersPreferences();
-  let toast = $state<{ kind: NotifyKind; message: string } | null>(null);
-
-  function notify(kind: NotifyKind, message: string) {
-    toast = { kind, message };
-    window.setTimeout(() => {
-      toast = null;
-    }, 4500);
-  }
+  const toasts = createToastNotifier();
+  const notify = toasts.notify;
 
   const formApi = createCharactersFormModel();
 
-  /** Unsaved-changes UX is owned by guard; SPA navigation interception lives beside controller boot. */
-  const unsaved = createCharactersUnsavedGuard(
+  const unsaved = createUnsavedGuard(
     () => formApi.dirty,
     () => prefs.detailMode === 'edit',
     (next) => {
@@ -58,21 +52,22 @@
   const detailVisible = $derived(prefs.activeTab === 'detail');
   const isNew = $derived(detailVisible && prefs.detailMode === 'edit' && !prefs.characterId);
 
-  /** Tab strip label for the Detail tab chip. */
   const detailTabLabel = $derived(
     isNew ? 'New character' : ctrl.selected?.name?.trim() || prefs.characterId || 'Detail'
   );
 
   const editToolbarTitle = $derived(prefs.characterId ? 'Edit character' : 'New character');
 
-  /** Toolbar subtitle uses live editable name vs loaded row for existing IDs. */
   const editCharacterDisplayLine = $derived.by(() => {
     if (!prefs.characterId) return '';
     const n = formApi.form.name.trim() || ctrl.selected?.name?.trim() || '';
     return n || prefs.characterId;
   });
 
-  /** Route-level hydration mirrors original mount + SPA navigation reconciliation. */
+  const fixedTabs: readonly AdminTabDescriptor<CharactersTabPreference>[] = [
+    { id: 'browse', label: 'Browse', kind: 'pane' }
+  ];
+
   onMount(async () => {
     await ctrl.hydrateCharactersFromUrl();
   });
@@ -84,56 +79,40 @@
   });
 </script>
 
-<section
-  class={cn(
-    'grid max-w-[1420px]',
-    detailVisible && prefs.detailMode === 'edit' ? 'gap-3' : 'gap-5'
-  )}
+<AdminPageHeader
+  kicker="Configuration"
+  title="Characters"
+  sticky
+  wrapperClass={detailVisible && prefs.detailMode === 'edit'
+    ? 'grid max-w-[1420px] gap-3'
+    : 'grid max-w-[1420px] gap-5'}
 >
-  <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-    <div>
-      <p class="font-sans text-xs font-extrabold uppercase text-primary">Configuration</p>
-      <h2 class="brand-text-gradient mt-1 text-3xl font-semibold">Characters</h2>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="inline-flex rounded-lg border bg-card p-1" role="tablist" aria-label="Characters sections">
-        <Button
-          class={cn(
-            'shadow-none',
-            prefs.activeTab === 'browse' ? '' : 'bg-transparent text-muted-foreground hover:bg-secondary'
-          )}
-          variant={prefs.activeTab === 'browse' ? 'secondary' : 'ghost'}
-          role="tab"
-          aria-selected={prefs.activeTab === 'browse'}
-          onclick={() => ctrl.openBrowse()}
-        >
-          Browse
-        </Button>
+  {#snippet tabs()}
+    <AdminTabStrip
+      ariaLabel="Characters sections"
+      tabs={fixedTabs}
+      active={prefs.activeTab}
+      onSelect={() => void ctrl.openBrowse()}
+    >
+      {#snippet recordTab()}
         {#if detailVisible}
-          <div
-            class="inline-flex max-w-[min(20rem,calc(100vw-9rem))] items-center rounded-md bg-secondary text-secondary-foreground shadow-none"
-            role="tab"
-            aria-selected="true"
-          >
-            <span class="flex min-w-0 items-center gap-2 px-3 py-2 font-sans text-sm font-semibold">
-              <UserRound size={15} class="shrink-0" aria-hidden="true" />
-              <span class="truncate">{detailTabLabel}</span>
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="size-8 shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-              aria-label="Close character and return to Browse"
-              onclick={() => void ctrl.openBrowse()}
-            >
-              <X size={17} aria-hidden="true" />
-            </Button>
-          </div>
+          <AdminRecordTabChip
+            label={detailTabLabel}
+            active
+            icon={UserRound}
+            closeLabel="Close character and return to Browse"
+            onClose={() => void ctrl.openBrowse()}
+          />
         {/if}
-      </div>
-      <Button onclick={() => void ctrl.openNewCharacter()}><Plus size={16} /> New character</Button>
-    </div>
-  </div>
+      {/snippet}
+    </AdminTabStrip>
+  {/snippet}
+
+  {#snippet actions()}
+    <Button onclick={() => void ctrl.openNewCharacter()}>
+      <Plus size={16} /> New character
+    </Button>
+  {/snippet}
 
   {#if prefs.activeTab === 'browse'}
     <CharactersBrowseSection
@@ -169,12 +148,12 @@
 
       <div class="grid gap-5 px-4 pb-5 pt-3 md:px-5">
         {#if ctrl.loadingDetail}
-          <p class="text-muted-foreground">Loading character...</p>
+          <InlineLoading label="Loading character…" />
         {:else if ctrl.detailError}
-          <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-            <strong class="font-sans">Could not load character</strong>
-            <span class="block text-sm">{ctrl.detailError}</span>
-          </div>
+          <InlineDestructiveAlert
+            title="Could not load character"
+            message={ctrl.detailError}
+          />
         {:else}
           <div class="grid gap-8">
             <CharacterProfileSection
@@ -247,24 +226,28 @@
       </div>
     </section>
   {/if}
-</section>
+</AdminPageHeader>
 
-<ToastHost {toast} />
+<ToastHost toast={toasts.toast} />
 
-<Modal
+<Dialog.Root
   open={ctrl.deleteOpen}
-  title={`Delete '${prefs.characterId}'?`}
-  subtitle="This removes the character folder and index row."
-  onClose={() => {
-    if (!ctrl.busy) ctrl.deleteOpen = false;
+  onOpenChange={(next) => {
+    if (!next && !ctrl.busy) ctrl.deleteOpen = false;
   }}
 >
-  <p class="text-sm text-muted-foreground">This action cannot be undone.</p>
-  {#snippet footer()}
-    <Button variant="outline" disabled={ctrl.busy} onclick={() => (ctrl.deleteOpen = false)}>Cancel</Button>
-    <Button variant="destructive" disabled={ctrl.busy} onclick={() => void ctrl.confirmDelete()}>Delete</Button>
-  {/snippet}
-</Modal>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Delete '{prefs.characterId}'?</Dialog.Title>
+      <Dialog.Description>This removes the character folder and index row.</Dialog.Description>
+    </Dialog.Header>
+    <p class="text-sm text-muted-foreground">This action cannot be undone.</p>
+    <Dialog.Footer>
+      <Button variant="outline" disabled={ctrl.busy} onclick={() => (ctrl.deleteOpen = false)}>Cancel</Button>
+      <Button variant="destructive" disabled={ctrl.busy} onclick={() => void ctrl.confirmDelete()}>Delete</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <CharacterPhotoCropModal
   open={ctrl.cropOpen}
@@ -280,17 +263,21 @@
   onSubmitPhoto={() => void ctrl.submitPhoto()}
 />
 
-<Modal
+<Dialog.Root
   open={unsaved.unsavedModalOpen}
-  title="Unsaved changes"
-  subtitle="You have edits that are not saved yet."
-  onClose={unsaved.closeUnsavedModalContinueEditing}
+  onOpenChange={(next) => { if (!next) unsaved.closeUnsavedModalContinueEditing(); }}
 >
-  <p class="text-sm text-muted-foreground">
-    Discard them and leave, or stay on this page to keep editing.
-  </p>
-  {#snippet footer()}
-    <Button variant="outline" onclick={unsaved.closeUnsavedModalContinueEditing}>Continue editing</Button>
-    <Button variant="destructive" onclick={unsaved.confirmUnsavedModalDiscard}>Discard changes</Button>
-  {/snippet}
-</Modal>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Unsaved changes</Dialog.Title>
+      <Dialog.Description>You have edits that are not saved yet.</Dialog.Description>
+    </Dialog.Header>
+    <p class="text-sm text-muted-foreground">
+      Discard them and leave, or stay on this page to keep editing.
+    </p>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={unsaved.closeUnsavedModalContinueEditing}>Continue editing</Button>
+      <Button variant="destructive" onclick={unsaved.confirmUnsavedModalDiscard}>Discard changes</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

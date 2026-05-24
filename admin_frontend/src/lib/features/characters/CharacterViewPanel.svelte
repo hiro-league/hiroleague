@@ -1,6 +1,8 @@
 <script lang="ts">
   import { ArrowLeft, Edit3, UserRound } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import CharacterResolvedBlock from '$lib/features/characters/CharacterResolvedBlock.svelte';
   import { prettyJson } from '$lib/features/characters/utils';
@@ -27,12 +29,9 @@
 
 <section class="grid gap-5 rounded-lg border bg-card p-5 shadow-sm">
   {#if loadingDetail}
-    <p class="text-muted-foreground">Loading character...</p>
+    <InlineLoading label="Loading character…" />
   {:else if detailError}
-    <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-      <strong class="font-sans">Could not load character</strong>
-      <span class="block text-sm">{detailError}</span>
-    </div>
+    <InlineDestructiveAlert title="Could not load character" message={detailError} />
   {:else if !selected}
     <div class="grid gap-3">
       <h3 class="text-lg font-semibold">No character selected</h3>

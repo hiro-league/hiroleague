@@ -10,14 +10,16 @@ import {
   type CharacterRow
 } from '$lib/api/characters';
 import {
-  listActiveProviders,
   listCatalogModels,
   listCatalogProviders,
-  reloadModelCatalog,
-  type ActiveProviderRow,
   type CatalogModelRow,
   type CatalogProviderRow
 } from '$lib/api/catalog';
+import {
+  catalogReloadSuccessMessage,
+  reloadCatalogAndRefetch
+} from '$lib/catalog/catalog-reload';
+import { createActiveProvidersStore } from '$lib/catalog/active-providers/active-providers-store.svelte';
 import { getPreferences, type TuningProfile } from '$lib/api/preferences';
 import {
   characterSaveBody,
@@ -40,6 +42,7 @@ export function createCharactersPageController(opts: {
   confirmDiscard: () => Promise<boolean>;
 }) {
   const { prefs, formApi, notify, confirmDiscard } = opts;
+  const activeProvidersStore = createActiveProvidersStore();
 
   let rows = $state<CharacterRow[]>([]);
   let selected = $state<CharacterDetail | null>(null);
@@ -54,8 +57,6 @@ export function createCharactersPageController(opts: {
   let catalogAllProviders = $state<CatalogProviderRow[]>([]);
   let voiceOptions = $state<CatalogModelRow[]>([]);
   let catalogTtsProviders = $state<CatalogProviderRow[]>([]);
-  let workspaceActiveProviders = $state<ActiveProviderRow[]>([]);
-  let workspaceActiveProvidersResolved = $state(false);
   let tuningProfiles = $state<Record<string, TuningProfile>>({});
   let workspaceDefaultTuningProfile = $state('balanced_chat');
 
@@ -106,17 +107,10 @@ export function createCharactersPageController(opts: {
     tuningProfiles = preferences.data.preferences.tuning_profiles ?? {};
     workspaceDefaultTuningProfile =
       preferences.data.preferences.llm.default_tuning_profile || 'balanced_chat';
-    workspaceActiveProvidersResolved = false;
-    try {
-      const activePayload = await listActiveProviders();
-      workspaceActiveProviders = activePayload.data ?? [];
-      workspaceActiveProvidersResolved = true;
-    } catch (err) {
-      workspaceActiveProviders = [];
-      workspaceActiveProvidersResolved = false;
+    await activeProvidersStore.load({ silent: true });
+    if (!activeProvidersStore.resolved) {
       console.warn(
-        '⚠️ Characters editor — workspace active providers unavailable · inactive-picker styling skipped',
-        err instanceof Error ? err.message : err
+        '⚠️ Characters editor — workspace active providers unavailable · inactive-picker styling skipped'
       );
     }
     catalogReady = true;
@@ -133,17 +127,14 @@ export function createCharactersPageController(opts: {
   async function reloadBundledCatalogInEditor() {
     bundledCatalogReloadBusy = true;
     try {
-      const payload = await reloadModelCatalog();
+      const result = await reloadCatalogAndRefetch(['chat', 'tts']);
       catalogReady = false;
       await loadCatalogOptions(true);
       formApi.form.tts_voice_by_provider = mergeVoiceProviderDefaults(
         formApi.form.tts_voice_by_provider,
         catalogTtsProviders
       );
-      notify(
-        'success',
-        `Catalog v${payload.data.catalog_version} reloaded (${payload.data.provider_count} providers, ${payload.data.model_count} models).`
-      );
+      notify('success', catalogReloadSuccessMessage(result.reload));
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Catalog reload failed.');
     } finally {
@@ -357,14 +348,14 @@ export function createCharactersPageController(opts: {
       return catalogTtsProviders;
     },
     get workspaceActiveProvidersResolved(): boolean {
-      return workspaceActiveProvidersResolved;
+      return activeProvidersStore.resolved;
     },
     /** Getters unwrap plain ``Set``/rows for picker props — raw ``$derived`` fields on POJO controllers confuse prop bridging and produced empty lookups (all offline). */
     get workspaceChatActiveIds(): Set<string> {
-      return new Set(workspaceActiveProviders.filter((r) => r.has_chat).map((r) => r.provider_id));
+      return activeProvidersStore.chatActiveProviderIds;
     },
     get workspaceTtsActiveIds(): Set<string> {
-      return new Set(workspaceActiveProviders.filter((r) => r.has_tts).map((r) => r.provider_id));
+      return activeProvidersStore.ttsActiveProviderIds;
     },
     get tuningProfiles(): Record<string, TuningProfile> {
       return tuningProfiles;

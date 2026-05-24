@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ChevronRight, CircleCheck } from '@lucide/svelte';
   import type { CharacterResolvedPayload, CharacterResolvedRow } from '$lib/api/characters';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import { cn } from '$lib/utils';
 
   /** One-line summary for collapsed LLM header (effective catalog model id + optional display name). */
@@ -361,7 +362,9 @@
         {#if error}
           {error}
         {:else if !resolved}
-          <span class="text-muted-foreground">Loading resolved configuration…</span>
+          <span class="font-sans text-sm text-muted-foreground" role="status" aria-live="polite">
+            Loading resolved configuration…
+          </span>
         {:else if segment === 'llm'}
           {llmCollapsedSummary(resolved)}
         {:else}
@@ -382,7 +385,7 @@
     {#if error}
       <p class="text-sm text-destructive">{error}</p>
     {:else if !resolved}
-      <p class="text-sm text-muted-foreground">Loading resolved configuration…</p>
+      <InlineLoading label="Loading resolved configuration…" />
     {:else}
       <div class="grid gap-5 md:grid-cols-2 md:items-start">
         <div class="grid max-w-lg gap-2">
@@ -494,7 +497,7 @@
       {#if error}
         <p class="text-sm text-destructive">{error}</p>
       {:else if !resolved}
-        <p class="text-sm text-muted-foreground">Loading resolved configuration…</p>
+        <InlineLoading label="Loading resolved configuration…" />
       {:else if segment === 'llm'}
         {@render llmSegmentBody()}
       {:else}

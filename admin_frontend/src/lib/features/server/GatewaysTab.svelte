@@ -4,7 +4,13 @@
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { liveStatus } from '$lib/live/status.svelte';
-  import Modal from '$lib/ui/Modal.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import FormField from '$lib/components/ui/form-field.svelte';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { createGatewayStore } from './gateway-store.svelte';
   import type { Notify } from './types';
   import type { GatewayRow } from '$lib/api/server';
@@ -41,6 +47,8 @@
     const updated = formatStderrTime(row.stderr_log_mtime);
     return `stderr.log${updated ? ` updated ${updated}` : ''} (${formatBytes(row.stderr_log_size)})`;
   }
+
+  const GATEWAY_GRID = '220px 130px 140px 110px 260px';
 </script>
 
 <section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
@@ -66,26 +74,23 @@
   </div>
 
   {#if gateway.loading}
-    <p class="text-muted-foreground">Loading gateways...</p>
+    <InlineLoading label="Loading gateways…" />
   {:else if gateway.error}
-    <div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-      <strong class="font-sans">Could not load gateways</strong>
-      <span class="block text-sm">{gateway.error}</span>
-    </div>
+    <InlineDestructiveAlert title="Could not load gateways" message={gateway.error} />
   {:else if gateway.rows.length === 0}
-    <p class="text-muted-foreground">No gateway instances configured yet.</p>
+    <InlineEmptyState message="No gateway instances configured yet." />
   {:else}
-    <div class="overflow-x-auto rounded-md border">
-      <div class="min-w-[880px]">
-        <div class="grid grid-cols-[220px_130px_140px_110px_260px] gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground">
-          <span>Name</span>
-          <span>Status</span>
-          <span>Host : Port</span>
-          <span>Autostart</span>
-          <span>Actions</span>
-        </div>
-        {#each gateway.rows as row}
-          <div class="grid min-h-16 grid-cols-[220px_130px_140px_110px_260px] gap-3 border-t px-3 py-3">
+    <AdminTableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
+      {#snippet headRow()}
+        <span>Name</span>
+        <span>Status</span>
+        <span>Host : Port</span>
+        <span>Autostart</span>
+        <span>Actions</span>
+      {/snippet}
+      {#snippet body()}
+        {#each gateway.rows as row (row.name)}
+          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GATEWAY_GRID}>
             <span class="flex min-w-0 items-center gap-1.5">
               {#if row.is_default}
                 <Star
@@ -141,40 +146,97 @@
             </span>
           </div>
         {/each}
-      </div>
-    </div>
+      {/snippet}
+    </AdminTableShell>
   {/if}
 </section>
 
-<Modal open={gateway.dialog === 'create'} title="Create gateway instance" onClose={gateway.closeDialog}>
-  <label>Name<input bind:value={gateway.createForm.name} placeholder="e.g. main" /></label>
-  <label>Desktop public key<textarea bind:value={gateway.createForm.desktopPublicKey} placeholder="Paste the workspace public key here"></textarea></label>
-  <label>Port<input bind:value={gateway.createForm.port} inputmode="numeric" placeholder="8765" /></label>
-  <details>
-    <summary>Advanced options</summary>
-    <label>Host<input bind:value={gateway.createForm.host} placeholder="0.0.0.0" /></label>
-    <label class="check-row"><input type="checkbox" bind:checked={gateway.createForm.makeDefault} /> Set as default gateway instance</label>
-    <label class="check-row"><input type="checkbox" bind:checked={gateway.createForm.skipAutostart} /> Skip auto-start registration</label>
-    <label class="check-row"><input type="checkbox" bind:checked={gateway.createForm.elevatedTask} /> Request elevated Task Scheduler entry</label>
-  </details>
-  {#snippet footer()}
-    <Button variant="outline" onclick={gateway.closeDialog}>Cancel</Button>
-    <Button disabled={gateway.busy} onclick={gateway.submitCreate}>Create</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={gateway.dialog === 'create'}
+  onOpenChange={(next) => { if (!next) gateway.closeDialog(); }}
+>
+  <Dialog.Content class="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
+    <Dialog.Header>
+      <Dialog.Title>Create gateway instance</Dialog.Title>
+    </Dialog.Header>
+    <div class="grid gap-4">
+      <FormField label="Name">
+        {#snippet children()}
+          <input bind:value={gateway.createForm.name} placeholder="e.g. main" />
+        {/snippet}
+      </FormField>
+      <FormField label="Desktop public key">
+        {#snippet children()}
+          <textarea bind:value={gateway.createForm.desktopPublicKey} placeholder="Paste the workspace public key here"></textarea>
+        {/snippet}
+      </FormField>
+      <FormField label="Port">
+        {#snippet children()}
+          <input bind:value={gateway.createForm.port} inputmode="numeric" placeholder="8765" />
+        {/snippet}
+      </FormField>
+      <details class="grid gap-3 rounded-md border bg-muted/40 p-3">
+        <summary class="cursor-pointer font-sans font-semibold">Advanced options</summary>
+        <FormField label="Host">
+          {#snippet children()}
+            <input bind:value={gateway.createForm.host} placeholder="0.0.0.0" />
+          {/snippet}
+        </FormField>
+        <label class="flex items-center gap-2 font-sans text-sm">
+          <input type="checkbox" bind:checked={gateway.createForm.makeDefault} />
+          Set as default gateway instance
+        </label>
+        <label class="flex items-center gap-2 font-sans text-sm">
+          <input type="checkbox" bind:checked={gateway.createForm.skipAutostart} />
+          Skip auto-start registration
+        </label>
+        <label class="flex items-center gap-2 font-sans text-sm">
+          <input type="checkbox" bind:checked={gateway.createForm.elevatedTask} />
+          Request elevated Task Scheduler entry
+        </label>
+      </details>
+    </div>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={gateway.closeDialog}>Cancel</Button>
+      <Button disabled={gateway.busy} onclick={gateway.submitCreate}>Create</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal open={gateway.dialog === 'stop'} title={`Stop gateway '${gateway.selected?.name ?? ''}'`} onClose={gateway.closeDialog}>
-  <p class="text-sm text-muted-foreground">This will stop the running gateway process.</p>
-  {#snippet footer()}
-    <Button variant="outline" onclick={gateway.closeDialog}>Cancel</Button>
-    <Button variant="destructive" disabled={gateway.busy} onclick={gateway.submitStop}>Stop</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={gateway.dialog === 'stop'}
+  onOpenChange={(next) => { if (!next) gateway.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Stop gateway '{gateway.selected?.name ?? ''}'</Dialog.Title>
+    </Dialog.Header>
+    <p class="text-sm text-muted-foreground">This will stop the running gateway process.</p>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={gateway.closeDialog}>Cancel</Button>
+      <Button variant="destructive" disabled={gateway.busy} onclick={gateway.submitStop}>Stop</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal open={gateway.dialog === 'remove'} title={`Remove gateway '${gateway.selected?.name ?? ''}'`} subtitle={gateway.selected?.path ?? ''} onClose={gateway.closeDialog}>
-  <label class="check-row"><input type="checkbox" bind:checked={gateway.removeForm.purge} /> Also delete instance files from disk</label>
-  {#snippet footer()}
-    <Button variant="outline" onclick={gateway.closeDialog}>Cancel</Button>
-    <Button variant="destructive" disabled={gateway.busy} onclick={gateway.submitRemove}>Remove</Button>
-  {/snippet}
-</Modal>
+<Dialog.Root
+  open={gateway.dialog === 'remove'}
+  onOpenChange={(next) => { if (!next) gateway.closeDialog(); }}
+>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Remove gateway '{gateway.selected?.name ?? ''}'</Dialog.Title>
+      {#if gateway.selected?.path}
+        <Dialog.Description>{gateway.selected.path}</Dialog.Description>
+      {/if}
+    </Dialog.Header>
+    <label class="flex items-center gap-2 font-sans text-sm">
+      <input type="checkbox" bind:checked={gateway.removeForm.purge} />
+      Also delete instance files from disk
+    </label>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={gateway.closeDialog}>Cancel</Button>
+      <Button variant="destructive" disabled={gateway.busy} onclick={gateway.submitRemove}>Remove</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

@@ -1,16 +1,11 @@
-/** Shared Tailwind/class strings for graph-runs UI (header tab strip). */
+/**
+ * Graph-runs feature-local class helpers.
+ *
+ * Header / tablist tokens moved to `$lib/styling/admin-tokens`. What remains
+ * here is feature-specific: the primary-pane tab helper and the ledger search
+ * hit highlight rule.
+ */
 import { cn } from '$lib/utils';
-
-export const GRAPH_RUNS_HEADER_KICKER = 'm-0 font-sans text-xs font-extrabold uppercase text-primary';
-
-export const GRAPH_RUNS_HEADER_TITLE =
-  'brand-text-gradient mb-0 mt-1 text-3xl font-semibold';
-
-export const GRAPH_RUNS_HEADER_INTRO = 'mb-0 mt-1 font-sans text-sm text-muted-foreground';
-
-/** Matches `rounded-lg border bg-card p-1` tablist from the redesign. */
-export const GRAPH_RUNS_TABLIST_SHELL =
-  'inline-flex max-w-full flex-wrap rounded-lg border bg-card p-1';
 
 export function cnGraphRunsMainPaneTab(active: boolean) {
   return cn('shadow-none', !active && 'bg-transparent text-muted-foreground hover:bg-secondary');

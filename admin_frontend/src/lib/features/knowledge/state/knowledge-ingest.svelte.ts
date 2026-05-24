@@ -12,15 +12,15 @@ import {
 import { openWorkspaceFolder } from '$lib/api/server';
 import { connectKnowledgeJobEvents } from '../shared/knowledge-events';
 import { upsertRecentJobRecord } from '../shared/knowledge-jobs';
+import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
 import {
   buildIngestMetadata,
   DEFAULT_SCANNED_FILE_SORT,
   optionalInt,
   readPersistedKnowledgeFolder,
+  SCANNED_FILE_SORT_COLUMNS,
   sortScannedFiles,
-  writePersistedKnowledgeFolder,
-  type ScannedFileSortColumn,
-  type ScannedFileSortDirection
+  writePersistedKnowledgeFolder
 } from '../shared/knowledge-pure';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
@@ -46,8 +46,12 @@ export function createKnowledgeIngestModel(deps: {
   let job = $state<KnowledgeJobData | null>(null);
   let recentJobs = $state<KnowledgeJobRecord[]>([]);
   let activeErrorsJobId = $state<string | null>(null);
-  let fileSortColumn = $state<ScannedFileSortColumn>(DEFAULT_SCANNED_FILE_SORT.column);
-  let fileSortDirection = $state<ScannedFileSortDirection>(DEFAULT_SCANNED_FILE_SORT.direction);
+
+  const fileSort = useTableSort({
+    defaultBy: DEFAULT_SCANNED_FILE_SORT.column,
+    defaultDirection: DEFAULT_SCANNED_FILE_SORT.direction,
+    allowed: SCANNED_FILE_SORT_COLUMNS
+  });
 
   const selectedPaths = $derived(
     files.filter((file) => file.supported && selected[file.path]).map((file) => file.path)
@@ -55,7 +59,7 @@ export function createKnowledgeIngestModel(deps: {
   const supportedFiles = $derived(files.filter((file) => file.supported));
   const visibleFiles = $derived(showOnlySupported ? supportedFiles : files);
   const sortedVisibleFiles = $derived(
-    sortScannedFiles(visibleFiles, fileSortColumn, fileSortDirection)
+    sortScannedFiles(visibleFiles, fileSort.sortBy, fileSort.direction)
   );
   const allSupportedSelected = $derived(
     supportedFiles.length > 0 && supportedFiles.every((file) => selected[file.path])
@@ -258,15 +262,6 @@ export function createKnowledgeIngestModel(deps: {
     }
   }
 
-  function toggleFileSort(column: ScannedFileSortColumn) {
-    if (fileSortColumn === column) {
-      fileSortDirection = fileSortDirection === 'asc' ? 'desc' : 'asc';
-      return;
-    }
-    fileSortColumn = column;
-    fileSortDirection = 'asc';
-  }
-
   function toggleActiveErrorsJobId(jobId: string) {
     activeErrorsJobId = activeErrorsJobId === jobId ? null : jobId;
   }
@@ -356,11 +351,8 @@ export function createKnowledgeIngestModel(deps: {
     get sortedVisibleFiles() {
       return sortedVisibleFiles;
     },
-    get fileSortColumn() {
-      return fileSortColumn;
-    },
-    get fileSortDirection() {
-      return fileSortDirection;
+    get fileSort() {
+      return fileSort;
     },
     get allSupportedSelected() {
       return allSupportedSelected;
@@ -396,7 +388,6 @@ export function createKnowledgeIngestModel(deps: {
     reingestActiveDocument,
     toggleSelectAllSupported,
     toggleFileSelection,
-    toggleFileSort,
     retryJob,
     toggleActiveErrorsJobId
   };
