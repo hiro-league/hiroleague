@@ -1,3 +1,8 @@
+import type { Component } from 'svelte';
+
+/** Lucide (or compatible) icon passed to page-level tab descriptors. */
+export type AdminTabIcon = Component<{ size?: number; class?: string }>;
+
 /**
  * Shared types for `<AdminTabStrip>` / `<AdminTabButton>` / `<AdminSubtabStrip>`
  * / `<AdminPageHeader>`.
@@ -15,6 +20,8 @@ export type AdminPaneTabDescriptor<TId extends string = string> = {
   id: TId;
   label: string;
   kind?: 'pane';
+  /** Optional Lucide icon rendered before the label. */
+  icon?: AdminTabIcon;
   disabled?: boolean;
   /** Override `aria-label` for screen readers when `label` is not descriptive enough. */
   ariaLabel?: string;
@@ -30,6 +37,8 @@ export type AdminRouteTabDescriptor<TId extends string = string> = {
   kind: 'route';
   /** Required for `kind: 'route'`. */
   href: string;
+  /** Optional Lucide icon rendered before the label. */
+  icon?: AdminTabIcon;
   disabled?: boolean;
   ariaLabel?: string;
   htmlId?: string;

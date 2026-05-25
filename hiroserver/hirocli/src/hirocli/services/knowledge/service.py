@@ -429,9 +429,10 @@ class KnowledgeService:
         chunk_offset: str | None = None,
     ) -> KnowledgeDocumentDetailResult:
         row = await asyncio.to_thread(self.catalog.document_row_by_id, document_id)
-        document = document_from_row(row) if row else None
-        if document is None:
+        if row is None:
             return KnowledgeDocumentDetailResult(document=None, chunks=[])
+        tags = await asyncio.to_thread(self.catalog.tags_for_document, document_id)
+        document = document_from_row(row, tags=tags)
         offset = json.loads(chunk_offset) if chunk_offset else None
         chunks, next_offset = await asyncio.to_thread(
             self.vector_store.scroll_document_chunks,
@@ -499,7 +500,8 @@ class KnowledgeService:
         )
         if row is None:
             raise KeyError(f"Unknown knowledge document: {document_id}")
-        return document_from_row(row)
+        tags = await asyncio.to_thread(self.catalog.tags_for_document, document_id)
+        return document_from_row(row, tags=tags)
 
     async def _run_ingest_job(self, job_id: str, paths: list[str], params: dict[str, Any]) -> None:
         totals = {"requested": len(paths), "skipped": 0, "ingested": 0, "failed": 0, "chunks": 0}

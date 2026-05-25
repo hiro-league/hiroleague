@@ -50,6 +50,7 @@
     {#if tab.kind === 'route'}
       <AdminTabButton
         label={tab.label}
+        icon={tab.icon}
         active={tab.id === active}
         href={tab.href}
         disabled={tab.disabled}
@@ -60,6 +61,7 @@
     {:else}
       <AdminTabButton
         label={tab.label}
+        icon={tab.icon}
         active={tab.id === active}
         disabled={tab.disabled}
         ariaLabel={tab.ariaLabel}

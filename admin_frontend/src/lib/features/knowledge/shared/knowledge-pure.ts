@@ -15,13 +15,23 @@ export function normalizeKnowledgeTab(value: string | null | undefined): Knowled
 }
 
 export const KNOWLEDGE_TABS: { id: KnowledgeTabId; label: string }[] = [
-  { id: 'ingest', label: 'Add' },
   { id: 'browse', label: 'Browse' },
+  { id: 'ingest', label: 'Add' },
   { id: 'ask', label: 'Ask' }
 ];
 
 /** Deep link to workspace Knowledge preferences (embedding, retrieval, chunking, answering). */
 export const KNOWLEDGE_PREFERENCES_SECTION_HREF = preferenceTabHref('knowledge');
+
+/** Deep link to Knowledge admin Browse tab (`/knowledge/` — default tab omits `?tab=`). */
+export function knowledgeTabHref(tab: KnowledgeTabId, basePath = ''): string {
+  if (tab === 'browse') {
+    return `${basePath}/knowledge/`;
+  }
+  return `${basePath}/knowledge/?tab=${tab}`;
+}
+
+export const KNOWLEDGE_BROWSE_HREF = knowledgeTabHref('browse');
 
 /** Browse chunk list page size; fetch one extra to detect a further page. */
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 100;
@@ -172,6 +182,42 @@ export function jobElapsed(createdAt: string): string {
   const seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+export type JobTotalsLike = Record<string, number>;
+
+export function formatJobTotalsSummary(totals: JobTotalsLike): string {
+  return `${totals.ingested ?? 0} ingested, ${totals.skipped ?? 0} skipped, ${totals.failed ?? 0} failed, ${totals.chunks ?? 0} chunks`;
+}
+
+export function sumJobTotals(jobs: ReadonlyArray<{ totals: JobTotalsLike }>): JobTotalsLike {
+  const sum: JobTotalsLike = { ingested: 0, skipped: 0, failed: 0, chunks: 0 };
+  for (const job of jobs) {
+    sum.ingested = (sum.ingested ?? 0) + (job.totals.ingested ?? 0);
+    sum.skipped = (sum.skipped ?? 0) + (job.totals.skipped ?? 0);
+    sum.failed = (sum.failed ?? 0) + (job.totals.failed ?? 0);
+    sum.chunks = (sum.chunks ?? 0) + (job.totals.chunks ?? 0);
+  }
+  return sum;
+}
+
+export function formatRecentJobsHeaderSummary(
+  jobs: ReadonlyArray<{ totals: JobTotalsLike }>
+): string {
+  const jobCount = jobs.length;
+  const jobLabel = jobCount === 1 ? '1 job' : `${jobCount} jobs`;
+  return `${jobLabel} · ${formatJobTotalsSummary(sumJobTotals(jobs))}`;
+}
+
+export function formatIngestHeaderSummary(selectedCount: number, jobStatus?: string | null): string {
+  const parts: string[] = [];
+  if (selectedCount > 0) {
+    parts.push(selectedCount === 1 ? '1 file selected' : `${selectedCount} files selected`);
+  }
+  if (jobStatus) {
+    parts.push(jobStatus);
+  }
+  return parts.join(' · ');
 }
 
 export type ScannedFileSortColumn = 'filename' | 'relative_path' | 'size' | 'ext' | 'state';

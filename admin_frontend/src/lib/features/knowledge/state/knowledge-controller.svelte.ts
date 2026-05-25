@@ -3,14 +3,18 @@
  */
 import type { KnowledgeDocument } from '$lib/api/knowledge';
 import type { KnowledgeTabId } from '../shared/knowledge-pure';
-import { createKnowledgePreferences } from '$lib/preferences/knowledge-preferences.svelte';
+import {
+  createKnowledgePreferences,
+  type KnowledgeTabPreferences
+} from '$lib/preferences/knowledge-preferences.svelte';
 import { createKnowledgeAskModel } from './knowledge-ask.svelte';
 import { createKnowledgeBrowseModel } from './knowledge-browse.svelte';
 import { createKnowledgeIngestModel } from './knowledge-ingest.svelte';
 import { createKnowledgeOptionsModel } from './knowledge-options.svelte';
 
-export function createKnowledgePageController() {
-  const tabPrefs = createKnowledgePreferences();
+export function createKnowledgePageController(
+  tabPrefs: KnowledgeTabPreferences = createKnowledgePreferences()
+) {
   let error = $state<string | null>(null);
 
   function setError(message: string | null) {
@@ -31,6 +35,9 @@ export function createKnowledgePageController() {
     setError,
     onJobTerminal: () => {
       void browse.loadDocuments();
+      if (browse.activeDocumentId) {
+        void browse.openDocument(browse.activeDocumentId);
+      }
       if (ingest.folder.trim()) void ingest.scan();
     }
   });
@@ -62,7 +69,6 @@ export function createKnowledgePageController() {
   }
 
   function mount() {
-    tabPrefs.initialize();
     ingest.restoreFolderFromStorage();
     void bootstrap();
     const stopEvents = ingest.connectEvents();
@@ -72,10 +78,14 @@ export function createKnowledgePageController() {
   }
 
   return {
+    get tabPrefs() {
+      return tabPrefs;
+    },
     get activeTab() {
       return tabPrefs.activeTab;
     },
     setActiveTab,
+    syncActiveTabFromUrl: tabPrefs.syncActiveTabFromUrl,
     get error() {
       return error;
     },

@@ -57,12 +57,18 @@ export function createKnowledgeIngestModel(deps: {
     files.filter((file) => file.supported && selected[file.path]).map((file) => file.path)
   );
   const supportedFiles = $derived(files.filter((file) => file.supported));
+  const readyFiles = $derived(files.filter((file) => file.supported && !file.already_ingested));
   const visibleFiles = $derived(showOnlySupported ? supportedFiles : files);
   const sortedVisibleFiles = $derived(
     sortScannedFiles(visibleFiles, fileSort.sortBy, fileSort.direction)
   );
   const allSupportedSelected = $derived(
     supportedFiles.length > 0 && supportedFiles.every((file) => selected[file.path])
+  );
+  const allReadySelected = $derived(
+    readyFiles.length > 0 &&
+      readyFiles.every((file) => selected[file.path]) &&
+      supportedFiles.every((file) => !file.already_ingested || !selected[file.path])
   );
   const someSupportedSelected = $derived(
     supportedFiles.some((file) => selected[file.path]) && !allSupportedSelected
@@ -164,9 +170,7 @@ export function createKnowledgeIngestModel(deps: {
       persistFolder();
       const payload = await scanKnowledgeFolder(folder.trim(), true);
       files = payload.data.files;
-      selected = Object.fromEntries(
-        payload.data.files.filter((file) => file.supported && !file.already_ingested).map((file) => [file.path, true])
-      );
+      selected = {};
       hasScanned = true;
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Folder scan failed.');
@@ -202,31 +206,53 @@ export function createKnowledgeIngestModel(deps: {
     }
   }
 
-  async function reingestActiveDocument(documentId: string) {
+  async function reingestActiveDocument(documentId: string): Promise<KnowledgeJobData | null> {
     ingesting = true;
     deps.setError(null);
     try {
       const payload = await reingestKnowledgeDocument(documentId);
       applyJobUpdate(payload.data);
+      return payload.data;
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Re-ingest failed.');
+      return null;
     } finally {
       ingesting = false;
     }
   }
 
+  function selectReadyFiles() {
+    selected = Object.fromEntries(readyFiles.map((file) => [file.path, true]));
+  }
+
   function selectAllSupported() {
-    selected = Object.fromEntries(files.filter((file) => file.supported).map((file) => [file.path, true]));
+    selected = Object.fromEntries(supportedFiles.map((file) => [file.path, true]));
   }
 
   function deselectAll() {
     selected = {};
   }
 
-  function toggleSelectAllSupported(event: Event) {
-    const checked = (event.currentTarget as HTMLInputElement).checked;
-    if (checked) selectAllSupported();
-    else deselectAll();
+  /** Header checkbox cycles: ready → ready+indexed → none. */
+  function cycleSelectAll() {
+    if (supportedFiles.length === 0) return;
+
+    const anySelected = supportedFiles.some((file) => selected[file.path]);
+    const indexedAnySelected = supportedFiles.some((file) => file.already_ingested && selected[file.path]);
+
+    if (allSupportedSelected) {
+      deselectAll();
+      return;
+    }
+    if (allReadySelected) {
+      selectAllSupported();
+      return;
+    }
+    if (!anySelected && readyFiles.length === 0) {
+      selectAllSupported();
+      return;
+    }
+    selectReadyFiles();
   }
 
   function toggleFileSelection(path: string, checked: boolean) {
@@ -357,6 +383,9 @@ export function createKnowledgeIngestModel(deps: {
     get allSupportedSelected() {
       return allSupportedSelected;
     },
+    get allReadySelected() {
+      return allReadySelected;
+    },
     get someSupportedSelected() {
       return someSupportedSelected;
     },
@@ -386,7 +415,7 @@ export function createKnowledgeIngestModel(deps: {
     handleOwnerKindChange,
     ingestSelected,
     reingestActiveDocument,
-    toggleSelectAllSupported,
+    cycleSelectAll,
     toggleFileSelection,
     retryJob,
     toggleActiveErrorsJobId

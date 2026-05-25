@@ -193,19 +193,29 @@ class WorkspaceService:
         return Result.success(r.public_key_b64)
 
     def open_folder(self, folder_path: str) -> Result[None]:
+        import os
         import platform
         import subprocess
 
-        if not folder_path:
+        trimmed = folder_path.strip()
+        if not trimmed:
             return Result.failure("Folder path not available.")
+        try:
+            # Resolve + normalize so Explorer on Windows gets a real directory path
+            # (forward slashes like D:/foo often open Documents instead).
+            resolved = Path(trimmed).expanduser().resolve()
+        except OSError as exc:
+            return Result.failure(f"Folder not found: {trimmed} ({exc})")
+        if not resolved.is_dir():
+            return Result.failure(f"Folder not found: {trimmed}")
         try:
             system = platform.system()
             if system == "Windows":
-                subprocess.Popen(f'explorer "{folder_path}"')  # noqa: S603
+                os.startfile(resolved)  # noqa: S606
             elif system == "Darwin":
-                subprocess.Popen(["open", folder_path])  # noqa: S603
+                subprocess.Popen(["open", str(resolved)], start_new_session=True)  # noqa: S603
             else:
-                subprocess.Popen(["xdg-open", folder_path])  # noqa: S603
+                subprocess.Popen(["xdg-open", str(resolved)], start_new_session=True)  # noqa: S603
         except Exception as exc:
             return Result.failure(f"Could not open folder: {exc}")
         return Result.success(None)

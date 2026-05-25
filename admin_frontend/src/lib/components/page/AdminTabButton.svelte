@@ -6,10 +6,13 @@
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';
   import { cnAdminTab } from '$lib/styling/admin-tokens';
+  import type { AdminTabIcon } from './tab-types';
 
   type Props = {
     label: string;
     active: boolean;
+    /** Optional Lucide icon rendered before the label or `children` snippet. */
+    icon?: AdminTabIcon;
     /** When set, renders an `<a href>` instead of a `<button>` (route tab). */
     href?: string;
     disabled?: boolean;
@@ -26,6 +29,7 @@
   let {
     label,
     active,
+    icon: Icon,
     href,
     disabled = false,
     ariaControls,
@@ -54,6 +58,9 @@
     aria-disabled={disabled || undefined}
     tabindex={disabled ? -1 : 0}
   >
+    {#if Icon}
+      <Icon size={16} class="shrink-0" />
+    {/if}
     {#if children}{@render children()}{:else}{label}{/if}
   </a>
 {:else}
@@ -68,6 +75,9 @@
     {disabled}
     {onclick}
   >
+    {#if Icon}
+      <Icon size={16} class="shrink-0" />
+    {/if}
     {#if children}{@render children()}{:else}{label}{/if}
   </button>
 {/if}

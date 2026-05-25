@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import {
     Ban,
     Check,
+    ChevronRight,
     CircleCheck,
+    ExternalLink,
     Eye,
     EyeOff,
     FileCheck,
@@ -22,13 +25,14 @@
   import type { KnowledgeScannedFile } from '$lib/api/knowledge';
   import KnowledgeFilePreviewDialog from '$lib/features/knowledge/shared/file-preview/KnowledgeFilePreviewDialog.svelte';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
-  import { fileName, formatBytes, jobElapsed, optionalInt, relativeFolderPath } from '$lib/features/knowledge/shared/knowledge-pure';
+  import { fileName, formatBytes, formatIngestHeaderSummary, formatJobTotalsSummary, formatRecentJobsHeaderSummary, jobElapsed, KNOWLEDGE_BROWSE_HREF, optionalInt, relativeFolderPath } from '$lib/features/knowledge/shared/knowledge-pure';
   import {
     KNOWLEDGE_FIELD_LABEL,
     KNOWLEDGE_FIELD_LABEL_TEXT,
     KNOWLEDGE_INPUT,
     KNOWLEDGE_METADATA_SHELL,
     KNOWLEDGE_SECTION_CARD,
+    KNOWLEDGE_SECTION_TITLE,
     KNOWLEDGE_SELECT,
     KNOWLEDGE_TABLE_HEAD
   } from '$lib/features/knowledge/shared/knowledge-ui';
@@ -46,6 +50,11 @@
   let selectAllCheckboxEl = $state<HTMLInputElement | null>(null);
   let previewOpen = $state(false);
   let previewFile = $state<KnowledgeScannedFile | null>(null);
+  let recentJobsExpanded = $state(false);
+  let ingestSectionExpanded = $state(false);
+
+  const INGEST_BODY_ID = 'knowledge-ingest-section';
+  const RECENT_JOBS_BODY_ID = 'knowledge-ingest-recent-jobs';
 
   function openFilePreview(file: KnowledgeScannedFile) {
     previewFile = file;
@@ -57,7 +66,9 @@
       ? 'No selectable files'
       : ingest.allSupportedSelected
         ? 'Deselect all files'
-        : 'Select all files'
+        : ingest.allReadySelected
+          ? 'Select ready and indexed files'
+          : 'Select all ready files'
   );
 
   $effect(() => {
@@ -67,10 +78,21 @@
   });
 
   const fileSort = $derived(ingest.fileSort);
+  const ingestHeaderSummary = $derived(
+    formatIngestHeaderSummary(ingest.selectedPaths.length, ingest.job?.status ?? null)
+  );
+  const recentJobsHeaderSummary = $derived(formatRecentJobsHeaderSummary(ingest.recentJobs));
+
+  $effect(() => {
+    if (ingest.ingesting || ingest.job?.status === 'running') {
+      ingestSectionExpanded = true;
+    }
+  });
 </script>
 
-<section class={KNOWLEDGE_SECTION_CARD}>
-  <div class="grid gap-4">
+<section class="grid gap-4">
+  <section class={KNOWLEDGE_SECTION_CARD}>
+    <div class="grid gap-4">
     <div class={KNOWLEDGE_FIELD_LABEL}>
       <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Folder</span>
       <span class="flex flex-wrap items-center gap-2">
@@ -136,31 +158,30 @@
       </span>
     </div>
 
-    <div class="h-[290px]">
-      {#if ingest.files.length === 0}
-        {#if ingest.folder.trim() && !ingest.hasScanned}
-          <div class="flex h-full min-h-[290px] flex-col items-center justify-center gap-3 px-3 py-8 text-center">
-            {#if ingest.scanning}
-              <LoaderCircle size={24} class="animate-spin text-muted-foreground" />
-              <p class="font-sans text-sm text-muted-foreground">Scanning folder…</p>
-            {:else}
-              <Button onclick={() => void ingest.scan()}>
-                <FolderSearch size={16} />
-                Scan folder for supported formats
-              </Button>
-            {/if}
-          </div>
-        {:else}
-          <div class="flex h-full min-h-[290px] items-center justify-center px-3 py-8 text-center font-sans text-sm text-muted-foreground">
-            {ingest.folder.trim() ? 'No scan results' : 'Enter a folder path to scan'}
-          </div>
-        {/if}
-      {:else if ingest.visibleFiles.length === 0}
-        <div class="flex h-full min-h-[290px] items-center justify-center px-3 py-8 text-center font-sans text-sm text-muted-foreground">
-          No supported files in this folder
+    {#if ingest.files.length === 0}
+      {#if ingest.folder.trim() && !ingest.hasScanned}
+        <div class="flex flex-col items-center gap-2 py-2 text-center">
+          {#if ingest.scanning}
+            <LoaderCircle size={24} class="animate-spin text-muted-foreground" />
+            <p class="font-sans text-sm text-muted-foreground">Scanning folder…</p>
+          {:else}
+            <Button onclick={() => void ingest.scan()}>
+              <FolderSearch size={16} />
+              Scan folder for supported formats
+            </Button>
+          {/if}
         </div>
       {:else}
-        <AdminTableShell stickyHead maxBodyHeight="290px" class="h-full">
+        <div class="flex min-h-[290px] items-center justify-center px-3 py-8 text-center font-sans text-sm text-muted-foreground">
+          {ingest.folder.trim() ? 'No scan results' : 'Enter a folder path to scan'}
+        </div>
+      {/if}
+    {:else if ingest.visibleFiles.length === 0}
+      <div class="flex min-h-[290px] items-center justify-center px-3 py-8 text-center font-sans text-sm text-muted-foreground">
+        No supported files in this folder
+      </div>
+    {:else}
+      <AdminTableShell stickyHead maxBodyHeight="400px">
           <thead class={KNOWLEDGE_TABLE_HEAD}>
             <tr>
               <th class="w-10 px-3 py-2">
@@ -171,7 +192,10 @@
                   title={selectAllCheckboxTooltip}
                   disabled={ingest.supportedFiles.length === 0}
                   checked={ingest.allSupportedSelected}
-                  onchange={ingest.toggleSelectAllSupported}
+                  onclick={(event) => {
+                    event.preventDefault();
+                    ingest.cycleSelectAll();
+                  }}
                 />
               </th>
               <AdminTableHeaderCell column="filename" sort={fileSort}>Filename</AdminTableHeaderCell>
@@ -232,148 +256,210 @@
               </tr>
             {/each}
           </tbody>
-        </AdminTableShell>
-      {/if}
-    </div>
+      </AdminTableShell>
+    {/if}
     {#if ingest.supportedFiles.length > 0}
       <div class="font-sans text-xs text-muted-foreground">{ingest.supportedFiles.length} markdown files</div>
     {/if}
-
-    <div class={KNOWLEDGE_METADATA_SHELL}>
-      <div class="font-sans text-sm font-medium">Ingest metadata</div>
-      <div class="grid gap-3">
-        <div class="flex flex-wrap items-end gap-3">
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
-            <select class={cn(KNOWLEDGE_SELECT, 'w-[180px]')} bind:value={ingest.ownerKind} onchange={ingest.handleOwnerKindChange}>
-              <option value="system">System</option>
-              <option value="character">Character</option>
-              <option value="user">User</option>
-            </select>
-          </label>
-          {#if ingest.ownerKind === 'character'}
-            <label class={KNOWLEDGE_FIELD_LABEL}>
-              <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
-              <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ingest.ownerId}>
-                {#each options.characters as character (character.id)}
-                  <option value={String(character.id)}>{character.name} ({character.id})</option>
-                {/each}
-              </select>
-            </label>
-          {:else if ingest.ownerKind === 'user'}
-            <label class={KNOWLEDGE_FIELD_LABEL}>
-              <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>User</span>
-              <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ingest.ownerId}>
-                {#each options.users as user (user.id)}
-                  <option value={String(user.id)}>{user.name} ({user.id})</option>
-                {/each}
-              </select>
-            </label>
-          {/if}
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Category</span>
-            <CreatableCategorySelect
-              bind:value={ingest.categoryId}
-              options={options.topCategories}
-              placeholder="None"
-              searchPlaceholder="Search or create category…"
-              creating={options.creatingCategory}
-              onSelect={() => {
-                ingest.subcategoryId = '';
-              }}
-              onCreate={(name) => options.upsertCategoryByName(name, null)}
-            />
-          </label>
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Subcategory</span>
-            <CreatableCategorySelect
-              bind:value={ingest.subcategoryId}
-              options={ingest.subcategories}
-              placeholder="None"
-              searchPlaceholder="Search or create subcategory…"
-              disabled={!ingest.categoryId}
-              creating={options.creatingSubcategory}
-              onCreate={(name) => options.upsertCategoryByName(name, optionalInt(ingest.categoryId))}
-            />
-          </label>
-          <label class="grid min-w-[280px] flex-1 gap-1 font-sans text-sm">
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Tags</span>
-            <CreatableTagsSelect
-              bind:selected={ingest.ingestTags}
-              options={options.tags}
-              creating={options.creatingTag}
-              onCreate={options.upsertTag}
-            />
-          </label>
-          <Button
-            variant="outline"
-            onclick={() => void ingest.ingestSelected()}
-            disabled={ingest.ingesting || ingest.selectedPaths.length === 0 || (ingest.ownerKind !== 'system' && !ingest.ownerId)}
-          >
-            {#if ingest.ingesting}
-              <LoaderCircle size={16} class="animate-spin" />
-            {:else}
-              <Check size={16} />
-            {/if}
-            Ingest {ingest.selectedPaths.length}
-          </Button>
-        </div>
-      </div>
     </div>
+  </section>
 
-    {#if ingest.job}
-      <div class="grid gap-2 rounded-md border bg-background p-3 font-sans text-sm">
-        <div class="flex flex-wrap items-center gap-2">
-          <Badge variant={ingest.job.status === 'completed' ? 'success' : ingest.job.status === 'failed' ? 'destructive' : 'outline'}>
-            {ingest.job.status}
-          </Badge>
-          <span class="text-muted-foreground">
-            {ingest.job.totals.ingested ?? 0} ingested, {ingest.job.totals.skipped ?? 0} skipped, {ingest.job.totals.failed ?? 0} failed,
-            {ingest.job.totals.chunks ?? 0} chunks
-          </span>
-          {#if ingest.currentJobRecord}
-            <span class="text-xs text-muted-foreground">elapsed {jobElapsed(ingest.currentJobRecord.created_at)}</span>
-          {/if}
-          <span class="ml-auto text-xs text-muted-foreground">{ingest.jobDone}/{ingest.job.totals.requested ?? 0} files</span>
-          <Button class="h-8" type="button" variant="outline" disabled title="Cancellation is documented but not implemented yet.">
-            Cancel
-          </Button>
+  <section class={KNOWLEDGE_SECTION_CARD}>
+    <div class="grid gap-3">
+      <div class="flex items-start justify-between gap-2">
+        <button
+          type="button"
+          class="flex min-w-0 flex-1 items-start gap-2 rounded-md py-0.5 text-left outline-none transition hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={ingestSectionExpanded}
+          aria-controls={INGEST_BODY_ID}
+          onclick={() => {
+            ingestSectionExpanded = !ingestSectionExpanded;
+          }}
+        >
+          <ChevronRight
+            size={18}
+            class={cn(
+              'mt-0.5 shrink-0 text-muted-foreground transition-transform duration-150',
+              ingestSectionExpanded && 'rotate-90'
+            )}
+            aria-hidden="true"
+          />
+          <span class={KNOWLEDGE_SECTION_TITLE}>Ingest</span>
+        </button>
+        {#if ingestHeaderSummary}
+          <span class="shrink-0 text-right font-sans text-xs text-muted-foreground">{ingestHeaderSummary}</span>
+        {/if}
+      </div>
+      <div id={INGEST_BODY_ID} class="grid gap-3" hidden={!ingestSectionExpanded}>
+        <div class={KNOWLEDGE_METADATA_SHELL}>
+          <div class="font-sans text-sm font-medium">Ingest metadata</div>
+          <div class="grid gap-3">
+            <div class="flex flex-wrap items-end gap-3">
+              <label class={KNOWLEDGE_FIELD_LABEL}>
+                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
+                <select class={cn(KNOWLEDGE_SELECT, 'w-[180px]')} bind:value={ingest.ownerKind} onchange={ingest.handleOwnerKindChange}>
+                  <option value="system">System</option>
+                  <option value="character">Character</option>
+                  <option value="user">User</option>
+                </select>
+              </label>
+              {#if ingest.ownerKind === 'character'}
+                <label class={KNOWLEDGE_FIELD_LABEL}>
+                  <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
+                  <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ingest.ownerId}>
+                    {#each options.characters as character (character.id)}
+                      <option value={String(character.id)}>{character.name} ({character.id})</option>
+                    {/each}
+                  </select>
+                </label>
+              {:else if ingest.ownerKind === 'user'}
+                <label class={KNOWLEDGE_FIELD_LABEL}>
+                  <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>User</span>
+                  <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ingest.ownerId}>
+                    {#each options.users as user (user.id)}
+                      <option value={String(user.id)}>{user.name} ({user.id})</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+              <label class={KNOWLEDGE_FIELD_LABEL}>
+                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Category</span>
+                <CreatableCategorySelect
+                  bind:value={ingest.categoryId}
+                  options={options.topCategories}
+                  placeholder="None"
+                  searchPlaceholder="Search or create category…"
+                  creating={options.creatingCategory}
+                  onSelect={() => {
+                    ingest.subcategoryId = '';
+                  }}
+                  onCreate={(name) => options.upsertCategoryByName(name, null)}
+                />
+              </label>
+              <label class={KNOWLEDGE_FIELD_LABEL}>
+                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Subcategory</span>
+                <CreatableCategorySelect
+                  bind:value={ingest.subcategoryId}
+                  options={ingest.subcategories}
+                  placeholder="None"
+                  searchPlaceholder="Search or create subcategory…"
+                  disabled={!ingest.categoryId}
+                  creating={options.creatingSubcategory}
+                  onCreate={(name) => options.upsertCategoryByName(name, optionalInt(ingest.categoryId))}
+                />
+              </label>
+              <label class="grid min-w-[280px] flex-1 gap-1 font-sans text-sm">
+                <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Tags</span>
+                <CreatableTagsSelect
+                  bind:selected={ingest.ingestTags}
+                  options={options.tags}
+                  creating={options.creatingTag}
+                  onCreate={options.upsertTag}
+                />
+              </label>
+              <Button
+                variant="outline"
+                onclick={() => void ingest.ingestSelected()}
+                disabled={ingest.ingesting || ingest.selectedPaths.length === 0 || (ingest.ownerKind !== 'system' && !ingest.ownerId)}
+              >
+                {#if ingest.ingesting}
+                  <LoaderCircle size={16} class="animate-spin" />
+                {:else}
+                  <Check size={16} />
+                {/if}
+                Ingest {ingest.selectedPaths.length}
+              </Button>
+            </div>
+          </div>
         </div>
-        <div class="h-2 overflow-hidden rounded-full bg-muted">
-          <div class="h-full bg-primary transition-all" style={`width: ${ingest.jobPercent}%`}></div>
-        </div>
-        {#if ingest.job.in_flight?.length}
-          <div class="truncate font-sans text-xs text-muted-foreground" title={ingest.job.in_flight.join(', ')}>
-            Processing {ingest.job.in_flight.length} file(s): {ingest.job.in_flight.join(', ')}
+
+        {#if ingest.job}
+          <div class="grid gap-2 rounded-md border bg-background p-3 font-sans text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+              <Badge variant={ingest.job.status === 'completed' ? 'success' : ingest.job.status === 'failed' ? 'destructive' : 'outline'}>
+                {ingest.job.status}
+              </Badge>
+              <span class="text-muted-foreground">
+                {formatJobTotalsSummary(ingest.job.totals)}
+              </span>
+              {#if ingest.currentJobRecord}
+                <span class="text-xs text-muted-foreground">elapsed {jobElapsed(ingest.currentJobRecord.created_at)}</span>
+              {/if}
+              <span class="ml-auto text-xs text-muted-foreground">{ingest.jobDone}/{ingest.job.totals.requested ?? 0} files</span>
+              {#if ingest.job.status === 'running'}
+                <Button class="h-8" type="button" variant="outline" disabled title="Cancellation is documented but not implemented yet.">
+                  Cancel
+                </Button>
+              {:else if ingest.job.status === 'completed'}
+                <a
+                  class="inline-flex h-8 items-center gap-1 rounded-md border px-2 py-1 font-sans text-xs text-primary hover:bg-primary/5"
+                  href={`${base}${KNOWLEDGE_BROWSE_HREF}`}
+                  onclick={(event) => {
+                    event.preventDefault();
+                    void ctl.setActiveTab('browse');
+                  }}
+                >
+                  View documents
+                  <ExternalLink size={12} aria-hidden="true" />
+                </a>
+              {/if}
+            </div>
+            <div class="h-2 overflow-hidden rounded-full bg-muted">
+              <div class="h-full bg-primary transition-all" style={`width: ${ingest.jobPercent}%`}></div>
+            </div>
+            {#if ingest.job.in_flight?.length}
+              <div class="truncate font-sans text-xs text-muted-foreground" title={ingest.job.in_flight.join(', ')}>
+                Processing {ingest.job.in_flight.length} file(s): {ingest.job.in_flight.join(', ')}
+              </div>
+            {/if}
+            {#if Object.keys(ingest.job.errors).length > 0}
+              <details class="text-xs">
+                <summary class="text-destructive">View errors</summary>
+                <InlineDestructiveAlert
+                  class="mt-2 whitespace-pre-wrap font-mono text-xs"
+                  message={JSON.stringify(ingest.job.errors, null, 2)}
+                />
+              </details>
+            {/if}
           </div>
         {/if}
-        {#if Object.keys(ingest.job.errors).length > 0}
-          <details class="text-xs">
-            <summary class="text-destructive">View errors</summary>
-            <InlineDestructiveAlert
-              class="mt-2 whitespace-pre-wrap font-mono text-xs"
-              message={JSON.stringify(ingest.job.errors, null, 2)}
-            />
-          </details>
-        {/if}
       </div>
-    {/if}
+    </div>
+  </section>
 
-    {#if ingest.recentJobs.length > 0}
-      <div class="grid gap-2 rounded-md border bg-background p-3">
-        <div class="font-sans text-sm font-medium">Recent jobs</div>
-        <div class="h-[7rem] overflow-auto rounded-md border">
-          <div class="grid gap-2 p-2">
-            {#each ingest.recentJobs as item (item.id)}
-              <div class="flex flex-wrap items-center gap-2 font-sans text-xs text-muted-foreground">
+  {#if ingest.recentJobs.length > 0}
+    <section class={KNOWLEDGE_SECTION_CARD}>
+      <div class="grid gap-3">
+        <div class="flex items-start justify-between gap-2">
+          <button
+            type="button"
+            class="flex min-w-0 flex-1 items-start gap-2 rounded-md py-0.5 text-left outline-none transition hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
+            aria-expanded={recentJobsExpanded}
+            aria-controls={RECENT_JOBS_BODY_ID}
+            onclick={() => {
+              recentJobsExpanded = !recentJobsExpanded;
+            }}
+          >
+            <ChevronRight
+              size={18}
+              class={cn(
+                'mt-0.5 shrink-0 text-muted-foreground transition-transform duration-150',
+                recentJobsExpanded && 'rotate-90'
+              )}
+              aria-hidden="true"
+            />
+            <span class={KNOWLEDGE_SECTION_TITLE}>Recent jobs</span>
+          </button>
+          <span class="shrink-0 text-right font-sans text-xs text-muted-foreground">{recentJobsHeaderSummary}</span>
+        </div>
+        <div id={RECENT_JOBS_BODY_ID} class="grid gap-2" hidden={!recentJobsExpanded}>
+          {#each ingest.recentJobs as item (item.id)}
+            <div class="flex flex-wrap items-center gap-2 rounded-md border bg-background p-2 font-sans text-xs text-muted-foreground">
               <Badge variant={item.status === 'completed' ? 'success' : item.status === 'failed' ? 'destructive' : 'outline'}>
                 {item.status}
               </Badge>
               <span>{formatChatTimestamp(item.created_at)}</span>
-              <span>
-                {item.totals.ingested ?? 0} ingested, {item.totals.skipped ?? 0} skipped,
-                {item.totals.failed ?? 0} failed, {item.totals.chunks ?? 0} chunks
-              </span>
+              <span>{formatJobTotalsSummary(item.totals)}</span>
               {#if item.status === 'failed'}
                 <Button class="h-7" type="button" variant="outline" onclick={() => void ingest.retryJob(item)} disabled={ingest.ingesting}>
                   Retry
@@ -400,11 +486,10 @@
               {/if}
             </div>
           {/each}
-          </div>
         </div>
       </div>
-    {/if}
-  </div>
+    </section>
+  {/if}
 </section>
 
 <KnowledgeFilePreviewDialog bind:open={previewOpen} file={previewFile} />

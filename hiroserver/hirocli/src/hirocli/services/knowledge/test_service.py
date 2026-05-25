@@ -79,6 +79,7 @@ async def test_markdown_ingest_search_and_detail(tmp_path: Path) -> None:
 
         detail = await service.get_document(documents.documents[0].id)
         assert detail.document is not None
+        assert detail.document.tags == ["smoke"]
         assert len(detail.chunks) == 2
         assert detail.chunks[0]["heading_path"] == "# Alpha"
 
@@ -460,6 +461,7 @@ async def test_metadata_update_bumps_updated_at_not_ingested_at(tmp_path: Path) 
 
         after = (await service.get_document(document_id)).document
         assert after is not None
+        assert after.tags == ["edited"]
         assert after.ingested_at == before.ingested_at
         assert after.updated_at > before.updated_at
     finally:

@@ -12,6 +12,7 @@
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
+  import KnowledgeBrowseLink from '$lib/features/preferences/widgets/KnowledgeBrowseLink.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -30,7 +31,10 @@
     {#if ctrl.sectionDescription('knowledge')}
       <p class="min-w-0 flex-1 text-sm text-muted-foreground">{ctrl.sectionDescription('knowledge')}</p>
     {/if}
-    <ActiveProvidersLink busy={ctrl.busy} />
+    <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      <KnowledgeBrowseLink busy={ctrl.busy} />
+      <ActiveProvidersLink busy={ctrl.busy} />
+    </div>
   </div>
 
   {#if ctrl.draft}

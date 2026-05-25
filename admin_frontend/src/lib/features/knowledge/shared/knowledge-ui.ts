@@ -4,7 +4,6 @@
  * Header / sticky-page / tablist tokens now live in `$lib/styling/admin-tokens`.
  * Form tokens re-export admin tokens so Knowledge inputs stay aligned app-wide.
  */
-import { cn } from '$lib/utils';
 import {
   ADMIN_INPUT,
   ADMIN_INPUT_LG,
@@ -34,10 +33,17 @@ export const KNOWLEDGE_TABLE = 'w-full text-left font-sans text-sm';
 
 export const KNOWLEDGE_TABLE_HEAD = 'sticky top-0 bg-muted text-xs uppercase text-muted-foreground';
 
-export function cnKnowledgeBrowseDocRow(selected: boolean) {
-  return cn(
-    'cursor-pointer border-t transition-[background-color,box-shadow]',
-    'hover:bg-primary/10 hover:shadow-[inset_0_0_0_2px] hover:shadow-brand',
-    selected && 'bg-primary/10 shadow-[inset_0_0_0_2px] shadow-primary'
-  );
-}
+/** Bulk browse actions (metadata / re-ingest / delete) — wide, content-sized up to viewport max. */
+export const KNOWLEDGE_BROWSE_BULK_DIALOG =
+  'flex w-[min(92vw,720px)] max-w-[min(92vw,720px)] max-h-[min(85vh,720px)] flex-col gap-4 overflow-hidden sm:max-w-[min(92vw,720px)]';
+
+/** Scrolls only when dialog content exceeds the viewport cap. */
+export const KNOWLEDGE_BROWSE_BULK_DIALOG_BODY = 'flex min-h-0 shrink flex-col gap-3 overflow-y-auto';
+
+/** Content-sized list shell — scroll only when many documents (max height on the `<ul>`). */
+export const KNOWLEDGE_BROWSE_BULK_DIALOG_AFFECTED_LIST =
+  'shrink-0 rounded-md border bg-muted/30 p-3';
+
+/** Ask tab collapsible section bodies (`aria-controls` targets). */
+export const KNOWLEDGE_ASK_QUESTION_BODY_ID = 'knowledge-ask-question';
+export const KNOWLEDGE_ASK_CHUNK_RESULTS_BODY_ID = 'knowledge-ask-chunk-results';

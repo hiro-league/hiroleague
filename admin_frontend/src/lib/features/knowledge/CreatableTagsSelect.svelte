@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { LoaderCircle, Plus, X } from '@lucide/svelte';
+  import * as Popover from '$lib/components/ui/popover/index.js';
   import { cn } from '$lib/utils';
 
   type TagOption = { id: number; name: string };
@@ -89,20 +90,29 @@
     inputEl?.focus();
   }
 
-  function handleInputFocus() {
+  function openSuggestions() {
     if (disabled) return;
     open = true;
   }
 
-  function handleFieldPointerDown() {
+  function handleComboboxPointerDown(event: PointerEvent) {
     if (disabled) return;
-    open = true;
+    openSuggestions();
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.closest('[data-tag-remove]')) return;
     void focusInput();
   }
 
   function keepFocus(event: MouseEvent) {
     // Prevent input blur before click so suggestion picks register reliably.
     event.preventDefault();
+  }
+
+  function handleInteractOutside(event: Event) {
+    const target = event.target;
+    if (target instanceof Node && rootEl?.contains(target)) {
+      event.preventDefault();
+    }
   }
 
   async function handleInputKeydown(event: KeyboardEvent) {
@@ -142,80 +152,78 @@
     open = true;
     await focusInput();
   }
-
-  $effect(() => {
-    if (!open) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && rootEl?.contains(target)) return;
-      open = false;
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  });
 </script>
 
-<div bind:this={rootEl} class={cn('relative w-full', className)}>
-  <div
-    role="combobox"
-    aria-expanded={open}
-    aria-haspopup="listbox"
-    aria-disabled={disabled}
-    class={cn(
-      'flex min-h-9 w-full flex-wrap items-center gap-1 rounded-md border bg-background px-2 py-1 shadow-xs outline-none focus-within:ring-2 focus-within:ring-primary',
-      disabled && 'cursor-not-allowed opacity-50'
-    )}
-    onclick={handleFieldPointerDown}
-    onkeydown={(event) => {
-      if (event.key === 'Backspace' && event.target === event.currentTarget && selected.length > 0) {
-        event.preventDefault();
-        removeLastTag();
-      }
-    }}
-  >
-    {#each selected as tag, index (tag + index)}
-      <span
-        class="inline-flex max-w-full items-center gap-1 rounded-md border border-primary bg-primary/10 px-2 py-0.5 font-sans text-xs text-foreground"
-      >
-        <span class="truncate">{tag}</span>
-        <button
-          class="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background/80 hover:text-foreground"
-          type="button"
-          data-tag-remove
-          aria-label={`Remove tag ${tag}`}
-          {disabled}
-          onclick={(event) => {
-            event.stopPropagation();
-            removeTag(tag);
-            void focusInput();
-          }}
-        >
-          <X size={12} />
-        </button>
-      </span>
-    {/each}
-    <input
-      bind:this={inputEl}
-      bind:value={search}
-      class="min-w-[8rem] flex-1 border-0 bg-transparent px-1 py-1 font-sans text-sm outline-none disabled:cursor-not-allowed"
-      type="text"
-      {placeholder}
-      {disabled}
-      aria-label="Add tags"
-      onfocus={handleInputFocus}
-      onkeydown={handleInputKeydown}
-    />
-    {#if creating}
-      <LoaderCircle size={14} class="mr-1 shrink-0 animate-spin text-muted-foreground" />
-    {/if}
-  </div>
-  {#if open}
+<Popover.Root bind:open>
+  <div bind:this={rootEl} class={cn('relative w-full', className)}>
     <div
-      class="absolute top-[calc(100%+0.25rem)] z-50 w-full overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
-      role="listbox"
-      aria-label="Tag suggestions"
-      onmousedown={keepFocus}
+      role="combobox"
+      aria-expanded={open}
+      aria-haspopup="listbox"
+      aria-disabled={disabled}
+      class={cn(
+        'box-border flex min-h-9 w-full max-w-full cursor-text flex-wrap items-center gap-1 overflow-x-hidden rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus-within:ring-2 focus-within:ring-ring',
+        disabled && 'cursor-not-allowed opacity-50'
+      )}
+      onpointerdown={handleComboboxPointerDown}
+      onkeydown={(event) => {
+        if (event.key === 'Backspace' && event.target === event.currentTarget && selected.length > 0) {
+          event.preventDefault();
+          removeLastTag();
+        }
+      }}
     >
+      {#each selected as tag, index (tag + index)}
+        <span
+          class="inline-flex max-w-[calc(100%-0.25rem)] items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 font-sans text-xs text-foreground"
+        >
+          <span class="truncate">{tag}</span>
+          <button
+            class="inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background/80 hover:text-foreground"
+            type="button"
+            data-tag-remove
+            aria-label={`Remove tag ${tag}`}
+            {disabled}
+            onclick={(event) => {
+              event.stopPropagation();
+              removeTag(tag);
+              void focusInput();
+            }}
+          >
+            <X size={12} />
+          </button>
+        </span>
+      {/each}
+      <input
+        bind:this={inputEl}
+        bind:value={search}
+        class="min-w-[3rem] max-w-full flex-1 basis-[3rem] border-0 bg-transparent px-1 py-0.5 font-sans text-sm shadow-none outline-none ring-0 focus:ring-0 focus-visible:ring-0 disabled:cursor-not-allowed"
+        type="text"
+        {placeholder}
+        {disabled}
+        aria-label="Add tags"
+        onfocus={openSuggestions}
+        oninput={openSuggestions}
+        onkeydown={handleInputKeydown}
+      />
+      {#if creating}
+        <LoaderCircle size={14} class="mr-1 shrink-0 animate-spin text-muted-foreground" />
+      {/if}
+    </div>
+  </div>
+
+  <Popover.Content
+    customAnchor={rootEl}
+    align="start"
+    side="bottom"
+    sideOffset={4}
+    class="w-[var(--bits-popover-anchor-width)] p-0"
+    trapFocus={false}
+    onOpenAutoFocus={(event) => event.preventDefault()}
+    onCloseAutoFocus={(event) => event.preventDefault()}
+    onInteractOutside={handleInteractOutside}
+  >
+    <div role="listbox" aria-label="Tag suggestions" class="overflow-hidden" onmousedown={keepFocus}>
       <div class="max-h-56 overflow-y-auto p-1">
         {#if filteredOptions.length === 0 && !showCreate}
           <div class="px-2 py-3 text-center font-sans text-sm text-muted-foreground">
@@ -231,6 +239,7 @@
               class="flex w-full rounded-sm px-2 py-1.5 text-left font-sans text-sm hover:bg-muted"
               type="button"
               role="option"
+              aria-selected="false"
               onclick={() => void selectSuggestion(option.name)}
             >
               {option.name}
@@ -254,5 +263,5 @@
         {/if}
       </div>
     </div>
-  {/if}
-</div>
+  </Popover.Content>
+</Popover.Root>

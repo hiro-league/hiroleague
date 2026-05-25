@@ -1,30 +1,25 @@
 <script lang="ts">
-  import { BookText, ChevronDown, ChevronUp, Code, Database, ExternalLink, FilterX, LoaderCircle, Search } from '@lucide/svelte';
+  import { BookText, Code, ExternalLink, LoaderCircle, Search } from '@lucide/svelte';
+  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
-  import CreatableCategorySelect from '$lib/features/knowledge/CreatableCategorySelect.svelte';
-  import CreatableTagsSelect from '$lib/features/knowledge/CreatableTagsSelect.svelte';
+  import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
+  import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
   import {
     chunkTextByteSize,
     formatBytes,
-    optionalInt,
     readKnowledgeChunkMarkdownFormat,
     writeKnowledgeChunkMarkdownFormat
   } from '$lib/features/knowledge/shared/knowledge-pure';
   import {
-    KNOWLEDGE_FIELD_LABEL,
+    KNOWLEDGE_ASK_CHUNK_RESULTS_BODY_ID,
+    KNOWLEDGE_ASK_QUESTION_BODY_ID,
     KNOWLEDGE_FIELD_LABEL_TEXT,
-    KNOWLEDGE_INPUT,
-    KNOWLEDGE_INPUT_LG,
-    KNOWLEDGE_METADATA_SHELL,
-    KNOWLEDGE_SECTION_CARD,
-    KNOWLEDGE_SECTION_TITLE,
-    KNOWLEDGE_SELECT
+    KNOWLEDGE_INPUT_LG
   } from '$lib/features/knowledge/shared/knowledge-ui';
-  import { cn } from '$lib/utils';
 
   interface Props {
     ctl: KnowledgePageController;
@@ -35,11 +30,23 @@
   const options = $derived(ctl.options);
 
   let chunkMarkdownFormat = $state(readKnowledgeChunkMarkdownFormat());
-  let filtersExpanded = $state(true);
+
+  const questionHeaderSummary = $derived(
+    ask.searching ? 'Searching…' : ask.answerResult?.no_results ? 'No sources matched' : ask.answerResult ? 'Answer ready' : ''
+  );
 </script>
 
 <section class="grid gap-4">
-  <div class={KNOWLEDGE_SECTION_CARD}>
+  <AdminPageStickyToolbar>
+    <KnowledgeAskFilterBar {ask} {options} />
+  </AdminPageStickyToolbar>
+
+  <KnowledgeCollapsibleSectionCard
+    title="Question"
+    bodyId={KNOWLEDGE_ASK_QUESTION_BODY_ID}
+    defaultExpanded={true}
+    summary={questionHeaderSummary}
+  >
     <div class="flex flex-wrap items-end gap-3">
       <label class="grid min-w-[320px] flex-1 gap-1 font-sans text-sm">
         <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Question</span>
@@ -63,157 +70,19 @@
     </div>
 
     {#if ask.askDocumentScope}
-      <div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-background px-3 py-2 font-sans text-sm">
+      <div class="flex flex-wrap items-center gap-2 rounded-md border bg-background px-3 py-2 font-sans text-sm">
         <span class="text-muted-foreground">Scoped to document:</span>
         <Badge variant="secondary">{ask.askDocumentScope.title || ask.askDocumentScope.source_uri}</Badge>
         <Button class="h-7 px-2" variant="ghost" onclick={ask.clearAskDocumentScope}>Clear scope</Button>
       </div>
     {/if}
 
-    <div class={cn(KNOWLEDGE_METADATA_SHELL, 'mt-3')}>
-      <div class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-          type="button"
-          aria-expanded={filtersExpanded}
-          aria-controls="knowledge-ask-filters-panel"
-          aria-label={filtersExpanded ? 'Collapse filters' : 'Expand filters'}
-          title={filtersExpanded ? 'Collapse filters' : 'Expand filters'}
-          onclick={() => {
-            filtersExpanded = !filtersExpanded;
-          }}
-        >
-          {#if filtersExpanded}
-            <ChevronUp size={18} strokeWidth={2} aria-hidden="true" />
-          {:else}
-            <ChevronDown size={18} strokeWidth={2} aria-hidden="true" />
-          {/if}
-        </Button>
-        <div class="font-sans text-sm font-medium">Filters</div>
-        <Button
-          variant="ghost"
-          size="icon"
-          class={cn(
-            'size-7 shrink-0',
-            ask.hasAskFilters
-              ? 'text-destructive hover:bg-destructive/10 hover:text-destructive'
-              : 'text-muted-foreground'
-          )}
-          type="button"
-          aria-label="Clear filters"
-          title="Clear filters"
-          disabled={!ask.hasAskFilters}
-          onclick={() => ask.clearAskFilters()}
-        >
-          <FilterX size={16} aria-hidden="true" />
-        </Button>
-      </div>
-      {#if filtersExpanded}
-      <div id="knowledge-ask-filters-panel" class="grid gap-3">
-        <div class="flex flex-wrap items-end gap-3">
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
-            <select
-              class={cn(KNOWLEDGE_SELECT, 'w-[180px]')}
-              bind:value={ask.askOwnerKind}
-              onchange={ask.handleAskOwnerKindChange}
-            >
-              <option value="">Any</option>
-              <option value="system">System</option>
-              <option value="character">Character</option>
-              <option value="user">User</option>
-            </select>
-          </label>
-          {#if ask.askOwnerKind === 'character'}
-            <label class={KNOWLEDGE_FIELD_LABEL}>
-              <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
-              <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ask.askOwnerId}>
-                {#each options.characters as character (character.id)}
-                  <option value={String(character.id)}>{character.name} ({character.id})</option>
-                {/each}
-              </select>
-            </label>
-          {:else if ask.askOwnerKind === 'user'}
-            <label class={KNOWLEDGE_FIELD_LABEL}>
-              <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>User</span>
-              <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ask.askOwnerId}>
-                {#each options.users as user (user.id)}
-                  <option value={String(user.id)}>{user.name} ({user.id})</option>
-                {/each}
-              </select>
-            </label>
-          {/if}
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Category</span>
-            <CreatableCategorySelect
-              bind:value={ask.askCategoryId}
-              options={options.topCategories}
-              placeholder="Any"
-              searchPlaceholder="Search or create category…"
-              creating={options.creatingCategory}
-              onSelect={() => {
-                ask.askSubcategoryId = '';
-              }}
-              onCreate={(name) => options.upsertCategoryByName(name, null)}
-            />
-          </label>
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Subcategory</span>
-            <CreatableCategorySelect
-              bind:value={ask.askSubcategoryId}
-              options={ask.askSubcategories}
-              placeholder="Any"
-              searchPlaceholder="Search or create subcategory…"
-              disabled={!ask.askCategoryId}
-              creating={options.creatingSubcategory}
-              onCreate={(name) => options.upsertCategoryByName(name, optionalInt(ask.askCategoryId))}
-            />
-          </label>
-          <label class="grid min-w-[280px] flex-1 gap-1 font-sans text-sm">
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Tags</span>
-            <CreatableTagsSelect
-              bind:selected={ask.askTags}
-              options={options.tags}
-              creating={options.creatingTag}
-              onCreate={options.upsertTag}
-            />
-          </label>
-        </div>
-        <div class="flex flex-wrap items-end gap-3">
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Top K</span>
-            <input
-              class={cn(KNOWLEDGE_INPUT, 'w-24')}
-              type="number"
-              min="1"
-              max="100"
-              bind:value={ask.askTopK}
-            />
-          </label>
-          <label class={KNOWLEDGE_FIELD_LABEL}>
-            <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Min score</span>
-            <input
-              class={cn(KNOWLEDGE_INPUT, 'w-32')}
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              bind:value={ask.askMinScore}
-            />
-          </label>
-        </div>
-      </div>
-      {/if}
-    </div>
-
     {#if ask.answerResult?.no_results}
-      <div class="mt-4 rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
+      <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
         No sources matched. Relax filters or lower the minimum score.
       </div>
     {:else if ask.answerResult}
-      <article class="mt-4 grid gap-3 rounded-md border bg-background p-4">
+      <article class="grid gap-3 rounded-md border bg-background p-4">
         <div class="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{ask.answerResult.elapsed_ms}ms</Badge>
           {#if ask.answerResult.model_id}<Badge variant="secondary">{ask.answerResult.model_id}</Badge>{/if}
@@ -244,21 +113,24 @@
         <p class="whitespace-pre-wrap font-sans text-sm leading-6">{ask.answerResult.answer}</p>
       </article>
     {:else}
-      <div class="mt-4 rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
+      <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
         Ask a question to retrieve cited sources.
       </div>
     {/if}
-  </div>
+  </KnowledgeCollapsibleSectionCard>
 
   {#if ask.answerResult && !ask.answerResult.no_results && ask.answerResult.sources.length > 0}
-    <div class={KNOWLEDGE_SECTION_CARD}>
-      <div class="mb-3 flex items-center gap-2">
-        <Database size={17} class="shrink-0 text-muted-foreground" />
-        <h3 class={KNOWLEDGE_SECTION_TITLE}>Chunk Results</h3>
+    <KnowledgeCollapsibleSectionCard
+      title="Chunk Results"
+      bodyId={KNOWLEDGE_ASK_CHUNK_RESULTS_BODY_ID}
+      defaultExpanded={false}
+      summary={`${ask.answerResult.sources.length} chunks`}
+    >
+      {#snippet headerActions()}
         <Button
           variant="ghost"
           size="icon"
-          class="ml-auto size-8 shrink-0 text-muted-foreground hover:text-foreground"
+          class="size-8 shrink-0 text-muted-foreground hover:text-foreground"
           type="button"
           aria-label={chunkMarkdownFormat ? 'Show raw chunk text' : 'Show formatted markdown'}
           aria-pressed={chunkMarkdownFormat}
@@ -274,8 +146,7 @@
             <Code size={16} aria-hidden="true" />
           {/if}
         </Button>
-        <Badge class="shrink-0" variant="outline">{ask.answerResult.sources.length}</Badge>
-      </div>
+      {/snippet}
       <div class="rounded-md border">
         {#each ask.answerResult.sources as source (source.point_id)}
           <article class="grid gap-2 border-t px-3 py-3 first:border-t-0">
@@ -300,6 +171,6 @@
           </article>
         {/each}
       </div>
-    </div>
+    </KnowledgeCollapsibleSectionCard>
   {/if}
 </section>

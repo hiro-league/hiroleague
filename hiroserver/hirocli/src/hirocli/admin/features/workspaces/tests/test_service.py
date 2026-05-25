@@ -137,14 +137,36 @@ def test_get_public_key_workspace_error() -> None:
 
 
 @pytest.mark.parametrize("system", ["Windows", "Darwin", "Linux"])
-def test_open_folder_success(system: str) -> None:
+def test_open_folder_success(system: str, tmp_path) -> None:
+    folder = str(tmp_path)
+    with patch("platform.system", return_value=system):
+        if system == "Windows":
+            with patch("os.startfile") as startfile:
+                r = WorkspaceService().open_folder(folder)
+            assert r.ok
+            startfile.assert_called_once()
+        else:
+            with patch("subprocess.Popen") as popen:
+                r = WorkspaceService().open_folder(folder)
+            assert r.ok
+            assert popen.call_count == 1
+
+
+def test_open_folder_normalizes_forward_slashes_on_windows(tmp_path) -> None:
+    folder = str(tmp_path).replace("\\", "/")
     with (
-        patch("platform.system", return_value=system),
-        patch("subprocess.Popen") as P,
+        patch("platform.system", return_value="Windows"),
+        patch("os.startfile") as startfile,
     ):
-        r = WorkspaceService().open_folder("/tmp/ws")
+        r = WorkspaceService().open_folder(folder)
     assert r.ok
-    assert P.call_count == 1
+    startfile.assert_called_once()
+
+
+def test_open_folder_missing_dir() -> None:
+    r = WorkspaceService().open_folder("/nonexistent/hiro-test-folder-xyzzy")
+    assert not r.ok
+    assert "not found" in (r.error or "").lower()
 
 
 def test_open_folder_empty_path() -> None:

@@ -5,7 +5,8 @@ import {
   updateKnowledgeDocumentMetadata,
   type KnowledgeChunk,
   type KnowledgeDocument,
-  type KnowledgeIngestMetadata
+  type KnowledgeIngestMetadata,
+  type KnowledgeJobData
 } from '$lib/api/knowledge';
 import {
   DEFAULT_DOCUMENT_SORT,
@@ -35,7 +36,7 @@ function tagsFromChunks(chunks: KnowledgeChunk[]): string[] {
 export function createKnowledgeBrowseModel(deps: {
   options: KnowledgeOptionsModel;
   setError: (message: string | null) => void;
-  onReingest: (documentId: string) => Promise<void>;
+  onReingest: (documentId: string) => Promise<void | KnowledgeJobData | null>;
 }) {
   let browseStatus = $state('');
   let browseOwnerKind = $state('');
@@ -54,6 +55,7 @@ export function createKnowledgeBrowseModel(deps: {
   let chunkHasMore = $state(false);
   let chunkNextOffset = $state<string | null>(null);
   let loadingMoreChunks = $state(false);
+  let selectedDocuments = $state<Record<string, boolean>>({});
   let filterDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   const documentSort = useTableSort<DocumentSortColumn>({
@@ -66,6 +68,17 @@ export function createKnowledgeBrowseModel(deps: {
     sortDocuments(documents, documentSort.sortBy, documentSort.direction, deps.options.categoryLabel)
   );
 
+  const allDocumentsSelected = $derived(
+    sortedDocuments.length > 0 && sortedDocuments.every((doc) => selectedDocuments[doc.id])
+  );
+  const someDocumentsSelected = $derived(
+    sortedDocuments.some((doc) => selectedDocuments[doc.id]) && !allDocumentsSelected
+  );
+  const selectedDocumentCount = $derived(
+    Object.entries(selectedDocuments).filter(([, selected]) => selected).length
+  );
+  const selectedDocumentRows = $derived(documents.filter((doc) => selectedDocuments[doc.id]));
+
   const browseSubcategories = $derived(
     deps.options.categories.filter((category) => category.parent_id === optionalInt(browseCategoryId))
   );
@@ -74,6 +87,35 @@ export function createKnowledgeBrowseModel(deps: {
     if (!doc) return [];
     return deps.options.categories.filter((category) => category.parent_id === doc.category_id);
   });
+
+  function pruneDocumentSelection() {
+    const visibleIds = new Set(documents.map((doc) => doc.id));
+    const next: Record<string, boolean> = {};
+    for (const [id, selected] of Object.entries(selectedDocuments)) {
+      if (selected && visibleIds.has(id)) {
+        next[id] = true;
+      }
+    }
+    selectedDocuments = next;
+  }
+
+  function toggleDocumentSelection(documentId: string, checked: boolean) {
+    selectedDocuments = { ...selectedDocuments, [documentId]: checked };
+  }
+
+  function selectAllDocuments() {
+    selectedDocuments = Object.fromEntries(sortedDocuments.map((doc) => [doc.id, true]));
+  }
+
+  function deselectAllDocuments() {
+    selectedDocuments = {};
+  }
+
+  function toggleSelectAllDocuments(event: Event) {
+    const checked = (event.currentTarget as HTMLInputElement).checked;
+    if (checked) selectAllDocuments();
+    else deselectAllDocuments();
+  }
 
   function queueLoadDocuments() {
     if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
@@ -152,6 +194,7 @@ export function createKnowledgeBrowseModel(deps: {
       });
       documents = payload.data.documents;
       documentTotal = payload.data.total;
+      pruneDocumentSelection();
       if (!activeDocumentId && documents[0]) {
         await openDocument(documents[0].id);
       } else if (activeDocumentId && !activeDocument) {
@@ -185,7 +228,10 @@ export function createKnowledgeBrowseModel(deps: {
       const payload = await getKnowledgeDocument(documentId, { chunkLimit: KNOWLEDGE_CHUNK_FETCH_SIZE });
       activeDocument = payload.data.document;
       applyFetchedChunks(payload.data.chunks, payload.data.chunk_next_offset, false);
-      detailTags = [...(payload.data.document?.tags ?? tagsFromChunks(chunks))];
+      const apiTags = payload.data.document?.tags ?? [];
+      const chunkTags = tagsFromChunks(payload.data.chunks);
+      const listTags = documents.find((document) => document.id === documentId)?.tags ?? [];
+      detailTags = [...(apiTags.length > 0 ? apiTags : chunkTags.length > 0 ? chunkTags : listTags)];
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Could not load document.');
     }
@@ -207,25 +253,43 @@ export function createKnowledgeBrowseModel(deps: {
     }
   }
 
+  async function deleteDocuments(documentIds: string[]): Promise<{ deleted: number; failed: number }> {
+    if (documentIds.length === 0) return { deleted: 0, failed: 0 };
+    deps.setError(null);
+    let deleted = 0;
+    let failed = 0;
+    for (const documentId of documentIds) {
+      try {
+        await deleteKnowledgeDocument(documentId);
+        deleted++;
+        if (selectedDocuments[documentId]) {
+          const next = { ...selectedDocuments };
+          delete next[documentId];
+          selectedDocuments = next;
+        }
+        if (activeDocumentId === documentId) {
+          activeDocumentId = null;
+          activeDocument = null;
+          chunks = [];
+          chunkHasMore = false;
+          chunkNextOffset = null;
+          detailTags = [];
+        }
+      } catch (err) {
+        failed++;
+        deps.setError(err instanceof Error ? err.message : 'Delete failed.');
+      }
+    }
+    if (deleted > 0) {
+      await loadDocuments();
+    }
+    return { deleted, failed };
+  }
+
   async function deleteDocument(documentId: string) {
     if (!documentId) return false;
-    deps.setError(null);
-    try {
-      await deleteKnowledgeDocument(documentId);
-      if (activeDocumentId === documentId) {
-        activeDocumentId = null;
-        activeDocument = null;
-        chunks = [];
-        chunkHasMore = false;
-        chunkNextOffset = null;
-        detailTags = [];
-      }
-      await loadDocuments();
-      return true;
-    } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Delete failed.');
-      return false;
-    }
+    const result = await deleteDocuments([documentId]);
+    return result.deleted === 1;
   }
 
   async function reingestActiveDocument() {
@@ -235,22 +299,47 @@ export function createKnowledgeBrowseModel(deps: {
 
   async function saveActiveMetadata() {
     if (!activeDocument) return false;
+    return saveDocumentMetadata(activeDocument.id, {
+      owner_kind: activeDocument.owner_kind as KnowledgeIngestMetadata['owner_kind'],
+      owner_id: activeDocument.owner_id,
+      category_id: activeDocument.category_id,
+      subcategory_id: activeDocument.subcategory_id,
+      tags: detailTags
+    });
+  }
+
+  async function saveDocumentsMetadata(
+    documentIds: string[],
+    metadata: KnowledgeIngestMetadata
+  ): Promise<{ saved: number; failed: number }> {
+    if (documentIds.length === 0) return { saved: 0, failed: 0 };
     deps.setError(null);
-    try {
-      await updateKnowledgeDocumentMetadata(activeDocument.id, {
-        owner_kind: activeDocument.owner_kind as KnowledgeIngestMetadata['owner_kind'],
-        owner_id: activeDocument.owner_id,
-        category_id: activeDocument.category_id,
-        subcategory_id: activeDocument.subcategory_id,
-        tags: detailTags
-      });
-      await loadDocuments();
-      await openDocument(activeDocument.id);
-      return true;
-    } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Metadata update failed.');
-      return false;
+    let saved = 0;
+    let failed = 0;
+    for (const documentId of documentIds) {
+      try {
+        await updateKnowledgeDocumentMetadata(documentId, metadata);
+        saved++;
+      } catch (err) {
+        failed++;
+        deps.setError(err instanceof Error ? err.message : 'Metadata update failed.');
+      }
     }
+    if (saved > 0) {
+      await loadDocuments();
+      if (activeDocumentId && documentIds.includes(activeDocumentId)) {
+        await openDocument(activeDocumentId);
+      }
+    }
+    return { saved, failed };
+  }
+
+  async function saveDocumentMetadata(
+    documentId: string,
+    metadata: KnowledgeIngestMetadata
+  ): Promise<boolean> {
+    const result = await saveDocumentsMetadata([documentId], metadata);
+    return result.saved === 1;
   }
 
   return {
@@ -329,6 +418,21 @@ export function createKnowledgeBrowseModel(deps: {
     get sortedDocuments() {
       return sortedDocuments;
     },
+    get selectedDocuments() {
+      return selectedDocuments;
+    },
+    get allDocumentsSelected() {
+      return allDocumentsSelected;
+    },
+    get someDocumentsSelected() {
+      return someDocumentsSelected;
+    },
+    get selectedDocumentCount() {
+      return selectedDocumentCount;
+    },
+    get selectedDocumentRows() {
+      return selectedDocumentRows;
+    },
     get documentSort() {
       return documentSort;
     },
@@ -364,11 +468,16 @@ export function createKnowledgeBrowseModel(deps: {
     queueLoadDocuments,
     handleBrowseOwnerKindChange,
     handleDetailOwnerKindChange,
+    toggleDocumentSelection,
+    toggleSelectAllDocuments,
     openDocument,
     loadMoreChunks,
     deleteDocument,
+    deleteDocuments,
     reingestActiveDocument,
     saveActiveMetadata,
+    saveDocumentMetadata,
+    saveDocumentsMetadata,
     updateActiveDocumentDraft
   };
 }
