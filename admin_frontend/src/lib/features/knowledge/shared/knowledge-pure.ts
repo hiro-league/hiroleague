@@ -2,6 +2,7 @@
  * Side-effect-free helpers for Knowledge admin UI (ingest, ask, browse).
  * Kept separate from KnowledgePage.svelte so formatting and parsing stay unit-testable.
  */
+import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import { readLocalBoolean, readLocalString, removeLocalString, writeLocalBoolean, writeLocalString } from '$lib/preferences/storage';
 import type { KnowledgeDocument, KnowledgeFilters, KnowledgeIngestMetadata, KnowledgeScannedFile } from '$lib/api/knowledge';
@@ -20,7 +21,7 @@ export const KNOWLEDGE_TABS: { id: KnowledgeTabId; label: string }[] = [
 ];
 
 /** Deep link to workspace Knowledge preferences (embedding, retrieval, chunking, answering). */
-export const KNOWLEDGE_PREFERENCES_SECTION_HREF = '/preferences/#preferences-knowledge';
+export const KNOWLEDGE_PREFERENCES_SECTION_HREF = preferenceTabHref('knowledge');
 
 /** Browse chunk list page size; fetch one extra to detect a further page. */
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 100;

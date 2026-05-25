@@ -5,24 +5,28 @@
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import { FileText } from '@lucide/svelte';
   import GraphRunsListCharacterCell from './GraphRunsListCharacterCell.svelte';
   import { GRAPH_RUNS_PREVIEW_HIGHLIGHT_MARK } from './shared/graph-runs-ui';
   import {
+    graphRunsDateCellClass,
+    graphRunsLogsIconLinkClass,
     graphRunsNameCellClass,
     graphRunsPreviewCellClass,
+    graphRunsRunCellInnerClass,
     graphRunsTableLinkClass
   } from './shared/graph-runs-table-ui';
   import {
     adminLogsUrlForInboundId,
     formatCost,
-    formatGraphRunsListTs,
-    formatRunListTokensCell,
     graphRunKindLabel,
     highlightPreviewSegments,
     listRowChannelName,
     listRowCharacter,
+    memoryDateDisplay,
     GRAPH_RUNS_PANEL_IDS,
     GRAPH_RUNS_SUBTAB_IDS,
     trimRunIdForList,
@@ -95,42 +99,46 @@
   aria-labelledby={GRAPH_RUNS_SUBTAB_IDS.browse}
   {hidden}
 >
-  <AdminFilterBar class="items-end">
-    <AdminFilterBarSelect
-      label="Run kind"
-      bind:value={filterRunKind}
-      placeholder="All run kinds"
-      class="min-w-[10rem]"
-      options={runKindOptions}
-    />
-    <AdminFilterBarSelect
-      label="Character"
-      bind:value={filterCharacterId}
-      placeholder="All characters"
-      class="min-w-[10rem]"
-      options={characterOptions}
-    />
-    <AdminFilterBarSelect
-      label="Channel"
-      bind:value={filterChannelId}
-      placeholder="All channels"
-      class="min-w-[10rem]"
-      options={channelOptions}
-    />
-    <AdminFilterBarSelect
-      label="Status"
-      bind:value={filterStatus}
-      placeholder="All statuses"
-      class="min-w-[10rem]"
-      options={statusesForFilterDropdown}
-    />
-    <AdminFilterBarSearch
-      label="Preview search"
-      bind:value={previewSearch}
-      placeholder="Search input / output previews…"
-      class="min-w-[12rem] flex-1"
-    />
-  </AdminFilterBar>
+  {#if !hidden}
+    <AdminPageStickyToolbar>
+      <AdminFilterBar class="items-end">
+      <AdminFilterBarSelect
+        label="Run kind"
+        bind:value={filterRunKind}
+        placeholder="All run kinds"
+        class="min-w-[10rem]"
+        options={runKindOptions}
+      />
+      <AdminFilterBarSelect
+        label="Character"
+        bind:value={filterCharacterId}
+        placeholder="All characters"
+        class="min-w-[10rem]"
+        options={characterOptions}
+      />
+      <AdminFilterBarSelect
+        label="Channel"
+        bind:value={filterChannelId}
+        placeholder="All channels"
+        class="min-w-[10rem]"
+        options={channelOptions}
+      />
+      <AdminFilterBarSelect
+        label="Status"
+        bind:value={filterStatus}
+        placeholder="All statuses"
+        class="min-w-[10rem]"
+        options={statusesForFilterDropdown}
+      />
+      <AdminFilterBarSearch
+        label="Preview search"
+        bind:value={previewSearch}
+        placeholder="Search input / output previews…"
+        class="min-w-[12rem] flex-1"
+      />
+      </AdminFilterBar>
+    </AdminPageStickyToolbar>
+  {/if}
 
   {#if error}
     <p class="error m-0 font-sans text-sm text-muted-foreground" role="alert">{error}</p>
@@ -149,8 +157,6 @@
         <th>Status</th>
         <th>Cost</th>
         <th>Model</th>
-        <th>Tokens</th>
-        <th>Logs</th>
       </tr>
     </thead>
     <tbody>
@@ -162,20 +168,36 @@
         {@const outputPreviewTooltip = String(row.output_preview ?? '').trim()
           ? String(row.output_preview ?? '')
           : undefined}
+        {@const listTs = memoryDateDisplay(row.ts)}
         <tr class:muted-open={openRunIds.includes(row.run_id)}>
-          <td>{formatGraphRunsListTs(row.ts)}</td>
+          <td class={graphRunsDateCellClass} title={listTs.title}>
+            <span>{listTs.date}</span>
+            <span>{listTs.time}</span>
+          </td>
           <GraphRunsListCharacterCell photo={listCh.photo} name={listCh.name} />
           <td class={graphRunsNameCellClass}>{listRowChannelName(row, channelById)}</td>
           <td class="font-mono" title={row.run_id}>{graphRunKindLabel(row.run_id)}</td>
-          <td>
-            <button
-              type="button"
-              class={graphRunsTableLinkClass}
-              title={row.run_id}
-              onclick={() => onOpenRun(row.run_id)}
-            >
-              {trimRunIdForList(row.run_id)}
-            </button>
+          <td class="align-middle">
+            <div class={graphRunsRunCellInnerClass}>
+              <button
+                type="button"
+                class={graphRunsTableLinkClass}
+                title={row.run_id}
+                onclick={() => onOpenRun(row.run_id)}
+              >
+                {trimRunIdForList(row.run_id)}
+              </button>
+              {#if String(row.inbound_id ?? '').trim()}
+                <a
+                  class={graphRunsLogsIconLinkClass}
+                  href={adminLogsUrlForInboundId(row.inbound_id)}
+                  title="Open Logs scoped to inbound message id (msg_id)"
+                  aria-label="Open logs for this run"
+                >
+                  <FileText size={15} aria-hidden="true" />
+                </a>
+              {/if}
+            </div>
           </td>
           <td class={graphRunsPreviewCellClass} title={inputPreviewTooltip}>
             {#if previewSearchNeedle && String(row.input_preview ?? '').toLowerCase().includes(previewSearchNeedle)}
@@ -198,20 +220,6 @@
           <td>{row.status}</td>
           <td>{formatCost(row.cost_usd)}</td>
           <td>{row.model}</td>
-          <td>{formatRunListTokensCell(row)}</td>
-          <td>
-            {#if String(row.inbound_id ?? '').trim()}
-              <a
-                class={graphRunsTableLinkClass}
-                href={adminLogsUrlForInboundId(row.inbound_id)}
-                title="Open Logs scoped to inbound message id (msg_id)"
-              >
-                Logs
-              </a>
-            {:else}
-              —
-            {/if}
-          </td>
         </tr>
       {/each}
     </tbody>

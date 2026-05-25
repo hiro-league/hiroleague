@@ -9,6 +9,7 @@
    * `AdminTableShell stickyHead` can align beneath this bar.
    */
   import { onMount, type Snippet } from 'svelte';
+  import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -51,7 +52,8 @@
 <div
   bind:this={toolbarEl}
   class={cn(
-    'sticky z-10 -mx-4 border-b border-border/70 bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85 md:-mx-6 md:px-6',
+    'sticky z-10 border-b border-border/70 bg-background/95 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85',
+    ADMIN_SHELL_STICKY_BLEED,
     className
   )}
   style="top: calc(4rem + var(--admin-page-header-h, 0px));"

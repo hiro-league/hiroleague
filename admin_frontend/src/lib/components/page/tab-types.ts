@@ -1,5 +1,6 @@
 /**
- * Shared types for `<AdminTabStrip>` / `<AdminTabButton>` / `<AdminPageHeader>`.
+ * Shared types for `<AdminTabStrip>` / `<AdminTabButton>` / `<AdminSubtabStrip>`
+ * / `<AdminPageHeader>`.
  *
  * Tabs carry an explicit `kind`:
  *  - `'pane'` (default) — local content; the host renders the matching panel.
@@ -38,3 +39,15 @@ export type AdminRouteTabDescriptor<TId extends string = string> = {
 export type AdminTabDescriptor<TId extends string = string> =
   | AdminPaneTabDescriptor<TId>
   | AdminRouteTabDescriptor<TId>;
+
+/** Second-level underline tab (Preferences sections, Graph runs ledger strip). */
+export type AdminSubtabDescriptor<TId extends string = string> = {
+  id: TId;
+  label: string;
+  disabled?: boolean;
+  ariaLabel?: string;
+  htmlId?: string;
+  ariaControls?: string;
+  /** Native `title` tooltip (e.g. truncated run id on dynamic Graph runs tabs). */
+  title?: string;
+};

@@ -14,6 +14,7 @@
   import type { CharacterResolvedPayload } from '$lib/api/characters';
   import type { TuningProfile } from '$lib/api/preferences';
   import { formatTuningProfileSummary } from '$lib/catalog/catalog-picker-utils';
+  import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
   import type { CharacterForm } from '$lib/features/characters/utils';
   import { cn } from '$lib/utils';
 
@@ -65,7 +66,7 @@
     form.tuning_profile ? tuningProfiles[form.tuning_profile] : undefined
   );
 
-  const preferencesTuningProfilesHref = '/preferences/#preferences-tuning-profiles';
+  const preferencesTuningProfilesHref = preferenceTabHref('tuning-profiles');
 </script>
 
 <CharacterSectionCard>

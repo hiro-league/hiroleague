@@ -233,31 +233,6 @@ export function trimRunIdForList(runId: string): string {
   return `${s.slice(0, 10)}…${s.slice(-6)}`;
 }
 
-/** Same timestamp line as Messages admin (today + clock with seconds). */
-export function formatGraphRunsListTs(ts: GraphLedgerRow['ts']): string {
-  if (ts === '') return '—';
-  const sec = typeof ts === 'number' ? ts : Number(ts);
-  if (!Number.isFinite(sec)) return '—';
-  return formatChatTimestamp(new Date(sec * 1000).toISOString());
-}
-
-/** Prompt-side = input + cached (chat agent footer); output = completion tokens. */
-export function formatRunListTokensCell(row: GraphLedgerRow): string {
-  const inRaw = row.input_tokens;
-  const cachedRaw = row.cached_input_tokens;
-  const outRaw = row.output_tokens;
-  const inN = typeof inRaw === 'number' ? inRaw : Number(inRaw || 0);
-  const cachedN = typeof cachedRaw === 'number' ? cachedRaw : Number(cachedRaw || 0);
-  const outN = typeof outRaw === 'number' ? outRaw : Number(outRaw || 0);
-  const prompt =
-    Math.max(0, Math.trunc(Number.isFinite(inN) ? inN : 0)) +
-    Math.max(0, Math.trunc(Number.isFinite(cachedN) ? cachedN : 0));
-  const completion = Math.max(0, Math.trunc(Number.isFinite(outN) ? outN : 0));
-  if (prompt === 0 && completion === 0) return '—';
-  /* Order and `` t`` suffix match ``AgentTokenCounter``. */
-  return `↑ ${formatTokenCount(prompt)} t · ↓ ${formatTokenCount(completion)} t`;
-}
-
 export function formatLedgerField(field: keyof GraphLedgerRow, row: GraphLedgerRow): string {
   const raw = row[field];
   if (raw === '' || raw === null || raw === undefined) return '—';

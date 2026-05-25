@@ -1,16 +1,19 @@
 <script lang="ts">
   import FormField from '$lib/components/ui/form-field.svelte';
+  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import {
     rerankerDeviceOptions,
     rerankerModelOptions
   } from '$lib/features/preferences/shared/preferences-constants';
+  import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
-    ADMIN_SECTION_CARD_MUTED,
-    ADMIN_SELECT_LG,
-    PREFERENCE_SECTION_SCROLL_MT
-  } from '$lib/features/preferences/shared/preferences-ui';
+    PREFERENCE_TAB_IDS,
+    PREFERENCE_TAB_PANEL_IDS
+  } from '$lib/features/preferences/shared/preferences-tabs';
+  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
+  import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -19,44 +22,65 @@
   let { ctrl }: Props = $props();
 </script>
 
-<section id="preferences-memory" class="{PREFERENCE_SECTION_SCROLL_MT} grid gap-4 border-b pb-6">
-  <div>
-    <h3 class="font-sans text-xl font-semibold text-foreground">
-      {ctrl.sectionLabel('memory', 'Agent Memory')}
-    </h3>
-    <p class="mt-1 text-sm text-muted-foreground">{ctrl.sectionDescription('memory')}</p>
+<div
+  id={PREFERENCE_TAB_PANEL_IDS.memory}
+  class="grid gap-4"
+  role="tabpanel"
+  aria-labelledby={PREFERENCE_TAB_IDS.memory}
+>
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    {#if ctrl.sectionDescription('memory')}
+      <p class="min-w-0 flex-1 text-sm text-muted-foreground">{ctrl.sectionDescription('memory')}</p>
+    {/if}
+    <ActiveProvidersLink busy={ctrl.busy} />
   </div>
 
   {#if ctrl.draft}
-    <SingleModelPicker
-      label="Memory LLM model"
-      hint="Used by the memory service for memory extraction."
-      selectedId={ctrl.draft.memory.default_llm}
-      catalogModels={ctrl.memoryLlmOptions}
-      catalogAllProviders={ctrl.catalogAllProviders}
-      workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-      workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
-      busy={ctrl.busy}
-      emptyProviders="No chat providers in catalog."
-      emptyModelsForProvider="No chat models for this provider."
-      onSelect={(id) => ctrl.setMemoryModel('default_llm', id)}
-      onChange={ctrl.markDirty}
-    />
+    <SectionCardMuted
+      title="Memory LLM model"
+      description="Used by the memory service for memory extraction."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryLlm}
+    >
+      <SingleModelPicker
+        embedded
+        label="Memory LLM model"
+        hint=""
+        selectedId={ctrl.draft.memory.default_llm}
+        catalogModels={ctrl.memoryLlmOptions}
+        catalogAllProviders={ctrl.catalogAllProviders}
+        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
+        workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
+        busy={ctrl.busy}
+        emptyProviders="No chat providers in catalog."
+        emptyModelsForProvider="No chat models for this provider."
+        onSelect={(id) => ctrl.setMemoryModel('default_llm', id)}
+        onChange={ctrl.markDirty}
+      />
+    </SectionCardMuted>
 
-    <SingleModelPicker
-      label="Memory embedding model"
-      hint="Used by the memory service for vector search."
-      selectedId={ctrl.draft.memory.default_embedding_model}
-      catalogModels={ctrl.embeddingOptions}
-      catalogAllProviders={ctrl.catalogAllProviders}
-      workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-      workspaceActiveProviderIds={ctrl.activeProvidersStore.embeddingActiveProviderIds}
-      busy={ctrl.busy}
-      emptyProviders="No embedding providers in catalog."
-      emptyModelsForProvider="No embedding models for this provider."
-      onSelect={(id) => ctrl.setMemoryModel('default_embedding_model', id)}
-      onChange={ctrl.markDirty}
-    />
+    <SectionCardMuted
+      title="Memory embedding model"
+      description="Used by the memory service for vector search."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryEmbedding}
+    >
+      <SingleModelPicker
+        embedded
+        label="Memory embedding model"
+        hint=""
+        selectedId={ctrl.draft.memory.default_embedding_model}
+        catalogModels={ctrl.embeddingOptions}
+        catalogAllProviders={ctrl.catalogAllProviders}
+        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
+        workspaceActiveProviderIds={ctrl.activeProvidersStore.embeddingActiveProviderIds}
+        busy={ctrl.busy}
+        emptyProviders="No embedding providers in catalog."
+        emptyModelsForProvider="No embedding models for this provider."
+        onSelect={(id) => ctrl.setMemoryModel('default_embedding_model', id)}
+        onChange={ctrl.markDirty}
+      />
+    </SectionCardMuted>
 
     <FormField label="Max retained messages" class="max-w-sm">
       <input
@@ -81,14 +105,12 @@
       </select>
     </FormField>
 
-    <div class="grid gap-3 {ADMIN_SECTION_CARD_MUTED}">
-      <div>
-        <h4 class="font-sans text-base font-semibold text-foreground">Local reranker</h4>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Optional cross-encoder reranking (sentence-transformers). Downloads the model on first use.
-          Rebuilds the memory service when saved.
-        </p>
-      </div>
+    <SectionCardMuted
+      title="Local reranker"
+      description="Optional cross-encoder reranking (sentence-transformers). Downloads the model on first use. Rebuilds the memory service when saved."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryReranker}
+    >
       <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
         <input
           type="checkbox"
@@ -136,16 +158,14 @@
           oninput={ctrl.markDirty}
         />
       </FormField>
-    </div>
+    </SectionCardMuted>
 
-    <div class="grid gap-3 {ADMIN_SECTION_CARD_MUTED}">
-      <div>
-        <h4 class="font-sans text-base font-semibold text-foreground">Retrieval</h4>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Controls long-term memory search before each reply (memory_in). Rebuilds the memory service when
-          saved.
-        </p>
-      </div>
+    <SectionCardMuted
+      title="Retrieval"
+      description="Controls long-term memory search before each reply (memory_in). Rebuilds the memory service when saved."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryRetrieval}
+    >
       <div class="grid gap-3 md:grid-cols-2">
         <FormField label="Results per search">
           <input
@@ -189,6 +209,6 @@
       {#if !ctrl.memoryRerankerEnabled}
         <p class="text-xs text-muted-foreground">Enable the local reranker above to use reranking.</p>
       {/if}
-    </div>
+    </SectionCardMuted>
   {/if}
-</section>
+</div>

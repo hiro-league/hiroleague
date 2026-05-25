@@ -5,10 +5,10 @@
  * folder (catalog, server, channels-devices, characters) — they collapse to a
  * one-line `createTabPreferences(...)` call once Phase 2 adoption lands.
  *
- * Inner navigation patterns (Preferences `#hash` scroll-spy, Graph runs'
- * underline subtab strip with dynamic per-record tabs) are intentionally
- * *not* covered by this factory — see `docs/admin-frontend-refactor-plan.md`
- * §2.3.
+ * Graph runs' underline subtab strip with dynamic per-record tabs is
+ * intentionally *not* covered by this factory — see
+ * `docs/admin-frontend-refactor-plan.md` §2.3. Preferences uses this factory
+ * for its page-level `?tab=` strip.
  */
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
@@ -47,6 +47,8 @@ export type TabPreferences<TTab extends string> = {
    *   reset (`urlParamsToReset` is honoured first). Empty values are dropped.
    */
   setActiveTab: (tab: TTab, extras?: Record<string, string>) => Promise<void>;
+  /** Apply `?tab=` from the current URL without navigating (e.g. after unsaved-guard `goto`). */
+  syncActiveTabFromUrl: () => void;
 };
 
 export function createTabPreferences<TTab extends string>(
@@ -66,6 +68,13 @@ export function createTabPreferences<TTab extends string>(
       normalise(page.url.searchParams.get('tab')) ??
       normalise(readSessionString(opts.storageKey)) ??
       opts.defaultTab;
+  }
+
+  function syncActiveTabFromUrl() {
+    const fromUrl = normalise(page.url.searchParams.get('tab'));
+    if (fromUrl !== null && fromUrl !== activeTab) {
+      activeTab = fromUrl;
+    }
   }
 
   async function setActiveTab(tab: TTab, extras: Record<string, string> = {}) {
@@ -109,6 +118,7 @@ export function createTabPreferences<TTab extends string>(
       return activeTab;
     },
     initialize,
-    setActiveTab
+    setActiveTab,
+    syncActiveTabFromUrl
   };
 }

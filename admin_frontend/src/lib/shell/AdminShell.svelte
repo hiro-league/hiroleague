@@ -27,6 +27,7 @@
   import Button from '$lib/components/ui/button.svelte';
   import { liveStatus, type WorkspaceStatusState } from '$lib/live/status.svelte';
   import { createShellPreferences } from '$lib/preferences/shell-preferences.svelte';
+  import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { navItems } from './nav';
 
@@ -187,7 +188,10 @@
 
   <div class="min-w-0">
     <header
-      class="sticky top-0 z-20 flex min-h-16 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur md:px-6"
+      class={cn(
+        'sticky top-0 z-20 flex min-h-16 items-center gap-3 border-b bg-background/85 backdrop-blur',
+        ADMIN_SHELL_HEADER_PADDING
+      )}
     >
       <Button
         class="hidden lg:inline-flex"
@@ -255,7 +259,7 @@
       </div>
     </header>
 
-    <main class={cn('p-4 md:p-6', mainClass)}>
+    <main class={cn(ADMIN_SHELL_CONTENT_PADDING, mainClass)}>
       {@render children?.()}
     </main>
   </div>

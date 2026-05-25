@@ -9,10 +9,9 @@
    * - A `recordTab` snippet slot is appended after the static tabs (used by
    *   Characters' "open record" Detail chip — see `AdminRecordTabChip`).
    *
-   * Inner section-style navigation (Preferences' `#hash` scroll-spy, Graph
-   * runs' underline subtab strip with dynamic per-record tabs) is *not*
-   * covered by this component — use `SectionScrollNav` or a feature-local
-   * strip instead. See `docs/admin-frontend-refactor-plan.md` §2.3.
+   * Second-level underline navigation uses `<AdminSubtabStrip>` (Preferences
+   * sections, Graph runs ledger strip). Dynamic per-record subtabs stay in an
+   * `extraTabs` snippet until a second consumer needs the same pattern.
    */
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';

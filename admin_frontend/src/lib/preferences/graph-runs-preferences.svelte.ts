@@ -44,6 +44,7 @@ export function createGraphRunsPreferences(): GraphRunsPreferences {
       return tabs.activeTab;
     },
     setActiveTab: tabs.setActiveTab,
+    syncActiveTabFromUrl: tabs.syncActiveTabFromUrl,
     get runDetailCardsExpanded() {
       return runDetailCardsExpanded;
     },

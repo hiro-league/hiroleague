@@ -9,6 +9,30 @@
  */
 import { cn } from '$lib/utils';
 
+// ── shell content inset (sidebar → main column) ────────────────────────────
+
+/** Vertical padding on `<main>` in AdminShell. */
+export const ADMIN_SHELL_CONTENT_PY = 'py-4 md:py-6';
+
+/** Right inset — unchanged from original shell padding. */
+export const ADMIN_SHELL_CONTENT_PR = 'pr-4 md:pr-6';
+
+/** Left inset — 2× the original `pl-4` / `md:pl-6` gap from the side nav. */
+export const ADMIN_SHELL_CONTENT_PL = 'pl-8 md:pl-12';
+
+export const ADMIN_SHELL_CONTENT_PADDING = cn(
+  ADMIN_SHELL_CONTENT_PY,
+  ADMIN_SHELL_CONTENT_PR,
+  ADMIN_SHELL_CONTENT_PL
+);
+
+export const ADMIN_SHELL_HEADER_PADDING = cn(ADMIN_SHELL_CONTENT_PR, ADMIN_SHELL_CONTENT_PL);
+
+/** Cancels shell content padding so sticky page chrome can bleed edge-to-edge in `<main>`. */
+export const ADMIN_SHELL_STICKY_BLEED = cn(
+  '-ml-8 -mr-4 pl-8 pr-4 md:-ml-12 md:-mr-6 md:pl-12 md:pr-6'
+);
+
 // ── page wrapper ───────────────────────────────────────────────────────────
 
 /** Left-aligned page width used by every admin page. */
@@ -34,8 +58,10 @@ export const ADMIN_HEADER_BREADCRUMB_SEP = 'shrink-0 font-sans text-sm font-norm
  * Sticky positioning shell — always applied when `<AdminPageHeader sticky>`.
  * Frosted chrome (`ADMIN_PAGE_STICKY_HEADER_PINNED`) is added only once pinned.
  */
-export const ADMIN_PAGE_STICKY_HEADER_POSITION =
-  'sticky top-16 z-10 -mx-4 mt-0 border-b border-transparent bg-transparent px-4 transition-[margin,padding,box-shadow,background-color,border-color,backdrop-filter] duration-200 ease-out md:-mx-6 md:px-6';
+export const ADMIN_PAGE_STICKY_HEADER_POSITION = cn(
+  'sticky top-16 z-10 mt-0 border-b border-transparent bg-transparent transition-[margin,padding,box-shadow,background-color,border-color,backdrop-filter] duration-200 ease-out',
+  ADMIN_SHELL_STICKY_BLEED
+);
 
 /** Frosted chrome when pinned; bleeds into `<main>` padding under the shell bar. */
 export const ADMIN_PAGE_STICKY_HEADER_PINNED =
@@ -63,6 +89,25 @@ export const ADMIN_TABLIST_SHELL = 'inline-flex gap-1 rounded-lg border bg-card 
 /** Class to apply to each tab button; pass `active` to toggle the visual state. */
 export function cnAdminTab(active: boolean) {
   return cn('shadow-none', !active && 'bg-transparent text-muted-foreground hover:bg-secondary');
+}
+
+// ── second-level subtab strip (underline, below page title or primary tabs) ─
+
+/** Outer row: tablist + optional trailing toolbar. */
+export const ADMIN_SUBTAB_STRIP_SHELL =
+  '-mb-px flex min-h-[2.5rem] min-w-0 items-end gap-3 border-b border-border';
+
+/** Tablist row inside `ADMIN_SUBTAB_STRIP_SHELL`. */
+export const ADMIN_SUBTAB_TABLIST =
+  'flex min-h-9 min-w-0 flex-1 flex-wrap items-end gap-x-1 gap-y-0';
+
+/** Underline subtab button — pass `active` for the selected tab. */
+export function cnAdminSubtab(active: boolean, className?: string) {
+  return cn(
+    '-mb-px min-w-0 max-w-[min(22rem,calc(100vw-10rem))] shrink-0 truncate border-b-2 border-transparent bg-transparent px-3 py-2 text-left font-sans text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+    active && 'border-primary font-semibold text-foreground',
+    className
+  );
 }
 
 // ── section cards (two deliberate variants — §2.4.4) ───────────────────────

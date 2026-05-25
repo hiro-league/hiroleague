@@ -23,7 +23,8 @@
     emptyModelsForProvider,
     onSelect,
     onChange,
-    toolbar
+    toolbar,
+    embedded = false
   }: {
     label: string;
     hint: string;
@@ -39,6 +40,8 @@
     onChange?: () => void;
     /** Optional row (e.g. catalog link + reload) shown under the section title. */
     toolbar?: Snippet;
+    /** When true, omit outer card chrome — host `<SectionCardMuted>` owns title/collapse. */
+    embedded?: boolean;
   } = $props();
 
   let pickProviderId = $state('');
@@ -90,21 +93,7 @@
   }
 </script>
 
-<section class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
-  <div class="grid gap-2">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-      <div class="grid min-w-0 gap-1">
-        <h4 class="font-sans text-base font-semibold text-foreground">{label}</h4>
-        <p class="text-sm text-muted-foreground">{hint}</p>
-      </div>
-      {#if toolbar}
-        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          {@render toolbar()}
-        </div>
-      {/if}
-    </div>
-  </div>
-
+{#snippet pickerBody()}
   <div class="flex flex-col gap-4 xl:flex-row xl:items-start">
     <div class="grid min-w-0 gap-2 content-start xl:w-[16rem] xl:shrink-0">
       <span class="font-sans text-sm font-semibold text-muted-foreground">Provider</span>
@@ -249,4 +238,27 @@
       </div>
     </div>
   </div>
-</section>
+{/snippet}
+
+{#if embedded}
+  <div class="grid gap-3">
+    {@render pickerBody()}
+  </div>
+{:else}
+  <section class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
+    <div class="grid gap-2">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div class="grid min-w-0 gap-1">
+          <h4 class="font-sans text-base font-semibold text-foreground">{label}</h4>
+          <p class="text-sm text-muted-foreground">{hint}</p>
+        </div>
+        {#if toolbar}
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {@render toolbar()}
+          </div>
+        {/if}
+      </div>
+    </div>
+    {@render pickerBody()}
+  </section>
+{/if}

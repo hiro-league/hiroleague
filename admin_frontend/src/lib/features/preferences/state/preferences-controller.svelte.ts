@@ -306,6 +306,11 @@ export function createPreferencesController(notify: Notify) {
   async function resetDraft() {
     if (!baseline) return;
     if (!(await unsaved.confirmDiscard())) return;
+    abandonDraft();
+  }
+
+  function abandonDraft() {
+    if (!baseline) return;
     draft = cloneWorkspacePreferences(baseline);
     forceClean = false;
   }
@@ -381,7 +386,8 @@ export function createPreferencesController(notify: Notify) {
     loadAll,
     reloadCatalog,
     savePreferences,
-    resetDraft
+    resetDraft,
+    abandonDraft
   };
 }
 

@@ -1,11 +1,12 @@
 <script lang="ts">
   /**
-   * Graph Runs underline subtab strip + run-detail toolbar (§4b — feature-local).
-   * Primary pill tabs render in `<AdminPageHeader tabs>`; page title uses admin tokens.
+   * Graph Runs second-level strip: ledger list + dynamic run inspectors + toolbar.
+   * Primary pill tabs live in `<AdminPageHeader tabs>`.
    */
   import { ChevronDown, ChevronUp, RefreshCw, X } from '@lucide/svelte';
+  import AdminSubtabButton from '$lib/components/page/AdminSubtabButton.svelte';
+  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import { cn } from '$lib/utils';
   import {
     graphRunTabId,
     GRAPH_RUNS_PANEL_IDS,
@@ -40,47 +41,39 @@
     onRefresh: () => void;
   } = $props();
 
-  function cnBrowseSubtab(selected: boolean) {
-    return cn(
-      '-mb-px min-w-0 max-w-[min(22rem,calc(100vw-10rem))] shrink-0 items-center truncate border-b-2 border-transparent bg-transparent px-3 py-2 text-left font-sans text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-      selected ? 'border-primary font-semibold text-foreground' : undefined
-    );
-  }
+  const browseTab = [
+    {
+      id: RUNS_TAB,
+      label: 'Graph runs',
+      htmlId: GRAPH_RUNS_SUBTAB_IDS.browse,
+      ariaControls: GRAPH_RUNS_PANEL_IDS.runs
+    }
+  ] as const;
 </script>
 
-<div class="-mb-px flex min-h-[2.5rem] min-w-0 items-end gap-3 border-b border-border">
-  <div
-    class="flex min-h-9 min-w-0 flex-1 flex-wrap items-end gap-x-1 gap-y-0"
-    role="tablist"
-    aria-label={GRAPH_RUNS_SUBTAB_TABLIST_LABEL}
-  >
-    <button
-      type="button"
-      id={GRAPH_RUNS_SUBTAB_IDS.browse}
-      class={cnBrowseSubtab(activePane === RUNS_TAB)}
-      role="tab"
-      aria-controls={GRAPH_RUNS_PANEL_IDS.runs}
-      aria-selected={activePane === RUNS_TAB}
-      tabindex={0}
-      onclick={onShowRunsOnly}
-    >
-      Graph runs
-    </button>
+<AdminSubtabStrip
+  ariaLabel={GRAPH_RUNS_SUBTAB_TABLIST_LABEL}
+  tabs={browseTab}
+  active={activePane}
+  onSelect={(id) => {
+    if (id === RUNS_TAB) onShowRunsOnly();
+  }}
+>
+  {#snippet extraTabs()}
     {#each openRunIds as rid (rid)}
-      <span class="flex min-w-0 max-w-[min(26rem,calc(100vw-8rem))] shrink-0 items-end gap-0" role="presentation">
-        <button
-          type="button"
-          id={graphRunTabId(rid)}
+      <span
+        class="flex min-w-0 max-w-[min(26rem,calc(100vw-8rem))] shrink-0 items-end gap-0"
+        role="presentation"
+      >
+        <AdminSubtabButton
+          label={runTabDisplayLabel(rid)}
           title={runTabTooltip(rid)}
-          class={cnBrowseSubtab(activePane === rid)}
-          role="tab"
-          aria-controls={GRAPH_RUNS_PANEL_IDS.detail}
-          aria-selected={activePane === rid}
-          tabindex={0}
+          class="max-w-[min(22rem,calc(100vw-10rem))]"
+          active={activePane === rid}
+          htmlId={graphRunTabId(rid)}
+          ariaControls={GRAPH_RUNS_PANEL_IDS.detail}
           onclick={() => onOpenRunTab(rid)}
-        >
-          {runTabDisplayLabel(rid)}
-        </button>
+        />
         <button
           type="button"
           class="-mb-px flex size-9 shrink-0 items-center justify-center rounded-t-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
@@ -95,8 +88,9 @@
         </button>
       </span>
     {/each}
-  </div>
-  <div class="flex shrink-0 items-end gap-1 pb-px">
+  {/snippet}
+
+  {#snippet toolbar()}
     <Button
       variant="ghost"
       size="icon"
@@ -133,5 +127,5 @@
         {/if}
       </Button>
     {/if}
-  </div>
-</div>
+  {/snippet}
+</AdminSubtabStrip>

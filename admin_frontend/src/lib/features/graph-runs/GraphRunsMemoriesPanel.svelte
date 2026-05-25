@@ -3,6 +3,7 @@
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
@@ -105,68 +106,72 @@
     {:else if memoriesError}
       <!-- Error banner above -->
     {:else}
-      <div class="memories-controls">
-        <AdminFilterBar class="min-w-0 flex-1 items-end">
-          <AdminFilterBarSelect
-            label="Character"
-            bind:value={memoryFilterCharacterId}
-            placeholder="All characters"
-            class="min-w-[10rem]"
-            options={characterOptions}
-          />
-          <AdminFilterBarSelect
-            label="Channel"
-            bind:value={memoryFilterChannelId}
-            placeholder="All channels"
-            class="min-w-[10rem]"
-            options={channelOptions}
-          />
-          <AdminFilterBarSelect
-            label="Source"
-            bind:value={memoryFilterSource}
-            placeholder="All sources"
-            class="min-w-[10rem]"
-            options={sourcesForMemoryFilterDropdown}
-          />
-          <AdminFilterBarSearch
-            label="Search"
-            bind:value={memorySearch}
-            placeholder="Search memory text, id, source…"
-            class="min-w-[12rem] flex-1"
-          />
-        </AdminFilterBar>
-        <div class="memories-actions">
-          {#if memoriesTotalCount > 0}
+      {#if !hidden}
+        <AdminPageStickyToolbar>
+          <div class="memories-controls">
+          <AdminFilterBar class="min-w-0 flex-1 items-end">
+            <AdminFilterBarSelect
+              label="Character"
+              bind:value={memoryFilterCharacterId}
+              placeholder="All characters"
+              class="min-w-[10rem]"
+              options={characterOptions}
+            />
+            <AdminFilterBarSelect
+              label="Channel"
+              bind:value={memoryFilterChannelId}
+              placeholder="All channels"
+              class="min-w-[10rem]"
+              options={channelOptions}
+            />
+            <AdminFilterBarSelect
+              label="Source"
+              bind:value={memoryFilterSource}
+              placeholder="All sources"
+              class="min-w-[10rem]"
+              options={sourcesForMemoryFilterDropdown}
+            />
+            <AdminFilterBarSearch
+              label="Search"
+              bind:value={memorySearch}
+              placeholder="Search memory text, id, source…"
+              class="min-w-[12rem] flex-1"
+            />
+          </AdminFilterBar>
+          <div class="memories-actions">
+            {#if memoriesTotalCount > 0}
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={memoryActionBusy || memoriesLoading}
+                onclick={onRequestClearAll}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                Clear all memories
+              </Button>
+            {/if}
             <Button
               type="button"
-              variant="destructive"
-              size="sm"
-              disabled={memoryActionBusy || memoriesLoading}
-              onclick={onRequestClearAll}
+              variant="ghost"
+              size="icon"
+              class="text-muted-foreground hover:text-foreground"
+              disabled={memoriesLoading}
+              aria-label="Refresh memories list"
+              title="Refresh memories list"
+              onclick={onRefreshMemories}
             >
-              <Trash2 size={14} aria-hidden="true" />
-              Clear all memories
+              <RefreshCw
+                size={17}
+                strokeWidth={2}
+                class={memoriesLoading ? 'motion-safe:animate-spin' : ''}
+                aria-hidden="true"
+              />
             </Button>
-          {/if}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            class="text-muted-foreground hover:text-foreground"
-            disabled={memoriesLoading}
-            aria-label="Refresh memories list"
-            title="Refresh memories list"
-            onclick={onRefreshMemories}
-          >
-            <RefreshCw
-              size={17}
-              strokeWidth={2}
-              class={memoriesLoading ? 'motion-safe:animate-spin' : ''}
-              aria-hidden="true"
-            />
-          </Button>
-        </div>
-      </div>
+          </div>
+          </div>
+        </AdminPageStickyToolbar>
+      {/if}
 
       {#if memoriesTotalCount === 0}
         <p class="memories-hint">No memories in the store for the default user yet.</p>
