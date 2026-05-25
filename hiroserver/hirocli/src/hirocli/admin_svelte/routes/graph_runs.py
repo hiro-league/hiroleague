@@ -36,8 +36,9 @@ async def tail_graph_runs(
             partial(
                 service.tail_initial,
                 workspace_id,
-                lines=body.lines or 500,
+                lines=body.lines or 100,
                 since_seconds_ago=body.since_seconds_ago,
+                skip_from_end=body.skip_from_end or 0,
                 filters=body.filters,
             )
         )
@@ -49,6 +50,7 @@ async def tail_graph_runs(
         "data": {
             "rows": result.data.rows,
             "file_offsets": result.data.file_offsets,
+            "has_more": result.data.has_more,
         },
     }
 

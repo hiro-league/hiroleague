@@ -140,7 +140,7 @@
     {:else if rows.length === 0}
       <InlineEmptyState message="No paired devices. Use the button above to generate a pairing code." />
     {:else}
-      <AdminTableShell layout="grid" minWidth={920} gridColumns={DEVICE_GRID}>
+      <AdminTableShell layout="grid" minWidth={920} gridColumns={DEVICE_GRID} stickyHead>
         {#snippet headRow()}
           <span>Name</span>
           <span>Device ID</span>

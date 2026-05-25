@@ -48,35 +48,54 @@
   const minWidthStyle = $derived(
     minWidth === undefined ? undefined : typeof minWidth === 'number' ? `${minWidth}px` : minWidth
   );
+
+  /** Pin beneath page chrome (document scroll). Requires no overflow ancestor. */
+  const pageStickyHead = $derived(stickyHead && !maxBodyHeight);
+  /** Pin within a max-height body scroller (nested panels). */
+  const containerStickyHead = $derived(stickyHead && !!maxBodyHeight);
 </script>
 
 <div
   class={cn(
     'rounded-md border',
-    density === 'default' && 'overflow-x-auto bg-card',
-    density === 'dense' && 'admin-table-shell-dense overflow-auto',
-    stickyHead && layout === 'table' && density === 'default' && 'admin-table-shell-sticky',
+    density === 'default' && 'bg-card',
+    // overflow-x on the shell breaks page-level sticky; only use it when the head is not page-pinned.
+    density === 'default' && !pageStickyHead && 'overflow-x-auto',
+    density === 'dense' && 'admin-table-shell-dense',
+    density === 'dense' && !stickyHead && 'overflow-auto',
+    pageStickyHead && layout === 'table' && density === 'default' && 'admin-table-shell-sticky-page',
+    containerStickyHead && layout === 'table' && density === 'default' && 'admin-table-shell-sticky-container',
+    pageStickyHead && layout === 'table' && density === 'dense' && 'admin-table-shell-dense-sticky-page',
     className
   )}
+  style:--admin-table-sticky-top={pageStickyHead ? ADMIN_TABLE_STICKY_TOP : undefined}
   data-sticky-head={stickyHead || undefined}
+  data-sticky-scope={pageStickyHead ? 'page' : containerStickyHead ? 'container' : undefined}
   data-density={density}
 >
   {#if layout === 'grid'}
     <div style:min-width={minWidthStyle}>
       {#if headRow}
         <div
-          class={cn('admin-table-grid-head', stickyHead && 'admin-table-grid-head-sticky')}
+          class={cn(
+            'admin-table-grid-head',
+            pageStickyHead && 'admin-table-grid-head-sticky-page',
+            containerStickyHead && 'admin-table-grid-head-sticky-container'
+          )}
           style:grid-template-columns={gridColumns}
         >
           {@render headRow()}
         </div>
       {/if}
-      <div class={cn(maxBodyHeight && 'overflow-auto')} style:max-height={maxBodyHeight}>
+      <div class={cn(maxBodyHeight && 'overflow-auto', !pageStickyHead && 'overflow-x-auto')} style:max-height={maxBodyHeight}>
         {@render body?.()}
       </div>
     </div>
   {:else}
-    <div class={cn(maxBodyHeight && 'overflow-auto')} style:max-height={maxBodyHeight}>
+    <div
+      class={cn(maxBodyHeight && 'overflow-auto', !pageStickyHead && 'overflow-x-auto')}
+      style:max-height={maxBodyHeight}
+    >
       <table class={ADMIN_TABLE}>
         {@render children?.()}
       </table>
@@ -85,10 +104,34 @@
 </div>
 
 <style>
-  .admin-table-shell-sticky :global(thead) {
+  /* Page scroll: pin beneath shell bar + sticky page header + sticky toolbar.
+     `--admin-table-sticky-top` is set inline by the shell; v-bind cannot bind a
+     plain JS constant, so we publish the value via a CSS variable instead. */
+  .admin-table-shell-sticky-page :global(thead th),
+  .admin-table-grid-head-sticky-page {
     position: sticky;
-    top: v-bind(ADMIN_TABLE_STICKY_TOP);
+    top: var(--admin-table-sticky-top, 4rem);
+    z-index: 5;
+  }
+
+  .admin-table-shell-sticky-page :global(thead th) {
+    background: var(--muted);
+    box-shadow: 0 1px 0 var(--border);
+  }
+
+  .admin-table-grid-head-sticky-page {
+    box-shadow: 0 1px 0 var(--border);
+  }
+
+  /* Nested max-height scroller: pin at top of the scroll container. */
+  .admin-table-shell-sticky-container :global(thead th),
+  .admin-table-grid-head-sticky-container {
+    position: sticky;
+    top: 0;
     z-index: 1;
+  }
+
+  .admin-table-shell-sticky-container :global(thead th) {
     background: var(--muted);
   }
 
@@ -102,12 +145,6 @@
     font-weight: 700;
     text-transform: uppercase;
     color: var(--muted-foreground);
-  }
-
-  .admin-table-grid-head-sticky {
-    position: sticky;
-    top: v-bind(ADMIN_TABLE_STICKY_TOP);
-    z-index: 1;
   }
 
   /* Ledger-style tables (Graph Runs) — matches former GraphRunsTableShell. */
@@ -133,5 +170,12 @@
     z-index: 1;
     font-weight: inherit;
     text-transform: none;
+  }
+
+  /* Dense tables pinned beneath page chrome on document scroll. */
+  .admin-table-shell-dense-sticky-page :global(thead th) {
+    top: var(--admin-table-sticky-top, 4rem);
+    z-index: 5;
+    box-shadow: 0 1px 0 var(--border);
   }
 </style>

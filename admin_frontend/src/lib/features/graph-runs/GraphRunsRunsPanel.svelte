@@ -6,6 +6,7 @@
   import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Button from '$lib/components/ui/button.svelte';
   import GraphRunsListCharacterCell from './GraphRunsListCharacterCell.svelte';
   import { GRAPH_RUNS_PREVIEW_HIGHLIGHT_MARK } from './shared/graph-runs-ui';
   import {
@@ -44,7 +45,10 @@
     statusesForFilterDropdown,
     characterMap,
     channelById,
-    onOpenRun
+    onOpenRun,
+    hasMoreRuns = false,
+    loadingMoreRuns = false,
+    onLoadMore
   }: {
     filterCharacterId?: string;
     filterChannelId?: string;
@@ -62,6 +66,9 @@
     characterMap: Record<string, CharacterRow>;
     channelById: Map<number, ChatChannelRow>;
     onOpenRun: (runId: string) => void;
+    hasMoreRuns?: boolean;
+    loadingMoreRuns?: boolean;
+    onLoadMore?: () => void;
   } = $props();
 
   const runKindOptions = [
@@ -129,7 +136,7 @@
     <p class="error m-0 font-sans text-sm text-muted-foreground" role="alert">{error}</p>
   {/if}
 
-  <AdminTableShell density="dense">
+  <AdminTableShell density="dense" stickyHead>
     <thead>
       <tr>
         <th>Time</th>
@@ -209,6 +216,14 @@
       {/each}
     </tbody>
   </AdminTableShell>
+
+  {#if hasMoreRuns && onLoadMore}
+    <div class="border-t py-3 text-center">
+      <Button variant="outline" size="sm" disabled={loadingMoreRuns} onclick={() => onLoadMore()}>
+        {loadingMoreRuns ? 'Loading…' : 'Load more runs'}
+      </Button>
+    </div>
+  {/if}
 </div>
 
 <style>

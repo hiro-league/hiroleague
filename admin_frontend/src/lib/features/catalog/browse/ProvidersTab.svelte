@@ -8,6 +8,7 @@
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
+  import { cn } from '$lib/utils';
 
   type Props = {
     ctrl: CatalogController;
@@ -32,14 +33,15 @@
     />
   </div>
 
-  {#if ctrl.providersLoading}
+  {#if ctrl.providersLoading && ctrl.providers.length === 0}
+    <!-- See ModelsTab — keep existing rows mounted on refresh to avoid header flicker. -->
     <InlineLoading label="Loading catalog providers…" />
   {:else if ctrl.providersError}
     <InlineDestructiveAlert title="Could not load catalog providers" message={ctrl.providersError} />
   {:else if ctrl.providers.length === 0}
     <InlineEmptyState message="No providers in the bundled catalog." />
   {:else}
-    <AdminTableShell class="min-w-[980px]">
+    <AdminTableShell stickyHead class={cn('min-w-[980px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="provider" sort={ctrl.providerSort}>Provider</AdminTableHeaderCell>

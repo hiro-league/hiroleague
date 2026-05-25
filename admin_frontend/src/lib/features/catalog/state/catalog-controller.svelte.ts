@@ -10,6 +10,7 @@ import {
   catalogReloadSuccessMessage,
   reloadCatalogAndRefetch
 } from '$lib/catalog/catalog-reload';
+import { preserveStickyAnchor } from '$lib/components/page/table/preserve-sticky-anchor';
 import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
 import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
 import { createCatalogPreferences } from '$lib/preferences/catalog-preferences.svelte';
@@ -214,7 +215,9 @@ export function createCatalogController(notify: Notify) {
     if (prefs.activeTab !== 'models') {
       await prefs.setActiveTab('models');
     }
-    await loadModels();
+    // Filter changes resize the rendered list; the anchor helper keeps the
+    // sticky table head at the same viewport y so we don't snap back to top.
+    await preserveStickyAnchor(loadModels);
   }
 
   async function clearModelFilters() {

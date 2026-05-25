@@ -130,8 +130,9 @@ class GraphRunsTailRequest(BaseModel):
     """POST /graph-runs/tail - live graph ledger snapshot."""
 
     after_offsets: dict[str, int] | None = None
-    lines: int | None = None
-    since_seconds_ago: int | None = 86_400
+    lines: int | None = 100
+    since_seconds_ago: int | None = None
+    skip_from_end: int | None = 0
     filters: dict[str, str] | None = None
 
 

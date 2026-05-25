@@ -92,7 +92,10 @@
     statusesForFilterDropdown={ctl.statusesForFilterDropdown}
     characterMap={ctl.characterMap}
     channelById={ctl.channelById}
+    hasMoreRuns={ctl.hasMoreRuns}
+    loadingMoreRuns={ctl.loadingMoreRuns}
     onOpenRun={(runId) => void ctl.openRunTab(runId)}
+    onLoadMore={() => void ctl.loadMoreRuns()}
   />
 
   <GraphRunsMemoriesPanel

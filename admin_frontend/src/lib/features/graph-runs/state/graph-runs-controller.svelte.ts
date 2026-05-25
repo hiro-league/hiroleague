@@ -4,6 +4,7 @@
  */
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow } from '$lib/api/characters';
+import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
 import {
   getGraphRun,
   getGraphRunLangsmithUrl,
@@ -32,7 +33,7 @@ import {
   type ActivePane,
   type GraphRunKindFilter,
 } from '../graph-runs-pure';
-import { graphRunsFetchInitialLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
+import { graphRunsFetchInitialLedger, graphRunsLoadMoreLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
 import {
   graphRunsClearAllMemories,
   graphRunsDeleteMemory,
@@ -72,6 +73,9 @@ export function createGraphRunsPageController() {
 
   let offsets: Record<string, number> = {};
   let timer: ReturnType<typeof setInterval> | null = null;
+  let hasMoreRuns = $state(false);
+  let historySkipFromEnd = $state(0);
+  let loadingMoreRuns = $state(false);
 
   let selectedNodeRowId = $state<string | null>(null);
   let nodeDetailRowId = $state<string | null>(null);
@@ -377,6 +381,8 @@ export function createGraphRunsPageController() {
   async function loadInitial() {
     error = '';
     offsets = {};
+    historySkipFromEnd = 0;
+    hasMoreRuns = false;
     const result = await graphRunsFetchInitialLedger();
     if (!result.ok) {
       error = result.error;
@@ -384,6 +390,29 @@ export function createGraphRunsPageController() {
     }
     rows = result.rows;
     offsets = result.offsets;
+    hasMoreRuns = result.hasMore;
+    historySkipFromEnd = result.rows.length;
+  }
+
+  async function loadMoreRuns() {
+    if (!hasMoreRuns || loadingMoreRuns) return;
+    loadingMoreRuns = true;
+    try {
+      const result = await graphRunsLoadMoreLedger(historySkipFromEnd);
+      if (!result.ok) {
+        error = result.error;
+        return;
+      }
+      const existingIds = new Set(rows.map((row) => row.id));
+      const older = result.rows.filter((row) => !existingIds.has(row.id));
+      if (older.length > 0) {
+        rows = [...rows, ...older];
+      }
+      hasMoreRuns = result.hasMore;
+      historySkipFromEnd += result.rows.length;
+    } finally {
+      loadingMoreRuns = false;
+    }
   }
 
   async function poll() {
@@ -677,33 +706,45 @@ export function createGraphRunsPageController() {
     },
     set filterCharacterId(v: string) {
       filterCharacterId = v;
+      // Filter changes shrink the rendered list; preserve sticky chrome y-pos.
+      preserveStickyAnchorAround();
     },
     get filterChannelId() {
       return filterChannelId;
     },
     set filterChannelId(v: string) {
       filterChannelId = v;
+      preserveStickyAnchorAround();
     },
     get filterStatus() {
       return filterStatus;
     },
     set filterStatus(v: string) {
       filterStatus = v;
+      preserveStickyAnchorAround();
     },
     get filterRunKind() {
       return filterRunKind;
     },
     set filterRunKind(v: GraphRunKindFilter) {
       filterRunKind = v;
+      preserveStickyAnchorAround();
     },
     get previewSearch() {
       return previewSearch;
     },
     set previewSearch(v: string) {
       previewSearch = v;
+      preserveStickyAnchorAround();
     },
     get error() {
       return error;
+    },
+    get hasMoreRuns() {
+      return hasMoreRuns;
+    },
+    get loadingMoreRuns() {
+      return loadingMoreRuns;
     },
     get visibleRows() {
       return visibleRows;
@@ -749,24 +790,28 @@ export function createGraphRunsPageController() {
     },
     set memorySearch(v: string) {
       memorySearch = v;
+      preserveStickyAnchorAround();
     },
     get memoryFilterCharacterId() {
       return memoryFilterCharacterId;
     },
     set memoryFilterCharacterId(v: string) {
       memoryFilterCharacterId = v;
+      preserveStickyAnchorAround();
     },
     get memoryFilterChannelId() {
       return memoryFilterChannelId;
     },
     set memoryFilterChannelId(v: string) {
       memoryFilterChannelId = v;
+      preserveStickyAnchorAround();
     },
     get memoryFilterSource() {
       return memoryFilterSource;
     },
     set memoryFilterSource(v: string) {
       memoryFilterSource = v;
+      preserveStickyAnchorAround();
     },
     get memoryActionBusy() {
       return memoryActionBusy;
@@ -839,6 +884,7 @@ export function createGraphRunsPageController() {
     openRunTab,
     closeRunTab,
     refreshMain,
+    loadMoreRuns,
     toggleRunDetailCards,
     toggleNodeRowSelection,
     openNodeDetails,

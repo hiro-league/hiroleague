@@ -17,6 +17,7 @@
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
+  import { cn } from '$lib/utils';
 
   type Props = {
     ctrl: CatalogController;
@@ -41,14 +42,18 @@
     />
   </div>
 
-  {#if ctrl.modelsLoading}
+  {#if ctrl.modelsLoading && ctrl.models.length === 0}
+    <!-- Only show the full placeholder on the initial load (no rows yet).
+         Filter-driven reloads keep the existing table mounted so the document
+         height stays stable, which prevents the sticky page header from
+         flickering back to expanded mode while fetching. -->
     <InlineLoading label="Loading models…" />
   {:else if ctrl.modelsError}
     <InlineDestructiveAlert title="Could not load models" message={ctrl.modelsError} />
   {:else if ctrl.models.length === 0}
     <InlineEmptyState message="No models match the current filters." />
   {:else}
-    <AdminTableShell stickyHead class="min-w-[1180px]">
+    <AdminTableShell stickyHead class={cn('min-w-[1180px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="provider" sort={ctrl.modelSort}>Provider</AdminTableHeaderCell>

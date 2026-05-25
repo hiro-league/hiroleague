@@ -1,14 +1,16 @@
-import { tailGraphRuns, type GraphLedgerRow } from '$lib/api/graph-runs';
+import { GRAPH_RUNS_PAGE_SIZE, tailGraphRuns, type GraphLedgerRow } from '$lib/api/graph-runs';
 
 export type GraphLedgerFileOffsets = Record<string, number>;
 
-/** Initial tail window for the ledger list on graph-runs browse. */
-export async function graphRunsFetchInitialLedger(): Promise<
-  { ok: true; rows: GraphLedgerRow[]; offsets: GraphLedgerFileOffsets } | { ok: false; error: string }
-> {
+type LedgerPageResult =
+  | { ok: true; rows: GraphLedgerRow[]; offsets: GraphLedgerFileOffsets; hasMore: boolean }
+  | { ok: false; error: string };
+
+/** Initial page: newest aggregate run rows, no time window. */
+export async function graphRunsFetchInitialLedger(): Promise<LedgerPageResult> {
   const response = await tailGraphRuns({
-    lines: 500,
-    since_seconds_ago: 86_400
+    lines: GRAPH_RUNS_PAGE_SIZE,
+    skip_from_end: 0
   });
   if (!response.ok || !response.data) {
     return { ok: false, error: response.error ?? 'Failed to load graph ledger.' };
@@ -16,7 +18,25 @@ export async function graphRunsFetchInitialLedger(): Promise<
   return {
     ok: true,
     rows: response.data.rows,
-    offsets: response.data.file_offsets
+    offsets: response.data.file_offsets,
+    hasMore: response.data.has_more
+  };
+}
+
+/** Older history page (counts from the newest end of the ledger). */
+export async function graphRunsLoadMoreLedger(skipFromEnd: number): Promise<LedgerPageResult> {
+  const response = await tailGraphRuns({
+    lines: GRAPH_RUNS_PAGE_SIZE,
+    skip_from_end: skipFromEnd
+  });
+  if (!response.ok || !response.data) {
+    return { ok: false, error: response.error ?? 'Failed to load more graph runs.' };
+  }
+  return {
+    ok: true,
+    rows: response.data.rows,
+    offsets: response.data.file_offsets,
+    hasMore: response.data.has_more
   };
 }
 

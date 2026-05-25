@@ -173,7 +173,7 @@
       {:else if visibleMemoriesRows.length === 0}
         <p class="memories-hint">No memories match the current filters.</p>
       {:else}
-        <AdminTableShell density="dense" class={graphRunsMemoriesTableShellClass}>
+        <AdminTableShell density="dense" stickyHead class={graphRunsMemoriesTableShellClass}>
           <thead>
             <tr>
               <th>Updated</th>

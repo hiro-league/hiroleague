@@ -58,7 +58,7 @@ export const ADMIN_PAGE_STICKY_HEADER = cn(
 
 // ── tab strip ──────────────────────────────────────────────────────────────
 
-export const ADMIN_TABLIST_SHELL = 'inline-flex rounded-lg border bg-card p-1';
+export const ADMIN_TABLIST_SHELL = 'inline-flex gap-1 rounded-lg border bg-card p-1';
 
 /** Class to apply to each tab button; pass `active` to toggle the visual state. */
 export function cnAdminTab(active: boolean) {
@@ -110,7 +110,7 @@ export const ADMIN_SEARCH_FIELD =
 
 export const ADMIN_TABLE = 'w-full text-left font-sans text-sm';
 
-export const ADMIN_TABLE_HEAD = 'sticky top-0 bg-muted text-xs uppercase text-muted-foreground';
+export const ADMIN_TABLE_HEAD = 'bg-muted text-xs uppercase text-muted-foreground';
 
 export const ADMIN_TABLE_ROW = 'border-t transition-[background-color,box-shadow]';
 

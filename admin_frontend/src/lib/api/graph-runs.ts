@@ -40,12 +40,16 @@ export type GraphLedgerRow = {
 export type GraphRunsTailResponse = {
   rows: GraphLedgerRow[];
   file_offsets: Record<string, number>;
+  has_more: boolean;
 };
+
+export const GRAPH_RUNS_PAGE_SIZE = 100;
 
 export async function tailGraphRuns(body: {
   after_offsets?: Record<string, number> | null;
   lines?: number | null;
   since_seconds_ago?: number | null;
+  skip_from_end?: number | null;
   filters?: Record<string, string>;
 }): Promise<ApiResponse<GraphRunsTailResponse>> {
   return apiRequest<GraphRunsTailResponse>('/graph-runs/tail', {

@@ -18,7 +18,7 @@ from hirocli.domain.config import load_config, resolve_log_dir
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS
 
-INITIAL_GRAPH_LEDGER_LINES = 500
+INITIAL_GRAPH_LEDGER_LINES = 100
 
 log = Logger.get("ADMIN.GRAPH_RUNS")
 
@@ -27,6 +27,7 @@ log = Logger.get("ADMIN.GRAPH_RUNS")
 class GraphLedgerSnapshot:
     rows: list[dict[str, Any]]
     file_offsets: dict[str, int]
+    has_more: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,8 @@ class GraphLedgerService:
         workspace: str | None,
         *,
         lines: int = INITIAL_GRAPH_LEDGER_LINES,
-        since_seconds_ago: int | None = 86_400,
+        since_seconds_ago: int | None = None,
+        skip_from_end: int = 0,
         filters: dict[str, str] | None = None,
     ) -> Result[GraphLedgerSnapshot]:
         try:
@@ -60,8 +62,7 @@ class GraphLedgerService:
                 rows = [row for row in rows if float(row.get("ts") or 0) >= min_ts]
             rows = _apply_filters(rows, {"row_kind": "run", **(filters or {})})
             rows.sort(key=lambda row: float(row.get("ts") or 0))
-            if len(rows) > lines:
-                rows = rows[-lines:]
+            page, has_more = _page_rows_from_end(rows, lines=lines, skip_from_end=skip_from_end)
             try:
                 offset = path.stat().st_size
             except OSError as exc:
@@ -71,7 +72,9 @@ class GraphLedgerService:
                     error=str(exc),
                 )
                 offset = 0
-            return Result.success(GraphLedgerSnapshot(rows=rows, file_offsets={str(path): offset}))
+            return Result.success(
+                GraphLedgerSnapshot(rows=page, file_offsets={str(path): offset}, has_more=has_more)
+            )
         except Exception as exc:
             return Result.failure(str(exc))
 
@@ -88,10 +91,16 @@ class GraphLedgerService:
             rows, new_offset = _read_rows_from_offset(path, offset)
             rows = _apply_filters(rows, {"row_kind": "run", **(filters or {})})
             return Result.success(
-                GraphLedgerSnapshot(rows=rows, file_offsets={str(path): new_offset})
+                GraphLedgerSnapshot(
+                    rows=rows,
+                    file_offsets={str(path): new_offset},
+                    has_more=False,
+                )
             )
         except RuntimeError:
-            return Result.success(GraphLedgerSnapshot(rows=[], file_offsets=dict(file_offsets)))
+            return Result.success(
+                GraphLedgerSnapshot(rows=[], file_offsets=dict(file_offsets), has_more=False)
+            )
         except Exception as exc:
             return Result.failure(str(exc))
 
@@ -195,6 +204,21 @@ def _shape_row(raw: dict[str, Any]) -> dict[str, Any] | None:
         f"{row.get('run_id')}:{row.get('row_kind')}:{row.get('step_index')}:{row.get('node')}"
     )
     return row
+
+
+def _page_rows_from_end(
+    rows: list[dict[str, Any]],
+    *,
+    lines: int,
+    skip_from_end: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Return ``lines`` run rows counting from the newest end, skipping ``skip_from_end`` first."""
+    limit = max(1, int(lines))
+    skip = max(0, int(skip_from_end))
+    total = len(rows)
+    end = max(0, total - skip)
+    start = max(0, end - limit)
+    return rows[start:end], start > 0
 
 
 def _apply_filters(rows: list[dict[str, Any]], filters: dict[str, str]) -> list[dict[str, Any]]:

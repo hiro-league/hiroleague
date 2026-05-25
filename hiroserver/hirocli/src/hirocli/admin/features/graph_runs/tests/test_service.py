@@ -79,6 +79,31 @@ def test_inspect_run_sorts_nodes_and_returns_aggregate(tmp_path: Path) -> None:
     assert result.data.aggregate_row.get("node") == "@run"
 
 
+def test_tail_initial_skip_from_end_pages(tmp_path: Path) -> None:
+    rows = [
+        {
+            "ts": str(1000 + index),
+            "run_id": f"chat-{index}",
+            "row_kind": "run",
+            "node": "@run",
+        }
+        for index in range(150)
+    ]
+    _write_graph_log(tmp_path, rows)
+
+    with _workspace_patch(tmp_path):
+        first = GraphLedgerService().tail_initial("ws", lines=100, skip_from_end=0)
+        second = GraphLedgerService().tail_initial("ws", lines=100, skip_from_end=100)
+
+    assert first.ok and first.data is not None
+    assert [row["run_id"] for row in first.data.rows] == [f"chat-{index}" for index in range(50, 150)]
+    assert first.data.has_more is True
+
+    assert second.ok and second.data is not None
+    assert [row["run_id"] for row in second.data.rows] == [f"chat-{index}" for index in range(50)]
+    assert second.data.has_more is False
+
+
 def test_tail_initial_filters_before_line_limit(tmp_path: Path) -> None:
     _write_graph_log(
         tmp_path,
