@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage
 from hirocli.domain.preferences import WorkspacePreferences, save_preferences
 import hirocli.services.knowledge.agent.graph as knowledge_graph_module
 from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
-from hirocli.services.knowledge.agent.helpers import NormalizedQuery
+from hirocli.services.knowledge.agent.helpers import NormalizedQuery, QueryRewrite
 from hirocli.services.knowledge import service as knowledge_service_module
 from hirocli.services.knowledge.live_registry import maybe_recover_abandoned_work
 from hirocli.services.knowledge.runtime_owner import current_owner_token
@@ -598,6 +598,211 @@ async def test_answer_prompt_honors_citation_and_language_preferences(
     assert "Do not include footnote references" in captured["system"]
     assert "Cite evidence" not in captured["system"]
     assert "Answer in Arabic" in captured["system"]
+
+
+def _rewrite_graph(tmp_path: Path, prefs: WorkspacePreferences | None = None) -> KnowledgeAgentGraph:
+    return KnowledgeAgentGraph(
+        workspace_path=tmp_path / "workspace",
+        service=object(),
+        prefs=prefs or WorkspacePreferences(),
+    )
+
+
+class _FakeSpec:
+    def __init__(self, features: list[str]) -> None:
+        self.features = features
+
+
+class _FakeCatalog:
+    def __init__(self, features: list[str]) -> None:
+        self._features = features
+
+    def get_model(self, _model_id: str) -> _FakeSpec:
+        return _FakeSpec(self._features)
+
+
+def _patch_rewrite_llm(monkeypatch: pytest.MonkeyPatch, *, structured_output: bool = True) -> None:
+    """Patch the rewrite resolver + catalog so the node reaches the model call in tests.
+
+    Tuning (temperature / max_tokens / thinking) comes from the knowledge_rewrite profile via
+    ResolvedModel — never hardcoded in the node.
+    """
+    from hirocli.domain.preferences import ResolvedModel
+
+    monkeypatch.setattr(
+        knowledge_graph_module,
+        "resolve_knowledge_rewrite_llm",
+        lambda *_a, **_k: ResolvedModel(
+            model_id="google:gemini-3-flash-preview",
+            temperature=0.0,
+            max_tokens=1024,
+            thinking="off",
+        ),
+    )
+    monkeypatch.setattr(
+        knowledge_graph_module,
+        "get_model_catalog",
+        lambda: _FakeCatalog(["structured_output"] if structured_output else []),
+    )
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_noop_when_disabled(tmp_path: Path) -> None:
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": False,
+        "normalized_query": NormalizedQuery(raw="hi", text="hi", language="en"),
+    }
+    assert await graph.rewrite_query(state) == {}
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_skips_empty_query(tmp_path: Path) -> None:
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="   ", text="   ", language="unknown"),
+    }
+    # Nothing to rewrite — skip before resolving or calling any model.
+    assert await graph.rewrite_query(state) == {}
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_skips_when_no_llm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        knowledge_graph_module, "resolve_knowledge_rewrite_llm", lambda *_a, **_k: None
+    )
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="hi", text="hi", language="en"),
+    }
+    # No model configured → silent passthrough, retrieval proceeds on the normalized query.
+    assert await graph.rewrite_query(state) == {}
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_skips_when_model_lacks_structured_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[bool] = []
+    _patch_rewrite_llm(monkeypatch, structured_output=False)
+    monkeypatch.setattr(
+        knowledge_graph_module, "create_chat_model", lambda *_a, **_k: called.append(True)
+    )
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="hi", text="hi", language="en"),
+    }
+    # Guard must short-circuit before any model call when the model can't do structured output.
+    assert await graph.rewrite_query(state) == {}
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_applies_llm_rewrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeStructured:
+        async def ainvoke(self, _messages):
+            return {
+                "parsed": QueryRewrite(standalone_query="what does the Research agent do?", keywords=["Selim"]),
+                "raw": AIMessage(content=""),
+            }
+
+    class _FakeModel:
+        def with_structured_output(self, _schema, include_raw=False):
+            return _FakeStructured()
+
+    _patch_rewrite_llm(monkeypatch)
+    monkeypatch.setattr(knowledge_graph_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="teh 2nd one", text="teh 2nd one", language="en"),
+    }
+    result = await graph.rewrite_query(state)
+    assert result["rewritten_query"] == "what does the Research agent do?"
+    assert result["rewrite_keywords"] == ["Selim"]
+    assert result["normalized_query"].text == "what does the Research agent do?"
+    # Original raw + detected language are preserved (answer-language policy follows the user).
+    assert result["normalized_query"].raw == "teh 2nd one"
+    assert result["normalized_query"].language == "en"
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_blank_output_falls_back_to_normalized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _FakeStructured:
+        async def ainvoke(self, _messages):
+            return {"parsed": QueryRewrite(standalone_query="   ", keywords=["  "]), "raw": AIMessage(content="")}
+
+    class _FakeModel:
+        def with_structured_output(self, _schema, include_raw=False):
+            return _FakeStructured()
+
+    _patch_rewrite_llm(monkeypatch)
+    monkeypatch.setattr(knowledge_graph_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="keep me", text="keep me", language="en"),
+    }
+    result = await graph.rewrite_query(state)
+    assert result["rewritten_query"] == "keep me"
+    assert result["rewrite_keywords"] == []
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_falls_back_when_structured_output_unparsable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: with_structured_output(include_raw=True) returns parse failures in the dict
+    # (it does NOT raise). A reasoning model that hits MAX_TOKENS yields parsed=None — the node
+    # must fall back to the raw query rather than silently doing nothing unlogged.
+    class _FakeStructured:
+        async def ainvoke(self, _messages):
+            return {
+                "parsed": None,
+                "parsing_error": ValueError("Invalid json output: Here is the JSON requested:"),
+                "raw": AIMessage(
+                    content="Here is the JSON requested:",
+                    response_metadata={"finish_reason": "MAX_TOKENS"},
+                    usage_metadata={"input_tokens": 91, "output_tokens": 252, "total_tokens": 343},
+                ),
+            }
+
+    class _FakeModel:
+        def with_structured_output(self, _schema, include_raw=False):
+            return _FakeStructured()
+
+    _patch_rewrite_llm(monkeypatch)
+    monkeypatch.setattr(knowledge_graph_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="طيب", text="طيب", language="ar"),
+    }
+    # Falls back to the raw query (empty delta), and does not raise.
+    assert await graph.rewrite_query(state) == {}
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_falls_back_on_model_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_a, **_k):
+        raise RuntimeError("provider down")
+
+    _patch_rewrite_llm(monkeypatch)
+    monkeypatch.setattr(knowledge_graph_module, "create_chat_model", boom)
+    graph = _rewrite_graph(tmp_path)
+    state = {
+        "rewrite": True,
+        "normalized_query": NormalizedQuery(raw="hi", text="hi", language="en"),
+    }
+    # A model failure must never block retrieval — the node returns an empty passthrough.
+    assert await graph.rewrite_query(state) == {}
 
 
 @pytest.mark.asyncio

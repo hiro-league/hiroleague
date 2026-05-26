@@ -118,6 +118,13 @@
   </FormField>
   <label
     class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
+    title="Rewrite the query with an LLM before retrieval: normalize wording and extract literal keywords (one extra model call)"
+  >
+    <input type="checkbox" class="size-4" bind:checked={ask.askRewrite} />
+    <span class="text-sm text-muted-foreground">Rewrite</span>
+  </label>
+  <label
+    class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
     title="Show match type, per-branch cosine/BM25 scores, and matched terms for each result (extra query work)"
   >
     <input type="checkbox" class="size-4" bind:checked={ask.askExplain} />

@@ -29,7 +29,17 @@ below were verified against the installed stack, not assumed from model cards.
   `knowledge.chunking.embed_structural_context` (default on); ingest-time only, so flipping it
   needs a re-ingest. The stored payload `text` is unchanged — the UI and LLM context still add
   `title`/`heading_path` separately.
-- ⏳ **Pending:** embedder upgrade (Arabic recall), reranker.
+- ✅ **Query rewrite (Ask, opt-in) — implemented.** An optional per-query "Rewrite" toggle on the
+  Ask screen runs one structured-output LLM call before retrieval that normalizes wording and
+  extracts literal keywords (`standalone_query` → dense branch; `keywords` are appended to the
+  BM25 branch text to keep exact-match signal). Reuses the resolved answering model; any failure
+  silently falls back to the normalized query (retrieval never blocks). The system prompt is
+  editable and the default toggle state is set in Admin → Preferences → Knowledge → "Query rewrite
+  (Ask)" (`knowledge.rewrite.{prompt, default_on}`). The new `rewrite_query` graph node reports
+  token cost + in/out previews in graph runs. Scope: Ask only — conversational reference-resolution
+  remains deferred to chat-agent integration; multi-query / decomposition can later extend the same
+  structured-output call.
+- ⏳ **Pending:** embedder upgrade (Arabic recall), reranker, multi-query / decomposition.
 
 > **Migration (no-backward-compatibility):** the collection schema changed from a single
 > unnamed vector to named `dense` + `bm25`. Existing workspaces must **clear knowledge and
@@ -59,9 +69,10 @@ flowchart LR
 | Context | All hits concatenated and sent to the LLM | `helpers.build_context` |
 | Answering | `gemini-3-flash-preview`, temp 0.2, max 1600 tokens | tuning profile |
 
-There is **no query rewriting, HyDE, reranking, hybrid BM25, MMR, or per-document dedup** —
-all deferred to v2 in the design doc. `parse_query` only normalizes text and detects
-language for the answer prompt, not for retrieval.
+There is **no query-side transformation** — no conversational rewriting, multi-query, HyDE,
+or decomposition — and no reranking, MMR, or per-document dedup. `parse_query` only normalizes
+text and detects language for the answer prompt, not for retrieval. See
+[Query transformation](#query-transformation-query-side-recall) for the technique breakdown.
 
 ## Environment & stack notes
 
@@ -122,9 +133,85 @@ A cross-encoder reranker reorders the candidate set so the LLM sees the best 5�
 all 20. Important eventually, but it can **only reorder what retrieval already surfaced** —
 with the current recall it would add latency for little gain. Fix recall (1–3) first.
 
-### 6. Single-shot query → single embedding (recall, vague queries)
-No multi-query rewrite, HyDE, or sub-question decomposition. Short/vague queries get one shot
-at the index. Worth adding once the core recall path is solid.
+### 6. Single-shot query → single embedding (recall, vague & conversational queries)
+No conversational rewriting, multi-query rewrite, or sub-question decomposition. Short/vague
+queries — and, once knowledge runs inside a chat, queries that reference earlier turns ("the
+second one", "his brother") — get one shot at the index. This is the *query-side* recall
+lever; see [Query transformation](#query-transformation-query-side-recall) for the technique
+breakdown and the HyDE rejection. Worth adding once the core recall path is solid.
+
+## Query transformation (query-side recall)
+
+Everything above fixes the **index** side. This section covers the **query** side: turning
+raw human input into the query (or queries) actually sent to retrieval. It is ordered after
+the index fixes on purpose — quality in, quality out, but a clean query only helps once the
+index can answer it.
+
+**Scope — where each technique applies:**
+
+| Surface | Query shape | Techniques that apply |
+|---|---|---|
+| Admin **Ask** tab (v1, today) | One standalone question per submit | normalization, **optional LLM rewrite** (cleanup only — no history to resolve), multi-query, decomposition *(HyDE rejected)* |
+| Chat sub-agent (v2, future) | A turn inside a multi-turn conversation | **LLM rewrite first** (cleanup + reference resolution), then the above |
+
+### Techniques
+
+| Technique | Shape | Fixes | Fit for Hiro |
+|---|---|---|---|
+| **Normalization** *(done)* | 1→1 | unicode / Arabic alef / casing noise | already in `parse_query` |
+| **Query rewriting** (normalize + contextualize) | 1→1 | dialect/typos (any query) + references to earlier turns (chat) | **optional per-query toggle** (Ask-tab param, default off); resolves references only when chat history is present |
+| **Multi-query expansion** | 1→N | vocabulary / phrasing mismatch (user words ≠ doc words) | **best first lever**; reuses the existing RRF fan-in |
+| **Decomposition** | 1→N | compound / multi-hop questions needing separate facts | moderate; for "compare X and Y" queries |
+| **HyDE** | 1→hypothetical | question-vs-answer shape mismatch | **rejected — see below** |
+
+### Query rewriting — LLM normalize + contextualize (optional)
+
+A single structured-output LLM call run **before** retrieval that does three things at once:
+
+1. **Normalize** — fix typos, fold Arabic dialect → MSA, clean phrasing. Useful even for a
+   single-shot query, and more capable here than regex (regex can't do dialect→MSA).
+2. **Contextualize** — when conversation history is present, resolve references
+   (*"what about the second one?"* + a prior turn listing Hiro's agents → *"what does the
+   Research agent do?"*). No-op when there's no history.
+3. **Preserve literals** — emit proper nouns / identifiers verbatim as `keywords` so the BM25
+   branch keeps its exact-match signal (the rewrite must **not** "correct" names like `Selim`).
+
+Structured output (illustrative):
+
+```json
+{ "standalone_query": "…", "keywords": ["…"], "language": "ar|en", "is_followup": true }
+```
+
+`standalone_query` → dense branch; `keywords` → BM25 branch. A thin deterministic NFC pass
+still runs on the output before embedding; ingest-side BM25 tokenization stays deterministic
+(no LLM over chunks at ingest).
+
+**Optional, per-query.** It costs one LLM call + latency before retrieval, so it is an **opt-in
+toggle exposed in the Ask tab params** (alongside `top_k` / `min_score` / Explain), **default
+off**. In chat it would default on (reference resolution is required there). Architecturally it
+is a new node (or an extension of `parse_query`) gated on the toggle + presence of history.
+
+**Forward note:** multi-query and decomposition can later extend *this same* structured-output
+call (extra `variants[]` / `sub_questions[]` fields) rather than adding new model calls.
+
+**To verify at implementation:** ingest must apply the same Arabic normalization (alef folding,
+etc.) to chunk text before computing BM25 vectors as `parse_query` applies to the query — else
+the sparse branch is silently mismatched for Arabic (query `احمد` vs stored `أحمد`). Confirm
+ingest/query normalization symmetry.
+
+### HyDE — evaluated and rejected (for Hiro's corpus)
+
+HyDE embeds an LLM-generated **hypothetical answer** instead of the question, on the theory
+that a fake answer sits closer to real passages than the question does. **Rejected for Hiro:**
+the corpus is the user's private, specific data (files, chats, family, schedules) — the model
+cannot *guess* those facts, so it fabricates a plausible-but-wrong passage and steers retrieval
+toward the wrong neighborhood. HyDE was validated on general web-QA (MS MARCO / TREC), the
+opposite of a personal-knowledge base. Its one strength — exact-term / proper-noun matching —
+is already covered, more safely, by the BM25 branch.
+
+**Narrow exception:** a future *reference / general-knowledge* sub-corpus (saved articles,
+manuals collected by the Research Agent) could use HyDE, gated to that owner/category and
+never the personal data. Not now.
 
 ## Embedding model options
 

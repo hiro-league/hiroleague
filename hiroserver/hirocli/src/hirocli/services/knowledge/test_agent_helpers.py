@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hirocli.services.knowledge.agent.helpers import matched_query_terms
+from hirocli.services.knowledge.agent.helpers import QueryRewrite, matched_query_terms
 
 
 def test_matched_query_terms_returns_shared_content_words() -> None:
@@ -25,3 +25,15 @@ def test_matched_query_terms_arabic_alef_folding() -> None:
 def test_matched_query_terms_empty_inputs() -> None:
     assert matched_query_terms("", "anything") == []
     assert matched_query_terms("anything", "") == []
+
+
+def test_query_rewrite_defaults_empty() -> None:
+    rewrite = QueryRewrite()
+    assert rewrite.standalone_query == ""
+    assert rewrite.keywords == []
+
+
+def test_query_rewrite_populates_fields() -> None:
+    rewrite = QueryRewrite(standalone_query="what does the Research agent do?", keywords=["Research"])
+    assert rewrite.standalone_query == "what does the Research agent do?"
+    assert rewrite.keywords == ["Research"]

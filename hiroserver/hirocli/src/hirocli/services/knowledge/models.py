@@ -137,6 +137,9 @@ class KnowledgeAnswerResult:
     usage: dict[str, Any] = field(default_factory=dict)
     no_results: bool = False
     run_id: str | None = None
+    # Optional query rewrite (opt-in). rewritten_query is None when rewrite was off or skipped.
+    rewritten_query: str | None = None
+    keywords: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

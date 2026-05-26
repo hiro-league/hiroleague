@@ -60,6 +60,7 @@ export function createKnowledgePageController(
 
   async function bootstrap() {
     await Promise.all([browse.loadDocuments(), ingest.loadJobs(), options.loadOptions()]);
+    ask.initRewriteDefault(options.rewriteDefaultOn);
     if (ingest.ownerKind === 'character' && !ingest.ownerId && options.characters[0]) {
       ingest.ownerId = String(options.characters[0].id);
     }

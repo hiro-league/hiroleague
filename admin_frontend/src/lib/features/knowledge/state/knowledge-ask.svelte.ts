@@ -17,6 +17,10 @@ export function createKnowledgeAskModel(deps: {
   let askMinScore = $state(DEFAULT_ASK_MIN_SCORE);
   // Opt-in: request per-branch scores + matched terms for human evaluation of results.
   let askExplain = $state(false);
+  // Opt-in: LLM query rewrite (normalize + keyword-extract) before retrieval. The workspace
+  // default (knowledge.rewrite.default_on) seeds this via initRewriteDefault on first load.
+  let rewriteDefault = $state(false);
+  let askRewrite = $state(false);
   let askOwnerKind = $state('');
   let askOwnerId = $state('');
   let askCategoryId = $state('');
@@ -41,8 +45,15 @@ export function createKnowledgeAskModel(deps: {
       askTags.length > 0 ||
       askDocumentId !== null ||
       askTopK !== DEFAULT_ASK_TOP_K ||
-      askMinScore !== DEFAULT_ASK_MIN_SCORE
+      askMinScore !== DEFAULT_ASK_MIN_SCORE ||
+      askRewrite !== rewriteDefault
   );
+
+  // Seed the Ask-tab toggle from the workspace default once options have loaded.
+  function initRewriteDefault(on: boolean) {
+    rewriteDefault = on;
+    askRewrite = on;
+  }
 
   async function runSearch() {
     if (!query.trim()) return;
@@ -61,7 +72,8 @@ export function createKnowledgeAskModel(deps: {
           askTags,
           askDocumentId
         }),
-        askExplain
+        askExplain,
+        askRewrite
       );
       answerResult = payload.data;
     } catch (err) {
@@ -92,6 +104,7 @@ export function createKnowledgeAskModel(deps: {
     askDocumentId = null;
     askTopK = DEFAULT_ASK_TOP_K;
     askMinScore = DEFAULT_ASK_MIN_SCORE;
+    askRewrite = rewriteDefault;
   }
 
   function clearAskDocumentScope() {
@@ -141,6 +154,12 @@ export function createKnowledgeAskModel(deps: {
     },
     set askExplain(v: boolean) {
       askExplain = v;
+    },
+    get askRewrite() {
+      return askRewrite;
+    },
+    set askRewrite(v: boolean) {
+      askRewrite = v;
     },
     get askOwnerKind() {
       return askOwnerKind;
@@ -197,7 +216,8 @@ export function createKnowledgeAskModel(deps: {
     handleAskOwnerKindChange,
     clearAskFilters,
     clearAskDocumentScope,
-    resetForDocument
+    resetForDocument,
+    initRewriteDefault
   };
 }
 

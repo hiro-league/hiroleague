@@ -14,6 +14,7 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   knowledgeRetrieval: 'preferences-section-knowledge-retrieval',
   knowledgeTuningProfile: 'preferences-section-knowledge-tuning-profile',
   knowledgeAnsweringModel: 'preferences-section-knowledge-answering-model',
+  knowledgeRewrite: 'preferences-section-knowledge-rewrite',
   knowledgeAnsweringChunking: 'preferences-section-knowledge-answering-chunking',
   tuningProfilesList: 'preferences-section-tuning-profiles-list'
 } as const;

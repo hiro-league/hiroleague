@@ -162,6 +162,33 @@
     </SectionCardMuted>
 
     <SectionCardMuted
+      title="Query rewrite (Ask)"
+      description="Optional LLM step that rewrites a question before retrieval — normalizes wording and extracts literal keywords. Reuses the answering model; toggled per query on the Ask tab."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeRewrite}
+    >
+      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+        <input
+          type="checkbox"
+          bind:checked={ctrl.draft.knowledge.rewrite.default_on}
+          onchange={ctrl.markDirty}
+        />
+        <span class="font-sans text-sm font-medium">Enable by default on the Ask tab</span>
+      </label>
+      <FormField label="Rewrite prompt">
+        <textarea
+          class="min-h-[9rem] w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          bind:value={ctrl.draft.knowledge.rewrite.prompt}
+          oninput={ctrl.markDirty}
+        ></textarea>
+      </FormField>
+      <p class="text-xs text-muted-foreground">
+        Sent as the system prompt for the rewrite call. Keep the instruction to copy proper nouns
+        and identifiers verbatim so the BM25 keyword branch keeps its exact-match signal.
+      </p>
+    </SectionCardMuted>
+
+    <SectionCardMuted
       title="Answering and chunking"
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeAnsweringChunking}

@@ -147,6 +147,7 @@ class TuningProfile(ModelTuning):
 DEFAULT_CHAT_TUNING_PROFILE_ID = "balanced_chat"
 DEFAULT_MEMORY_TUNING_PROFILE_ID = "memory_extraction"
 DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID = "knowledge_answering"
+DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID = "knowledge_rewrite"
 
 
 def default_tuning_profiles() -> dict[str, TuningProfile]:
@@ -171,6 +172,16 @@ def default_tuning_profiles() -> dict[str, TuningProfile]:
             temperature=0.2,
             max_tokens=1600,
             thinking=None,
+        ),
+        DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID: TuningProfile(
+            label="Knowledge query rewrite",
+            locked=True,
+            # Deterministic normalization + keyword extraction. Reasoning is disabled on
+            # purpose: a reasoning model would spend the token budget thinking and never emit
+            # the structured JSON. max_tokens only needs to cover the small JSON envelope.
+            temperature=0.0,
+            max_tokens=1024,
+            thinking="off",
         ),
     }
 
@@ -274,6 +285,17 @@ DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingu
 # the domain layer does not import the services layer (same pattern as the embedding default).
 DEFAULT_KNOWLEDGE_SPARSE_MODEL = "Qdrant/bm25"
 
+# System prompt for the optional query-rewrite step (admin Ask). Editable in preferences;
+# the rewrite node falls back to this constant when the stored prompt is blank. Scope is
+# normalization + literal-keyword extraction (no conversation history in admin Ask).
+DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
+    "Rewrite the user's question into one clean, standalone search query. "
+    "Fix typos and normalize informal or dialectal phrasing into clear formal language, "
+    "but do NOT change the meaning or add information that is not in the question. "
+    "Copy proper nouns, names, dates, and identifiers VERBATIM into `keywords` — never "
+    "translate or 'correct' a name. Do not invent facts or answer the question."
+)
+
 
 class KnowledgeChunkingMarkdownPreferences(BaseModel):
     respect_headings: bool = True
@@ -314,12 +336,20 @@ class KnowledgeAnsweringPreferences(BaseModel):
     language_policy: Literal["match_query", "prefer_english", "prefer_arabic"] = "match_query"
 
 
+class KnowledgeRewritePreferences(BaseModel):
+    # Optional LLM query rewrite for the Ask tab: normalize + extract literal keywords before
+    # retrieval. Reuses the resolved answering model. ``default_on`` seeds the Ask-tab toggle.
+    prompt: str = DEFAULT_KNOWLEDGE_REWRITE_PROMPT
+    default_on: bool = False
+
+
 class KnowledgePreferences(BaseModel):
     default_embedding_model: str | None = None
     default_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
     answering: KnowledgeAnsweringPreferences = Field(default_factory=KnowledgeAnsweringPreferences)
+    rewrite: KnowledgeRewritePreferences = Field(default_factory=KnowledgeRewritePreferences)
 
     @property
     def default_embedding_model_resolved(self) -> str:
@@ -587,14 +617,19 @@ def knowledge_answering_model_source(prefs: WorkspacePreferences) -> str | None:
     return None
 
 
-def resolve_knowledge_answering_llm(
+def _resolve_knowledge_llm(
     prefs: WorkspacePreferences,
     workspace_path: Path,
     *,
+    tuning_profile_id: str,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
-    """Resolve the knowledge answering chat model with catalog, credentials, and tuning."""
+    """Resolve the knowledge chat model (catalog + credentials) with a given tuning profile.
+
+    The model id is shared across knowledge LLM steps (explicit ``knowledge.answering.model``
+    else ``llm.default_chat``); only the tuning profile differs (answering vs rewrite).
+    """
     from .available_models import AvailableModelsService
     from .model_catalog import get_model_catalog
     from .workspace import workspace_id_for_path
@@ -615,7 +650,7 @@ def resolve_knowledge_answering_llm(
         wid = workspace_id or workspace_id_for_path(workspace_path)
         if wid is None:
             logger.debug(
-                "resolve_knowledge_answering_llm: workspace path not in registry — %s",
+                "_resolve_knowledge_llm: workspace path not in registry — %s",
                 workspace_path,
             )
             return None
@@ -625,12 +660,46 @@ def resolve_knowledge_answering_llm(
     if not ams.is_model_available(model_id):
         return None
 
-    tuning = _profile_tuning(prefs, prefs.knowledge.default_tuning_profile)
+    tuning = _profile_tuning(prefs, tuning_profile_id)
     return ResolvedModel(
         model_id=model_id,
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
         thinking=tuning.thinking,
+    )
+
+
+def resolve_knowledge_answering_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the knowledge answering chat model with catalog, credentials, and tuning."""
+    return _resolve_knowledge_llm(
+        prefs,
+        workspace_path,
+        tuning_profile_id=prefs.knowledge.default_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_knowledge_rewrite_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the model for the query-rewrite step: same model, ``knowledge_rewrite`` tuning."""
+    return _resolve_knowledge_llm(
+        prefs,
+        workspace_path,
+        tuning_profile_id=DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
     )
 
 

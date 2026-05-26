@@ -7,7 +7,25 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
+from pydantic import BaseModel, Field as PydanticField
 from qdrant_client import models as qm
+
+
+class QueryRewrite(BaseModel):
+    """Structured output for the optional Ask-tab query-rewrite step.
+
+    ``standalone_query`` feeds the dense branch; ``keywords`` (literal proper nouns /
+    identifiers) reinforce the BM25 branch so exact-match signal survives the rewrite.
+    """
+
+    standalone_query: str = PydanticField(
+        default="",
+        description="One clean, standalone search query. Normalized but meaning-preserving.",
+    )
+    keywords: list[str] = PydanticField(
+        default_factory=list,
+        description="Proper nouns, names, dates, and identifiers copied verbatim from the question.",
+    )
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 # Tiny English + Arabic stoplist so matched-term chips show content words, not glue words.

@@ -13,8 +13,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import StreamWriter
 
+from hirocli.domain.model_catalog import get_model_catalog
 from hirocli.domain.model_factory import create_chat_model
-from hirocli.domain.preferences import resolve_knowledge_answering_llm
+from hirocli.domain.preferences import (
+    DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
+    resolve_knowledge_answering_llm,
+    resolve_knowledge_rewrite_llm,
+)
 from hirocli.runtime.agent_graph.base import BaseAgentGraph
 from hirocli.runtime.agent_graph.base import _llm_usage_payload as llm_usage_payload
 from hirocli.runtime.agent_graph.base import _normalize_reply_content
@@ -23,6 +28,7 @@ from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged
 
 from .helpers import (
     NormalizedQuery,
+    QueryRewrite,
     build_context,
     build_qdrant_filter,
     matched_query_terms,
@@ -44,6 +50,9 @@ class KnowledgeAgentState(TypedDict, total=False):
     top_k: int
     min_score: float
     explain: bool
+    rewrite: bool
+    rewrite_keywords: list[str]
+    rewritten_query: str | None
     normalized_query: NormalizedQuery
     qdrant_filter: Any
     query_vector: list[float]
@@ -103,6 +112,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/parse_query", self.parse_query),
         )
         graph.add_node(
+            "rewrite_query",
+            self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/rewrite_query", self.rewrite_query),
+        )
+        graph.add_node(
             "build_filters",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/build_filters", self.build_filters),
         )
@@ -127,7 +140,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/finalize", self.finalize),
         )
         graph.add_edge(START, "parse_query")
-        graph.add_edge("parse_query", "build_filters")
+        graph.add_edge("parse_query", "rewrite_query")
+        graph.add_edge("rewrite_query", "build_filters")
         graph.add_edge("build_filters", "embed_query")
         graph.add_edge("embed_query", "vector_search")
         graph.add_edge("vector_search", "build_context")
@@ -153,6 +167,143 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             "started_at": dt.datetime.now(dt.UTC).isoformat(),
         }
 
+    @graph_logged(captures={"usage", "decision"})
+    async def rewrite_query(
+        self,
+        state: KnowledgeAgentState,
+        writer: StreamWriter | None = None,
+    ) -> dict[str, Any]:
+        # Opt-in LLM rewrite: normalize the query + extract literal keywords before retrieval.
+        # Reuses the answering model with the dedicated ``knowledge_rewrite`` tuning profile
+        # (temperature / max_tokens / thinking come from preferences, never hardcoded here).
+        # Every failure path is a logged, observable fallback to the raw query — retrieval must
+        # never be blocked by the rewrite step.
+        if not state.get("rewrite"):
+            return {}
+        normalized = state["normalized_query"]
+        if entry := current_entry.get():
+            entry.set_input_preview(f"text: {normalized.text[:200]}")
+        if not normalized.text.strip():
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "empty_query")
+                entry.set_output_preview("rewrite: <skipped empty query>")
+            return {}
+
+        resolved = resolve_knowledge_rewrite_llm(
+            self._prefs,
+            self._workspace_path,
+            workspace_id=self._workspace_id,
+        )
+        if resolved is None:
+            log.info("⚠️ knowledge.rewrite — no answering model configured · skipping rewrite")
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "no_llm_configured")
+                entry.set_output_preview("rewrite: <skipped no model>")
+            return {}
+
+        model_id = resolved.model_id
+        # Cross-provider guard: only attempt structured output on models the catalog says
+        # support it; otherwise the call would burn tokens and fall back every time.
+        spec = get_model_catalog().get_model(model_id)
+        if spec is None or "structured_output" not in spec.features:
+            log.warning(
+                "⚠️ knowledge.rewrite — model lacks structured_output support · skipping rewrite",
+                model=model_id,
+            )
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "no_structured_output")
+                entry.set_output_preview("rewrite: <skipped unsupported model>")
+            return {}
+
+        prompt = (
+            self._prefs.knowledge.rewrite.prompt or ""
+        ).strip() or DEFAULT_KNOWLEDGE_REWRITE_PROMPT
+        messages = [SystemMessage(content=prompt), HumanMessage(content=normalized.text)]
+        estimate = count_tokens_approximately(messages)
+        try:
+            model = create_chat_model(
+                model_id,
+                workspace_path=self._workspace_path,
+                workspace_id=self._workspace_id,
+                temperature=resolved.temperature,
+                max_tokens=resolved.max_tokens,
+                thinking=resolved.thinking,
+            ).with_structured_output(QueryRewrite, include_raw=True)
+            result = await model.ainvoke(messages)
+        except Exception as exc:
+            log.warning(
+                "⚠️ knowledge.rewrite — model call failed, using raw query",
+                error=str(exc)[:200],
+                model=model_id,
+                exc_info=True,
+            )
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "rewrite_call_failed")
+                entry.set_error(f"rewrite_call_failed: {str(exc)[:160]}")
+                entry.set_output_preview("rewrite: <fallback to raw query>")
+            return {}
+
+        parsed = result.get("parsed") if isinstance(result, dict) else None
+        raw = result.get("raw") if isinstance(result, dict) else None
+        parsing_error = result.get("parsing_error") if isinstance(result, dict) else None
+
+        # The call was billed whether or not parsing succeeded — record usage first so the node
+        # always reports cost in graph runs, even on a parse failure.
+        if raw is not None:
+            usage_payload = llm_usage_payload(
+                raw,
+                inbound_id=str(state.get("inbound_id") or "knowledge.rewrite"),
+                chat_channel_id=int(state.get("chat_channel_id") or 0),
+                model_id=model_id,
+                estimated_input_tokens=estimate,
+            )
+            provider = model_id.split(":", 1)[0] if ":" in model_id else ""
+            if entry := current_entry.get():
+                entry.add_usage(
+                    provider=provider,
+                    model=model_id,
+                    input_tokens=int(usage_payload.get("input_tokens") or estimate or 0),
+                    output_tokens=int(usage_payload.get("output_tokens") or 0),
+                    cached_input_tokens=int(usage_payload.get("cached_input_tokens") or 0),
+                    reasoning_tokens=int(usage_payload.get("reasoning_tokens") or 0),
+                )
+            if writer is not None:
+                self._emit(writer, GRAPH_LLM_USAGE, usage_payload)
+
+        # include_raw=True returns parse failures in the result dict (it does NOT raise), so we
+        # must inspect parsing_error explicitly, log it with finish_reason, and fall back.
+        if not isinstance(parsed, QueryRewrite):
+            finish_reason = (
+                str(getattr(raw, "response_metadata", {}).get("finish_reason", ""))
+                if raw is not None
+                else ""
+            )
+            log.warning(
+                "⚠️ knowledge.rewrite — unparsable structured output, using raw query",
+                error=str(parsing_error)[:200] if parsing_error else "no parsed object returned",
+                finish_reason=finish_reason or "unknown",
+                model=model_id,
+            )
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "rewrite_unparsed")
+                entry.set_error(f"rewrite_unparsed (finish_reason={finish_reason or 'unknown'})")
+                entry.set_output_preview("rewrite: <fallback to raw query>")
+            return {}
+
+        new_text = (parsed.standalone_query or "").strip() or normalized.text
+        keywords = [kw.strip() for kw in parsed.keywords if kw.strip()]
+        if entry := current_entry.get():
+            entry.set_decision("rewritten", "ok")
+            kw = f" · kw={','.join(keywords)[:80]}" if keywords else ""
+            entry.set_output_preview(f"query: {new_text[:160]}{kw}")
+        return {
+            "normalized_query": NormalizedQuery(
+                raw=normalized.raw, text=new_text, language=normalized.language
+            ),
+            "rewrite_keywords": keywords,
+            "rewritten_query": new_text,
+        }
+
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:
         return {"qdrant_filter": build_qdrant_filter(state.get("filters") or {})}
 
@@ -163,9 +314,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             entry.set_input_preview(f"text: {normalized.text[:200]}")
         vector = await self._service.embed_query(normalized.text)
         out: dict[str, Any] = {"query_vector": vector}
-        # Only pay for the BM25 query embed when hybrid is enabled.
+        # Only pay for the BM25 query embed when hybrid is enabled. Append rewrite keywords
+        # (literal proper nouns/identifiers) so the sparse branch keeps its exact-match signal.
         if self._prefs.knowledge.retrieval.hybrid:
-            out["query_sparse_vector"] = await self._service.embed_query_sparse(normalized.text)
+            keywords = state.get("rewrite_keywords") or []
+            sparse_text = (
+                f"{normalized.text} {' '.join(keywords)}".strip() if keywords else normalized.text
+            )
+            out["query_sparse_vector"] = await self._service.embed_query_sparse(sparse_text)
         return out
 
     @graph_logged(captures={"decision"})

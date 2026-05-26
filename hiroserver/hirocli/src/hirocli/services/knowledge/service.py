@@ -347,6 +347,7 @@ class KnowledgeService:
         filters: dict[str, Any] | None = None,
         workspace_id: str | None = None,
         explain: bool = False,
+        rewrite: bool = False,
     ) -> KnowledgeAnswerResult:
         prefs = self.workspace_prefs()
         retrieval = prefs.knowledge.retrieval
@@ -363,6 +364,7 @@ class KnowledgeService:
             "top_k": top_k if top_k is not None else retrieval.top_k,
             "min_score": min_score if min_score is not None else retrieval.min_score,
             "explain": explain,
+            "rewrite": rewrite,
         }
         parent = current_run.get()
         if parent is not None:
@@ -414,6 +416,8 @@ class KnowledgeService:
             usage=dict(state.get("usage") or {}),
             no_results=bool(state.get("no_results")),
             run_id=ledger_run_id,
+            rewritten_query=state.get("rewritten_query"),
+            keywords=list(state.get("rewrite_keywords") or []),
         )
         log_knowledge_answer(
             log,

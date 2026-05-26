@@ -112,7 +112,8 @@ class SearchBody(BaseModel):
 
 
 class AnswerBody(SearchBody):
-    pass
+    # Opt-in: run the LLM query-rewrite step (normalize + keyword-extract) before retrieval.
+    rewrite: bool = False
 
 
 class CreateCategoryBody(BaseModel):
@@ -215,6 +216,7 @@ async def options(
                 run_in_threadpool(list_characters_detailed, workspace_path),
                 run_in_threadpool(_list_users, workspace_path),
             )
+            prefs = service.workspace_prefs()
             return _success(
                 {
                     "categories": categories,
@@ -224,6 +226,7 @@ async def options(
                         for row in characters
                     ],
                     "users": users,
+                    "rewrite_default_on": prefs.knowledge.rewrite.default_on,
                 }
             )
         finally:
@@ -442,6 +445,7 @@ async def answer(
                     filters=body.filters,
                     workspace_id=workspace_id,
                     explain=body.explain,
+                    rewrite=body.rewrite,
                 )
             )
         finally:

@@ -31,6 +31,8 @@ export type KnowledgeOptionsData = {
   tags: KnowledgeTag[];
   characters: KnowledgeOwnerOption[];
   users: KnowledgeOwnerOption[];
+  // Workspace default for the Ask-tab query-rewrite toggle (knowledge.rewrite.default_on).
+  rewrite_default_on?: boolean;
 };
 
 export type KnowledgeScanData = {
@@ -154,6 +156,9 @@ export type KnowledgeAnswerData = {
   usage: Record<string, number | string | boolean | null>;
   no_results: boolean;
   run_id?: string | null;
+  // Query rewrite (opt-in): null/absent when rewrite was off or skipped.
+  rewritten_query?: string | null;
+  keywords?: string[];
 };
 
 export type KnowledgeFilters = {
@@ -276,11 +281,12 @@ export function answerKnowledge(
   topK = 20,
   minScore = 0,
   filters: KnowledgeFilters = {},
-  explain = false
+  explain = false,
+  rewrite = false
 ): Promise<ApiResponse<KnowledgeAnswerData>> {
   return apiRequest<KnowledgeAnswerData>('/knowledge/answer', {
     method: 'POST',
-    body: { query, top_k: topK, min_score: minScore, filters, explain },
+    body: { query, top_k: topK, min_score: minScore, filters, explain, rewrite },
     timeoutMs: 180000
   });
 }

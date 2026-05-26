@@ -12,6 +12,7 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
   let tags = $state<{ id: number; name: string }[]>([]);
   let characters = $state<KnowledgeOwnerOption[]>([]);
   let users = $state<KnowledgeOwnerOption[]>([]);
+  let rewriteDefaultOn = $state(false);
   let creatingCategory = $state(false);
   let creatingSubcategory = $state(false);
   let creatingTag = $state(false);
@@ -30,6 +31,7 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
       tags = payload.data.tags;
       characters = payload.data.characters;
       users = payload.data.users;
+      rewriteDefaultOn = payload.data.rewrite_default_on ?? false;
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Could not load knowledge options.');
     }
@@ -85,6 +87,9 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
     },
     get users() {
       return users;
+    },
+    get rewriteDefaultOn() {
+      return rewriteDefaultOn;
     },
     get creatingCategory() {
       return creatingCategory;

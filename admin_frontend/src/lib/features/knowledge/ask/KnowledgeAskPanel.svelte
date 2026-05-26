@@ -169,6 +169,18 @@
             Copy answer
           </Button>
         </div>
+        {#if ask.answerResult.rewritten_query}
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed bg-muted/30 px-3 py-2 font-sans text-xs">
+            <span class="shrink-0 font-medium text-muted-foreground">Searched as</span>
+            <span class="min-w-0 break-words text-foreground">{ask.answerResult.rewritten_query}</span>
+            {#if ask.answerResult.keywords?.length}
+              <span class="ml-1 shrink-0 text-muted-foreground">keywords:</span>
+              {#each ask.answerResult.keywords as kw (kw)}
+                <Badge variant="secondary" class="rounded px-1.5 py-0 font-mono text-[12px]">{kw}</Badge>
+              {/each}
+            {/if}
+          </div>
+        {/if}
         <p class="whitespace-pre-wrap font-sans text-sm leading-6">{ask.answerResult.answer}</p>
       </article>
     {:else}

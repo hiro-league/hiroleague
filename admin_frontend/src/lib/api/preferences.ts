@@ -59,6 +59,10 @@ export type KnowledgePreferences = {
     cite_sources: boolean;
     language_policy: 'match_query' | 'prefer_english' | 'prefer_arabic';
   };
+  rewrite: {
+    prompt: string;
+    default_on: boolean;
+  };
 };
 
 export type WorkspacePreferences = {
@@ -121,6 +125,10 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
     model_resolved: null,
     cite_sources: true,
     language_policy: 'match_query'
+  },
+  rewrite: {
+    prompt: '',
+    default_on: false
   }
 };
 
@@ -146,6 +154,7 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       },
       retrieval: { ...DEFAULT_KNOWLEDGE.retrieval, ...(prefs.knowledge?.retrieval ?? {}) },
       answering: { ...DEFAULT_KNOWLEDGE.answering, ...(prefs.knowledge?.answering ?? {}) },
+      rewrite: { ...DEFAULT_KNOWLEDGE.rewrite, ...(prefs.knowledge?.rewrite ?? {}) },
       default_tuning_profile:
         prefs.knowledge?.default_tuning_profile ?? DEFAULT_KNOWLEDGE.default_tuning_profile
     }

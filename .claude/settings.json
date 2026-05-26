@@ -1,3 +1,5 @@
 {
-  "additionalDirectories": ["D:\\projects\\hiro-docs"]
+  "permissions": {
+    "additionalDirectories": ["D:\\projects\\hiro-docs"]
+  }
 }

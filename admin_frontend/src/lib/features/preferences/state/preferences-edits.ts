@@ -96,6 +96,8 @@ export function editsForSave(
     baseline.knowledge.chunking.markdown.respect_headings,
     draft.knowledge.chunking.markdown.respect_headings
   );
+  add('knowledge.rewrite.prompt', baseline.knowledge.rewrite.prompt, draft.knowledge.rewrite.prompt);
+  add('knowledge.rewrite.default_on', baseline.knowledge.rewrite.default_on, draft.knowledge.rewrite.default_on);
   add('tuning_profiles', baseline.tuning_profiles, draft.tuning_profiles);
   return edits;
 }
