@@ -50,7 +50,10 @@ class FakeRetrievalService:
     async def embed_query(self, query: str) -> list[float]:
         return [0.2] * 8
 
-    async def vector_search_by_vector(self, vector: list[float], **kwargs) -> list:
+    async def embed_query_sparse(self, query: str):
+        return ([0], [1.0])
+
+    async def vector_search_by_vector(self, vector: list[float], sparse_vector=None, **kwargs) -> list:
         if not vector:
             return []
         from hirocli.services.knowledge.models import KnowledgeSearchHit
@@ -242,6 +245,11 @@ async def test_service_answer_writes_standalone_run_row(
         StubKnowledgeService,
         "embed_query",
         FakeRetrievalService.embed_query,
+    )
+    monkeypatch.setattr(
+        StubKnowledgeService,
+        "embed_query_sparse",
+        FakeRetrievalService.embed_query_sparse,
     )
     monkeypatch.setattr(
         StubKnowledgeService,

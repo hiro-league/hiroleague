@@ -270,6 +270,9 @@ class MemoryPreferences(BaseModel):
 # ---------------------------------------------------------------------------
 
 DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# Default sparse model for hybrid retrieval. Duplicated from services.knowledge.constants so
+# the domain layer does not import the services layer (same pattern as the embedding default).
+DEFAULT_KNOWLEDGE_SPARSE_MODEL = "Qdrant/bm25"
 
 
 class KnowledgeChunkingMarkdownPreferences(BaseModel):
@@ -279,6 +282,10 @@ class KnowledgeChunkingMarkdownPreferences(BaseModel):
 class KnowledgeChunkingPreferences(BaseModel):
     chunk_size: int = Field(default=1200, ge=200, le=8000)
     chunk_overlap: int = Field(default=150, ge=0, le=2000)
+    # Prefix each chunk's *embedded* text (dense + BM25) with its document title and heading
+    # breadcrumb so every chunk carries structural context — including heading-less continuation
+    # pieces. Ingest-time only (the stored payload text is unchanged); flipping it needs a re-ingest.
+    embed_structural_context: bool = True
     markdown: KnowledgeChunkingMarkdownPreferences = Field(default_factory=KnowledgeChunkingMarkdownPreferences)
 
     @model_validator(mode="after")
@@ -291,6 +298,14 @@ class KnowledgeChunkingPreferences(BaseModel):
 class KnowledgeRetrievalPreferences(BaseModel):
     top_k: int = Field(default=20, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Hybrid retrieval: fuse the dense vector with a BM25 sparse vector via Qdrant RRF.
+    # Sparse vectors are always stored at ingest, so this is a pure query-time toggle
+    # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
+    # threshold on the dense branch; the BM25 branch is rank-fused (its scores are not 0-1).
+    hybrid: bool = True
+    sparse_model: str = Field(default=DEFAULT_KNOWLEDGE_SPARSE_MODEL, min_length=1)
+    # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.
+    prefetch_limit: int = Field(default=40, ge=1, le=500)
 
 
 class KnowledgeAnsweringPreferences(BaseModel):

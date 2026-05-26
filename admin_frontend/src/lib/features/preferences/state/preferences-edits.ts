@@ -57,6 +57,17 @@ export function editsForSave(
   );
   add('knowledge.retrieval.top_k', baseline.knowledge.retrieval.top_k, draft.knowledge.retrieval.top_k);
   add('knowledge.retrieval.min_score', baseline.knowledge.retrieval.min_score, draft.knowledge.retrieval.min_score);
+  add('knowledge.retrieval.hybrid', baseline.knowledge.retrieval.hybrid, draft.knowledge.retrieval.hybrid);
+  add(
+    'knowledge.retrieval.sparse_model',
+    baseline.knowledge.retrieval.sparse_model,
+    draft.knowledge.retrieval.sparse_model
+  );
+  add(
+    'knowledge.retrieval.prefetch_limit',
+    baseline.knowledge.retrieval.prefetch_limit,
+    draft.knowledge.retrieval.prefetch_limit
+  );
   add(
     'knowledge.default_tuning_profile',
     baseline.knowledge.default_tuning_profile,
@@ -74,6 +85,11 @@ export function editsForSave(
     'knowledge.chunking.chunk_overlap',
     baseline.knowledge.chunking.chunk_overlap,
     draft.knowledge.chunking.chunk_overlap
+  );
+  add(
+    'knowledge.chunking.embed_structural_context',
+    baseline.knowledge.chunking.embed_structural_context,
+    draft.knowledge.chunking.embed_structural_context
   );
   add(
     'knowledge.chunking.markdown.respect_headings',

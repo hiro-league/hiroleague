@@ -107,6 +107,8 @@ class SearchBody(BaseModel):
     top_k: int = 10
     min_score: float = 0.0
     filters: dict[str, Any] = Field(default_factory=dict)
+    # Opt-in: return per-branch (cosine / BM25) scores and matched terms for human evaluation.
+    explain: bool = False
 
 
 class AnswerBody(SearchBody):
@@ -413,6 +415,7 @@ async def search(
                     top_k=body.top_k,
                     min_score=body.min_score,
                     filters=body.filters,
+                    explain=body.explain,
                 )
             )
         finally:
@@ -438,6 +441,7 @@ async def answer(
                     min_score=body.min_score,
                     filters=body.filters,
                     workspace_id=workspace_id,
+                    explain=body.explain,
                 )
             )
         finally:

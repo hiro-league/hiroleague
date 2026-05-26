@@ -15,10 +15,12 @@ from qdrant_client import models as qm
 from hirocli.services.knowledge.constants import (
     COLLECTION_NAME,
     DEFAULT_EMBEDDING_MODEL,
+    DENSE_VECTOR_NAME,
     KNOWLEDGE_VECTOR_BATCH_SIZE,
+    SPARSE_VECTOR_NAME,
 )
 from hirocli.services.knowledge.converters import document_filter, hit_from_payload
-from hirocli.services.knowledge.embedding_backends import EmbeddingBackend
+from hirocli.services.knowledge.embedding_backends import EmbeddingBackend, SparseVectorData
 from hirocli.services.knowledge.models import KnowledgeSearchHit
 
 
@@ -84,6 +86,7 @@ class KnowledgeVectorStore:
         mime: str,
         chunks: list[dict[str, str | None]],
         vectors: list[list[float]],
+        sparse_vectors: list[SparseVectorData],
         params: dict[str, Any],
         tags: Sequence[str],
         now: str,
@@ -109,7 +112,11 @@ class KnowledgeVectorStore:
             "ingested_at": now,
         }
         points = []
-        for ord_, (chunk, vector) in enumerate(zip(chunks, vectors), start=1):
+        # Each point carries both named vectors so hybrid is a query-time toggle (no re-ingest).
+        for ord_, (chunk, vector, sparse) in enumerate(
+            zip(chunks, vectors, sparse_vectors), start=1
+        ):
+            indices, values = sparse
             payload = {
                 **payload_base,
                 "ord": ord_,
@@ -119,7 +126,10 @@ class KnowledgeVectorStore:
             points.append(
                 qm.PointStruct(
                     id=str(uuid.uuid5(uuid.UUID(document_id), str(ord_))),
-                    vector=vector,
+                    vector={
+                        DENSE_VECTOR_NAME: vector,
+                        SPARSE_VECTOR_NAME: qm.SparseVector(indices=indices, values=values),
+                    },
                     payload=payload,
                 )
             )
@@ -183,30 +193,79 @@ class KnowledgeVectorStore:
             )
         return hit_from_payload(records[0].payload or {}, point_id=point_id, score=score)
 
-    def search_by_vector(
+    def search_hybrid(
         self,
-        vector: list[float],
+        dense_vector: list[float],
+        sparse_vector: SparseVectorData | None,
         *,
         top_k: int,
         min_score: float = 0.0,
+        prefetch_limit: int = 40,
+        hybrid: bool = True,
+        explain: bool = False,
         qdrant_filter: qm.Filter | None = None,
     ) -> list[KnowledgeSearchHit]:
-        """Run a similarity query directly via the qdrant client.
+        """Dense or hybrid (dense + BM25 sparse, RRF-fused) similarity query.
 
-        Replaces the previous ``langchain-qdrant`` wrapper path: that wrapper
-        required mirroring every flat payload field under a nested ``metadata``
-        key (its ``metadata_payload_key``) which doubled per-point storage.
-        Querying directly lets the payload stay flat.
+        Default (``explain=False``): a single server-side ``FusionQuery`` — one round-trip,
+        returning only the fused RRF score. ``min_score`` is a cosine threshold applied to the
+        **dense** branch only (BM25 scores are not 0-1); the RRF output is not thresholded.
+
+        Opt-in (``explain=True``): runs the dense and sparse branches as two separate queries and
+        fuses them in-process, so each hit carries its per-branch ``dense_score`` (cosine) and
+        ``sparse_score`` (BM25). Strictly opt-in — the default path stays a single query.
         """
-        response = self.qdrant.query_points(
-            collection_name=self.collection_name,
-            query=list(vector),
-            limit=max(1, min(int(top_k), 100)),
-            query_filter=qdrant_filter,
-            score_threshold=min_score if min_score > 0 else None,
-            with_payload=True,
-            with_vectors=False,
-        )
+        limit = max(1, min(int(top_k), 100))
+        dense_threshold = min_score if min_score > 0 else None
+        branch_limit = max(int(prefetch_limit), limit)
+        use_hybrid = bool(hybrid and sparse_vector is not None and sparse_vector[0])
+
+        if use_hybrid and explain:
+            return self._search_hybrid_explained(
+                dense_vector,
+                sparse_vector,  # type: ignore[arg-type]
+                limit=limit,
+                branch_limit=branch_limit,
+                dense_threshold=dense_threshold,
+                qdrant_filter=qdrant_filter,
+            )
+
+        if use_hybrid:
+            indices, values = sparse_vector  # type: ignore[misc]
+            response = self.qdrant.query_points(
+                collection_name=self.collection_name,
+                prefetch=[
+                    qm.Prefetch(
+                        query=list(dense_vector),
+                        using=DENSE_VECTOR_NAME,
+                        limit=branch_limit,
+                        score_threshold=dense_threshold,
+                        filter=qdrant_filter,
+                    ),
+                    qm.Prefetch(
+                        query=qm.SparseVector(indices=list(indices), values=list(values)),
+                        using=SPARSE_VECTOR_NAME,
+                        limit=branch_limit,
+                        filter=qdrant_filter,
+                    ),
+                ],
+                query=qm.FusionQuery(fusion=qm.Fusion.RRF),
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+        else:
+            response = self.qdrant.query_points(
+                collection_name=self.collection_name,
+                query=list(dense_vector),
+                using=DENSE_VECTOR_NAME,
+                limit=limit,
+                query_filter=qdrant_filter,
+                score_threshold=dense_threshold,
+                with_payload=True,
+                with_vectors=False,
+            )
+
         hits: list[KnowledgeSearchHit] = []
         for point in response.points:
             hits.append(
@@ -217,6 +276,74 @@ class KnowledgeVectorStore:
                 )
             )
         return hits
+
+    # RRF ranking constant — kept equal to Qdrant's server-side default so the explain path's
+    # ordering matches the default fused query.
+    _RRF_K = 2
+
+    def _search_hybrid_explained(
+        self,
+        dense_vector: list[float],
+        sparse_vector: SparseVectorData,
+        *,
+        limit: int,
+        branch_limit: int,
+        dense_threshold: float | None,
+        qdrant_filter: qm.Filter | None,
+    ) -> list[KnowledgeSearchHit]:
+        """Two branch queries + in-process RRF, exposing per-branch cosine/BM25 scores.
+
+        Only used in explain mode; the default search path remains a single fused query.
+        """
+        indices, values = sparse_vector
+        dense_resp = self.qdrant.query_points(
+            collection_name=self.collection_name,
+            query=list(dense_vector),
+            using=DENSE_VECTOR_NAME,
+            limit=branch_limit,
+            query_filter=qdrant_filter,
+            score_threshold=dense_threshold,
+            with_payload=True,
+            with_vectors=False,
+        )
+        sparse_resp = self.qdrant.query_points(
+            collection_name=self.collection_name,
+            query=qm.SparseVector(indices=list(indices), values=list(values)),
+            using=SPARSE_VECTOR_NAME,
+            limit=branch_limit,
+            query_filter=qdrant_filter,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        agg: dict[str, dict[str, Any]] = {}
+
+        def _accumulate(points: list[Any], score_key: str) -> None:
+            for rank, point in enumerate(points):
+                pid = str(point.id)
+                entry = agg.setdefault(
+                    pid,
+                    {"rrf": 0.0, "dense_score": None, "sparse_score": None, "payload": None},
+                )
+                entry["rrf"] += 1.0 / (self._RRF_K + rank)
+                entry[score_key] = float(point.score or 0.0)
+                if entry["payload"] is None:
+                    entry["payload"] = point.payload
+
+        _accumulate(dense_resp.points, "dense_score")
+        _accumulate(sparse_resp.points, "sparse_score")
+
+        ranked = sorted(agg.items(), key=lambda item: item[1]["rrf"], reverse=True)[:limit]
+        return [
+            hit_from_payload(
+                dict(entry["payload"] or {}),
+                point_id=pid,
+                score=float(entry["rrf"]),
+                dense_score=entry["dense_score"],
+                sparse_score=entry["sparse_score"],
+            )
+            for pid, entry in ranked
+        ]
 
     def sync_payload_metadata(
         self,
@@ -283,22 +410,40 @@ class KnowledgeVectorStore:
             raise RuntimeError("Qdrant client is not initialized.")
         if client.collection_exists(self.collection_name):
             current_size = self._collection_vector_size(client, self.collection_name)
-            if current_size is not None and current_size != self.embedder.dimension:
-                point_count = client.count(self.collection_name, exact=True).count
-                if point_count:
-                    raise RuntimeError(
-                        f"Knowledge collection vector size is {current_size}, "
-                        f"but embedder {getattr(self.embedder, 'model_name', DEFAULT_EMBEDDING_MODEL)} "
-                        f"uses {self.embedder.dimension}. "
-                        "Delete existing knowledge documents before changing embedding models."
-                    )
-                client.delete_collection(self.collection_name)
-            else:
+            dimension_ok = current_size is None or current_size == self.embedder.dimension
+            schema_ok = self._collection_has_named_schema(client, self.collection_name)
+            if dimension_ok and schema_ok:
                 return
+            # The dense dimension changed, or the collection predates hybrid (single unnamed
+            # vector / no sparse config). No migration (no-backward-compatibility): recreate
+            # when empty, otherwise require an explicit clear + re-ingest.
+            point_count = client.count(self.collection_name, exact=True).count
+            if point_count:
+                reason = (
+                    f"vector size {current_size} != embedder "
+                    f"{getattr(self.embedder, 'model_name', DEFAULT_EMBEDDING_MODEL)} "
+                    f"({self.embedder.dimension})"
+                    if not dimension_ok
+                    else "collection predates hybrid retrieval (missing named dense/sparse vectors)"
+                )
+                raise RuntimeError(
+                    f"Knowledge collection must be rebuilt: {reason}. "
+                    "Delete existing knowledge documents before changing retrieval settings."
+                )
+            client.delete_collection(self.collection_name)
         if not client.collection_exists(self.collection_name):
+            # Named dense + BM25 sparse vectors in one collection. BM25 needs the IDF modifier
+            # because FastEmbed emits raw term weights and Qdrant applies inverse doc frequency.
             client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=qm.VectorParams(size=self.embedder.dimension, distance=qm.Distance.COSINE),
+                vectors_config={
+                    DENSE_VECTOR_NAME: qm.VectorParams(
+                        size=self.embedder.dimension, distance=qm.Distance.COSINE
+                    )
+                },
+                sparse_vectors_config={
+                    SPARSE_VECTOR_NAME: qm.SparseVectorParams(modifier=qm.Modifier.IDF)
+                },
             )
         for field_name, schema in {
             "owner_kind": qm.PayloadSchemaType.KEYWORD,
@@ -322,10 +467,19 @@ class KnowledgeVectorStore:
     def _collection_vector_size(client: QdrantClient, collection_name: str) -> int | None:
         info = client.get_collection(collection_name)
         vectors = info.config.params.vectors
-        if hasattr(vectors, "size"):
-            return int(vectors.size)
         if isinstance(vectors, dict) and vectors:
-            first = next(iter(vectors.values()))
-            if hasattr(first, "size"):
-                return int(first.size)
+            params = vectors.get(DENSE_VECTOR_NAME) or next(iter(vectors.values()))
+            return int(params.size) if hasattr(params, "size") else None
+        if hasattr(vectors, "size"):  # legacy single unnamed vector
+            return int(vectors.size)
         return None
+
+    @staticmethod
+    def _collection_has_named_schema(client: QdrantClient, collection_name: str) -> bool:
+        """True only for the hybrid schema: named ``dense`` vector + ``bm25`` sparse vector."""
+        info = client.get_collection(collection_name)
+        vectors = info.config.params.vectors
+        has_dense = isinstance(vectors, dict) and DENSE_VECTOR_NAME in vectors
+        sparse = getattr(info.config.params, "sparse_vectors", None)
+        has_sparse = isinstance(sparse, dict) and SPARSE_VECTOR_NAME in sparse
+        return bool(has_dense and has_sparse)

@@ -93,6 +93,11 @@ class KnowledgeSearchHit:
     category_id: int | None
     subcategory_id: int | None
     tags: list[str]
+    # Explain mode (opt-in) diagnostics. None/empty on the default fused path.
+    # dense_score = cosine, sparse_score = BM25 weight; presence indicates which branch matched.
+    dense_score: float | None = None
+    sparse_score: float | None = None
+    matched_terms: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -116,6 +121,10 @@ class KnowledgeSource:
     category_id: int | None
     subcategory_id: int | None
     tags: list[str]
+    # Explain mode (opt-in) diagnostics; see KnowledgeSearchHit.
+    dense_score: float | None = None
+    sparse_score: float | None = None
+    matched_terms: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

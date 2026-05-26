@@ -1,0 +1,1 @@
+if new tools/packages are added to the dev environment or existing ones change or get reconfigured, make sure to update steps in mintdocs/build/first-time-setup.mdx

@@ -71,7 +71,21 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeRetrieval}
     >
-      <div class="grid gap-3 md:grid-cols-2">
+      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+        <input
+          type="checkbox"
+          bind:checked={ctrl.draft.knowledge.retrieval.hybrid}
+          onchange={ctrl.markDirty}
+        />
+        <span class="font-sans text-sm font-medium">Hybrid retrieval (dense + BM25, RRF fusion)</span>
+      </label>
+      <p class="text-xs text-muted-foreground">
+        Runs BM25 keyword search alongside dense embeddings and fuses them with Reciprocal Rank
+        Fusion — recovers exact terms, proper nouns, and Arabic surface forms. Sparse model:
+        <code>{ctrl.draft.knowledge.retrieval.sparse_model}</code> (local, no extra setup). When
+        enabled, “Minimum score” is the cosine threshold on the dense branch only.
+      </p>
+      <div class="grid gap-3 md:grid-cols-3">
         <FormField label="Results per query">
           <input
             type="number"
@@ -82,7 +96,7 @@
             oninput={ctrl.markDirty}
           />
         </FormField>
-        <FormField label="Minimum score">
+        <FormField label="Minimum score (dense)">
           <input
             type="number"
             min="0"
@@ -90,6 +104,16 @@
             step="0.05"
             class={ADMIN_SELECT_LG}
             bind:value={ctrl.draft.knowledge.retrieval.min_score}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+        <FormField label="Candidates per branch">
+          <input
+            type="number"
+            min="1"
+            max="500"
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.knowledge.retrieval.prefetch_limit}
             oninput={ctrl.markDirty}
           />
         </FormField>
@@ -190,6 +214,22 @@
           onchange={ctrl.markDirty}
         />
         <span class="font-sans text-sm font-medium">Respect markdown headings</span>
+      </label>
+      <label class="flex items-start gap-3 rounded-md border border-border/50 bg-card/45 px-3 py-2.5">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          bind:checked={ctrl.draft.knowledge.chunking.embed_structural_context}
+          onchange={ctrl.markDirty}
+        />
+        <span class="grid gap-0.5">
+          <span class="font-sans text-sm font-medium">Embed structural context</span>
+          <span class="font-sans text-xs text-muted-foreground">
+            Prefix each chunk's embedded text with its document title and heading path so every chunk
+            — including continuation pieces — carries its section context. Applies to new ingests;
+            changing this requires re-ingesting existing documents.
+          </span>
+        </span>
       </label>
     </SectionCardMuted>
   {/if}

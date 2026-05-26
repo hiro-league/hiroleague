@@ -1,0 +1,12 @@
+---
+paths:
+  - "hiroserver/**/*.py"
+---
+
+# LangChain / LangGraph V1+ API
+
+This project targets **LangChain ≥ 1.0** and **LangGraph ≥ 1.0**. Never suggest APIs from older versions.
+
+## Common mistakes to avoid
+
+- `create_react_agent` — pre-V1 name; use `create_agent` instead

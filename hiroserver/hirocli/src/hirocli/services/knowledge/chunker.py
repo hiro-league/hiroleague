@@ -30,6 +30,39 @@ def heading_path_from_metadata(metadata: dict[str, Any]) -> str | None:
     return " / ".join(parts) if parts else None
 
 
+def _heading_path_segments(heading_path: str | None) -> list[str]:
+    """Split a stored ``heading_path`` into clean, hash-free heading words.
+
+    ``heading_path`` is stored with markdown markers (``# Doc / ## Section``); the ``#``
+    characters are noise for embedding / BM25, so strip them for the embed text.
+    """
+    if not heading_path:
+        return []
+    segments = [segment.lstrip("#").strip() for segment in heading_path.split(" / ")]
+    return [segment for segment in segments if segment]
+
+
+def embed_text_for_chunk(title: str | None, chunk: dict[str, str | None]) -> str:
+    """Build the text actually fed to the embedders: structural breadcrumb + body.
+
+    The dense and BM25 vectors index this prefixed form so *every* chunk — including
+    heading-less continuation/overlap pieces and deep chunks whose body never repeats the
+    parent headings — carries its document title and full heading path. The raw
+    ``chunk["text"]`` is still what we store in the payload and show to the user / LLM; only
+    the embedded representation gains the prefix.
+    """
+    body = chunk.get("text") or ""
+    clean_title = (title or "").strip()
+    segments = _heading_path_segments(chunk.get("heading_path"))
+    # Lead with the document title, but avoid duplicating an H1 the heading_path already
+    # starts with (the title is usually derived from that same H1).
+    if clean_title and (not segments or segments[0].casefold() != clean_title.casefold()):
+        segments = [clean_title, *segments]
+    if not segments:
+        return body
+    return f"{' / '.join(segments)}\n{body}"
+
+
 def markdown_chunk_error(path: Path, text: str, *, respect_headings: bool) -> str | None:
     """Return a user-facing ingest error when markdown produces no chunks."""
     if not text.strip():

@@ -15,6 +15,11 @@ class FakeEmbedder:
         return [[0.1] * self.dimension for _ in texts]
 
 
+def _fake_sparse(count: int):
+    """One non-empty BM25-style sparse vector (indices, values) per chunk."""
+    return [([0, index + 1], [1.0, 1.0]) for index in range(count)]
+
+
 def test_upsert_document_vectors_writes_flat_payload_without_nested_metadata(
     tmp_path: Path,
 ) -> None:
@@ -27,6 +32,7 @@ def test_upsert_document_vectors_writes_flat_payload_without_nested_metadata(
             "text/markdown",
             [{"text": "chunk-0", "heading_path": "# Title"}],
             [[0.1] * FakeEmbedder.dimension],
+            _fake_sparse(1),
             {"owner_kind": "system", "owner_id": "0"},
             ["tag"],
             "2026-01-01T00:00:00+00:00",
@@ -71,6 +77,7 @@ def test_upsert_document_vectors_batches_qdrant_writes(
             "text/markdown",
             chunks,
             vectors,
+            _fake_sparse(chunk_count),
             {"owner_kind": "system", "owner_id": "0"},
             ["tag"],
             "2026-01-01T00:00:00+00:00",
@@ -98,11 +105,77 @@ def test_reload_embedder_revalidates_existing_collection(tmp_path: Path) -> None
             "text/markdown",
             [{"text": "chunk-0", "heading_path": None}],
             [[0.1] * FakeEmbedder.dimension],
+            _fake_sparse(1),
             {"owner_kind": "system", "owner_id": "0"},
             [],
             "2026-01-01T00:00:00+00:00",
         )
         with pytest.raises(RuntimeError, match="vector size"):
             store.reload_embedder(BiggerEmbedder())
+    finally:
+        store.close()
+
+
+def test_search_hybrid_dense_and_fused_paths(tmp_path: Path) -> None:
+    """Both the RRF-fused path and the dense-only fallback return the stored chunks."""
+    store = KnowledgeVectorStore(tmp_path / "qdrant", FakeEmbedder())
+    try:
+        chunks = [{"text": f"chunk-{index}", "heading_path": None} for index in range(3)]
+        store.upsert_document_vectors(
+            "00000000-0000-4000-8000-000000000001",
+            tmp_path / "note.md",
+            "Title",
+            "text/markdown",
+            chunks,
+            [[0.1] * FakeEmbedder.dimension for _ in chunks],
+            _fake_sparse(len(chunks)),
+            {"owner_kind": "system", "owner_id": "0"},
+            [],
+            "2026-01-01T00:00:00+00:00",
+        )
+        dense_query = [0.1] * FakeEmbedder.dimension
+        # Hybrid: dense + BM25 prefetch fused with RRF.
+        fused = store.search_hybrid(dense_query, ([0, 1], [1.0, 1.0]), top_k=5, hybrid=True)
+        assert fused
+        # Dense-only path.
+        dense_only = store.search_hybrid(dense_query, None, top_k=5, hybrid=False)
+        assert dense_only
+        # Hybrid requested but empty sparse → falls back to dense, still returns hits.
+        empty_sparse = store.search_hybrid(dense_query, ([], []), top_k=5, hybrid=True)
+        assert empty_sparse
+    finally:
+        store.close()
+
+
+def test_search_hybrid_explain_exposes_per_branch_scores(tmp_path: Path) -> None:
+    """explain=True attaches per-branch cosine/BM25 scores; the default path leaves them None."""
+    store = KnowledgeVectorStore(tmp_path / "qdrant", FakeEmbedder())
+    try:
+        chunks = [{"text": f"chunk-{index}", "heading_path": None} for index in range(3)]
+        store.upsert_document_vectors(
+            "00000000-0000-4000-8000-000000000001",
+            tmp_path / "note.md",
+            "Title",
+            "text/markdown",
+            chunks,
+            [[0.1] * FakeEmbedder.dimension for _ in chunks],
+            _fake_sparse(len(chunks)),
+            {"owner_kind": "system", "owner_id": "0"},
+            [],
+            "2026-01-01T00:00:00+00:00",
+        )
+        dense_query = [0.1] * FakeEmbedder.dimension
+        sparse_query = ([0, 1], [1.0, 1.0])
+
+        # Default fused path: no per-branch diagnostics.
+        plain = store.search_hybrid(dense_query, sparse_query, top_k=5, hybrid=True, explain=False)
+        assert plain
+        assert all(hit.dense_score is None and hit.sparse_score is None for hit in plain)
+
+        # Explain path: per-branch scores populated (presence = which branch matched).
+        explained = store.search_hybrid(dense_query, sparse_query, top_k=5, hybrid=True, explain=True)
+        assert explained
+        assert any(hit.dense_score is not None for hit in explained)
+        assert any(hit.sparse_score is not None for hit in explained)
     finally:
         store.close()

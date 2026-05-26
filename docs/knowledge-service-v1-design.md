@@ -637,7 +637,8 @@ collection = no behavior change.
 - Multiple loaders (PDF, HTML, audio, images, web crawl) — registry is
   designed for them, only `.md` is wired.
 - Hybrid search (BM25 + dense) — FastEmbed already supports sparse vectors,
-  trivial to add later.
+  trivial to add later. **(Since implemented — see `docs/rag-optimize.md`. The collection
+  now stores named `dense` + `bm25` vectors and fuses them with RRF.)**
 - Chat-agent sub-agent integration and cross-owner permission model.
 - Evaluation harness (Ragas, DeepEval).
 - Multi-collection / per-tenant isolation. v1 uses one collection with

@@ -116,6 +116,13 @@
       bind:value={ask.askMinScore}
     />
   </FormField>
+  <label
+    class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
+    title="Show match type, per-branch cosine/BM25 scores, and matched terms for each result (extra query work)"
+  >
+    <input type="checkbox" class="size-4" bind:checked={ask.askExplain} />
+    <span class="text-sm text-muted-foreground">Explain</span>
+  </label>
   <div class="flex items-end">
     <Button variant="outline" disabled={!ask.hasAskFilters} onclick={() => ask.clearAskFilters()}>
       <FilterX size={15} /> Clear

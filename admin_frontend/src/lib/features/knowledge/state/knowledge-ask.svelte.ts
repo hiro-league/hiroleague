@@ -15,6 +15,8 @@ export function createKnowledgeAskModel(deps: {
   let query = $state('');
   let askTopK = $state(DEFAULT_ASK_TOP_K);
   let askMinScore = $state(DEFAULT_ASK_MIN_SCORE);
+  // Opt-in: request per-branch scores + matched terms for human evaluation of results.
+  let askExplain = $state(false);
   let askOwnerKind = $state('');
   let askOwnerId = $state('');
   let askCategoryId = $state('');
@@ -58,7 +60,8 @@ export function createKnowledgeAskModel(deps: {
           askSubcategoryId,
           askTags,
           askDocumentId
-        })
+        }),
+        askExplain
       );
       answerResult = payload.data;
     } catch (err) {
@@ -132,6 +135,12 @@ export function createKnowledgeAskModel(deps: {
     },
     set askMinScore(v: number) {
       askMinScore = v;
+    },
+    get askExplain() {
+      return askExplain;
+    },
+    set askExplain(v: boolean) {
+      askExplain = v;
     },
     get askOwnerKind() {
       return askOwnerKind;

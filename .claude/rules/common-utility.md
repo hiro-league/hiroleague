@@ -1,0 +1,6 @@
+---
+paths:
+  - "hiroserver/**/*.py"
+---
+
+when adding functionality in a module that may exist in another module or package, consider moving that common functionality to hiro-commons package instead of duplication.

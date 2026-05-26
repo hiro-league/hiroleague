@@ -38,6 +38,7 @@ export type KnowledgePreferences = {
   chunking: {
     chunk_size: number;
     chunk_overlap: number;
+    embed_structural_context: boolean;
     markdown: {
       respect_headings: boolean;
     };
@@ -45,6 +46,10 @@ export type KnowledgePreferences = {
   retrieval: {
     top_k: number;
     min_score: number;
+    // Hybrid (dense + BM25 sparse, RRF) retrieval. min_score applies to the dense branch.
+    hybrid: boolean;
+    sparse_model: string;
+    prefetch_limit: number;
   };
   default_tuning_profile: string;
   answering: {
@@ -101,11 +106,15 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
   chunking: {
     chunk_size: 1200,
     chunk_overlap: 150,
+    embed_structural_context: true,
     markdown: { respect_headings: true }
   },
   retrieval: {
     top_k: 20,
-    min_score: 0
+    min_score: 0,
+    hybrid: true,
+    sparse_model: 'Qdrant/bm25',
+    prefetch_limit: 40
   },
   answering: {
     model: null,

@@ -59,7 +59,14 @@ def job_from_row(row: sqlite3.Row) -> KnowledgeJobRow:
     )
 
 
-def hit_from_payload(payload: dict[str, Any], *, point_id: str, score: float) -> KnowledgeSearchHit:
+def hit_from_payload(
+    payload: dict[str, Any],
+    *,
+    point_id: str,
+    score: float,
+    dense_score: float | None = None,
+    sparse_score: float | None = None,
+) -> KnowledgeSearchHit:
     return KnowledgeSearchHit(
         document_id=str(payload.get("document_id", "")),
         point_id=point_id,
@@ -74,10 +81,17 @@ def hit_from_payload(payload: dict[str, Any], *, point_id: str, score: float) ->
         category_id=optional_int(payload.get("category_id")),
         subcategory_id=optional_int(payload.get("subcategory_id")),
         tags=list(payload.get("tags") or []),
+        dense_score=dense_score,
+        sparse_score=sparse_score,
     )
 
 
-def source_from_hit(ref: int, hit: KnowledgeSearchHit) -> KnowledgeSource:
+def source_from_hit(
+    ref: int,
+    hit: KnowledgeSearchHit,
+    *,
+    matched_terms: list[str] | None = None,
+) -> KnowledgeSource:
     return KnowledgeSource(
         ref=ref,
         document_id=hit.document_id,
@@ -92,6 +106,9 @@ def source_from_hit(ref: int, hit: KnowledgeSearchHit) -> KnowledgeSource:
         category_id=hit.category_id,
         subcategory_id=hit.subcategory_id,
         tags=hit.tags,
+        dense_score=hit.dense_score,
+        sparse_score=hit.sparse_score,
+        matched_terms=list(matched_terms or []),
     )
 
 

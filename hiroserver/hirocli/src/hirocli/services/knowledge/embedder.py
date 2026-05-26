@@ -9,8 +9,16 @@ from typing import TYPE_CHECKING
 from langchain_core.embeddings import Embeddings
 
 from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
-from hirocli.services.knowledge.constants import DEFAULT_EMBEDDING_MODEL, KNOWLEDGE_DIR
-from hirocli.services.knowledge.embedding_backends import EmbeddingBackend, FastEmbedBackend
+from hirocli.services.knowledge.constants import (
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_SPARSE_MODEL,
+    KNOWLEDGE_DIR,
+)
+from hirocli.services.knowledge.embedding_backends import (
+    EmbeddingBackend,
+    FastEmbedBackend,
+    SparseFastEmbedBackend,
+)
 
 if TYPE_CHECKING:
     from hirocli.domain.credential_store import CredentialStore
@@ -70,6 +78,22 @@ def resolve_knowledge_embedder(
     )
     return FastEmbedBackend(
         model_name=fastembed_name,
+        cache_dir=workspace_path / KNOWLEDGE_DIR / "fastembed_cache",
+    )
+
+
+def resolve_knowledge_sparse_embedder(
+    workspace_path: Path,
+    sparse_model: str = DEFAULT_SPARSE_MODEL,
+) -> SparseFastEmbedBackend:
+    """Build the BM25 sparse backend for hybrid retrieval.
+
+    Local and independent of the dense embedder (so dense-model swaps don't touch it).
+    Shares the FastEmbed cache dir with the dense backend.
+    """
+    model = (sparse_model or DEFAULT_SPARSE_MODEL).strip() or DEFAULT_SPARSE_MODEL
+    return SparseFastEmbedBackend(
+        model_name=model,
         cache_dir=workspace_path / KNOWLEDGE_DIR / "fastembed_cache",
     )
 

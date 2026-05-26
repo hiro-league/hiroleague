@@ -34,6 +34,18 @@ class FakeEmbedder:
         return vectors
 
 
+class FakeSparseEmbedder:
+    """Avoids a real BM25 weight download during tests; deterministic sparse vectors."""
+
+    model_name = "fake-bm25"
+
+    def embed_documents(self, texts):
+        return [([0, (len(text) % 7) + 1], [1.0, 1.0]) for text in texts]
+
+    def embed_query(self, text):
+        return ([0], [1.0])
+
+
 @pytest.mark.asyncio
 async def test_markdown_ingest_search_and_detail(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
@@ -46,7 +58,7 @@ async def test_markdown_ingest_search_and_detail(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         scan = await service.scan_folder(str(docs))
         assert len(scan.files) == 1
@@ -112,7 +124,7 @@ async def test_markdown_ingest_search_and_detail(tmp_path: Path) -> None:
 
 def test_knowledge_crash_recovery_marks_running_jobs_failed(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     db_path = service.db_path
     try:
         with sqlite3.connect(db_path) as con:
@@ -130,7 +142,7 @@ def test_knowledge_crash_recovery_marks_running_jobs_failed(tmp_path: Path) -> N
         asyncio.run(service.close())
 
     maybe_recover_abandoned_work(workspace)
-    recovered = KnowledgeService(workspace, embedder=FakeEmbedder())
+    recovered = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         with sqlite3.connect(db_path) as con:
             row = con.execute("SELECT status, errors_json FROM knowledge_ingestion_jobs WHERE id = 'job-1'").fetchone()
@@ -146,7 +158,7 @@ def test_knowledge_crash_recovery_only_fails_documents_from_abandoned_jobs(tmp_p
     workspace = tmp_path / "workspace"
     abandoned_path = str((tmp_path / "abandoned.md").resolve())
     unrelated_path = str((tmp_path / "unrelated.md").resolve())
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     db_path = service.db_path
     try:
         with sqlite3.connect(db_path) as con:
@@ -178,7 +190,7 @@ def test_knowledge_crash_recovery_only_fails_documents_from_abandoned_jobs(tmp_p
         asyncio.run(service.close())
 
     maybe_recover_abandoned_work(workspace)
-    recovered = KnowledgeService(workspace, embedder=FakeEmbedder())
+    recovered = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         with sqlite3.connect(db_path) as con:
             rows = {
@@ -197,7 +209,7 @@ def test_knowledge_crash_recovery_only_fails_documents_from_abandoned_jobs(tmp_p
 
 def test_maybe_recover_skips_when_live_service_registered(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     db_path = service.db_path
     try:
         with sqlite3.connect(db_path) as con:
@@ -223,7 +235,7 @@ def test_maybe_recover_skips_when_live_service_registered(tmp_path: Path) -> Non
 
 def test_recovery_only_fails_jobs_with_dead_owner_token(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     db_path = service.db_path
     dead_token = f"{current_owner_token().split(':', 1)[0]}:999999:deadbeef"
     live_token = current_owner_token()
@@ -261,7 +273,7 @@ async def test_direct_save_preferences_enforces_knowledge_embedding_lock(tmp_pat
     note = docs / "note.md"
     note.write_text("# Alpha\n\nIndexed text.", encoding="utf-8")
 
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         await service.ingest_and_wait([str(note)])
         prefs = WorkspacePreferences()
@@ -276,7 +288,7 @@ async def test_direct_save_preferences_enforces_knowledge_embedding_lock(tmp_pat
 async def test_ingest_job_processes_files_with_bounded_parallelism(tmp_path: Path) -> None:
     class SlowKnowledgeService(KnowledgeService):
         def __init__(self, workspace_path: Path) -> None:
-            super().__init__(workspace_path, embedder=FakeEmbedder())
+            super().__init__(workspace_path, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
             self.current = 0
             self.max_seen = 0
 
@@ -315,7 +327,7 @@ async def test_max_file_size_guardrail_fails_before_loading(tmp_path: Path, monk
     note.write_text("# Large\n\nThis file is too large for the patched test limit.", encoding="utf-8")
     monkeypatch.setattr(knowledge_service_module, "MAX_FILE_SIZE_BYTES", 10)
 
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         job = await service.ingest_and_wait([str(note)])
         assert job.status == "failed"
@@ -326,7 +338,7 @@ async def test_max_file_size_guardrail_fails_before_loading(tmp_path: Path, monk
 
 @pytest.mark.asyncio
 async def test_category_subcategory_assignment_must_match(tmp_path: Path) -> None:
-    service = KnowledgeService(tmp_path / "workspace", embedder=FakeEmbedder())
+    service = KnowledgeService(tmp_path / "workspace", embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         category_a = await service.create_category("A")
         category_b = await service.create_category("B")
@@ -349,7 +361,7 @@ async def test_update_document_metadata_rejects_mismatched_subcategory(tmp_path:
     workspace = tmp_path / "workspace"
     note = tmp_path / "note.md"
     note.write_text("# Alpha\n\nIndexed text.", encoding="utf-8")
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         await service.ingest_and_wait([str(note)])
         documents = await service.list_documents()
@@ -375,7 +387,7 @@ async def test_update_document_metadata_keeps_payload_flat(tmp_path: Path) -> No
     workspace = tmp_path / "workspace"
     note = tmp_path / "note.md"
     note.write_text("# Alpha\n\nIndexed text.", encoding="utf-8")
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         await service.ingest_and_wait([str(note)])
         documents = await service.list_documents()
@@ -416,7 +428,7 @@ async def test_reingest_unchanged_content_updates_ingested_at(tmp_path: Path) ->
     workspace = tmp_path / "workspace"
     note = tmp_path / "note.md"
     note.write_text("# Alpha\n\nIndexed text.", encoding="utf-8")
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         await service.ingest_and_wait([str(note)])
         document_id = (await service.list_documents()).documents[0].id
@@ -443,7 +455,7 @@ async def test_metadata_update_bumps_updated_at_not_ingested_at(tmp_path: Path) 
     workspace = tmp_path / "workspace"
     note = tmp_path / "note.md"
     note.write_text("# Alpha\n\nIndexed text.", encoding="utf-8")
-    service = KnowledgeService(workspace, embedder=FakeEmbedder())
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         await service.ingest_and_wait([str(note)])
         document_id = (await service.list_documents()).documents[0].id
@@ -508,7 +520,10 @@ async def test_answer_skips_call_model_when_no_results(
         async def embed_query(self, query: str) -> list[float]:
             return [0.1] * 8
 
-        async def vector_search_by_vector(self, vector: list[float], **kwargs) -> list:
+        async def embed_query_sparse(self, query: str):
+            return ([0], [1.0])
+
+        async def vector_search_by_vector(self, vector, sparse_vector=None, **kwargs) -> list:
             return []
 
     def fail_create_chat_model(*_args, **_kwargs):
@@ -595,7 +610,7 @@ async def test_preview_file_markdown_and_unsupported(tmp_path: Path) -> None:
     blocked = docs / "data.bin"
     blocked.write_bytes(b"\xff\xfe")
 
-    service = KnowledgeService(tmp_path / "workspace", embedder=FakeEmbedder())
+    service = KnowledgeService(tmp_path / "workspace", embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         preview = await service.preview_file(str(note))
         assert preview.format == "markdown"

@@ -36,6 +36,7 @@ from hirocli.services.knowledge.ledger_runner import (
     ledger_identity_from_parent,
 )
 from hirocli.services.knowledge.catalog_store import CatalogStore
+from hirocli.services.knowledge.chunker import embed_text_for_chunk
 from hirocli.services.knowledge.constants import (
     DB_FILENAME,
     DEFAULT_FILE_CONCURRENCY,
@@ -56,7 +57,11 @@ from hirocli.services.knowledge.converters import (
     job_from_row,
     utc_now_iso,
 )
-from hirocli.services.knowledge.embedding_backends import EmbeddingBackend
+from hirocli.services.knowledge.embedding_backends import (
+    EmbeddingBackend,
+    SparseEmbeddingBackend,
+    SparseVectorData,
+)
 from hirocli.services.knowledge.live_registry import register_live_service, unregister_live_service
 from hirocli.services.knowledge.runtime_owner import current_owner_token
 from hirocli.services.knowledge.loaders import DEFAULT_LOADER_REGISTRY, LoaderRegistry
@@ -86,6 +91,7 @@ class KnowledgeService:
         workspace_path: Path,
         *,
         embedder: EmbeddingBackend | None = None,
+        sparse_embedder: SparseEmbeddingBackend | None = None,
         loader_registry: LoaderRegistry | None = None,
         prefs_provider: Callable[[], WorkspacePreferences] | None = None,
     ) -> None:
@@ -95,6 +101,8 @@ class KnowledgeService:
         self.db_path = self.knowledge_path / DB_FILENAME
         self.qdrant_path = self.knowledge_path / QDRANT_DIR
         self.embedder = embedder or self._default_embedder_for_workspace()
+        # BM25 sparse backend for hybrid retrieval — local and independent of the dense model.
+        self.sparse_embedder = sparse_embedder or self._default_sparse_embedder_for_workspace()
         self.loader_registry = loader_registry or DEFAULT_LOADER_REGISTRY
         self.catalog = CatalogStore(self.db_path)
         self.vector_store = KnowledgeVectorStore(self.qdrant_path, self.embedder)
@@ -120,6 +128,15 @@ class KnowledgeService:
         return resolve_knowledge_embedder(
             self.workspace_path,
             prefs.knowledge.default_embedding_model_resolved,
+        )
+
+    def _default_sparse_embedder_for_workspace(self) -> SparseEmbeddingBackend:
+        from hirocli.services.knowledge.embedder import resolve_knowledge_sparse_embedder
+
+        prefs = self.workspace_prefs()
+        return resolve_knowledge_sparse_embedder(
+            self.workspace_path,
+            prefs.knowledge.retrieval.sparse_model,
         )
 
     def reload_embedder(self, embedder: EmbeddingBackend) -> None:
@@ -255,16 +272,24 @@ class KnowledgeService:
         top_k: int = 10,
         min_score: float = 0.0,
         filters: dict[str, Any] | None = None,
+        explain: bool = False,
     ) -> KnowledgeSearchResult:
         text = query.strip()
         if not text:
             return KnowledgeSearchResult(query=query, hits=[])
         t0 = time.perf_counter()
+        retrieval = self.workspace_prefs().knowledge.retrieval
         vector = await self.embed_query(text)
+        # Skip the BM25 query embed entirely when hybrid is off — pure dense path.
+        sparse_vector = await self.embed_query_sparse(text) if retrieval.hybrid else None
         hits = await self.vector_search_by_vector(
             vector,
+            sparse_vector,
             top_k=top_k,
             min_score=min_score,
+            prefetch_limit=retrieval.prefetch_limit,
+            hybrid=retrieval.hybrid,
+            explain=explain,
             qdrant_filter=build_qdrant_filter(filters or {}),
         )
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -285,19 +310,31 @@ class KnowledgeService:
         vectors = await asyncio.to_thread(self.embedder.embed_texts, [query])
         return list(vectors[0]) if vectors else []
 
+    async def embed_query_sparse(self, query: str) -> SparseVectorData:
+        """BM25 sparse vector for the query (query-side weighting differs from documents)."""
+        return await asyncio.to_thread(self.sparse_embedder.embed_query, query)
+
     async def vector_search_by_vector(
         self,
         vector: list[float],
+        sparse_vector: SparseVectorData | None = None,
         *,
         top_k: int,
         min_score: float,
-        qdrant_filter: qm.Filter | None,
+        prefetch_limit: int = 40,
+        hybrid: bool = True,
+        explain: bool = False,
+        qdrant_filter: qm.Filter | None = None,
     ) -> list[KnowledgeSearchHit]:
         return await asyncio.to_thread(
-            self.vector_store.search_by_vector,
+            self.vector_store.search_hybrid,
             vector,
+            sparse_vector,
             top_k=top_k,
             min_score=min_score,
+            prefetch_limit=prefetch_limit,
+            hybrid=hybrid,
+            explain=explain,
             qdrant_filter=qdrant_filter,
         )
 
@@ -309,6 +346,7 @@ class KnowledgeService:
         min_score: float | None = None,
         filters: dict[str, Any] | None = None,
         workspace_id: str | None = None,
+        explain: bool = False,
     ) -> KnowledgeAnswerResult:
         prefs = self.workspace_prefs()
         retrieval = prefs.knowledge.retrieval
@@ -324,6 +362,7 @@ class KnowledgeService:
             "filters": filters or {},
             "top_k": top_k if top_k is not None else retrieval.top_k,
             "min_score": min_score if min_score is not None else retrieval.min_score,
+            "explain": explain,
         }
         parent = current_run.get()
         if parent is not None:
@@ -665,9 +704,23 @@ class KnowledgeService:
                 if not chunks:
                     raise ValueError(f"No text chunks produced from {path}.")
                 await asyncio.to_thread(self.catalog.update_document_status, document_id, "embedding", None)
-                vectors = await asyncio.to_thread(self.embedder.embed_texts, [c["text"] for c in chunks])
+                # Embed the structural breadcrumb (title / heading path) + body when enabled, so
+                # every chunk — including heading-less continuation pieces — carries its document
+                # and section context in what actually gets indexed. The stored payload text stays
+                # the raw chunk body (the UI and LLM context add title/heading separately).
+                if chunking.embed_structural_context:
+                    embed_texts = [embed_text_for_chunk(loaded.title, chunk) for chunk in chunks]
+                else:
+                    embed_texts = [chunk["text"] for chunk in chunks]
+                vectors = await asyncio.to_thread(self.embedder.embed_texts, embed_texts)
                 if len(vectors) != len(chunks):
                     raise RuntimeError("Embedding backend returned the wrong number of vectors.")
+                # Always store BM25 sparse alongside dense so hybrid is a query-time toggle.
+                sparse_vectors = await asyncio.to_thread(
+                    self.sparse_embedder.embed_documents, embed_texts
+                )
+                if len(sparse_vectors) != len(chunks):
+                    raise RuntimeError("Sparse embedding backend returned the wrong number of vectors.")
                 now = utc_now_iso()
                 await asyncio.to_thread(
                     self._upsert_document_and_vectors,
@@ -679,6 +732,7 @@ class KnowledgeService:
                     size_bytes,
                     chunks,
                     vectors,
+                    sparse_vectors,
                     params,
                     now,
                 )
@@ -698,6 +752,7 @@ class KnowledgeService:
         size_bytes: int,
         chunks: list[dict[str, str | None]],
         vectors: list[list[float]],
+        sparse_vectors: list[SparseVectorData],
         params: dict[str, Any],
         now: str,
     ) -> None:
@@ -710,6 +765,7 @@ class KnowledgeService:
             mime,
             chunks,
             vectors,
+            sparse_vectors,
             params,
             tags,
             now,

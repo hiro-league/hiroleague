@@ -139,6 +139,10 @@ export type KnowledgeSource = {
   category_id: number | null;
   subcategory_id: number | null;
   tags: string[];
+  // Explain mode (opt-in): per-branch scores + matched terms. Absent/empty in the default path.
+  dense_score?: number | null;
+  sparse_score?: number | null;
+  matched_terms?: string[];
 };
 
 export type KnowledgeAnswerData = {
@@ -271,11 +275,12 @@ export function answerKnowledge(
   query: string,
   topK = 20,
   minScore = 0,
-  filters: KnowledgeFilters = {}
+  filters: KnowledgeFilters = {},
+  explain = false
 ): Promise<ApiResponse<KnowledgeAnswerData>> {
   return apiRequest<KnowledgeAnswerData>('/knowledge/answer', {
     method: 'POST',
-    body: { query, top_k: topK, min_score: minScore, filters },
+    body: { query, top_k: topK, min_score: minScore, filters, explain },
     timeoutMs: 180000
   });
 }

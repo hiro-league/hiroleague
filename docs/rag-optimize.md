@@ -1,6 +1,40 @@
-# OPUS
+# Knowledge RAG — Retrieval Optimization
 
-I dug through the search graph (`agent/graph.py` + `helpers.py`), the chunker, the Qdrant vector store, the embedder resolution, and your `default/preferences.json`. Below is what the pipeline actually does today, where it’s leaving recall/precision on the table, and what to change.
+Analysis of the workspace knowledge retrieval pipeline (`agent/graph.py` + `helpers.py`,
+the chunker, the Qdrant vector store, embedder resolution in
+`services/knowledge/embedder.py`, and `default/preferences.json`): what it does today,
+where it leaves recall/precision on the table, and what to change. Environment facts
+below were verified against the installed stack, not assumed from model cards.
+
+## Status
+
+- ✅ **Hybrid retrieval (dense + BM25 sparse, RRF fusion) — implemented.** The Qdrant
+  collection stores named `dense` + `bm25` sparse vectors per chunk; queries fuse both
+  branches server-side with Reciprocal Rank Fusion. Controlled by
+  `knowledge.retrieval.{hybrid, sparse_model, prefetch_limit}`. Sparse vectors are always
+  stored at ingest, so `hybrid` is a query-time toggle (no re-ingest to flip). `min_score`
+  now applies as the cosine threshold on the **dense** branch; the BM25 branch is rank-fused
+  and the RRF output is not thresholded (precision left to a future reranker). Sparse model:
+  `Qdrant/bm25` — language-agnostic, ships Arabic stopwords, and lives in the already-present
+  `fastembed` (no new dependency).
+- ✅ **Explain mode (opt-in) — implemented.** A per-query "Explain" toggle on the Ask screen
+  (`explain=true`) returns per-result diagnostics for human evaluation: which branch matched
+  (dense / sparse / both), per-branch **cosine** and **BM25** scores, the fused **RRF** score,
+  and **matched query terms**. The default path is unchanged — a single fused query with no
+  extra work; explain runs the two branches separately and fuses in-process only when asked.
+- ✅ **Structural-context embedding — implemented.** Each chunk's *embedded* text (dense +
+  BM25) is prefixed with `{title} / {heading path}` so every chunk — including heading-less
+  continuation/overlap pieces and deep chunks whose body never repeats the parent headings —
+  carries its document and section context. Controlled by
+  `knowledge.chunking.embed_structural_context` (default on); ingest-time only, so flipping it
+  needs a re-ingest. The stored payload `text` is unchanged — the UI and LLM context still add
+  `title`/`heading_path` separately.
+- ⏳ **Pending:** embedder upgrade (Arabic recall), reranker.
+
+> **Migration (no-backward-compatibility):** the collection schema changed from a single
+> unnamed vector to named `dense` + `bm25`. Existing workspaces must **clear knowledge and
+> re-ingest once** — old points don't match the new schema (the store raises a clear
+> "must be rebuilt" error until cleared). No migration is provided.
 
 ## How retrieval works today
 
@@ -10,276 +44,196 @@ flowchart LR
     N --> F[build_filters<br/>owner/category=AND<br/>tags=OR]
     F --> E[embed_query<br/>single dense vector]
     E --> V[Qdrant cosine search<br/>top_k=20, min_score=0]
-    V --> C[build_context<br/>concat ALL hits<br/>as #91;1#93;...#91;20#93;]
-    C --> M[Gemini 3 Flash<br/>cite_sources=true]
-```
-
-Key facts pulled from prefs + code:
-
-| Stage | Current setting | Source |
-|---|---|---|
-| Embedder | `null` → fallback `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (384‑dim, **128‑token** max) | `embedder.py` + `constants.py` |
-| Chunking | 1200 chars, overlap 150, heading‑aware markdown then `RecursiveCharacterTextSplitter` | `chunker.py` |
-| Retrieval | `top_k=20`, `min_score=0.0`, dense only | `vector_store.search_by_vector` |
-| Rerank | None (memory has one, knowledge does not) | `preferences.json` |
-| Context | All 20 hits concatenated and sent to LLM | `helpers.build_context` |
-| Answering | `gemini-3-flash-preview`, temp 0.2, max 1600 tokens | tuning profile |
-
-## The problems, ranked by leverage
-
-### 1. Embedder is silently truncating your chunks (biggest issue)
-
-`paraphrase-multilingual-MiniLM-L12-v2` has a **128‑token** max sequence. Your chunks are **1200 chars (~250–350 tokens)**. FastEmbed truncates the tail of every chunk before embedding, so:
-
-- Roughly **half of every chunk is invisible to retrieval**.
-- Late content under a heading (often the “meat” of a section) is never indexed.
-- Headings near the top of a chunk dominate the vector.
-
-This is the single biggest reason real questions miss obvious content.
-
-### 2. No reranker → context dilution
-
-You retrieve 20 hits and shove **all 20** straight into the LLM prompt. With 1200‑char chunks that’s ~5k tokens of context, much of it weakly relevant. Two compounding effects:
-
-- “Lost in the middle”: Gemini’s answer quality drops as irrelevant chunks crowd the relevant ones.
-- Citations get diluted — irrelevant `[n]` markers leak into answers.
-
-Your memory pipeline already exposes a `reranker` preference block; knowledge has none.
-
-### 3. `min_score = 0.0`
-
-Cosine scores from MiniLM tend to be inflated; with no floor, even unrelated hits (score 0.1–0.2) make it into the prompt. There is literally no filter beyond `top_k`.
-
-### 4. Dense‑only retrieval (no hybrid)
-
-Pure dense embedding loses on:
-
-- Proper nouns: “Hagrid”, “Voldemort”, “Selim”.
-- Identifiers, dates, codes.
-- Exact phrases.
-
-Qdrant supports sparse vectors + dense fusion via RRF; you’re not using it. For an English/Arabic mixed corpus this hurts noticeably.
-
-### 5. Single‑shot query → single embedding
-
-No multi‑query rewrite, no HyDE, no sub‑question decomposition. Short or vague queries (“tell me about Harry’s school years”) only ever get one chance at the index.
-
-### 6. Chunker isn’t aware of the embedder
-
-`chunk_size` is in **characters**, embedder limits are in **tokens**. They’re tracked independently. If you later switch to OpenAI `text-embedding-3-small` (8192 tokens) you’d want **much bigger** chunks; if you keep MiniLM you’d want **smaller** ones. Today both extremes are wrong.
-
-### 7. No deduplication / near‑dup collapse
-
-If you re‑ingest, or two docs cover the same passage, the same content can fill 3–5 of your top‑20 slots. `build_context` just concatenates them.
-
-### 8. Answering prompt doesn’t exploit metadata
-
-`build_context` emits `[n] {title} §{heading}\n{text}` — but not `source_uri`, ingest date, tags, or owner. The model can’t disambiguate sources or prefer recent material.
-
-### 9. Heading propagation can be lossy
-
-`MarkdownHeaderTextSplitter` followed by `RecursiveCharacterTextSplitter.split_documents` keeps the heading metadata of the parent doc, but only the splitter’s metadata on the *original* split — the recursive pass can shed the path on deeply nested sections in some LangChain versions. Worth a unit test of `chunk_markdown` on a doc with 4–5 heading levels and overlap.
-
-## What I’d change in `preferences.json` and code
-
-### Preference edits (no code changes required)
-
-```json
-"knowledge": {
-  "default_embedding_model": "openai:text-embedding-3-small",
-  "default_tuning_profile": "knowledge_answering",
-  "chunking": {
-    "chunk_size": 1800,
-    "chunk_overlap": 200,
-    "markdown": { "respect_headings": true }
-  },
-  "retrieval": {
-    "top_k": 30,
-    "min_score": 0.25
-  },
-  "answering": {
-    "model": null,
-    "cite_sources": true,
-    "language_policy": "match_query"
-  }
-}
-```
-
-Rationale:
-
-- **`text-embedding-3-small`**: 1536‑dim, 8k token window, cheap, multilingual (handles Arabic fine), and it removes the silent truncation problem immediately. You’ll need to wipe `~/.../default/knowledge/qdrant/` (or re‑ingest) since dimension changes from 384 → 1536 — `_ensure_collection` enforces this.
-- **`chunk_size=1800` / overlap 200**: With an 8k‑token embedder, larger semantic chunks are better; you stop fragmenting paragraphs. (If you stay on MiniLM, do the opposite: `chunk_size=400, overlap=60`.)
-- **`top_k=30` + `min_score=0.25`**: pull more candidates but reject obvious noise.
-
-### Code‑level upgrades (in order of impact)
-
-1. **Add a knowledge reranker block** mirroring `memory.reranker`, and a `rerank_top_n` (e.g. 6). Insert a `rerank` node between `vector_search` and `build_context`. Trim the context to the reranked top‑N rather than passing all 30 hits to Gemini.
-2. **Hybrid retrieval.** Add sparse vectors to the collection (BM25 or a SPLADE‑style model) and switch `query_points` to `Query.Fusion(RRF)` over dense + sparse. This is the single biggest precision boost for proper‑noun queries.
-3. **Token‑aware chunking.** Replace `RecursiveCharacterTextSplitter` with a token‑based splitter sized to the active embedder (the chunker should read `self.embedder.max_tokens`), so the same `chunk_size` pref is meaningful across model swaps.
-4. **Multi‑query / HyDE node** before `embed_query`. Cheap with `gemini-3-flash` — generate 3 reformulations or one hypothetical answer, embed all, union candidates, then rerank.
-5. **Dedup pass** in `build_context`: collapse hits whose normalized text Jaccard > 0.85 or share `document_id + heading_path`.
-6. **Enrich `build_context`** with `source_uri` and `ingested_at` so the LLM can prefer authoritative/recent sources.
-7. **Optional**: lift the `min_score` floor onto the **reranker** score instead of the raw cosine, once you add reranking — cross‑encoder scores are much more meaningful than cosine.
-
-## TL;DR
-
-- **Root cause #1**: your default embedder (`paraphrase-multilingual-MiniLM-L12-v2`) has a **128‑token cap** while you chunk at **1200 chars (~250–350 tokens)** → roughly half of every chunk is **never indexed**. Switch to `openai:text-embedding-3-small` (or `BAAI/bge-m3`) and re‑ingest.
-- **Root cause #2**: **no reranker** and **`min_score=0.0`**, so all 20 hits — relevant or not — are concatenated into the LLM prompt. Add a cross‑encoder rerank node, keep the top **5–8**, and raise `min_score` to **~0.25**.
-- **Biggest single quality win after that**: **hybrid retrieval** (dense + sparse with RRF fusion in Qdrant) — fixes proper‑noun/exact‑term misses.
-- **Next tier**: token‑aware chunking tied to the active embedder, multi‑query/HyDE expansion, dedup before context assembly, and richer per‑hit metadata in the prompt.
-
-### Reflecting build updates
-
-Changing `knowledge.default_embedding_model` changes the vector dimension. `_ensure_collection` will refuse to swap a populated collection, so you’ll need to either:
-
-1. Delete every document via the admin Knowledge UI (clears Qdrant), **or**
-2. Stop the server and remove `C:\Users\augr\AppData\Local\hiro\workspaces\default\knowledge\qdrant\` and `knowledge.db`, then re‑ingest.
-
-We are operating under the workspace’s **no‑backward‑compatibility** rule, so a hard wipe + re‑ingest is the expected path here rather than a migration.
-
-
-# Composer 2.5
-
-You’re on a **pure dense-vector RAG pipeline** today: normalize query → embed once → Qdrant cosine search → pack chunks into context → LLM answer. That’s a solid v1 baseline, but retrieval quality is mostly capped by **embedding + chunking at ingest time** and **how many noisy chunks reach the LLM**.
-
----
-
-## What the search graph actually does
-
-```mermaid
-flowchart LR
-    Q[Query] --> P[parse_query<br/>NFC + Arabic alef normalize]
-    P --> F[build_filters<br/>owner / category / tags]
-    F --> E[embed_query]
-    E --> V[vector_search<br/>top_k + min_score]
-    V --> C[build_context]
-    C -->|hits > 0| M[call_model]
+    V --> C[build_context<br/>concat ALL hits]
+    C -->|hits > 0| M[call_model<br/>cite_sources=true]
     C -->|no hits| Z[finalize]
     M --> Z
 ```
 
-There is **no query rewriting, HyDE, reranking, hybrid BM25, MMR, or per-document dedup** — all explicitly deferred to v2 in the design doc. `parse_query` only normalizes text and detects language (for the answer prompt, not retrieval).
+| Stage | Current setting | Source |
+|---|---|---|
+| Embedder | `null` → FastEmbed `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (384-dim) | `constants.py`, `embedder.py` |
+| Chunking | 1200 chars, overlap 150, heading-aware markdown then recursive split | `constants.py`, `chunker.py` |
+| Retrieval | `top_k=20`, `min_score=0.0`, dense only | `vector_store.search_by_vector` |
+| Rerank | None (agent memory has one; knowledge does not) | `preferences.json` |
+| Context | All hits concatenated and sent to the LLM | `helpers.build_context` |
+| Answering | `gemini-3-flash-preview`, temp 0.2, max 1600 tokens | tuning profile |
 
----
+There is **no query rewriting, HyDE, reranking, hybrid BM25, MMR, or per-document dedup** —
+all deferred to v2 in the design doc. `parse_query` only normalizes text and detects
+language for the answer prompt, not for retrieval.
 
-## Default workspace preferences (structural defaults)
+## Environment & stack notes
 
-If your default workspace has a fresh `preferences.json`, these are the knowledge defaults from `WorkspacePreferences()`:
+- Embedding uses **FastEmbed** (ONNX). The stack ships **CPU-only** `onnxruntime` (and a CPU
+  `torch` build), so embedding and any cross-encoder reranking run on **CPU** by default.
+  Deployments that have a CUDA GPU can install the GPU builds (`onnxruntime-gpu` /
+  `fastembed-gpu`, and a CUDA-matched `torch`) to accelerate bulk ingest; query-time latency
+  is acceptable on CPU. GPU is an optional, environment-specific optimization — not assumed.
+- The default embedder is **not bundled** — FastEmbed lazily downloads weights (~0.22 GB)
+  from HuggingFace on the **first ingestion**, caching to
+  `<workspace>/knowledge/fastembed_cache`. There is currently **no user consent prompt**
+  before this download.
+- **The default embedder is not truncating chunks.** FastEmbed's build of MiniLM
+  (`qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q`) allows **512 input tokens**
+  (per FastEmbed's own model metadata). The default 1200-char chunks are ~250–350 tokens,
+  well under 512. (The "128 token" figure sometimes quoted comes from the
+  *sentence-transformers* packaging of this model, not the FastEmbed ONNX build used here.)
+  The embedder is a **quality** lever — and a correctness issue for Arabic — not a length fix.
 
-| Knob | Default | Effect on retrieval |
-|------|---------|---------------------|
-| **Embedding model** | `null` → FastEmbed `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, local) | General-purpose multilingual; not strong on domain jargon or long-context nuance |
-| **Chunk size / overlap** | 1200 / 150 | Moderate chunks; `respect_headings: true` splits on markdown headers first |
-| **top_k** | 20 | Up to 20 chunks go to the LLM |
-| **min_score** | 0.0 | **No score gate** — weak matches are included |
-| **Answering model** | `null` → inherits `llm.default_chat` | Affects synthesis, not retrieval |
-| **Tuning profile** | `knowledge_answering` (temp 0.2, max 1600 tokens) | Affects answer quality, not retrieval |
+## Gaps, ranked by leverage
 
-The Ask tab hardcodes the same defaults (`top_k=20`, `min_score=0`) unless you override per query.
+Retrieval is gated by **recall first**: if the right chunk never makes the candidate set,
+nothing downstream (`min_score`, reranking, prompt formatting) can recover it. The list is
+ordered accordingly — recall fixes first, precision/ordering second.
 
-**Compare to agent memory:** memory has `search.threshold` (default 0.1) and an optional cross-encoder reranker. Knowledge has neither.
+### 1. Embedder is weak, and effectively unusable for Arabic (highest leverage)
+The default `paraphrase-multilingual-MiniLM-L12-v2` is a small 384-dim, 2019 general
+multilingual model. Its Arabic representations are poor, so Arabic queries frequently fail to
+surface the correct chunk at all — a **recall** failure at the source, before any ranking
+step runs. A strong multilingual embedder is the single biggest lever for this corpus.
+(Dimension change → re-index; see options below.)
 
----
+### 2. Dense-only retrieval — no hybrid (recall) — ✅ RESOLVED
+Pure dense embedding misses proper nouns ("Selim"), identifiers, dates, exact phrases, and
+Arabic surface forms / morphology. **Now addressed:** retrieval fuses a dense vector with a
+BM25 sparse vector via Qdrant RRF (see Status above). Lexical/sparse signal recovers exactly
+the matches a weak dense model drops, so this compounds with the (still pending) embedder fix.
 
-## Highest-impact gaps (code-level, not just prefs)
+### 3. Chunks embedded without structural context (recall) — ✅ RESOLVED
+Previously only `chunk["text"]` was embedded. Because the chunker keeps heading lines in the
+body (`strip_headers=False`), the *first* chunk of each section did embed its own deepest
+heading — but the ancestor headings, the document title, and every heading-less continuation /
+overlap chunk had no structural context in the vector at all (`title` / `heading_path` lived
+only in the Qdrant payload, added back after retrieval in `build_context`). So "what does
+section X say about Y?" could miss the right chunk whenever the section name wasn't repeated in
+that chunk's body. **Now addressed:** the embedded text (dense + BM25) is prefixed with the full
+`{title} / {heading path}` breadcrumb for *every* chunk, so section/document context is
+searchable regardless of where a chunk falls. Compounds with the (still pending) embedder
+upgrade. (Ingest-time; re-ingest to apply.)
 
-### 1. Chunks are embedded without structural context
+### 4. `min_score = 0.0` and no diversity control (precision)
+With no score floor, unrelated hits still enter the prompt; and all `top_k` slots can come
+from one document (overlapping chunks) with no MMR / per-document cap / near-duplicate
+collapse. These are precision knobs — useful, but only once recall produces good candidates.
 
-At ingest, only `chunk["text"]` is embedded. `title` and `heading_path` live in Qdrant payload but **are not part of the vector**. That hurts questions like “what does section X say about Y?” — the vector never saw the section title.
+### 5. No reranker (precision / ordering — secondary)
+A cross-encoder reranker reorders the candidate set so the LLM sees the best 5–8 instead of
+all 20. Important eventually, but it can **only reorder what retrieval already surfaced** —
+with the current recall it would add latency for little gain. Fix recall (1–3) first.
 
-Context formatting adds headings only **after** retrieval, in `build_context`.
+### 6. Single-shot query → single embedding (recall, vague queries)
+No multi-query rewrite, HyDE, or sub-question decomposition. Short/vague queries get one shot
+at the index. Worth adding once the core recall path is solid.
 
-### 2. No reranking or hybrid search
+## Embedding model options
 
-Design doc non-goals for v1: reranker, BM25+dense hybrid. You get raw cosine top‑k only.
+All swaps that change the **vector dimension** require clearing the knowledge collection and
+re-ingesting (`_ensure_collection` refuses to resize a populated collection).
 
-### 3. No diversity control
+| Model | Backend | Local? | Dim | Context | Arabic | License | Size | Notes |
+|---|---|---|---|---|---|---|---|---|
+| `paraphrase-multilingual-MiniLM-L12-v2` *(current default)* | FastEmbed | ✅ | 384 | 512 | ok (~50 langs) | Apache-2 | 0.22 GB | weak/old; baseline |
+| `intfloat/multilingual-e5-large` | FastEmbed | ✅ | 1024 | 512 | strong (~100 langs) | **MIT** | 2.24 GB | best in-stack upgrade; needs `query:`/`passage:` prefixes |
+| `bge-m3` | **Ollama** | ✅ | 1024 | **8192** | excellent (100+ langs) | **MIT** | ~2.2 GB | strongest local multilingual; **not in FastEmbed 0.8.0** — requires Ollama installed |
+| `nomic-embed-text` | Ollama | ✅ | 768 | 8192 | weak (English-centric) | Apache-2 | ~0.27 GB | already registered in catalog (`ollama:nomic-embed-text`); weak for Arabic |
+| `text-embedding-3-small` | OpenAI | ☁️ cloud | 1536 | 8191 | good | proprietary | — | cheap, simplest drop-in; data leaves machine |
+| `gemini-embedding-001` | Google | ☁️ cloud | 768 | — | good | proprietary | — | already in catalog |
 
-All 20 slots can come from the **same document** (overlapping chunks). No MMR, no max-per-document cap.
+**Notes on the local multilingual choices:**
+- **`intfloat/multilingual-e5-large`** is the best option that stays entirely in the current
+  FastEmbed stack (no new system dependency, MIT-licensed). Tradeoff: 512-token context and
+  it requires `query:` / `passage:` input prefixes to perform well.
+- **`bge-m3` via Ollama** is the strongest local multilingual model (8192-token context,
+  excellent Arabic, MIT) — but `bge-m3` is **absent from FastEmbed 0.8.0** (verified across
+  dense/sparse/late-interaction model lists), so it can only be run locally through **Ollama**,
+  which adds a system dependency. (Ollama uses a GPU where one is available, CPU otherwise.)
 
-### 4. No adjacent-chunk expansion
+## Constraints when changing the embedder (code-level)
 
-A hit might be a fragment mid-section; surrounding chunks (`ord ± 1`) are not fetched to widen context.
+1. **Resolver only routes `sentence-transformers/*` names to FastEmbed.** In
+   `resolve_knowledge_embedder`, any FastEmbed name not starting with `sentence-transformers/`
+   (e.g. `intfloat/multilingual-e5-large`) silently falls back to MiniLM. Selecting e5-large
+   therefore requires widening the resolver to a **curated allow-list** of FastEmbed models.
+2. **Catalog (`provider:model`) path** already handles cloud + Ollama embedders. Adding
+   `ollama:bge-m3` is a low-risk **catalog entry + dimension constant (1024)** — it reuses the
+   existing `ollama:nomic-embed-text` plumbing.
+3. **e5 prefixes:** e5 models need `passage:` at ingest and `query:` at search time — a
+   per-model input-prefix setting is needed for correct results.
+4. **Re-index required** on any dimension change (384 → 1024/1536). Under the workspace's
+   no-backward-compatibility rule, a clean wipe + re-ingest is the expected path: clear all
+   docs via the admin Knowledge UI, or stop the server and delete
+   `<workspace>/knowledge/qdrant/` + `knowledge.db`, then re-ingest.
 
-### 5. Embedding model lock
+## Recommended direction
 
-Changing `knowledge.default_embedding_model` requires **deleting all indexed docs first**, then full re-ingest. So model upgrades are a deliberate migration, not a toggle.
+Fix **recall** before precision — a reranker on weak candidates is wasted effort.
 
----
+1. **Upgrade the embedder (biggest lever; needs re-index).** This is the fix for Arabic.
+   - In-stack, no new dependency → **`intfloat/multilingual-e5-large`** (FastEmbed, MIT;
+     needs `query:`/`passage:` prefixes).
+   - Best local multilingual quality → **`bge-m3` via Ollama** (MIT, 8192 ctx) where an
+     Ollama server is available.
+2. ✅ **Hybrid retrieval (dense + sparse RRF) in Qdrant — done.** Recovers exact-term /
+   proper-noun / Arabic-surface matches the dense model drops. Compounds with the embedder
+   upgrade.
+3. ✅ **Embed structural context — done.** Prefix `{title} / {heading_path}` into the embedded
+   text (dense + BM25) at ingest so every chunk carries its breadcrumb.
+4. **Then precision:** raise `min_score` off 0.0; add a cross-encoder **reranker** (a
+   *multilingual* model — not the English-only one memory defaults to) trimming to top 5–8;
+   add a per-document cap / dedup.
+5. **Build a small eval harness first** (20 hand-curated question → expected-doc pairs) so the
+   embedder/hybrid changes are measured, not guessed — especially important for Arabic, where
+   relevance is harder to eyeball.
 
-## What you can do now (no code changes)
+The prefs-only `min_score`/`top_k` tuning is worth doing immediately, but treat it as
+mitigation, not a fix — it cannot surface a chunk that recall never retrieved.
 
-### Preferences tuning (Admin → Preferences → Knowledge)
+## Proposed: admin-UI embedding-model manager
 
-1. **Raise `min_score`** — start around **0.25–0.45** and tune on real queries. With `min_score=0`, borderline chunks pollute the LLM context. The Ask tab already suggests “lower minimum score” when nothing matches — the opposite problem is usually **too much** weak context.
+To make model selection and ingestion safe and explicit (and to fix the silent first-ingest
+download), add an **Embedding model** section under Admin → Preferences → Knowledge:
 
-2. **Tune `top_k` by use case**
-   - **Precise factual Q&A:** try **8–12**
-   - **Broad synthesis across docs:** keep **15–25**
-   - If you raise `top_k`, pair it with a non-zero `min_score`
+- **Model registry** (single source of truth, shared by the resolver and the UI): for each
+  model — backend (FastEmbed / Ollama / cloud), dimension, context, size, languages, license,
+  whether it needs query/passage prefixes, and download/availability status.
+- **Explicit download / prefetch**: a "Download" action that pre-fetches FastEmbed weights
+  (into `fastembed_cache`) or triggers `ollama pull`, with size disclosure and a progress
+  bar — so no model ever downloads silently on first ingestion.
+- **Set active** with guardrails: changing the active model warns that the dimension change
+  requires clearing knowledge + re-ingesting, and offers that flow inline.
+- **Status surface**: downloaded vs not, active model, dimension, and (for Ollama) whether
+  the Ollama server is reachable and the model is pulled.
 
-3. **Adjust chunking, then re-ingest**
-   - **Smaller chunks (600–900)** → better pinpoint retrieval, more vectors
-   - **Larger overlap (200–300)** → less boundary loss
-   - Chunk prefs affect **new ingests only** — re-ingest existing docs after changes
+This directly addresses two current pain points: silent downloads with no consent, and the
+re-index footgun on model swaps.
 
-4. **Use metadata filters aggressively**
-   - Categories, tags, owner, document scope in Ask tab
-   - Reduces corpus noise before vector search
-
-5. **Try a stronger embedding model (if you have API creds)**
-   - e.g. `openai:text-embedding-3-small` or similar catalog embedding
-   - Requires: delete all knowledge docs → change model → re-ingest everything
-   - Often the single biggest recall/precision jump for technical corpora
-
-6. **Set a dedicated answering model**
-   - Doesn’t improve retrieval, but a model tuned for grounded citation (`knowledge_answering` profile, temp 0.2) reduces hallucination when context is partial
-
-### Operational debugging
-
-- Use **Graph runs** from the Ask tab to inspect `vector_search` hit counts and scores
-- Compare **raw search** (`knowledge_search` tool / API) vs **full answer** — separates retrieval failure from LLM failure
-- Check whether misses are **recall** (right chunk not in top_k) vs **precision** (wrong chunks ranked higher)
-
----
-
-## What would materially improve retrieval (needs implementation)
-
-Prioritized by effort vs impact:
-
-| Priority | Change | Why |
-|----------|--------|-----|
-| **High / low effort** | Prefix chunks at embed time: `{title} / {heading_path}\n{text}` | Cheap; often large recall gain |
-| **High / medium** | Cross-encoder reranker node (reuse memory’s `MemoryRerankerPreferences` pattern) | Re-order top 20 → best 5–8 for the LLM |
-| **High / medium** | Per-document cap or MMR | Stops one doc from dominating context |
-| **Medium** | Hybrid BM25 + dense (design doc notes FastEmbed sparse support) | Helps keyword/exact-term queries |
-| **Medium** | Adjacent-chunk expansion on hit | Fixes “right section, wrong fragment” |
-| **Lower priority** | Query rewriting / multi-query / HyDE | Helps vague questions; adds latency + cost |
-| **Foundation** | Eval harness (even 20 hand-curated Q→expected-doc pairs) | Without this, tuning `top_k`/`min_score` is guesswork |
-
----
-
-## Practical tuning workflow
+## Operational tuning workflow
 
 ```mermaid
 flowchart TD
-    A[Pick 10–20 real questions] --> B[Run Ask with current defaults]
+    A[Pick 10-20 real questions] --> B[Run Ask with current defaults]
     B --> C{Right info in chunk results?}
     C -->|No, 0 hits| D[Lower min_score OR raise top_k OR relax filters]
-    C -->|No, wrong chunks| E[Smaller chunks + re-ingest OR better embedder]
-    C -->|Yes, but bad answer| F[LLM / context issue — lower top_k, raise min_score]
+    C -->|No, wrong chunks| E[Add reranker / hybrid; consider stronger embedder]
+    C -->|Yes, but bad answer| F[Context issue: lower top_k, raise min_score]
     D --> B
     E --> B
-    F --> G[Done for v1 prefs ceiling]
+    F --> G[Done]
 ```
-
----
 
 ## TL;DR
 
-- **Current pipeline:** single dense vector search, no rerank/hybrid/dedup; defaults are permissive (`min_score=0`, `top_k=20`).
-- **Quick wins:** raise `min_score`, tune `top_k`, use filters, shrink chunks and re-ingest, consider a stronger embedding model (full re-index required).
-- **Biggest code gaps:** chunks embedded without title/heading context; no reranker (memory has one); no per-document diversity.
-- **Default workspace prefs** are the structural defaults above unless you’ve customized `preferences.json` on disk — check Admin → Preferences → Knowledge for your live values.
-
-We're in initial-development mode (no backward compatibility), so embedding model and chunking changes expect a clean re-ingest rather than migration — plan for that if you upgrade the stack.
+- **Recall is the bottleneck — fix it before reranking.** The top lever is the **embedder**:
+  the default MiniLM is weak and effectively unusable for **Arabic**, so correct chunks often
+  never make the candidate set. (It is *not* truncating chunks — 512-token cap, chunks are
+  ~250–350 tokens — the problem is representation quality, not length.)
+- **Embedder choice (needs re-index):** in-stack → `intfloat/multilingual-e5-large`
+  (FastEmbed, MIT, needs query/passage prefixes); best local multilingual → `bge-m3` via
+  **Ollama** (MIT, 8192 ctx). `ollama:nomic-embed-text` is wired already but weak for Arabic.
+- **Hybrid (dense+sparse RRF)** and **structural-context prefixes** — the other two recall
+  levers — are now in place; the embedder upgrade and a reranker are what remain.
+- **Reranking and `min_score` are precision steps** — valuable only once recall is good.
+- **Any embedder swap changes the vector dimension → wipe + re-ingest.**
+- **Recommended UX:** an admin model-manager with explicit, progress-tracked downloads and a
+  guarded "set active + re-ingest" flow.

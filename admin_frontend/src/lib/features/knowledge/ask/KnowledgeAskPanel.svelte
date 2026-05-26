@@ -8,6 +8,7 @@
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
+  import type { KnowledgeSource } from '$lib/api/knowledge';
   import {
     chunkTextByteSize,
     formatBytes,
@@ -33,6 +34,64 @@
 
   const questionHeaderSummary = $derived(
     ask.searching ? 'Searching…' : ask.answerResult?.no_results ? 'No sources matched' : ask.answerResult ? 'Answer ready' : ''
+  );
+
+  // Explain-mode hints. matchKind is null in the default path (no per-branch scores), so the
+  // row falls back to the plain score badge and renders no extra detail.
+  type MatchKind = 'both' | 'semantic' | 'keyword' | null;
+  const MATCH_LABEL: Record<'both' | 'semantic' | 'keyword', string> = {
+    both: 'Both',
+    semantic: 'Semantic',
+    keyword: 'Keyword'
+  };
+
+  function matchKind(source: KnowledgeSource): MatchKind {
+    const hasDense = source.dense_score != null;
+    const hasSparse = source.sparse_score != null;
+    if (hasDense && hasSparse) return 'both';
+    if (hasDense) return 'semantic';
+    if (hasSparse) return 'keyword';
+    return null;
+  }
+
+  // Score coloring (hybrid scheme). Cosine is a bounded 0–1 similarity, so it uses fixed
+  // bands — 0.6 means the same thing on every query. BM25 and the RRF score are unbounded /
+  // rank-based, so they're colored relative to the strongest result in the *current* set.
+  type ScoreTone = 'strong' | 'ok' | 'weak';
+
+  // Reuse the design-system Badge variants (emerald / amber / neutral fill) for chip color.
+  const TONE_VARIANT: Record<ScoreTone, 'success' | 'warning' | 'secondary'> = {
+    strong: 'success',
+    ok: 'warning',
+    weak: 'secondary'
+  };
+  // Bar-fill color for the RRF strength slider (a plain div, not a Badge).
+  const TONE_BAR: Record<ScoreTone, string> = {
+    strong: 'bg-emerald-500',
+    ok: 'bg-amber-500',
+    weak: 'bg-muted-foreground/40'
+  };
+
+  function cosineTone(score: number): ScoreTone {
+    if (score >= 0.6) return 'strong';
+    if (score >= 0.45) return 'ok';
+    return 'weak';
+  }
+
+  function relativeTone(value: number, max: number): ScoreTone {
+    if (max <= 0) return 'weak';
+    const ratio = value / max;
+    if (ratio >= 0.85) return 'strong';
+    if (ratio >= 0.6) return 'ok';
+    return 'weak';
+  }
+
+  // Set-relative maxima for the rank-based scores (RRF + BM25), recomputed per answer.
+  const topScore = $derived(
+    (ask.answerResult?.sources ?? []).reduce((max, source) => Math.max(max, source.score ?? 0), 0)
+  );
+  const maxSparseScore = $derived(
+    (ask.answerResult?.sources ?? []).reduce((max, source) => Math.max(max, source.sparse_score ?? 0), 0)
   );
 </script>
 
@@ -149,6 +208,8 @@
       {/snippet}
       <div class="rounded-md border">
         {#each ask.answerResult.sources as source (source.point_id)}
+          {@const kind = matchKind(source)}
+          {@const rrfTone = relativeTone(source.score, topScore)}
           <article class="grid gap-2 border-t px-3 py-3 first:border-t-0">
             <div class="flex min-w-0 items-center gap-2">
               <Badge class="shrink-0 rounded-md font-mono tabular-nums" variant="secondary">#{source.ref}</Badge>
@@ -156,13 +217,51 @@
               {#if source.heading_path}
                 <span class="min-w-0 truncate font-sans text-xs text-muted-foreground">{source.heading_path}</span>
               {/if}
-              <Badge class="ml-auto shrink-0 font-mono tabular-nums" variant="outline">
+              {#if kind}
+                <Badge class="ml-auto shrink-0 font-mono" variant={kind === 'both' ? 'default' : 'outline'}>
+                  {MATCH_LABEL[kind]}
+                </Badge>
+              {/if}
+              <!-- RRF strength slider: fill width + color are relative to the top result in this set. -->
+              <div
+                class="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted {kind ? '' : 'ml-auto'}"
+                title="RRF score relative to the top result"
+              >
+                <div
+                  class="h-full rounded-full transition-[width] {TONE_BAR[rrfTone]}"
+                  style="width: {topScore > 0 ? Math.round((source.score / topScore) * 100) : 0}%"
+                ></div>
+              </div>
+              <Badge class="shrink-0 font-mono tabular-nums" variant={TONE_VARIANT[rrfTone]}>
                 {source.score.toFixed(3)}
               </Badge>
               <Badge class="shrink-0 font-mono tabular-nums" variant="outline">
                 {formatBytes(chunkTextByteSize(source.text))}
               </Badge>
             </div>
+            {#if kind}
+              <div class="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                {#each source.matched_terms ?? [] as term (term)}
+                  <Badge variant="secondary" class="rounded px-1.5 py-0 font-mono text-[12px]">{term}</Badge>
+                {/each}
+                {#if source.dense_score != null}
+                  <Badge
+                    variant={TONE_VARIANT[cosineTone(source.dense_score)]}
+                    class="rounded px-1.5 py-0 font-mono text-[12px] tabular-nums"
+                  >
+                    cos {source.dense_score.toFixed(3)}
+                  </Badge>
+                {/if}
+                {#if source.sparse_score != null}
+                  <Badge
+                    variant={TONE_VARIANT[relativeTone(source.sparse_score, maxSparseScore)]}
+                    class="rounded px-1.5 py-0 font-mono text-[12px] tabular-nums"
+                  >
+                    bm25 {source.sparse_score.toFixed(2)}
+                  </Badge>
+                {/if}
+              </div>
+            {/if}
             {#if chunkMarkdownFormat}
               <KnowledgeChunkMarkdownPreview markdown={source.text} class="text-muted-foreground" />
             {:else}

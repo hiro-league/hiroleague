@@ -21,7 +21,13 @@ from hirocli.runtime.agent_graph.base import _normalize_reply_content
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
 from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged
 
-from .helpers import NormalizedQuery, build_context, build_qdrant_filter, normalize_query
+from .helpers import (
+    NormalizedQuery,
+    build_context,
+    build_qdrant_filter,
+    matched_query_terms,
+    normalize_query,
+)
 
 if TYPE_CHECKING:
     from hirocli.domain.preferences import WorkspacePreferences
@@ -37,9 +43,11 @@ class KnowledgeAgentState(TypedDict, total=False):
     filters: dict[str, Any]
     top_k: int
     min_score: float
+    explain: bool
     normalized_query: NormalizedQuery
     qdrant_filter: Any
     query_vector: list[float]
+    query_sparse_vector: Any
     hits: list[Any]
     sources: list[Any]
     context: str
@@ -154,7 +162,11 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         if entry := current_entry.get():
             entry.set_input_preview(f"text: {normalized.text[:200]}")
         vector = await self._service.embed_query(normalized.text)
-        return {"query_vector": vector}
+        out: dict[str, Any] = {"query_vector": vector}
+        # Only pay for the BM25 query embed when hybrid is enabled.
+        if self._prefs.knowledge.retrieval.hybrid:
+            out["query_sparse_vector"] = await self._service.embed_query_sparse(normalized.text)
+        return out
 
     @graph_logged(captures={"decision"})
     async def vector_search(self, state: KnowledgeAgentState) -> dict[str, Any]:
@@ -164,14 +176,19 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 entry.set_decision("empty", "no_query_vector")
                 entry.set_output_preview("hits: 0")
             return {"hits": []}
+        retrieval = self._prefs.knowledge.retrieval
         hits = await self._service.vector_search_by_vector(
             vector,
-            top_k=int(state.get("top_k") or self._prefs.knowledge.retrieval.top_k),
+            state.get("query_sparse_vector"),
+            top_k=int(state.get("top_k") or retrieval.top_k),
             min_score=float(
                 state["min_score"]
                 if state.get("min_score") is not None
-                else self._prefs.knowledge.retrieval.min_score
+                else retrieval.min_score
             ),
+            prefetch_limit=retrieval.prefetch_limit,
+            hybrid=retrieval.hybrid,
+            explain=bool(state.get("explain")),
             qdrant_filter=state.get("qdrant_filter"),
         )
         if entry := current_entry.get():
@@ -182,7 +199,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
     def build_context(self, state: KnowledgeAgentState) -> dict[str, Any]:
         from hirocli.services.knowledge.converters import source_from_hit
 
-        sources = [source_from_hit(index, hit) for index, hit in enumerate(state.get("hits") or [], start=1)]
+        # matched_terms is a human-eval hint, computed only in opt-in explain mode.
+        explain = bool(state.get("explain"))
+        normalized = state.get("normalized_query")
+        query_text = normalized.text if normalized is not None else str(state.get("query", ""))
+        sources = []
+        for index, hit in enumerate(state.get("hits") or [], start=1):
+            terms = matched_query_terms(query_text, hit.text) if explain else None
+            sources.append(source_from_hit(index, hit, matched_terms=terms))
         return {
             "sources": sources,
             "context": build_context(sources),
