@@ -73,6 +73,8 @@ export function createChatChannelsPageController() {
   let pendingPhotoDataUrl = $state<string | null>(null);
   let formBaseline = $state<ChatChannelFormBaseline | null>(null);
   let requestVoiceReplyUi = $state(false);
+  /** Per-message "use knowledge" toggle (default on); persisted like the voice-reply pref. */
+  let useKnowledgeUi = $state(true);
   /** Tools + token counters on Messages bubbles; persisted like voice-reply pref. */
   let showAgentToolsTokensUi = $state(true);
   let draftMessage = $state('');
@@ -678,7 +680,8 @@ export function createChatChannelsPageController() {
       const requestVoiceReply = effectiveRequestVoiceReplyForSend();
       const sent = await sendChatMessage(id, {
         text,
-        request_voice_reply: requestVoiceReply || undefined
+        request_voice_reply: requestVoiceReply || undefined,
+        use_knowledge: useKnowledgeUi
       });
       const sentAt = new Date().toISOString();
       draftMessage = '';
@@ -753,7 +756,8 @@ export function createChatChannelsPageController() {
         audio_base64: b64,
         audio_mime_type: effectiveMime,
         audio_duration_ms: duration_ms,
-        request_voice_reply: requestVoiceReply || undefined
+        request_voice_reply: requestVoiceReply || undefined,
+        use_knowledge: useKnowledgeUi
       });
       const sentAt = new Date().toISOString();
       addOptimisticMessage({
@@ -817,6 +821,9 @@ export function createChatChannelsPageController() {
       const raw = localStorage.getItem(PREF_KEYS.chatChannelsVoiceReply);
       if (raw === '1') requestVoiceReplyUi = true;
       if (raw === '0') requestVoiceReplyUi = false;
+      const rawKnowledge = localStorage.getItem(PREF_KEYS.chatChannelsUseKnowledge);
+      if (rawKnowledge === '1') useKnowledgeUi = true;
+      if (rawKnowledge === '0') useKnowledgeUi = false;
       const rawTelemetry = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTelemetry);
       if (rawTelemetry === '0') showAgentToolsTokensUi = false;
       if (rawTelemetry === '1') showAgentToolsTokensUi = true;
@@ -905,6 +912,17 @@ export function createChatChannelsPageController() {
       requestVoiceReplyUi = v;
       try {
         localStorage.setItem(PREF_KEYS.chatChannelsVoiceReply, v ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+    get useKnowledgeUi() {
+      return useKnowledgeUi;
+    },
+    set useKnowledgeUi(v: boolean) {
+      useKnowledgeUi = v;
+      try {
+        localStorage.setItem(PREF_KEYS.chatChannelsUseKnowledge, v ? '1' : '0');
       } catch {
         /* ignore */
       }

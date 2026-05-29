@@ -107,6 +107,17 @@ class GraphState(TypedDict, total=False):
     # Built by context_build / call_model
     user_text: str | None
     retrieved_memories: list[dict[str, Any]]
+    # Knowledge retrieval (per-turn scratch). ``knowledge_enabled`` is the per-message toggle
+    # (default on, sent in routing.metadata like request_voice_reply). ``knowledge_context`` is the
+    # numbered [n] block built by the retrieval subgraph; ``knowledge_sources`` backs citations + UI.
+    knowledge_enabled: bool
+    knowledge_context: str | None
+    knowledge_sources: list[Any]
+    # Ephemeral, rebuilt every turn by compose_context: memory + knowledge (+ citation) rendered
+    # into one context string. call_model injects it into the current user turn (context first,
+    # question last); persona stays a separate stable system message. Never written into
+    # ``messages`` (durable history stays clean). Overwritten each turn — checkpointing is harmless.
+    turn_context: str | None
     messages: Annotated[list[BaseMessage], add_messages]
     reply_text: str | None
     # ``reply_id`` is set by ``memory_out_node`` and consumed by ``tts_node``

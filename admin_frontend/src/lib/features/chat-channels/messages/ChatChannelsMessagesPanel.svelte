@@ -86,6 +86,7 @@
     onFinalizeRecording: () => void | Promise<void>;
     onDiscardRecording: () => void | Promise<void>;
     requestVoiceReplyUi: boolean;
+    useKnowledgeUi: boolean;
     draftMessage: string;
     voiceReplyCheckboxDisabled: boolean;
     voiceReplyCheckboxHint: string;
@@ -122,6 +123,7 @@
     onFinalizeRecording,
     onDiscardRecording,
     requestVoiceReplyUi = $bindable(),
+    useKnowledgeUi = $bindable(true),
     showAgentToolsTokensUi = $bindable(true),
     draftMessage = $bindable(),
     voiceReplyCheckboxDisabled,
@@ -527,22 +529,35 @@
         {#if selectedChannelId && channels.length > 0 && !channelsError}
           <div class="shrink-0 space-y-2 border-border border-t pt-3 font-sans text-sm">
             <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-              <label
-                class={cn(
-                  'flex items-center gap-2 text-xs text-muted-foreground',
-                  voiceReplyCheckboxDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
-                )}
-                title={voiceReplyCheckboxHint ||
-                  'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
-              >
-                <input
-                  type="checkbox"
-                  bind:checked={requestVoiceReplyUi}
-                  disabled={voiceReplyCheckboxDisabled}
-                  class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
-                />
-                Get voice reply
-              </label>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <label
+                  class={cn(
+                    'flex items-center gap-2 text-xs text-muted-foreground',
+                    voiceReplyCheckboxDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
+                  )}
+                  title={voiceReplyCheckboxHint ||
+                    'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
+                >
+                  <input
+                    type="checkbox"
+                    bind:checked={requestVoiceReplyUi}
+                    disabled={voiceReplyCheckboxDisabled}
+                    class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
+                  />
+                  Get voice reply
+                </label>
+                <label
+                  class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+                  title="Augment this message's reply with relevant workspace knowledge (sent per-message)."
+                >
+                  <input
+                    type="checkbox"
+                    bind:checked={useKnowledgeUi}
+                    class="accent-primary h-4 w-4 shrink-0"
+                  />
+                  Use knowledge
+                </label>
+              </div>
               <div
                 class="flex shrink-0 items-center gap-1"
                 role="group"

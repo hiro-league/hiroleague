@@ -9,6 +9,8 @@ export const PREF_KEYS = {
   chatChannelsVoiceReply: 'hiro.admin.chatChannels.voiceReply',
   /** Show agent tool stack + token counts on Messages tab (default on). */
   chatChannelsShowAgentTelemetry: 'hiro.admin.chatChannels.showAgentTelemetry',
+  /** "Use knowledge" per-message toggle on Messages tab (default on). */
+  chatChannelsUseKnowledge: 'hiro.admin.chatChannels.useKnowledge',
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab',
   knowledgeActiveTab: 'hiro.admin.knowledge.activeTab',
@@ -35,4 +37,5 @@ export type PreferencesTabPreference =
   | 'media'
   | 'memory'
   | 'knowledge'
+  | 'agent'
   | 'tuning-profiles';

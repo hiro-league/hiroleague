@@ -4,6 +4,7 @@ export type PreferenceTabId =
   | 'media'
   | 'memory'
   | 'knowledge'
+  | 'agent'
   | 'tuning-profiles';
 
 export const DEFAULT_PREFERENCE_TAB: PreferenceTabId = 'models';
@@ -15,6 +16,7 @@ export const PREFERENCE_TAB_IDS: Record<PreferenceTabId, string> = {
   media: 'preferences-tab-media',
   memory: 'preferences-tab-memory',
   knowledge: 'preferences-tab-knowledge',
+  agent: 'preferences-tab-agent',
   'tuning-profiles': 'preferences-tab-tuning-profiles'
 };
 
@@ -23,6 +25,7 @@ export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
   media: 'preferences-panel-media',
   memory: 'preferences-panel-memory',
   knowledge: 'preferences-panel-knowledge',
+  agent: 'preferences-panel-agent',
   'tuning-profiles': 'preferences-panel-tuning-profiles'
 };
 
@@ -31,6 +34,7 @@ export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
   { id: 'media', label: 'Media' },
   { id: 'memory', label: 'Agent Memory' },
   { id: 'knowledge', label: 'Knowledge' },
+  { id: 'agent', label: 'Agent' },
   { id: 'tuning-profiles', label: 'Tuning profiles' }
 ];
 
@@ -40,6 +44,7 @@ export const LEGACY_PREFERENCE_HASH_TO_TAB: Record<string, PreferenceTabId> = {
   'preferences-media': 'media',
   'preferences-memory': 'memory',
   'preferences-knowledge': 'knowledge',
+  'preferences-agent': 'agent',
   'preferences-tuning-profiles': 'tuning-profiles'
 };
 

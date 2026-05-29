@@ -19,9 +19,14 @@ export type TuningProfile = ModelTuning & {
 };
 
 export type MemorySearchPreferences = {
+  enabled: boolean;
   top_k: number;
   threshold: number;
   rerank: boolean;
+};
+
+export type MemoryExtractionPreferences = {
+  enabled: boolean;
 };
 
 export type MemoryRerankerPreferences = {
@@ -65,6 +70,13 @@ export type KnowledgePreferences = {
   };
 };
 
+export type ChatPreferences = {
+  instructions: string;
+  max_messages: number;
+  cite_sources: boolean;
+  preferred_answering_language: string;
+};
+
 export type WorkspacePreferences = {
   version: number;
   llm: {
@@ -82,18 +94,24 @@ export type WorkspacePreferences = {
     default_llm: string | null;
     default_embedding_model: string | null;
     default_tuning_profile: string;
-    max_messages: number;
     search: MemorySearchPreferences;
+    extraction: MemoryExtractionPreferences;
     reranker: MemoryRerankerPreferences;
   };
   knowledge: KnowledgePreferences;
+  chat: ChatPreferences;
   tuning_profiles: Record<string, TuningProfile>;
 };
 
 export const DEFAULT_MEMORY_SEARCH: MemorySearchPreferences = {
+  enabled: true,
   top_k: 8,
   threshold: 0.1,
   rerank: false
+};
+
+export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionPreferences = {
+  enabled: true
 };
 
 export const DEFAULT_MEMORY_RERANKER: MemoryRerankerPreferences = {
@@ -132,13 +150,22 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
   }
 };
 
+export const DEFAULT_CHAT: ChatPreferences = {
+  instructions: '',
+  max_messages: 6,
+  cite_sources: false,
+  preferred_answering_language: 'en'
+};
+
 /** Fill nested memory blocks when loading older preferences.json payloads. */
 export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): WorkspacePreferences {
   return {
     ...prefs,
+    chat: { ...DEFAULT_CHAT, ...(prefs.chat ?? {}) },
     memory: {
       ...prefs.memory,
       search: { ...DEFAULT_MEMORY_SEARCH, ...(prefs.memory.search ?? {}) },
+      extraction: { ...DEFAULT_MEMORY_EXTRACTION, ...(prefs.memory.extraction ?? {}) },
       reranker: { ...DEFAULT_MEMORY_RERANKER, ...(prefs.memory.reranker ?? {}) }
     },
     knowledge: {

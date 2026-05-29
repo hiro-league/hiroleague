@@ -5,6 +5,8 @@ export type GraphLedgerRow = {
   ts: number | '';
   run_id: string;
   step_index: number | '';
+  /** Sub-step ordinal within step_index for nested rows; rendered as `${step_index}.${sub_step}`. */
+  sub_step: number | '';
   node: string;
   node_attempt: number | '';
   branch_index: number | '';
@@ -74,6 +76,7 @@ export const GRAPH_RUN_HEADER_FIELDS = [
   'ts',
   'run_id',
   'step_index',
+  'sub_step',
   'node',
   'node_attempt',
   'branch_index',
@@ -112,6 +115,7 @@ export const GRAPH_RUN_HEADER_FIELDS = [
 export const GRAPH_RUN_HEADER_TAB_FIELDS = GRAPH_RUN_HEADER_FIELDS.filter(
   (k) =>
     k !== 'step_index' &&
+    k !== 'sub_step' &&
     k !== 'node_attempt' &&
     k !== 'branch_index' &&
     k !== 'pricing_version' &&

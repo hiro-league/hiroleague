@@ -53,6 +53,11 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
         label="Knowledge",
         description="Workspace-local RAG ingest, retrieval, and answering settings.",
     ),
+    PreferenceSection(
+        key="chat",
+        label="Agent",
+        description="How the character answers in chat — general instructions and citation behavior.",
+    ),
 )
 
 
@@ -225,7 +230,9 @@ class MediaPreferences(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-DEFAULT_MEMORY_MAX_MESSAGES = 6
+# Conversation-history window kept per turn (short-term context for trim_history). Lives under
+# ``chat`` (it feeds the chat answer + memory/knowledge retrieval), not under ``memory``.
+DEFAULT_MAX_HISTORY_MESSAGES = 6
 
 DEFAULT_MEMORY_SEARCH_TOP_K = 8
 DEFAULT_MEMORY_SEARCH_THRESHOLD = 0.1
@@ -235,6 +242,9 @@ DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 class MemorySearchPreferences(BaseModel):
     """Retrieval-time tuning for ``MemoryService.search``."""
 
+    # When false, ``memory_search`` is skipped — no long-term memory is injected before the reply
+    # (independent of extraction). No-op unless ``memory.enabled`` (models configured).
+    enabled: bool = True
     top_k: int = Field(default=DEFAULT_MEMORY_SEARCH_TOP_K, ge=1, le=100)
     # Mem0 fused score in [0, 1] (semantic + BM25 + entity boost). Rows below
     # this score are dropped pre-rerank; 0.0 disables the gate.
@@ -242,6 +252,14 @@ class MemorySearchPreferences(BaseModel):
     # Per-call default for the rerank pass. Effective only when
     # ``reranker.enabled`` is true; otherwise mem0 has no reranker to call.
     rerank: bool = False
+
+
+class MemoryExtractionPreferences(BaseModel):
+    """Whether the agent stores new long-term memories after a reply (memory_out)."""
+
+    # When false, ``_store_turn_memory`` is skipped — memory becomes read-only (it stops growing)
+    # while search may still inject existing memories. No-op unless ``memory.enabled``.
+    enabled: bool = True
 
 
 class MemoryRerankerPreferences(BaseModel):
@@ -265,8 +283,8 @@ class MemoryPreferences(BaseModel):
     default_llm: str | None = None
     default_embedding_model: str | None = None
     default_tuning_profile: str = DEFAULT_MEMORY_TUNING_PROFILE_ID
-    max_messages: int = Field(default=DEFAULT_MEMORY_MAX_MESSAGES, ge=1, le=100)
     search: MemorySearchPreferences = Field(default_factory=MemorySearchPreferences)
+    extraction: MemoryExtractionPreferences = Field(default_factory=MemoryExtractionPreferences)
     reranker: MemoryRerankerPreferences = Field(default_factory=MemoryRerankerPreferences)
 
     @model_validator(mode="after")
@@ -285,15 +303,21 @@ DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingu
 # the domain layer does not import the services layer (same pattern as the embedding default).
 DEFAULT_KNOWLEDGE_SPARSE_MODEL = "Qdrant/bm25"
 
-# System prompt for the optional query-rewrite step (admin Ask). Editable in preferences;
-# the rewrite node falls back to this constant when the stored prompt is blank. Scope is
-# normalization + literal-keyword extraction (no conversation history in admin Ask).
+# System prompt for the optional query-rewrite step. Editable in preferences; the rewrite node
+# falls back to this constant when the stored prompt is blank. Scope is normalization +
+# literal-keyword extraction; the conversation-history clause is a no-op for admin Ask (which
+# passes no history) and active in chat (where history is supplied for reference resolution).
 DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
     "Rewrite the user's question into one clean, standalone search query. "
     "Fix typos and normalize informal or dialectal phrasing into clear formal language, "
     "but do NOT change the meaning or add information that is not in the question. "
+    "If a conversation is provided, resolve references (pronouns, 'the second one', "
+    "'his brother') against it so the query stands alone without the conversation. "
     "Copy proper nouns, names, dates, and identifiers VERBATIM into `keywords` — never "
-    "translate or 'correct' a name. Do not invent facts or answer the question."
+    "translate or 'correct' a name. "
+    "Set `knowledge_needed` to false when the message is just a greeting, farewell, thanks, "
+    "acknowledgement, or small talk and clearly does not ask for stored information; otherwise "
+    "true. Do not invent facts or answer the question."
 )
 
 
@@ -356,6 +380,38 @@ class KnowledgePreferences(BaseModel):
         return self.default_embedding_model or DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
 
 
+# General chat-answering instructions injected (in the current user turn) ahead of the question.
+# Authored as Markdown in the Admin → Preferences → Agent editor; sent to the model as text.
+# Not knowledge-specific — these are how the character should answer, regardless of retrieval.
+DEFAULT_CHAT_INSTRUCTIONS = (
+    "## Instructions\n"
+    "- This is a conversation between you (the character) and the user.\n"
+    "- Use the **Knowledge retrieved** (from the workspace knowledge base) and "
+    "**Memories retrieved** below as optional background.\n"
+    "- You choose what is relevant — you do not need to use all, or any, of it.\n"
+    "- source rank and score suggest the search relevancy of the knowledge item to the "
+    "user message/context\n"
+    "- Answer **Last User Message** in your own style."
+)
+
+
+class ChatPreferences(BaseModel):
+    """Chat-answering behavior (the chat model answers; not the Ask knowledge answerer)."""
+
+    # General answering instructions (Markdown), injected into the current user turn. Editable in
+    # the Admin → Preferences → Agent tab. Broader than knowledge — may carry any answering guidance.
+    instructions: str = DEFAULT_CHAT_INSTRUCTIONS
+    # Conversation-history window kept per turn by trim_history (short-term context). Feeds the chat
+    # answer + memory/knowledge retrieval — a chat-answering concern, not a long-term memory one.
+    max_messages: int = Field(default=DEFAULT_MAX_HISTORY_MESSAGES, ge=1, le=100)
+    # When on, chat instructs the model to cite knowledge inline as [n] AND surfaces the source list
+    # to the client (citation bridge on graph.reply.completed). Moved here from knowledge.chat.
+    cite_sources: bool = False
+    # Placeholder until a real per-character/per-chat language setting exists; chat retrieval does
+    # not constrain answer language today (the persona decides). Kept so it can be threaded later.
+    preferred_answering_language: str = "en"
+
+
 # ---------------------------------------------------------------------------
 # Top-level model
 # ---------------------------------------------------------------------------
@@ -369,6 +425,7 @@ class WorkspacePreferences(BaseModel):
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
     knowledge: KnowledgePreferences = Field(default_factory=KnowledgePreferences)
+    chat: ChatPreferences = Field(default_factory=ChatPreferences)
     tuning_profiles: dict[str, TuningProfile] = Field(default_factory=default_tuning_profiles)
 
     @model_validator(mode="after")

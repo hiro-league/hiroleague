@@ -440,7 +440,7 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
                 side_effect=fake_create_memory_service,
             ),
         ):
-            mgr._ctx.preferences.update("memory.max_messages", 9)
+            mgr._ctx.preferences.update("chat.max_messages", 9)
             await asyncio.sleep(0.05)
 
         assert stt_rebuilds == []

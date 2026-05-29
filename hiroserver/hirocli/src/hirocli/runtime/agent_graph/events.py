@@ -99,13 +99,16 @@ class MemoryStoredPayload(TypedDict):
     elapsed_ms: int
 
 
-class ReplyCompletedPayload(TypedDict):
+class ReplyCompletedPayload(TypedDict, total=False):
     inbound_id: str
     chat_channel_id: int
     thread_id: str
     reply_text: str
     reply_id: str
     request_voice_reply: bool
+    # Present only when chat.cite_sources is on and the turn used knowledge. Compact
+    # source dicts (ref/title/heading_path/source_uri/document_id/score); persisted on the reply.
+    knowledge_sources: list[dict[str, Any]]
 
 
 class TtsCompletedPayload(TypedDict, total=False):

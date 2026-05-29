@@ -50,7 +50,14 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer, Send, StreamWriter
 
 from ...domain.memory import resolve_memory_user_id
-from ...domain.preferences import DEFAULT_MEMORY_MAX_MESSAGES
+from ...domain.preferences import DEFAULT_MAX_HISTORY_MESSAGES
+from .context_assembly import (
+    ContextAssembler,
+    citation_block,
+    instructions_block,
+    knowledge_block,
+    memory_block,
+)
 from .events import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
@@ -69,6 +76,7 @@ from .events import (
 from .ledger import (
     LedgerSink,
     current_entry,
+    current_substep,
     graph_logged,
     wrap_graph_callable,
     wrap_graph_node,
@@ -96,7 +104,7 @@ if TYPE_CHECKING:
 log = Logger.get("AGENT.GRAPH")
 
 # Compatibility default for callers that have not been wired to runtime prefs.
-TRIMMED_MESSAGE_LIMIT = DEFAULT_MEMORY_MAX_MESSAGES
+TRIMMED_MESSAGE_LIMIT = DEFAULT_MAX_HISTORY_MESSAGES
 
 
 class BaseAgentGraph:
@@ -126,6 +134,7 @@ class BaseAgentGraph:
         checkpointer: Checkpointer | None,
         memory_service: "MemoryService | None" = None,
         preferences: "WorkspacePreferencesRuntime | None" = None,
+        knowledge_subgraph: CompiledStateGraph | None = None,
     ) -> None:
         self._workspace_path = workspace_path
         self._stt = stt_service
@@ -135,6 +144,9 @@ class BaseAgentGraph:
         self._credentials = credential_store
         self._checkpointer = checkpointer
         self._preferences = preferences
+        # Compiled retrieval-only knowledge subgraph (KnowledgeAgentGraph.build_retrieval()).
+        # None when knowledge is unavailable — the chat graph then skips the knowledge branch.
+        self._knowledge_subgraph = knowledge_subgraph
         self._ledger_sink = LedgerSink(workspace_path)
 
     # ------------------------------------------------------------------
@@ -152,6 +164,14 @@ class BaseAgentGraph:
 
     def set_memory_service(self, memory_service: "MemoryService | None") -> None:
         self._memory = memory_service
+
+    def set_knowledge_subgraph(self, knowledge_subgraph: CompiledStateGraph | None) -> None:
+        """Swap the compiled knowledge subgraph (rebuilt on knowledge-preference changes).
+
+        ``knowledge_retrieve_node`` reads ``self._knowledge_subgraph`` per call, so reassigning is
+        enough — no chat-graph recompile (the knowledge branch shape does not depend on prefs).
+        """
+        self._knowledge_subgraph = knowledge_subgraph
 
     # ------------------------------------------------------------------
     # Override point — subclasses wire the StateGraph here.
@@ -475,7 +495,7 @@ class BaseAgentGraph:
         """
         user_text = state.get("user_text") or ""
         if user_text.strip():
-            return "memory_in"
+            return "trim_history"
         return "media_failed"
 
     @graph_logged(captures={"decision"})
@@ -534,29 +554,27 @@ class BaseAgentGraph:
         )
         return {"reply_text": reply_text, "reply_id": reply_id}
 
-    @graph_logged(captures={"decision"})
-    async def memory_in_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
-        """Trim chat history to the latest ``TRIMMED_MESSAGE_LIMIT`` messages.
+    async def trim_history_node(self, state: GraphState) -> dict[str, Any]:
+        """Trim chat history to the latest ``chat.max_messages`` turns.
 
-        Replaces the prior ``trimming_agent_graph``: same fixed-window memory,
-        now expressed as a graph node like everything else.
+        Split out of the old ``memory_in`` node so it runs *before* the parallel
+        memory + knowledge branches: both consume the same trimmed window (knowledge's
+        history-aware query rewrite must see exactly what memory sees).
         """
         messages: list[AnyMessage] = list(state.get("messages", []) or [])
-        limit = self._memory_max_messages()
+        limit = self._history_window()
         keep = _trim_chat_history(messages, limit)
-        result: dict[str, Any] = {}
         if keep == messages:
-            pass
-        else:
-            from langchain_core.messages import RemoveMessage
-            from langgraph.graph.message import REMOVE_ALL_MESSAGES
+            return {}
+        from langchain_core.messages import RemoveMessage
+        from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-            log.info(
-                "memory_in trim - before=%d after=%d",
-                len(messages), len(keep),
-            )
-            result["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES), *keep]
+        log.info("trim_history - before=%d after=%d", len(messages), len(keep))
+        return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *keep]}
 
+    @graph_logged(captures={"decision"})
+    async def memory_search_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
+        """Bring recent conversation memory (mem0) into the turn. Runs after ``trim_history``."""
         text = state.get("user_text") or ""
         if entry := current_entry.get():
             entry.set_input_preview(f"search: {text}" if text.strip() else "search: <empty>")
@@ -566,13 +584,20 @@ class BaseAgentGraph:
                 entry.set_output_preview(
                     "results: 0; disabled" if self._memory is None else "results: 0; no_query"
                 )
-            return result
+            return {}
 
-        if not bool(getattr(getattr(self._current_preferences(), "memory", None), "enabled", False)):
+        memory_prefs = getattr(self._current_preferences(), "memory", None)
+        if not bool(getattr(memory_prefs, "enabled", False)):
             if entry := current_entry.get():
                 entry.set_decision("empty", "disabled")
                 entry.set_output_preview("results: 0; disabled")
-            return result
+            return {}
+        # Independent per-direction toggle: skip retrieval when memory search is off.
+        if not bool(getattr(getattr(memory_prefs, "search", None), "enabled", True)):
+            if entry := current_entry.get():
+                entry.set_decision("empty", "search_disabled")
+                entry.set_output_preview("results: 0; search disabled")
+            return {}
 
         t0 = time.perf_counter()
         memory_user_id = resolve_memory_user_id(
@@ -591,17 +616,17 @@ class BaseAgentGraph:
                 entry.set_error("memory_search_failed")
                 entry.set_output_preview(f"error: {exc}")
             log.warning(
-                "memory_in search failed - %s",
+                "memory_search failed - %s",
                 state.get("inbound_id", "?"),
                 error=str(exc),
             )
-            return result
+            return {}
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         if entry := current_entry.get():
             entry.set_decision("retrieved" if hits else "empty", str(len(hits)))
             entry.set_output_preview(_memory_results_preview("results", hits))
-        log.info("memory_in retrieved - n=%d", len(hits), elapsed_ms=elapsed_ms)
+        log.info("memory_search retrieved - n=%d", len(hits), elapsed_ms=elapsed_ms)
         self._emit(
             writer,
             GRAPH_MEMORY_RETRIEVED,
@@ -613,19 +638,144 @@ class BaseAgentGraph:
                 "elapsed_ms": elapsed_ms,
             },
         )
-        result["retrieved_memories"] = hits
-        return result
+        return {"retrieved_memories": hits}
+
+    def knowledge_fanout(self, state: GraphState) -> list[str]:
+        """Fan out from ``trim_history`` to the parallel context branches.
+
+        ``memory_search`` always runs; ``knowledge_retrieve`` is added only when a knowledge
+        subgraph is wired and the per-message toggle is on (default on). Both join at
+        ``context_build``.
+        """
+        targets = ["memory_search"]
+        if self._knowledge_subgraph is not None and bool(state.get("knowledge_enabled", True)):
+            targets.append("knowledge_retrieve")
+        return targets
+
+    @graph_logged(captures={"decision"})
+    async def knowledge_retrieve_node(
+        self, state: GraphState, writer: StreamWriter
+    ) -> dict[str, Any]:
+        """Run the knowledge retrieval subgraph and map context + sources into chat state.
+
+        Invoked with no ledger run of its own, so its ``knowledge/*`` node rows fold into the
+        chat turn. Any failure degrades gracefully — the turn still answers without knowledge.
+        """
+        entry = current_entry.get()
+        if self._knowledge_subgraph is None:
+            if entry:
+                entry.set_decision("skipped", "no_subgraph")
+                entry.set_output_preview("sources: 0; no_subgraph")
+            return {}
+        user_text = (state.get("user_text") or "").strip()
+        if not user_text:
+            if entry:
+                entry.set_decision("empty", "no_user_text")
+                entry.set_output_preview("sources: 0; no_user_text")
+            return {}
+        if entry:
+            entry.set_input_preview(f"query: {user_text[:160]}")
+
+        retrieval = self._current_preferences().knowledge.retrieval
+        sub_input: dict[str, Any] = {
+            "query": user_text,
+            "history": _format_history(list(state.get("messages") or [])),
+            "rewrite": True,
+            "filters": self._knowledge_scope_filters(state),
+            "top_k": retrieval.top_k,
+            "min_score": retrieval.min_score,
+            "inbound_id": state.get("inbound_id", ""),
+            "chat_channel_id": state.get("chat_channel_id", 0),
+            "character_id": state.get("character_id", ""),
+            "user_id": str(state.get("data_user_id") or ""),
+        }
+        # Number the retrieval subgraph's ``knowledge/*`` rows as sub-steps of this node (e.g. ``4.1``)
+        # so they sort under it in the ledger instead of restarting their own step counter.
+        substep_token = current_substep.set(entry.step_index) if entry is not None else None
+        try:
+            out = await self._knowledge_subgraph.ainvoke(sub_input)
+        except Exception as exc:
+            log.warning(
+                "⚠️ knowledge_retrieve failed - %s",
+                state.get("inbound_id", "?"),
+                error=str(exc),
+                exc_info=True,
+            )
+            if entry:
+                entry.set_decision("failed", _error_slug(exc))
+                entry.set_error("knowledge_retrieve_failed")
+                entry.set_output_preview(f"error: {exc}")
+            return {}
+        finally:
+            if substep_token is not None:
+                current_substep.reset(substep_token)
+
+        sources = list(out.get("sources") or [])
+        context = out.get("context") or ""
+        if entry:
+            entry.set_decision("retrieved" if sources else "empty", str(len(sources)))
+            entry.set_output_preview(f"sources: {len(sources)}")
+        return {"knowledge_context": context, "knowledge_sources": sources}
+
+    def _knowledge_scope_filters(self, state: GraphState) -> dict[str, Any]:
+        """Owner/category scope for chat retrieval, derived server-side (never from the LLM).
+
+        v1: all owners visible (system + character + user) → no filter. Tightening to a
+        per-character/per-user policy is a later step.
+        """
+        return {}
 
     async def context_build_node(self, state: GraphState) -> dict[str, Any]:
-        """Append the new user turn to the (trimmed) message history."""
+        """Append the new user turn — and ONLY the user turn — to the (trimmed) history.
+
+        Memory / knowledge / citation context is assembled ephemerally by ``compose_context`` into
+        ``turn_context`` and injected by ``call_model`` into the current user turn; it must never
+        enter ``messages`` (durable history stays clean across turns). See
+        ``docs/context-assembly.md``.
+        """
         text = state.get("user_text")
         if not text:
             # No usable input — leave messages untouched; call_model will short-circuit.
             return {}
-        memory_context = _format_memory_context(state.get("retrieved_memories", []) or [])
-        if memory_context:
-            text = f"{memory_context}\n\n{text}"
         return {"messages": [HumanMessage(content=text)]}
+
+    def make_compose_context_node(self):
+        """Return a node that assembles the ephemeral per-turn context block.
+
+        Renders memory + knowledge (+ citation instruction) via :class:`ContextAssembler` into
+        ``turn_context``. Persona is NOT included — it stays a stable system message in
+        ``call_model`` (cache-friendly). Runs once before the tools loop; ``call_model`` injects
+        ``turn_context`` into the current user turn each iteration. Nothing here touches ``messages``.
+        """
+        assembler = ContextAssembler()  # Phase 1: no token budget (seam for Phase 2).
+
+        @graph_logged(captures={"decision"})
+        async def compose_context(state: GraphState, writer: StreamWriter) -> dict[str, Any]:
+            sources = state.get("knowledge_sources") or []
+            # Instructions, Knowledge, and Memories are always present (sections render a
+            # placeholder when empty); the citation instruction is conditional. Knowledge renders
+            # from the structured sources (tagged, neutralized), not the pre-joined string.
+            blocks = [
+                block
+                for block in (
+                    instructions_block(self._chat_instructions()),
+                    knowledge_block(sources),
+                    memory_block(state.get("retrieved_memories") or []),
+                    citation_block(
+                        has_sources=bool(sources),
+                        cite_enabled=self._knowledge_cite_in_chat(),
+                    ),
+                )
+                if block is not None
+            ]
+            turn_context = assembler.assemble(blocks=blocks)
+            if entry := current_entry.get():
+                sources = ",".join(block.source for block in blocks) or "none"
+                entry.set_decision("composed", sources)
+                entry.set_output_preview(f"blocks: {sources}; chars={len(turn_context)}")
+            return {"turn_context": turn_context}
+
+        return self._wrap_dynamic_node("compose_context", compose_context)
 
     def make_call_model_node(
         self,
@@ -647,13 +797,28 @@ class BaseAgentGraph:
                     entry.set_input_preview("messages: 0")
                     entry.set_output_preview("reply: <empty>")
                 return {}
-            inputs: list[AnyMessage] = (
-                [SystemMessage(content=system_prompt), *messages]
-                if system_prompt
-                else messages
-            )
+            # Persona stays a stable system message (cache-friendly). The per-turn context block
+            # (memory + knowledge + citation), assembled once by compose_context into
+            # ``turn_context``, is injected ephemerally into the current user turn — context first,
+            # question last — so it sits next to the query and never persists in ``messages``.
+            # ``turn_context`` is absent for non-chat variants that skip compose_context.
+            turn_context = (state.get("turn_context") or "").strip()
+            inputs: list[AnyMessage] = list(messages)
+            if turn_context:
+                # The current user turn is the last HumanMessage (after a tool loop it is no longer
+                # the final element). Enrich a copy of it; the stored message stays clean.
+                for i in range(len(inputs) - 1, -1, -1):
+                    if isinstance(inputs[i], HumanMessage):
+                        user_text = _normalize_reply_content(inputs[i].content)
+                        inputs[i] = HumanMessage(
+                            content=f"{turn_context}\n\n## Last User Message\n{user_text}"
+                        )
+                        break
+            if system_prompt:
+                inputs = [SystemMessage(content=system_prompt), *inputs]
             if entry := current_entry.get():
-                entry.set_input_preview(f"text: {_last_human_message_preview(inputs)}")
+                # Preview the clean stored turn (not the enriched copy) so the ledger reflects state.
+                entry.set_input_preview(f"text: {_last_human_message_preview(messages)}")
             input_estimate = count_tokens_approximately(inputs)
             log.fineinfo(
                 "call_model — input · count=%d tokens≈%d",
@@ -829,6 +994,7 @@ class BaseAgentGraph:
                 "reply_text": reply_text,
                 "reply_id": reply_id,
                 "request_voice_reply": bool(state.get("request_voice_reply", False)),
+                "knowledge_sources": self._reply_knowledge_sources(state),
             },
         )
         await self._store_turn_memory(state, writer, reply_text)
@@ -850,10 +1016,17 @@ class BaseAgentGraph:
         writer: StreamWriter,
         reply_text: str,
     ) -> None:
-        if self._memory is None or not bool(getattr(self._current_preferences().memory, "enabled", False)):
+        memory_prefs = self._current_preferences().memory
+        if self._memory is None or not bool(getattr(memory_prefs, "enabled", False)):
             if entry := current_entry.get():
                 entry.set_decision("skipped", "disabled")
                 entry.set_output_preview("stored: 0; disabled")
+            return
+        # Independent per-direction toggle: skip storage when memory extraction is off (read-only).
+        if not bool(getattr(getattr(memory_prefs, "extraction", None), "enabled", True)):
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "extraction_disabled")
+                entry.set_output_preview("stored: 0; extraction disabled")
             return
 
         t0 = time.perf_counter()
@@ -1176,11 +1349,29 @@ class BaseAgentGraph:
 
         return load_preferences(self._workspace_path)
 
-    def _memory_max_messages(self) -> int:
+    def _history_window(self) -> int:
         try:
-            return int(self._current_preferences().memory.max_messages)
+            return int(self._current_preferences().chat.max_messages)
         except Exception:
             return TRIMMED_MESSAGE_LIMIT
+
+    def _knowledge_cite_in_chat(self) -> bool:
+        try:
+            return bool(self._current_preferences().chat.cite_sources)
+        except Exception:
+            return False
+
+    def _chat_instructions(self) -> str:
+        try:
+            return str(self._current_preferences().chat.instructions or "")
+        except Exception:
+            return ""
+
+    def _reply_knowledge_sources(self, state: GraphState) -> list[dict[str, Any]]:
+        """Serialized knowledge sources to attach to the reply — only when chat citations are on."""
+        if not self._knowledge_cite_in_chat():
+            return []
+        return _serialize_knowledge_sources(state.get("knowledge_sources") or [])
 
     def _wrap_dynamic_node(self, node_name: str, fn):
         return wrap_graph_callable(self, node_name, fn)
@@ -1247,22 +1438,44 @@ def _normalize_reply_content(content: Any) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def _format_memory_context(memories: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for item in memories[:8]:
-        text = (
-            item.get("memory")
-            or item.get("text")
-            or item.get("content")
-            or item.get("data")
-            or ""
+def _serialize_knowledge_sources(sources: list[Any]) -> list[dict[str, Any]]:
+    """Compact, JSON-safe view of KnowledgeSource for the reply event + persisted metadata.
+
+    Carries just what a source-list UI needs; the bracket [n] in the reply text maps to ``ref``.
+    """
+    out: list[dict[str, Any]] = []
+    for source in sources:
+        out.append(
+            {
+                "ref": getattr(source, "ref", None),
+                "title": getattr(source, "title", ""),
+                "heading_path": getattr(source, "heading_path", None),
+                "source_uri": getattr(source, "source_uri", ""),
+                "document_id": getattr(source, "document_id", ""),
+                "score": getattr(source, "score", None),
+            }
         )
-        text = " ".join(str(text or "").split())
+    return out
+
+
+def _format_history(messages: list[AnyMessage], *, limit: int = 6) -> str:
+    """Format the last ``limit`` prior turns as 'Role: text' lines for the knowledge rewrite node.
+
+    Called at ``knowledge_retrieve`` time, before the new user turn is appended, so this is the
+    prior conversation only — exactly the context needed to resolve references in the query.
+    """
+    lines: list[str] = []
+    for message in messages[-limit:]:
+        if isinstance(message, HumanMessage):
+            role = "User"
+        elif isinstance(message, AIMessage):
+            role = "Assistant"
+        else:
+            continue
+        text = _normalize_reply_content(message.content).strip()
         if text:
-            lines.append(f"- {text[:500]}")
-    if not lines:
-        return ""
-    return "Memory context:\n" + "\n".join(lines)
+            lines.append(f"{role}: {text}")
+    return "\n".join(lines)
 
 
 def _memory_results_preview(

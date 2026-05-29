@@ -76,6 +76,16 @@ def routing_requests_voice_reply(metadata: dict[str, Any] | None) -> bool:
     return (metadata or {}).get("request_voice_reply") is True
 
 
+def routing_uses_knowledge(metadata: dict[str, Any] | None) -> bool:
+    """True unless routing.metadata.use_knowledge is explicitly False (per-message toggle, default ON).
+
+    Mirrors ``request_voice_reply`` but defaults on: knowledge augmentation runs for a chat turn
+    unless the client opted out for this message. Absent metadata (older clients) keeps it enabled.
+    """
+
+    return (metadata or {}).get("use_knowledge") is not False
+
+
 def _snippet_text(body: str, max_len: int = _TEXT_SNIPPET_MAX) -> str:
     t = " ".join(body.split())
     if len(t) <= max_len:

@@ -570,6 +570,12 @@ class GraphEventSubscriber:
         inbound_id = str(payload.get("inbound_id") or inbound.routing.id)
         agent = self._agent_meta(inbound_id)
         agent["reply_id"] = reply_id
+        # Knowledge citations (only present when chat.cite_sources is on) ride alongside
+        # the agent snapshot so a source-list UI can render them; the [n] in the text maps to ref.
+        metadata: dict[str, Any] = {"agent": agent}
+        knowledge_sources = payload.get("knowledge_sources")
+        if knowledge_sources:
+            metadata["knowledge_sources"] = knowledge_sources
         try:
             from ..domain.message_store import save_message
 
@@ -581,7 +587,7 @@ class GraphEventSubscriber:
                 sender_id="server",
                 content_type="text",
                 body=reply_text,
-                metadata={"agent": agent},
+                metadata=metadata,
             )
         except Exception as exc:
             log.warning(

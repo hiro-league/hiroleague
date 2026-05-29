@@ -14,8 +14,8 @@ from hirocli.domain.events import (
     get_domain_event_bus,
 )
 from hirocli.domain.preferences import (
+    ChatPreferences,
     LLMPreferences,
-    MemoryPreferences,
     WorkspacePreferences,
     compute_effective_changes,
     save_preferences,
@@ -87,11 +87,11 @@ def test_select_changes_unrelated_path() -> None:
 def test_compute_effective_changes_only_real_diffs() -> None:
     old = WorkspacePreferences(
         llm=LLMPreferences(default_stt="openai:gpt-4o-transcribe"),
-        memory=MemoryPreferences(max_messages=6),
+        chat=ChatPreferences(max_messages=6),
     )
     new = WorkspacePreferences(
         llm=LLMPreferences(default_stt="openai:gpt-4o-mini-transcribe"),
-        memory=MemoryPreferences(max_messages=6),
+        chat=ChatPreferences(max_messages=6),
     )
     changes = compute_effective_changes(old, new)
     assert changes == {
@@ -105,9 +105,9 @@ def test_compute_effective_changes_no_op() -> None:
 
 
 def test_compute_effective_changes_from_none_treats_all_leaves_as_new() -> None:
-    new = WorkspacePreferences(memory=MemoryPreferences(max_messages=9))
+    new = WorkspacePreferences(chat=ChatPreferences(max_messages=9))
     changes = compute_effective_changes(None, new)
-    assert ("memory.max_messages", (None, 9)) in changes.items()
+    assert ("chat.max_messages", (None, 9)) in changes.items()
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ async def test_runtime_update_publishes_effective_changes_only(tmp_path: Path) -
     """A second update setting the same value must not republish that path."""
     save_preferences(
         tmp_path,
-        WorkspacePreferences(memory=MemoryPreferences(max_messages=6)),
+        WorkspacePreferences(chat=ChatPreferences(max_messages=6)),
     )
 
     runtime = WorkspacePreferencesRuntime(tmp_path)
@@ -252,13 +252,13 @@ async def test_runtime_update_publishes_effective_changes_only(tmp_path: Path) -
 
     reactor = PreferenceReactor(tmp_path)
     try:
-        reactor.on_change("memory.max_messages", handler, key="t.mem", debounce_ms=10)
+        reactor.on_change("chat.max_messages", handler, key="t.chat", debounce_ms=10)
 
-        runtime.update("memory.max_messages", 9)
+        runtime.update("chat.max_messages", 9)
         await asyncio.sleep(0.05)
-        assert captured == [{"memory.max_messages": (6, 9)}]
+        assert captured == [{"chat.max_messages": (6, 9)}]
 
-        runtime.update("memory.max_messages", 9)
+        runtime.update("chat.max_messages", 9)
         await asyncio.sleep(0.05)
         assert len(captured) == 1
     finally:

@@ -112,6 +112,7 @@ async def send_chat_channel_message(
             audio_mime_type=body.audio_mime_type,
             audio_duration_ms=body.audio_duration_ms,
             request_voice_reply=body.request_voice_reply,
+            use_knowledge=body.use_knowledge,
         )
     )
     return _api_from_result(result)

@@ -128,6 +128,7 @@ class MessageSendTool(Tool):
         "audio_mime_type": ToolParam(str, "e.g. audio/webm, audio/m4a (required with audio)", required=False),
         "audio_duration_ms": ToolParam(int, "Recorded duration in ms (required with audio)", required=False),
         "request_voice_reply": ToolParam(bool, "Set routing.metadata.request_voice_reply when true", required=False),
+        "use_knowledge": ToolParam(bool, "Augment the reply with workspace knowledge (default true)", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
@@ -153,6 +154,7 @@ class MessageSendTool(Tool):
         audio_mime_type: str | None = None,
         audio_duration_ms: int | None = None,
         request_voice_reply: bool = False,
+        use_knowledge: bool = True,
     ) -> MessageSendResult:
         rt = getattr(self, "_runtime", None)
         if rt is None:
@@ -245,6 +247,10 @@ class MessageSendTool(Tool):
         }
         if request_voice_reply:
             meta["request_voice_reply"] = True
+        # Default-on per-message toggle: set explicitly only on opt-out so the wire carries the
+        # intent; absent metadata is treated as enabled by ``routing_uses_knowledge``.
+        if not use_knowledge:
+            meta["use_knowledge"] = False
 
         msg_id = str(uuid.uuid4())
         envelope = UnifiedMessage(

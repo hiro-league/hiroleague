@@ -42,7 +42,8 @@ export function editsForSave(
     add(`media.input.${key}`, baseline.media.input[key], draft.media.input[key]);
     add(`media.output.${key}`, baseline.media.output[key], draft.media.output[key]);
   }
-  add('memory.max_messages', baseline.memory.max_messages, draft.memory.max_messages);
+  add('memory.search.enabled', baseline.memory.search.enabled, draft.memory.search.enabled);
+  add('memory.extraction.enabled', baseline.memory.extraction.enabled, draft.memory.extraction.enabled);
   add('memory.search.top_k', baseline.memory.search.top_k, draft.memory.search.top_k);
   add('memory.search.threshold', baseline.memory.search.threshold, draft.memory.search.threshold);
   add('memory.search.rerank', baseline.memory.search.rerank, draft.memory.search.rerank);
@@ -98,6 +99,9 @@ export function editsForSave(
   );
   add('knowledge.rewrite.prompt', baseline.knowledge.rewrite.prompt, draft.knowledge.rewrite.prompt);
   add('knowledge.rewrite.default_on', baseline.knowledge.rewrite.default_on, draft.knowledge.rewrite.default_on);
+  add('chat.instructions', baseline.chat.instructions, draft.chat.instructions);
+  add('chat.max_messages', baseline.chat.max_messages, draft.chat.max_messages);
+  add('chat.cite_sources', baseline.chat.cite_sources, draft.chat.cite_sources);
   add('tuning_profiles', baseline.tuning_profiles, draft.tuning_profiles);
   return edits;
 }

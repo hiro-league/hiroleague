@@ -131,7 +131,9 @@ collapse. These are precision knobs — useful, but only once recall produces go
 ### 5. No reranker (precision / ordering — secondary)
 A cross-encoder reranker reorders the candidate set so the LLM sees the best 5–8 instead of
 all 20. Important eventually, but it can **only reorder what retrieval already surfaced** —
-with the current recall it would add latency for little gain. Fix recall (1–3) first.
+with the current recall it would add latency for little gain. Fix recall (1–3) first. See
+[Reranking](#reranking-precision--ordering) for the backend/model breakdown — note the agent-
+memory reranker is English-only and must **not** be reused as-is for Arabic.
 
 ### 6. Single-shot query → single embedding (recall, vague & conversational queries)
 No conversational rewriting, multi-query rewrite, or sub-question decomposition. Short/vague
@@ -252,6 +254,84 @@ re-ingesting (`_ensure_collection` refuses to resize a populated collection).
    docs via the admin Knowledge UI, or stop the server and delete
    `<workspace>/knowledge/qdrant/` + `knowledge.db`, then re-ingest.
 
+## Reranking (precision / ordering)
+
+A cross-encoder reranker scores each `(query, chunk)` pair jointly and reorders the
+candidate set, so the LLM sees the best 5–8 chunks instead of all 20 in fused-rank order.
+It is a **precision** step, deliberately sequenced **after** the embedder upgrade: it can
+only reorder what retrieval already surfaced, so running it on weak candidates adds latency
+for little gain (gap #5). Two constraints from this stack shape every choice below:
+
+- **Must be multilingual.** The agent-memory reranker already defaults to
+  `cross-encoder/ms-marco-MiniLM-L-6-v2` (`DEFAULT_RERANKER_MODEL`, `preferences.py`), which
+  is **English-only**. Reusing it as-is for an Arabic corpus would actively *hurt* ordering.
+  The knowledge reranker needs a genuinely multilingual cross-encoder.
+- **CPU by default** (same stack note as embedding). A cross-encoder runs the model once
+  per candidate, so latency ≈ `top_k` × model size. On CPU the latency levers are the model
+  and the candidate count fed in (rerank the top ~20, not the whole index).
+
+### Two backends — and they expose *different* model menus
+
+This is the key finding (verified against the installed `fastembed==0.8.0` and the
+already-present `sentence-transformers`, not model cards): the backend you pick **constrains
+which models you can run**, exactly like the `bge-m3` embedder situation.
+
+**FastEmbed `TextCrossEncoder` (pure ONNX, no torch).** Same CPU-ONNX runtime as the
+embedder and BM25 branch; lightest footprint. Verified supported models in 0.8.0:
+
+| Model | Multilingual / Arabic | License | Size |
+|---|---|---|---|
+| `Xenova/ms-marco-MiniLM-L-6-v2` / `-L-12-v2` | English-only | Apache-2 | 0.08 / 0.12 GB |
+| `jinaai/jina-reranker-v1-tiny-en` / `-turbo-en` | English-only | Apache-2 | 0.13 / 0.15 GB |
+| **`BAAI/bge-reranker-base`** | multilingual (ok Arabic) | **Apache-2** | 1.04 GB |
+| `jinaai/jina-reranker-v2-base-multilingual` | strong | ⚠️ **CC-BY-NC** (non-commercial) | 1.11 GB |
+
+> In the FastEmbed lane the **only** usable multilingual option is `bge-reranker-base`
+> (Apache-2). The stronger `bge-reranker-v2-m3` and `gte-multilingual-reranker-base` are
+> **absent from FastEmbed 0.8.0's cross-encoder list**, and the Jina v2 multilingual model
+> is non-commercial. So staying in ONNX means accepting `bge-reranker-base` as the ceiling.
+
+**`sentence-transformers` `CrossEncoder` (HuggingFace, torch).** Same path agent-memory
+already uses via mem0's `sentence_transformer` provider; pulls torch (CPU build) but unlocks
+the full HF menu:
+
+| Model | Multilingual / Arabic | License | Size (≈params) |
+|---|---|---|---|
+| **`BAAI/bge-reranker-v2-m3`** | excellent (100+ langs) | Apache-2 | ~568M |
+| **`Alibaba-NLP/gte-multilingual-reranker-base`** | strong | Apache-2 | ~306M |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` *(memory default)* | English-only | Apache-2 | ~22M |
+
+**Cloud rerank (Cohere Rerank 3.5, Jina API)** is best-in-class and zero local compute, but
+data leaves the machine — same objection as the cloud embedders; not now.
+
+**Decision: compare both backends, pick the model via eval — not from this table.** The
+FastEmbed lane keeps everything in one ONNX runtime at the cost of capping at
+`bge-reranker-base`; the sentence-transformers lane adds a second reranker backend + torch
+but reaches `bge-reranker-v2-m3` / `gte`. Which actually wins on *this* Arabic corpus is an
+empirical question, so the eval harness (recommended-direction #5) should measure
+`bge-reranker-base` (ONNX) against `bge-reranker-v2-m3` and `gte-multilingual-reranker-base`
+(sentence-transformers) before the default is fixed.
+
+### Surface: preferences only (no per-query toggle)
+
+Mirror the existing `MemoryRerankerPreferences` shape under
+`knowledge.retrieval.reranker.{enabled, model, device, batch_size}`, **default off** —
+enabling pulls the cross-encoder weights on first use. Unlike Rewrite/Explain, reranking is
+**not** a per-query Ask toggle: it is a prefs-level on/off, always applied when enabled. This
+keeps the Ask params surface lean and matches how memory already governs its reranker.
+Because the config block is near-identical to memory's `_reranker_config` (`service.py`), the
+cross-encoder call belongs in a shared helper in `hiro-commons` rather than duplicated — the
+two callers differ only in backend wiring (mem0 vs. the knowledge graph), not in the prefs
+shape. When the reranker is enabled, **Explain mode** adds the per-result rerank score to the
+existing cosine / BM25 / RRF diagnostics.
+
+### Where it slots in the graph
+
+A new node between the Qdrant search and `build_context`: retrieve `top_k≈20` → rerank →
+trim to top 5–8 → concat. Like `rewrite_query`, it reports latency (and, since it is local,
+no token cost) in graph runs, and fails safe — any reranker error logs and falls back to the
+fused RRF order so retrieval never blocks.
+
 ## Recommended direction
 
 Fix **recall** before precision — a reranker on weak candidates is wasted effort.
@@ -266,9 +346,11 @@ Fix **recall** before precision — a reranker on weak candidates is wasted effo
    upgrade.
 3. ✅ **Embed structural context — done.** Prefix `{title} / {heading_path}` into the embedded
    text (dense + BM25) at ingest so every chunk carries its breadcrumb.
-4. **Then precision:** raise `min_score` off 0.0; add a cross-encoder **reranker** (a
-   *multilingual* model — not the English-only one memory defaults to) trimming to top 5–8;
-   add a per-document cap / dedup.
+4. **Then precision:** raise `min_score` off 0.0; add a cross-encoder **reranker**
+   (prefs-only, default off; a *multilingual* model — not the English-only one memory
+   defaults to) trimming to top 5–8; add a per-document cap / dedup. Backend (FastEmbed ONNX
+   vs. sentence-transformers) and default model are decided by the eval harness (#5), since
+   the two backends expose different model menus — see [Reranking](#reranking-precision--ordering).
 5. **Build a small eval harness first** (20 hand-curated question → expected-doc pairs) so the
    embedder/hybrid changes are measured, not guessed — especially important for Arabic, where
    relevance is harder to eyeball.
@@ -321,6 +403,10 @@ flowchart TD
 - **Hybrid (dense+sparse RRF)** and **structural-context prefixes** — the other two recall
   levers — are now in place; the embedder upgrade and a reranker are what remain.
 - **Reranking and `min_score` are precision steps** — valuable only once recall is good.
+  The reranker must be **multilingual** (the memory default is English-only) and is
+  **prefs-only, default off**. Backend is a real fork: FastEmbed ONNX caps at
+  `bge-reranker-base`; sentence-transformers reaches `bge-reranker-v2-m3` / `gte` but adds
+  torch — decide via the eval harness.
 - **Any embedder swap changes the vector dimension → wipe + re-ingest.**
 - **Recommended UX:** an admin model-manager with explicit, progress-tracked downloads and a
   guarded "set active + re-ingest" flow.

@@ -14,6 +14,7 @@ from hirocli.runtime.agent_graph.ledger import (
     RunAccumulator,
     current_entry,
     current_run,
+    current_substep,
     graph_logged,
 )
 
@@ -125,6 +126,35 @@ async def test_ledger_spawn_child_writes_sibling_row_without_parent(tmp_path: Pa
     assert rows[0]["decision_kind"] == "ok"
     assert rows[0]["model"] == ""
     assert rows[0]["input_tokens"] == ""
+    # Spawned tool rows nest under their parent step (1) as sub-steps rather than consuming a step.
+    assert rows[0]["step_index"] == "1"
+    assert rows[0]["sub_step"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_open_entry_numbers_subgraph_rows_as_substeps(tmp_path: Path) -> None:
+    """A parent node that sets ``current_substep`` makes nested rows number as ``N.1``, ``N.2`` …"""
+    graph = _graph(tmp_path)
+    sink = graph._ledger_sink
+
+    parent = sink.open_entry("knowledge_retrieve", _state("in-sub"))
+    assert parent.step_index == 1
+    assert parent.sub_step == ""
+
+    token = current_substep.set(parent.step_index)
+    try:
+        first = sink.open_entry("knowledge/parse_query", _state("in-sub"))
+        second = sink.open_entry("knowledge/embed_query", _state("in-sub"))
+    finally:
+        current_substep.reset(token)
+
+    assert (first.step_index, first.sub_step) == (1, 1)
+    assert (second.step_index, second.sub_step) == (1, 2)
+
+    # Top-level numbering resumes after the substep scope closes (parallel branch, next chat node).
+    after = sink.open_entry("memory_search", _state("in-sub"))
+    assert after.step_index == 2
+    assert after.sub_step == ""
 
 
 @pytest.mark.asyncio
@@ -250,20 +280,20 @@ def test_tts_audio_seconds_are_persisted(tmp_path: Path) -> None:
 def test_node_previews_are_persisted_and_capped(tmp_path: Path) -> None:
     graph = _graph(tmp_path)
     entry = graph._ledger_sink.open_entry(
-        "memory_in",
+        "memory_search",
         _state("in-preview"),
         captures=frozenset({"decision"}),
     )
-    entry.set_input_preview("search: " + ("hello " * 40))
-    entry.set_output_preview("results: 2; " + ("memory " * 40))
+    entry.set_input_preview("search: " + ("hello " * 80))
+    entry.set_output_preview("results: 2; " + ("memory " * 80))
 
     graph._ledger_sink.write_rows(entry.rows(include_parent=True))
 
     row = _rows(tmp_path)[0]
     assert row["input_preview"].startswith("search: hello")
     assert row["output_preview"].startswith("results: 2; memory")
-    assert len(row["input_preview"]) == 140
-    assert len(row["output_preview"]) == 140
+    assert len(row["input_preview"]) == 280
+    assert len(row["output_preview"]) == 280
 
 
 def test_gemini_tts_prices_with_audio_tokens(tmp_path: Path) -> None:
@@ -330,8 +360,8 @@ async def test_run_accumulator_writes_aggregate_and_evicts_run(tmp_path: Path) -
             status="completed",
             decision_kind="completed",
             decision_detail="text_reply",
-            input_preview="hello " * 40,
-            output_preview="world " * 40,
+            input_preview="hello " * 80,
+            output_preview="world " * 80,
         )
         graph._ledger_sink.evict_run(acc.run_id)
     finally:
@@ -349,8 +379,8 @@ async def test_run_accumulator_writes_aggregate_and_evicts_run(tmp_path: Path) -
     assert run_row["reasoning_tokens"] == "3"
     assert run_row["model"] == "openai:gpt-5.4"
     assert run_row["cost_usd"] == node_row["cost_usd"]
-    assert len(run_row["input_preview"]) == 140
-    assert len(run_row["output_preview"]) == 140
+    assert len(run_row["input_preview"]) == 280
+    assert len(run_row["output_preview"]) == 280
     assert "chat-in-run" not in graph._ledger_sink._step_indexes
     assert not graph._ledger_sink._attempt_indexes
 

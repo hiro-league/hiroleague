@@ -36,6 +36,28 @@
   </div>
 
   {#if ctrl.draft}
+    <!-- Direction toggles (independent of each other and of model selection). -->
+    <div class="grid gap-2">
+      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+        <input
+          type="checkbox"
+          bind:checked={ctrl.draft.memory.search.enabled}
+          disabled={ctrl.busy}
+          onchange={ctrl.markDirty}
+        />
+        <span class="font-sans text-sm font-medium">Search long-term memory before each reply</span>
+      </label>
+      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+        <input
+          type="checkbox"
+          bind:checked={ctrl.draft.memory.extraction.enabled}
+          disabled={ctrl.busy}
+          onchange={ctrl.markDirty}
+        />
+        <span class="font-sans text-sm font-medium">Store new memories after each reply</span>
+      </label>
+    </div>
+
     <SectionCardMuted
       title="Memory LLM model"
       description="Used by the memory service for memory extraction."
@@ -57,6 +79,17 @@
         onSelect={(id) => ctrl.setMemoryModel('default_llm', id)}
         onChange={ctrl.markDirty}
       />
+      <FormField label="Memory tuning profile" class="max-w-md">
+        <select
+          class={ADMIN_SELECT_LG}
+          value={ctrl.draft.memory.default_tuning_profile}
+          onchange={(event) => ctrl.setDefaultTuningProfile('memory', event.currentTarget.value)}
+        >
+          {#each ctrl.profileEntries as [id, profile] (id)}
+            <option value={id}>{profile.label}</option>
+          {/each}
+        </select>
+      </FormField>
     </SectionCardMuted>
 
     <SectionCardMuted
@@ -82,28 +115,56 @@
       />
     </SectionCardMuted>
 
-    <FormField label="Max retained messages" class="max-w-sm">
-      <input
-        type="number"
-        min="1"
-        max="100"
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.memory.max_messages}
-        oninput={ctrl.markDirty}
-      />
-    </FormField>
-
-    <FormField label="Default memory tuning profile" class="max-w-md">
-      <select
-        class={ADMIN_SELECT_LG}
-        value={ctrl.draft.memory.default_tuning_profile}
-        onchange={(event) => ctrl.setDefaultTuningProfile('memory', event.currentTarget.value)}
+    <SectionCardMuted
+      title="Retrieval"
+      description="Tunes long-term memory search before each reply (memory_search). Rebuilds the memory service when saved."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryRetrieval}
+    >
+      <div class="grid gap-3 md:grid-cols-2">
+        <FormField label="Results per search">
+          <input
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.memory.search.top_k}
+            disabled={ctrl.busy}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+        <FormField label="Minimum relevance">
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.memory.search.threshold}
+            disabled={ctrl.busy}
+            oninput={ctrl.markDirty}
+          />
+          <span class="text-xs text-muted-foreground">Score 0–1; use 0 to disable filtering.</span>
+        </FormField>
+      </div>
+      <label
+        class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3 {!ctrl.memoryRerankerEnabled
+          ? 'opacity-50'
+          : ''}"
       >
-        {#each ctrl.profileEntries as [id, profile] (id)}
-          <option value={id}>{profile.label}</option>
-        {/each}
-      </select>
-    </FormField>
+        <input
+          type="checkbox"
+          bind:checked={ctrl.draft.memory.search.rerank}
+          disabled={ctrl.busy || !ctrl.memoryRerankerEnabled}
+          onchange={ctrl.markDirty}
+        />
+        <span class="font-sans text-sm font-medium">Rerank search results</span>
+      </label>
+      {#if !ctrl.memoryRerankerEnabled}
+        <p class="text-xs text-muted-foreground">Enable the local reranker below to use reranking.</p>
+      {/if}
+    </SectionCardMuted>
 
     <SectionCardMuted
       title="Local reranker"
@@ -158,57 +219,6 @@
           oninput={ctrl.markDirty}
         />
       </FormField>
-    </SectionCardMuted>
-
-    <SectionCardMuted
-      title="Retrieval"
-      description="Controls long-term memory search before each reply (memory_in). Rebuilds the memory service when saved."
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryRetrieval}
-    >
-      <div class="grid gap-3 md:grid-cols-2">
-        <FormField label="Results per search">
-          <input
-            type="number"
-            min="1"
-            max="100"
-            step="1"
-            class={ADMIN_SELECT_LG}
-            bind:value={ctrl.draft.memory.search.top_k}
-            disabled={ctrl.busy}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
-        <FormField label="Minimum relevance">
-          <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            class={ADMIN_SELECT_LG}
-            bind:value={ctrl.draft.memory.search.threshold}
-            disabled={ctrl.busy}
-            oninput={ctrl.markDirty}
-          />
-          <span class="text-xs text-muted-foreground">Score 0–1; use 0 to disable filtering.</span>
-        </FormField>
-      </div>
-      <label
-        class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3 {!ctrl.memoryRerankerEnabled
-          ? 'opacity-50'
-          : ''}"
-      >
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.memory.search.rerank}
-          disabled={ctrl.busy || !ctrl.memoryRerankerEnabled}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Rerank search results</span>
-      </label>
-      {#if !ctrl.memoryRerankerEnabled}
-        <p class="text-xs text-muted-foreground">Enable the local reranker above to use reranking.</p>
-      {/if}
     </SectionCardMuted>
   {/if}
 </div>

@@ -29,6 +29,7 @@ GRAPH_LEDGER_COLUMNS = [
     "ts",
     "run_id",
     "step_index",
+    "sub_step",
     "node",
     "node_attempt",
     "branch_index",
@@ -69,6 +70,13 @@ current_entry: ContextVar["LedgerEntry | None"] = ContextVar(
 )
 current_run: ContextVar["RunAccumulator | None"] = ContextVar(
     "graph_ledger_run",
+    default=None,
+)
+# Set by a parent node around a nested subgraph invoke (e.g. chat ``knowledge_retrieve`` running the
+# retrieval subgraph) so the nested ``knowledge/*`` rows render as sub-steps of the parent (``4.1``,
+# ``4.2`` …) instead of restarting their own step counter. Carries the parent's ``step_index``.
+current_substep: ContextVar[int | None] = ContextVar(
+    "graph_ledger_substep",
     default=None,
 )
 
@@ -163,6 +171,9 @@ class LedgerEntry:
     node: str
     run_id: str
     step_index: int
+    # Sub-step ordinal within ``step_index`` (1-based) for nested rows; blank for top-level nodes.
+    # Rendered as ``{step_index}.{sub_step}`` (e.g. ``4.1``) in the admin ledger.
+    sub_step: int | str = ""
     node_attempt: int = 1
     branch_index: int | None = None
     inbound_id: str = ""
@@ -269,7 +280,10 @@ class LedgerEntry:
             sink=self.sink,
             node=node,
             run_id=self.run_id,
-            step_index=self.sink.next_step_index(self.run_id),
+            # Spawned tool/sub rows render as sub-steps of their parent (e.g. ``8.1``, ``8.2``)
+            # instead of consuming a top-level step index, so the ledger reads as a nested timeline.
+            step_index=self.step_index,
+            sub_step=len(self._children) + 1,
             node_attempt=self.sink.next_node_attempt(self.run_id, node),
             branch_index=self.branch_index if branch_index is None else branch_index,
             inbound_id=self.inbound_id,
@@ -307,6 +321,7 @@ class LedgerEntry:
             "ts": time.time(),
             "run_id": self.run_id,
             "step_index": self.step_index,
+            "sub_step": self.sub_step,
             "node": self.node,
             "node_attempt": self.node_attempt,
             "branch_index": _blank_none(self.branch_index),
@@ -374,6 +389,8 @@ class LedgerSink:
         self._lock = Lock()
         self._step_indexes: OrderedDict[str, int] = OrderedDict()
         self._attempt_indexes: OrderedDict[tuple[str, str], int] = OrderedDict()
+        # Per (run_id, parent step_index) ordinal for nested sub-step rows (e.g. ``4.1`` → ``4.2``).
+        self._sub_step_indexes: OrderedDict[tuple[str, int], int] = OrderedDict()
         with self._open_lock:
             if self.path not in self._opened:
                 Logger.add_file_sink(
@@ -391,6 +408,15 @@ class LedgerSink:
             self._touch_run(key)
             value = self._step_indexes.get(key, 0) + 1
             self._step_indexes[key] = value
+            return value
+
+    def next_sub_step(self, run_id: str, parent_step: int) -> int:
+        run_key = run_id or ""
+        key = (run_key, int(parent_step))
+        with self._lock:
+            self._touch_run(run_key)
+            value = self._sub_step_indexes.get(key, 0) + 1
+            self._sub_step_indexes[key] = value
             return value
 
     def next_node_attempt(self, run_id: str, node: str) -> int:
@@ -412,6 +438,9 @@ class LedgerSink:
             for attempt_key in list(self._attempt_indexes):
                 if attempt_key[0] == old_run_id:
                     self._attempt_indexes.pop(attempt_key, None)
+            for sub_key in list(self._sub_step_indexes):
+                if sub_key[0] == old_run_id:
+                    self._sub_step_indexes.pop(sub_key, None)
 
     def open_entry(
         self,
@@ -425,11 +454,22 @@ class LedgerSink:
         if not run_id:
             inbound_id = str(identity.get("inbound_id") or "")
             run_id = f"chat-{inbound_id}" if inbound_id else "chat-"
+        # Inside a parent node's nested subgraph (e.g. chat ``knowledge_retrieve``), number these
+        # rows as sub-steps of the parent so they sort right after it instead of restarting from 1
+        # under this (separate) sink's own counter.
+        parent_step = current_substep.get()
+        if parent_step is not None:
+            step_index: int = int(parent_step)
+            sub_step: int | str = self.next_sub_step(run_id, parent_step)
+        else:
+            step_index = self.next_step_index(run_id)
+            sub_step = ""
         return LedgerEntry(
             sink=self,
             node=node,
             run_id=run_id,
-            step_index=self.next_step_index(run_id),
+            step_index=step_index,
+            sub_step=sub_step,
             node_attempt=self.next_node_attempt(run_id, node),
             captures=frozenset(captures or ()),
             branch_index=identity.get("branch_index"),
@@ -466,6 +506,7 @@ class LedgerSink:
                     "ts": time.time(),
                     "run_id": accumulator.run_id,
                     "step_index": "",
+                    "sub_step": "",
                     "node": "@run",
                     "node_attempt": "",
                     "branch_index": "",
@@ -509,6 +550,9 @@ class LedgerSink:
             for attempt_key in list(self._attempt_indexes):
                 if attempt_key[0] == key:
                     self._attempt_indexes.pop(attempt_key, None)
+            for sub_key in list(self._sub_step_indexes):
+                if sub_key[0] == key:
+                    self._sub_step_indexes.pop(sub_key, None)
 
     def _with_cost(self, row: dict[str, Any]) -> dict[str, Any]:
         provider = str(row.get("provider") or "")

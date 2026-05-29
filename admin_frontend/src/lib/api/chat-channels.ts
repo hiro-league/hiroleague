@@ -192,6 +192,7 @@ export async function sendChatMessage(
     audio_mime_type?: string;
     audio_duration_ms?: number;
     request_voice_reply?: boolean;
+    use_knowledge?: boolean;
   }
 ) {
   return apiRequest<{ message_id: string; channel_id: number }>(

@@ -8,6 +8,7 @@ const ALLOWED: readonly PreferencesTabPreference[] = [
   'media',
   'memory',
   'knowledge',
+  'agent',
   'tuning-profiles'
 ] as const;
 

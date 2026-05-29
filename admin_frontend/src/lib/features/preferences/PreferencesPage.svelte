@@ -13,6 +13,7 @@
   } from '$lib/components/page/collapsible-section-registry.svelte';
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import Button from '$lib/components/ui/button.svelte';
+  import AgentSection from '$lib/features/preferences/sections/AgentSection.svelte';
   import KnowledgeSection from '$lib/features/preferences/sections/KnowledgeSection.svelte';
   import MediaSection from '$lib/features/preferences/sections/MediaSection.svelte';
   import MemorySection from '$lib/features/preferences/sections/MemorySection.svelte';
@@ -178,6 +179,8 @@
       <MemorySection {ctrl} />
     {:else if tabPrefs.activeTab === 'knowledge'}
       <KnowledgeSection {ctrl} />
+    {:else if tabPrefs.activeTab === 'agent'}
+      <AgentSection {ctrl} />
     {:else}
       <TuningProfilesSection {ctrl} />
     {/if}

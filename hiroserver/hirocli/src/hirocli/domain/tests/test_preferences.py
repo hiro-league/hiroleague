@@ -109,7 +109,7 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.media.input.image is False
     assert prefs.media.output.file is False
     assert prefs.memory.enabled is False
-    assert prefs.memory.max_messages == 6
+    assert prefs.chat.max_messages == 6
     assert prefs.llm.default_tuning_profile == "balanced_chat"
     assert prefs.memory.default_tuning_profile == "memory_extraction"
     assert prefs.knowledge.default_tuning_profile == DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
@@ -135,6 +135,7 @@ def test_preference_sections_are_first_level_only() -> None:
         "media",
         "memory",
         "knowledge",
+        "chat",
     ]
 
 
@@ -145,7 +146,7 @@ def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None
     assert preferences_file(ws).is_file()
     assert prefs.version == 3
     assert prefs.media.input.voice is True
-    assert prefs.memory.max_messages == 6
+    assert prefs.chat.max_messages == 6
 
 
 def test_resolve_llm_with_default_and_credentials(

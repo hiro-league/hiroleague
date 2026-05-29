@@ -127,6 +127,7 @@ export function fieldLabel(field: keyof GraphLedgerRow): string {
     ts: 'Time',
     run_id: 'Run',
     step_index: 'Step',
+    sub_step: 'Sub',
     node: 'Node',
     node_attempt: 'Attempt',
     branch_index: 'Branch',
@@ -236,6 +237,11 @@ export function trimRunIdForList(runId: string): string {
 export function formatLedgerField(field: keyof GraphLedgerRow, row: GraphLedgerRow): string {
   const raw = row[field];
   if (raw === '' || raw === null || raw === undefined) return '—';
+  if (field === 'step_index') {
+    /* Nested rows show ``{step}.{sub_step}`` (e.g. ``4.1``) so substeps read as children of their step. */
+    const sub = row.sub_step;
+    return typeof sub === 'number' && Number.isFinite(sub) ? `${raw}.${sub}` : String(raw);
+  }
   if (field === 'ts') {
     const n = typeof raw === 'number' ? raw : Number(raw);
     /* Match Messages tab clock line (same ``formatChatTimestamp`` path). */

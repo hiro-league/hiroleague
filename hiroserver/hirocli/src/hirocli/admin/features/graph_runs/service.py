@@ -128,7 +128,9 @@ def _inspect_run_rows(path: Path, run_id: str) -> GraphRunInspectSnapshot:
         for row in all_rows
         if row.get("run_id") == run_id and row.get("row_kind") == "node"
     ]
-    nodes.sort(key=lambda r: int(r.get("step_index") or 0))
+    # Secondary key keeps nested sub-step rows (e.g. ``4.1``, ``4.2``) ordered right after their
+    # parent step and before the next top-level step.
+    nodes.sort(key=lambda r: (int(r.get("step_index") or 0), int(r.get("sub_step") or 0)))
     aggregate_candidates = [
         row
         for row in all_rows
@@ -186,6 +188,7 @@ def _shape_row(raw: dict[str, Any]) -> dict[str, Any] | None:
         row[key] = _float_or_blank(row.get(key))
     for key in (
         "step_index",
+        "sub_step",
         "node_attempt",
         "branch_index",
         "elapsed_ms",
@@ -200,8 +203,11 @@ def _shape_row(raw: dict[str, Any]) -> dict[str, Any] | None:
         "stt_audio_tokens",
     ):
         row[key] = _int_or_blank(row.get(key))
+    # ``sub_step`` keeps ids unique when one parent step has several nested rows for the same node
+    # (e.g. the same tool called twice → ``tools/search`` at ``8.1`` and ``8.2``).
     row["id"] = (
-        f"{row.get('run_id')}:{row.get('row_kind')}:{row.get('step_index')}:{row.get('node')}"
+        f"{row.get('run_id')}:{row.get('row_kind')}:"
+        f"{row.get('step_index')}.{row.get('sub_step')}:{row.get('node')}"
     )
     return row
 

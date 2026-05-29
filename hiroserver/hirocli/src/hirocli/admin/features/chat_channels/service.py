@@ -311,6 +311,7 @@ class ChatChannelsService:
         audio_mime_type: str | None = None,
         audio_duration_ms: int | None = None,
         request_voice_reply: bool = False,
+        use_knowledge: bool = True,
     ) -> Result[dict[str, Any]]:
         """Deliver a synthetic user message through the workspace server's ``InboundPipeline``."""
         if not workspace_id:
@@ -327,6 +328,7 @@ class ChatChannelsService:
         params: dict[str, Any] = {
             "channel_id": channel_id,
             "request_voice_reply": request_voice_reply,
+            "use_knowledge": use_knowledge,
             "workspace": workspace_id,
         }
         if text_ok:

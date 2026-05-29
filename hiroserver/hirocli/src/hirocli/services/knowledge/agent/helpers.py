@@ -12,10 +12,11 @@ from qdrant_client import models as qm
 
 
 class QueryRewrite(BaseModel):
-    """Structured output for the optional Ask-tab query-rewrite step.
+    """Structured output for the query-rewrite step (Ask + chat).
 
     ``standalone_query`` feeds the dense branch; ``keywords`` (literal proper nouns /
     identifiers) reinforce the BM25 branch so exact-match signal survives the rewrite.
+    ``knowledge_needed`` gates retrieval — when false, embedding + vector search are skipped.
     """
 
     standalone_query: str = PydanticField(
@@ -25,6 +26,14 @@ class QueryRewrite(BaseModel):
     keywords: list[str] = PydanticField(
         default_factory=list,
         description="Proper nouns, names, dates, and identifiers copied verbatim from the question.",
+    )
+    knowledge_needed: bool = PydanticField(
+        default=True,
+        description=(
+            "False ONLY when the message clearly does not request stored information — "
+            "greetings, farewells, thanks, acknowledgements, or pure small talk. "
+            "Otherwise true. When false, knowledge retrieval is skipped."
+        ),
     )
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)

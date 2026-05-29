@@ -81,9 +81,9 @@ def _enable_memory(runtime: WorkspacePreferencesRuntime) -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_in_node_uses_runtime_memory_max_messages(tmp_path) -> None:
+async def test_trim_history_uses_runtime_chat_max_messages(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
-    runtime.update("memory.max_messages", 3)
+    runtime.update("chat.max_messages", 3)
     graph = BaseAgentGraph(
         workspace_path=tmp_path,
         stt_service=None,
@@ -95,7 +95,7 @@ async def test_memory_in_node_uses_runtime_memory_max_messages(tmp_path) -> None
     )
 
     messages = [HumanMessage(content=f"m{i}") for i in range(5)]
-    result = await graph.memory_in_node({"messages": messages}, lambda _event: None)
+    result = await graph.trim_history_node({"messages": messages})
 
     kept = result["messages"][1:]
     assert [msg.content for msg in kept] == ["m2", "m3", "m4"]
@@ -142,7 +142,7 @@ def test_llm_usage_payload_uses_langchain_usage_metadata_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_in_retrieves_and_context_build_prepends_memory(tmp_path) -> None:
+async def test_memory_search_and_compose_context_injects_memory(tmp_path) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
@@ -158,23 +158,32 @@ async def test_memory_in_retrieves_and_context_build_prepends_memory(tmp_path) -
     )
     events = []
 
-    result = await graph.memory_in_node(
+    result = await graph.memory_search_node(
         {"user_text": "what should you remember?", "character_id": "hiro"},
         events.append,
     )
+    # context_build now stores ONLY the clean user turn — context must not enter messages.
     message_result = await graph.context_build_node(
         {"user_text": "what should you remember?", **result}
+    )
+    # Memory is assembled ephemerally into turn_context by compose_context (blocks only, no persona).
+    compose = graph.make_compose_context_node()
+    ctx_result = await compose(
+        {"user_text": "what should you remember?", **result}, lambda _event: None
     )
 
     assert events[0]["event"] == GRAPH_MEMORY_RETRIEVED
     assert result["retrieved_memories"] == [{"memory": "User prefers concise replies"}]
-    assert message_result["messages"][0].content.startswith(
-        "Memory context:\n- User prefers concise replies\n\n"
-    )
+    assert message_result["messages"][0].content == "what should you remember?"
+    turn_context = ctx_result["turn_context"]
+    # Persona is NOT in the context block (it stays a stable system message). Instructions lead,
+    # then the Memories section renders the hit as a bullet.
+    assert turn_context.startswith("## Instructions")
+    assert "## Memories retrieved\n- User prefers concise replies" in turn_context
 
 
 @pytest.mark.asyncio
-async def test_memory_in_records_search_and_result_previews(tmp_path) -> None:
+async def test_memory_search_records_search_and_result_previews(tmp_path) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
@@ -190,14 +199,14 @@ async def test_memory_in_records_search_and_result_previews(tmp_path) -> None:
     )
     entry = LedgerEntry(
         sink=LedgerSink(tmp_path),
-        node="memory_in",
+        node="memory_search",
         run_id="run-1",
         step_index=1,
         captures=frozenset({"decision"}),
     )
     token = current_entry.set(entry)
     try:
-        await graph.memory_in_node(
+        await graph.memory_search_node(
             {"user_text": "tea preference?", "character_id": "hiro"},
             lambda _event: None,
         )

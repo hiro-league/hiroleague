@@ -33,9 +33,9 @@ def _graph(tmp_path: Path) -> BaseAgentGraph:
 # ---------------------------------------------------------------------------
 
 
-def test_input_gate_routes_to_memory_in_when_user_text_present(tmp_path: Path) -> None:
+def test_input_gate_routes_to_trim_history_when_user_text_present(tmp_path: Path) -> None:
     graph = _graph(tmp_path)
-    assert graph.input_gate({"user_text": "hello"}) == "memory_in"
+    assert graph.input_gate({"user_text": "hello"}) == "trim_history"
 
 
 def test_input_gate_routes_to_media_failed_when_user_text_empty(tmp_path: Path) -> None:

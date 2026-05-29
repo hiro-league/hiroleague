@@ -43,6 +43,7 @@ from .comm_log import (
     comm_kind,
     comm_peer_label,
     routing_requests_voice_reply,
+    routing_uses_knowledge,
 )
 
 if TYPE_CHECKING:
@@ -194,6 +195,7 @@ class AgentManager:
                 credential_store=self._credentials,
                 checkpointer=checkpointer,
                 preferences=self._ctx.preferences,
+                knowledge_subgraph=self._build_knowledge_subgraph(),
             )
             # Hot-reload STT/TTS when workspace model defaults change. Nodes read
             # ``self._stt`` / ``self._tts`` per call, so swapping attributes is enough
@@ -222,6 +224,13 @@ class AgentManager:
                 "tuning_profiles",
                 self._reload_tuning_profiles_on_change,
                 key="agent.tuning-profiles",
+            )
+            # Knowledge retrieval (hybrid/rewrite-model/top_k…) is read by the subgraph nodes;
+            # rebuild the compiled subgraph and drop chat graphs so the new shape/settings apply.
+            self._ctx.preference_reactor.on_change(
+                "knowledge",
+                self._reload_knowledge_on_change,
+                key="agent.knowledge",
             )
             # Providers/admin mutations write ``providers.json`` via another
             # ``CredentialStore`` instance — keep graph caches and media services in sync.
@@ -314,6 +323,8 @@ class AgentManager:
             is not None
         )
         request_voice_reply = routing_requests_voice_reply(msg.routing.metadata)
+        # Per-message knowledge toggle (default on); the fan-out edge skips retrieval when off.
+        knowledge_enabled = routing_uses_knowledge(msg.routing.metadata)
 
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
@@ -366,6 +377,7 @@ class AgentManager:
             "model_id": llm_entry.model_id,
             "request_voice_reply": request_voice_reply,
             "voice_input_allowed": voice_input_allowed,
+            "knowledge_enabled": knowledge_enabled,
             "routing_metadata": dict(msg.routing.metadata or {}),
             "inbound_envelope": msg.model_dump(mode="json"),
             "transcripts": [],
@@ -883,6 +895,51 @@ class AgentManager:
             paths=sorted(changes.keys()),
             memory_available=self._memory is not None,
             memory_reloaded=ok,
+        )
+
+    def _build_knowledge_subgraph(self):
+        """Compile the retrieval-only knowledge subgraph from the workspace knowledge service.
+
+        Returns ``None`` when knowledge is unavailable; the chat graph then omits the knowledge
+        branch entirely. The subgraph is invoked per chat turn and inherits the chat run's ledger,
+        so its ``knowledge/*`` node costs fold into that turn (no separate run).
+        """
+        manager = getattr(self._ctx, "knowledge_manager", None)
+        service = getattr(manager, "service", None) if manager is not None else None
+        if service is None:
+            return None
+        from ..domain.workspace import workspace_id_for_path
+        from ..services.knowledge.agent.graph import KnowledgeAgentGraph
+
+        try:
+            builder = KnowledgeAgentGraph(
+                workspace_path=self._ctx.workspace_path,
+                service=service,
+                prefs=self._current_preferences(),
+                workspace_id=workspace_id_for_path(self._ctx.workspace_path),
+            )
+            return builder.build_retrieval()
+        except Exception as exc:
+            log.warning(
+                "⚠️ knowledge subgraph build failed — chat knowledge disabled",
+                error=str(exc),
+                exc_info=True,
+            )
+            return None
+
+    async def _reload_knowledge_on_change(
+        self,
+        workspace_path,
+        changes: dict[str, tuple[Any, Any]],
+    ) -> None:
+        """Rebuild the knowledge subgraph and drop chat graphs after knowledge prefs change."""
+        if self._graph is None:
+            return
+        self._graph.set_knowledge_subgraph(self._build_knowledge_subgraph())
+        self._compiled_cache.clear()
+        log.info(
+            "✅ knowledge subgraph rebuilt — chat graph cache cleared",
+            paths=sorted(changes.keys()),
         )
 
 

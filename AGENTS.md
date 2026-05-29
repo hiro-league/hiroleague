@@ -44,3 +44,4 @@ This mirrors the `Architecture` tab in `../hiro-docs/mintdocs/docs.json`; use it
 ## Design Decisions
 
 - [Memory requirements](../hiro-docs/mintdocs/architecture/design-decisions/memory-requirements.mdx) — Use this for long-term memory requirements, memory manager/backend evaluation, selected Mem0 + Qdrant + Kuzu stack, and phased memory implementation plan.
+

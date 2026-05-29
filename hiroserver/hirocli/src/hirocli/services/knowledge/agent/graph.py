@@ -51,7 +51,13 @@ class KnowledgeAgentState(TypedDict, total=False):
     min_score: float
     explain: bool
     rewrite: bool
+    # Preformatted prior conversation (chat only). When present, ``rewrite_query`` uses it to
+    # resolve references ("the second one") into a standalone query. Empty/absent for Ask/CLI.
+    history: str
     rewrite_keywords: list[str]
+    # Set by ``rewrite_query`` (when rewrite runs): False routes past embed/search to skip
+    # retrieval for small talk. Absent/True → retrieve normally (safe default on any fallback).
+    knowledge_needed: bool
     rewritten_query: str | None
     normalized_query: NormalizedQuery
     qdrant_filter: Any
@@ -98,15 +104,13 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         self._prefs = prefs
         self._workspace_id = workspace_id
 
-    def build(
-        self,
-        *,
-        model: Any = None,
-        tools: list | None = None,
-        model_id: str = "",
-        system_prompt: str | None = None,
-    ) -> CompiledStateGraph:
-        graph = StateGraph(KnowledgeAgentState)
+    def _add_retrieval_nodes(self, graph: StateGraph) -> None:
+        """Add + wire the shared retrieval prefix: START → … → build_context.
+
+        Reused by both ``build()`` (Ask/CLI/HTTP, retrieval + answering) and
+        ``build_retrieval()`` (the chat subgraph, retrieval only) so the retrieval
+        logic — including the history-aware ``rewrite_query`` node — has one implementation.
+        """
         graph.add_node(
             "parse_query",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/parse_query", self.parse_query),
@@ -131,6 +135,31 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             "build_context",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/build_context", self.build_context),
         )
+        graph.add_edge(START, "parse_query")
+        graph.add_edge("parse_query", "rewrite_query")
+        # When rewrite decides the message needs no knowledge (small talk), skip straight to
+        # build_context — bypassing build_filters / embed_query / vector_search. build_context
+        # with no hits yields empty context + no_results, so downstream behaves like "no hits".
+        graph.add_conditional_edges(
+            "rewrite_query",
+            self._route_after_rewrite,
+            {"retrieve": "build_filters", "skip": "build_context"},
+        )
+        graph.add_edge("build_filters", "embed_query")
+        graph.add_edge("embed_query", "vector_search")
+        graph.add_edge("vector_search", "build_context")
+
+    def build(
+        self,
+        *,
+        model: Any = None,
+        tools: list | None = None,
+        model_id: str = "",
+        system_prompt: str | None = None,
+    ) -> CompiledStateGraph:
+        """Full Ask/CLI/HTTP graph: shared retrieval prefix + cited-answer step."""
+        graph = StateGraph(KnowledgeAgentState)
+        self._add_retrieval_nodes(graph)
         graph.add_node(
             "call_model",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/call_model", self.call_model),
@@ -139,12 +168,6 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             "finalize",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/finalize", self.finalize),
         )
-        graph.add_edge(START, "parse_query")
-        graph.add_edge("parse_query", "rewrite_query")
-        graph.add_edge("rewrite_query", "build_filters")
-        graph.add_edge("build_filters", "embed_query")
-        graph.add_edge("embed_query", "vector_search")
-        graph.add_edge("vector_search", "build_context")
         graph.add_conditional_edges(
             "build_context",
             self._route_after_context,
@@ -153,6 +176,23 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         graph.add_edge("call_model", "finalize")
         graph.add_edge("finalize", END)
         return graph.compile()
+
+    def build_retrieval(self) -> CompiledStateGraph:
+        """Retrieval-only subgraph for the chat agent: shared prefix → END.
+
+        Compiled without a checkpointer (retrieval is per-turn scratch). It opens no ledger
+        run of its own, so when invoked inside a chat run its node rows inherit the chat
+        ``run_id`` and fold into that turn's cost (see ``ledger._resolve_ledger_identity``).
+        """
+        graph = StateGraph(KnowledgeAgentState)
+        self._add_retrieval_nodes(graph)
+        graph.add_edge("build_context", END)
+        return graph.compile()
+
+    @staticmethod
+    def _route_after_rewrite(state: KnowledgeAgentState) -> str:
+        # Only an explicit False skips; absent/True (rewrite off, no LLM, parse failure) retrieves.
+        return "skip" if state.get("knowledge_needed") is False else "retrieve"
 
     @staticmethod
     def _route_after_context(state: KnowledgeAgentState) -> str:
@@ -218,7 +258,17 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         prompt = (
             self._prefs.knowledge.rewrite.prompt or ""
         ).strip() or DEFAULT_KNOWLEDGE_REWRITE_PROMPT
-        messages = [SystemMessage(content=prompt), HumanMessage(content=normalized.text)]
+        # When the chat graph supplies conversation history, hand it to the model so it can
+        # resolve references (pronouns, "the second one") into a standalone query. The Ask/CLI
+        # path passes no history, so the human turn is just the normalized question (unchanged).
+        history = (state.get("history") or "").strip()
+        if history:
+            human_text = (
+                f"Conversation so far:\n{history}\n\nLatest user message:\n{normalized.text}"
+            )
+        else:
+            human_text = normalized.text
+        messages = [SystemMessage(content=prompt), HumanMessage(content=human_text)]
         estimate = count_tokens_approximately(messages)
         try:
             model = create_chat_model(
@@ -292,16 +342,22 @@ class KnowledgeAgentGraph(BaseAgentGraph):
 
         new_text = (parsed.standalone_query or "").strip() or normalized.text
         keywords = [kw.strip() for kw in parsed.keywords if kw.strip()]
+        knowledge_needed = bool(parsed.knowledge_needed)
         if entry := current_entry.get():
-            entry.set_decision("rewritten", "ok")
-            kw = f" · kw={','.join(keywords)[:80]}" if keywords else ""
-            entry.set_output_preview(f"query: {new_text[:160]}{kw}")
+            if knowledge_needed:
+                kw = f" · kw={','.join(keywords)[:80]}" if keywords else ""
+                entry.set_decision("rewritten", "ok")
+                entry.set_output_preview(f"query: {new_text[:160]}{kw}")
+            else:
+                entry.set_decision("rewritten", "no_knowledge_needed")
+                entry.set_output_preview("knowledge_needed: false (retrieval skipped)")
         return {
             "normalized_query": NormalizedQuery(
                 raw=normalized.raw, text=new_text, language=normalized.language
             ),
             "rewrite_keywords": keywords,
             "rewritten_query": new_text,
+            "knowledge_needed": knowledge_needed,
         }
 
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:

@@ -95,6 +95,7 @@
     <ChatChannelsMessagesPanel
       bind:selectedChannelId={ctrl.selectedChannelId}
       bind:requestVoiceReplyUi={ctrl.requestVoiceReplyUi}
+      bind:useKnowledgeUi={ctrl.useKnowledgeUi}
       bind:showAgentToolsTokensUi={ctrl.showAgentToolsTokensUi}
       bind:draftMessage={ctrl.draftMessage}
       channels={ctrl.channels}

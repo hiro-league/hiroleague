@@ -408,8 +408,8 @@ strictly bounded.
 | Column | Type | Notes |
 |---|---|---|
 | `row_kind` | enum: `node` / `run` | new discriminator. Empty = `node` for legacy rows. |
-| `input_preview` | string, ≤140 chars | aggregate-only; user turn text, capped, never truncated mid-grapheme if avoidable |
-| `output_preview` | string, ≤140 chars | aggregate-only; assistant reply text, capped |
+| `input_preview` | string, ≤280 chars | aggregate-only; user turn text, capped, never truncated mid-grapheme if avoidable |
+| `output_preview` | string, ≤280 chars | aggregate-only; assistant reply text, capped |
 | `tts_audio_seconds` | float | also added now to fix the per-node TTS-repricing gap (the field was captured but never persisted) |
 
 `row_kind` is the canonical filter for both views (`WHERE row_kind='run'`
@@ -445,14 +445,14 @@ node-row contract):
 | `pricing_version` | `{catalog_version}:{hash12}` snapshot on priced nodes (typically same across a run unless catalog reload mid-run) |
 | `decision_kind` / `decision_detail` | terminal reason (e.g. `completed`/`text_reply`, `failed`/`provider_error`) |
 | `error_code` | empty on success; failure-class slug on `failed` / `cancelled` |
-| `input_preview` | first ≤140 chars of the user turn text |
-| `output_preview` | first ≤140 chars of the assistant reply text |
+| `input_preview` | first ≤280 chars of the user turn text |
+| `output_preview` | first ≤280 chars of the assistant reply text |
 
 ### Preview Boundary
 
 Previews are a **hard-capped UI hint**, not a payload. Rules:
 
-- ≤140 chars (treat like `unified_message_text_preview` in the SDK).
+- ≤280 chars (treat like `unified_message_text_preview` in the SDK).
 - Trim whitespace; collapse interior whitespace to single space.
 - For multimodal turns, prefer the typed text; fall back to STT
   transcript joined with `· ` separators.
@@ -569,7 +569,7 @@ Additive to the original "Implementation Touch Points" section:
   - `RunAccumulator` correctly evicts `LedgerSink` per-run state
   - cost equals sum of per-node `cost_usd` (not a recompute from token
     sums)
-  - preview cap is enforced (≤140 chars after whitespace normalization)
+  - preview cap is enforced (≤280 chars after whitespace normalization)
   - `row_kind` filter returns the right population for each view
 
 ## Build Reflection (Delta)

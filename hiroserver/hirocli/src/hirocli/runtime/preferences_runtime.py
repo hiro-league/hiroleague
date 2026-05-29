@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from hirocli.domain.preferences import (
+    ChatPreferences,
     KnowledgePreferences,
     LLMPreferences,
     MediaPreferences,
@@ -62,6 +63,10 @@ class WorkspacePreferencesRuntime:
     @property
     def knowledge(self) -> KnowledgePreferences:
         return self.current.knowledge
+
+    @property
+    def chat(self) -> ChatPreferences:
+        return self.current.chat
 
     def reload(self) -> WorkspacePreferences:
         """Reload preferences from disk and replace the in-memory current value."""

@@ -80,16 +80,8 @@
       box-shadow 80ms ease;
   }
 
-  .nodes-table__data-row.substep {
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
-  }
-
   .nodes-table__data-row:hover:not(.nodes-table__data-row--selected) {
     background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
-  }
-
-  .nodes-table__data-row.substep:hover:not(.nodes-table__data-row--selected) {
-    background: color-mix(in srgb, var(--primary) 16%, transparent);
   }
 
   .nodes-table__data-row.nodes-table__data-row--selected {
@@ -97,8 +89,10 @@
     box-shadow: inset 4px 0 0 var(--primary);
   }
 
-  .nodes-table__data-row.substep.nodes-table__data-row--selected {
-    background: color-mix(in srgb, var(--primary) 22%, transparent);
+  /* Nested sub-step rows (tools/*, knowledge/*) read as children via an indent on the step cell
+     plus their ``4.1`` numbering — the previous primary-tinted highlight was removed. */
+  .nodes-table__data-row.substep td:first-child {
+    padding-left: 1.5rem;
   }
 
   .nodes-table__data-row:focus-visible {
