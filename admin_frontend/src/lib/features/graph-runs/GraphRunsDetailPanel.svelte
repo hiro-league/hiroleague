@@ -187,13 +187,40 @@
     align-items: stretch;
   }
 
+  /* No scroll-past-end padding on the table column. The side panel (col 2) is already capped to the
+     remaining viewport height, so it needs no extra-tall cell to pin against — and the old padding
+     made the page scroll the short node table up under its sticky header into empty space, hiding
+     all the rows. Without it the node grid lands flush under the sticky chrome with every row
+     visible and no phantom scroll. */
+
+  /* With the side panel open the table column is narrow; clip the wide ledger row's horizontal
+     overflow so it doesn't bleed under the (semi-transparent) panel. `clip` contains it WITHOUT
+     creating a scroll container, so the page-sticky header and sticky panel keep working. The
+     clipped right-hand columns are exactly the fields the open detail panel already shows. */
+  .run-detail-node-grid--with-panel > :global(.nodes-table-panel) {
+    overflow-x: clip;
+  }
+
   .run-detail-node-grid--with-panel {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .run-detail-node-grid > :global(.node-detail-panel) {
+    /* Stay pinned beside the page-scrolled nodes table (top matches the sticky chrome offset). */
+    position: sticky;
+    top: calc(
+      4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + 0.75rem
+    );
+    align-self: start;
     min-height: 340px;
-    max-height: min(70vh, 720px);
+    /* Fill the viewport height left below the sticky chrome instead of a fixed 70vh/720px cap, so
+       the panel grows to use the remaining space — and grows further as the header compacts on
+       scroll-up (var(--admin-page-header-h) shrinks when pinned). The trailing 1.5rem = the 0.75rem
+       sticky-top gap above + a matching 0.75rem breathing room at the bottom. */
+    max-height: calc(
+      100dvh - 4rem - var(--admin-page-header-h, 0px) - var(--admin-page-sticky-toolbar-h, 0px) -
+        1.5rem
+    );
   }
 
   @media (min-width: 760px) {

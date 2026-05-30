@@ -85,6 +85,12 @@ class FastEmbedBackend:
                     threads=min(os.cpu_count() or 1, 4),
                     lazy_load=False,
                 )
+        # Record a download marker so availability is tracked the same way as rerankers (one
+        # mechanism). Best-effort; written only after a successful load.
+        if self.cache_dir is not None:
+            from hirocli.services.knowledge.download_markers import write_marker
+
+            write_marker(self.cache_dir, self.model_name)
         return self._model
 
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:

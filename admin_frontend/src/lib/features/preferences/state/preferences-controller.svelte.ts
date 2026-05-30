@@ -1,6 +1,7 @@
 import {
   listCatalogModels,
   listCatalogProviders,
+  listLocalCatalogModels,
   type CatalogModelRow,
   type CatalogProviderRow
 } from '$lib/api/catalog';
@@ -18,6 +19,12 @@ import {
   type TuningProfile,
   type WorkspacePreferences
 } from '$lib/api/preferences';
+import {
+  cancelKnowledgeReranker,
+  downloadKnowledgeReranker,
+  listKnowledgeRerankers,
+  type LocalRerankerRow
+} from '$lib/api/knowledge';
 import type { ThinkingValue } from '$lib/features/preferences/shared/preferences-constants';
 import {
   cloneWorkspacePreferences,
@@ -45,6 +52,18 @@ export function createPreferencesController(notify: Notify) {
   let ttsOptions = $state<CatalogModelRow[]>([]);
   let memoryLlmOptions = $state<CatalogModelRow[]>([]);
   let embeddingOptions = $state<CatalogModelRow[]>([]);
+  // Knowledge reranker: cloud models come from the catalog; local in-process models from the
+  // local-models source (provider "local"). rerankPickerOptions merges both for SingleModelPicker;
+  // localRerankers carries the live download status used by the inline download affordance.
+  let rerankCatalogOptions = $state<CatalogModelRow[]>([]);
+  let rerankLocalOptions = $state<CatalogModelRow[]>([]);
+  let localRerankers = $state<LocalRerankerRow[]>([]);
+  let rerankerDownloading = $state<string | null>(null);
+
+  const rerankPickerOptions = $derived<CatalogModelRow[]>([
+    ...rerankCatalogOptions,
+    ...rerankLocalOptions
+  ]);
   let catalogAllProviders = $state<CatalogProviderRow[]>([]);
 
   const dirty = $derived.by(() => {
@@ -138,6 +157,59 @@ export function createPreferencesController(notify: Notify) {
     markDirty();
   }
 
+  function setKnowledgeRerankerEnabled(enabled: boolean) {
+    if (!draft) return;
+    draft.knowledge.retrieval.reranker.enabled = enabled;
+    markDirty();
+  }
+
+  function setKnowledgeRerankerModel(id: string | null) {
+    if (!draft) return;
+    draft.knowledge.retrieval.reranker.model_id = id;
+    markDirty();
+  }
+
+  async function downloadReranker(modelId: string) {
+    if (rerankerDownloading) return;
+    rerankerDownloading = modelId;
+    try {
+      await downloadKnowledgeReranker(modelId);
+      // The download runs in a background subprocess; poll status + byte progress until it
+      // resolves. Each poll refreshes the registry rows so percent/status stay live in the UI.
+      for (let i = 0; i < 1200; i++) {
+        const refreshed = await listKnowledgeRerankers();
+        localRerankers = refreshed.data.local ?? localRerankers;
+        const row = localRerankers.find((m) => m.id === modelId);
+        if (!row || row.downloaded || row.status === 'ready') {
+          notify('success', 'Reranker downloaded.');
+          return;
+        }
+        if (row.status === 'error') {
+          notify('error', row.error || 'Reranker download failed.');
+          return;
+        }
+        // Anything other than 'downloading' (e.g. cancelled → 'available') ends the poll.
+        if (row.status !== 'downloading') return;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Reranker download failed.');
+    } finally {
+      rerankerDownloading = null;
+    }
+  }
+
+  async function cancelReranker(modelId: string) {
+    try {
+      await cancelKnowledgeReranker(modelId);
+      const refreshed = await listKnowledgeRerankers();
+      localRerankers = refreshed.data.local ?? localRerankers;
+      notify('info', 'Download cancelled.');
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Cancel failed.');
+    }
+  }
+
   function setDefaultTuningProfile(scope: 'llm' | 'memory' | 'knowledge', id: string) {
     if (!draft || !draft.tuning_profiles[id]) return;
     if (scope === 'llm') draft.llm.default_tuning_profile = id;
@@ -227,18 +299,31 @@ export function createPreferencesController(notify: Notify) {
     loading = true;
     error = null;
     try {
-      const [prefsPayload, chatPayload, sttPayload, ttsPayload, embeddingPayload, providersPayload] =
-        await Promise.all([
-          getPreferences(),
-          listCatalogModels({ model_kind: 'chat' }),
-          listCatalogModels({ model_kind: 'stt' }),
-          listCatalogModels({ model_kind: 'tts' }),
-          listCatalogModels({ model_kind: 'embedding' }),
-          listCatalogProviders()
-        ]);
+      const [
+        prefsPayload,
+        chatPayload,
+        sttPayload,
+        ttsPayload,
+        embeddingPayload,
+        rerankPayload,
+        localRerankPayload,
+        providersPayload
+      ] = await Promise.all([
+        getPreferences(),
+        listCatalogModels({ model_kind: 'chat' }),
+        listCatalogModels({ model_kind: 'stt' }),
+        listCatalogModels({ model_kind: 'tts' }),
+        listCatalogModels({ model_kind: 'embedding' }),
+        listCatalogModels({ model_kind: 'rerank' }),
+        listKnowledgeRerankers(),
+        listCatalogProviders()
+      ]);
       sections = prefsPayload.data.sections ?? [];
       const prefs = prefsPayload.data.preferences;
       setDraftFromServer(prefs);
+      rerankCatalogOptions = rerankPayload.data.models;
+      rerankLocalOptions = await listLocalCatalogModels('rerank');
+      localRerankers = localRerankPayload.data.local ?? [];
       chatOptions = prefs.llm.default_chat
         ? includeUnknownModel(chatPayload.data.models, prefs.llm.default_chat, 'chat')
         : chatPayload.data.models;
@@ -276,6 +361,8 @@ export function createPreferencesController(notify: Notify) {
       ttsOptions = result.modelsByKind.tts ?? [];
       memoryLlmOptions = result.modelsByKind.chat ?? [];
       embeddingOptions = result.modelsByKind.embedding ?? [];
+      rerankCatalogOptions = result.modelsByKind.rerank ?? [];
+      rerankLocalOptions = await listLocalCatalogModels('rerank');
       catalogAllProviders = result.providers;
       await activeProvidersStore.load({ silent: true });
       notify('success', catalogReloadSuccessMessage(result.reload));
@@ -358,6 +445,18 @@ export function createPreferencesController(notify: Notify) {
     get embeddingOptions() {
       return embeddingOptions;
     },
+    get rerankCatalogOptions() {
+      return rerankCatalogOptions;
+    },
+    get rerankPickerOptions() {
+      return rerankPickerOptions;
+    },
+    get localRerankers() {
+      return localRerankers;
+    },
+    get rerankerDownloading() {
+      return rerankerDownloading;
+    },
     get catalogAllProviders() {
       return catalogAllProviders;
     },
@@ -378,6 +477,10 @@ export function createPreferencesController(notify: Notify) {
     setMemoryModel,
     setKnowledgeEmbeddingModel,
     setKnowledgeAnswerModel,
+    setKnowledgeRerankerEnabled,
+    setKnowledgeRerankerModel,
+    downloadReranker,
+    cancelReranker,
     setDefaultTuningProfile,
     updateProfile,
     createProfile,

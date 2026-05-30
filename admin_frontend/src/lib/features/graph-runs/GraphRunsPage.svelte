@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import type { GraphRunsPrimaryTabPreference } from '$lib/preferences/keys';
   import GraphRunsDetailPanel from './GraphRunsDetailPanel.svelte';
@@ -50,7 +51,13 @@
   <title>{ctl.primaryTab === MEMORIES_TAB ? 'Memories' : 'Graph Runs'}</title>
 </svelte:head>
 
-<AdminPageHeader sticky kicker="Operations" title={pageTitle} subtitle={pageSubtitle}>
+<AdminPageHeader
+  sticky
+  wrapperClass={ADMIN_PAGE_MAX_W_WIDE}
+  kicker="Operations"
+  title={pageTitle}
+  subtitle={pageSubtitle}
+>
   {#snippet tabs()}
     <AdminTabStrip
       ariaLabel={GRAPH_RUNS_PRIMARY_TABLIST_LABEL}
@@ -61,20 +68,22 @@
     />
   {/snippet}
 
-  {#if ctl.activePane !== MEMORIES_TAB}
-    <GraphRunsSubtabNav
-      activePane={ctl.activePane}
-      openRunIds={ctl.openRunIds}
-      runDetailCardsExpanded={ctl.runDetailCardsExpanded}
-      runTabDisplayLabel={ctl.runTabDisplayLabel}
-      runTabTooltip={ctl.runTabTooltip}
-      onShowRunsOnly={ctl.showRunsOnly}
-      onOpenRunTab={(rid) => void ctl.openRunTab(rid)}
-      onCloseRunTab={ctl.closeRunTab}
-      onToggleRunDetailCards={ctl.toggleRunDetailCards}
-      onRefresh={ctl.refreshMain}
-    />
-  {/if}
+  {#snippet subnav()}
+    {#if ctl.activePane !== MEMORIES_TAB}
+      <GraphRunsSubtabNav
+        activePane={ctl.activePane}
+        openRunIds={ctl.openRunIds}
+        runDetailCardsExpanded={ctl.runDetailCardsExpanded}
+        runTabDisplayLabel={ctl.runTabDisplayLabel}
+        runTabTooltip={ctl.runTabTooltip}
+        onShowRunsOnly={ctl.showRunsOnly}
+        onOpenRunTab={(rid) => void ctl.openRunTab(rid)}
+        onCloseRunTab={ctl.closeRunTab}
+        onToggleRunDetailCards={ctl.toggleRunDetailCards}
+        onRefresh={ctl.refreshMain}
+      />
+    {/if}
+  {/snippet}
 
   <GraphRunsRunsPanel
     bind:filterCharacterId={ctl.filterCharacterId}

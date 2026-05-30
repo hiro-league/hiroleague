@@ -8,7 +8,7 @@ from typing import Any
 
 from ..domain.available_models import AvailableModelsService
 from ..domain.credential_store import CredentialStore
-from ..domain.model_catalog import ModelKind, get_model_catalog
+from ..domain.model_catalog import MODEL_KINDS, ModelKind, get_model_catalog
 from ..domain.workspace import WorkspaceError, resolve_workspace
 from .base import Tool, ToolParam
 
@@ -138,13 +138,7 @@ class AvailableModelsListTool(Tool):
             mk_raw = None
         mk: ModelKind | None = None
         if mk_raw is not None:
-            allowed: tuple[ModelKind, ...] = (
-                "chat",
-                "tts",
-                "stt",
-                "embedding",
-                "image_gen",
-            )
+            allowed: tuple[ModelKind, ...] = MODEL_KINDS
             if mk_raw.lower() not in allowed:
                 raise ValueError(f"model_kind must be one of {', '.join(allowed)} when provided")
             mk = mk_raw.lower()  # type: ignore[assignment]

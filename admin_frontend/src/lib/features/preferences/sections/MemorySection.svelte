@@ -36,28 +36,6 @@
   </div>
 
   {#if ctrl.draft}
-    <!-- Direction toggles (independent of each other and of model selection). -->
-    <div class="grid gap-2">
-      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.memory.search.enabled}
-          disabled={ctrl.busy}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Search long-term memory before each reply</span>
-      </label>
-      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.memory.extraction.enabled}
-          disabled={ctrl.busy}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Store new memories after each reply</span>
-      </label>
-    </div>
-
     <SectionCardMuted
       title="Memory LLM model"
       description="Used by the memory service for memory extraction."
@@ -79,7 +57,7 @@
         onSelect={(id) => ctrl.setMemoryModel('default_llm', id)}
         onChange={ctrl.markDirty}
       />
-      <FormField label="Memory tuning profile" class="max-w-md">
+      <FormField label="Memory model profile" class="max-w-md">
         <select
           class={ADMIN_SELECT_LG}
           value={ctrl.draft.memory.default_tuning_profile}

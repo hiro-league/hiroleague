@@ -46,6 +46,8 @@ def format_pricing_summary(
         return "—" if hosting != "local" else "—"
 
     def _num(key: str) -> float | None:
+        if key not in pricing:
+            return None
         v = pricing.get(key)
         if v is None:
             return None
@@ -99,6 +101,24 @@ def format_pricing_summary(
         pi = _num("per_image")
         if pi is not None:
             return f"${pi:.4f}/image"
+
+    if kind == "rerank":
+        per_1k_searches = _num("estimated_usd_per_1k_searches")
+        if per_1k_searches is not None:
+            return f"${per_1k_searches:.2f}/1K searches"
+        est_req = _num("estimated_usd_per_request")
+        per_1k_proc = _num("per_1k_tokens")
+        if per_1k_proc is None:
+            per_1m = _num("input_per_1m_tokens")
+            if per_1m is not None:
+                per_1k_proc = per_1m / 1000.0
+        lines_rr: list[str] = []
+        if per_1k_proc is not None:
+            lines_rr.append(f"${per_1k_proc:.5f}/1K processed tokens")
+        if est_req is not None:
+            lines_rr.append(f"~${est_req:.4f}/request (est.)")
+        if lines_rr:
+            return "\n".join(lines_rr)
 
     # Any remaining priced field
     for key, suffix in (

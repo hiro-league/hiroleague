@@ -16,6 +16,7 @@ from .preferences import ModelTuning, ThinkingLevel
 from .workspace import workspace_id_for_path
 
 if TYPE_CHECKING:
+    from langchain_core.documents.compressor import BaseDocumentCompressor
     from langchain_core.embeddings import Embeddings
     from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -338,3 +339,62 @@ def create_embedding_model(
 
     lc_provider = _embedding_init_provider(pid)
     return init_embeddings(f"{lc_provider}:{api_model}", **provider_kwargs)
+
+
+def create_reranker(
+    model_id: str,
+    *,
+    workspace_path: Path,
+    workspace_id: str | None = None,
+    top_n: int = 8,
+    credential_store: CredentialStore | None = None,
+) -> BaseDocumentCompressor:
+    """Resolve a **cloud** catalog ``provider:model`` rerank id to a LangChain compressor.
+
+    Mirrors ``create_embedding_model``: validate the catalog spec, pull the provider key from
+    the workspace ``CredentialStore``, and return a ``BaseDocumentCompressor``. Local in-process
+    rerankers are NOT handled here — they live in the knowledge local-reranker registry.
+
+    Raises ``ValueError`` if the model is unknown, not a rerank model, or the provider is not
+    configured for this workspace.
+    """
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None:
+        raise ValueError(f"Unknown model id: {model_id}")
+    if not spec.supports_kind("rerank"):
+        raise ValueError(f"Model {model_id} is not a rerank model (kind={spec.model_kind})")
+
+    wid = workspace_id or workspace_id_for_path(workspace_path)
+    if wid is None and credential_store is None:
+        raise ValueError(
+            "Workspace path is not registered; cannot resolve credential scope. "
+            "Pass workspace_id explicitly or add this folder via hiro workspaces."
+        )
+    store = credential_store or CredentialStore(workspace_path, wid)
+    if not store.is_configured(spec.provider_id):
+        raise ValueError(
+            f"Provider {spec.provider_id!r} is not configured for this workspace. "
+            f"Run: hiro provider add {spec.provider_id}"
+        )
+
+    api_model = _api_model_id(model_id)
+    pid = spec.provider_id
+    if pid == "cohere":
+        key = store.get_api_key("cohere")
+        if not key:
+            raise ValueError("Cohere API key missing (keyring or COHERE_API_KEY).")
+        from langchain_cohere import CohereRerank
+
+        return CohereRerank(model=api_model, top_n=top_n, cohere_api_key=key)
+
+    if pid == "voyage":
+        key = store.get_api_key("voyage")
+        if not key:
+            raise ValueError("Voyage API key missing (keyring or VOYAGE_API_KEY).")
+        from langchain_voyageai import VoyageAIRerank
+
+        # Voyage's compressor takes ``top_k`` (not ``top_n``).
+        return VoyageAIRerank(model=api_model, top_k=top_n, voyage_api_key=key)
+
+    raise ValueError(f"Model factory does not support rerank provider {pid!r} yet.")

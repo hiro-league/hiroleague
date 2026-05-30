@@ -116,6 +116,10 @@ class AnswerBody(SearchBody):
     rewrite: bool = False
 
 
+class DownloadRerankerBody(BaseModel):
+    model_id: str
+
+
 class CreateCategoryBody(BaseModel):
     name: str
     parent_id: int | None = None
@@ -233,6 +237,83 @@ async def options(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge options failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/rerankers")
+async def list_rerankers(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Local reranker registry rows with per-model download status.
+
+    Cloud rerankers come from the catalog (``/catalog/models?model_kind=rerank``); the admin
+    picker merges the two sources.
+    """
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            return _success({"local": service.reranker_options()})
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error("knowledge list rerankers failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/rerankers/download")
+async def download_reranker(
+    body: DownloadRerankerBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Download a local reranker's weights (no model is fetched silently).
+
+    On the live workspace the download runs in the background and returns immediately with
+    ``status: downloading`` — the UI polls ``GET /knowledge/rerankers`` for the live transition
+    to ``ready`` / ``error``. For a short-lived (owned) service the task would not outlive the
+    request, so it falls back to a blocking download.
+    """
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            if owned:
+                return _success(await service.download_reranker(body.model_id))
+            return _success(service.start_reranker_download(body.model_id))
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error(
+            "knowledge reranker download failed",
+            model_id=body.model_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/rerankers/cancel")
+async def cancel_reranker_download(
+    body: DownloadRerankerBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Cancel an in-flight local-reranker download (terminates the download process)."""
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            if owned:
+                return _success({"model_id": body.model_id, "status": "available"})
+            return _success(service.cancel_reranker_download(body.model_id))
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error(
+            "knowledge reranker cancel failed",
+            model_id=body.model_id,
+            error=str(exc),
+            exc_info=True,
+        )
         return envelope_failure(str(exc))
 
 

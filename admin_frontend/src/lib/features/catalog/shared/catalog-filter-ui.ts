@@ -1,4 +1,5 @@
 import {
+  ArrowDownWideNarrow,
   Box,
   Cloud,
   Image as ImageIcon,
@@ -10,11 +11,14 @@ import {
 } from '@lucide/svelte';
 import type { CatalogModelRow } from '$lib/api/catalog';
 
-export const MODEL_KIND_FILTER_IDS = ['chat', 'tts', 'stt', 'embedding', 'image_gen'] as const;
+export const MODEL_KIND_FILTER_IDS = ['chat', 'tts', 'stt', 'embedding', 'image_gen', 'rerank'] as const;
 export type ModelKindFilterId = (typeof MODEL_KIND_FILTER_IDS)[number];
 
 export const HOSTING_FILTER_IDS = ['cloud', 'local'] as const;
 export type HostingFilterId = (typeof HOSTING_FILTER_IDS)[number];
+
+export const AVAILABILITY_FILTER_IDS = ['online', 'offline'] as const;
+export type AvailabilityFilterId = (typeof AVAILABILITY_FILTER_IDS)[number];
 
 export const MODEL_KIND_FILTER_UI: Record<
   ModelKindFilterId,
@@ -24,7 +28,8 @@ export const MODEL_KIND_FILTER_UI: Record<
   tts: { Icon: Volume2, title: 'Text-to-speech (TTS)' },
   stt: { Icon: Mic, title: 'Speech-to-text (STT)' },
   embedding: { Icon: Layers, title: 'Embedding' },
-  image_gen: { Icon: ImageIcon, title: 'Image generation' }
+  image_gen: { Icon: ImageIcon, title: 'Image generation' },
+  rerank: { Icon: ArrowDownWideNarrow, title: 'Reranker' }
 };
 
 export const HOSTING_FILTER_UI: Record<
@@ -33,6 +38,20 @@ export const HOSTING_FILTER_UI: Record<
 > = {
   cloud: { Icon: Cloud, title: 'Cloud' },
   local: { Icon: Server, title: 'Local' }
+};
+
+export const AVAILABILITY_FILTER_UI: Record<
+  AvailabilityFilterId,
+  { title: string; circleClass: string }
+> = {
+  online: {
+    title: 'Online — provider configured in this workspace',
+    circleClass: 'bg-green-600 dark:bg-green-500'
+  },
+  offline: {
+    title: 'Offline — provider not configured in this workspace',
+    circleClass: 'bg-muted-foreground/40'
+  }
 };
 
 export const MODEL_CLASS_OPTIONS = ['', 'agentic', 'fast', 'balanced', 'reasoning', 'creative', 'coding'];
@@ -83,4 +102,33 @@ export function catalogHostingUiForRow(hosting: string | null | undefined) {
 
 export function listText(values: string[] | undefined) {
   return values?.length ? values.slice().sort().join(', ') : '-';
+}
+
+export function isCatalogProviderOnline(providerId: string, configuredProviderIds: Set<string>): boolean {
+  return configuredProviderIds.has(providerId);
+}
+
+/** Availability for a browse row. Cloud/server rows: provider configured. Local rows: downloaded. */
+export function isRowAvailable(
+  model: CatalogModelRow,
+  configuredProviderIds: Set<string>
+): boolean {
+  if (model.source === 'local') return Boolean(model.downloaded);
+  return isCatalogProviderOnline(model.provider_id, configuredProviderIds);
+}
+
+export function filterModelsByAvailability(
+  rows: CatalogModelRow[],
+  selected: AvailabilityFilterId[],
+  configuredProviderIds: Set<string>
+): CatalogModelRow[] {
+  if (selected.length === 0 || selected.length === AVAILABILITY_FILTER_IDS.length) {
+    return rows;
+  }
+  const wantOnline = selected.includes('online');
+  const wantOffline = selected.includes('offline');
+  return rows.filter((model) => {
+    const online = isRowAvailable(model, configuredProviderIds);
+    return (online && wantOnline) || (!online && wantOffline);
+  });
 }

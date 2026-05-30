@@ -11,6 +11,9 @@
    *  - `titleAdornment` — inline element next to the title (e.g. open-folder icon).
    *  - `subtitle`       — replaces the `subtitle` string prop with rich markup.
    *  - `tabs`           — an `<AdminTabStrip>` (or a custom strip).
+   *  - `subnav`         — full-width second-level strip rendered inside the sticky
+   *    region below the title/tabs row (e.g. a per-record subtab strip). Pins with
+   *    the header; its height folds into `--admin-page-header-h` automatically.
    *  - `actions`        — trailing buttons / link actions.
    *  - `actionsCollapse({ expanded, toggle, ariaControls })` — optional chevron
    *    toggle that collapses a secondary region elsewhere on the page; receives
@@ -78,6 +81,7 @@
     titleAdornment?: Snippet;
     subtitleSlot?: Snippet;
     tabs?: Snippet;
+    subnav?: Snippet;
     actions?: Snippet;
     actionsCollapse?: Snippet<[ActionsCollapseArgs]>;
     backToTop?: Snippet;
@@ -98,6 +102,7 @@
     titleAdornment,
     subtitleSlot,
     tabs,
+    subnav,
     actions,
     actionsCollapse,
     backToTop,
@@ -302,6 +307,13 @@
         </div>
       {/if}
     </div>
+
+    {#if subnav}
+      <!-- Second-level strip inside the sticky region: pins with the header and its
+           height folds into --admin-page-header-h via the ResizeObserver above.
+           Tight top margin keeps the pinned chrome compact. -->
+      <div class="mt-1">{@render subnav()}</div>
+    {/if}
   </div>
 
   {#if children}

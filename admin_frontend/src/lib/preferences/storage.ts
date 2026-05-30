@@ -35,3 +35,8 @@ export function writeSessionString(key: string, value: string) {
   if (!browser) return;
   sessionStorage.setItem(key, value);
 }
+
+export function removeSessionString(key: string) {
+  if (!browser) return;
+  sessionStorage.removeItem(key);
+}

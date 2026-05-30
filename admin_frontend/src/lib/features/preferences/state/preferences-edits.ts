@@ -70,6 +70,31 @@ export function editsForSave(
     draft.knowledge.retrieval.prefetch_limit
   );
   add(
+    'knowledge.retrieval.reranker.enabled',
+    baseline.knowledge.retrieval.reranker.enabled,
+    draft.knowledge.retrieval.reranker.enabled
+  );
+  add(
+    'knowledge.retrieval.reranker.model_id',
+    baseline.knowledge.retrieval.reranker.model_id,
+    draft.knowledge.retrieval.reranker.model_id || null
+  );
+  add(
+    'knowledge.retrieval.reranker.top_n',
+    baseline.knowledge.retrieval.reranker.top_n,
+    draft.knowledge.retrieval.reranker.top_n
+  );
+  add(
+    'knowledge.retrieval.reranker.device',
+    baseline.knowledge.retrieval.reranker.device,
+    draft.knowledge.retrieval.reranker.device
+  );
+  add(
+    'knowledge.retrieval.reranker.batch_size',
+    baseline.knowledge.retrieval.reranker.batch_size,
+    draft.knowledge.retrieval.reranker.batch_size
+  );
+  add(
     'knowledge.default_tuning_profile',
     baseline.knowledge.default_tuning_profile,
     draft.knowledge.default_tuning_profile

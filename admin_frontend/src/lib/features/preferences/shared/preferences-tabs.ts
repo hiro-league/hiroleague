@@ -31,11 +31,11 @@ export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
 
 export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
   { id: 'models', label: 'Models' },
-  { id: 'media', label: 'Media' },
+  { id: 'agent', label: 'Agent' },
   { id: 'memory', label: 'Agent Memory' },
   { id: 'knowledge', label: 'Knowledge' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'tuning-profiles', label: 'Tuning profiles' }
+  { id: 'tuning-profiles', label: 'Model Profiles' },
+  { id: 'media', label: 'Media' }
 ];
 
 /** Legacy `#preferences-*` scroll anchors from the pre-tab layout. */

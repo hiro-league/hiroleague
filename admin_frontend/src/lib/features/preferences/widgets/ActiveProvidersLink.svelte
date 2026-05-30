@@ -11,7 +11,7 @@
 </script>
 
 <AdminPageLinkAction
-  href={`${base}/active-providers/`}
+  href={`${base}/catalog/?tab=active-providers`}
   icon={KeyRound}
   variant="outline"
   size="sm"

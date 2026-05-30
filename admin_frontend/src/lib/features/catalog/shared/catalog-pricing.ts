@@ -50,11 +50,14 @@ export function ttsUsdPer1kCatalogEstimate(
 }
 
 export function modelPricing(model: CatalogModelRow): string {
+  // Local in-process models cost nothing to run — state it explicitly rather than blank.
+  if (model.free || model.source === 'local') return 'Free';
   const pricing = model.pricing;
   if (!pricing || typeof pricing !== 'object') return '-';
 
   const num = (key: string) => {
     const raw = pricing[key];
+    if (raw === undefined || raw === null) return null;
     const value = typeof raw === 'number' ? raw : Number(raw);
     return Number.isFinite(value) ? value : null;
   };
@@ -95,6 +98,27 @@ export function modelPricing(model: CatalogModelRow): string {
   if (model.model_kind === 'stt') {
     const perSecond = num('per_second');
     if (perSecond !== null) return `$${perSecond.toFixed(4)}/sec audio`;
+  }
+  if (model.model_kind === 'rerank') {
+    // Cohere only — Voyage rows include estimated_usd_per_1k_searches: null in the API payload.
+    const per1kSearches = num('estimated_usd_per_1k_searches');
+    if (per1kSearches !== null && model.provider_id === 'cohere') {
+      return `$${per1kSearches.toFixed(2)}/1K searches`;
+    }
+    const estReq = num('estimated_usd_per_request');
+    let per1kProcessed = num('per_1k_tokens');
+    if (per1kProcessed === null) {
+      const per1m = num('input_per_1m_tokens');
+      if (per1m !== null) per1kProcessed = per1m / 1000;
+    }
+    const lines: string[] = [];
+    if (per1kProcessed !== null) {
+      lines.push(`$${per1kProcessed.toFixed(5)}/1K processed tokens`);
+    }
+    if (estReq !== null) {
+      lines.push(`~$${estReq.toFixed(4)}/request (est.)`);
+    }
+    if (lines.length > 0) return lines.join('\n');
   }
   return '-';
 }

@@ -7,7 +7,7 @@ import {
   type CatalogReloadData
 } from '$lib/api/catalog';
 
-export type CatalogModelKind = 'chat' | 'stt' | 'tts' | 'embedding';
+export type CatalogModelKind = 'chat' | 'stt' | 'tts' | 'embedding' | 'rerank';
 
 export type CatalogRefetchResult = {
   reload: CatalogReloadData;
@@ -15,7 +15,13 @@ export type CatalogRefetchResult = {
   providers: CatalogProviderRow[];
 };
 
-const DEFAULT_MODEL_KINDS: readonly CatalogModelKind[] = ['chat', 'stt', 'tts', 'embedding'];
+const DEFAULT_MODEL_KINDS: readonly CatalogModelKind[] = [
+  'chat',
+  'stt',
+  'tts',
+  'embedding',
+  'rerank'
+];
 
 /** Reload bundled catalog on the server, then parallel-fetch model lists and providers. */
 export async function reloadCatalogAndRefetch(

@@ -21,6 +21,9 @@ from hirocli.domain.preferences import (
     resolve_knowledge_rewrite_llm,
 )
 from hirocli.runtime.agent_graph.base import BaseAgentGraph
+from hirocli.runtime.agent_graph.base import _KNOWLEDGE_PREVIEW_MAX as KNOWLEDGE_PREVIEW_MAX
+from hirocli.runtime.agent_graph.base import _estimate_text_tokens as estimate_text_tokens
+from hirocli.runtime.agent_graph.base import _knowledge_results_rows as knowledge_results_rows
 from hirocli.runtime.agent_graph.base import _llm_usage_payload as llm_usage_payload
 from hirocli.runtime.agent_graph.base import _normalize_reply_content
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
@@ -44,6 +47,21 @@ log = Logger.get("SVC.KNOWLEDGE.GRAPH")
 KNOWLEDGE_NODE_PREFIX = "knowledge"
 
 
+def _minmax_relevances(scores: list[float]) -> list[float]:
+    """Min-max normalize retrieval scores into [0, 1] *within this result set* (ordinal).
+
+    Used for the score contract when no reranker ran — RRF/cosine scores are not calibrated, so
+    the top hit maps to 1.0 and the lowest to 0.0. A degenerate (all-equal) set maps all to 1.0.
+    """
+    if not scores:
+        return []
+    lo, hi = min(scores), max(scores)
+    if hi <= lo:
+        return [1.0 for _ in scores]
+    span = hi - lo
+    return [(score - lo) / span for score in scores]
+
+
 class KnowledgeAgentState(TypedDict, total=False):
     query: str
     filters: dict[str, Any]
@@ -64,6 +82,9 @@ class KnowledgeAgentState(TypedDict, total=False):
     query_vector: list[float]
     query_sparse_vector: Any
     hits: list[Any]
+    # Set True by the rerank node when a reranker actually reordered the hits; drives the
+    # score_source ("reranker" vs "rrf"/"cosine") that build_context stamps onto sources.
+    reranked: bool
     sources: list[Any]
     context: str
     answer: str
@@ -132,6 +153,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/vector_search", self.vector_search),
         )
         graph.add_node(
+            "rerank",
+            self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/rerank", self.rerank),
+        )
+        graph.add_node(
             "build_context",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/build_context", self.build_context),
         )
@@ -147,7 +172,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         )
         graph.add_edge("build_filters", "embed_query")
         graph.add_edge("embed_query", "vector_search")
-        graph.add_edge("vector_search", "build_context")
+        graph.add_edge("vector_search", "rerank")
+        graph.add_edge("rerank", "build_context")
 
     def build(
         self,
@@ -242,6 +268,12 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             return {}
 
         model_id = resolved.model_id
+        if entry := current_entry.get():
+            # Enrich the input with the resolved tuning so the run shows what params actually ran.
+            entry.set_input_preview(
+                f"text: {normalized.text[:140]} · {model_id} temp={resolved.temperature} "
+                f"max_tokens={resolved.max_tokens} thinking={resolved.thinking or 'off'}"
+            )
         # Cross-provider guard: only attempt structured output on models the catalog says
         # support it; otherwise the call would burn tokens and fall back every time.
         spec = get_model_catalog().get_model(model_id)
@@ -287,10 +319,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 model=model_id,
                 exc_info=True,
             )
+            provider = model_id.split(":", 1)[0] if ":" in model_id else ""
             if entry := current_entry.get():
+                # Record the failing model + the provider's actual message (output_preview is not
+                # slugged) instead of a mangled, capped error_code.
+                entry.add_usage(provider=provider, model=model_id)
                 entry.set_decision("provider_error", "rewrite_call_failed")
-                entry.set_error(f"rewrite_call_failed: {str(exc)[:160]}")
-                entry.set_output_preview("rewrite: <fallback to raw query>")
+                entry.set_error("rewrite_call_failed")
+                entry.set_output_preview(f"error: {exc}")
             return {}
 
         parsed = result.get("parsed") if isinstance(result, dict) else None
@@ -363,41 +399,76 @@ class KnowledgeAgentGraph(BaseAgentGraph):
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:
         return {"qdrant_filter": build_qdrant_filter(state.get("filters") or {})}
 
-    @graph_logged()
+    @graph_logged(captures={"usage", "decision"})
     async def embed_query(self, state: KnowledgeAgentState) -> dict[str, Any]:
         normalized = state["normalized_query"]
+        embedding_model = self._prefs.knowledge.default_embedding_model_resolved
+        hybrid = self._prefs.knowledge.retrieval.hybrid
+        sparse_model = self._prefs.knowledge.retrieval.sparse_model
         if entry := current_entry.get():
-            entry.set_input_preview(f"text: {normalized.text[:200]}")
+            # Put the embedding model in the model column and an estimated input-token count so the
+            # ledger prices it (gross list price; embedding pricing is input-only). Local/free
+            # embedders aren't catalogued → cost stays blank.
+            provider = embedding_model.split(":", 1)[0] if ":" in embedding_model else ""
+            entry.add_usage(
+                provider=provider,
+                model=embedding_model,
+                input_tokens=estimate_text_tokens(normalized.text),
+            )
+            entry.set_input_preview(
+                f"model: {embedding_model}"
+                + (f" + sparse: {sparse_model}" if hybrid else "")
+                + f" · text: {normalized.text[:140]}"
+            )
         vector = await self._service.embed_query(normalized.text)
         out: dict[str, Any] = {"query_vector": vector}
         # Only pay for the BM25 query embed when hybrid is enabled. Append rewrite keywords
         # (literal proper nouns/identifiers) so the sparse branch keeps its exact-match signal.
-        if self._prefs.knowledge.retrieval.hybrid:
+        sparse = None
+        if hybrid:
             keywords = state.get("rewrite_keywords") or []
             sparse_text = (
                 f"{normalized.text} {' '.join(keywords)}".strip() if keywords else normalized.text
             )
-            out["query_sparse_vector"] = await self._service.embed_query_sparse(sparse_text)
+            sparse = await self._service.embed_query_sparse(sparse_text)
+            out["query_sparse_vector"] = sparse
+        # Was an empty row before; report vector dim + whether the sparse branch ran so the step is
+        # not a black box.
+        if entry := current_entry.get():
+            dim = len(vector) if hasattr(vector, "__len__") else 0
+            entry.set_decision("embedded", f"dim_{dim}")
+            entry.set_output_preview(f"embedded: dim={dim}; sparse={'yes' if sparse is not None else 'no'}")
         return out
 
     @graph_logged(captures={"decision"})
     async def vector_search(self, state: KnowledgeAgentState) -> dict[str, Any]:
+        retrieval = self._prefs.knowledge.retrieval
+        top_k = int(state.get("top_k") or retrieval.top_k)
+        min_score = float(
+            state["min_score"] if state.get("min_score") is not None else retrieval.min_score
+        )
+        nq = state.get("normalized_query")
+        query_text = nq.text if nq is not None else str(state.get("query") or "")
+        if entry := current_entry.get():
+            # Surface the query text + effective knobs so a low/zero hit count is interpretable
+            # (wrong query? min_score too high? filtered? hybrid off?) instead of a bare "hits: 0".
+            entry.set_input_preview(
+                f"q: {query_text[:80]} · top_k={top_k} min_score={min_score:.2f} "
+                f"prefetch/branch={retrieval.prefetch_limit} "
+                f"hybrid={'on' if retrieval.hybrid else 'off'} "
+                f"filter={'yes' if state.get('qdrant_filter') else 'none'}"
+            )
         vector = state.get("query_vector") or []
         if not vector:
             if entry := current_entry.get():
                 entry.set_decision("empty", "no_query_vector")
-                entry.set_output_preview("hits: 0")
+                entry.set_output_preview("hits 0; no_query_vector")
             return {"hits": []}
-        retrieval = self._prefs.knowledge.retrieval
         hits = await self._service.vector_search_by_vector(
             vector,
             state.get("query_sparse_vector"),
-            top_k=int(state.get("top_k") or retrieval.top_k),
-            min_score=float(
-                state["min_score"]
-                if state.get("min_score") is not None
-                else retrieval.min_score
-            ),
+            top_k=top_k,
+            min_score=min_score,
             prefetch_limit=retrieval.prefetch_limit,
             hybrid=retrieval.hybrid,
             explain=bool(state.get("explain")),
@@ -405,8 +476,74 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         )
         if entry := current_entry.get():
             entry.set_decision("ok", f"hits_{len(hits)}")
-            entry.set_output_preview(f"hits: {len(hits)}")
+            # Show the actual top results (title + snippet), tagged rrf/cosine (pre-rerank), so you
+            # can see WHAT was retrieved, not just how many.
+            source = "rrf" if retrieval.hybrid else "cosine"
+            rows = knowledge_results_rows(hits)
+            head = f"hits {len(hits)} ({source})"
+            entry.set_output_preview(
+                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
+            )
         return {"hits": hits}
+
+    @graph_logged(captures={"usage", "decision"})
+    async def rerank(self, state: KnowledgeAgentState) -> dict[str, Any]:
+        # Opt-in cross-encoder reranking over the retrieved candidates (precision step).
+        # Prefs-only, default off. Fails safe: any error logs and returns {} so the fused
+        # retrieval order is kept — reranking never blocks an answer.
+        reranker = self._prefs.knowledge.retrieval.reranker
+        hits = state.get("hits") or []
+        if not reranker.enabled or not reranker.model_id or not hits:
+            return {}
+        provider = reranker.model_id.split(":", 1)[0] if ":" in reranker.model_id else ""
+        normalized = state["normalized_query"]
+        # Estimate billed work (gross list price; free tiers ignored). Voyage-style processed
+        # tokens = query_tokens × #candidates + sum(candidate doc tokens); Cohere prices per search
+        # unit — the cost estimator reads the model's kind/pricing and applies the right shape.
+        processed_tokens = estimate_text_tokens(normalized.text) * len(hits) + sum(
+            estimate_text_tokens(getattr(hit, "text", "") or "") for hit in hits
+        )
+        if entry := current_entry.get():
+            # Reranker in the model column + processed tokens so the row prices (local cross-encoders
+            # aren't catalogued → cost stays blank).
+            entry.add_usage(
+                provider=provider, model=reranker.model_id, input_tokens=processed_tokens
+            )
+            entry.set_input_preview(
+                f"model: {reranker.model_id} · candidates: {len(hits)} · top_n: {reranker.top_n}"
+            )
+        try:
+            reranked = await self._service.rerank_hits(
+                normalized.text,
+                hits,
+                model_id=reranker.model_id,
+                top_n=reranker.top_n,
+                device=reranker.device,
+                workspace_id=self._workspace_id,
+            )
+        except Exception as exc:
+            log.warning(
+                "⚠️ knowledge.rerank — failed, using retrieval order",
+                error=str(exc)[:200],
+                model=reranker.model_id,
+                exc_info=True,
+            )
+            if entry := current_entry.get():
+                entry.set_decision("provider_error", "rerank_failed")
+                entry.set_error("rerank_failed")
+                # Keep the runtime's actual message (output_preview is not slugged/capped at 80).
+                entry.set_output_preview(f"error: {exc}")
+            return {}
+        if entry := current_entry.get():
+            entry.set_decision("ok", f"reranked_{len(reranked)}")
+            # Show the surviving results themselves (title + snippet + post-rerank relevance) so the
+            # precision step is judgeable, not just "K of N".
+            rows = knowledge_results_rows(reranked)
+            head = f"reranked {len(reranked)} of {len(hits)}"
+            entry.set_output_preview(
+                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
+            )
+        return {"hits": reranked, "reranked": True}
 
     def build_context(self, state: KnowledgeAgentState) -> dict[str, Any]:
         from hirocli.services.knowledge.converters import source_from_hit
@@ -415,10 +552,33 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         explain = bool(state.get("explain"))
         normalized = state.get("normalized_query")
         query_text = normalized.text if normalized is not None else str(state.get("query", ""))
+        hits = state.get("hits") or []
+        # Unified score contract: when the rerank node ran, sources carry the reranker's
+        # normalized relevance (set on the hits). Otherwise relevance is the retrieval score
+        # min-max normalized within this result set (ordinal, not calibrated) — tagged so chat
+        # fusion knows the provenance. score_source is "rrf" under hybrid, else "cosine".
+        reranked = bool(state.get("reranked"))
+        score_source = (
+            "reranker"
+            if reranked
+            else ("rrf" if self._prefs.knowledge.retrieval.hybrid else "cosine")
+        )
+        fallback_relevances = (
+            None if reranked else _minmax_relevances([float(hit.score) for hit in hits])
+        )
         sources = []
-        for index, hit in enumerate(state.get("hits") or [], start=1):
+        for index, hit in enumerate(hits, start=1):
             terms = matched_query_terms(query_text, hit.text) if explain else None
-            sources.append(source_from_hit(index, hit, matched_terms=terms))
+            relevance = None if reranked else fallback_relevances[index - 1]
+            sources.append(
+                source_from_hit(
+                    index,
+                    hit,
+                    matched_terms=terms,
+                    relevance=relevance,
+                    score_source=score_source,
+                )
+            )
         return {
             "sources": sources,
             "context": build_context(sources),
@@ -437,8 +597,20 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             workspace_id=self._workspace_id,
         )
         normalized = state["normalized_query"]
+        answering = self._prefs.knowledge.answering
         if entry := current_entry.get():
-            entry.set_input_preview(f"text: {normalized.text[:200]}")
+            # Show the answering config that actually ran: language policy, citation toggle, and the
+            # resolved tuning (temp/max_tokens/thinking) — not just the question text.
+            tuning = (
+                f" · {resolved.model_id} temp={resolved.temperature} "
+                f"max_tokens={resolved.max_tokens} thinking={resolved.thinking or 'off'}"
+                if resolved is not None
+                else ""
+            )
+            entry.set_input_preview(
+                f"text: {normalized.text[:140]} · lang={answering.language_policy} "
+                f"cite={answering.cite_sources}{tuning}"
+            )
         if resolved is None:
             answer = self._fallback_answer(state)
             if entry := current_entry.get():
@@ -462,10 +634,13 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         except Exception as exc:
             log.error("knowledge.answer model creation failed", error=str(exc), exc_info=True)
             answer = self._fallback_answer(state)
+            provider = model_id.split(":", 1)[0] if ":" in model_id else ""
             if entry := current_entry.get():
+                # Identify the model and keep the provider's message (not just "model_create_failed").
+                entry.add_usage(provider=provider, model=model_id)
                 entry.set_decision("provider_error", "model_create_failed")
                 entry.set_error("model_create_failed")
-                entry.set_output_preview(f"answer: {answer[:200]}")
+                entry.set_output_preview(f"error: {exc}")
             return {"answer": answer, "model_id": model_id, "usage": {}}
         messages = [
             SystemMessage(content=self._system_prompt(normalized)),
@@ -477,10 +652,13 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         except Exception as exc:
             log.error("knowledge.answer model call failed", error=str(exc), exc_info=True)
             answer = self._fallback_answer(state)
+            provider = model_id.split(":", 1)[0] if ":" in model_id else ""
             if entry := current_entry.get():
+                # Identify the model and keep the provider's actual message in output_preview.
+                entry.add_usage(provider=provider, model=model_id)
                 entry.set_decision("provider_error", "model_call_failed")
-                entry.set_error("provider_error")
-                entry.set_output_preview(f"answer: {answer[:200]}")
+                entry.set_error("model_call_failed")
+                entry.set_output_preview(f"error: {exc}")
             return {"answer": answer, "model_id": model_id, "usage": {}}
         usage_payload = llm_usage_payload(
             response,

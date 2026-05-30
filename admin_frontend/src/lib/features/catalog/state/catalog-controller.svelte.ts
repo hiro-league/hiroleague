@@ -1,6 +1,7 @@
 import {
   listCatalogModels,
   listCatalogProviders,
+  listLocalCatalogModels,
   type CatalogModelFilters,
   type CatalogModelRow,
   type CatalogProviderRow
@@ -17,10 +18,13 @@ import { createCatalogPreferences } from '$lib/preferences/catalog-preferences.s
 import type { CatalogTabPreference } from '$lib/preferences/keys';
 import type { ToastKind } from '$lib/ui/toast-types';
 import {
+  AVAILABILITY_FILTER_IDS,
+  filterModelsByAvailability,
   HOSTING_FILTER_IDS,
   MODEL_KIND_FILTER_IDS,
   modelSupportsCatalogKind,
   parseCommaList,
+  type AvailabilityFilterId,
   type HostingFilterId,
   type ModelKindFilterId
 } from '../shared/catalog-filter-ui';
@@ -35,12 +39,20 @@ type Notify = (kind: ToastKind, message: string) => void;
 
 export type CatalogController = ReturnType<typeof createCatalogController>;
 
+function catalogModelDisplayNameMap(rows: CatalogModelRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of rows) {
+    out[row.id] = row.display_name;
+  }
+  return out;
+}
+
 export function createCatalogController(notify: Notify) {
   const prefs = createCatalogPreferences();
   const activeProvidersStore = createActiveProvidersStore();
 
   const modelFilters = useTableFilters({
-    keys: ['provider_id', 'model_class', 'model_kind', 'hosting'] as const,
+    keys: ['provider_id', 'model_class', 'model_kind', 'hosting', 'availability'] as const,
     urlSync: true
   });
 
@@ -65,6 +77,8 @@ export function createCatalogController(notify: Notify) {
   let providersError = $state<string | null>(null);
   let modelsError = $state<string | null>(null);
   let catalogReloadBusy = $state(false);
+  /** All bundled models — used to resolve recommended_models ids to display names on the providers tab. */
+  let catalogModelDisplayNames = $state<Record<string, string>>({});
 
   const providerLabels = $derived(
     providers.reduce<Record<string, string>>((acc, provider) => {
@@ -96,11 +110,30 @@ export function createCatalogController(notify: Notify) {
   const configuredWorkspaceProviderIds = $derived(activeProvidersStore.configuredProviderIds);
 
   const sortedProviders = $derived(
-    sortProviders(providers, providerSort.sortBy, providerSort.direction)
+    sortProviders(
+      providers,
+      providerSort.sortBy,
+      providerSort.direction,
+      configuredWorkspaceProviderIds
+    )
+  );
+
+  const filteredModels = $derived(
+    filterModelsByAvailability(
+      models,
+      selectedAvailabilityFilters(),
+      configuredWorkspaceProviderIds
+    )
   );
 
   const sortedModels = $derived(
-    sortModels(models, modelSort.sortBy, modelSort.direction, providerLabels)
+    sortModels(
+      filteredModels,
+      modelSort.sortBy,
+      modelSort.direction,
+      providerLabels,
+      configuredWorkspaceProviderIds
+    )
   );
 
   const hasModelFilters = $derived.by(() => {
@@ -109,9 +142,15 @@ export function createCatalogController(notify: Notify) {
       f.provider_id.trim() ||
         f.model_class.trim() ||
         f.model_kind.trim() ||
-        f.hosting.trim()
+        f.hosting.trim() ||
+        f.availability.trim()
     );
   });
+
+  function selectedAvailabilityFilters(): AvailabilityFilterId[] {
+    const selected = new Set(parseCommaList(modelFilters.filters.availability));
+    return AVAILABILITY_FILTER_IDS.filter((id) => selected.has(id));
+  }
 
   function selectedModelKinds(): ModelKindFilterId[] {
     const selected = new Set(parseCommaList(modelFilters.filters.model_kind));
@@ -126,6 +165,10 @@ export function createCatalogController(notify: Notify) {
     return parseCommaList(modelFilters.filters.hosting).includes(hosting);
   }
 
+  function isAvailabilitySelected(availability: AvailabilityFilterId): boolean {
+    return parseCommaList(modelFilters.filters.availability).includes(availability);
+  }
+
   function catalogFetchFilters(): CatalogModelFilters {
     const kinds = selectedModelKinds();
     const out: CatalogModelFilters = {};
@@ -137,6 +180,18 @@ export function createCatalogController(notify: Notify) {
     if (hostings.length === 1) out.hosting = hostings[0];
     if (kinds.length === 1) out.model_kind = kinds[0];
     return out;
+  }
+
+  async function loadCatalogModelIndex() {
+    try {
+      const payload = await listCatalogModels();
+      catalogModelDisplayNames = catalogModelDisplayNameMap(payload.data?.models ?? []);
+      if (payload.data?.catalog_version) {
+        catalogVersion = payload.data.catalog_version;
+      }
+    } catch {
+      catalogModelDisplayNames = {};
+    }
   }
 
   async function loadProviders() {
@@ -153,19 +208,40 @@ export function createCatalogController(notify: Notify) {
     }
   }
 
+  // Local in-process models (rerankers today) are merged into the browse as read-only
+  // hosting:local rows. They have no model_class, so a class filter excludes them; the hosting
+  // and provider/kind filters are applied here to mirror the catalog list.
+  async function loadLocalModels(): Promise<CatalogModelRow[]> {
+    if (modelFilters.filters.model_class.trim()) return [];
+    const hostings = HOSTING_FILTER_IDS.filter((h) => isHostingSelected(h));
+    if (hostings.length === 1 && hostings[0] !== 'local') return [];
+    const kinds = selectedModelKinds();
+    const rows = await listLocalCatalogModels(kinds.length === 1 ? kinds[0] : undefined);
+    let list = rows;
+    if (kinds.length > 1) {
+      list = list.filter((m) => kinds.some((k) => modelSupportsCatalogKind(m, k)));
+    }
+    const prov = modelFilters.filters.provider_id.trim();
+    if (prov) list = list.filter((m) => m.provider_id === prov);
+    return list;
+  }
+
   async function loadModels() {
     modelsLoading = true;
     modelsError = null;
     try {
       const fetchFilters = catalogFetchFilters();
       const kinds = selectedModelKinds();
-      const payload = await listCatalogModels(fetchFilters);
+      const [payload, localRows] = await Promise.all([
+        listCatalogModels(fetchFilters),
+        loadLocalModels()
+      ]);
       catalogVersion = payload.data.catalog_version;
       let list = payload.data.models;
       if (kinds.length > 1) {
         list = list.filter((m) => kinds.some((k) => modelSupportsCatalogKind(m, k)));
       }
-      models = list;
+      models = [...list, ...localRows];
     } catch (err) {
       modelsError = err instanceof Error ? err.message : 'Failed to load catalog models.';
       models = [];
@@ -181,6 +257,11 @@ export function createCatalogController(notify: Notify) {
       notify('success', catalogReloadSuccessMessage(result.reload));
       providers = result.providers;
       providersError = null;
+      const indexRows: CatalogModelRow[] = [];
+      for (const list of Object.values(result.modelsByKind)) {
+        if (list) indexRows.push(...list);
+      }
+      catalogModelDisplayNames = catalogModelDisplayNameMap(indexRows);
       await activeProvidersStore.load({ silent: true });
       if (prefs.activeTab === 'models') {
         await loadModels();
@@ -201,7 +282,7 @@ export function createCatalogController(notify: Notify) {
   }
 
   async function refreshCatalogProviders() {
-    await loadProviders();
+    await Promise.all([loadProviders(), loadCatalogModelIndex()]);
     await activeProvidersStore.load({ silent: true });
   }
 
@@ -247,9 +328,19 @@ export function createCatalogController(notify: Notify) {
     await applyModelFilters();
   }
 
+  function toggleAvailabilityFilter(availability: AvailabilityFilterId) {
+    const set = new Set(parseCommaList(modelFilters.filters.availability));
+    if (set.has(availability)) {
+      set.delete(availability);
+    } else {
+      set.add(availability);
+    }
+    modelFilters.set('availability', [...set].join(','));
+  }
+
   async function initialize() {
     prefs.initialize();
-    await Promise.all([loadProviders(), activeProvidersStore.load()]);
+    await Promise.all([loadProviders(), loadCatalogModelIndex(), activeProvidersStore.load()]);
     if (prefs.activeTab === 'models') {
       await loadModels();
     }
@@ -267,6 +358,9 @@ export function createCatalogController(notify: Notify) {
     },
     get models() {
       return models;
+    },
+    get filteredModels() {
+      return filteredModels;
     },
     get sortedModels() {
       return sortedModels;
@@ -298,8 +392,14 @@ export function createCatalogController(notify: Notify) {
     get recommendedCatalogModelIds() {
       return recommendedCatalogModelIds;
     },
+    get catalogModelDisplayNames() {
+      return catalogModelDisplayNames;
+    },
     get configuredWorkspaceProviderIds() {
       return configuredWorkspaceProviderIds;
+    },
+    get activeProvidersStore() {
+      return activeProvidersStore;
     },
     get modelFilters() {
       return modelFilters;
@@ -315,6 +415,7 @@ export function createCatalogController(notify: Notify) {
     },
     isModelKindSelected,
     isHostingSelected,
+    isAvailabilitySelected,
     switchTab,
     refreshCatalogProviders,
     openModelsForProvider,
@@ -322,6 +423,7 @@ export function createCatalogController(notify: Notify) {
     clearModelFilters,
     toggleModelKindFilter,
     toggleHostingFilter,
+    toggleAvailabilityFilter,
     loadModels,
     reloadBundledCatalog,
     initialize

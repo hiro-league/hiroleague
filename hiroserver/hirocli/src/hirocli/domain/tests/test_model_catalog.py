@@ -57,6 +57,31 @@ def test_bundled_catalog_loads() -> None:
     assert cat.list_models(model_kind="stt")
     assert any(m.id == "google:gemini-3-flash-preview" for m in cat.list_models(model_kind="stt"))
 
+    voyage_rr = cat.get_model("voyage:rerank-2.5")
+    assert voyage_rr is not None and voyage_rr.pricing is not None
+    assert voyage_rr.pricing.per_1k_tokens == 0.00005
+    assert voyage_rr.pricing.input_per_1m_tokens == 0.05
+    assert voyage_rr.pricing.estimated_usd_per_request == 0.0025
+
+    cohere_rr = cat.get_model("cohere:rerank-v4.0-pro")
+    assert cohere_rr is not None and cohere_rr.pricing is not None
+    assert cohere_rr.pricing.estimated_usd_per_1k_searches == 2.50
+
+    voyage = cat.get_provider("voyage")
+    assert voyage is not None and len(voyage.free_offers) == 1
+    assert voyage.free_offers[0].label == "Free rerank"
+    assert "200" in voyage.free_offers[0].summary
+    assert voyage.free_offers[0].updated_at == "2026-05-30"
+    assert voyage.free_offers[0].details_url is not None
+
+    cohere = cat.get_provider("cohere")
+    assert cohere is not None and len(cohere.free_offers) == 1
+    assert cohere.free_offers[0].label == "Trial API"
+    assert cohere.free_offers[0].updated_at == "2026-05-30"
+    assert "1,000" in cohere.free_offers[0].summary
+    assert "10 req/min" in cohere.free_offers[0].summary
+    assert cohere.free_offers[0].details_url == "https://docs.cohere.com/docs/rate-limits"
+
 
 def test_reload_model_catalog_refreshes_process_cache() -> None:
     """``reload_model_catalog`` must clear LRU cache so a new singleton is loaded."""

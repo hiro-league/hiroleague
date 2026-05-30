@@ -2,19 +2,18 @@ export type NavItem = {
   label: string;
   path: string;
   icon: string;
-  group: 'Core' | 'AI Models' | 'Communication' | 'Operations';
+  group: 'Core' | 'Configuration' | 'Communication' | 'Operations';
 };
 
 export const navItems: NavItem[] = [
   { group: 'Core', label: 'Dashboard', path: '/', icon: 'grid' },
   { group: 'Core', label: 'Server', path: '/server/', icon: 'server' },
-  { group: 'AI Models', label: 'Model Catalog', path: '/catalog/', icon: 'book' },
-  { group: 'AI Models', label: 'Active Providers', path: '/active-providers/', icon: 'key' },
+  { group: 'Configuration', label: 'Providers/Models', path: '/catalog/', icon: 'book' },
+  { group: 'Configuration', label: 'Preferences', path: '/preferences/', icon: 'settings' },
   { group: 'Communication', label: 'Channels & Devices', path: '/channels-devices/', icon: 'cpu' },
   { group: 'Communication', label: 'Characters', path: '/characters/', icon: 'user' },
   { group: 'Communication', label: 'Chat channels', path: '/chats/', icon: 'message' },
   { group: 'Operations', label: 'Knowledge', path: '/knowledge/', icon: 'database' },
-  { group: 'Operations', label: 'Preferences', path: '/preferences/', icon: 'settings' },
   { group: 'Operations', label: 'Graph Runs', path: '/graph-runs/', icon: 'workflow' },
   { group: 'Operations', label: 'Logs', path: '/logs/', icon: 'list' }
 ];

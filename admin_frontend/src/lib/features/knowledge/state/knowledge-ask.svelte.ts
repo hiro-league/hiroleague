@@ -1,5 +1,11 @@
 import { answerKnowledge, type KnowledgeAnswerData } from '$lib/api/knowledge';
-import { buildAskFilters, optionalInt } from '../shared/knowledge-pure';
+import {
+  buildAskFilters,
+  clearPersistedKnowledgeAskResult,
+  optionalInt,
+  readPersistedKnowledgeAskResult,
+  writePersistedKnowledgeAskResult
+} from '../shared/knowledge-pure';
 import type { KnowledgeBrowseModel } from './knowledge-browse.svelte';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
@@ -12,7 +18,6 @@ export function createKnowledgeAskModel(deps: {
   options: KnowledgeOptionsModel;
   setError: (message: string | null) => void;
 }) {
-  let query = $state('');
   let askTopK = $state(DEFAULT_ASK_TOP_K);
   let askMinScore = $state(DEFAULT_ASK_MIN_SCORE);
   // Opt-in: request per-branch scores + matched terms for human evaluation of results.
@@ -29,7 +34,10 @@ export function createKnowledgeAskModel(deps: {
   let askDocumentId = $state<string | null>(null);
   let queryInputEl = $state<HTMLInputElement | null>(null);
   let searching = $state(false);
-  let answerResult = $state<KnowledgeAnswerData | null>(null);
+  // Restore the last answer cached in sessionStorage so results survive navigating to other admin
+  // pages and back (asking costs an LLM call). Seed the query box to match the restored answer.
+  let answerResult = $state<KnowledgeAnswerData | null>(readPersistedKnowledgeAskResult());
+  let query = $state(answerResult?.query ?? '');
 
   const askDocumentScope = $derived(
     deps.browse.documents.find((doc) => doc.id === askDocumentId) ?? null
@@ -76,6 +84,8 @@ export function createKnowledgeAskModel(deps: {
         askRewrite
       );
       answerResult = payload.data;
+      // Cache so the answer + chunks survive navigation away and back (see knowledge-pure helpers).
+      writePersistedKnowledgeAskResult(payload.data);
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Ask failed.');
     } finally {
@@ -111,6 +121,13 @@ export function createKnowledgeAskModel(deps: {
     askDocumentId = null;
   }
 
+  // Explicit "Clear" action: drop the current answer + cached copy so the next question starts fresh.
+  function clearAnswer() {
+    answerResult = null;
+    clearPersistedKnowledgeAskResult();
+    queueMicrotask(() => queryInputEl?.focus());
+  }
+
   function resetForDocument(document: {
     id: string;
     owner_kind: string;
@@ -127,6 +144,7 @@ export function createKnowledgeAskModel(deps: {
     askTags = [...(document.tags ?? [])];
     query = '';
     answerResult = null;
+    clearPersistedKnowledgeAskResult();
     queueMicrotask(() => queryInputEl?.focus());
   }
 
@@ -216,6 +234,7 @@ export function createKnowledgeAskModel(deps: {
     handleAskOwnerKindChange,
     clearAskFilters,
     clearAskDocumentScope,
+    clearAnswer,
     resetForDocument,
     initRewriteDefault
   };

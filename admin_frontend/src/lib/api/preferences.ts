@@ -36,6 +36,15 @@ export type MemoryRerankerPreferences = {
   batch_size: number;
 };
 
+export type KnowledgeRerankerPreferences = {
+  enabled: boolean;
+  // Catalog provider:model (cloud) OR a local-registry id (local:*). Null = no reranker.
+  model_id: string | null;
+  top_n: number;
+  device: string | null;
+  batch_size: number;
+};
+
 export type KnowledgePreferences = {
   default_embedding_model: string | null;
   default_embedding_model_resolved?: string | null;
@@ -55,6 +64,7 @@ export type KnowledgePreferences = {
     hybrid: boolean;
     sparse_model: string;
     prefetch_limit: number;
+    reranker: KnowledgeRerankerPreferences;
   };
   default_tuning_profile: string;
   answering: {
@@ -136,7 +146,14 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
     min_score: 0,
     hybrid: true,
     sparse_model: 'Qdrant/bm25',
-    prefetch_limit: 40
+    prefetch_limit: 40,
+    reranker: {
+      enabled: false,
+      model_id: null,
+      top_n: 8,
+      device: null,
+      batch_size: 32
+    }
   },
   answering: {
     model: null,
@@ -179,7 +196,14 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
           ...(prefs.knowledge?.chunking?.markdown ?? {})
         }
       },
-      retrieval: { ...DEFAULT_KNOWLEDGE.retrieval, ...(prefs.knowledge?.retrieval ?? {}) },
+      retrieval: {
+        ...DEFAULT_KNOWLEDGE.retrieval,
+        ...(prefs.knowledge?.retrieval ?? {}),
+        reranker: {
+          ...DEFAULT_KNOWLEDGE.retrieval.reranker,
+          ...(prefs.knowledge?.retrieval?.reranker ?? {})
+        }
+      },
       answering: { ...DEFAULT_KNOWLEDGE.answering, ...(prefs.knowledge?.answering ?? {}) },
       rewrite: { ...DEFAULT_KNOWLEDGE.rewrite, ...(prefs.knowledge?.rewrite ?? {}) },
       default_tuning_profile:

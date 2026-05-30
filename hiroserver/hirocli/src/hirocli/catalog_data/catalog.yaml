@@ -121,6 +121,49 @@ providers:
     metadata_updated_at: "2026-03-27"
     notes: Default port varies by install; check Jan settings.
 
+  # Rerank-only cloud providers (knowledge retrieval precision step). Local in-process
+  # rerankers (FlashRank / FastEmbed / sentence-transformers) are NOT here — they live in the
+  # services.knowledge local-reranker registry, mirroring the FastEmbed embedder fallback.
+  - id: voyage
+    display_name: Voyage AI
+    hosting: cloud
+    credential_env_keys: [VOYAGE_API_KEY]
+    docs_url: https://docs.voyageai.com
+    recommended_models:
+      rerank: voyage:rerank-2.5
+    free_offers:
+      - label: Free rerank
+        summary: 200M processed rerank tokens per account (rerank-2.5 family)
+        updated_at: "2026-05-30"
+        details: |
+          Voyage waives charges for the first 200 million processed rerank tokens per account
+          on rerank-2.5 and rerank-2.5-lite. Processed tokens = (query tokens × document count)
+          + sum of document tokens. Legacy rerank-2 / rerank-2-lite rows do not include this
+          allowance. Verify current limits on the pricing page before production use.
+        details_url: https://docs.voyageai.com/docs/pricing
+    metadata_updated_at: "2026-05-30"
+
+  - id: cohere
+    display_name: Cohere
+    hosting: cloud
+    credential_env_keys: [COHERE_API_KEY]
+    docs_url: https://docs.cohere.com
+    recommended_models:
+      rerank: cohere:rerank-v4.0-pro
+    free_offers:
+      - label: Trial API
+        summary: "Trial key: 1,000 API calls/mo (all endpoints), Rerank 10 req/min — non-production"
+        updated_at: "2026-05-30"
+        details: |
+          New Cohere accounts get a trial API key (free, non-production). Trial keys share one
+          monthly cap of 1,000 API calls across all endpoints — Rerank counts toward that pool,
+          not a separate rerank-only quota. Per-endpoint rate limit for Rerank on trial keys is
+          10 requests per minute (production keys: 1,000 req/min). Trial usage is for evaluation
+          and proof-of-concept only; add billing and use a production key for commercial or
+          sustained workloads.
+        details_url: https://docs.cohere.com/docs/rate-limits
+    metadata_updated_at: "2026-05-30"
+
 models:
   # --- OpenAI cloud (developers.openai.com/api/docs/models; pricing openai.com/api/pricing) ---
   - id: openai:gpt-5.5
@@ -672,3 +715,88 @@ models:
     features: [streaming]
     tags: [local]
     notes: Replace api id with the model id configured in Jan.
+
+  # --- Rerank: cloud (knowledge retrieval precision; pricing approximate — verify vendor pages) ---
+  # Voyage: processed tokens = (query_tokens × num_docs) + sum(doc tokens); 200M free tokens/account.
+  #   per_1k_tokens / input_per_1m_tokens = list price per processed token; estimated_usd_per_request =
+  #   vendor table (100 docs; query + each document token count sums to 500).
+  # Cohere: billed per search unit (1 query + up to 100 docs; docs >500 tokens split into chunks).
+  - id: voyage:rerank-2.5
+    provider_id: voyage
+    display_name: Voyage rerank-2.5
+    released_at: "2025-08-11"
+    model_kind: rerank
+    context_window: 32000
+    modalities: [text]
+    features: [multilingual]
+    tags: [reranker]
+    notes: Latest Voyage generalist reranker; instruction-following; 32K context; 200M free processed tokens/account. Use rerank-2.5-lite for lower cost/latency.
+    pricing:
+      per_1k_tokens: 0.00005
+      input_per_1m_tokens: 0.05
+      estimated_usd_per_request: 0.0025
+      pricing_updated_at: "2026-05-30"
+      pricing_source: https://docs.voyageai.com/docs/pricing
+
+  - id: voyage:rerank-2.5-lite
+    provider_id: voyage
+    display_name: Voyage rerank-2.5-lite
+    released_at: "2025-08-11"
+    model_kind: rerank
+    context_window: 32000
+    modalities: [text]
+    features: [multilingual]
+    tags: [reranker]
+    notes: Latency/cost-balanced sibling of rerank-2.5; same 32K context; 200M free processed tokens/account.
+    pricing:
+      per_1k_tokens: 0.00002
+      input_per_1m_tokens: 0.02
+      estimated_usd_per_request: 0.001
+      pricing_updated_at: "2026-05-30"
+      pricing_source: https://docs.voyageai.com/docs/pricing
+
+  - id: cohere:rerank-v4.0-pro
+    provider_id: cohere
+    display_name: Cohere Rerank 4.0 Pro
+    released_at: "2026-04-06"
+    model_kind: rerank
+    context_window: 32000
+    modalities: [text]
+    features: [multilingual]
+    tags: [reranker]
+    notes: State-of-the-art multilingual reranker; semi-structured/JSON docs; 32K context.
+    pricing:
+      estimated_usd_per_1k_searches: 2.50
+      pricing_updated_at: "2026-05-30"
+      pricing_source: https://cohere.com/pricing
+
+  - id: cohere:rerank-v4.0-fast
+    provider_id: cohere
+    display_name: Cohere Rerank 4.0 Fast
+    released_at: "2026-04-06"
+    model_kind: rerank
+    context_window: 32000
+    modalities: [text]
+    features: [multilingual]
+    tags: [reranker]
+    notes: Lower-latency v4 variant; same 32K context and JSON support.
+    pricing:
+      estimated_usd_per_1k_searches: 2.00
+      pricing_updated_at: "2026-05-30"
+      pricing_source: https://cohere.com/pricing
+
+  - id: cohere:rerank-v3.5
+    provider_id: cohere
+    display_name: Cohere Rerank 3.5
+    released_at: "2024-12-01"
+    model_kind: rerank
+    context_window: 4096
+    modalities: [text]
+    features: [multilingual]
+    tags: [reranker]
+    replacement_id: cohere:rerank-v4.0-pro
+    notes: Prior generation (4K context). Prefer rerank-v4.0-pro for new work.
+    pricing:
+      estimated_usd_per_1k_searches: 2.00
+      pricing_updated_at: "2026-05-30"
+      pricing_source: https://cohere.com/pricing

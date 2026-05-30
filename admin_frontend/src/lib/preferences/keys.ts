@@ -21,14 +21,16 @@ export const PREF_KEYS = {
   graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
   knowledgeLastFolderPrefix: 'hiro.admin.knowledge.lastFolder',
   /** Browse tab: render chunk text as formatted markdown (default on). */
-  knowledgeChunkMarkdownFormat: 'hiro.admin.knowledge.chunkMarkdownFormat'
+  knowledgeChunkMarkdownFormat: 'hiro.admin.knowledge.chunkMarkdownFormat',
+  /** Ask tab: last answer + chunk results, kept across navigation until cleared (sessionStorage). */
+  knowledgeAskResult: 'hiro.admin.knowledge.askResult'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';
 export type ServerTabPreference = 'workspaces' | 'gateways' | 'metrics';
 export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
-export type CatalogTabPreference = 'providers' | 'models';
+export type CatalogTabPreference = 'active-providers' | 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type GraphRunsPrimaryTabPreference = 'runs' | 'memories';

@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ..domain.model_catalog import get_model_catalog, reload_model_catalog
+from ..domain.model_catalog import MODEL_KINDS, get_model_catalog, reload_model_catalog
 from ..tools.llm_catalog import (
     LlmCatalogGetModelTool,
     LlmCatalogListModelsTool,
@@ -55,7 +55,7 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
             None, "--provider", "-p", help="Filter by provider id"
         ),
         kind: Optional[str] = typer.Option(
-            None, "--kind", "-k", help="chat, tts, stt, embedding, image_gen"
+            None, "--kind", "-k", help=", ".join(MODEL_KINDS)
         ),
         model_class: Optional[str] = typer.Option(
             None, "--class", "-c", help="e.g. agentic, fast, balanced"

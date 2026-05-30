@@ -8,6 +8,12 @@
         "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh"
       },
       {
+        "name": "Bash startup (Windows Terminal) — no Flutter",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./bash-startup-no-flutter.sh"
+      },
+      {
         "name": "Bash startup (Windows Terminal)",
         "type": "node-terminal",
         "request": "launch",

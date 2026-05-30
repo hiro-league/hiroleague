@@ -5,6 +5,8 @@
   import Button from '$lib/components/ui/button.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import {
+    AVAILABILITY_FILTER_IDS,
+    AVAILABILITY_FILTER_UI,
     HOSTING_FILTER_IDS,
     HOSTING_FILTER_UI,
     MODEL_CLASS_OPTIONS,
@@ -111,6 +113,33 @@
           onclick={() => void ctrl.toggleHostingFilter(hosting)}
         >
           <Icon size={16} strokeWidth={on ? 2.25 : 2} aria-hidden="true" />
+        </button>
+      {/each}
+    </div>
+  </div>
+  <div class="grid min-w-[6.5rem] gap-1 font-sans text-xs font-semibold text-muted-foreground">
+    <span id="catalog-availability-filters-label">Online</span>
+    <div
+      class="flex h-9 items-center justify-center gap-1 rounded-md border bg-background px-1.5"
+      role="group"
+      aria-labelledby="catalog-availability-filters-label"
+    >
+      {#each AVAILABILITY_FILTER_IDS as availability (availability)}
+        {@const { title, circleClass } = AVAILABILITY_FILTER_UI[availability]}
+        {@const on = ctrl.isAvailabilitySelected(availability)}
+        <button
+          type="button"
+          class={cn(
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors',
+            on ? 'bg-primary/10 shadow-sm' : 'opacity-55 hover:opacity-100',
+            on && 'border-primary/20'
+          )}
+          title={title}
+          aria-label={title}
+          aria-pressed={on}
+          onclick={() => ctrl.toggleAvailabilityFilter(availability)}
+        >
+          <span class={cn('size-2 rounded-full', circleClass)} aria-hidden="true"></span>
         </button>
       {/each}
     </div>

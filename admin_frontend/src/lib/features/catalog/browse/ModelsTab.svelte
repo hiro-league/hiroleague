@@ -9,6 +9,7 @@
     allCatalogKinds,
     catalogHostingUiForRow,
     catalogKindsTitle,
+    isRowAvailable,
     listText,
     modelKindUiForRow
   } from '$lib/features/catalog/shared/catalog-filter-ui';
@@ -31,13 +32,12 @@
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>Models</h3>
       <span class="font-sans text-sm text-muted-foreground">
-        {ctrl.models.length} shown{ctrl.catalogVersion ? ` / catalog version ${ctrl.catalogVersion}` : ''}
+        {ctrl.filteredModels.length} shown{ctrl.catalogVersion ? ` / catalog version ${ctrl.catalogVersion}` : ''}
       </span>
     </div>
     <CatalogTabActions
       catalogReloadBusy={ctrl.catalogReloadBusy}
       refreshBusy={ctrl.modelsLoading}
-      onReload={() => ctrl.reloadBundledCatalog()}
       onRefresh={() => ctrl.loadModels()}
     />
   </div>
@@ -50,12 +50,15 @@
     <InlineLoading label="Loading models…" />
   {:else if ctrl.modelsError}
     <InlineDestructiveAlert title="Could not load models" message={ctrl.modelsError} />
-  {:else if ctrl.models.length === 0}
+  {:else if ctrl.filteredModels.length === 0}
     <InlineEmptyState message="No models match the current filters." />
   {:else}
     <AdminTableShell stickyHead class={cn('min-w-[1180px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
+          <AdminTableHeaderCell column="online" sort={ctrl.modelSort} class="w-12 text-center">
+            Online
+          </AdminTableHeaderCell>
           <AdminTableHeaderCell column="provider" sort={ctrl.modelSort}>Provider</AdminTableHeaderCell>
           <AdminTableHeaderCell column="model" sort={ctrl.modelSort}>Model</AdminTableHeaderCell>
           <AdminTableHeaderCell column="kind" sort={ctrl.modelSort}>Kind</AdminTableHeaderCell>
@@ -74,18 +77,33 @@
           {@const hostingUi = catalogHostingUiForRow(model.hosting)}
           {@const HostingIcon = hostingUi.Icon}
           {@const priceHref = pricingSourceHref(model)}
+          {@const isLocal = model.source === 'local'}
+          {@const available = isRowAvailable(model, ctrl.configuredWorkspaceProviderIds)}
           <tr class="border-t">
+            <td class="px-2 py-3 text-center">
+              {#if available}
+                <span
+                  class="inline-block size-2 rounded-full bg-green-600 dark:bg-green-500"
+                  title={isLocal
+                    ? 'Downloaded — available in this workspace'
+                    : 'Online — provider configured in this workspace'}
+                  aria-hidden="true"
+                ></span>
+                <span class="sr-only">{isLocal ? 'Downloaded. ' : 'Online. '}</span>
+              {:else}
+                <span
+                  class="inline-block size-2 rounded-full bg-muted-foreground/40"
+                  title={isLocal
+                    ? `Not downloaded — ${model.manage_hint ?? 'manage in Preferences'}`
+                    : 'Offline — provider not configured in this workspace'}
+                  aria-hidden="true"
+                ></span>
+                <span class="sr-only">{isLocal ? 'Not downloaded. ' : 'Offline. '}</span>
+              {/if}
+            </td>
             <td class="px-3 py-3">
-              <span class="flex min-w-0 items-center gap-2 truncate text-sm">
-                {#if ctrl.configuredWorkspaceProviderIds.has(model.provider_id)}
-                  <span
-                    class="size-2 shrink-0 rounded-full bg-green-600 dark:bg-green-500"
-                    title="Configured for this workspace"
-                    aria-hidden="true"
-                  ></span>
-                  <span class="sr-only">Configured workspace provider. </span>
-                {/if}
-                <span class="truncate">{ctrl.providerLabels[model.provider_id] ?? model.provider_id}</span>
+              <span class="block min-w-0 truncate text-sm">
+                {ctrl.providerLabels[model.provider_id] ?? model.provider_id}
               </span>
             </td>
             <td class="min-w-0 px-3 py-3">
@@ -99,8 +117,13 @@
                   <span class="sr-only">Recommended. </span>
                 {/if}
                 <span class="min-w-0 truncate">{model.display_name}</span>
+                {#if isLocal}
+                  <Badge variant="outline" class="shrink-0 text-[10px]">Local</Badge>
+                {/if}
               </strong>
-              <small class="block truncate text-xs text-muted-foreground">{model.id}</small>
+              <small class="block truncate text-xs text-muted-foreground">
+                {model.id}{#if isLocal && model.size_label} · {model.size_label}{/if}
+              </small>
             </td>
             <td class="px-3 py-3">
               <span class="flex flex-wrap justify-center gap-0.5" title={catalogKindsTitle(model)}>
@@ -134,7 +157,7 @@
             </td>
             <td class="px-3 py-3">
               <span class="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                <span class="min-w-0">{modelPricing(model)}</span>
+                <span class="min-w-0 whitespace-pre-line">{modelPricing(model)}</span>
                 {#if priceHref}
                   <a
                     href={priceHref}

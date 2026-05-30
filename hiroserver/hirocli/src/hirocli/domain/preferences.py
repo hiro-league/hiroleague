@@ -308,13 +308,13 @@ DEFAULT_KNOWLEDGE_SPARSE_MODEL = "Qdrant/bm25"
 # literal-keyword extraction; the conversation-history clause is a no-op for admin Ask (which
 # passes no history) and active in chat (where history is supplied for reference resolution).
 DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
-    "Rewrite the user's question into one clean, standalone search query. "
+    "Rewrite the user's question into one clean, standalone search query.\n\n"
     "Fix typos and normalize informal or dialectal phrasing into clear formal language, "
-    "but do NOT change the meaning or add information that is not in the question. "
+    "but do NOT change the meaning or add information that is not in the question.\n\n"
     "If a conversation is provided, resolve references (pronouns, 'the second one', "
-    "'his brother') against it so the query stands alone without the conversation. "
+    "'his brother') against it so the query stands alone without the conversation.\n\n"
     "Copy proper nouns, names, dates, and identifiers VERBATIM into `keywords` — never "
-    "translate or 'correct' a name. "
+    "translate or 'correct' a name.\n\n"
     "Set `knowledge_needed` to false when the message is just a greeting, farewell, thanks, "
     "acknowledgement, or small talk and clearly does not ask for stored information; otherwise "
     "true. Do not invent facts or answer the question."
@@ -341,6 +341,25 @@ class KnowledgeChunkingPreferences(BaseModel):
         return self
 
 
+class KnowledgeRerankerPreferences(BaseModel):
+    """Cross-encoder reranker over retrieved candidates (precision step).
+
+    Prefs-only, default off. ``model_id`` is a catalog ``provider:model`` (cloud: Voyage /
+    Cohere) OR a local-registry id (FlashRank / FastEmbed / sentence-transformers). It is
+    resolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` — the same way
+    ``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a
+    swap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local
+    torch lane only and are ignored by cloud models. ``model_id`` null = no reranker (retrieval
+    order used as-is) even when ``enabled`` is true.
+    """
+
+    enabled: bool = False
+    model_id: str | None = None
+    top_n: int = Field(default=8, ge=1, le=100)
+    device: str | None = None
+    batch_size: int = Field(default=32, ge=1, le=512)
+
+
 class KnowledgeRetrievalPreferences(BaseModel):
     top_k: int = Field(default=20, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -352,6 +371,7 @@ class KnowledgeRetrievalPreferences(BaseModel):
     sparse_model: str = Field(default=DEFAULT_KNOWLEDGE_SPARSE_MODEL, min_length=1)
     # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.
     prefetch_limit: int = Field(default=40, ge=1, le=500)
+    reranker: KnowledgeRerankerPreferences = Field(default_factory=KnowledgeRerankerPreferences)
 
 
 class KnowledgeAnsweringPreferences(BaseModel):

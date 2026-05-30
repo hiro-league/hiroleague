@@ -39,7 +39,17 @@ below were verified against the installed stack, not assumed from model cards.
   token cost + in/out previews in graph runs. Scope: Ask only — conversational reference-resolution
   remains deferred to chat-agent integration; multi-query / decomposition can later extend the same
   structured-output call.
-- ⏳ **Pending:** embedder upgrade (Arabic recall), reranker, multi-query / decomposition.
+- ✅ **Reranker — implemented.** A cross-encoder reorders retrieved candidates before answering
+  (precision step), prefs-only and **default off**. Both lanes ship: **cloud** (`voyage:rerank-2.5`,
+  `cohere:rerank-v3.5` via the catalog) and **local** (FlashRank `ms-marco-MultiBERT-L-12` starter,
+  FastEmbed `bge-reranker-base`, sentence-transformers `bge-reranker-v2-m3`, in a non-catalog
+  registry). All resolve to a LangChain `BaseDocumentCompressor` via `resolve_reranker`; a new
+  `rerank` graph node runs between search and `build_context` and **fails safe** to the fused order.
+  No silent downloads — local models gate on an explicit download (admin Reranker section under
+  Preferences → Knowledge). Rerankers are dimensionless → hot swap, **no re-ingest**. Controlled by
+  `knowledge.retrieval.reranker.{enabled, model_id, top_n, device, batch_size}`. Score contract
+  (`relevance`/`raw_score`/`score_source`) is emitted whether rerank is on or off.
+- ⏳ **Pending:** embedder upgrade (Arabic recall), multi-query / decomposition.
 
 > **Migration (no-backward-compatibility):** the collection schema changed from a single
 > unnamed vector to named `dense` + `bm25`. Existing workspaces must **clear knowledge and
@@ -128,12 +138,13 @@ With no score floor, unrelated hits still enter the prompt; and all `top_k` slot
 from one document (overlapping chunks) with no MMR / per-document cap / near-duplicate
 collapse. These are precision knobs — useful, but only once recall produces good candidates.
 
-### 5. No reranker (precision / ordering — secondary)
-A cross-encoder reranker reorders the candidate set so the LLM sees the best 5–8 instead of
-all 20. Important eventually, but it can **only reorder what retrieval already surfaced** —
-with the current recall it would add latency for little gain. Fix recall (1–3) first. See
-[Reranking](#reranking-precision--ordering) for the backend/model breakdown — note the agent-
-memory reranker is English-only and must **not** be reused as-is for Arabic.
+### 5. No reranker (precision / ordering)
+A reranker reorders the candidate set so the LLM sees the best ~8 instead of all 20. It can
+**only reorder what retrieval already surfaced**, so it is a precision step — but for this
+corpus manual results are poor enough that it is being built **now**, not deferred behind a
+formal eval. The full design (catalog-integrated, local + cloud, LangChain
+`BaseDocumentCompressor`) is locked in [Reranking](#reranking-precision--ordering) — note the
+agent-memory reranker is English-only and mem0-native, and is **not** reused here.
 
 ### 6. Single-shot query → single embedding (recall, vague & conversational queries)
 No conversational rewriting, multi-query rewrite, or sub-question decomposition. Short/vague
@@ -256,81 +267,262 @@ re-ingesting (`_ensure_collection` refuses to resize a populated collection).
 
 ## Reranking (precision / ordering)
 
-A cross-encoder reranker scores each `(query, chunk)` pair jointly and reorders the
-candidate set, so the LLM sees the best 5–8 chunks instead of all 20 in fused-rank order.
-It is a **precision** step, deliberately sequenced **after** the embedder upgrade: it can
-only reorder what retrieval already surfaced, so running it on weak candidates adds latency
-for little gain (gap #5). Two constraints from this stack shape every choice below:
+A reranker scores each `(query, chunk)` pair jointly and reorders the candidate set, so the
+LLM sees the best 5–8 chunks instead of all 20 in fused-rank order. It is a **precision**
+step, sequenced **after** recall: it can only reorder what retrieval already surfaced. (For
+this corpus, manual results are already poor enough that reranking is being built *before* a
+formal eval harness, not gated on one.)
 
-- **Must be multilingual.** The agent-memory reranker already defaults to
-  `cross-encoder/ms-marco-MiniLM-L-6-v2` (`DEFAULT_RERANKER_MODEL`, `preferences.py`), which
-  is **English-only**. Reusing it as-is for an Arabic corpus would actively *hurt* ordering.
-  The knowledge reranker needs a genuinely multilingual cross-encoder.
-- **CPU by default** (same stack note as embedding). A cross-encoder runs the model once
-  per candidate, so latency ≈ `top_k` × model size. On CPU the latency levers are the model
-  and the candidate count fed in (rerank the top ~20, not the whole index).
+**Design decisions (locked):**
+- **Both lanes ship — local *and* cloud — as user-selectable options**, not an either/or.
+- **Integrate through the existing model catalog**, exactly like embedders — a reranker is
+  just another catalog `provider:model` of a new `rerank` kind, resolved through the model
+  factory, with credentials via the existing `CredentialStore`. **No special-case path.**
+- **Program against LangChain's `BaseDocumentCompressor` interface** (the one step in the
+  pipeline where the LangChain abstraction earns its keep — rerank is a pluggable-provider
+  op). Adopt the **compressor only**, called from a graph node — **not** the
+  `ContextualCompressionRetriever`/`BaseRetriever` refactor, which would fight the custom
+  hybrid-RRF retrieval for zero gain.
+- **Prefs-only surface, default off** — not a per-query Ask toggle.
+- **Rerankers are dimensionless** → switching one is a **hot config swap with no re-ingest**
+  (unlike an embedder swap). This is what makes "offer several, let users pick" cheap and safe.
 
-### Two backends — and they expose *different* model menus
+> **Do not reuse the agent-memory reranker as-is.** It defaults to
+> `cross-encoder/ms-marco-MiniLM-L-6-v2` (`DEFAULT_RERANKER_MODEL`, `preferences.py`) — an
+> **English-only** model wired through mem0's own `sentence_transformer` provider, not the
+> catalog. Knowledge rerank goes through the catalog + LangChain (below); memory stays
+> mem0-native. The two **diverge on purpose** — no shared `hiro-commons` helper (mem0
+> encapsulates its reranker; there was never a clean seam to share).
 
-This is the key finding (verified against the installed `fastembed==0.8.0` and the
-already-present `sentence-transformers`, not model cards): the backend you pick **constrains
-which models you can run**, exactly like the `bge-m3` embedder situation.
+### LangChain integration — verified import surface (LC 1.2 / community 0.4)
 
-**FastEmbed `TextCrossEncoder` (pure ONNX, no torch).** Same CPU-ONNX runtime as the
-embedder and BM25 branch; lightest footprint. Verified supported models in 0.8.0:
+The compressor surface moved in LangChain 1.x; these paths were checked against the installed
+stack, not docs:
 
-| Model | Multilingual / Arabic | License | Size |
+| Concrete reranker | Import (verified) | Dependency status | Lane |
 |---|---|---|---|
-| `Xenova/ms-marco-MiniLM-L-6-v2` / `-L-12-v2` | English-only | Apache-2 | 0.08 / 0.12 GB |
-| `jinaai/jina-reranker-v1-tiny-en` / `-turbo-en` | English-only | Apache-2 | 0.13 / 0.15 GB |
-| **`BAAI/bge-reranker-base`** | multilingual (ok Arabic) | **Apache-2** | 1.04 GB |
-| `jinaai/jina-reranker-v2-base-multilingual` | strong | ⚠️ **CC-BY-NC** (non-commercial) | 1.11 GB |
+| **Interface** `BaseDocumentCompressor` | `langchain_core.documents.compressor` | ✅ present (stable) | — |
+| `CohereRerank` | `langchain_cohere` | ⚠️ **new dep** `langchain-cohere` (not installed) | cloud |
+| `VoyageAIRerank` | `langchain_voyageai` | ⚠️ **new dep** `langchain-voyageai` (not installed) | cloud |
+| sentence-transformers `CrossEncoder` | `sentence_transformers` | ✅ present (wrapped directly in `SentenceTransformersReranker`) | local (torch) |
+| `FlashrankRerank` | `langchain_community.document_compressors` | ✅ present (needs `flashrank`) | local (ONNX) |
+| FastEmbed `TextCrossEncoder` | `fastembed.rerank.cross_encoder` | ✅ present (no LC wrapper — wrap in ~15-line `BaseDocumentCompressor`) | local (ONNX) |
 
-> In the FastEmbed lane the **only** usable multilingual option is `bge-reranker-base`
-> (Apache-2). The stronger `bge-reranker-v2-m3` and `gte-multilingual-reranker-base` are
-> **absent from FastEmbed 0.8.0's cross-encoder list**, and the Jina v2 multilingual model
-> is non-commercial. So staying in ONNX means accepting `bge-reranker-base` as the ceiling.
+> The torch lane uses sentence-transformers' `CrossEncoder` **directly** (not LangChain's
+> `HuggingFaceCrossEncoder`/`langchain_classic` `CrossEncoderReranker`) — needed so
+> `trust_remote_code` reaches the tokenizer + config, and to avoid a `langchain_classic` dep.
 
-**`sentence-transformers` `CrossEncoder` (HuggingFace, torch).** Same path agent-memory
-already uses via mem0's `sentence_transformer` provider; pulls torch (CPU build) but unlocks
-the full HF menu:
+> Note: `langchain.retrievers.document_compressors.CrossEncoderReranker` (a path commonly
+> cited) **does not exist** in LC 1.2 — `langchain.retrievers` is gone; it lives in
+> `langchain_classic`. Build against `BaseDocumentCompressor` from `langchain_core` and let
+> each provider supply the concrete impl, so the classic dependency is contained to the local
+> torch lane only.
 
-| Model | Multilingual / Arabic | License | Size (≈params) |
-|---|---|---|---|
-| **`BAAI/bge-reranker-v2-m3`** | excellent (100+ langs) | Apache-2 | ~568M |
-| **`Alibaba-NLP/gte-multilingual-reranker-base`** | strong | Apache-2 | ~306M |
-| `cross-encoder/ms-marco-MiniLM-L-6-v2` *(memory default)* | English-only | Apache-2 | ~22M |
+### Model menu — cloud and local (both shipping)
 
-**Cloud rerank (Cohere Rerank 3.5, Jina API)** is best-in-class and zero local compute, but
-data leaves the machine — same objection as the cloud embedders; not now.
+**Cloud** (catalog providers + a key; best multilingual quality, zero local compute):
 
-**Decision: compare both backends, pick the model via eval — not from this table.** The
-FastEmbed lane keeps everything in one ONNX runtime at the cost of capping at
-`bge-reranker-base`; the sentence-transformers lane adds a second reranker backend + torch
-but reaches `bge-reranker-v2-m3` / `gte`. Which actually wins on *this* Arabic corpus is an
-empirical question, so the eval harness (recommended-direction #5) should measure
-`bge-reranker-base` (ONNX) against `bge-reranker-v2-m3` and `gte-multilingual-reranker-base`
-(sentence-transformers) before the default is fixed.
+| Model | Provider (new) | LC class | Arabic | Notes |
+|---|---|---|---|---|
+| **`rerank-2.5` / `rerank-2.5-lite`** | `voyage` | `VoyageAIRerank` | strong (multilingual) | **most generous free tier**; `lite` is cheaper/faster; adds `langchain-voyageai` + `VOYAGE_API_KEY` |
+| **`rerank-v3.5`** | `cohere` | `CohereRerank` | excellent | top quality; adds `langchain-cohere` + `COHERE_API_KEY` |
 
-### Surface: preferences only (no per-query toggle)
+Cloud rerankers need **only a key, no download**, and return a **normalized `relevance_score` in
+[0, 1]** (see [Score handling](#score-handling--propagation)). (`JinaRerank` is available in
+`langchain_community` with no new dep, but Jina is **deferred** — not in the launch set.)
 
-Mirror the existing `MemoryRerankerPreferences` shape under
-`knowledge.retrieval.reranker.{enabled, model, device, batch_size}`, **default off** —
-enabling pulls the cross-encoder weights on first use. Unlike Rewrite/Explain, reranking is
-**not** a per-query Ask toggle: it is a prefs-level on/off, always applied when enabled. This
-keeps the Ask params surface lean and matches how memory already governs its reranker.
-Because the config block is near-identical to memory's `_reranker_config` (`service.py`), the
-cross-encoder call belongs in a shared helper in `hiro-commons` rather than duplicated — the
-two callers differ only in backend wiring (mem0 vs. the knowledge graph), not in the prefs
-shape. When the reranker is enabled, **Explain mode** adds the per-result rerank score to the
-existing cosine / BM25 / RRF diagnostics.
+**Local** — and the backend still constrains the model menu (verified against
+`fastembed==0.8.0`; both `sentence-transformers` and `langchain_classic` are already
+installed, torch ships CPU):
+
+| Model | Backend | LC wrapping | Size | Arabic | Notes |
+|---|---|---|---|---|---|
+| **`ms-marco-MultiBERT-L-12`** | FlashRank ONNX | `FlashrankRerank` | **~150 MB** | ✅ 100+ langs | **recommended starter** — small, multilingual, no torch; adds `flashrank` dep |
+| `BAAI/bge-reranker-base` | FastEmbed ONNX | tiny custom `BaseDocumentCompressor` | ~1.04 GB | ok | no torch; only multilingual model in FastEmbed 0.8.0; large to auto-fetch |
+| **`BAAI/bge-reranker-v2-m3`** | sentence-transformers | `SentenceTransformersReranker` (direct `CrossEncoder`) | ~568 M params | excellent | best local Arabic; torch (already present for memory); **absent from FastEmbed** |
+| ~~`Alibaba-NLP/gte-multilingual-reranker-base`~~ | sentence-transformers | — | ~306 M params | strong | **dropped** — custom RoPE remote-code arch crashes the `CrossEncoder` input path (corrupt `position_ids` → IndexError), even with `trust_remote_code` |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` *(memory default)* | sentence-transformers | — | ~22 M | ❌ English-only | do **not** pick for Arabic |
+
+> The sentence-transformers lane uses a small custom `SentenceTransformersReranker`
+> (`BaseDocumentCompressor` over `CrossEncoder.predict`) rather than LangChain's
+> `HuggingFaceCrossEncoder`/`CrossEncoderReranker`, so `trust_remote_code` reaches the
+> tokenizer + config (not just the model) — and to drop the `langchain_classic` dependency.
+
+Three local lanes, all behind one `BaseDocumentCompressor`: **FlashRank ONNX** (small,
+multilingual, no torch — the starter), **FastEmbed ONNX** (no torch, but caps at the 1 GB
+`bge-reranker-base`), and **sentence-transformers** (torch, reaches the best `bge-reranker-v2-m3`).
+Ship them all; the picker decides. Local cross-encoders return **unbounded logits** — *not*
+[0, 1] and *not* comparable across models (see [Score handling](#score-handling--propagation)).
+
+> **Starter sizes/multilinguality are from FlashRank's published model list — verify at
+> implementation** (couldn't introspect without installing `flashrank`).
+
+### Catalog, registry & credential integration
+
+Reranking follows the embedder's **split** exactly: **cloud** models live in the catalog;
+**local in-process** models do **not** (just as the default FastEmbed embedder is resolved
+outside the catalog by `resolve_knowledge_embedder`'s fallback, not as a `catalog.yaml` row).
+
+**Cloud → catalog:**
+1. **`model_catalog.py`** — add `"rerank"` to the `ModelKind` literal (line ~24), to the
+   `allowed` set in `extra_kinds_consistent` (line ~123), and to the `recommended_models`
+   kind whitelist (line ~188). Then `list_models(model_kind="rerank")` surfaces cloud rerankers
+   like any other kind. **Do not bump `catalog_version`** — pre-release, it stays pinned.
+2. **`catalog.yaml`** — add providers `voyage` (`credential_env_keys: [VOYAGE_API_KEY]`,
+   `hosting: cloud`) and `cohere` (`[COHERE_API_KEY]`) with their `model_kind: rerank` rows.
+   (Jina deferred — not added now.)
+3. **`model_factory.py`** — add `create_reranker(model_id, …) -> BaseDocumentCompressor` for the
+   **cloud** path, mirroring `create_embedding_model`: look up the spec, assert
+   `supports_kind("rerank")`, pull credentials via `CredentialStore`, return the LangChain
+   compressor. **No dimension map** (rerankers are dimensionless).
+4. **Credentials** — `VOYAGE_API_KEY` / `COHERE_API_KEY` flow through the existing keyring/env
+   `CredentialStore`; `hiro provider add voyage` works with zero new credential code.
+
+**Local → a non-catalog registry + resolver** (the analog of the FastEmbed embedder fallback):
+5. A small **local-reranker registry** (code-level) lists the in-process options — MultiBERT
+   (FlashRank), bge-reranker-base (FastEmbed), bge-reranker-v2-m3 (sentence-transformers)
+   — each with backend, size, languages, and download status. A `resolve_reranker(model_id)`
+   dispatches: catalog id → `create_reranker` (cloud); local registry id → the matching local
+   compressor. This mirrors `resolve_knowledge_embedder` dispatching catalog vs. FastEmbed.
+6. **Dependencies** — add `langchain-voyageai` (Voyage), `langchain-cohere` (Cohere), and
+   `flashrank` (local starter loader). The classic cross-encoder and FastEmbed are already
+   installed. *Verify latest stable versions before pinning* (per the deps rule).
+
+**The admin picker merges both sources** (catalog `rerank` models + local registry) into one
+list — the same two-source merge the embedder UI already needs for catalog + FastEmbed default.
+
+> **Tools Architecture:** selecting/configuring a reranker is a catalog+provider operation,
+> which is already exposed as CLI / HTTP / Admin. We extend that existing surface rather than
+> building a new one.
+
+### Preferences (supersedes the earlier MemoryRerankerPreferences mirror)
+
+Because resolution now goes through the catalog, the pref is a **catalog model id**, not a
+local-only `{model, device, batch_size}` block:
+
+```
+knowledge.retrieval.reranker.{ enabled: bool=false, model_id: null, top_n: int=8 }
+```
+
+**Default: no reranker** (`enabled=false`, `model_id=null`) — opt-in to either a cloud model
+(needs a key) or a local model (needs a download). `model_id` is resolved by `create_reranker`,
+exactly as `knowledge.embedding_model` is resolved by `create_embedding_model`. Local-only
+knobs (`device`, `batch_size`) apply only to the torch lane and can be omitted initially.
+Prefs-only, default off; no per-query toggle (keeps the Ask params lean). When enabled,
+**Explain mode** adds the per-result rerank score next to the existing cosine / BM25 / RRF
+diagnostics.
 
 ### Where it slots in the graph
 
-A new node between the Qdrant search and `build_context`: retrieve `top_k≈20` → rerank →
-trim to top 5–8 → concat. Like `rewrite_query`, it reports latency (and, since it is local,
-no token cost) in graph runs, and fails safe — any reranker error logs and falls back to the
-fused RRF order so retrieval never blocks.
+A new node between the Qdrant search and `build_context`: retrieve `top_k≈20` → marshal hits
+to `Document`s → `compressor.compress_documents(docs, query)` → take `top_n` → `build_context`.
+It reports latency (and, for cloud, token/credit cost) in graph runs like `rewrite_query`, and
+**fails safe** — any reranker error (network, missing key, model not downloaded) logs and falls
+back to the fused RRF order so retrieval never blocks.
+
+### Score handling & propagation
+
+Rerank scores are **not comparable across backends**, so the system must normalize at the
+knowledge boundary rather than thresholding on raw values:
+
+| Backend | Raw score | Range |
+|---|---|---|
+| Cohere / Voyage (API) | `relevance_score` | normalized **[0, 1]** |
+| FastEmbed / sentence-transformers / FlashRank | cross-encoder **logit** | **unbounded**, model-specific |
+
+Rules:
+- **Order + trim only by default — do not threshold on the raw score.** A cutoff tuned for
+  one model is meaningless for another (a Cohere 0.4 ≠ a bge logit 0.4).
+- **Emit a normalized `relevance ∈ [0, 1]`** at the knowledge result boundary (sigmoid for
+  cross-encoder logits; pass-through for API scores), **plus** `raw_score` and `reranker_model`
+  for diagnostics. Ordering uses the raw score; cross-surface decisions use the normalized one.
+
+Two consumers:
+- **Internal Ask graph:** rerank reorders → `top_n` → `build_context`. Surface the score in
+  Explain mode and graph-run metadata, **but do not inject raw scores into the LLM prompt**
+  (logits aren't interpretable; ordering + citations carry the signal).
+- **Chat graph (knowledge-as-tool):** when chat calls knowledge, it may **fuse** these chunks
+  with other tools/sources — exactly where a raw logit silently corrupts comparisons. The
+  **normalized `relevance`** is what crosses back to the chat graph (raw stays for diagnostics),
+  so chat can rank/merge without having to interpret a model-specific scale.
+
+**Unified contract — emitted whether rerank is on or off.** Every knowledge chunk carries the
+same shape, only the source changes:
+
+```
+{ relevance: 0.0–1.0, raw_score: <native>, score_source: "reranker" | "rrf" | "cosine" }
+```
+
+- **Rerank on** → `relevance` from the reranker (pass-through for API [0,1]; sigmoid for
+  cross-encoder logits), `score_source = "reranker"`.
+- **Rerank off** → `relevance` from the **fused RRF** score (or dense cosine in non-hybrid),
+  `score_source = "rrf" | "cosine"`.
+
+So chat (and `build_context`) always read one field, `relevance`, and may weight by
+`score_source` — e.g. discount non-reranked results. **Caveat:** for `rrf`/`cosine` sources the
+[0, 1] is **within-set normalized** (ordinal — top result ≈ 1.0), not an absolute calibrated
+relevance the way an API reranker's score is; chat should treat it as ordering signal, not a
+confidence gate.
+
+### Admin UI integration
+
+Reuses the existing catalog picker plumbing — mostly mechanical:
+
+- **`catalog-filter-ui.ts`** — add `'rerank'` to `MODEL_KIND_FILTER_IDS` + an icon/title entry
+  (the catalog browse page then filters rerankers like any other kind).
+- **`preferences-controller.svelte.ts`** — load `listCatalogModels({ model_kind: 'rerank' })`
+  (cloud) **merged with the local-reranker registry** into one `rerankerOptions` state, plus a
+  `setKnowledgeReranker` setter. (Two sources, one list — same merge the embedder UI needs.)
+- **`KnowledgeSection.svelte`** — a new **Reranker** subsection: an enable toggle, the existing
+  **`SingleModelPicker`** (same component the embedding model uses), and a `top_n` field.
+- **`catalog-pricing.ts`** — add a `rerank` pricing branch (per-search / per-1k-docs for cloud;
+  free for local).
+
+### Local model download & availability
+
+**Hard rule: no model — reranker *or* embedder — may download silently.** A model is usable
+only after the user **explicitly downloads** it; no lazy / first-use network fetch anywhere.
+**Nothing is bundled** (the model-wheel idea is dropped — FlashRank publishes no upstream wheel,
+and since rerank is **off by default** there is no need for a ready-at-startup model). This
+requirement also retires the embedder's current silent ~0.22 GB first-ingest fetch.
+
+**Gate matrix — every local model needs an explicit download first:**
+
+| Model | Lane | Gate before it can be selected |
+|---|---|---|
+| `ms-marco-MultiBERT-L-12` *(recommended first local — small, ~150 MB)* | FlashRank | **Explicit Download** |
+| `bge-reranker-base` | FastEmbed (~1 GB) | **Explicit Download** |
+| `bge-reranker-v2-m3` | sentence-transformers | **Explicit Download** |
+| `voyage:rerank-2.5` / `cohere:rerank-v3.5` | cloud API | **Configure key** (no download) |
+
+**How it looks** (folds into the model manager below):
+
+```
+Admin → Preferences → Knowledge → Reranker
+Active:  (none) ▼     ← default OFF; retrieval (RRF) order used as-is
+
+╭ Local ──────────────────────────────────────────────────────────────╮
+│ ○ ms-marco-MultiBERT-L-12   FlashRank · ~150MB · multilingual         │
+│     ⬇ Not downloaded   (recommended)     [ Download ]   Select ▢(off) │
+│ ○ bge-reranker-v2-m3        sentence-transformers · best Arabic       │
+│     ⬇ Not downloaded                     [ Download ]   Select ▢(off) │
+│ ○ bge-reranker-base         FastEmbed · ~1GB                          │
+│     ⬇ Downloading  612 / ~1024 MB (60%)               [ Cancel ]      │
+╰───────────────────────────────────────────────────────────────────────╯
+╭ Cloud ──────────────────────────────────────────────────────────────╮
+│ ○ voyage:rerank-2.5         Voyage · API · generous free tier         │
+│     ⚠ Key not configured            [ Configure key ]  Select ▢(off)  │
+│ ○ cohere:rerank-v3.5        Cohere · API                              │
+│     ✓ Key configured                                      [ Select ]  │
+╰───────────────────────────────────────────────────────────────────────╯
+```
+
+- **Select** is disabled until the row is `Ready` (downloaded) or its key is configured.
+- **Explicit Download** writes to the right cache (FlashRank → its cache, FastEmbed →
+  `fastembed_cache`, sentence-transformers → HF cache) with size disclosure + progress + cancel.
+- **No re-ingest on swap.** Because rerankers are **dimensionless**, switching is a hot config
+  change — the only gate is availability, never a collection rebuild. This is the contrast with
+  embedder swaps and what makes "offer several, let users pick" cheap and safe.
 
 ## Recommended direction
 
@@ -346,11 +538,12 @@ Fix **recall** before precision — a reranker on weak candidates is wasted effo
    upgrade.
 3. ✅ **Embed structural context — done.** Prefix `{title} / {heading_path}` into the embedded
    text (dense + BM25) at ingest so every chunk carries its breadcrumb.
-4. **Then precision:** raise `min_score` off 0.0; add a cross-encoder **reranker**
-   (prefs-only, default off; a *multilingual* model — not the English-only one memory
-   defaults to) trimming to top 5–8; add a per-document cap / dedup. Backend (FastEmbed ONNX
-   vs. sentence-transformers) and default model are decided by the eval harness (#5), since
-   the two backends expose different model menus — see [Reranking](#reranking-precision--ordering).
+4. **Then precision:** raise `min_score` off 0.0; add a **reranker** trimming to top ~8; add
+   a per-document cap / dedup. The reranker is **catalog-integrated** (a new `rerank` kind,
+   resolved via `create_reranker` to a LangChain `BaseDocumentCompressor`), ships **both local
+   and cloud** lanes as user-pickable options (prefs-only, default off), and — being
+   dimensionless — swaps with **no re-ingest**. A *multilingual* model only (never the
+   English-only memory default). See [Reranking](#reranking-precision--ordering).
 5. **Build a small eval harness first** (20 hand-curated question → expected-doc pairs) so the
    embedder/hybrid changes are measured, not guessed — especially important for Arabic, where
    relevance is harder to eyeball.
@@ -358,24 +551,32 @@ Fix **recall** before precision — a reranker on weak candidates is wasted effo
 The prefs-only `min_score`/`top_k` tuning is worth doing immediately, but treat it as
 mitigation, not a fix — it cannot surface a chunk that recall never retrieved.
 
-## Proposed: admin-UI embedding-model manager
+## Proposed: admin-UI model manager (embedding + reranker)
 
-To make model selection and ingestion safe and explicit (and to fix the silent first-ingest
-download), add an **Embedding model** section under Admin → Preferences → Knowledge:
+To make model selection safe and explicit (and to fix the silent first-fetch download), add a
+**model manager** under Admin → Preferences → Knowledge covering **both** the embedding model
+and the reranker. The two share one registry/download/status surface; they differ on the
+set-active guard — **embedder swaps require re-index, reranker swaps do not**:
 
 - **Model registry** (single source of truth, shared by the resolver and the UI): for each
   model — backend (FastEmbed / Ollama / cloud), dimension, context, size, languages, license,
   whether it needs query/passage prefixes, and download/availability status.
-- **Explicit download / prefetch**: a "Download" action that pre-fetches FastEmbed weights
-  (into `fastembed_cache`) or triggers `ollama pull`, with size disclosure and a progress
-  bar — so no model ever downloads silently on first ingestion.
-- **Set active** with guardrails: changing the active model warns that the dimension change
-  requires clearing knowledge + re-ingesting, and offers that flow inline.
-- **Status surface**: downloaded vs not, active model, dimension, and (for Ollama) whether
-  the Ollama server is reachable and the model is pulled.
+- **Explicit download / prefetch (hard rule — no silent fetch):** a "Download" action
+  pre-fetches FlashRank/FastEmbed/HF weights (into their caches) or triggers `ollama pull`, with
+  size disclosure + progress + cancel. **No model downloads on first use** — every model is
+  explicitly downloaded here first (nothing is bundled; see
+  [Local download](#local-model-download--availability)). This also retires the embedder's
+  current silent first-ingest fetch.
+- **Set active** with guardrails: an **embedder** change warns that the dimension change
+  requires clearing knowledge + re-ingesting, and offers that flow inline. A **reranker**
+  change is a hot swap — dimensionless, **no re-ingest** — gated only on availability
+  (downloaded for local, key configured for cloud).
+- **Status surface**: downloaded vs not, active model, dimension (embedder only), and (for
+  Ollama) whether the server is reachable and the model is pulled; for cloud rerankers,
+  whether the provider key is configured.
 
 This directly addresses two current pain points: silent downloads with no consent, and the
-re-index footgun on model swaps.
+re-index footgun — which applies to embedder swaps but **not** reranker swaps.
 
 ## Operational tuning workflow
 
@@ -402,11 +603,36 @@ flowchart TD
   **Ollama** (MIT, 8192 ctx). `ollama:nomic-embed-text` is wired already but weak for Arabic.
 - **Hybrid (dense+sparse RRF)** and **structural-context prefixes** — the other two recall
   levers — are now in place; the embedder upgrade and a reranker are what remain.
-- **Reranking and `min_score` are precision steps** — valuable only once recall is good.
-  The reranker must be **multilingual** (the memory default is English-only) and is
-  **prefs-only, default off**. Backend is a real fork: FastEmbed ONNX caps at
-  `bge-reranker-base`; sentence-transformers reaches `bge-reranker-v2-m3` / `gte` but adds
-  torch — decide via the eval harness.
+- **Reranker — implemented (backend + admin UI).** It integrates through the **model catalog**
+  like embedders (new `rerank` kind + `create_reranker` → LangChain `BaseDocumentCompressor`,
+  credentials via the existing `CredentialStore` — no special path; **do not bump
+  `catalog_version`** pre-release), ships **both local and cloud** as user-pickable options, is
+  **prefs-only / default off (no reranker initially)**, and must be **multilingual** (never the
+  English-only memory default, which stays mem0-native). Rerankers are **dimensionless →
+  hot-swap, no re-ingest.**
+- **Reranker models (catalog lists all; user loads what they want):** cloud → **Voyage
+  `rerank-2.5`** (most generous free tier, `langchain-voyageai`), Cohere `rerank-v3.5`
+  (`langchain-cohere`). Local → starter **FlashRank `ms-marco-MultiBERT-L-12`** (~150 MB,
+  multilingual, no torch); or `bge-reranker-v2-m3` (sentence-transformers, best Arabic) /
+  `bge-reranker-base` (FastEmbed ONNX). **Jina deferred.** Verified: `CrossEncoderReranker` now
+  lives in `langchain_classic`, Cohere/Voyage need new packages — not the old `langchain.retrievers` path.
+- **Rerank scores are not comparable across backends** (cloud → [0,1]; local cross-encoders →
+  unbounded logits). **Order/trim by default, don't threshold;** emit a normalized
+  `relevance ∈ [0,1]` (+ raw) at the knowledge boundary — required for the **chat-graph fusion**
+  case. Don't inject raw scores into the LLM prompt.
+- **Admin UI:** reuse `SingleModelPicker`; add `'rerank'` to `MODEL_KIND_FILTER_IDS`, a reranker
+  subsection in `KnowledgeSection`, and a unified embedding+reranker **model manager** (per-row
+  needs-key / needs-download status; local weights gated before set-active; **no re-ingest on
+  reranker swap**).
+- **No silent downloads (hard rule):** **nothing is bundled** — every local model is
+  **explicitly downloaded** before selection (cloud needs a key); `Select` is disabled until
+  ready/keyed. MultiBERT (~150 MB) is just the recommended *first* local download. This also
+  retires the embedder's current silent first-ingest fetch.
+- **Local rerankers are NOT in the catalog** — they live in a separate code-level registry +
+  `resolve_reranker` path, mirroring how the FastEmbed embedder is resolved outside the catalog.
+  Only **cloud** rerankers (Voyage, Cohere) are `catalog.yaml` rows; the picker merges both.
+- **Score contract is emitted rerank on *or* off:** `{ relevance∈[0,1], raw_score, score_source }`
+  — reranker when on, RRF/cosine when off — so chat fusion always has one comparable field.
 - **Any embedder swap changes the vector dimension → wipe + re-ingest.**
 - **Recommended UX:** an admin model-manager with explicit, progress-tracked downloads and a
   guarded "set active + re-ingest" flow.

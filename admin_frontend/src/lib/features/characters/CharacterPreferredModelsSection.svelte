@@ -85,17 +85,17 @@
           </p>
         {/if}
       </div>
-      <!-- Model catalog + reload: shared header for LLM and voice sections (each section renders this block). -->
+      <!-- Providers/models + reload: shared header for LLM and voice sections (each section renders this block). -->
       <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
         <Button
           variant="outline"
           size="sm"
           class="shrink-0"
           disabled={busy}
-          title="Open Model Catalog (bundled providers and models)"
+          title="Open Providers/Models (bundled providers and models)"
           onclick={() => void goto('/catalog/')}
         >
-          <BookOpen size={14} /> Model catalog
+          <BookOpen size={14} /> Providers/models
         </Button>
         <Button
           variant="outline"

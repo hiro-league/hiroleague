@@ -6,9 +6,12 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+import subprocess
+import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -83,6 +86,16 @@ from hirocli.services.knowledge.vector_store import KnowledgeVectorStore
 log = Logger.get("SVC.KNOWLEDGE")
 
 
+@dataclass
+class _RerankerDownloadJob:
+    """A running local-reranker download (a killable subprocess + progress baseline)."""
+
+    process: subprocess.Popen  # the download subprocess
+    baseline_bytes: int  # cache size at start; progress = (current - baseline) / expected
+    expected_bytes: int  # approximate total from the model's size label
+    cancelled: bool = False
+
+
 class KnowledgeService:
     """Phase 1 knowledge service: scan, ingest markdown, search, browse chunks."""
 
@@ -109,6 +122,15 @@ class KnowledgeService:
         self.scanner = SourceScanner(self.loader_registry, self.catalog)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._uri_locks: dict[str, asyncio.Lock] = {}
+        # Cached reranker compressor (model load is expensive — keyed by model/top_n/device).
+        self._reranker_key: tuple[str, int, str] | None = None
+        self._reranker_compressor: Any | None = None
+        self._reranker_calibrated: bool = True
+        # In-flight local-reranker downloads (killable spawn processes), keyed by model_id, and
+        # terminal error messages for the last failed download. The downloaded marker is the
+        # source of truth for "ready". Surfaced via reranker_options() for the admin poll.
+        self._reranker_jobs: dict[str, _RerankerDownloadJob] = {}
+        self._reranker_errors: dict[str, str] = {}
         self.owner_token = current_owner_token()
         self.knowledge_path.mkdir(parents=True, exist_ok=True)
         self.qdrant_path.mkdir(parents=True, exist_ok=True)
@@ -162,6 +184,9 @@ class KnowledgeService:
                 task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        # Terminate any in-flight reranker download processes so they don't outlive the service.
+        for model_id in list(self._reranker_jobs):
+            self.cancel_reranker_download(model_id)
         self.vector_store.close()
         unregister_live_service(self)
 
@@ -337,6 +362,200 @@ class KnowledgeService:
             explain=explain,
             qdrant_filter=qdrant_filter,
         )
+
+    async def rerank_hits(
+        self,
+        query: str,
+        hits: list[KnowledgeSearchHit],
+        *,
+        model_id: str,
+        top_n: int,
+        device: str | None = None,
+        workspace_id: str | None = None,
+    ) -> list[KnowledgeSearchHit]:
+        """Rerank retrieved hits with the active reranker (cloud or local).
+
+        Builds + caches the compressor on first use, then reorders/trims off the event loop.
+        Raises on resolution/inference failure — the graph node catches and falls back to the
+        retrieval order, so reranking never blocks an answer.
+        """
+        if not hits:
+            return []
+        from hirocli.services.knowledge.reranker import rerank_hits as _rerank_hits
+        from hirocli.services.knowledge.reranker import resolve_reranker
+
+        key = (model_id, int(top_n), device or "")
+        if self._reranker_key != key or self._reranker_compressor is None:
+            compressor, calibrated = await asyncio.to_thread(
+                resolve_reranker,
+                model_id,
+                workspace_path=self.workspace_path,
+                workspace_id=workspace_id,
+                top_n=int(top_n),
+                device=device,
+            )
+            self._reranker_compressor = compressor
+            self._reranker_calibrated = calibrated
+            self._reranker_key = key
+        return await asyncio.to_thread(
+            _rerank_hits,
+            self._reranker_compressor,
+            query,
+            list(hits),
+            scores_calibrated=self._reranker_calibrated,
+            top_n=int(top_n),
+        )
+
+    async def download_reranker(self, model_id: str) -> dict[str, Any]:
+        """Download a local reranker's weights synchronously (no model is fetched silently).
+
+        Blocking — used for short-lived (owned) services. Live services use the non-blocking
+        ``start_reranker_download`` so a multi-GB fetch never holds the HTTP request open.
+        """
+        from hirocli.services.knowledge.reranker_registry import (
+            download,
+            get_local_reranker,
+            reranker_cache_dir,
+        )
+
+        spec = get_local_reranker(model_id)
+        if spec is None:
+            raise KeyError(f"Unknown local reranker: {model_id}")
+        await asyncio.to_thread(download, spec, reranker_cache_dir(self.workspace_path))
+        return {"model_id": model_id, "status": "ready"}
+
+    def start_reranker_download(self, model_id: str) -> dict[str, Any]:
+        """Start a download in a killable spawn process and return immediately.
+
+        The admin UI polls ``reranker_options`` for live ``downloading`` (with byte progress) →
+        ``ready`` / ``error``, and may ``cancel_reranker_download`` to terminate the process.
+        """
+        from hirocli.services.knowledge.download_markers import (
+            dir_size_bytes,
+            parse_size_label,
+        )
+        from hirocli.services.knowledge.reranker_registry import (
+            get_local_reranker,
+            is_downloaded,
+            reranker_cache_dir,
+        )
+
+        spec = get_local_reranker(model_id)
+        if spec is None:
+            raise KeyError(f"Unknown local reranker: {model_id}")
+        cache = reranker_cache_dir(self.workspace_path)
+        if is_downloaded(spec, cache):
+            return {"model_id": model_id, "status": "ready"}
+        existing = self._reranker_jobs.get(model_id)
+        if existing is not None and existing.process.poll() is None:
+            return {"model_id": model_id, "status": "downloading"}
+        self._reranker_errors.pop(model_id, None)
+        # Run in an isolated subprocess so the download can be truly terminated (an
+        # asyncio.to_thread cannot be killed). A subprocess (vs. multiprocessing) avoids
+        # re-importing the server's __main__ on Windows spawn.
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "hirocli.services.knowledge.download_entry", model_id, str(cache)],
+        )
+        self._reranker_jobs[model_id] = _RerankerDownloadJob(
+            process=proc,
+            baseline_bytes=dir_size_bytes(cache),
+            expected_bytes=parse_size_label(spec.size_label),
+        )
+        log.info("⬇️ Reranker download started — %s", model_id, size=spec.size_label)
+        return {"model_id": model_id, "status": "downloading"}
+
+    def cancel_reranker_download(self, model_id: str) -> dict[str, Any]:
+        """Terminate an in-flight local-reranker download (best-effort kill of the subprocess)."""
+        job = self._reranker_jobs.pop(model_id, None)
+        if job is None:
+            return {"model_id": model_id, "status": "available"}
+        job.cancelled = True
+        try:
+            if job.process.poll() is None:
+                job.process.terminate()
+                try:
+                    job.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    job.process.kill()
+        except Exception:
+            log.warning("⚠️ Reranker download cancel failed — %s", model_id, exc_info=True)
+        self._reranker_errors.pop(model_id, None)
+        log.info("🛑 Reranker download cancelled — %s", model_id)
+        return {"model_id": model_id, "status": "cancelled"}
+
+    def _poll_reranker_jobs(self) -> None:
+        """Reap finished download subprocesses: success → marker (ready); non-zero exit → error."""
+        from hirocli.services.knowledge.reranker_registry import (
+            get_local_reranker,
+            is_downloaded,
+            reranker_cache_dir,
+        )
+
+        cache = reranker_cache_dir(self.workspace_path)
+        for model_id, job in list(self._reranker_jobs.items()):
+            if job.process.poll() is None:
+                continue
+            self._reranker_jobs.pop(model_id, None)
+            if job.cancelled:
+                continue
+            spec = get_local_reranker(model_id)
+            if spec is not None and is_downloaded(spec, cache):
+                continue  # success — marker present
+            self._reranker_errors[model_id] = f"download failed (exit {job.process.returncode})"
+            log.error("❌ Reranker download failed — %s · exit %s", model_id, job.process.returncode)
+
+    def reranker_options(self) -> list[dict[str, Any]]:
+        """Local reranker registry rows with per-model download status + byte progress."""
+        from hirocli.services.knowledge.download_markers import dir_size_bytes
+        from hirocli.services.knowledge.reranker_registry import (
+            is_downloaded,
+            list_local_rerankers,
+            reranker_cache_dir,
+        )
+
+        self._poll_reranker_jobs()
+        cache = reranker_cache_dir(self.workspace_path)
+        current_bytes: int | None = None  # computed once, only if a download is active
+        rows: list[dict[str, Any]] = []
+        for spec in list_local_rerankers():
+            downloaded = is_downloaded(spec, cache)
+            job = self._reranker_jobs.get(spec.id)
+            error = self._reranker_errors.get(spec.id)
+            percent: int | None = None
+            downloaded_bytes: int | None = None
+            total_bytes: int | None = None
+            if downloaded:
+                status = "ready"
+            elif job is not None and job.process.poll() is None:
+                status = "downloading"
+                if current_bytes is None:
+                    current_bytes = dir_size_bytes(cache)
+                downloaded_bytes = max(0, current_bytes - job.baseline_bytes)
+                total_bytes = job.expected_bytes or None
+                if job.expected_bytes > 0:
+                    percent = min(99, int(downloaded_bytes / job.expected_bytes * 100))
+            elif error:
+                status = "error"
+            else:
+                status = "available"
+            rows.append(
+                {
+                    "id": spec.id,
+                    "display_name": spec.display_name,
+                    "backend": spec.backend,
+                    "size_label": spec.size_label,
+                    "languages": spec.languages,
+                    "multilingual": spec.multilingual,
+                    "description": spec.description,
+                    "downloaded": downloaded,
+                    "status": status,
+                    "error": error if status == "error" else None,
+                    "percent": percent,
+                    "downloaded_bytes": downloaded_bytes,
+                    "total_bytes": total_bytes,
+                }
+            )
+        return rows
 
     async def answer(
         self,

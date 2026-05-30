@@ -38,6 +38,13 @@ export const ADMIN_SHELL_STICKY_BLEED = cn(
 /** Left-aligned page width used by every admin page. */
 export const ADMIN_PAGE_MAX_W = 'grid max-w-[1420px] gap-5';
 
+/**
+ * Wider page width for dense, table + detail-panel operations pages (Graph runs,
+ * Logs) whose master/detail split needs more horizontal room. Keep the bare
+ * `max-w` literal here in sync with the Logs page custom flex wrapper.
+ */
+export const ADMIN_PAGE_MAX_W_WIDE = 'grid max-w-[2000px] gap-5';
+
 // ── page header (kicker + brand-gradient title + muted intro) ──────────────
 
 export const ADMIN_HEADER_KICKER = 'font-sans text-xs font-extrabold uppercase text-primary';

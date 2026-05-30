@@ -714,7 +714,16 @@ class BaseAgentGraph:
         context = out.get("context") or ""
         if entry:
             entry.set_decision("retrieved" if sources else "empty", str(len(sources)))
-            entry.set_output_preview(f"sources: {len(sources)}")
+            # Show the actual top results (title + snippet), not just a count, so retrieval is evaluable.
+            if sources:
+                score_source = str(getattr(sources[0], "score_source", "") or "").strip()
+                head = f"{len(sources)} src" + (f" ({score_source})" if score_source else "")
+                entry.set_output_preview(
+                    f"{head} · {_knowledge_results_rows(sources)}",
+                    max_len=_KNOWLEDGE_PREVIEW_MAX,
+                )
+            else:
+                entry.set_output_preview("0 src")
         return {"knowledge_context": context, "knowledge_sources": sources}
 
     def _knowledge_scope_filters(self, state: GraphState) -> dict[str, Any]:
@@ -824,7 +833,19 @@ class BaseAgentGraph:
                 "call_model — input · count=%d tokens≈%d",
                 len(inputs), input_estimate,
             )
-            response = await bound.ainvoke(inputs)
+            # Resolve identity up-front so a failed call still records WHICH model broke (the ledger
+            # wrapper otherwise stamps only the exception class name, e.g. "googlegenerativeai").
+            effective_model = model_id or str(state.get("model_id") or "")
+            provider = effective_model.split(":", 1)[0] if ":" in effective_model else ""
+            try:
+                response = await bound.ainvoke(inputs)
+            except Exception as exc:
+                if entry := current_entry.get():
+                    entry.add_usage(provider=provider, model=effective_model)
+                    entry.set_decision("provider_error", _error_slug(exc))
+                    # output_preview is not slugged (280 chars) → keep the provider's actual message.
+                    entry.set_output_preview(f"error: {exc}")
+                raise
             usage_payload = _llm_usage_payload(
                 response,
                 inbound_id=state.get("inbound_id", ""),
@@ -833,8 +854,6 @@ class BaseAgentGraph:
                 estimated_input_tokens=input_estimate,
             )
             if entry := current_entry.get():
-                effective_model = model_id or str(state.get("model_id") or "")
-                provider = effective_model.split(":", 1)[0] if ":" in effective_model else ""
                 entry.add_usage(
                     provider=provider,
                     model=effective_model,
@@ -1456,6 +1475,36 @@ def _serialize_knowledge_sources(sources: list[Any]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _relevance_of(item: Any) -> float | None:
+    """Best calibrated score for a hit/source: ``relevance`` ([0,1], reranker-aware) → ``rerank_score``
+    → raw backend ``score``. The raw ``score`` (cosine/RRF) is uncalibrated and not the final
+    ranking signal once a reranker runs, so prefer ``relevance`` for previews."""
+    for attr in ("relevance", "rerank_score", "score"):
+        value = getattr(item, attr, None)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
+# Retrieval previews get a larger budget than the 280-char default so a few result snippets fit —
+# enough to eyeball whether retrieval actually returned relevant content.
+_KNOWLEDGE_PREVIEW_MAX = 600
+
+
+def _knowledge_results_rows(items: list[Any], *, limit: int = 3, snippet_len: int = 130) -> str:
+    """``[ref] rel Title :: snippet`` rows for the top results, so the actual retrieved content (not
+    just counts/scores) is visible. Score is the calibrated, reranker-aware ``relevance``."""
+    rows: list[str] = []
+    for index, item in enumerate(items[:limit], start=1):
+        ref = getattr(item, "ref", None) or index
+        title = " ".join(str(getattr(item, "title", "") or "").split())[:50] or "<untitled>"
+        relevance = _relevance_of(item)
+        rel_text = f" {relevance:.2f}" if relevance is not None else ""
+        snippet = " ".join(str(getattr(item, "text", "") or "").split())[:snippet_len]
+        rows.append(f"[{ref}]{rel_text} {title} :: {snippet}")
+    return " | ".join(rows)
 
 
 def _format_history(messages: list[AnyMessage], *, limit: int = 6) -> str:

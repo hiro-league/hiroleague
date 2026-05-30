@@ -1,11 +1,11 @@
 import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
 import type { TableSortDirection } from '$lib/components/page/table/table-sort-utils';
-import { allCatalogKinds } from './catalog-filter-ui';
+import { allCatalogKinds, isRowAvailable } from './catalog-filter-ui';
 
-export const PROVIDER_SORT_COLUMNS = ['provider', 'hosting', 'updated'] as const;
+export const PROVIDER_SORT_COLUMNS = ['online', 'provider', 'hosting', 'updated'] as const;
 export type ProviderSortColumn = (typeof PROVIDER_SORT_COLUMNS)[number];
 
-export const MODEL_SORT_COLUMNS = ['provider', 'model', 'kind', 'class', 'hosting', 'context'] as const;
+export const MODEL_SORT_COLUMNS = ['online', 'provider', 'model', 'kind', 'class', 'hosting', 'context'] as const;
 export type ModelSortColumn = (typeof MODEL_SORT_COLUMNS)[number];
 
 function compareStrings(a: string, b: string, direction: TableSortDirection): number {
@@ -23,11 +23,17 @@ function compareNumbers(a: number | null, b: number | null, direction: TableSort
 export function sortProviders(
   rows: CatalogProviderRow[],
   sortBy: ProviderSortColumn,
-  direction: TableSortDirection
+  direction: TableSortDirection,
+  configuredProviderIds: Set<string>
 ): CatalogProviderRow[] {
   const list = [...rows];
   list.sort((a, b) => {
     switch (sortBy) {
+      case 'online': {
+        const ao = configuredProviderIds.has(a.id) ? 1 : 0;
+        const bo = configuredProviderIds.has(b.id) ? 1 : 0;
+        return compareNumbers(ao, bo, direction);
+      }
       case 'hosting':
         return compareStrings(a.hosting ?? '', b.hosting ?? '', direction);
       case 'updated':
@@ -44,11 +50,17 @@ export function sortModels(
   rows: CatalogModelRow[],
   sortBy: ModelSortColumn,
   direction: TableSortDirection,
-  providerLabels: Record<string, string>
+  providerLabels: Record<string, string>,
+  configuredProviderIds: Set<string>
 ): CatalogModelRow[] {
   const list = [...rows];
   list.sort((a, b) => {
     switch (sortBy) {
+      case 'online': {
+        const ao = isRowAvailable(a, configuredProviderIds) ? 1 : 0;
+        const bo = isRowAvailable(b, configuredProviderIds) ? 1 : 0;
+        return compareNumbers(ao, bo, direction);
+      }
       case 'provider': {
         const al = providerLabels[a.provider_id] ?? a.provider_id;
         const bl = providerLabels[b.provider_id] ?? b.provider_id;

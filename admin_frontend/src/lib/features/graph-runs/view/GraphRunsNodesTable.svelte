@@ -19,8 +19,7 @@
 </script>
 
 <div class="nodes-table-panel min-w-0">
-  <p class="section-label">Nodes</p>
-  <AdminTableShell density="dense" maxBodyHeight="min(70vh, 720px)" class="nodes-scroll">
+  <AdminTableShell density="dense" stickyHead class="nodes-scroll">
     <thead>
       <tr>
         {#each nodeFieldList as field (field)}
@@ -60,16 +59,6 @@
 <style>
   .nodes-table-panel {
     min-width: 0;
-  }
-
-  .section-label {
-    margin-top: 8px;
-    margin-bottom: 0;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted-foreground, #64748b);
   }
 
   .nodes-table__data-row {

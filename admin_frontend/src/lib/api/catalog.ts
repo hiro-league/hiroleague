@@ -7,6 +7,16 @@ export type CatalogTtsVoiceRow = {
   description?: string | null;
 };
 
+/** Editorial free-tier / trial note for a catalog provider (matches catalog.yaml free_offers). */
+export type CatalogProviderFreeOffer = {
+  label: string;
+  summary: string;
+  /** ISO YYYY-MM-DD — when this offer note was last verified. */
+  updated_at: string;
+  details?: string | null;
+  details_url?: string | null;
+};
+
 export type CatalogProviderRow = {
   id: string;
   display_name: string;
@@ -17,6 +27,8 @@ export type CatalogProviderRow = {
   recommended_models?: Record<string, string>;
   /** Curated presets for vendor TTS; empty when provider has no integrated speech API in Hiro. */
   tts_voices?: CatalogTtsVoiceRow[];
+  /** Editorial trial / free-tier notes shown in admin provider tables. */
+  free_offers?: CatalogProviderFreeOffer[];
   metadata_updated_at?: string | null;
   notes?: string | null;
 };
@@ -40,6 +52,16 @@ export type CatalogModelRow = {
   deprecated_since?: string | null;
   replacement_id?: string | null;
   notes?: string | null;
+  /** "catalog" (default) or "local" — local in-process models merged into the browse. */
+  source?: 'catalog' | 'local';
+  /** Local rows only: per-workspace download status (availability axis = downloaded). */
+  downloaded?: boolean;
+  size_label?: string | null;
+  languages?: string | null;
+  /** Local rows only: free to run (no per-token cost) → pricing shows a Free indicator. */
+  free?: boolean;
+  /** Local rows only: where/how to make it available when not downloaded (kind-specific). */
+  manage_hint?: string | null;
 };
 
 export type CatalogModelsResponse = {
@@ -57,6 +79,7 @@ export type ActiveProviderRow = {
   has_tts: boolean;
   has_stt: boolean;
   has_embedding: boolean;
+  has_rerank: boolean;
 };
 
 export type AddableProviderRow = {
@@ -100,6 +123,51 @@ export async function listCatalogModels(
 
 export async function reloadModelCatalog(): Promise<ApiResponse<CatalogReloadData>> {
   return apiRequest<CatalogReloadData>('/catalog/reload', { method: 'POST' });
+}
+
+/** Local in-process models, mapped into CatalogModelRow shape for the browse. */
+export type LocalModelApiRow = {
+  id: string;
+  provider_id: string;
+  display_name: string;
+  model_kind: string;
+  hosting: string;
+  backend: string;
+  size_label: string;
+  languages: string;
+  description: string;
+  context_window: number | null;
+  modalities: string[];
+  features: string[];
+  free: boolean;
+  downloaded: boolean;
+  manage_hint: string;
+  source: string;
+};
+
+export async function listLocalCatalogModels(modelKind?: string): Promise<CatalogModelRow[]> {
+  const payload = await apiRequest<{ models: LocalModelApiRow[] }>(
+    `/catalog/local-models${queryString({ model_kind: modelKind })}`
+  );
+  return (payload.data.models ?? []).map((m) => ({
+    id: m.id,
+    provider_id: m.provider_id,
+    display_name: m.display_name,
+    model_kind: m.model_kind,
+    hosting: m.hosting,
+    model_class: m.backend,
+    context_window: m.context_window,
+    modalities: m.modalities,
+    features: m.features,
+    notes: m.description,
+    pricing: null,
+    source: 'local',
+    free: m.free,
+    downloaded: m.downloaded,
+    size_label: m.size_label,
+    languages: m.languages,
+    manage_hint: m.manage_hint
+  }));
 }
 
 export async function listActiveProviders(): Promise<ApiResponse<ActiveProviderRow[]>> {

@@ -145,6 +145,11 @@ export type KnowledgeSource = {
   dense_score?: number | null;
   sparse_score?: number | null;
   matched_terms?: string[];
+  // Score contract (always present). rerank_score = the reranker's native score (null when no
+  // reranker ran); relevance = normalized [0,1]; score_source = 'reranker' | 'rrf' | 'cosine'.
+  rerank_score?: number | null;
+  relevance?: number | null;
+  score_source?: string;
 };
 
 export type KnowledgeAnswerData = {
@@ -213,6 +218,59 @@ export function getKnowledgeOptions(): Promise<ApiResponse<KnowledgeOptionsData>
   return apiRequest<KnowledgeOptionsData>('/knowledge/options', {
     timeoutMs: 60000
   });
+}
+
+export type RerankerDownloadStatus = 'available' | 'downloading' | 'ready' | 'error';
+
+export type LocalRerankerRow = {
+  id: string;
+  display_name: string;
+  backend: string;
+  size_label: string;
+  languages: string;
+  multilingual: boolean;
+  description: string;
+  downloaded: boolean;
+  status: RerankerDownloadStatus;
+  error: string | null;
+  // Download progress (only while status === 'downloading'). percent is 0–99 then ready→100.
+  percent: number | null;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
+};
+
+export function listKnowledgeRerankers(): Promise<ApiResponse<{ local: LocalRerankerRow[] }>> {
+  return apiRequest<{ local: LocalRerankerRow[] }>('/knowledge/rerankers', {
+    timeoutMs: 60000
+  });
+}
+
+export function downloadKnowledgeReranker(
+  modelId: string
+): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+  // Non-blocking on the live workspace: returns immediately with status "downloading"; the
+  // caller polls listKnowledgeRerankers for byte progress and the ready/error transition.
+  return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
+    '/knowledge/rerankers/download',
+    {
+      method: 'POST',
+      body: { model_id: modelId },
+      timeoutMs: 60000
+    }
+  );
+}
+
+export function cancelKnowledgeReranker(
+  modelId: string
+): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+  return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
+    '/knowledge/rerankers/cancel',
+    {
+      method: 'POST',
+      body: { model_id: modelId },
+      timeoutMs: 60000
+    }
+  );
 }
 
 export function createKnowledgeCategory(

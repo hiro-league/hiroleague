@@ -91,6 +91,8 @@ def source_from_hit(
     hit: KnowledgeSearchHit,
     *,
     matched_terms: list[str] | None = None,
+    relevance: float | None = None,
+    score_source: str = "rrf",
 ) -> KnowledgeSource:
     return KnowledgeSource(
         ref=ref,
@@ -109,6 +111,11 @@ def source_from_hit(
         dense_score=hit.dense_score,
         sparse_score=hit.sparse_score,
         matched_terms=list(matched_terms or []),
+        rerank_score=hit.rerank_score,
+        # relevance falls back to the hit's own (set by the rerank node) when the caller
+        # does not override; score_source is decided by the caller (reranker vs rrf/cosine).
+        relevance=relevance if relevance is not None else hit.relevance,
+        score_source=score_source,
     )
 
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -21,7 +21,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 logger = logging.getLogger(__name__)
 
 Hosting = Literal["cloud", "local"]
-ModelKind = Literal["chat", "tts", "stt", "embedding", "image_gen"]
+ModelKind = Literal["chat", "tts", "stt", "embedding", "image_gen", "rerank"]
+# Single source of truth for valid kinds — derived from the Literal so adding a new kind
+# (e.g. "rerank") only requires editing ModelKind. Validators and Tool allowlists use this.
+MODEL_KINDS: tuple[ModelKind, ...] = get_args(ModelKind)
 
 
 class TtsVoicePreset(BaseModel):
@@ -34,6 +37,29 @@ class TtsVoicePreset(BaseModel):
     id: str = Field(min_length=1)
     display_name: str | None = None
     description: str | None = None
+
+
+class ProviderFreeOffer(BaseModel):
+    """Editorial note about a vendor free tier, trial, or promotional allowance."""
+
+    label: str = Field(min_length=1, description="Short badge text, e.g. 'Free rerank'.")
+    summary: str = Field(
+        min_length=1,
+        description="One-line tooltip on the admin free-offer icon.",
+    )
+    updated_at: str = Field(
+        description="ISO YYYY-MM-DD when this offer note was last verified against vendor docs.",
+    )
+    details: str | None = Field(
+        default=None,
+        description=(
+            "Optional longer plain-text for the admin dialog; YAML line wraps are folded on display."
+        ),
+    )
+    details_url: str | None = Field(
+        default=None,
+        description="Optional link to vendor pricing or trial documentation.",
+    )
 
 
 class PricingBlock(BaseModel):
@@ -51,6 +77,26 @@ class PricingBlock(BaseModel):
             "TTS: curated rough USD per ~1k chars of input script including typical audio output tokens; approximate."
         ),
     )
+    estimated_usd_per_1k_searches: float | None = Field(
+        default=None,
+        description=(
+            "Rerank (Cohere-style): USD per 1,000 search units (1 query + up to 100 docs); approximate."
+        ),
+    )
+    per_1k_tokens: float | None = Field(
+        default=None,
+        description=(
+            "Rerank (Voyage-style): USD per 1K processed tokens "
+            "(query×docs + sum(doc tokens)); pairs with input_per_1m_tokens × 1000."
+        ),
+    )
+    estimated_usd_per_request: float | None = Field(
+        default=None,
+        description=(
+            "Rerank (Voyage-style): vendor table estimate per request "
+            "(100 docs; query + each doc sum to 500 tokens); approximate."
+        ),
+    )
     pricing_updated_at: str
     pricing_source: str | None = None
 
@@ -66,6 +112,8 @@ class Provider(BaseModel):
     recommended_models: dict[str, str] | None = None
     # Curated preset voices for this vendor's integrated TTS APIs (same list for all catalog TTS models).
     tts_voices: list[TtsVoicePreset] = Field(default_factory=list)
+    # Editorial free-tier / trial notes surfaced in admin provider tables.
+    free_offers: list[ProviderFreeOffer] = Field(default_factory=list)
     metadata_updated_at: str
     notes: str | None = None
 
@@ -120,13 +168,7 @@ class ModelSpec(BaseModel):
 
     @model_validator(mode="after")
     def extra_kinds_consistent(self) -> ModelSpec:
-        allowed: set[str] = {
-            "chat",
-            "tts",
-            "stt",
-            "embedding",
-            "image_gen",
-        }
+        allowed: set[str] = set(MODEL_KINDS)
         seen: set[str] = set()
         for k in self.extra_kinds:
             if k not in allowed:
@@ -185,13 +227,7 @@ class CatalogDocument(BaseModel):
             if not prov.recommended_models:
                 continue
             for kind, mid in prov.recommended_models.items():
-                if kind not in (
-                    "chat",
-                    "tts",
-                    "stt",
-                    "embedding",
-                    "image_gen",
-                ):
+                if kind not in MODEL_KINDS:
                     raise ValueError(
                         f"provider {prov.id!r} recommended_models has unknown kind {kind!r}"
                     )
@@ -438,6 +474,68 @@ class ModelCatalog:
             currency="USD",
             estimated_total=total,
             pricing_available=True,
+        )
+
+    def estimate_rerank_cost(
+        self,
+        *,
+        model_id: str,
+        processed_tokens: int = 0,
+        search_units: int = 1,
+    ) -> CostEstimate:
+        """Estimate reranker cost — gross list price, free-tier quotas ignored.
+
+        Two vendor shapes: Voyage-style per *processed* token
+        (``processed = query_tokens × doc_count + sum(doc_tokens)``) and Cohere-style per *search
+        unit* (one query + up to ~100 docs ≈ one unit). Local rerankers aren't catalogued → blank.
+        """
+        spec = self.get_model(model_id)
+        if spec is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_in_catalog",
+            )
+        pricing = spec.pricing
+        if pricing is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="pricing_missing",
+            )
+        tokens = max(0, int(processed_tokens))
+        units = max(1, int(search_units))
+        if pricing.per_1k_tokens is not None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=tokens * pricing.per_1k_tokens / 1_000,
+                pricing_available=True,
+            )
+        if pricing.input_per_1m_tokens is not None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=tokens * pricing.input_per_1m_tokens / 1_000_000,
+                pricing_available=True,
+            )
+        if pricing.estimated_usd_per_1k_searches is not None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=units * pricing.estimated_usd_per_1k_searches / 1_000,
+                pricing_available=True,
+            )
+        if pricing.estimated_usd_per_request is not None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=units * pricing.estimated_usd_per_request,
+                pricing_available=True,
+            )
+        return CostEstimate(
+            currency="USD",
+            estimated_total=0.0,
+            pricing_available=False,
+            reason="rerank_pricing_missing",
         )
 
     def estimate_tts_usage_cost(

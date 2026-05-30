@@ -86,6 +86,12 @@
     return 'weak';
   }
 
+  // True when a reranker reordered this answer's chunks (any source tagged score_source
+  // 'reranker'). Drives the "Reranked" header chip and the per-row rerank relevance badge.
+  const reranked = $derived(
+    (ask.answerResult?.sources ?? []).some((source) => source.score_source === 'reranker')
+  );
+
   // Set-relative maxima for the rank-based scores (RRF + BM25), recomputed per answer.
   const topScore = $derived(
     (ask.answerResult?.sources ?? []).reduce((max, source) => Math.max(max, source.score ?? 0), 0)
@@ -126,6 +132,12 @@
         {/if}
         Ask
       </Button>
+      {#if ask.answerResult}
+        <!-- Drop the cached answer + chunks so the next question starts fresh. -->
+        <Button variant="outline" onclick={ask.clearAnswer} disabled={ask.searching}>
+          Clear
+        </Button>
+      {/if}
     </div>
 
     {#if ask.askDocumentScope}
@@ -145,6 +157,11 @@
         <div class="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{ask.answerResult.elapsed_ms}ms</Badge>
           {#if ask.answerResult.model_id}<Badge variant="secondary">{ask.answerResult.model_id}</Badge>{/if}
+          {#if reranked}
+            <Badge variant="secondary" title="Chunks reordered by a cross-encoder reranker">
+              Reranked
+            </Badge>
+          {/if}
           {#if ask.answerResult.usage?.usage_available}
             <Badge variant="outline">
               {(ask.answerResult.usage.input_tokens ?? ask.answerResult.usage.estimated_input_tokens ?? 0)} in /
@@ -244,7 +261,22 @@
                   style="width: {topScore > 0 ? Math.round((source.score / topScore) * 100) : 0}%"
                 ></div>
               </div>
-              <Badge class="shrink-0 font-mono tabular-nums" variant={TONE_VARIANT[rrfTone]}>
+              {#if source.rerank_score != null}
+                <Badge
+                  class="shrink-0 font-mono tabular-nums"
+                  variant={TONE_VARIANT[cosineTone(source.relevance ?? 0)]}
+                  title={`Reranker relevance (normalized; raw score ${source.rerank_score.toFixed(3)})`}
+                >
+                  rerank {(source.relevance ?? 0).toFixed(3)}
+                </Badge>
+              {/if}
+              <Badge
+                class="shrink-0 font-mono tabular-nums {source.rerank_score != null
+                  ? 'opacity-60'
+                  : ''}"
+                variant={TONE_VARIANT[rrfTone]}
+                title="Retrieval (RRF) score — relative to the top result"
+              >
                 {source.score.toFixed(3)}
               </Badge>
               <Badge class="shrink-0 font-mono tabular-nums" variant="outline">

@@ -29,7 +29,14 @@
     {#if ctrl.sectionDescription('llm')}
       <p class="min-w-0 flex-1 text-sm text-muted-foreground">{ctrl.sectionDescription('llm')}</p>
     {/if}
-    <ActiveProvidersLink busy={ctrl.busy} />
+    <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      <ReloadCatalogButton
+        busy={ctrl.busy}
+        catalogReloadBusy={ctrl.catalogReloadBusy}
+        onReload={() => void ctrl.reloadCatalog()}
+      />
+      <ActiveProvidersLink busy={ctrl.busy} />
+    </div>
   </div>
 
   {#if ctrl.draft}
@@ -39,13 +46,6 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.modelsChat}
     >
-      {#snippet headerActions()}
-        <ReloadCatalogButton
-          busy={ctrl.busy}
-          catalogReloadBusy={ctrl.catalogReloadBusy}
-          onReload={() => void ctrl.reloadCatalog()}
-        />
-      {/snippet}
       <SingleModelPicker
         embedded
         label="Default chat model"
@@ -61,6 +61,17 @@
         onSelect={(id) => ctrl.setDefaultModel('default_chat', id)}
         onChange={ctrl.markDirty}
       />
+      <FormField label="Default chat model profile" class="max-w-md">
+        <select
+          class={ADMIN_SELECT_LG}
+          value={ctrl.draft.llm.default_tuning_profile}
+          onchange={(event) => ctrl.setDefaultTuningProfile('llm', event.currentTarget.value)}
+        >
+          {#each ctrl.profileEntries as [id, profile] (id)}
+            <option value={id}>{profile.label}</option>
+          {/each}
+        </select>
+      </FormField>
     </SectionCardMuted>
 
     <SectionCardMuted
@@ -69,13 +80,6 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.modelsStt}
     >
-      {#snippet headerActions()}
-        <ReloadCatalogButton
-          busy={ctrl.busy}
-          catalogReloadBusy={ctrl.catalogReloadBusy}
-          onReload={() => void ctrl.reloadCatalog()}
-        />
-      {/snippet}
       <SingleModelPicker
         embedded
         label="Default speech-to-text model"
@@ -114,24 +118,6 @@
         onSelect={(id) => ctrl.setDefaultModel('default_tts', id)}
         onChange={ctrl.markDirty}
       />
-    </SectionCardMuted>
-
-    <SectionCardMuted
-      title="Default chat tuning profile"
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.modelsTuningProfile}
-    >
-      <FormField label="Profile" class="max-w-md">
-        <select
-          class={ADMIN_SELECT_LG}
-          value={ctrl.draft.llm.default_tuning_profile}
-          onchange={(event) => ctrl.setDefaultTuningProfile('llm', event.currentTarget.value)}
-        >
-          {#each ctrl.profileEntries as [id, profile] (id)}
-            <option value={id}>{profile.label}</option>
-          {/each}
-        </select>
-      </FormField>
     </SectionCardMuted>
   {/if}
 </div>

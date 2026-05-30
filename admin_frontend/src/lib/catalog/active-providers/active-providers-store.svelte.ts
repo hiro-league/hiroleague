@@ -48,6 +48,7 @@ export function createActiveProvidersStore() {
     if (provider.has_tts) kinds.push('tts');
     if (provider.has_stt) kinds.push('stt');
     if (provider.has_embedding) kinds.push('embedding');
+    if (provider.has_rerank) kinds.push('rerank');
     return kinds.length ? kinds.join(', ') : '-';
   }
 
@@ -199,6 +200,9 @@ export function createActiveProvidersStore() {
     },
     get embeddingActiveProviderIds(): Set<string> {
       return activeProviderIdsFor((row) => row.has_embedding);
+    },
+    get rerankActiveProviderIds(): Set<string> {
+      return activeProviderIdsFor((row) => row.has_rerank);
     },
     get addableProviders(): AddableProviderRow[] {
       return addableProviders;

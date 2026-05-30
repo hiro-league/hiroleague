@@ -134,7 +134,7 @@
 <AdminPageHeader
   kicker="Operations"
   title="Logs"
-  wrapperClass="flex h-full min-h-0 max-w-[1420px] flex-col gap-4 overflow-hidden"
+  wrapperClass="flex h-full min-h-0 max-w-[2000px] flex-col gap-4 overflow-hidden"
   collapseExpanded={!prefs.controlsCollapsed}
   onToggleCollapse={() => prefs.toggleControlsCollapsed()}
   collapseAriaControls={LOGS_FILTER_REGION_ID}

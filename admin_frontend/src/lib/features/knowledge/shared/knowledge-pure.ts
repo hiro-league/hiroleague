@@ -4,8 +4,23 @@
  */
 import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
 import { PREF_KEYS } from '$lib/preferences/keys';
-import { readLocalBoolean, readLocalString, removeLocalString, writeLocalBoolean, writeLocalString } from '$lib/preferences/storage';
-import type { KnowledgeDocument, KnowledgeFilters, KnowledgeIngestMetadata, KnowledgeScannedFile } from '$lib/api/knowledge';
+import {
+  readLocalBoolean,
+  readLocalString,
+  readSessionString,
+  removeLocalString,
+  removeSessionString,
+  writeLocalBoolean,
+  writeLocalString,
+  writeSessionString
+} from '$lib/preferences/storage';
+import type {
+  KnowledgeAnswerData,
+  KnowledgeDocument,
+  KnowledgeFilters,
+  KnowledgeIngestMetadata,
+  KnowledgeScannedFile
+} from '$lib/api/knowledge';
 
 export type KnowledgeTabId = 'ingest' | 'ask' | 'browse';
 
@@ -69,6 +84,31 @@ export function readKnowledgeChunkMarkdownFormat(): boolean {
 
 export function writeKnowledgeChunkMarkdownFormat(enabled: boolean) {
   writeLocalBoolean(PREF_KEYS.knowledgeChunkMarkdownFormat, enabled);
+}
+
+/**
+ * Ask tab last-answer persistence. Asking costs an LLM call, so the answer + chunk results are
+ * cached in sessionStorage and survive navigating away to other admin pages and back, until the
+ * user asks a new question, clears the result, or closes the browser tab.
+ */
+export function readPersistedKnowledgeAskResult(): KnowledgeAnswerData | null {
+  const raw = readSessionString(PREF_KEYS.knowledgeAskResult);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as KnowledgeAnswerData;
+  } catch {
+    // Corrupt/stale payload — drop it rather than crashing the Ask tab on mount.
+    removeSessionString(PREF_KEYS.knowledgeAskResult);
+    return null;
+  }
+}
+
+export function writePersistedKnowledgeAskResult(result: KnowledgeAnswerData) {
+  writeSessionString(PREF_KEYS.knowledgeAskResult, JSON.stringify(result));
+}
+
+export function clearPersistedKnowledgeAskResult() {
+  removeSessionString(PREF_KEYS.knowledgeAskResult);
 }
 
 export function fileName(relativePath: string): string {

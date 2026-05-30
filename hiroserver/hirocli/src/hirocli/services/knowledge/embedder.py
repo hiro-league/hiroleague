@@ -105,3 +105,16 @@ def _is_catalog_embedding_model(model_id: str) -> bool:
 
     spec = get_model_catalog().get_model(model_id)
     return spec is not None and spec.supports_kind("embedding")
+
+
+def is_default_embedder_cached(workspace_path: Path) -> bool:
+    """Is the default FastEmbed embedder downloaded in this workspace?
+
+    Marker-based, same as rerankers (see ``download_markers``) — the FastEmbed backend writes a
+    marker after its first successful load. The embedder auto-downloads on first ingest, so this
+    flips to True once any knowledge ingest/query has run on this install.
+    """
+    from hirocli.services.knowledge.download_markers import is_marked
+
+    cache_dir = Path(workspace_path) / KNOWLEDGE_DIR / "fastembed_cache"
+    return is_marked(cache_dir, DEFAULT_KNOWLEDGE_EMBEDDING_MODEL)

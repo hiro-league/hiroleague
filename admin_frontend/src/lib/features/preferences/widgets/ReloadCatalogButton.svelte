@@ -19,10 +19,10 @@
   size="sm"
   class="shrink-0"
   disabled={busy}
-  title="Open Model Catalog (bundled providers and models)"
+  title="Open Providers/Models (bundled providers and models)"
   onclick={() => void goto(`${base}/catalog/`)}
 >
-  <BookOpen size={14} /> Model catalog
+  <BookOpen size={14} /> Providers/models
 </Button>
 <Button
   variant="outline"

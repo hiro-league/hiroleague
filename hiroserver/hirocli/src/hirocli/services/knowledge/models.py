@@ -98,6 +98,12 @@ class KnowledgeSearchHit:
     dense_score: float | None = None
     sparse_score: float | None = None
     matched_terms: list[str] = field(default_factory=list)
+    # Reranker output (set by the rerank node when a reranker is active; None otherwise).
+    # rerank_score = the reranker's native score (API [0,1] or cross-encoder logit — NOT
+    # comparable across backends). relevance = that score normalized to [0,1] (sigmoid for
+    # logits, pass-through for calibrated API scores) — the field consumers should use.
+    rerank_score: float | None = None
+    relevance: float | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +131,12 @@ class KnowledgeSource:
     dense_score: float | None = None
     sparse_score: float | None = None
     matched_terms: list[str] = field(default_factory=list)
+    # Unified score contract — emitted whether or not a reranker ran (see KnowledgeSearchHit).
+    # relevance is always populated in [0,1]; score_source tags its provenance so chat-side
+    # fusion knows whether it is a calibrated reranker score or a within-set retrieval rank.
+    rerank_score: float | None = None
+    relevance: float | None = None
+    score_source: str = "rrf"
 
 
 @dataclass(frozen=True)

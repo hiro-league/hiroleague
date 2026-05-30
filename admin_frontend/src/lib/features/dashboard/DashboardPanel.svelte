@@ -31,7 +31,7 @@
   <section class="grid gap-4 md:grid-cols-3">
     <a
       class="group grid min-h-36 gap-3 rounded-lg border bg-card p-4 shadow-sm transition-colors hover:border-primary/50 hover:bg-secondary/20"
-      href={`${base}/active-providers/`}
+      href={`${base}/catalog/?tab=active-providers`}
     >
       <div class="flex items-start justify-between gap-3">
         <div class="flex items-center gap-3">

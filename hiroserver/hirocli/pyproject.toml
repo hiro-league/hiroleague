@@ -57,6 +57,12 @@ dependencies = [
     # torch + huggingface-hub transitively; ~100MB on first install. Required
     # because mem0ai lists sentence-transformers under its ``[extras]`` group.
     "sentence-transformers>=5.4",
+    # Knowledge reranker — cloud providers (catalog) + local FlashRank starter loader.
+    # Cohere/Voyage are LangChain BaseDocumentCompressor impls; flashrank is a small ONNX
+    # cross-encoder loader (no torch). sentence-transformers (above) covers the bge/gte lanes.
+    "langchain-cohere>=0.5.1",
+    "langchain-voyageai>=0.3.3",
+    "flashrank>=0.2.10",
     "keyring>=25.7",
     "platformdirs>=4",
     "aiosqlite>=0.20",

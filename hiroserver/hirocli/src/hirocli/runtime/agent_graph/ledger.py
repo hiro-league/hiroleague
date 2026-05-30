@@ -257,11 +257,12 @@ class LedgerEntry:
         self.decision_kind = _slug(kind)
         self.decision_detail = _slug(detail)
 
-    def set_input_preview(self, value: Any) -> None:
-        self.input_preview = _preview(str(value or ""))
+    def set_input_preview(self, value: Any, *, max_len: int = 280) -> None:
+        self.input_preview = _preview(str(value or ""), max_len=max_len)
 
-    def set_output_preview(self, value: Any) -> None:
-        self.output_preview = _preview(str(value or ""))
+    def set_output_preview(self, value: Any, *, max_len: int = 280) -> None:
+        # Retrieval nodes pass a larger max_len so result snippets (not just counts) are visible.
+        self.output_preview = _preview(str(value or ""), max_len=max_len)
 
     def set_error(self, code: str) -> None:
         self.status = "error"
@@ -562,7 +563,18 @@ class LedgerSink:
 
         try:
             catalog = get_model_catalog()
-            if row.get("tts_chars") not in ("", None):
+            spec = catalog.get_model(model)
+            model_kind = spec.model_kind if spec is not None else ""
+            if model_kind == "rerank":
+                # Reranker billing differs from chat tokens — Voyage-style per processed token
+                # (recorded on ``input_tokens``) or Cohere-style per search unit (1 per rerank call).
+                # ``embedding`` rows need no branch: the token path below prices input-only.
+                estimate = catalog.estimate_rerank_cost(
+                    model_id=model,
+                    processed_tokens=_to_int(row.get("input_tokens")),
+                    search_units=1,
+                )
+            elif row.get("tts_chars") not in ("", None):
                 # ``tts_text_tokens`` is the metered text-token count parsed from provider
                 # ``usage_metadata`` (Gemini TEXT modality / OpenAI text-tier counts). Falls back
                 # to the local ``_estimate_text_tokens`` value that ``tts_node`` writes to
@@ -910,6 +922,16 @@ def _slug(value: str) -> str:
 
 
 def _error_code(exc: BaseException) -> str:
+    # Prefer an explicit status/code (e.g. "http_429", "resource_exhausted") over the bare
+    # exception class name — the class name alone (e.g. "googlegenerativeai") is not actionable.
+    for attr in ("status_code", "http_status", "code", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value:
+            return _slug(f"http_{value}")
+        if isinstance(value, str) and value.strip():
+            return _slug(value)
     name = exc.__class__.__name__.replace("Error", "").replace("Exception", "")
     return _slug(name or "error")
 
@@ -930,9 +952,9 @@ def _row_kind(row: dict[str, Any]) -> str:
     return str(row.get("row_kind") or "node")
 
 
-def _preview(value: str) -> str:
+def _preview(value: str, *, max_len: int = 280) -> str:
     compact = " ".join(str(value or "").split())
-    return compact[:280]
+    return compact[: max(0, max_len)]
 
 
 def _to_int(value: Any) -> int:

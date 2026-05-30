@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..domain.model_catalog import Hosting, ModelKind, get_model_catalog
+from ..domain.model_catalog import MODEL_KINDS, Hosting, ModelKind, get_model_catalog
 from .base import Tool, ToolParam
 
 
@@ -43,8 +43,8 @@ class LlmCatalogListProvidersTool(Tool):
     description = (
         "List AI providers known to Hiro (OpenAI, Google, Anthropic, local runtimes). "
         "Each entry includes hosting type (cloud vs local), required credential env var "
-        "names, metadata dates, and optional tts_voices presets for bundled TTS. "
-        "Optional filter by hosting."
+        "names, metadata dates, optional free_offers (trial/free-tier notes), and optional "
+        "tts_voices presets for bundled TTS. Optional filter by hosting."
     )
     params = {
         "hosting": ToolParam(
@@ -74,7 +74,7 @@ class LlmCatalogListModelsTool(Tool):
     name = "llm_catalog_list_models"
     description = (
         "List models in the Hiro catalog with optional filters: provider_id, model_kind "
-        "(chat, tts, stt, embedding, image_gen — includes rows whose primary or extra_kinds "
+        f"({', '.join(MODEL_KINDS)} — includes rows whose primary or extra_kinds "
         "match), model_class (e.g. agentic, fast), "
         "or hosting (cloud vs local). Each row includes pricing metadata when present."
     )
@@ -86,7 +86,7 @@ class LlmCatalogListModelsTool(Tool):
         ),
         "model_kind": ToolParam(
             str,
-            "Filter by kind: chat, tts, stt, embedding, image_gen (matches primary model_kind or extra_kinds)",
+            f"Filter by kind: {', '.join(MODEL_KINDS)} (matches primary model_kind or extra_kinds)",
             required=False,
         ),
         "model_class": ToolParam(
@@ -115,13 +115,7 @@ class LlmCatalogListModelsTool(Tool):
         model_kind: ModelKind | None = None
         if model_kind_raw is not None and str(model_kind_raw).strip() != "":
             mk = str(model_kind_raw).strip().lower()
-            allowed: tuple[ModelKind, ...] = (
-                "chat",
-                "tts",
-                "stt",
-                "embedding",
-                "image_gen",
-            )
+            allowed: tuple[ModelKind, ...] = MODEL_KINDS
             if mk not in allowed:
                 raise ValueError(
                     f"model_kind must be one of {', '.join(allowed)} when provided"
