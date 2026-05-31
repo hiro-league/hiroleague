@@ -19,7 +19,7 @@ from hiro_commons.log import Logger
 
 from .gemini_provider import GeminiSTTProvider
 from .openai_provider import OpenAISTTProvider
-from .provider import ModelInfo, STTProvider
+from .provider import ModelInfo, STTProvider, TranscriptionResult
 from .service import STTService
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 __all__ = [
     "STTProvider",
     "ModelInfo",
+    "TranscriptionResult",
     "STTService",
     "OpenAISTTProvider",
     "GeminiSTTProvider",

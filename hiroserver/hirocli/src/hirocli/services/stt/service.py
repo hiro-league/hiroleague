@@ -39,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from hiro_commons.log import Logger
 
-from .provider import ModelInfo, STTProvider
+from .provider import ModelInfo, STTProvider, TranscriptionResult
 
 log = Logger.get("STT.SERVICE")
 
@@ -112,8 +112,8 @@ class STTService:
         model: str | None = None,
         mime_type: str = "audio/mp4",
         **kwargs: object,
-    ) -> str:
-        """Transcribe audio and return the transcript text.
+    ) -> TranscriptionResult:
+        """Transcribe audio and return the transcript + usage metadata.
 
         ``source`` may be:
           - A URL (``http://`` or ``https://``)
@@ -157,18 +157,18 @@ class STTService:
         )
         audio_bytes = _resolve_audio_bytes(source)
         log.debug("Audio bytes resolved", byte_count=len(audio_bytes))
-        transcript = await provider.transcribe(
+        result = await provider.transcribe(
             audio_bytes, model=effective_model, mime_type=mime_type, **kwargs,
         )
         log.info(
             "Transcribe result",
             model=effective_model,
-            transcript_len=len(transcript),
-            is_empty=not transcript.strip(),
+            transcript_len=len(result.text),
+            is_empty=not result.text.strip(),
         )
-        return transcript
+        return result
 
-    def transcribe_sync(self, source: str, **kwargs: object) -> str:
+    def transcribe_sync(self, source: str, **kwargs: object) -> "TranscriptionResult":
         """Synchronous wrapper — safe to call from a tool or non-async context.
 
         Runs transcribe() in a dedicated thread so an existing event loop in

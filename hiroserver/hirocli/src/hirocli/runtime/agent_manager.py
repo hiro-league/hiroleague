@@ -577,6 +577,9 @@ class AgentManager:
             tools=self._lc_agent_tools,
             model_id=llm_entry.model_id,
             system_prompt=system_prompt,
+            temperature=llm_entry.temperature,
+            max_tokens=llm_entry.max_tokens,
+            thinking=getattr(llm_entry, "thinking", None),
         )
         self._compiled_cache[key] = compiled
         self._compiled_cache.move_to_end(key)

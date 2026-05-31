@@ -18,13 +18,57 @@ API key is injected by ``create_stt_service`` (credential store).
 
 from __future__ import annotations
 
+from typing import Any
+
+from hiro_commons.llm_usage import modality_token_count
 from hiro_commons.log import Logger
 
-from .provider import ModelInfo, STTProvider
+from .provider import ModelInfo, STTProvider, TranscriptionResult
 
 log = Logger.get("STT.GEMINI")
 
 _DEFAULT_MODEL = "gemini-2.5-flash"
+
+
+def _usage_dict(value: Any) -> dict[str, Any] | None:
+    """Best-effort conversion of a Gemini ``usage_metadata`` SDK object to a plain dict."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    for attr in ("model_dump", "to_dict", "dict"):
+        fn = getattr(value, attr, None)
+        if callable(fn):
+            try:
+                result = fn()
+                if isinstance(result, dict):
+                    return result
+            except Exception:
+                continue
+    return None
+
+
+def _gemini_stt_usage(usage_metadata: Any) -> dict[str, int] | None:
+    """Normalize Gemini usage → ``{"audio_tokens", "output_tokens"}`` (None if absent).
+
+    Per ``docs/model_pricing.md``: audio_tokens = AUDIO-modality tokens from
+    ``promptTokensDetails``; output_tokens = ``candidatesTokenCount``.
+    """
+    data = _usage_dict(usage_metadata)
+    if not data:
+        return None
+    audio_tokens = int(
+        modality_token_count(
+            data,
+            detail_keys=("promptTokensDetails", "prompt_tokens_details"),
+            modality="AUDIO",
+        )
+        or 0
+    )
+    output_tokens = int(data.get("candidatesTokenCount") or data.get("candidates_token_count") or 0)
+    if not audio_tokens and not output_tokens:
+        return None
+    return {"audio_tokens": audio_tokens, "output_tokens": output_tokens}
 
 _TRANSCRIPTION_PROMPT = (
     "Transcribe the following audio clip verbatim. "
@@ -120,16 +164,21 @@ class GeminiSTTProvider(STTProvider):
             wait=wait_exponential(min=1, max=20, multiplier=2),
             stop=stop_after_attempt(4),
         )
-        async def _call() -> str:
-            response = await client.aio.models.generate_content(
+        async def _call():
+            return await client.aio.models.generate_content(
                 model=effective_model,
                 contents=[
                     effective_prompt,
                     types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                 ],
             )
-            return (response.text or "").strip()
 
-        transcript = await _call()
+        response = await _call()
+        transcript = (response.text or "").strip()
         log.info("Transcription complete", model=effective_model, chars=len(transcript))
-        return transcript
+        return TranscriptionResult(
+            text=transcript,
+            model=effective_model,
+            provider="gemini",
+            usage_metadata=_gemini_stt_usage(getattr(response, "usage_metadata", None)),
+        )

@@ -268,6 +268,19 @@ class LedgerEntry:
         self.status = "error"
         self.error_code = _slug(code)
 
+    def fail(self, code: str, *, message: str = "", decision: str = "provider_error") -> None:
+        """Record a node failure consistently — decision + error code + readable message in one call.
+
+        Use this when a node *catches/degrades* an error or *detects invalid output* itself. For
+        uncaught exceptions the node wrapper already records ``status=error``, ``error_code`` and the
+        exception message, so this is not needed on the propagate path.
+        """
+        if decision:
+            self.set_decision(decision, code)
+        self.set_error(code)
+        if message:
+            self.set_output_preview(f"error: {message}")
+
     def spawn_child(
         self,
         *,
@@ -595,10 +608,15 @@ class LedgerSink:
                 row.get("stt_audio_seconds") not in ("", None)
                 or row.get("stt_audio_tokens") not in ("", None)
             ):
-                # STT pricing is not wired yet — see ``estimate_stt_usage_cost`` follow-up.
-                # ``stt_audio_tokens`` / ``stt_audio_seconds`` are persisted now so future
-                # repricing has all the inputs from ``docs/model_pricing.md``.
-                return {**row, "cost_usd": "", "pricing_version": ""}
+                # Token-based when the provider returned usage (audio-in + output tokens), else a
+                # per-second fallback from the audio duration (see ``docs/model_pricing.md``).
+                estimate = catalog.estimate_stt_usage_cost(
+                    provider_id=provider,
+                    model_id=model,
+                    audio_seconds=_to_float(row.get("stt_audio_seconds")),
+                    audio_tokens=_to_int(row.get("stt_audio_tokens")),
+                    output_tokens=_to_int(row.get("output_tokens")),
+                )
             else:
                 estimate = catalog.estimate_token_usage_cost(
                     model_id=model,
@@ -616,6 +634,10 @@ class LedgerSink:
             return {**row, "cost_usd": "", "pricing_version": ""}
 
         if not estimate.pricing_available:
+            # A model that isn't in the catalog is local/self-hosted → no API cost. Emit a
+            # *calculated* $0 so it reads as "free" rather than blank "—" (genuinely unknown).
+            if estimate.reason == "model_not_in_catalog":
+                return {**row, "cost_usd": "0", "pricing_version": ""}
             detail = row.get("decision_detail") or estimate.reason or "pricing_missing"
             return {**row, "cost_usd": "", "pricing_version": "", "decision_detail": detail}
         return {
@@ -695,7 +717,7 @@ async def _run_wrapped_plain_async(
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     except Exception as exc:
-        entry.finish("error", error_code=_error_code(exc))
+        _record_node_exception(entry, exc)
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     else:
@@ -733,7 +755,7 @@ def _run_wrapped_plain_sync(
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     except Exception as exc:
-        entry.finish("error", error_code=_error_code(exc))
+        _record_node_exception(entry, exc)
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     else:
@@ -771,7 +793,7 @@ async def _run_wrapped_node_async(
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     except Exception as exc:
-        entry.finish("error", error_code=_error_code(exc))
+        _record_node_exception(entry, exc)
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     else:
@@ -809,7 +831,7 @@ def _run_wrapped_node_sync(
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     except Exception as exc:
-        entry.finish("error", error_code=_error_code(exc))
+        _record_node_exception(entry, exc)
         sink.write_rows(entry.rows(include_parent=bool(spec and spec.flush)))
         raise
     else:
@@ -919,6 +941,16 @@ def _identity_from_state(state: Any, config: Any = None) -> dict[str, Any]:
 def _slug(value: str) -> str:
     raw = str(value or "").strip().lower().replace(" ", "_")
     return "".join(ch for ch in raw if ch.isalnum() or ch in {"_", "-", ".", "/"})[:80]
+
+
+def _record_node_exception(entry: "LedgerEntry", exc: Exception) -> None:
+    """Unified failure capture shared by every node wrapper: status, error code, and a readable
+    message — so a propagating exception in ANY node lands a rich error row without per-node code.
+    The node may have set its own message (e.g. via ``fail``) before raising; don't clobber it.
+    """
+    entry.finish("error", error_code=_error_code(exc))
+    if not entry.output_preview:
+        entry.set_output_preview(f"error: {exc}")
 
 
 def _error_code(exc: BaseException) -> str:

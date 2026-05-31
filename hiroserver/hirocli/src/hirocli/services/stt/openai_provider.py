@@ -18,13 +18,35 @@ from __future__ import annotations
 
 import io
 
+from typing import Any
+
 from hiro_commons.log import Logger
 
-from .provider import ModelInfo, STTProvider
+from .provider import ModelInfo, STTProvider, TranscriptionResult
 
 log = Logger.get("STT.OPENAI")
 
 _DEFAULT_MODEL = "gpt-4o-mini-transcribe"
+
+
+def _openai_stt_usage(usage: Any) -> dict[str, int] | None:
+    """Normalize OpenAI transcription usage → ``{"audio_tokens", "output_tokens"}`` (None if absent).
+
+    Per ``docs/model_pricing.md``: audio_tokens = ``usage.input_token_details.audio_tokens``,
+    output_tokens = ``usage.output_tokens``. Handles both SDK objects and dicts.
+    """
+    if usage is None:
+        return None
+
+    def _get(obj: Any, key: str) -> Any:
+        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+    details = _get(usage, "input_token_details")
+    audio_tokens = int(_get(details, "audio_tokens") or 0) if details is not None else 0
+    output_tokens = int(_get(usage, "output_tokens") or 0)
+    if not audio_tokens and not output_tokens:
+        return None
+    return {"audio_tokens": audio_tokens, "output_tokens": output_tokens}
 
 _MIME_TO_EXT: dict[str, str] = {
     "audio/mp4": ".m4a",
@@ -163,16 +185,22 @@ class OpenAISTTProvider(STTProvider):
             stop=stop_after_attempt(4),
             retry=lambda exc: isinstance(exc, (RateLimitError, APIError)),
         )
-        async def _call() -> str:
-            resp = await client.audio.transcriptions.create(
+        async def _call():
+            return await client.audio.transcriptions.create(
                 model=effective_model,
                 file=audio_file,
                 language=language,
                 prompt=prompt,
                 temperature=temperature,
             )
-            return resp.text
 
-        transcript = await _call()
+        resp = await _call()
+        transcript = resp.text
         log.info("Transcription complete", model=effective_model, chars=len(transcript))
-        return transcript
+        return TranscriptionResult(
+            text=transcript,
+            model=effective_model,
+            provider="openai",
+            # gpt-4o-transcribe models return token usage; whisper-1 does not (priced per second).
+            usage_metadata=_openai_stt_usage(getattr(resp, "usage", None)),
+        )

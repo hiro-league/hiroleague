@@ -68,6 +68,13 @@ class PricingBlock(BaseModel):
     input_per_1m_tokens: float | None = None
     output_per_1m_tokens: float | None = None
     cached_input_per_1m_tokens: float | None = None
+    audio_input_per_1m_tokens: float | None = Field(
+        default=None,
+        description=(
+            "STT: USD per 1M audio-input tokens — distinct from the text input rate for dual-use "
+            "chat models used as STT. STT-only models leave this null (their input_per_1m is audio)."
+        ),
+    )
     per_character: float | None = None
     per_second: float | None = None
     per_image: float | None = None
@@ -670,6 +677,68 @@ class ModelCatalog:
             estimated_total=0.0,
             pricing_available=False,
             reason="unsupported_tts_model",
+        )
+
+    def estimate_stt_usage_cost(
+        self,
+        *,
+        provider_id: str,
+        model_id: str,
+        audio_seconds: float = 0.0,
+        audio_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> CostEstimate:
+        """Estimate STT cost (mirrors ``estimate_tts_usage_cost``).
+
+        Token-based when provider usage is available — ``(audio_tokens × audio-input-rate) +
+        (output_tokens × output-rate)`` per ``docs/model_pricing.md``. Falls back to a duration
+        ``per_second`` estimate (e.g. whisper-style, or before usage is wired). For STT-only models
+        ``input_per_1m_tokens`` is the audio-input rate; dual-use chat models approximate with it.
+        """
+        canonical = model_id if ":" in model_id else f"{(provider_id or '').strip()}:{model_id}"
+        spec = self.get_model(canonical)
+        if spec is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_in_catalog",
+            )
+        if not spec.supports_kind("stt"):
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_stt",
+            )
+        pricing = spec.pricing
+        if pricing is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="pricing_missing",
+            )
+        audio_tok = max(0, int(audio_tokens))
+        output_tok = max(0, int(output_tokens))
+        # Audio-input rate: the dedicated field, else input_per_1m_tokens ONLY for STT-only models
+        # (where input is audio). Dual-use chat models without the field are not text-rate-approximated.
+        audio_rate = pricing.audio_input_per_1m_tokens
+        if audio_rate is None and spec.model_kind == "stt":
+            audio_rate = pricing.input_per_1m_tokens
+        if audio_tok > 0 and audio_rate is not None and pricing.output_per_1m_tokens is not None:
+            total = (
+                audio_tok * audio_rate + output_tok * pricing.output_per_1m_tokens
+            ) / 1_000_000
+            return CostEstimate(currency="USD", estimated_total=total, pricing_available=True)
+        if pricing.per_second is not None:
+            total = max(0.0, float(audio_seconds)) * pricing.per_second
+            return CostEstimate(currency="USD", estimated_total=total, pricing_available=True)
+        return CostEstimate(
+            currency="USD",
+            estimated_total=0.0,
+            pricing_available=False,
+            reason="stt_pricing_missing",
         )
 
 

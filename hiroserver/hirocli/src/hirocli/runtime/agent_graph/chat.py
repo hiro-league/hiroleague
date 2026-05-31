@@ -25,6 +25,8 @@ only) would subclass ``BaseAgentGraph`` similarly.
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph
@@ -46,6 +48,9 @@ class ChatAgentGraph(BaseAgentGraph):
         tools: list,
         model_id: str,
         system_prompt: str | None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        thinking: Any = None,
     ) -> CompiledStateGraph:
         b = self._new_state_graph()
 
@@ -65,6 +70,9 @@ class ChatAgentGraph(BaseAgentGraph):
                 tools=tools,
                 model_id=model_id,
                 system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                thinking=thinking,
             ),
         )
         b.add_node("memory_out", self.memory_out_node, retry=_RETRY_TWICE)

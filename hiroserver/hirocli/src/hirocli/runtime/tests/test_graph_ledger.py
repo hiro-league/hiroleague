@@ -241,7 +241,8 @@ def _graph(tmp_path: Path) -> LedgerProbeGraph:
     )
 
 
-def test_stt_usage_does_not_get_token_priced(tmp_path: Path) -> None:
+def test_stt_priced_by_duration_fallback(tmp_path: Path) -> None:
+    """With only audio seconds (no token usage), STT prices via the per-second fallback."""
     graph = _graph(tmp_path)
 
     priced = graph._ledger_sink._with_cost(
@@ -252,8 +253,28 @@ def test_stt_usage_does_not_get_token_priced(tmp_path: Path) -> None:
         }
     )
 
-    assert priced["cost_usd"] == ""
-    assert priced["pricing_version"] == ""
+    # gpt-4o-transcribe per_second = 0.0001 → 12.5 × 0.0001 = 0.00125.
+    assert priced["cost_usd"] == "0.00125"
+    assert priced["pricing_version"]
+
+
+def test_stt_priced_by_tokens_when_usage_present(tmp_path: Path) -> None:
+    """When provider usage is recorded, STT prices token-based (audio-in + output)."""
+    graph = _graph(tmp_path)
+
+    priced = graph._ledger_sink._with_cost(
+        {
+            "provider": "openai",
+            "model": "openai:gpt-4o-mini-transcribe",
+            "stt_audio_seconds": 8.4,
+            "stt_audio_tokens": 1200,
+            "output_tokens": 80,
+        }
+    )
+
+    # 1200 × 1.25/1e6 + 80 × 5.00/1e6 = 0.0019 (token path wins over the per-second fallback).
+    assert priced["cost_usd"] == "0.0019"
+    assert priced["pricing_version"]
 
 
 def test_tts_audio_seconds_are_persisted(tmp_path: Path) -> None:

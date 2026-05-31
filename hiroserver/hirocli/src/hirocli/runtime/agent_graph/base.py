@@ -323,9 +323,7 @@ class BaseAgentGraph:
             entry.set_input_preview(_audio_item_preview(item))
         if self._stt is None or not self._stt.is_available():
             if entry := current_entry.get():
-                entry.set_decision("provider_error", "stt_unavailable")
-                entry.set_error("stt_unavailable")
-                entry.set_output_preview("error: stt_unavailable")
+                entry.fail("stt_unavailable", message="STT provider unavailable")
             err: NodeError = {
                 "node": "stt",
                 "item_index": item["item_index"],
@@ -338,12 +336,10 @@ class BaseAgentGraph:
 
         t0 = time.perf_counter()
         try:
-            text = await self._stt.transcribe(item["body"], mime_type=item["mime_type"])
+            result = await self._stt.transcribe(item["body"], mime_type=item["mime_type"])
         except Exception as exc:
             if entry := current_entry.get():
-                entry.set_decision("provider_error", "exception")
-                entry.set_error("provider_error")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("stt_failed", message=str(exc))
             log.error(
                 "❌ stt — %s · item=%d", inbound_id, item["item_index"],
                 error=str(exc), exc_info=True,
@@ -354,18 +350,26 @@ class BaseAgentGraph:
             err = {"node": "stt", "item_index": item["item_index"], "error": str(exc)}
             return {"errors": [err]}
 
+        text = result.text
+        usage = result.usage_metadata or {}
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         if entry := current_entry.get():
-            model_id = str(getattr(self._stt, "_default_model", "") or "")
-            provider = ""
-            provider_map = getattr(self._stt, "_model_to_provider", {})
-            provider_obj = provider_map.get(model_id) if isinstance(provider_map, dict) else None
-            if provider_obj is not None:
-                provider = str(getattr(provider_obj, "name", "") or "")
+            # Prefer the provider's reported model/provider; fall back to the service default map.
+            model_id = result.model or str(getattr(self._stt, "_default_model", "") or "")
+            provider = result.provider
+            if not provider:
+                provider_map = getattr(self._stt, "_model_to_provider", {})
+                provider_obj = provider_map.get(model_id) if isinstance(provider_map, dict) else None
+                if provider_obj is not None:
+                    provider = str(getattr(provider_obj, "name", "") or "")
+            # Record seconds (per-second fallback) AND the token usage (token-based pricing) so the
+            # ledger prices via ``estimate_stt_usage_cost``.
             entry.add_usage(
                 provider=provider,
                 model=model_id,
                 stt_audio_seconds=(float(item.get("duration_ms") or 0) / 1000),
+                stt_audio_tokens=(int(usage.get("audio_tokens") or 0) or None),
+                output_tokens=(int(usage.get("output_tokens") or 0) or None),
             )
             entry.set_decision("transcribed" if text.strip() else "silence", provider)
             entry.set_output_preview(f"transcript: {text}" if text.strip() else "transcript: <empty>")
@@ -572,12 +576,12 @@ class BaseAgentGraph:
         log.info("trim_history - before=%d after=%d", len(messages), len(keep))
         return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *keep]}
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"usage", "decision"})
     async def memory_search_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Bring recent conversation memory (mem0) into the turn. Runs after ``trim_history``."""
         text = state.get("user_text") or ""
         if entry := current_entry.get():
-            entry.set_input_preview(f"search: {text}" if text.strip() else "search: <empty>")
+            entry.set_input_preview(f"q: {text[:160]}" if text.strip() else "q: <empty>")
         if not text.strip() or self._memory is None:
             if entry := current_entry.get():
                 entry.set_decision("empty", "disabled" if self._memory is None else "no_query")
@@ -599,6 +603,22 @@ class BaseAgentGraph:
                 entry.set_output_preview("results: 0; search disabled")
             return {}
 
+        # Record the mem0 embedding model + the retrieval knobs that actually ran, and an estimated
+        # query-token cost (input-only; local embedders price $0). Mirrors knowledge ``embed_query``.
+        search_prefs = memory_prefs.search
+        embed_model = str(getattr(memory_prefs, "default_embedding_model", "") or "")
+        if entry := current_entry.get():
+            if embed_model:
+                provider = embed_model.split(":", 1)[0] if ":" in embed_model else ""
+                entry.add_usage(
+                    provider=provider, model=embed_model, input_tokens=_estimate_text_tokens(text)
+                )
+            entry.set_input_preview(
+                f"q: {text[:120]} · top_k={search_prefs.top_k} "
+                f"threshold={search_prefs.threshold:.2f} "
+                f"rerank={'on' if search_prefs.rerank else 'off'}"
+            )
+
         t0 = time.perf_counter()
         memory_user_id = resolve_memory_user_id(
             data_user_id=state.get("data_user_id"),
@@ -612,9 +632,7 @@ class BaseAgentGraph:
             )
         except Exception as exc:
             if entry := current_entry.get():
-                entry.set_decision("failed", _error_slug(exc))
-                entry.set_error("memory_search_failed")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("memory_search_failed", message=str(exc), decision="failed")
             log.warning(
                 "memory_search failed - %s",
                 state.get("inbound_id", "?"),
@@ -702,9 +720,7 @@ class BaseAgentGraph:
                 exc_info=True,
             )
             if entry:
-                entry.set_decision("failed", _error_slug(exc))
-                entry.set_error("knowledge_retrieve_failed")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("knowledge_retrieve_failed", message=str(exc), decision="failed")
             return {}
         finally:
             if substep_token is not None:
@@ -779,9 +795,13 @@ class BaseAgentGraph:
             ]
             turn_context = assembler.assemble(blocks=blocks)
             if entry := current_entry.get():
-                sources = ",".join(block.source for block in blocks) or "none"
-                entry.set_decision("composed", sources)
-                entry.set_output_preview(f"blocks: {sources}; chars={len(turn_context)}")
+                source_names = ",".join(block.source for block in blocks) or "none"
+                entry.set_input_preview(
+                    f"knowledge: {len(sources)} · "
+                    f"memories: {len(state.get('retrieved_memories') or [])}"
+                )
+                entry.set_decision("composed", source_names)
+                entry.set_output_preview(f"blocks: {source_names} · chars={len(turn_context)}")
             return {"turn_context": turn_context}
 
         return self._wrap_dynamic_node("compose_context", compose_context)
@@ -793,6 +813,9 @@ class BaseAgentGraph:
         tools: list,
         model_id: str,
         system_prompt: str | None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        thinking: Any = None,
     ):
         """Return a closed-over ``call_model`` node bound to this character/model."""
         bound = model.bind_tools(tools) if tools else model
@@ -826,8 +849,14 @@ class BaseAgentGraph:
             if system_prompt:
                 inputs = [SystemMessage(content=system_prompt), *inputs]
             if entry := current_entry.get():
-                # Preview the clean stored turn (not the enriched copy) so the ledger reflects state.
-                entry.set_input_preview(f"text: {_last_human_message_preview(messages)}")
+                # Preview the clean stored turn (not the enriched copy) + the tuning that ran. Model
+                # is in the model column, so it's not repeated here.
+                tuning = (
+                    f" · temp={temperature} max_tokens={max_tokens} thinking={thinking or 'off'}"
+                    if temperature is not None
+                    else ""
+                )
+                entry.set_input_preview(f"text: {_last_human_message_preview(messages)}{tuning}")
             input_estimate = count_tokens_approximately(inputs)
             log.fineinfo(
                 "call_model — input · count=%d tokens≈%d",
@@ -840,11 +869,11 @@ class BaseAgentGraph:
             try:
                 response = await bound.ainvoke(inputs)
             except Exception as exc:
+                # Record which model failed (the wrapper can't), then fail() adds decision + message;
+                # re-raise so failure semantics are unchanged.
                 if entry := current_entry.get():
                     entry.add_usage(provider=provider, model=effective_model)
-                    entry.set_decision("provider_error", _error_slug(exc))
-                    # output_preview is not slugged (280 chars) → keep the provider's actual message.
-                    entry.set_output_preview(f"error: {exc}")
+                    entry.fail(_error_slug(exc), message=str(exc))
                 raise
             usage_payload = _llm_usage_payload(
                 response,
@@ -927,8 +956,8 @@ class BaseAgentGraph:
                     if status == "completed":
                         child.set_decision("ok", "ok")
                     else:
-                        child.set_decision("client_error", _error_slug(error or "tool_error"))
-                        child.set_error("tool_error")
+                        # output_preview already holds the error text above; fail() adds decision + code.
+                        child.fail(_error_slug(error or "tool_error"), decision="client_error")
                 self._emit(
                     writer,
                     GRAPH_TOOL_COMPLETED,
@@ -981,7 +1010,7 @@ class BaseAgentGraph:
 
         if entry := current_entry.get():
             entry.set_input_preview(
-                f"user: {state.get('user_text') or ''}; assistant: {reply_text}"
+                f"user: {state.get('user_text') or ''} · assistant: {reply_text}"
             )
 
         if not reply_text:
@@ -1069,9 +1098,7 @@ class BaseAgentGraph:
         except Exception as exc:
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             if entry := current_entry.get():
-                entry.set_decision("failed", _error_slug(exc))
-                entry.set_error("memory_store_failed")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("memory_store_failed", message=str(exc), decision="failed")
             log.warning(
                 "❌ memory_out — store failed · %s",
                 state.get("inbound_id", "?"),
@@ -1095,8 +1122,8 @@ class BaseAgentGraph:
         # run summary; row-level ``_with_cost`` prices it independently.
         if entry := current_entry.get():
             if extraction_dropped:
-                entry.set_decision("failed", "extraction_dropped")
-                entry.set_error("memory_extraction_dropped")
+                # output_preview is set to the stored summary just below; record decision + code here.
+                entry.fail("memory_extraction_dropped", decision="failed")
             elif stored_count == 0:
                 entry.set_decision("stored", "no_new_facts")
             else:
@@ -1216,9 +1243,7 @@ class BaseAgentGraph:
             )
         except Exception as exc:
             if entry := current_entry.get():
-                entry.set_decision("provider_error", "exception")
-                entry.set_error("provider_error")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("tts_failed", message=str(exc))
             log.error("❌ tts — %s", inbound_id, error=str(exc), exc_info=True)
             self._emit(writer, GRAPH_ERROR, {
                 "inbound_id": inbound_id, "node": "tts", "error": str(exc),
@@ -1280,7 +1305,8 @@ class BaseAgentGraph:
             )
             entry.set_decision("voiced", provider)
             entry.set_output_preview(
-                f"audio: {len(result.audio_bytes)} bytes; duration_ms={duration_ms}; model={result.model}"
+                f"audio: {len(result.audio_bytes)} bytes · duration: {duration_ms}ms"
+                f" · voice: {result.voice}"
             )
         payload = {
             "inbound_id": inbound_id,
@@ -1327,7 +1353,7 @@ class BaseAgentGraph:
         reply_text = state.get("reply_text") or ""
         if entry := current_entry.get():
             entry.set_input_preview(
-                f"reply_id: {reply_id or '<empty>'}; reply: {reply_text}"
+                f"reply_id: {reply_id or '<empty>'} · reply: {reply_text}"
             )
         if reply_text and reply_id:
             if entry := current_entry.get():
@@ -1345,9 +1371,7 @@ class BaseAgentGraph:
             return {}
 
         if entry := current_entry.get():
-            entry.set_decision("failed", "reply_generation_failed")
-            entry.set_error("reply_generation_failed")
-            entry.set_output_preview("run: failed reply_generation_failed")
+            entry.fail("reply_generation_failed", message="reply generation failed", decision="failed")
         self._emit(
             writer,
             GRAPH_RUN_FAILED,
@@ -1536,7 +1560,7 @@ def _memory_results_preview(
     snippets = [_memory_text(item) for item in memories[:3]]
     snippets = [item for item in snippets if item]
     if snippets:
-        return f"{label}: {total}; " + " | ".join(snippets)
+        return f"{label}: {total} · " + " | ".join(snippets)
     return f"{label}: {total}"
 
 

@@ -65,6 +65,13 @@ if TYPE_CHECKING:
 
 log = Logger.get("CHANNEL_MAN")
 
+# Routine transport churn — plugin/handler layers already log the owning transition.
+_FINEINFO_CHANNEL_EVENTS = frozenset({
+    "gateway_disconnected",
+    "device_connected",
+    "device_disconnected",
+})
+
 
 @dataclass
 class _ConnectedChannel:
@@ -360,7 +367,12 @@ class ChannelManager:
                             traffic_class=TRAFFIC_CLASS_INFRA_EVENT,
                             traffic_subclass=ev,
                         ):
-                            log.info(
+                            event_log = (
+                                log.fineinfo
+                                if ev in _FINEINFO_CHANNEL_EVENTS
+                                else log.info
+                            )
+                            event_log(
                                 f"{LOG_IN} Channel event — {ev}",
                                 **log_kwargs,
                             )

@@ -282,6 +282,18 @@ export function formatLedgerField(field: keyof GraphLedgerRow, row: GraphLedgerR
   return String(raw);
 }
 
+/**
+ * Break a bounded preview onto multiple lines for readability. Our node previews join segments with
+ * ` · ` (params / head) and ` | ` (results); the detail panel renders this with `white-space: pre-wrap`.
+ */
+export function previewMultiline(text: string): string {
+  return String(text ?? '')
+    .split(' | ')
+    .join('\n')
+    .split(' · ')
+    .join('\n');
+}
+
 export function memoryPrimaryText(m: Record<string, unknown>): string {
   const raw = m.memory ?? m.text ?? m.content ?? m['data'];
   if (typeof raw === 'string') return raw;

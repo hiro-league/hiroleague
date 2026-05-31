@@ -2,7 +2,7 @@
   import { X } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
-  import { fieldLabel, formatLedgerField } from './graph-runs-pure';
+  import { fieldLabel, formatLedgerField, previewMultiline } from './graph-runs-pure';
 
   let {
     row,
@@ -84,9 +84,11 @@
             <dd
               class:node-detail-field__value--wrap={shouldWrapField(field)}
               class:node-detail-field__value--preview={isPreviewField(field)}
-              title={isPreviewField(field) ? formatLedgerField(field, row) : undefined}
+              title={isPreviewField(field) ? previewMultiline(formatLedgerField(field, row)) : undefined}
             >
-              {formatLedgerField(field, row)}
+              {isPreviewField(field)
+                ? previewMultiline(formatLedgerField(field, row))
+                : formatLedgerField(field, row)}
             </dd>
           </div>
           {/each}

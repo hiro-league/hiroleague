@@ -281,7 +281,7 @@
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={ctrl.busy || ctrl.rerankerDownloading !== null}
+                    disabled={ctrl.busy || ctrl.rerankerBusy}
                     onclick={() => ctrl.downloadReranker(sel.id)}
                   >
                     {sel.status === 'error' ? 'Retry download' : 'Download'}

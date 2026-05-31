@@ -14,6 +14,22 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class TranscriptionResult:
+    """Output of a successful transcription — text plus metering metadata (mirrors ``TTSResult``).
+
+    ``usage_metadata`` is provider-normalized for pricing: ``{"audio_tokens": int,
+    "output_tokens": int}``. ``None`` when the provider returns no usage (e.g. whisper) — the ledger
+    then falls back to a per-second estimate from the audio duration.
+    """
+
+    text: str
+    model: str = ""
+    provider: str = ""
+    usage_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -62,8 +78,8 @@ class STTProvider(ABC):
         *,
         model: str | None = None,
         **kwargs: object,
-    ) -> str:
-        """Transcribe raw audio bytes and return the transcript text.
+    ) -> TranscriptionResult:
+        """Transcribe raw audio bytes and return the transcript + usage metadata.
 
         Args:
             audio_bytes: Raw audio data (WAV, MP3, M4A, WEBM, etc.).

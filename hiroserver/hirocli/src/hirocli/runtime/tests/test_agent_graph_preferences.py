@@ -213,8 +213,10 @@ async def test_memory_search_records_search_and_result_previews(tmp_path) -> Non
     finally:
         current_entry.reset(token)
 
-    assert entry.input_preview == "search: tea preference?"
-    assert entry.output_preview == "results: 1; User prefers concise replies"
+    # Input now carries the query + the retrieval knobs that ran; output uses the ` · ` separator.
+    assert entry.input_preview.startswith("q: tea preference?")
+    assert "top_k=" in entry.input_preview and "rerank=off" in entry.input_preview
+    assert entry.output_preview == "results: 1 · User prefers concise replies"
 
 
 @pytest.mark.asyncio
@@ -315,7 +317,7 @@ async def test_store_turn_memory_records_returned_usage(tmp_path) -> None:
     assert entry.output_tokens == 40
     assert entry.cached_input_tokens == 10
     assert entry.decision_kind == "stored"
-    assert entry.output_preview == "stored: 1; stored memory 1"
+    assert entry.output_preview == "stored: 1 · stored memory 1"
 
 
 @pytest.mark.asyncio
@@ -372,7 +374,8 @@ async def test_store_turn_memory_flags_dropped_extraction(tmp_path) -> None:
         current_entry.reset(token)
 
     assert entry.decision_kind == "failed"
-    assert entry.decision_detail == "extraction_dropped"
+    # fail() ties decision_detail to the error code now (one consistent failure record).
+    assert entry.decision_detail == "memory_extraction_dropped"
     assert entry.error_code == "memory_extraction_dropped"
     assert events[-1]["event"] == GRAPH_MEMORY_STORED
     assert events[-1]["payload"]["count"] == 0

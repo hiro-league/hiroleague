@@ -82,8 +82,8 @@ class TranscribeTool(Tool):
                 "Configure a provider: hiro provider add openai (or google)."
             )
 
-        transcript = service.transcribe_sync(source, model=model) if model else service.transcribe_sync(source)
-        return TranscribeResult(transcript=transcript)
+        result = service.transcribe_sync(source, model=model) if model else service.transcribe_sync(source)
+        return TranscribeResult(transcript=result.text)
 
 
 class DescribeImageTool(Tool):

@@ -402,8 +402,12 @@ models:
     model_kind: stt
     modalities: [audio_in, text]
     features: []
+    # Token-based metering (preferred): audio_input + output per 1M tokens (docs/model_pricing.md).
+    # ``per_second`` is kept as a duration-based fallback when provider usage is unavailable.
     pricing:
       per_second: 0.0001
+      input_per_1m_tokens: 2.50
+      output_per_1m_tokens: 10.00
       pricing_updated_at: "2026-03-27"
       pricing_source: https://openai.com/api/pricing
 
@@ -415,8 +419,11 @@ models:
     model_class: fast
     modalities: [audio_in, text]
     features: []
+    # Token-based metering (preferred); ``per_second`` kept as the duration fallback.
     pricing:
       per_second: 0.00005
+      input_per_1m_tokens: 1.25
+      output_per_1m_tokens: 5.00
       pricing_updated_at: "2026-03-27"
       pricing_source: https://openai.com/api/pricing
 
@@ -512,6 +519,8 @@ models:
       input_per_1m_tokens: 0.50
       cached_input_per_1m_tokens: 0.05
       output_per_1m_tokens: 3.00
+      # STT audio input is billed higher than text input (docs/model_pricing.md).
+      audio_input_per_1m_tokens: 1.00
       pricing_updated_at: "2026-05-14"
       pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3-flash-preview
 
@@ -530,6 +539,8 @@ models:
       input_per_1m_tokens: 0.25
       cached_input_per_1m_tokens: 0.025
       output_per_1m_tokens: 1.50
+      # STT audio input is billed higher than text input (docs/model_pricing.md).
+      audio_input_per_1m_tokens: 0.50
       pricing_updated_at: "2026-05-14"
       pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-flash-lite-preview
 

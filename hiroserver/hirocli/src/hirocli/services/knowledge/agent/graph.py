@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -45,6 +46,17 @@ if TYPE_CHECKING:
 log = Logger.get("SVC.KNOWLEDGE.GRAPH")
 
 KNOWLEDGE_NODE_PREFIX = "knowledge"
+
+
+def _is_valid_vector(vector: Any) -> bool:
+    """A usable dense query vector is non-empty and finite; an empty/NaN vector means the embedder
+    returned garbage and retrieval should not proceed on it."""
+    try:
+        if not len(vector):
+            return False
+        return math.isfinite(float(vector[0]))
+    except (TypeError, ValueError, IndexError):
+        return False
 
 
 def _minmax_relevances(scores: list[float]) -> list[float]:
@@ -269,9 +281,9 @@ class KnowledgeAgentGraph(BaseAgentGraph):
 
         model_id = resolved.model_id
         if entry := current_entry.get():
-            # Enrich the input with the resolved tuning so the run shows what params actually ran.
+            # Model is in the model column; show only the tuning that actually ran.
             entry.set_input_preview(
-                f"text: {normalized.text[:140]} · {model_id} temp={resolved.temperature} "
+                f"text: {normalized.text[:180]} · temp={resolved.temperature} "
                 f"max_tokens={resolved.max_tokens} thinking={resolved.thinking or 'off'}"
             )
         # Cross-provider guard: only attempt structured output on models the catalog says
@@ -321,12 +333,9 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             )
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
             if entry := current_entry.get():
-                # Record the failing model + the provider's actual message (output_preview is not
-                # slugged) instead of a mangled, capped error_code.
+                # Identify the failing model; fail() records decision + code + the readable message.
                 entry.add_usage(provider=provider, model=model_id)
-                entry.set_decision("provider_error", "rewrite_call_failed")
-                entry.set_error("rewrite_call_failed")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("rewrite_call_failed", message=str(exc))
             return {}
 
         parsed = result.get("parsed") if isinstance(result, dict) else None
@@ -371,9 +380,11 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 model=model_id,
             )
             if entry := current_entry.get():
-                entry.set_decision("provider_error", "rewrite_unparsed")
-                entry.set_error(f"rewrite_unparsed (finish_reason={finish_reason or 'unknown'})")
-                entry.set_output_preview("rewrite: <fallback to raw query>")
+                # Garbage output: structured-output parse failed → record it as a failure.
+                entry.fail(
+                    "rewrite_unparsed",
+                    message=f"unparseable structured output (finish_reason={finish_reason or 'unknown'})",
+                )
             return {}
 
         new_text = (parsed.standalone_query or "").strip() or normalized.text
@@ -415,12 +426,26 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 model=embedding_model,
                 input_tokens=estimate_text_tokens(normalized.text),
             )
+            # Dense model is already in the model column; only the (uncolumned) sparse model + query
+            # add new info here.
             entry.set_input_preview(
-                f"model: {embedding_model}"
-                + (f" + sparse: {sparse_model}" if hybrid else "")
-                + f" · text: {normalized.text[:140]}"
+                (f"sparse: {sparse_model} · " if hybrid else "")
+                + f"text: {normalized.text[:180]}"
             )
-        vector = await self._service.embed_query(normalized.text)
+        try:
+            vector = await self._service.embed_query(normalized.text)
+        except Exception as exc:
+            # Record a rich error row, then propagate so knowledge_retrieve degrades gracefully.
+            if entry := current_entry.get():
+                entry.fail("embed_failed", message=str(exc))
+            raise
+        if not _is_valid_vector(vector):
+            # Garbage embedding (empty / non-finite) — flag it and short-circuit to 0 hits instead of
+            # silently searching with a useless vector.
+            if entry := current_entry.get():
+                length = len(vector) if hasattr(vector, "__len__") else 0
+                entry.fail("invalid_embedding", message=f"embedder returned invalid vector (len={length})")
+            return {"query_vector": []}
         out: dict[str, Any] = {"query_vector": vector}
         # Only pay for the BM25 query embed when hybrid is enabled. Append rewrite keywords
         # (literal proper nouns/identifiers) so the sparse branch keeps its exact-match signal.
@@ -509,9 +534,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             entry.add_usage(
                 provider=provider, model=reranker.model_id, input_tokens=processed_tokens
             )
-            entry.set_input_preview(
-                f"model: {reranker.model_id} · candidates: {len(hits)} · top_n: {reranker.top_n}"
-            )
+            # Reranker model is already in the model column — don't repeat it here.
+            entry.set_input_preview(f"candidates: {len(hits)} · top_n: {reranker.top_n}")
         try:
             reranked = await self._service.rerank_hits(
                 normalized.text,
@@ -529,10 +553,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 exc_info=True,
             )
             if entry := current_entry.get():
-                entry.set_decision("provider_error", "rerank_failed")
-                entry.set_error("rerank_failed")
-                # Keep the runtime's actual message (output_preview is not slugged/capped at 80).
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("rerank_failed", message=str(exc))
             return {}
         if entry := current_entry.get():
             entry.set_decision("ok", f"reranked_{len(reranked)}")
@@ -601,14 +622,15 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         if entry := current_entry.get():
             # Show the answering config that actually ran: language policy, citation toggle, and the
             # resolved tuning (temp/max_tokens/thinking) — not just the question text.
+            # Model is in the model column; show the answering config + tuning that ran, not the id.
             tuning = (
-                f" · {resolved.model_id} temp={resolved.temperature} "
-                f"max_tokens={resolved.max_tokens} thinking={resolved.thinking or 'off'}"
+                f" · temp={resolved.temperature} max_tokens={resolved.max_tokens} "
+                f"thinking={resolved.thinking or 'off'}"
                 if resolved is not None
                 else ""
             )
             entry.set_input_preview(
-                f"text: {normalized.text[:140]} · lang={answering.language_policy} "
+                f"text: {normalized.text[:180]} · lang={answering.language_policy} "
                 f"cite={answering.cite_sources}{tuning}"
             )
         if resolved is None:
@@ -636,11 +658,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             answer = self._fallback_answer(state)
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
             if entry := current_entry.get():
-                # Identify the model and keep the provider's message (not just "model_create_failed").
                 entry.add_usage(provider=provider, model=model_id)
-                entry.set_decision("provider_error", "model_create_failed")
-                entry.set_error("model_create_failed")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("model_create_failed", message=str(exc))
             return {"answer": answer, "model_id": model_id, "usage": {}}
         messages = [
             SystemMessage(content=self._system_prompt(normalized)),
@@ -654,11 +673,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             answer = self._fallback_answer(state)
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
             if entry := current_entry.get():
-                # Identify the model and keep the provider's actual message in output_preview.
                 entry.add_usage(provider=provider, model=model_id)
-                entry.set_decision("provider_error", "model_call_failed")
-                entry.set_error("model_call_failed")
-                entry.set_output_preview(f"error: {exc}")
+                entry.fail("model_call_failed", message=str(exc))
             return {"answer": answer, "model_id": model_id, "usage": {}}
         usage_payload = llm_usage_payload(
             response,
