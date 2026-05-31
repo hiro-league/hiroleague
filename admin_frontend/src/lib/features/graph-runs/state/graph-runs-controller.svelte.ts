@@ -28,6 +28,7 @@ import {
   RUNS_TAB,
   trimRunIdForList,
   isKnowledgeStandaloneRun,
+  isGraphIngestRun,
   graphRunKindLabel,
   graphRunKindMatchesFilter,
   type ActivePane,
@@ -243,6 +244,7 @@ export function createGraphRunsPageController() {
 
   const runTitlePrimary = $derived.by(() => {
     if (activePane !== RUNS_TAB && activePane !== MEMORIES_TAB) {
+      if (isGraphIngestRun(activePane)) return 'Graph ingest';
       if (isKnowledgeStandaloneRun(activePane)) return 'Knowledge query';
     }
     const row = runIdentitySource;

@@ -155,6 +155,30 @@ class KnowledgeAnswerResult:
 
 
 @dataclass(frozen=True)
+class KnowledgeAnswerComparison:
+    """L3 — side-by-side flat-vs-graph result from ``KnowledgeService.compare``.
+
+    Both legs ran against the same query / filters / tuning — only ``use_graph``
+    toggled. ``elapsed_ms`` is the wall-clock for both legs (they run concurrently
+    via ``asyncio.gather``); each leg's own ``elapsed_ms`` reflects its own time.
+    """
+
+    query: str
+    flat: KnowledgeAnswerResult   # use_graph=False
+    graph: KnowledgeAnswerResult  # use_graph=True
+    elapsed_ms: int
+
+    @property
+    def sources_delta(self) -> int:
+        """``graph - flat`` in source count — a quick "did the graph help" signal."""
+        return len(self.graph.sources) - len(self.flat.sources)
+
+    @property
+    def both_no_results(self) -> bool:
+        return self.flat.no_results and self.graph.no_results
+
+
+@dataclass(frozen=True)
 class KnowledgeListDocumentsResult:
     documents: list[KnowledgeDocumentRow]
     total: int

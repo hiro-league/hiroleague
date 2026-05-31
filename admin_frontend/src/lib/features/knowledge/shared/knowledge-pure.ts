@@ -15,24 +15,27 @@ import {
   writeSessionString
 } from '$lib/preferences/storage';
 import type {
+  KnowledgeAnswerCompareData,
   KnowledgeAnswerData,
   KnowledgeDocument,
   KnowledgeFilters,
+  KnowledgeGraphMode,
   KnowledgeIngestMetadata,
   KnowledgeScannedFile
 } from '$lib/api/knowledge';
 
-export type KnowledgeTabId = 'ingest' | 'ask' | 'browse';
+export type KnowledgeTabId = 'ingest' | 'ask' | 'browse' | 'graph';
 
 export function normalizeKnowledgeTab(value: string | null | undefined): KnowledgeTabId | null {
-  if (value === 'ingest' || value === 'browse' || value === 'ask') return value;
+  if (value === 'ingest' || value === 'browse' || value === 'ask' || value === 'graph') return value;
   return null;
 }
 
 export const KNOWLEDGE_TABS: { id: KnowledgeTabId; label: string }[] = [
   { id: 'browse', label: 'Browse' },
   { id: 'ingest', label: 'Add' },
-  { id: 'ask', label: 'Ask' }
+  { id: 'ask', label: 'Ask' },
+  { id: 'graph', label: 'Graph' }
 ];
 
 /** Deep link to workspace Knowledge preferences (embedding, retrieval, chunking, answering). */
@@ -109,6 +112,40 @@ export function writePersistedKnowledgeAskResult(result: KnowledgeAnswerData) {
 
 export function clearPersistedKnowledgeAskResult() {
   removeSessionString(PREF_KEYS.knowledgeAskResult);
+}
+
+/** L3 — compare-mode last-result persistence (parallel to askResult above). */
+export function readPersistedKnowledgeAskCompareResult(): KnowledgeAnswerCompareData | null {
+  const raw = readSessionString(PREF_KEYS.knowledgeAskCompareResult);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as KnowledgeAnswerCompareData;
+  } catch {
+    removeSessionString(PREF_KEYS.knowledgeAskCompareResult);
+    return null;
+  }
+}
+
+export function writePersistedKnowledgeAskCompareResult(result: KnowledgeAnswerCompareData) {
+  writeSessionString(PREF_KEYS.knowledgeAskCompareResult, JSON.stringify(result));
+}
+
+export function clearPersistedKnowledgeAskCompareResult() {
+  removeSessionString(PREF_KEYS.knowledgeAskCompareResult);
+}
+
+/** L3 — graph mode preference (localStorage so it persists across browser sessions). */
+const VALID_GRAPH_MODES: KnowledgeGraphMode[] = ['off', 'on', 'compare'];
+
+export function readPersistedKnowledgeGraphMode(): KnowledgeGraphMode {
+  const raw = readLocalString(PREF_KEYS.knowledgeAskGraphMode) ?? 'off';
+  return VALID_GRAPH_MODES.includes(raw as KnowledgeGraphMode)
+    ? (raw as KnowledgeGraphMode)
+    : 'off';
+}
+
+export function writePersistedKnowledgeGraphMode(mode: KnowledgeGraphMode) {
+  writeLocalString(PREF_KEYS.knowledgeAskGraphMode, mode);
 }
 
 export function fileName(relativePath: string): string {

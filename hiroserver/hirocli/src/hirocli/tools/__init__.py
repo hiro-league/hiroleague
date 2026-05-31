@@ -64,6 +64,12 @@ from .knowledge import (
     KnowledgeReingestDocumentTool,
     KnowledgeUpdateDocumentMetadataTool,
 )
+from .knowledge_graph import (
+    KnowledgeGraphExportTool,
+    KnowledgeGraphIngestBatchTool,
+    KnowledgeGraphIngestTool,
+)
+from .knowledge_eval import KnowledgeL3EvalRunTool
 from .server import (
     RestartTool,
     SetupTool,
@@ -148,6 +154,10 @@ def all_tools() -> list[Tool]:
         KnowledgeListCategoriesTool(),
         KnowledgeCreateCategoryTool(),
         KnowledgeCreateTagTool(),
+        KnowledgeGraphIngestTool(),
+        KnowledgeGraphIngestBatchTool(),
+        KnowledgeGraphExportTool(),
+        KnowledgeL3EvalRunTool(),
         LogSearchTool(),
         LogTailTool(),
         LlmCatalogListProvidersTool(),

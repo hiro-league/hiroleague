@@ -17,6 +17,10 @@ class QueryRewrite(BaseModel):
     ``standalone_query`` feeds the dense branch; ``keywords`` (literal proper nouns /
     identifiers) reinforce the BM25 branch so exact-match signal survives the rewrite.
     ``knowledge_needed`` gates retrieval — when false, embedding + vector search are skipped.
+    ``entities`` (L3) drives graph-augmented retrieval — when the ``use_graph`` toggle is
+    on, the agent resolves these against the graph (name **or** alias), expands 1-hop, and
+    focuses Qdrant on the resulting chunk_ids. Leave empty when the query references no
+    specific entity (e.g. "what's the capital of France?" is a generic question).
     """
 
     standalone_query: str = PydanticField(
@@ -33,6 +37,16 @@ class QueryRewrite(BaseModel):
             "False ONLY when the message clearly does not request stored information — "
             "greetings, farewells, thanks, acknowledgements, or pure small talk. "
             "Otherwise true. When false, knowledge retrieval is skipped."
+        ),
+    )
+    entities: list[str] = PydanticField(
+        default_factory=list,
+        description=(
+            "Named entities the question asks about — proper nouns (people, places, "
+            "organizations) AND qualified relational mentions like 'my sister', 'mom', "
+            "'the Paris trip'. Used to anchor graph-augmented retrieval. Examples: "
+            "'what does my sister's husband do?' → ['my sister', 'husband']; "
+            "'tell me about Selim' → ['Selim']; 'what is photosynthesis?' → []."
         ),
     )
 
@@ -145,6 +159,13 @@ def build_qdrant_filter(filters: dict[str, Any]) -> qm.Filter | None:
     ]
     if tag_should:
         must.append(qm.Filter(should=tag_should))
+    # L3 — focus retrieval on a specific set of Qdrant point ids (the chunk_ids
+    # the graph expansion considers relevant). ``HasIdCondition`` restricts the
+    # match space directly by point id, so the existing hybrid + rerank still
+    # runs unchanged — it just sees a smaller candidate set.
+    chunk_ids = filters.get("chunk_ids")
+    if chunk_ids:
+        must.append(qm.HasIdCondition(has_id=[str(cid) for cid in chunk_ids if cid]))
     return qm.Filter(must=must) if must else None
 
 

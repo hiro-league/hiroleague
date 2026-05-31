@@ -153,6 +153,11 @@ DEFAULT_CHAT_TUNING_PROFILE_ID = "balanced_chat"
 DEFAULT_MEMORY_TUNING_PROFILE_ID = "memory_extraction"
 DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID = "knowledge_answering"
 DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID = "knowledge_rewrite"
+# L3 prototype — single structured-output call per chunk that emits typed entities
+# and relations. Deterministic by design (temp=0) so the same chunk produces the
+# same graph mutations; reasoning off because we want JSON, not chain-of-thought.
+DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID = "knowledge_graph_extraction"
+DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID = "knowledge_graph_disambiguation"
 
 
 def default_tuning_profiles() -> dict[str, TuningProfile]:
@@ -186,6 +191,26 @@ def default_tuning_profiles() -> dict[str, TuningProfile]:
             # the structured JSON. max_tokens only needs to cover the small JSON envelope.
             temperature=0.0,
             max_tokens=1024,
+            thinking="off",
+        ),
+        DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID: TuningProfile(
+            label="Knowledge graph extraction (L3)",
+            locked=True,
+            # Single structured-output call per chunk → typed entities + relations.
+            # Deterministic (temp=0) so re-ingest of the same chunk produces the same
+            # graph state. Reasoning off (we want JSON, not CoT). max_tokens generous
+            # because a 1200-token chunk can yield many small entity/relation rows.
+            temperature=0.0,
+            max_tokens=4096,
+            thinking="off",
+        ),
+        DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID: TuningProfile(
+            label="Knowledge graph entity disambiguation (L3)",
+            locked=True,
+            # Tiny structured-output decision: "does this mention match candidate X?"
+            # Bounded output keeps cost negligible per ambiguous mention.
+            temperature=0.0,
+            max_tokens=512,
             thinking="off",
         ),
     }
@@ -775,6 +800,48 @@ def resolve_knowledge_rewrite_llm(
         prefs,
         workspace_path,
         tuning_profile_id=DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_knowledge_graph_extraction_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """L3 — resolve the model for graph extraction (entities+relations per chunk).
+
+    Same answering-model resolution path; only the tuning profile differs
+    (``knowledge_graph_extraction`` — temp=0, generous max_tokens, no reasoning).
+    """
+    return _resolve_knowledge_llm(
+        prefs,
+        workspace_path,
+        tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_knowledge_graph_disambiguation_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """L3 — resolve the model for the LLM disambiguation step of the resolver.
+
+    Called only when the deterministic ladder (exact → fuzzy) cannot decide
+    confidently. Tiny output budget — see the tuning profile.
+    """
+    return _resolve_knowledge_llm(
+        prefs,
+        workspace_path,
+        tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
         workspace_id=workspace_id,
         credential_store=credential_store,
     )

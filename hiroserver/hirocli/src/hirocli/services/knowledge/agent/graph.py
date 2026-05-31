@@ -81,6 +81,10 @@ class KnowledgeAgentState(TypedDict, total=False):
     min_score: float
     explain: bool
     rewrite: bool
+    # L3 prototype — when True, the ``graph_expand`` node resolves query entities through
+    # the LadybugDB graph and focuses Qdrant on the resulting chunk_ids. Defaults to False
+    # so existing behavior is unchanged for any caller that hasn't opted in.
+    use_graph: bool
     # Preformatted prior conversation (chat only). When present, ``rewrite_query`` uses it to
     # resolve references ("the second one") into a standalone query. Empty/absent for Ask/CLI.
     history: str
@@ -90,6 +94,14 @@ class KnowledgeAgentState(TypedDict, total=False):
     knowledge_needed: bool
     rewritten_query: str | None
     normalized_query: NormalizedQuery
+    # L3 — entities extracted by ``rewrite_query`` (proper nouns + qualified relational
+    # mentions like "my sister"). Consumed by ``graph_expand``; ignored when use_graph=False.
+    query_entities: list[str]
+    # L3 — populated by ``graph_expand``: union of chunk_ids reachable from the resolved
+    # query entities + k=1 neighbors + incident edges. ``build_filters`` folds these into
+    # the Qdrant filter as a ``HasIdCondition`` to focus the candidate set.
+    graph_chunk_ids: list[str]
+    graph_nodes_touched: int
     qdrant_filter: Any
     query_vector: list[float]
     query_sparse_vector: Any
@@ -153,6 +165,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/rewrite_query", self.rewrite_query),
         )
         graph.add_node(
+            "graph_expand",
+            self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/graph_expand", self.graph_expand),
+        )
+        graph.add_node(
             "build_filters",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/build_filters", self.build_filters),
         )
@@ -180,8 +196,12 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         graph.add_conditional_edges(
             "rewrite_query",
             self._route_after_rewrite,
-            {"retrieve": "build_filters", "skip": "build_context"},
+            {"retrieve": "graph_expand", "skip": "build_context"},
         )
+        # L3 prototype — graph_expand runs unconditionally on the retrieve path; it
+        # short-circuits internally when ``use_graph=False`` (the default) or there
+        # are no entities to resolve. Cost when off = ~zero. See ``graph_expand`` impl.
+        graph.add_edge("graph_expand", "build_filters")
         graph.add_edge("build_filters", "embed_query")
         graph.add_edge("embed_query", "vector_search")
         graph.add_edge("vector_search", "rerank")
@@ -257,6 +277,9 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # Every failure path is a logged, observable fallback to the raw query — retrieval must
         # never be blocked by the rewrite step.
         if not state.get("rewrite"):
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "rewrite_off")
+                entry.set_output_preview("rewrite disabled · raw query used")
             return {}
         normalized = state["normalized_query"]
         if entry := current_entry.get():
@@ -390,11 +413,21 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         new_text = (parsed.standalone_query or "").strip() or normalized.text
         keywords = [kw.strip() for kw in parsed.keywords if kw.strip()]
         knowledge_needed = bool(parsed.knowledge_needed)
+        # L3 — query entities drive graph_expand. Strip + dedupe defensively (the LLM
+        # can repeat); preserve order so deterministic rendering matches the prompt.
+        entities_raw = list(parsed.entities or [])
+        seen: dict[str, None] = {}
+        for e in entities_raw:
+            t = (e or "").strip()
+            if t and t not in seen:
+                seen[t] = None
+        entities = list(seen)
         if entry := current_entry.get():
             if knowledge_needed:
                 kw = f" · kw={','.join(keywords)[:80]}" if keywords else ""
+                ent = f" · ent={','.join(entities)[:80]}" if entities else ""
                 entry.set_decision("rewritten", "ok")
-                entry.set_output_preview(f"query: {new_text[:160]}{kw}")
+                entry.set_output_preview(f"query: {new_text[:160]}{kw}{ent}")
             else:
                 entry.set_decision("rewritten", "no_knowledge_needed")
                 entry.set_output_preview("knowledge_needed: false (retrieval skipped)")
@@ -403,12 +436,91 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 raw=normalized.raw, text=new_text, language=normalized.language
             ),
             "rewrite_keywords": keywords,
+            "query_entities": entities,
             "rewritten_query": new_text,
             "knowledge_needed": knowledge_needed,
         }
 
+    @graph_logged(captures={"decision"})
+    async def graph_expand(self, state: KnowledgeAgentState) -> dict[str, Any]:
+        # L3 — entity resolution + 1-hop expansion in the LadybugDB graph. The
+        # output ``graph_chunk_ids`` becomes a HasIdCondition filter in
+        # ``build_filters``, focusing the existing Qdrant hybrid + rerank on the
+        # graph-relevant slice. SOFT FALLBACK: empty result → no filter added →
+        # caller gets normal flat search (graph silently did nothing).
+        entry = current_entry.get()
+        if not state.get("use_graph"):
+            if entry:
+                entry.set_decision("skipped", "use_graph_off")
+                entry.set_output_preview("use_graph=False · no expansion")
+            return {}
+        entities = state.get("query_entities") or []
+        if not entities:
+            if entry:
+                entry.set_decision("skipped", "no_entities")
+                entry.set_output_preview("no query entities · no expansion")
+            return {}
+        # Local imports keep the agent graph importable when the L3 graph
+        # submodule isn't yet wired in (defensive — same pattern used for the
+        # other knowledge submodules).
+        from hirocli.services.knowledge.constants import (
+            GRAPH_DIR,
+            KNOWLEDGE_DIR,
+            LADYBUG_DB_FILENAME,
+        )
+        from hirocli.services.knowledge.graph.expand import expand_entities_to_chunk_ids
+
+        db_path = (
+            self._workspace_path / KNOWLEDGE_DIR / GRAPH_DIR / LADYBUG_DB_FILENAME
+        )
+        if entry:
+            entry.set_input_preview(
+                f"entities: {entities[:5]}{'…' if len(entities) > 5 else ''}"
+            )
+        try:
+            expansion = await expand_entities_to_chunk_ids(db_path, entities, k=1)
+        except Exception as exc:
+            # SOFT FALLBACK: external store call failed → log + degrade to flat
+            # search (don't break the answer). The ledger row carries the error
+            # for observability.
+            log.warning(
+                "⚠️ graph_expand failed · falling back to flat search",
+                error=str(exc)[:200],
+                exc_info=True,
+            )
+            if entry:
+                entry.fail("graph_expand_failed", message=str(exc))
+            return {}
+        if entry:
+            entry.set_decision(
+                "expanded" if expansion.chunk_ids else "empty",
+                f"chunks_{len(expansion.chunk_ids)}",
+            )
+            # Show the actual graph data (which mentions matched, which nodes were reached), not
+            # just counts — same principle as the retrieval result snippets.
+            resolved = ", ".join(expansion.resolved_entities) or "none"
+            unmatched = [e for e in entities if e not in expansion.resolved_entities]
+            nodes = ", ".join(expansion.node_names[:6])
+            more = f" (+{len(expansion.node_names) - 6})" if len(expansion.node_names) > 6 else ""
+            entry.set_output_preview(
+                f"resolved: {resolved}"
+                + (f" · unmatched: {', '.join(unmatched)}" if unmatched else "")
+                + f" · nodes: {nodes}{more}"
+                + f" · chunks: {len(expansion.chunk_ids)}"
+            )
+        return {
+            "graph_chunk_ids": list(expansion.chunk_ids),
+            "graph_nodes_touched": expansion.nodes_touched,
+        }
+
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:
-        return {"qdrant_filter": build_qdrant_filter(state.get("filters") or {})}
+        # L3 — fold the graph_expand result into the Qdrant filter so the same
+        # hybrid+rerank step focuses on graph-relevant chunks (no rerank changes).
+        merged = dict(state.get("filters") or {})
+        graph_chunk_ids = state.get("graph_chunk_ids") or []
+        if graph_chunk_ids:
+            merged["chunk_ids"] = list(graph_chunk_ids)
+        return {"qdrant_filter": build_qdrant_filter(merged)}
 
     @graph_logged(captures={"usage", "decision"})
     async def embed_query(self, state: KnowledgeAgentState) -> dict[str, Any]:
@@ -518,7 +630,18 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # retrieval order is kept — reranking never blocks an answer.
         reranker = self._prefs.knowledge.retrieval.reranker
         hits = state.get("hits") or []
-        if not reranker.enabled or not reranker.model_id or not hits:
+        # Record WHY we skipped instead of writing a blank row — a node that ran should never be a
+        # black box.
+        if not reranker.enabled or not reranker.model_id:
+            if entry := current_entry.get():
+                reason = "disabled" if not reranker.enabled else "no_model"
+                entry.set_decision("skipped", reason)
+                entry.set_output_preview(f"reranker off ({reason}) · retrieval order kept")
+            return {}
+        if not hits:
+            if entry := current_entry.get():
+                entry.set_decision("skipped", "no_candidates")
+                entry.set_output_preview("no candidates to rerank")
             return {}
         provider = reranker.model_id.split(":", 1)[0] if ":" in reranker.model_id else ""
         normalized = state["normalized_query"]
@@ -717,14 +840,17 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             except ValueError:
                 elapsed_ms = 0
         if entry := current_entry.get():
+            sources = len(state.get("sources") or [])
             if state.get("no_results"):
                 entry.set_decision("empty", "no_results")
-                entry.set_output_preview("answer: <no_results>")
+                entry.set_output_preview(f"no_results · sources=0 · elapsed={elapsed_ms}ms")
             else:
+                # Don't repeat the answer (it's already on call_model) — show the terminal run
+                # summary that only finalize knows: source count + answer size + total elapsed.
                 answer = str(state.get("answer") or "")
                 entry.set_decision("completed", "knowledge_answer")
                 entry.set_output_preview(
-                    f"answer: {answer[:200]}" if answer.strip() else "answer: <empty>"
+                    f"answered · sources={sources} · answer_chars={len(answer)} · elapsed={elapsed_ms}ms"
                 )
         return {"elapsed_ms": elapsed_ms}
 

@@ -77,7 +77,8 @@
 
   const runKindOptions = [
     { value: 'chat', label: 'Chat agent' },
-    { value: 'knowledge', label: 'Knowledge (standalone)' }
+    { value: 'knowledge', label: 'Knowledge (standalone)' },
+    { value: 'ingest', label: 'Graph ingest' }
   ];
 
   const characterOptions = $derived(

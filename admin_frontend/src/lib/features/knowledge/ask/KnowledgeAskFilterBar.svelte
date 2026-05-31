@@ -130,6 +130,28 @@
     <input type="checkbox" class="size-4" bind:checked={ask.askExplain} />
     <span class="text-sm text-muted-foreground">Explain</span>
   </label>
+  <!-- L3 (Phase 5d) — Graph retrieval mode. off = flat (today). on = graph_expand focuses
+       Qdrant on chunks linked to query entities. compare = both legs side-by-side.
+       Persists across reloads via knowledgeAskGraphMode preference. -->
+  <fieldset
+    class="flex shrink-0 items-center gap-1 self-end pb-2"
+    title="Graph mode: off (flat) · on (graph-augmented) · compare (both side-by-side). Requires Rewrite to extract query entities."
+  >
+    <legend class="sr-only">Graph retrieval mode</legend>
+    <span class="mr-1 text-sm text-muted-foreground">Graph</span>
+    {#each ['off', 'on', 'compare'] as mode (mode)}
+      <button
+        type="button"
+        class="rounded-md border px-2 py-1 font-sans text-xs capitalize transition-colors {ask.graphMode === mode
+          ? 'border-primary bg-primary/10 text-foreground'
+          : 'border-input bg-background text-muted-foreground hover:text-foreground'}"
+        aria-pressed={ask.graphMode === mode}
+        onclick={() => ask.setGraphMode(mode as 'off' | 'on' | 'compare')}
+      >
+        {mode}
+      </button>
+    {/each}
+  </fieldset>
   <div class="flex items-end">
     <Button variant="outline" disabled={!ask.hasAskFilters} onclick={() => ask.clearAskFilters()}>
       <FilterX size={15} /> Clear

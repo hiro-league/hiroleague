@@ -357,6 +357,23 @@
                   onCreate={options.upsertTag}
                 />
               </label>
+              <!-- L3 (Phase 5f) — "Also build entity graph" opt-in. When checked
+                   and an ingest succeeds, the controller auto-fires the batch
+                   graph-ingest over the newly-ingested document_ids. Preference
+                   persists across reloads. -->
+              <label
+                class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
+                title="After ingest, run LLM entity extraction over the new chunks and write nodes + relations into the L3 graph (one extra LLM call per chunk; costs more)"
+              >
+                <input
+                  type="checkbox"
+                  class="size-4"
+                  checked={ingest.buildGraphAfter}
+                  onchange={(e) => ingest.setBuildGraphAfter((e.currentTarget as HTMLInputElement).checked)}
+                  disabled={ingest.ingesting}
+                />
+                <span class="text-sm text-muted-foreground">Also build entity graph (L3)</span>
+              </label>
               <Button
                 variant="outline"
                 onclick={() => void ingest.ingestSelected()}
@@ -410,6 +427,34 @@
             {#if ingest.job.in_flight?.length}
               <div class="truncate font-sans text-xs text-muted-foreground" title={ingest.job.in_flight.join(', ')}>
                 Processing {ingest.job.in_flight.length} file(s): {ingest.job.in_flight.join(', ')}
+              </div>
+            {/if}
+            <!-- L3 (Phase 5f) — Graph-build status after the ingest job. Surfaces
+                 inside the same job card so it's visually adjacent (one outcome
+                 chain: ingest → graph build). Idle = checkbox was off OR no
+                 trigger yet; running = the batch HTTP call is in flight (no SSE
+                 stream for graph build yet, so this is a single spinner row). -->
+            {#if ingest.graphBuildStatus !== 'idle' || ingest.graphBuildError}
+              <div class="flex flex-wrap items-center gap-2 rounded-md border border-dashed bg-muted/20 px-2 py-1.5 text-xs">
+                <span class="font-medium text-muted-foreground">Graph build:</span>
+                {#if ingest.graphBuildStatus === 'running'}
+                  <LoaderCircle size={12} class="animate-spin" aria-hidden="true" />
+                  <span>extracting entities from new chunks…</span>
+                {:else if ingest.graphBuildStatus === 'completed' && ingest.graphBuildResult}
+                  {@const t = ingest.graphBuildResult.totals}
+                  <Badge variant="success" class="font-mono text-[11px]">done</Badge>
+                  <span class="text-muted-foreground">
+                    {ingest.graphBuildResult.document_count} doc(s)
+                    · entities created {t.entities_created ?? 0}, linked {(t.entities_linked_exact ?? 0) + (t.entities_linked_fuzzy ?? 0) + (t.entities_linked_llm ?? 0)}
+                    · edges {t.edges_written ?? 0}
+                    · tokens {t.total_input_tokens ?? 0}i/{t.total_output_tokens ?? 0}o
+                  </span>
+                  <Button variant="ghost" class="ml-auto h-6 px-2 text-xs" onclick={ingest.clearGraphBuildResult}>Dismiss</Button>
+                {:else if ingest.graphBuildStatus === 'failed'}
+                  <Badge variant="destructive" class="font-mono text-[11px]">failed</Badge>
+                  <span class="text-destructive">{ingest.graphBuildError}</span>
+                  <Button variant="ghost" class="ml-auto h-6 px-2 text-xs" onclick={ingest.clearGraphBuildResult}>Dismiss</Button>
+                {/if}
               </div>
             {/if}
             {#if Object.keys(ingest.job.errors).length > 0}

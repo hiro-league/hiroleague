@@ -223,6 +223,15 @@ class KnowledgeSearchTool(Tool):
             await _close_if_owned(service, owned)
 
 
+# L3 — graph_mode values for KnowledgeAnswerTool.
+# "off" / "on" return a KnowledgeAnswerResult; "compare" returns a
+# KnowledgeAnswerComparison (two results side-by-side, ran concurrently).
+GRAPH_MODE_OFF = "off"
+GRAPH_MODE_ON = "on"
+GRAPH_MODE_COMPARE = "compare"
+GRAPH_MODES = (GRAPH_MODE_OFF, GRAPH_MODE_ON, GRAPH_MODE_COMPARE)
+
+
 class KnowledgeAnswerTool(Tool):
     runtime = True
     name = "knowledge_answer"
@@ -232,6 +241,20 @@ class KnowledgeAnswerTool(Tool):
         "top_k": ToolParam(int, "Maximum chunks to retrieve", required=False),
         "min_score": ToolParam(float, "Minimum vector score", required=False),
         "filters": ToolParam(dict, "Knowledge filters", required=False),
+        "rewrite": ToolParam(
+            bool,
+            "Run the LLM query-rewrite step (normalize + extract entities). "
+            "Required for graph_mode='on'/'compare' to have effect.",
+            required=False,
+        ),
+        "graph_mode": ToolParam(
+            str,
+            "L3 retrieval mode: 'off' (today's flat hybrid+rerank), 'on' "
+            "(graph_expand focuses Qdrant on chunks linked to query entities), or "
+            "'compare' (runs both concurrently and returns a side-by-side result). "
+            "Default 'off'.",
+            required=False,
+        ),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
@@ -244,6 +267,8 @@ class KnowledgeAnswerTool(Tool):
         top_k: int | None = None,
         min_score: float | None = None,
         filters: dict[str, Any] | None = None,
+        rewrite: bool = False,
+        graph_mode: str = GRAPH_MODE_OFF,
         workspace: str | None = None,
     ) -> Any:
         return asyncio.run(
@@ -252,6 +277,8 @@ class KnowledgeAnswerTool(Tool):
                 top_k=top_k,
                 min_score=min_score,
                 filters=filters,
+                rewrite=rewrite,
+                graph_mode=graph_mode,
                 workspace=workspace,
             )
         )
@@ -262,16 +289,37 @@ class KnowledgeAnswerTool(Tool):
         top_k: int | None = None,
         min_score: float | None = None,
         filters: dict[str, Any] | None = None,
+        rewrite: bool = False,
+        graph_mode: str = GRAPH_MODE_OFF,
         workspace: str | None = None,
     ) -> Any:
+        # Validate mode at the Tool boundary so CLI/HTTP callers get a clear
+        # error instead of silently falling through to 'off'.
+        mode = (graph_mode or "").strip().lower()
+        if mode not in GRAPH_MODES:
+            raise ValueError(
+                f"graph_mode must be one of {GRAPH_MODES}, got {graph_mode!r}"
+            )
+
         service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
         try:
+            if mode == GRAPH_MODE_COMPARE:
+                return await service.compare(
+                    query,
+                    top_k=top_k,
+                    min_score=min_score,
+                    filters=filters,
+                    workspace_id=workspace,
+                    rewrite=rewrite,
+                )
             return await service.answer(
                 query,
                 top_k=top_k,
                 min_score=min_score,
                 filters=filters,
                 workspace_id=workspace,
+                rewrite=rewrite,
+                use_graph=(mode == GRAPH_MODE_ON),
             )
         finally:
             await _close_if_owned(service, owned)

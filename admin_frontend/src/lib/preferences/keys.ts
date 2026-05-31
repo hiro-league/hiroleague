@@ -23,7 +23,25 @@ export const PREF_KEYS = {
   /** Browse tab: render chunk text as formatted markdown (default on). */
   knowledgeChunkMarkdownFormat: 'hiro.admin.knowledge.chunkMarkdownFormat',
   /** Ask tab: last answer + chunk results, kept across navigation until cleared (sessionStorage). */
-  knowledgeAskResult: 'hiro.admin.knowledge.askResult'
+  knowledgeAskResult: 'hiro.admin.knowledge.askResult',
+  // Phase 5d — cached compare-mode result (parallel to askResult so switching
+  // graph mode doesn't blow away the other one's cache on navigation).
+  knowledgeAskCompareResult: 'hiro.admin.knowledge.askCompareResult',
+  // Phase 5d — last selected graph mode (off/on/compare). Persists across reloads
+  // so the user's mode preference survives.
+  knowledgeAskGraphMode: 'hiro.admin.knowledge.askGraphMode',
+  // Phase 5f — Tab 1 "Also build entity graph (L3)" checkbox preference.
+  // Persists so the user's default sticks across uploads.
+  knowledgeIngestBuildGraph: 'hiro.admin.knowledge.ingestBuildGraph',
+  // Phase 5g (follow-up to 5e) — last completed/failed eval run snapshot
+  // (rows + summary + status). Session-scoped, parallel to knowledgeAskResult,
+  // so leaving the page and coming back shows the table you ran last.
+  knowledgeAskEvalRun: 'hiro.admin.knowledge.askEvalRun',
+  // Phase 5g — setup-form checkboxes for the Eval Batch (persist defaults
+  // across reloads; localStorage so they survive tab close, unlike the run
+  // snapshot above which is session-scoped).
+  knowledgeAskEvalIngest: 'hiro.admin.knowledge.askEvalIngest',
+  knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';
@@ -32,7 +50,7 @@ export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type CatalogTabPreference = 'active-providers' | 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
-export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
+export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask' | 'graph';
 export type GraphRunsPrimaryTabPreference = 'runs' | 'memories';
 export type PreferencesTabPreference =
   | 'models'

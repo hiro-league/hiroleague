@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,15 @@ from hirocli.domain.workspace import resolve_workspace
 from hirocli.services.knowledge import KnowledgeService, create_knowledge_service
 from hirocli.services.knowledge.constants import (
     KNOWLEDGE_DELETED,
+    KNOWLEDGE_EVAL_COMPLETED,
+    KNOWLEDGE_EVAL_FAILED,
+    KNOWLEDGE_EVAL_QUESTION_COMPLETED,
+    KNOWLEDGE_EVAL_SETUP_PROGRESS,
+    KNOWLEDGE_EVAL_STARTED,
+    KNOWLEDGE_GRAPH_EDGE_UPSERTED,
+    KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+    KNOWLEDGE_GRAPH_INGEST_PROGRESS,
+    KNOWLEDGE_GRAPH_NODE_UPSERTED,
     KNOWLEDGE_INGESTED,
     KNOWLEDGE_JOB_COMPLETED,
     KNOWLEDGE_JOB_FAILED,
@@ -40,6 +50,17 @@ knowledge_router = APIRouter()
 
 def _success(data: Any) -> dict[str, Any]:
     return {"ok": True, "error": None, "data": data}
+
+
+def _publish_graph_event(
+    workspace_path: Path, event_type: str, payload: dict[str, Any]
+) -> None:
+    """Publish a graph-viz Domain Event (workspace-scoped). Module-level so the
+    ingest ``event_sink`` can be ``functools.partial(_publish_graph_event, ws)``
+    — no nested closure. The bus drops with a warning if no loop is attached."""
+    get_domain_event_bus().publish(
+        DomainEvent(type=event_type, workspace_path=workspace_path, payload=payload)
+    )
 
 
 def _live_knowledge_service(request: Request, workspace_path: Path) -> tuple[bool, KnowledgeService | None]:
@@ -114,6 +135,18 @@ class SearchBody(BaseModel):
 class AnswerBody(SearchBody):
     # Opt-in: run the LLM query-rewrite step (normalize + keyword-extract) before retrieval.
     rewrite: bool = False
+    # L3 retrieval mode (Phase 5d): 'off' = today's flat hybrid+rerank,
+    # 'on' = graph_expand focuses Qdrant on chunks linked to query entities,
+    # 'compare' = run both concurrently and return both legs side-by-side.
+    graph_mode: str = "off"
+
+    @model_validator(mode="after")
+    def _validate_graph_mode(self) -> AnswerBody:
+        if self.graph_mode not in ("off", "on", "compare"):
+            raise ValueError(
+                f"graph_mode must be 'off', 'on', or 'compare', got {self.graph_mode!r}"
+            )
+        return self
 
 
 class DownloadRerankerBody(BaseModel):
@@ -127,6 +160,30 @@ class CreateCategoryBody(BaseModel):
 
 class CreateTagBody(BaseModel):
     name: str
+
+
+class EvalRunBody(BaseModel):
+    """L3 (Phase 5e) — request body for ``POST /knowledge/eval/run``.
+
+    The eval runs in the background; the response returns the ``run_id``
+    immediately, and progress events stream out on ``/knowledge/events``."""
+
+    ingest_synthetic: bool = False
+    build_graph: bool = False
+    run_id: str | None = None
+
+
+class GraphIngestBatchBody(BaseModel):
+    """L3 (Phase 5f) — request body for ``POST /knowledge/graph/ingest_batch``.
+
+    Synchronous: the response waits for the whole batch to complete (per-doc
+    failure isolation means one bad doc never aborts the rest). For a long
+    batch the caller blocks for minutes; that's acceptable for the Tab 1
+    "also build graph after ingest" path where the user is already watching
+    the ingest progress."""
+
+    document_ids: list[str] = Field(default_factory=list)
+    source_role: str = "user_document"
 
 
 class UpdateMetadataBody(BaseModel):
@@ -442,6 +499,18 @@ async def stream_knowledge_events(
         KNOWLEDGE_JOB_FAILED,
         KNOWLEDGE_INGESTED,
         KNOWLEDGE_DELETED,
+        # L3 eval batch (Phase 5c) — same SSE stream, separate event types
+        # so the UI subscriber can dispatch on event.type.
+        KNOWLEDGE_EVAL_STARTED,
+        KNOWLEDGE_EVAL_SETUP_PROGRESS,
+        KNOWLEDGE_EVAL_QUESTION_COMPLETED,
+        KNOWLEDGE_EVAL_COMPLETED,
+        KNOWLEDGE_EVAL_FAILED,
+        # L3 graph viz (MVP) — live node/edge updates for the admin Graph tab.
+        KNOWLEDGE_GRAPH_NODE_UPSERTED,
+        KNOWLEDGE_GRAPH_EDGE_UPSERTED,
+        KNOWLEDGE_GRAPH_INGEST_PROGRESS,
+        KNOWLEDGE_GRAPH_INGEST_COMPLETED,
     )
 
     async def events():
@@ -515,9 +584,37 @@ async def answer(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
 ) -> dict[str, Any]:
+    # Two response shapes:
+    #  * graph_mode=off/on  → KnowledgeAnswerResult (today's shape)
+    #  * graph_mode=compare → KnowledgeAnswerComparison { query, flat, graph,
+    #                          elapsed_ms, sources_delta, both_no_results }
+    # The frontend discriminates on the presence of `flat`/`graph` keys.
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
+            if body.graph_mode == "compare":
+                comparison = await service.compare(
+                    body.query,
+                    top_k=body.top_k,
+                    min_score=body.min_score,
+                    filters=body.filters,
+                    workspace_id=workspace_id,
+                    explain=body.explain,
+                    rewrite=body.rewrite,
+                )
+                # Serialize manually: KnowledgeAnswerComparison's helpers
+                # (sources_delta / both_no_results) are @properties and
+                # wouldn't survive dataclass auto-serialization.
+                return _success(
+                    {
+                        "query": comparison.query,
+                        "flat": comparison.flat,
+                        "graph": comparison.graph,
+                        "elapsed_ms": comparison.elapsed_ms,
+                        "sources_delta": comparison.sources_delta,
+                        "both_no_results": comparison.both_no_results,
+                    }
+                )
             return _success(
                 await service.answer(
                     body.query,
@@ -527,12 +624,199 @@ async def answer(
                     workspace_id=workspace_id,
                     explain=body.explain,
                     rewrite=body.rewrite,
+                    use_graph=(body.graph_mode == "on"),
                 )
             )
         finally:
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge answer failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/graph/ingest_batch")
+async def graph_ingest_batch(
+    body: GraphIngestBatchBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """L3 (Phase 5f) — graph-ingest N already-Qdrant-ingested documents.
+
+    Used by Tab 1's "Also build entity graph (L3)" checkbox: after a regular
+    ingest job completes, the frontend POSTs the freshly-ingested doc_ids here
+    to extract entities/relations into the LadybugDB graph. Per-document failure
+    isolation; aggregated totals returned.
+    """
+    from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
+
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            # Defensive dedupe (matches the Tool's behavior — callers iterating
+            # over uploaded paths may pass duplicates from race conditions).
+            deduped: list[str] = []
+            seen: set[str] = set()
+            for did in body.document_ids:
+                did_clean = (did or "").strip()
+                if did_clean and did_clean not in seen:
+                    seen.add(did_clean)
+                    deduped.append(did_clean)
+            result = await _run_graph_ingest_for_documents(
+                service,
+                service.workspace_path,
+                deduped,
+                source_role=body.source_role,
+                # Live viz: emit per-node/edge events so the Graph tab pops new
+                # elements while this ingest runs (graph viz MVP).
+                event_sink=functools.partial(
+                    _publish_graph_event, service.workspace_path
+                ),
+            )
+            # Burst is over — let the Graph tab run one reconciling full export
+            # to heal any deltas dropped under the SSE queue cap.
+            _publish_graph_event(
+                service.workspace_path,
+                KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+                {
+                    "document_count": result.get("document_count", 0),
+                    "totals": result.get("totals", {}),
+                },
+            )
+            return _success(result)
+        finally:
+            if owned:
+                await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error("knowledge graph ingest batch failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+class GraphExportBody(BaseModel):
+    """Graph export request. ``node_types`` / ``document_id`` are reserved for
+    the Phase 2 filters and ignored in the MVP; the limits are safety caps."""
+
+    node_types: list[str] | None = None
+    document_id: str | None = None
+    node_limit: int | None = None
+    edge_limit: int | None = None
+
+
+@knowledge_router.post("/knowledge/graph/export")
+async def graph_export(
+    body: GraphExportBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """L3 graph viz (MVP) — whole-graph export, the Graph tab's load path.
+
+    Read-only and independent of Qdrant: resolves the workspace path and returns
+    all nodes/edges from the LadybugDB graph. Empty graph when none built yet.
+    """
+    from hirocli.tools.knowledge_graph import graph_snapshot_payload
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path).resolve()
+        payload = await run_in_threadpool(
+            graph_snapshot_payload,
+            workspace_path,
+            node_limit=body.node_limit,
+            edge_limit=body.edge_limit,
+        )
+        return _success(payload)
+    except Exception as exc:
+        log.error("knowledge graph export failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/eval/run")
+async def eval_run(
+    body: EvalRunBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """L3 (Phase 5e) — kick the synthetic eval batch in the background.
+
+    Returns ``{run_id}`` immediately. The eval emits ``knowledge.eval.*`` Domain
+    Events as it goes; the admin UI subscribes via ``/knowledge/events`` to
+    update the live progress table. Tied to the workspace_id; the SSE filter
+    drops events for other workspaces.
+    """
+    # Local imports keep the module's top-level deps thin — eval is a niche path.
+    from hirocli.services.knowledge.eval_runner import (
+        collect_synthetic_doc_ids,
+        ingest_synthetic_corpus_via_service,
+        run_eval,
+    )
+    from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
+
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        run_id = (body.run_id or "").strip() or f"l3eval-{uuid.uuid4()}"
+        workspace_path = service.workspace_path
+
+        async def _runner() -> None:
+            # All exceptions caught inside the task: a background-task crash that
+            # bubbles up to the asyncio loop has nowhere to go (no awaiter) and
+            # the UI would see "FAILED" event but no error context. We log the
+            # full traceback ourselves and emit the FAILED event (run_eval
+            # already does on its own exceptions; setup-phase exceptions are
+            # handled explicitly here).
+            try:
+                ingested_ids: list[str] = []
+                if body.ingest_synthetic:
+                    log.info(
+                        "⬇️ knowledge.eval — ingesting synthetic corpus · run_id=%s",
+                        run_id,
+                    )
+                    ingested_ids = await ingest_synthetic_corpus_via_service(
+                        service, workspace_path
+                    )
+                if body.build_graph:
+                    doc_ids = ingested_ids or await collect_synthetic_doc_ids(service)
+                    if doc_ids:
+                        log.info(
+                            "⬇️ knowledge.eval — graph-ingesting %d doc(s) · run_id=%s",
+                            len(doc_ids),
+                            run_id,
+                        )
+                        await _run_graph_ingest_for_documents(
+                            service,
+                            workspace_path,
+                            doc_ids,
+                            source_role="user_document",
+                        )
+                    else:
+                        log.warning(
+                            "⚠️ knowledge.eval — build_graph requested but no "
+                            "synthetic docs in workspace · run_id=%s",
+                            run_id,
+                        )
+                # run_eval emits started / question_completed / completed / failed
+                # events on its own — no need for us to wrap those.
+                await run_eval(service, workspace_path, run_id=run_id)
+            except Exception:
+                log.error(
+                    "❌ knowledge.eval — background run failed · run_id=%s",
+                    run_id,
+                    exc_info=True,
+                )
+            finally:
+                if owned:
+                    await _close_if_owned(service, owned)
+
+        # ``create_task`` is fire-and-forget here. The route returns immediately
+        # so the UI gets ``run_id`` without blocking on the eval (which can take
+        # minutes for a real corpus). The task ref is kept by the loop until done.
+        asyncio.create_task(_runner())
+        return _success({"run_id": run_id})
+    except Exception as exc:
+        log.error(
+            "knowledge eval run failed to start · workspace=%s · %s",
+            workspace_id,
+            str(exc),
+            exc_info=True,
+        )
         return envelope_failure(str(exc))
 
 

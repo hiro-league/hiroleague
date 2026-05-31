@@ -307,6 +307,8 @@ class KnowledgeService:
         vector = await self.embed_query(text)
         # Skip the BM25 query embed entirely when hybrid is off — pure dense path.
         sparse_vector = await self.embed_query_sparse(text) if retrieval.hybrid else None
+        # L3 — ``filters`` may carry a ``chunk_ids`` key (set by callers wanting
+        # graph-focused search); build_qdrant_filter folds it in as a HasIdCondition.
         hits = await self.vector_search_by_vector(
             vector,
             sparse_vector,
@@ -567,6 +569,7 @@ class KnowledgeService:
         workspace_id: str | None = None,
         explain: bool = False,
         rewrite: bool = False,
+        use_graph: bool = False,
     ) -> KnowledgeAnswerResult:
         prefs = self.workspace_prefs()
         retrieval = prefs.knowledge.retrieval
@@ -577,6 +580,14 @@ class KnowledgeService:
             workspace_id=workspace_id,
         )
         graph = graph_builder.build()
+        # L3 — use_graph=True turns on the graph_expand node. Useful only when
+        # rewrite=True too (the rewrite step is what extracts query entities for
+        # the graph). use_graph=True with rewrite=False is a no-op + a warning.
+        if use_graph and not rewrite:
+            log.warning(
+                "⚠️ knowledge.answer — use_graph=True without rewrite=True · "
+                "graph_expand needs entities from rewrite_query · effectively off"
+            )
         initial_state: dict[str, Any] = {
             "query": query,
             "filters": filters or {},
@@ -584,6 +595,7 @@ class KnowledgeService:
             "min_score": min_score if min_score is not None else retrieval.min_score,
             "explain": explain,
             "rewrite": rewrite,
+            "use_graph": use_graph,
         }
         parent = current_run.get()
         if parent is not None:
@@ -654,6 +666,69 @@ class KnowledgeService:
             ),
         )
         return result
+
+    async def compare(
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+        min_score: float | None = None,
+        filters: dict[str, Any] | None = None,
+        workspace_id: str | None = None,
+        explain: bool = False,
+        rewrite: bool = False,
+    ) -> "KnowledgeAnswerComparison":
+        """L3 — run :meth:`answer` twice (use_graph False/True) **concurrently** and
+        return a side-by-side comparison.
+
+        Same query, same filters, same tuning — only ``use_graph`` differs. Used by
+        the Ask tab's compare mode (5d) and by the L3 eval batch (5e). Wall-clock is
+        ~max(leg1, leg2), not sum, because both legs run via ``asyncio.gather``.
+
+        ``rewrite=True`` is recommended (graph_expand needs entities from the rewrite
+        step); the no-rewrite case is allowed but the graph leg becomes a no-op,
+        making the comparison degenerate. A warning is logged when this happens.
+        """
+        from hirocli.services.knowledge.models import KnowledgeAnswerComparison
+
+        if not rewrite:
+            log.warning(
+                "⚠️ knowledge.compare — rewrite=False · graph_expand has no entities "
+                "to resolve · the 'graph' leg will degrade to flat; consider rewrite=True",
+            )
+        t0 = time.perf_counter()
+        # asyncio.gather preserves order. Both legs use independent agent graphs
+        # (each call creates its own KnowledgeAgentGraph in answer()), so there's
+        # no shared LangGraph state contention. Qdrant/Ladybug reads are safe to
+        # interleave (MVCC under the hood for both).
+        flat_result, graph_result = await asyncio.gather(
+            self.answer(
+                query,
+                top_k=top_k,
+                min_score=min_score,
+                filters=filters,
+                workspace_id=workspace_id,
+                explain=explain,
+                rewrite=rewrite,
+                use_graph=False,
+            ),
+            self.answer(
+                query,
+                top_k=top_k,
+                min_score=min_score,
+                filters=filters,
+                workspace_id=workspace_id,
+                explain=explain,
+                rewrite=rewrite,
+                use_graph=True,
+            ),
+        )
+        return KnowledgeAnswerComparison(
+            query=query,
+            flat=flat_result,
+            graph=graph_result,
+            elapsed_ms=int((time.perf_counter() - t0) * 1000),
+        )
 
     async def list_documents(
         self,

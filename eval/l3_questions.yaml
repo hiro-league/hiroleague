@@ -1,0 +1,121 @@
+# L3 prototype eval — synthetic personal-data questions.
+#
+# Each question is graded by simple substring match against `expected_fragments`:
+# all present → PASS (✓), some present → PARTIAL (◐), none → FAIL (✗).
+# Substring match is a *lower bound* on quality — manual review still warranted
+# for nuance (e.g. an answer that says "Omar (Lina's husband) works at Acme as
+# a senior engineer" passes any of those fragments).
+#
+# `requires_graph: true` flags questions designed to be UNANSWERABLE without
+# multi-hop / alias resolution / disambiguation that the graph provides.
+# A passing graph-off result on these is informative (flat RAG was lucky)
+# but graph-on is what the thesis requires to win.
+
+- id: relational_2hop
+  category: relational/multi-hop
+  question: "What does my sister's husband do for work?"
+  expected_fragments: ["Omar", "Acme"]
+  requires_graph: true
+  notes: |
+    Maya→sister(Lina, via alias)→spouse(Omar)→works_at(Acme).
+    Answer chunk (work_notes.md) names Omar but NOT Lina; relation chunk
+    (family.md) names Lina+Omar but NOT his job. Single-chunk flat RAG
+    cannot stitch this.
+
+- id: relational_1hop_alias
+  category: relational/1-hop+alias
+  question: "Who is Lina's husband?"
+  expected_fragments: ["Omar"]
+  requires_graph: false  # both family.md and work_notes.md state this directly
+  notes: |
+    A flat-RAG win is expected and OK — this baseline confirms the corpus is
+    answerable at all by the standard pipeline.
+
+- id: alias_bare_kinship
+  category: alias
+  question: "Where does mom live?"
+  expected_fragments: ["Cairo"]
+  requires_graph: true
+  notes: |
+    "mom" is bare — only alias-aware exact match resolves to Sara → Cairo.
+
+- id: alias_mommy
+  category: alias
+  question: "Who is Mommy?"
+  expected_fragments: ["Sara"]
+  requires_graph: true
+  notes: |
+    Tests whether 'Mommy' is captured as a Sara alias (it might not be —
+    'mom' / 'my mother' are in the text; 'Mommy' is not). A FAIL here is a
+    signal that aliases need a broader synonym expansion at write time.
+
+- id: disambig_two_ahmeds_work
+  category: disambiguation
+  question: "Which Ahmed helped me debug the deployment last week?"
+  expected_fragments: ["Acme"]  # the coworker — work_notes.md context
+  requires_graph: true
+  notes: |
+    Two distinct Ahmed nodes in the graph: cousin (cousin_ahmed.md, lawyer
+    in Cairo) and coworker (work_notes.md, at Acme). The graph keeps them
+    separate; flat RAG may conflate.
+
+- id: disambig_two_ahmeds_family
+  category: disambiguation
+  question: "What does my cousin Ahmed do?"
+  expected_fragments: ["law"]  # "law firm" / "partner" in cousin_ahmed.md
+  requires_graph: true
+
+- id: multi_entity_paris
+  category: cross-doc / multi-entity
+  question: "Who went to Paris with me in 2025?"
+  expected_fragments: ["Selim"]
+  requires_graph: false  # paris_trip_2025.md states this directly
+
+- id: cross_doc_lina_trips
+  category: cross-doc neighbor expansion
+  question: "What trips did Lina go on?"
+  expected_fragments: ["ski", "Chamonix"]  # ski_trip_2023.md
+  requires_graph: true
+  notes: |
+    Lina appears in family.md (kinship), lina marriage indirectly, and
+    ski_trip_2023.md (the actual trip). A flat embed of "trips Lina went
+    on" may pull family.md (about Lina) but miss the trip doc.
+
+- id: relational_company_about
+  category: relational/multi-hop with attribute
+  question: "What does my sister's husband's company do?"
+  expected_fragments: ["developer", "infrastructure"]  # work_notes.md
+  requires_graph: true
+  notes: |
+    3-hop: Maya→sister(Lina)→spouse(Omar)→works_at(Acme)→ description
+    "Acme builds developer infrastructure". Hardest question here.
+
+- id: entity_centric
+  category: entity-centric
+  question: "Tell me about Aunt Salma."
+  expected_fragments: ["sister", "Cairo"]  # mom's sister; lives nearby in Cairo
+  requires_graph: true
+  notes: |
+    Aunt Salma is described in family.md (mom's sister) and appears in
+    ski_trip_2023.md and cousin_ahmed.md. Neighbor expansion should pull
+    all three; flat RAG likely only finds family.md.
+
+- id: arabic_alias
+  category: arabic + alias
+  question: "ما هي وصفة أمي للكبسة؟"
+  expected_fragments: ["كبسة", "أرز"]  # any specific ingredient counts
+  requires_graph: false  # the recipe doc has both
+  notes: |
+    "أمي" should normalize to "امي" (alef-hamza fold) and exact-match
+    Sara's alias if extractor captured "أمي سارة". A graph-on result
+    confirms Arabic alias resolution end-to-end.
+
+- id: out_of_corpus
+  category: abstain / no-anchor
+  question: "What is the capital of France?"
+  expected_fragments: []  # no expected fragments — we expect NO answer
+  requires_graph: false
+  notes: |
+    Negative control. Both modes should abstain (no_results) since the
+    corpus has nothing relevant. A confident wrong answer (hallucination)
+    is a fail signal independent of graph_on vs graph_off.

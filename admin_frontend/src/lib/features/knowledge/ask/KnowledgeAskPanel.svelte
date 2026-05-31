@@ -4,6 +4,8 @@
   import Button from '$lib/components/ui/button.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
+  import KnowledgeAskCompareView from '$lib/features/knowledge/ask/KnowledgeAskCompareView.svelte';
+  import KnowledgeAskEvalBatch from '$lib/features/knowledge/ask/KnowledgeAskEvalBatch.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
@@ -32,8 +34,24 @@
 
   let chunkMarkdownFormat = $state(readKnowledgeChunkMarkdownFormat());
 
+  // L3 (Phase 5d): in compare mode we show the compareResult, otherwise the single answerResult.
+  // The cached "opposite-mode" result stays available — switching modes after a search reveals
+  // the previously cached result for the new mode without re-asking.
+  const inCompareMode = $derived(ask.graphMode === 'compare');
+  const activeResult = $derived(inCompareMode ? ask.compareResult : ask.answerResult);
+
   const questionHeaderSummary = $derived(
-    ask.searching ? 'Searching…' : ask.answerResult?.no_results ? 'No sources matched' : ask.answerResult ? 'Answer ready' : ''
+    ask.searching
+      ? 'Searching…'
+      : !activeResult
+        ? ''
+        : inCompareMode
+          ? ask.compareResult?.both_no_results
+            ? 'No sources matched (both legs)'
+            : 'Compare ready'
+          : ask.answerResult?.no_results
+            ? 'No sources matched'
+            : 'Answer ready'
   );
 
   // Explain-mode hints. matchKind is null in the default path (no per-branch scores), so the
@@ -132,8 +150,8 @@
         {/if}
         Ask
       </Button>
-      {#if ask.answerResult}
-        <!-- Drop the cached answer + chunks so the next question starts fresh. -->
+      {#if activeResult}
+        <!-- Drop the cached answer + chunks (both single + compare) so the next question starts fresh. -->
         <Button variant="outline" onclick={ask.clearAnswer} disabled={ask.searching}>
           Clear
         </Button>
@@ -148,7 +166,17 @@
       </div>
     {/if}
 
-    {#if ask.answerResult?.no_results}
+    {#if inCompareMode && ask.compareResult}
+      <!-- L3 compare-mode: render the two-leg side-by-side view. -->
+      <KnowledgeAskCompareView compareResult={ask.compareResult} />
+    {:else if inCompareMode}
+      <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
+        Ask a question to compare flat vs graph-augmented retrieval side-by-side.
+        {#if !ask.askRewrite}
+          <br /><span class="text-xs">Tip: enable Rewrite — graph mode needs entities from the rewrite step.</span>
+        {/if}
+      </div>
+    {:else if ask.answerResult?.no_results}
       <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
         No sources matched. Relax filters or lower the minimum score.
       </div>
@@ -207,7 +235,10 @@
     {/if}
   </KnowledgeCollapsibleSectionCard>
 
-  {#if ask.answerResult && !ask.answerResult.no_results && ask.answerResult.sources.length > 0}
+  <!-- Chunk-Results section is single-mode only — compare view shows compact source
+       summaries inline per leg, double-rendering the full chunk grid would dominate the
+       screen and slow scrolling. -->
+  {#if !inCompareMode && ask.answerResult && !ask.answerResult.no_results && ask.answerResult.sources.length > 0}
     <KnowledgeCollapsibleSectionCard
       title="Chunk Results"
       bodyId={KNOWLEDGE_ASK_CHUNK_RESULTS_BODY_ID}
@@ -316,4 +347,8 @@
       </div>
     </KnowledgeCollapsibleSectionCard>
   {/if}
+
+  <!-- L3 (Phase 5e) — Eval Batch lives at the bottom of the Ask tab. Self-contained:
+       owns its own state + SSE subscription; the Ask page just passes its error sink. -->
+  <KnowledgeAskEvalBatch setError={(msg) => ctl.setError(msg)} />
 </section>

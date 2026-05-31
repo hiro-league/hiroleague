@@ -42,10 +42,17 @@ export const KNOWLEDGE_RUN_ID_PREFIX = 'knowledge-';
 
 export const CHAT_RUN_ID_PREFIX = 'chat-';
 
-export type GraphRunKindFilter = '' | 'chat' | 'knowledge';
+/** Standalone L3 graph-ingest runs written by ``GraphIngestService.ingest_chunks``. */
+export const GRAPH_INGEST_RUN_ID_PREFIX = 'knowledge_graph_ingest-';
+
+export type GraphRunKindFilter = '' | 'chat' | 'knowledge' | 'ingest';
 
 export function isKnowledgeStandaloneRun(runId: string): boolean {
   return String(runId ?? '').trim().startsWith(KNOWLEDGE_RUN_ID_PREFIX);
+}
+
+export function isGraphIngestRun(runId: string): boolean {
+  return String(runId ?? '').trim().startsWith(GRAPH_INGEST_RUN_ID_PREFIX);
 }
 
 export function isChatAgentRun(runId: string): boolean {
@@ -53,6 +60,9 @@ export function isChatAgentRun(runId: string): boolean {
 }
 
 export function graphRunKindLabel(runId: string): string {
+  // Check ingest before knowledge: both start with "knowledge" but the prefixes don't overlap
+  // (``knowledge_graph_ingest-`` vs ``knowledge-``); ordering is defensive, not load-bearing.
+  if (isGraphIngestRun(runId)) return 'Ingest';
   if (isKnowledgeStandaloneRun(runId)) return 'Knowledge';
   if (isChatAgentRun(runId)) return 'Chat';
   return 'Other';
@@ -60,6 +70,7 @@ export function graphRunKindLabel(runId: string): string {
 
 export function graphRunKindMatchesFilter(runId: string, filter: GraphRunKindFilter): boolean {
   if (!filter) return true;
+  if (filter === 'ingest') return isGraphIngestRun(runId);
   if (filter === 'knowledge') return isKnowledgeStandaloneRun(runId);
   if (filter === 'chat') return isChatAgentRun(runId);
   return true;
@@ -176,6 +187,9 @@ export function listRowCharacter(
   characterMap: Record<string, CharacterRow>,
   channelById: Map<number, ChatChannelRow>
 ): { name: string; photo: string | null } {
+  if (isGraphIngestRun(String(row.run_id ?? ''))) {
+    return { name: 'Graph ingest', photo: null };
+  }
   if (isKnowledgeStandaloneRun(String(row.run_id ?? ''))) {
     return { name: 'Knowledge', photo: null };
   }
@@ -191,7 +205,7 @@ export function listRowCharacter(
 }
 
 export function listRowChannelName(row: GraphLedgerRow, channelById: Map<number, ChatChannelRow>): string {
-  if (isKnowledgeStandaloneRun(String(row.run_id ?? ''))) {
+  if (isGraphIngestRun(String(row.run_id ?? '')) || isKnowledgeStandaloneRun(String(row.run_id ?? ''))) {
     return 'Admin';
   }
   if (row.chat_channel_id === '' || typeof row.chat_channel_id !== 'number') return '—';

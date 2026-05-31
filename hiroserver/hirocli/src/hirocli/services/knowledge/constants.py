@@ -6,6 +6,11 @@ KNOWLEDGE_DIR = "knowledge"
 DB_FILENAME = "knowledge.db"
 QDRANT_DIR = "qdrant"
 COLLECTION_NAME = "hiro_knowledge"
+# L3 prototype: per-workspace embedded graph (LadybugDB, Kuzu-lineage). Holds
+# entity/relationship structure for graph-aware retrieval; chunk evidence stays
+# in Qdrant. See docs/knowledge-l3-prototype-plan.md.
+GRAPH_DIR = "graph"
+LADYBUG_DB_FILENAME = "ladybug.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_VECTOR_SIZE = 384
 # Hybrid retrieval: BM25 sparse vectors fused with the dense vector via RRF. BM25 is
@@ -29,3 +34,22 @@ KNOWLEDGE_JOB_COMPLETED = "knowledge.job.completed"
 KNOWLEDGE_JOB_FAILED = "knowledge.job.failed"
 KNOWLEDGE_INGESTED = "knowledge.ingested"
 KNOWLEDGE_DELETED = "knowledge.deleted"
+# L3 eval — Phase 5c. Streamed by ``services/knowledge/eval_runner.py`` so the
+# admin Eval Batch UI can update the per-question table live without polling.
+# Same pattern as the ingest job events above (one started, progress per item,
+# one completed/failed).
+KNOWLEDGE_EVAL_STARTED = "knowledge.eval.started"
+KNOWLEDGE_EVAL_SETUP_PROGRESS = "knowledge.eval.setup_progress"   # ingest / graph-build steps
+KNOWLEDGE_EVAL_QUESTION_COMPLETED = "knowledge.eval.question_completed"
+KNOWLEDGE_EVAL_COMPLETED = "knowledge.eval.completed"
+KNOWLEDGE_EVAL_FAILED = "knowledge.eval.failed"
+# L3 graph viz — live updates for the admin "Graph" tab. Emitted by
+# ``GraphIngestService`` as nodes/edges are written so the force-graph view can
+# pop new elements in real time over the existing ``/knowledge/events`` SSE
+# stream (no new transport). ``ingest_completed`` lets the UI run one reconciling
+# full export to heal any deltas dropped under the SSE queue cap.
+# See docs/knowledge-graph-viz-design.md.
+KNOWLEDGE_GRAPH_NODE_UPSERTED = "knowledge.graph.node_upserted"
+KNOWLEDGE_GRAPH_EDGE_UPSERTED = "knowledge.graph.edge_upserted"
+KNOWLEDGE_GRAPH_INGEST_PROGRESS = "knowledge.graph.ingest_progress"
+KNOWLEDGE_GRAPH_INGEST_COMPLETED = "knowledge.graph.ingest_completed"

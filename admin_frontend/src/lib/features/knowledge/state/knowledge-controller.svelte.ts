@@ -9,6 +9,7 @@ import {
 } from '$lib/preferences/knowledge-preferences.svelte';
 import { createKnowledgeAskModel } from './knowledge-ask.svelte';
 import { createKnowledgeBrowseModel } from './knowledge-browse.svelte';
+import { createKnowledgeGraphModel } from './knowledge-graph.svelte';
 import { createKnowledgeIngestModel } from './knowledge-ingest.svelte';
 import { createKnowledgeOptionsModel } from './knowledge-options.svelte';
 
@@ -43,6 +44,9 @@ export function createKnowledgePageController(
   });
 
   const ask = createKnowledgeAskModel({ browse, options, setError });
+  // Graph viz (MVP). SSE + data load are owned by KnowledgeGraphPanel so the
+  // EventSource only lives while the Graph tab is open.
+  const graph = createKnowledgeGraphModel({ setError });
 
   function setActiveTab(tab: KnowledgeTabId) {
     return tabPrefs.setActiveTab(tab);
@@ -90,6 +94,10 @@ export function createKnowledgePageController(
     get error() {
       return error;
     },
+    // L3 (Phase 5e) — exposed so the embedded Eval Batch component can route
+    // its own transport / setup errors through the page-level error banner
+    // (same surface the other sub-controllers already share via setError).
+    setError,
     get options() {
       return options;
     },
@@ -101,6 +109,9 @@ export function createKnowledgePageController(
     },
     get browse() {
       return browse;
+    },
+    get graph() {
+      return graph;
     },
     openAskForDocument,
     openBrowseForDocument,

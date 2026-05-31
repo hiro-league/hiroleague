@@ -1,15 +1,20 @@
 import {
   ingestKnowledge,
+  listKnowledgeDocuments,
   listKnowledgeJobs,
   pickKnowledgeFolder,
   reingestKnowledgeDocument,
+  runKnowledgeGraphIngestBatch,
   scanKnowledgeFolder,
+  type KnowledgeGraphIngestBatchData,
   type KnowledgeIngestMetadata,
   type KnowledgeJobData,
   type KnowledgeJobRecord,
   type KnowledgeScannedFile
 } from '$lib/api/knowledge';
 import { openWorkspaceFolder } from '$lib/api/server';
+import { PREF_KEYS } from '$lib/preferences/keys';
+import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
 import { connectKnowledgeJobEvents } from '../shared/knowledge-events';
 import { upsertRecentJobRecord } from '../shared/knowledge-jobs';
 import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
@@ -23,6 +28,9 @@ import {
   writePersistedKnowledgeFolder
 } from '../shared/knowledge-pure';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
+
+/** L3 (Phase 5f) — status of the post-ingest graph-build step. */
+export type GraphBuildStatus = 'idle' | 'running' | 'completed' | 'failed';
 
 /** Ingest tab: folder scan, file selection, job tracking. */
 export function createKnowledgeIngestModel(deps: {
@@ -46,6 +54,19 @@ export function createKnowledgeIngestModel(deps: {
   let job = $state<KnowledgeJobData | null>(null);
   let recentJobs = $state<KnowledgeJobRecord[]>([]);
   let activeErrorsJobId = $state<string | null>(null);
+
+  // L3 (Phase 5f) — "Also build entity graph (L3)" checkbox state.
+  // Persisted to localStorage so the user's default sticks across reloads.
+  let buildGraphAfter = $state<boolean>(
+    readLocalBoolean(PREF_KEYS.knowledgeIngestBuildGraph, false)
+  );
+  // When the user ingests with this checked, the controller remembers WHICH
+  // paths it sent so the post-ingest auto-graph step can resolve them back to
+  // document IDs (via listKnowledgeDocuments + source_uri match).
+  let lastOwnedIngestPaths = $state<string[]>([]);
+  let graphBuildStatus = $state<GraphBuildStatus>('idle');
+  let graphBuildResult = $state<KnowledgeGraphIngestBatchData | null>(null);
+  let graphBuildError = $state<string | null>(null);
 
   const fileSort = useTableSort({
     defaultBy: DEFAULT_SCANNED_FILE_SORT.column,
@@ -88,7 +109,70 @@ export function createKnowledgeIngestModel(deps: {
     recentJobs = upsertRecentJobRecord(recentJobs, nextJob);
     if (nextJob.status !== 'running') {
       deps.onJobTerminal();
+      // L3 (Phase 5f) — when this terminal event belongs to an ingest WE just
+      // kicked off (i.e. we have lastOwnedIngestPaths) AND the user opted into
+      // post-ingest graph build AND the job actually succeeded → resolve the
+      // paths to doc ids and fire off the batch graph ingest. Cleared after
+      // trigger so receiving the same terminal event twice doesn't re-fire.
+      if (
+        nextJob.status === 'completed'
+        && buildGraphAfter
+        && lastOwnedIngestPaths.length > 0
+      ) {
+        const paths = lastOwnedIngestPaths;
+        lastOwnedIngestPaths = [];
+        void autoBuildGraphForPaths(paths);
+      } else if (nextJob.status !== 'completed') {
+        // Failed ingest → nothing to graph; clear so a later success doesn't
+        // accidentally pick up the stale paths.
+        lastOwnedIngestPaths = [];
+      }
     }
+  }
+
+  /** Look up the just-ingested documents (by source_uri = one of ``paths``)
+   *  and trigger ``POST /knowledge/graph/ingest_batch``. Runs sync from the
+   *  controller's view (the API call awaits the full batch). Failures land
+   *  in graphBuildError but don't surface as a page-level error — the user
+   *  already sees the (successful) ingest job in the UI; graph-build failure
+   *  is its own side-channel. */
+  async function autoBuildGraphForPaths(paths: string[]) {
+    graphBuildStatus = 'running';
+    graphBuildError = null;
+    graphBuildResult = null;
+    try {
+      // Pull recent docs and filter by source_uri match. Limit=500 covers
+      // any reasonable batch; if the user uploads thousands at once, the
+      // overflow simply doesn't get auto-graphed (they can re-ingest later).
+      const pathSet = new Set(paths.map((p) => p.replace(/\\/g, '/')));
+      const docs = await listKnowledgeDocuments({ limit: 500 });
+      const docIds = docs.data.documents
+        .filter((d) => pathSet.has(String(d.source_uri).replace(/\\/g, '/')))
+        .map((d) => d.id);
+      if (docIds.length === 0) {
+        graphBuildStatus = 'completed';
+        graphBuildResult = { document_count: 0, documents: [], totals: {} };
+        return;
+      }
+      const result = await runKnowledgeGraphIngestBatch(docIds);
+      graphBuildResult = result.data;
+      graphBuildStatus = 'completed';
+    } catch (err) {
+      graphBuildStatus = 'failed';
+      graphBuildError = err instanceof Error ? err.message : 'Graph build failed.';
+    }
+  }
+
+  function setBuildGraphAfter(on: boolean) {
+    buildGraphAfter = on;
+    writeLocalBoolean(PREF_KEYS.knowledgeIngestBuildGraph, on);
+  }
+
+  /** Drop the last graph-build result (the "X" button next to the status line). */
+  function clearGraphBuildResult() {
+    graphBuildResult = null;
+    graphBuildError = null;
+    graphBuildStatus = 'idle';
   }
 
   async function loadJobs() {
@@ -193,6 +277,16 @@ export function createKnowledgeIngestModel(deps: {
     if (!selectedPaths.length) return;
     ingesting = true;
     deps.setError(null);
+    // Capture paths BEFORE the API call so the post-ingest auto-graph hook in
+    // applyJobUpdate has them; cleared on failure or after the terminal event
+    // fires the graph-build trigger.
+    lastOwnedIngestPaths = buildGraphAfter ? [...selectedPaths] : [];
+    // Fresh status for this ingest's graph-build outcome (drop any previous run).
+    if (buildGraphAfter) {
+      graphBuildStatus = 'idle';
+      graphBuildResult = null;
+      graphBuildError = null;
+    }
     try {
       const payload = await ingestKnowledge(
         selectedPaths,
@@ -201,6 +295,7 @@ export function createKnowledgeIngestModel(deps: {
       applyJobUpdate(payload.data);
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Ingest failed.');
+      lastOwnedIngestPaths = [];  // ingest failed → don't trigger graph build later
     } finally {
       ingesting = false;
     }
@@ -404,6 +499,21 @@ export function createKnowledgeIngestModel(deps: {
     get jobPercent() {
       return jobPercent;
     },
+    // L3 (Phase 5f) — "Also build entity graph" post-ingest toggle + status.
+    get buildGraphAfter() {
+      return buildGraphAfter;
+    },
+    setBuildGraphAfter,
+    get graphBuildStatus() {
+      return graphBuildStatus;
+    },
+    get graphBuildResult() {
+      return graphBuildResult;
+    },
+    get graphBuildError() {
+      return graphBuildError;
+    },
+    clearGraphBuildResult,
     restoreFolderFromStorage,
     connectEvents,
     loadJobs,

@@ -1,10 +1,21 @@
-import { answerKnowledge, type KnowledgeAnswerData } from '$lib/api/knowledge';
+import {
+  answerKnowledge,
+  isAnswerCompareData,
+  type KnowledgeAnswerCompareData,
+  type KnowledgeAnswerData,
+  type KnowledgeGraphMode
+} from '$lib/api/knowledge';
 import {
   buildAskFilters,
+  clearPersistedKnowledgeAskCompareResult,
   clearPersistedKnowledgeAskResult,
   optionalInt,
+  readPersistedKnowledgeAskCompareResult,
   readPersistedKnowledgeAskResult,
-  writePersistedKnowledgeAskResult
+  readPersistedKnowledgeGraphMode,
+  writePersistedKnowledgeAskCompareResult,
+  writePersistedKnowledgeAskResult,
+  writePersistedKnowledgeGraphMode
 } from '../shared/knowledge-pure';
 import type { KnowledgeBrowseModel } from './knowledge-browse.svelte';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
@@ -37,7 +48,22 @@ export function createKnowledgeAskModel(deps: {
   // Restore the last answer cached in sessionStorage so results survive navigating to other admin
   // pages and back (asking costs an LLM call). Seed the query box to match the restored answer.
   let answerResult = $state<KnowledgeAnswerData | null>(readPersistedKnowledgeAskResult());
-  let query = $state(answerResult?.query ?? '');
+  // L3 (Phase 5d) — compare-mode cache lives alongside the single-leg cache so
+  // toggling between modes doesn't lose the other side's result.
+  let compareResult = $state<KnowledgeAnswerCompareData | null>(
+    readPersistedKnowledgeAskCompareResult()
+  );
+  // L3 graph mode: 'off' = today's flat hybrid+rerank, 'on' = graph-augmented
+  // (focuses Qdrant on chunks linked to query entities), 'compare' = both legs
+  // side-by-side. Persisted across browser sessions so the user's preference
+  // sticks. Default 'off' preserves existing behavior.
+  let graphMode = $state<KnowledgeGraphMode>(readPersistedKnowledgeGraphMode());
+  // Seed the query box from whichever result is "active" given the current mode.
+  let query = $state(
+    graphMode === 'compare'
+      ? (compareResult?.query ?? '')
+      : (answerResult?.query ?? '')
+  );
 
   const askDocumentScope = $derived(
     deps.browse.documents.find((doc) => doc.id === askDocumentId) ?? null
@@ -81,16 +107,30 @@ export function createKnowledgeAskModel(deps: {
           askDocumentId
         }),
         askExplain,
-        askRewrite
+        askRewrite,
+        graphMode
       );
-      answerResult = payload.data;
-      // Cache so the answer + chunks survive navigation away and back (see knowledge-pure helpers).
-      writePersistedKnowledgeAskResult(payload.data);
+      // Server returns one of two shapes depending on graph_mode — use the type
+      // guard to populate the right slot. The opposite-slot cache stays so
+      // toggling modes doesn't blow away the other view.
+      if (isAnswerCompareData(payload.data)) {
+        compareResult = payload.data;
+        writePersistedKnowledgeAskCompareResult(payload.data);
+      } else {
+        answerResult = payload.data;
+        writePersistedKnowledgeAskResult(payload.data);
+      }
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Ask failed.');
     } finally {
       searching = false;
     }
+  }
+
+  function setGraphMode(mode: KnowledgeGraphMode) {
+    if (mode === graphMode) return;
+    graphMode = mode;
+    writePersistedKnowledgeGraphMode(mode);
   }
 
   function handleAskOwnerKindChange() {
@@ -121,10 +161,14 @@ export function createKnowledgeAskModel(deps: {
     askDocumentId = null;
   }
 
-  // Explicit "Clear" action: drop the current answer + cached copy so the next question starts fresh.
+  // Explicit "Clear" action: drop BOTH the current answer + compare caches so the
+  // next question starts fresh in whichever mode the user is in. (Keeping the other
+  // mode's cache around would make "Clear" feel inconsistent.)
   function clearAnswer() {
     answerResult = null;
+    compareResult = null;
     clearPersistedKnowledgeAskResult();
+    clearPersistedKnowledgeAskCompareResult();
     queueMicrotask(() => queryInputEl?.focus());
   }
 
@@ -144,7 +188,9 @@ export function createKnowledgeAskModel(deps: {
     askTags = [...(document.tags ?? [])];
     query = '';
     answerResult = null;
+    compareResult = null;
     clearPersistedKnowledgeAskResult();
+    clearPersistedKnowledgeAskCompareResult();
     queueMicrotask(() => queryInputEl?.focus());
   }
 
@@ -221,6 +267,13 @@ export function createKnowledgeAskModel(deps: {
     get answerResult() {
       return answerResult;
     },
+    get compareResult() {
+      return compareResult;
+    },
+    get graphMode() {
+      return graphMode;
+    },
+    setGraphMode,
     get askDocumentScope() {
       return askDocumentScope;
     },

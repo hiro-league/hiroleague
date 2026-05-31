@@ -166,6 +166,27 @@ export type KnowledgeAnswerData = {
   keywords?: string[];
 };
 
+/** L3 (Phase 5d) — compare-mode response: both legs side-by-side. The
+ *  frontend's discriminator is the presence of `flat`/`graph` on the payload. */
+export type KnowledgeAnswerCompareData = {
+  query: string;
+  flat: KnowledgeAnswerData;   // graph_mode='off' leg
+  graph: KnowledgeAnswerData;  // graph_mode='on' leg
+  elapsed_ms: number;          // wall-clock for both (legs run concurrently)
+  sources_delta: number;       // graph.sources.length - flat.sources.length
+  both_no_results: boolean;    // true when neither leg surfaced anything
+};
+
+export type KnowledgeGraphMode = 'off' | 'on' | 'compare';
+
+/** Type guard — distinguish a compare-mode response from a single-leg response. */
+export function isAnswerCompareData(
+  data: KnowledgeAnswerData | KnowledgeAnswerCompareData
+): data is KnowledgeAnswerCompareData {
+  return (data as KnowledgeAnswerCompareData).flat !== undefined
+    && (data as KnowledgeAnswerCompareData).graph !== undefined;
+}
+
 export type KnowledgeFilters = {
   owner_kind?: string | null;
   owner_id?: string | null;
@@ -334,18 +355,74 @@ export function searchKnowledge(
   });
 }
 
+/** L3 (Phase 5e) — kick the synthetic eval batch. Returns the run_id
+ *  immediately; progress streams on /api/knowledge/events. */
+export type EvalRunRequest = {
+  ingest_synthetic?: boolean;
+  build_graph?: boolean;
+  run_id?: string;
+};
+
+export function runKnowledgeEval(req: EvalRunRequest = {}): Promise<ApiResponse<{ run_id: string }>> {
+  return apiRequest<{ run_id: string }>('/knowledge/eval/run', {
+    method: 'POST',
+    body: req,
+    timeoutMs: 30000  // setup can take a few seconds; the eval itself runs in the background
+  });
+}
+
+/** L3 (Phase 5f) — per-document result inside a batch graph-ingest response. */
+export type KnowledgeGraphIngestDocResult = {
+  index: number;
+  total: number;
+  document_id: string;
+  document_title: string;
+  ok: boolean;
+  error: string;
+  stats: Record<string, number> | null;
+};
+
+/** L3 (Phase 5f) — batch graph-ingest response shape. */
+export type KnowledgeGraphIngestBatchData = {
+  document_count: number;
+  documents: KnowledgeGraphIngestDocResult[];
+  totals: Record<string, number>;
+};
+
+/** L3 (Phase 5f) — graph-ingest N already-Qdrant-ingested documents.
+ *  Synchronous: response returns when the whole batch finishes (or all docs
+ *  fail with isolation). Wired into Tab 1's "Also build entity graph" path
+ *  so newly ingested docs get auto-graphed in one round-trip. */
+export function runKnowledgeGraphIngestBatch(
+  documentIds: string[],
+  sourceRole: string = 'user_document'
+): Promise<ApiResponse<KnowledgeGraphIngestBatchData>> {
+  return apiRequest<KnowledgeGraphIngestBatchData>('/knowledge/graph/ingest_batch', {
+    method: 'POST',
+    body: { document_ids: documentIds, source_role: sourceRole },
+    // One LLM extraction call per chunk; a 10-chunk batch is ~10-30s; give it room.
+    timeoutMs: 600000
+  });
+}
+
+
 export function answerKnowledge(
   query: string,
   topK = 20,
   minScore = 0,
   filters: KnowledgeFilters = {},
   explain = false,
-  rewrite = false
-): Promise<ApiResponse<KnowledgeAnswerData>> {
-  return apiRequest<KnowledgeAnswerData>('/knowledge/answer', {
+  rewrite = false,
+  graphMode: KnowledgeGraphMode = 'off'
+): Promise<ApiResponse<KnowledgeAnswerData | KnowledgeAnswerCompareData>> {
+  // graph_mode='compare' makes the server run both legs (use_graph=False/True)
+  // concurrently and return a compare shape. The route response type is a
+  // union; callers use isAnswerCompareData() to discriminate.
+  return apiRequest<KnowledgeAnswerData | KnowledgeAnswerCompareData>('/knowledge/answer', {
     method: 'POST',
-    body: { query, top_k: topK, min_score: minScore, filters, explain, rewrite },
-    timeoutMs: 180000
+    body: { query, top_k: topK, min_score: minScore, filters, explain, rewrite, graph_mode: graphMode },
+    // Compare runs two legs (still concurrent), so allow a bit more headroom.
+    timeoutMs: graphMode === 'compare' ? 240000 : 180000
   });
 }
 
@@ -404,6 +481,57 @@ export function updateKnowledgeDocumentMetadata(
   return apiRequest<KnowledgeDocument>(`/knowledge/documents/${encodeURIComponent(documentId)}/metadata`, {
     method: 'PATCH',
     body: metadata,
+    timeoutMs: 60000
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Graph viz (MVP) — whole-graph export + live event payload shapes.
+// Shapes mirror services/knowledge/graph/serialize.py. Edges use source/target
+// (not source_id/target_id) so they drop straight into force-graph's link model.
+// ---------------------------------------------------------------------------
+
+export type GraphNodeDTO = {
+  id: string;
+  name: string;
+  type: string;
+  aliases: string[];
+  chunk_ids: string[];
+  document_ids: string[];
+};
+
+export type GraphEdgeDTO = {
+  id: string;
+  source: string;
+  target: string;
+  rel_type: string;
+  fact: string;
+  chunk_ids: string[];
+  document_ids: string[];
+};
+
+export type KnowledgeGraphExportData = {
+  nodes: GraphNodeDTO[];
+  edges: GraphEdgeDTO[];
+  truncated: boolean;
+  counts: { nodes: number; edges: number };
+};
+
+// Live SSE payloads (knowledge.graph.*).
+export type GraphNodeEvent = { node: GraphNodeDTO; is_new: boolean; document_id: string };
+export type GraphEdgeEvent = { edge: GraphEdgeDTO; is_new: boolean; document_id: string };
+export type GraphIngestProgress = {
+  document_id: string;
+  chunk_index: number;
+  chunk_total: number;
+};
+
+export function exportKnowledgeGraph(
+  opts: { nodeLimit?: number; edgeLimit?: number } = {}
+): Promise<ApiResponse<KnowledgeGraphExportData>> {
+  return apiRequest<KnowledgeGraphExportData>('/knowledge/graph/export', {
+    method: 'POST',
+    body: { node_limit: opts.nodeLimit ?? null, edge_limit: opts.edgeLimit ?? null },
     timeoutMs: 60000
   });
 }

@@ -109,9 +109,13 @@
 <div
   class={cn(
     'grid min-h-screen lg:transition-[grid-template-columns] lg:duration-200',
+    // Publish the sidebar width as a CSS custom property so position:fixed
+    // descendants (e.g. the Knowledge Graph expanded view) can offset from the
+    // content column instead of the viewport edge. Mobile (no sidebar) = 0.
+    '[--admin-sidebar-w:0px]',
     prefs.sidebarCollapsed
-      ? 'lg:grid-cols-[84px_minmax(0,1fr)]'
-      : 'lg:grid-cols-[264px_minmax(0,1fr)]'
+      ? 'lg:grid-cols-[84px_minmax(0,1fr)] lg:[--admin-sidebar-w:84px]'
+      : 'lg:grid-cols-[264px_minmax(0,1fr)] lg:[--admin-sidebar-w:264px]'
   )}
 >
   <aside
