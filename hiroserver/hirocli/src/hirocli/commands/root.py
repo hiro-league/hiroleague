@@ -10,14 +10,11 @@ from rich.console import Console
 from rich.table import Table
 
 from ..domain.workspace import WorkspaceError
-from ..tools.server import (
-    RestartTool,
-    StartTool,
-    StatusTool,
-    StopTool,
-    UninstallTool,
-    UpgradeTool,
-)
+
+# Tool imports happen inside each command body so loading ``commands/root.py``
+# (which always happens via ``commands/app.py``) stays cheap. The actual
+# ``hiro start`` work still goes through StartTool — the import just moves to
+# AFTER the first log line, so the user sees feedback immediately.
 
 log = Logger.get("CLI.SERVER")
 
@@ -49,6 +46,8 @@ def register(app: typer.Typer, console: Console) -> None:
         """Start the Hiro server (background by default, foreground with -f)."""
         log.info("hiro start", foreground=foreground, admin=admin, metrics=metrics)
 
+        from ..tools.server import StartTool
+
         try:
             result = StartTool().execute(workspace=workspace, foreground=foreground, admin=admin, metrics=metrics)
         except ValueError as exc:
@@ -79,6 +78,8 @@ def register(app: typer.Typer, console: Console) -> None:
     ) -> None:
         """Stop the running Hiro server."""
         log.info("hiro stop")
+
+        from ..tools.server import StopTool
 
         try:
             result = StopTool().execute(workspace=workspace)
@@ -116,6 +117,8 @@ def register(app: typer.Typer, console: Console) -> None:
         """Gracefully restart the Hiro server (stop + start)."""
         log.info("hiro restart", foreground=foreground, admin=admin, metrics=metrics)
 
+        from ..tools.server import RestartTool
+
         try:
             result = RestartTool().execute(
                 workspace=workspace, foreground=foreground, admin=admin, metrics=metrics,
@@ -152,6 +155,8 @@ def register(app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Show server and WebSocket connection status."""
+        from ..tools.server import StatusTool
+
         try:
             result = StatusTool().execute(workspace=workspace)
         except WorkspaceError as exc:
@@ -201,6 +206,8 @@ def register(app: typer.Typer, console: Console) -> None:
         and your workspace data lives outside the tool venv.
         """
         log.info("hiro upgrade", dry_run=dry_run, no_stop=no_stop, no_restart=no_restart)
+
+        from ..tools.server import UpgradeTool
 
         # Step 1: detect what we'd do (no side effects yet) so we can show the
         # plan to the user before asking for confirmation.
@@ -291,6 +298,8 @@ def register(app: typer.Typer, console: Console) -> None:
         """Stop server, remove auto-start, then print package uninstall commands."""
         console.print("[bold cyan]hiro uninstall[/bold cyan]")
         log.info("hiro uninstall", purge=purge)
+
+        from ..tools.server import UninstallTool
 
         try:
             result = UninstallTool().execute(

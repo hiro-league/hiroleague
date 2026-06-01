@@ -24,14 +24,9 @@ from hiro_commons.log import Logger
 
 from ..constants import PID_FILENAME
 from ..domain.workspace import WorkspaceError, resolve_workspace
-from ..tools.server import SetupTool, TeardownTool
-from ..tools.workspace import (
-    WorkspaceCreateTool,
-    WorkspaceListTool,
-    WorkspaceRemoveTool,
-    WorkspaceShowTool,
-    WorkspaceUpdateTool,
-)
+
+# Tool imports happen inside each command body to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 log = Logger.get("CLI.WORKSPACE")
 
@@ -41,6 +36,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
     @workspace_app.command("list")
     def workspace_list() -> None:
         """List all configured workspaces."""
+        from ..tools.workspace import WorkspaceListTool
+
         result = WorkspaceListTool().execute()
 
         if not result.workspaces:
@@ -103,6 +100,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Create a new workspace."""
+        from ..tools.workspace import WorkspaceCreateTool
+
         try:
             result = WorkspaceCreateTool().execute(
                 name=name,
@@ -168,6 +167,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Configure gateway, generate device ID, and register auto-start."""
+        from ..tools.server import SetupTool
+
         console.print("[bold cyan]hiro workspaces setup[/bold cyan]")
 
         from ..domain.config import load_config as _load_config
@@ -301,6 +302,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
 
         log.info("hiro workspaces remove", workspace_arg=workspace, purge=purge)
 
+        from ..tools.workspace import WorkspaceRemoveTool
+
         try:
             result = WorkspaceRemoveTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
@@ -335,6 +338,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
 
         log.info("hiro workspaces update", name=new_name, set_default=make_default, gateway_url=gateway_url)
 
+        from ..tools.workspace import WorkspaceUpdateTool
+
         try:
             result = WorkspaceUpdateTool().execute(
                 workspace=workspace,
@@ -362,6 +367,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Show details of a workspace."""
+        from ..tools.workspace import WorkspaceShowTool
+
         try:
             result = WorkspaceShowTool().execute(workspace=workspace)
         except WorkspaceError as exc:
@@ -427,6 +434,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Stop server and remove all auto-start registrations for a workspace."""
+        from ..tools.server import TeardownTool
+
         console.print("[bold cyan]hiro workspaces teardown[/bold cyan]")
         log.info("hiro workspaces teardown", purge=purge)
 

@@ -38,6 +38,8 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import MutedStatusLine from '$lib/features/chat-channels/shared/MutedStatusLine.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import ServerStartingBanner from '$lib/runtime/ServerStartingBanner.svelte';
+  import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
   import { cn } from '$lib/utils';
   import { ADMIN_SELECT, ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
 
@@ -528,6 +530,7 @@
         {/if}
         {#if selectedChannelId && channels.length > 0 && !channelsError}
           <div class="shrink-0 space-y-2 border-border border-t pt-3 font-sans text-sm">
+            <ServerStartingBanner />
             <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <label
@@ -610,11 +613,13 @@
                   onkeydown={(ev) => {
                     if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
                       ev.preventDefault();
+                      if (!serverReadiness.ready) return;
                       void submitDraftAndRefocus();
                       return;
                     }
                     if (ev.key === 'Enter' && !ev.shiftKey) {
                       ev.preventDefault();
+                      if (!serverReadiness.ready) return;
                       void submitDraftAndRefocus();
                     }
                   }}
@@ -622,8 +627,10 @@
                 ></textarea>
                 <Button
                   class="h-11 min-w-11 self-stretch px-0"
-                  title="Send message (Enter)"
-                  disabled={composingBusy || !draftMessage.trim()}
+                  title={serverReadiness.ready
+                    ? 'Send message (Enter)'
+                    : 'HiroServer is still starting — send will be available momentarily.'}
+                  disabled={composingBusy || !draftMessage.trim() || !serverReadiness.ready}
                   onclick={() => void submitDraftAndRefocus()}
                 >
                   <Send size={20} />

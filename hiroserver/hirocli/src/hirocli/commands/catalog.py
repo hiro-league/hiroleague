@@ -9,11 +9,9 @@ from rich.console import Console
 from rich.table import Table
 
 from ..domain.model_catalog import MODEL_KINDS, get_model_catalog, reload_model_catalog
-from ..tools.llm_catalog import (
-    LlmCatalogGetModelTool,
-    LlmCatalogListModelsTool,
-    LlmCatalogListProvidersTool,
-)
+
+# Tool imports happen inside each command body to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 
 def register(catalog_app: typer.Typer, console: Console) -> None:
@@ -28,6 +26,8 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List providers from the bundled LLM catalog."""
+        from ..tools.llm_catalog import LlmCatalogListProvidersTool
+
         result = LlmCatalogListProvidersTool().execute(hosting=hosting)
         if not result.providers:
             console.print("[dim]No providers match the filter.[/dim]")
@@ -65,6 +65,8 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List models from the bundled LLM catalog."""
+        from ..tools.llm_catalog import LlmCatalogListModelsTool
+
         result = LlmCatalogListModelsTool().execute(
             provider_id=provider,
             model_kind=kind,
@@ -95,6 +97,8 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
         model_id: str = typer.Argument(..., help="Canonical id, e.g. openai:gpt-5.4"),
     ) -> None:
         """Show one model and its provider from the catalog."""
+        from ..tools.llm_catalog import LlmCatalogGetModelTool
+
         try:
             result = LlmCatalogGetModelTool().execute(model_id=model_id)
         except ValueError as exc:

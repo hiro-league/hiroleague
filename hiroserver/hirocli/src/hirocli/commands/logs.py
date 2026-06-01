@@ -9,7 +9,9 @@ from rich.console import Console
 from rich.table import Table
 
 from ..domain.workspace import WorkspaceError
-from ..tools.logs import LogSearchTool, LogTailTool
+
+# Tool imports happen inside each command body to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 
 def register(logs_app: typer.Typer, console: Console) -> None:
@@ -52,6 +54,8 @@ def register(logs_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Search log files for entries matching the given filters."""
+        from ..tools.logs import LogSearchTool
+
         try:
             result = LogSearchTool().execute(
                 source=source,
@@ -127,6 +131,8 @@ def register(logs_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Show the most recent log entries."""
+        from ..tools.logs import LogTailTool
+
         try:
             result = LogTailTool().execute(
                 source=source,

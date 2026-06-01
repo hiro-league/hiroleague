@@ -26,12 +26,9 @@ from ..domain.preferences import load_preferences, save_preferences
 from ..domain.workspace import WorkspaceError, resolve_workspace
 
 logger = logging.getLogger(__name__)
-from ..tools.provider import (
-    AvailableModelsListTool,
-    ProviderAddApiKeyTool,
-    ProviderListConfiguredTool,
-    ProviderRemoveTool,
-)
+
+# Tool imports happen inside each command body / helper to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 
 def _mask_env_value(value: str, tail: int = 4) -> str:
@@ -42,6 +39,8 @@ def _mask_env_value(value: str, tail: int = 4) -> str:
 
 def print_provider_summary_table(console: Console, *, workspace: str | None) -> None:
     """Print the same configured-provider table as ``hiro provider list``."""
+    from ..tools.provider import ProviderListConfiguredTool
+
     result = ProviderListConfiguredTool().execute(workspace=workspace)
     if not result.providers:
         console.print("[dim]No providers configured for this workspace.[/dim]")
@@ -375,6 +374,8 @@ def register(provider_app: typer.Typer, console: Console) -> None:
         if not key.strip():
             console.print("[red]Empty key — aborted.[/red]")
             raise typer.Exit(1)
+        from ..tools.provider import ProviderAddApiKeyTool
+
         try:
             result = ProviderAddApiKeyTool().execute(
                 provider_id=provider_id,
@@ -416,6 +417,8 @@ def register(provider_app: typer.Typer, console: Console) -> None:
         ):
             console.print("Aborted.")
             raise typer.Exit(0)
+        from ..tools.provider import ProviderRemoveTool
+
         try:
             result = ProviderRemoveTool().execute(
                 provider_id=provider_id, workspace=workspace
@@ -587,6 +590,8 @@ def register_models_command(app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List models available in this workspace (configured providers only)."""
+        from ..tools.provider import AvailableModelsListTool
+
         try:
             result = AvailableModelsListTool().execute(
                 workspace=workspace,

@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+
+# NOTE: ``langchain_text_splitters/__init__.py`` (upstream) eagerly imports
+# ``langchain_text_splitters.sentence_transformers`` which pulls in
+# ``sentence_transformers`` → torch + transformers + sklearn (~10s cold on
+# Windows). This file is loaded transitively by ``services.knowledge.service``
+# on every CLI invocation, so we defer the import to actual chunk time.
 
 from hirocli.services.knowledge.constants import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
 
@@ -85,6 +90,13 @@ def chunk_markdown(
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     respect_headings: bool = True,
 ) -> list[dict[str, str | None]]:
+    # Deferred import: see module docstring — avoids dragging in torch on every
+    # CLI invocation just because something imported the chunker.
+    from langchain_text_splitters import (
+        MarkdownHeaderTextSplitter,
+        RecursiveCharacterTextSplitter,
+    )
+
     if respect_headings:
         header_splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=[

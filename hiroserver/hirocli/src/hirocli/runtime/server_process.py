@@ -184,6 +184,26 @@ async def _main(
     # Characters must exist before data.db seeds the default channel (FK by id string).
     seed_default_characters(workspace_path)
     ensure_data_db(workspace_path)
+
+    # --- Launch the admin UI as early as possible ---
+    # Once `ctx` is built (line above) and both DBs exist, the admin UI has
+    # everything it needs: ctx.workspace_path / ctx.config.admin_port /
+    # ctx.stop_event / ctx.preferences (set in ServerContext.__post_init__) and
+    # the file-backed registries the disk-reading admin pages query.
+    # Routes that need late-bound state (knowledge_manager, memory_service,
+    # metrics_collector, main HTTP) are already defensive and fall back to
+    # on-demand construction or return a `not available` payload that the UI
+    # surfaces via the readiness banner.
+    # This shaves ~9 s off the "admin port bound" moment because the rest of
+    # _main below (TTS load, AgentManager, etc.) runs after this point.
+    admin_task: asyncio.Task[None] | None = None
+    if admin:
+        from hirocli.admin.run import run_admin_ui_logged
+
+        admin_task = asyncio.create_task(
+            run_admin_ui_logged(ctx), name="admin_ui"
+        )
+
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.workspace import workspace_id_for_path
     from hirocli.runtime.knowledge_manager import KnowledgeManager
@@ -243,7 +263,11 @@ async def _main(
     )
 
     # --- Launch all coroutines ---
-    coros = [
+    # Admin UI was started earlier (see the `admin_task` block above) so it can
+    # bind admin_port before TTS / AgentManager / metrics startup. We include
+    # the existing admin_task in the gather list so cancellation propagates on
+    # shutdown.
+    coros: list = [
         run_http_server(ctx),
         channel_manager.run(),
         comm_manager.serve(),
@@ -251,11 +275,8 @@ async def _main(
         knowledge_manager.serve(),
         metrics_collector.run(),
     ]
-    if admin:
-        from hirocli.admin.run import run_admin_ui_logged
-
-        # run_admin_ui_logged: startup errors must not disappear inside gather(return_exceptions=True).
-        coros.append(run_admin_ui_logged(ctx))
+    if admin_task is not None:
+        coros.append(admin_task)
 
     server_task = asyncio.ensure_future(
         asyncio.gather(*coros, return_exceptions=True)

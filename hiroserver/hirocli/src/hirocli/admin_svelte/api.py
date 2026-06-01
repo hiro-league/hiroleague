@@ -25,6 +25,7 @@ from hirocli.admin_svelte.routes.memory import memory_router
 from hirocli.admin_svelte.routes.metrics import metrics_router
 from hirocli.admin_svelte.routes.preferences import preferences_router
 from hirocli.admin_svelte.routes.providers import providers_router
+from hirocli.admin_svelte.routes.runtime import runtime_router
 from hirocli.admin_svelte.routes.workspaces import workspaces_router
 
 api_router = APIRouter(prefix="/api", tags=["hiro-admin"])
@@ -43,6 +44,7 @@ api_router.include_router(channels_router)
 api_router.include_router(devices_router)
 api_router.include_router(logs_router)
 api_router.include_router(metrics_router)
+api_router.include_router(runtime_router)
 api_router.include_router(events_router)
 
 

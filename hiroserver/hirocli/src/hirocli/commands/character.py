@@ -11,14 +11,9 @@ from rich.console import Console
 from rich.table import Table
 
 from ..domain.workspace import WorkspaceError
-from ..tools.character import (
-    CharacterCreateTool,
-    CharacterDeleteTool,
-    CharacterGetTool,
-    CharacterListTool,
-    CharacterUpdateTool,
-    CharacterUploadPhotoTool,
-)
+
+# Tool imports happen inside each command body to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 log = Logger.get("CLI.CHARACTER")
 
@@ -33,6 +28,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List characters in the workspace."""
+        from ..tools.character import CharacterListTool
+
         try:
             result = CharacterListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
@@ -72,6 +69,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Show one character (including prompt and backstory)."""
+        from ..tools.character import CharacterGetTool
+
         try:
             result = CharacterGetTool().execute(character_id=character_id, workspace=workspace)
         except WorkspaceError as exc:
@@ -117,6 +116,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         extras_json: Optional[str] = typer.Option(None, "--extras-json", help="JSON object."),
     ) -> None:
         """Create a new character."""
+        from ..tools.character import CharacterCreateTool
+
         log.info("hiro character create", character_id=character_id)
         try:
             result = CharacterCreateTool().execute(
@@ -157,6 +158,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         extras_json: Optional[str] = typer.Option(None, "--extras-json"),
     ) -> None:
         """Update character fields (only options you pass are applied)."""
+        from ..tools.character import CharacterUpdateTool
+
         if all(
             x is None
             for x in (
@@ -202,6 +205,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Delete a character (not allowed for the default)."""
+        from ..tools.character import CharacterDeleteTool
+
         log.info("hiro character delete", character_id=character_id)
         try:
             result = CharacterDeleteTool().execute(character_id=character_id, workspace=workspace)
@@ -227,6 +232,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Copy an image into the character folder as photo.<ext>."""
+        from ..tools.character import CharacterUploadPhotoTool
+
         try:
             result = CharacterUploadPhotoTool().execute(
                 character_id=character_id,

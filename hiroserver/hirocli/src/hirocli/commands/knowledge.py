@@ -1,4 +1,10 @@
-"""Knowledge subcommands: markdown ingest and vector search."""
+"""Knowledge subcommands: markdown ingest and vector search.
+
+NOTE: knowledge tools transitively import the langchain / sentence-transformers
+/ torch stack (~10s cold). Each subcommand imports its tool inside the function
+body so loading ``commands/knowledge.py`` (which happens on every ``hiro …``
+invocation via ``commands/app.py``) stays cheap.
+"""
 
 from __future__ import annotations
 
@@ -8,14 +14,6 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.table import Table
-
-from ..tools.knowledge import (
-    KnowledgeIngestTool,
-    KnowledgeJobStatusTool,
-    KnowledgeListDocumentsTool,
-    KnowledgeScanFolderTool,
-    KnowledgeSearchTool,
-)
 
 
 def _split_tags(value: str | None) -> list[str]:
@@ -34,6 +32,8 @@ def register(knowledge_app: typer.Typer, console: Console) -> None:
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help="Workspace to use."),
     ) -> None:
         """Scan a folder and show supported ingest candidates."""
+        from ..tools.knowledge import KnowledgeScanFolderTool
+
         result = KnowledgeScanFolderTool().execute(
             folder=str(folder),
             recursive=recursive,
@@ -63,6 +63,8 @@ def register(knowledge_app: typer.Typer, console: Console) -> None:
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help="Workspace to use."),
     ) -> None:
         """Ingest markdown files and wait for completion."""
+        from ..tools.knowledge import KnowledgeIngestTool
+
         result = KnowledgeIngestTool().execute(
             paths=[str(path) for path in paths],
             owner_kind=owner_kind,
@@ -89,6 +91,8 @@ def register(knowledge_app: typer.Typer, console: Console) -> None:
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help="Workspace to use."),
     ) -> None:
         """Show one persisted ingestion job."""
+        from ..tools.knowledge import KnowledgeJobStatusTool
+
         result = KnowledgeJobStatusTool().execute(job_id=job_id, workspace=workspace)
         console.print_json(
             data={
@@ -111,6 +115,8 @@ def register(knowledge_app: typer.Typer, console: Console) -> None:
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help="Workspace to use."),
     ) -> None:
         """Search ingested knowledge chunks."""
+        from ..tools.knowledge import KnowledgeSearchTool
+
         filters = {
             "owner_kind": owner_kind,
             "owner_id": owner_id,
@@ -148,6 +154,8 @@ def register(knowledge_app: typer.Typer, console: Console) -> None:
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help="Workspace to use."),
     ) -> None:
         """List ingested knowledge documents."""
+        from ..tools.knowledge import KnowledgeListDocumentsTool
+
         result = KnowledgeListDocumentsTool().execute(
             status=status,
             owner_kind=owner_kind,

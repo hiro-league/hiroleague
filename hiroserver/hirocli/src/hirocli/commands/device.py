@@ -10,7 +10,9 @@ from rich.console import Console
 from rich.table import Table
 
 from ..domain.workspace import WorkspaceError
-from ..tools.device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
+
+# Tool imports happen inside each command body to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 log = Logger.get("CLI.DEVICE")
 
@@ -32,6 +34,8 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Generate a short-lived pairing code for onboarding a mobile device."""
+        from ..tools.device import DeviceAddTool
+
         log.info("hiro device add", ttl_seconds=ttl_seconds, code_length=code_length)
 
         try:
@@ -60,6 +64,8 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List approved paired devices."""
+        from ..tools.device import DeviceListTool
+
         try:
             result = DeviceListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
@@ -93,6 +99,8 @@ def register(device_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Revoke a previously approved paired device."""
+        from ..tools.device import DeviceRevokeTool
+
         log.info("hiro device revoke", device_id=device_id)
 
         try:

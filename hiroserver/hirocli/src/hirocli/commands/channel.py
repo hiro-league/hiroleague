@@ -21,14 +21,9 @@ from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 
 from ..domain.channel_config import load_channel_config
 from ..domain.workspace import WorkspaceError, resolve_workspace
-from ..tools.channel import (
-    ChannelDisableTool,
-    ChannelEnableTool,
-    ChannelInstallTool,
-    ChannelListTool,
-    ChannelRemoveTool,
-    ChannelSetupTool,
-)
+
+# Tool imports happen inside each command body to keep ``commands/app.py``
+# import cheap on fast paths like ``hiro start``.
 
 log = Logger.get("CLI.CHANNEL")
 
@@ -42,6 +37,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """List all configured channel plugins."""
+        from ..tools.channel import ChannelListTool
+
         try:
             result = ChannelListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
@@ -80,6 +77,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Install a channel plugin via uv tool install."""
+        from ..tools.channel import ChannelInstallTool
+
         pkg = package or f"hiro-channel-{name}"
         log.info("hiro channel install", channel=name, package=pkg, editable=editable)
 
@@ -115,6 +114,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         enable: bool = typer.Option(True, "--enable/--no-enable", help="Enable on setup"),
     ) -> None:
         """Configure and register a channel plugin."""
+        from ..tools.channel import ChannelSetupTool
+
         workspace_path = _resolve_workspace_path(workspace, console)
         existing = load_channel_config(workspace_path, name)
 
@@ -160,6 +161,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Enable a configured channel plugin."""
+        from ..tools.channel import ChannelEnableTool
+
         log.info("hiro channel enable", channel=name)
 
         try:
@@ -177,6 +180,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Disable a channel plugin without removing its configuration."""
+        from ..tools.channel import ChannelDisableTool
+
         log.info("hiro channel disable", channel=name)
 
         try:
@@ -195,6 +200,8 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     ) -> None:
         """Remove a channel plugin's configuration."""
+        from ..tools.channel import ChannelRemoveTool
+
         if not yes:
             typer.confirm(f"Remove configuration for channel '{name}'?", abort=True)
 
