@@ -1,0 +1,175 @@
+# Adam's-year question bank for the Graphiti pivot eval (category-tagged).
+# Pairs with eval/adam_year.episodes.jsonl. Each row: id, category, (subcategory),
+# question, and either expected_fragments (substring lower-bound) OR
+# expected_kind: abstain (negative control). must_not_contain catches superseded-fact
+# leakage; requires names the lens where graph/mix should win. See
+# docs/knowledge-graphiti-pivot-design.md §8.4–8.6.
+
+# ---- direct recall ----
+- id: q_direct_01
+  category: direct
+  question: "What is the name of Adam's wife?"
+  expected_fragments: ["Nora"]
+- id: q_direct_02
+  category: direct
+  question: "What company did Adam start working at in January?"
+  expected_fragments: ["Brightloom"]
+- id: q_direct_03
+  category: direct
+  question: "What is Adam's favorite cuisine?"
+  expected_fragments: ["Thai"]
+- id: q_direct_04
+  category: direct
+  question: "What is the name of Adam's brother?"
+  expected_fragments: ["Sam"]
+- id: q_direct_05
+  category: direct
+  question: "On what date is Adam's father's birthday?"
+  expected_fragments: ["March 12"]
+
+# ---- single hop ----
+- id: q_single_01
+  category: single_hop
+  question: "Who is Omar married to?"
+  expected_fragments: ["Lina"]
+  requires: [graph]
+- id: q_single_02
+  category: single_hop
+  question: "Where does Omar work?"
+  expected_fragments: ["Meridian Bank"]
+  requires: [graph]
+- id: q_single_03
+  category: single_hop
+  question: "What is the name of Adam's sister?"
+  expected_fragments: ["Lina"]
+
+# ---- multi hop ----
+- id: q_multi_01
+  category: multi_hop
+  subcategory: relational
+  question: "What does Adam's sister's husband do for work?"
+  expected_fragments: ["Meridian Bank"]
+  requires: [graph]
+- id: q_multi_02
+  category: multi_hop
+  subcategory: person_event_pref
+  question: "Who organized the November trip, and what kind of music do they like?"
+  expected_fragments: ["Marco", "jazz"]
+  requires: [graph]
+- id: q_multi_03
+  category: multi_hop
+  question: "What city does Adam's sister live in now, and in what country?"
+  expected_fragments: ["Kyoto", "Japan"]
+  requires: [graph, temporal]
+
+# ---- causal ----
+- id: q_causal_01
+  category: causal
+  question: "Why did Adam start training for a marathon?"
+  expected_fragments: ["blood pressure"]
+  requires: [graph]
+- id: q_causal_02
+  category: causal
+  question: "Why did Adam buy Asics shoes?"
+  expected_fragments: ["marathon"]
+  requires: [graph]
+
+# ---- non-existing entity (abstain) ----
+- id: q_nonexist_01
+  category: non_existing
+  question: "What is the name of Adam's dog?"
+  expected_kind: abstain
+
+# ---- direct event recall ----
+- id: q_event_01
+  category: event_recall
+  question: "Did Adam run a marathon, and in which month?"
+  expected_fragments: ["June"]
+- id: q_event_02
+  category: event_recall
+  question: "What happened with Adam's job in August?"
+  expected_fragments: ["Cedar Labs"]
+  requires: [temporal]
+
+# ---- direct preference recall ----
+- id: q_pref_01
+  category: preference_recall
+  question: "What brand of running shoes does Adam wear?"
+  expected_fragments: ["Asics"]
+- id: q_pref_02
+  category: preference_recall
+  question: "Did Adam become vegetarian?"
+  expected_fragments: ["vegetarian"]
+
+# ---- temporal: order / latest / comparison ----
+- id: q_temporal_order_01
+  category: temporal
+  subcategory: order
+  question: "Did Adam change jobs before or after he moved to Cambridge?"
+  expected_fragments: ["after"]
+  requires: [temporal]
+- id: q_temporal_latest_01
+  category: temporal
+  subcategory: latest_state
+  question: "Where does Adam work now?"
+  expected_fragments: ["Cedar Labs"]
+  must_not_contain: ["Brightloom"]
+  requires: [temporal]
+- id: q_temporal_latest_02
+  category: temporal
+  subcategory: latest_state
+  question: "What city does Adam live in now?"
+  expected_fragments: ["Cambridge"]
+  must_not_contain: ["Boston"]
+  requires: [temporal]
+- id: q_temporal_cmp_01
+  category: temporal
+  subcategory: comparison
+  question: "About how many months after joining Brightloom did Adam leave it? Answer in words."
+  expected_fragments: ["seven"]
+  requires: [temporal]
+
+# ---- knowledge update / conflict ----
+- id: q_update_01
+  category: knowledge_update
+  subcategory: conflict
+  question: "What is Adam's current favorite coffee?"
+  expected_fragments: ["oat", "latte"]
+  must_not_contain: ["espresso"]
+  requires: [graph, temporal]
+
+# ---- open domain (memory + world knowledge) ----
+- id: q_open_01
+  category: open_domain
+  question: "What currency would Adam's sister use where she lives now?"
+  expected_fragments: ["yen"]
+  requires: [graph, world]
+
+# ---- misleading: entity confusion / contradictory trap / false premise ----
+- id: q_mislead_ec_01
+  category: misleading
+  subcategory: entity_confusion
+  question: "Adam's coworker named Sam — what is their full name?"
+  expected_fragments: ["Reyes"]
+  requires: [graph]
+- id: q_mislead_ct_01
+  category: misleading
+  subcategory: contradictory_trap
+  question: "Who is Adam's manager at Brightloom now?"
+  expected_kind: abstain
+  requires: [temporal]
+- id: q_mislead_fp_01
+  category: misleading
+  subcategory: false_premise
+  question: "When did Adam visit Paris?"
+  expected_kind: abstain
+
+# ---- abstention (unanswerable) ----
+- id: q_abstain_01
+  category: abstention
+  question: "What is Adam's blood type?"
+  expected_kind: abstain
+- id: q_abstain_02
+  category: abstention
+  question: "What is the name of Adam's pet cat?"
+  expected_kind: abstain

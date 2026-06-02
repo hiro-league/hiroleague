@@ -20,18 +20,19 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from ..services.knowledge.eval_runner import (
+    ADAM_EVAL_TAG,
     DEFAULT_CORPUS_DIR,
     DEFAULT_QUESTIONS_FILE,
     EVAL_SYNTHETIC_TAG,
     collect_synthetic_doc_ids,
+    ingest_adam_corpus_via_service,
     ingest_synthetic_corpus_via_service,
+    load_adam_questions,
     load_questions,
     run_eval,
 )
-from ..services.knowledge.graph.ingest import GraphIngestService
-from ..services.knowledge.graph.ladybug_adapter import LadybugGraphStore
 from .knowledge import _close_if_owned, _resolve_service
-from .knowledge_graph import _graph_db_path, _run_graph_ingest_for_documents
+from .knowledge_graph import _run_graph_ingest_for_documents
 from .base import Tool, ToolParam
 
 log = Logger.get("SVC.KNOWLEDGE.EVAL.TOOL")
@@ -80,6 +81,17 @@ class KnowledgeL3EvalRunTool(Tool):
             "graph already built. Default false.",
             required=False,
         ),
+        "corpus_source": ToolParam(
+            str,
+            "'synthetic' (default, the .md L3 corpus) or 'adam' (the temporal JSONL "
+            "episode corpus). For 'adam', ingest_synthetic doubles as 'ingest the corpus'.",
+            required=False,
+        ),
+        "question_ids": ToolParam(
+            list[str],
+            "Adam path only: run just these question ids (empty = all).",
+            required=False,
+        ),
         "run_id": ToolParam(
             str,
             "Correlation id for the event stream (auto-generated when blank).",
@@ -97,6 +109,8 @@ class KnowledgeL3EvalRunTool(Tool):
         self,
         ingest_synthetic: bool = False,
         build_graph: bool = False,
+        corpus_source: str = "synthetic",
+        question_ids: list[str] | None = None,
         run_id: str = "",
         workspace: str | None = None,
     ) -> dict[str, Any]:
@@ -104,6 +118,8 @@ class KnowledgeL3EvalRunTool(Tool):
             self.execute_async(
                 ingest_synthetic=ingest_synthetic,
                 build_graph=build_graph,
+                corpus_source=corpus_source,
+                question_ids=question_ids,
                 run_id=run_id,
                 workspace=workspace,
             )
@@ -113,6 +129,8 @@ class KnowledgeL3EvalRunTool(Tool):
         self,
         ingest_synthetic: bool = False,
         build_graph: bool = False,
+        corpus_source: str = "synthetic",
+        question_ids: list[str] | None = None,
         run_id: str = "",
         workspace: str | None = None,
     ) -> dict[str, Any]:
@@ -120,6 +138,35 @@ class KnowledgeL3EvalRunTool(Tool):
         runtime = getattr(self, "_runtime", None)
         service, workspace_path, owned = _resolve_service(runtime, workspace)
         try:
+            # Adam temporal corpus path. ``ingest_synthetic`` doubles as "ingest the
+            # corpus" so subsets can re-run without re-ingesting; ``question_ids``
+            # narrows the run to a selected subset.
+            if corpus_source == "adam":
+                episodes = 0
+                if ingest_synthetic:
+                    episodes = await ingest_adam_corpus_via_service(service, workspace_path)
+                questions = load_adam_questions()
+                if question_ids:
+                    wanted = set(question_ids)
+                    questions = [q for q in questions if q["id"] in wanted]
+                summary = await run_eval(
+                    service,
+                    workspace_path,
+                    questions=questions,
+                    run_id=rid,
+                    filters={"tags": [ADAM_EVAL_TAG]},
+                )
+                return {
+                    "run_id": rid,
+                    "summary": summary.to_payload(),
+                    "questions": [
+                        q.to_payload(index=i, total=len(summary.questions))
+                        for i, q in enumerate(summary.questions)
+                    ],
+                    "corpus_source": "adam",
+                    "episodes_ingested": episodes,
+                }
+
             ingested_ids: list[str] = []
             if ingest_synthetic:
                 log.info("⬇️ eval — ingesting synthetic corpus · run_id=%s", rid)

@@ -6,11 +6,12 @@ KNOWLEDGE_DIR = "knowledge"
 DB_FILENAME = "knowledge.db"
 QDRANT_DIR = "qdrant"
 COLLECTION_NAME = "hiro_knowledge"
-# L3 prototype: per-workspace embedded graph (LadybugDB, Kuzu-lineage). Holds
-# entity/relationship structure for graph-aware retrieval; chunk evidence stays
-# in Qdrant. See docs/knowledge-l3-prototype-plan.md.
+# Per-workspace embedded graph dir. Backs the Graphiti temporal knowledge graph
+# (entities + facts + temporal windows); chunk evidence stays in Qdrant. See
+# docs/knowledge-graphiti-pivot-design.md.
 GRAPH_DIR = "graph"
-LADYBUG_DB_FILENAME = "ladybug.db"
+# The embedded Kuzu graph DB file that backs Graphiti.
+KUZU_DB_FILENAME = "graphiti_kuzu.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_VECTOR_SIZE = 384
 # Hybrid retrieval: BM25 sparse vectors fused with the dense vector via RRF. BM25 is
@@ -43,8 +44,8 @@ KNOWLEDGE_EVAL_SETUP_PROGRESS = "knowledge.eval.setup_progress"   # ingest / gra
 KNOWLEDGE_EVAL_QUESTION_COMPLETED = "knowledge.eval.question_completed"
 KNOWLEDGE_EVAL_COMPLETED = "knowledge.eval.completed"
 KNOWLEDGE_EVAL_FAILED = "knowledge.eval.failed"
-# L3 graph viz — live updates for the admin "Graph" tab. Emitted by
-# ``GraphIngestService`` as nodes/edges are written so the force-graph view can
+# Graph viz — live updates for the admin "Graph" tab. Emitted by Graphiti ingest
+# (``GraphitiMemoryService.ingest_chunks``) as episodes are processed so the view can
 # pop new elements in real time over the existing ``/knowledge/events`` SSE
 # stream (no new transport). ``ingest_completed`` lets the UI run one reconciling
 # full export to heal any deltas dropped under the SSE queue cap.

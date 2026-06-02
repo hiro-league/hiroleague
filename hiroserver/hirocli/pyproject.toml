@@ -79,8 +79,8 @@ dependencies = [
     "hirogate~=0.1.3",
     "langchain-qdrant>=1.1.0",
     "langdetect>=1.0.9",
-    "ladybug==0.17.0",
-    "rapidfuzz==3.14.5",
+    "graphiti-core==0.29.1",
+    "kuzu==0.11.3",
 ]
 
 [project.urls]

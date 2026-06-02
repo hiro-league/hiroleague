@@ -12,14 +12,16 @@
   this component is a thin view.
 -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { ExternalLink, LoaderCircle, Play, Trash2 } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
+  import type { EvalQuestionItem } from '$lib/api/knowledge';
   import {
     createKnowledgeEvalModel,
+    EVAL_MAX_SELECTED,
     type KnowledgeEvalModel
   } from '$lib/features/knowledge/state/knowledge-eval.svelte';
 
@@ -37,6 +39,25 @@
   });
 
   onDestroy(() => eval_.teardown());
+  // Load the question bank once (for the checklist) when the panel mounts.
+  onMount(() => {
+    if (eval_.corpusSource === 'adam') void eval_.loadQuestions();
+  });
+
+  // Group the question bank by category for the checklist.
+  const groups = $derived.by(() => {
+    const map = new Map<string, EvalQuestionItem[]>();
+    for (const q of eval_.questions) {
+      const arr = map.get(q.category) ?? [];
+      arr.push(q);
+      map.set(q.category, arr);
+    }
+    return [...map.entries()];
+  });
+
+  function categoryAllSelected(items: EvalQuestionItem[]): boolean {
+    return items.length > 0 && items.every((q) => eval_.isSelected(q.id));
+  }
 
   // Header summary so the collapsed card still tells the user the current state.
   const headerSummary = $derived.by(() => {
@@ -89,26 +110,33 @@
        Disabled while a run is in flight. -->
   <div class="grid gap-3">
     <div class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
-      <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
-        <input
-          type="checkbox"
-          class="size-4"
-          bind:checked={eval_.ingestSynthetic}
+      <label class="flex select-none items-center gap-2 font-sans text-sm">
+        <span class="text-muted-foreground">Corpus</span>
+        <select
+          class="h-8 rounded-md border bg-background px-2 text-sm"
+          value={eval_.corpusSource}
+          onchange={(e) =>
+            eval_.setCorpusSource(e.currentTarget.value as 'synthetic' | 'adam')}
           disabled={isBusy}
-        />
-        <span>Ingest synthetic corpus</span>
-        <span class="text-xs text-muted-foreground">(eval/l3_synthetic/*.md, tagged _l3_eval_synthetic)</span>
+        >
+          <option value="adam">Adam (temporal · 35 episodes)</option>
+          <option value="synthetic">Synthetic L3 (.md)</option>
+        </select>
       </label>
       <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
-        <input
-          type="checkbox"
-          class="size-4"
-          bind:checked={eval_.buildGraph}
-          disabled={isBusy}
-        />
-        <span>Build graph</span>
-        <span class="text-xs text-muted-foreground">(LLM extraction over the synthetic docs)</span>
+        <input type="checkbox" class="size-4" bind:checked={eval_.ingestSynthetic} disabled={isBusy} />
+        <span>
+          {eval_.corpusSource === 'adam'
+            ? 'Ingest corpus (episodes → Qdrant + graph)'
+            : 'Ingest synthetic corpus'}
+        </span>
       </label>
+      {#if eval_.corpusSource === 'synthetic'}
+        <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
+          <input type="checkbox" class="size-4" bind:checked={eval_.buildGraph} disabled={isBusy} />
+          <span>Build graph</span>
+        </label>
+      {/if}
       <div class="ml-auto flex gap-2">
         {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage}
           <Button variant="outline" disabled={isBusy} onclick={eval_.clear} title="Clear the last run's results">
@@ -125,6 +153,88 @@
         </Button>
       </div>
     </div>
+
+    <!-- Question checklist (Adam path only). Empty selection = run all. Cap 50. -->
+    {#if eval_.corpusSource === 'adam'}
+      <div class="rounded-md border">
+        <div class="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-xs">
+          <span class="font-semibold">Questions</span>
+          <span class="text-muted-foreground">
+            {eval_.selectedCount}/{EVAL_MAX_SELECTED} selected{#if eval_.selectedCount === 0}
+              · none = run all{/if}
+          </span>
+          {#if eval_.questionsLoading}
+            <LoaderCircle size={12} class="animate-spin" aria-hidden="true" />
+          {/if}
+          <div class="ml-auto flex gap-2">
+            <button
+              type="button"
+              class="rounded border px-2 py-0.5 hover:bg-muted disabled:opacity-50"
+              disabled={eval_.selectedCount === 0 || isBusy}
+              onclick={eval_.clearSelection}
+            >
+              Clear selection
+            </button>
+            <button
+              type="button"
+              class="rounded border px-2 py-0.5 hover:bg-muted disabled:opacity-50"
+              disabled={isBusy}
+              onclick={() => void eval_.loadQuestions()}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+        {#if eval_.questionsError}
+          <p class="px-3 py-2 text-xs text-destructive">{eval_.questionsError}</p>
+        {:else if eval_.questions.length === 0 && !eval_.questionsLoading}
+          <p class="px-3 py-2 text-xs text-muted-foreground">No questions loaded.</p>
+        {:else}
+          <div class="max-h-72 overflow-y-auto px-3 py-2">
+            {#each groups as [category, items] (category)}
+              <div class="mb-2">
+                <label
+                  class="flex select-none items-center gap-2 py-1 font-sans text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  <input
+                    type="checkbox"
+                    class="size-3.5"
+                    checked={categoryAllSelected(items)}
+                    disabled={isBusy}
+                    onchange={(e) =>
+                      eval_.setCategorySelected(
+                        items.map((q) => q.id),
+                        e.currentTarget.checked
+                      )}
+                  />
+                  {category}
+                  <span class="font-normal normal-case">({items.length})</span>
+                </label>
+                <div class="grid gap-0.5 pl-5">
+                  {#each items as q (q.id)}
+                    <label class="flex cursor-pointer select-none items-start gap-2 py-0.5 font-sans text-sm">
+                      <input
+                        type="checkbox"
+                        class="mt-0.5 size-3.5"
+                        checked={eval_.isSelected(q.id)}
+                        disabled={isBusy}
+                        onchange={() => eval_.toggleQuestion(q.id)}
+                      />
+                      <span class="min-w-0">
+                        {q.question}
+                        {#if q.subcategory}
+                          <span class="text-xs text-muted-foreground"> · {q.subcategory}</span>
+                        {/if}
+                      </span>
+                    </label>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Failure banner (transport / setup). Per-question failures show as ✗ in the table. -->
     {#if eval_.status === 'failed' && eval_.failureMessage}
@@ -235,11 +345,51 @@
       </div>
     {/if}
 
+    <!-- Per-category × flat/graph breakdown (where graph helps). -->
+    {#if eval_.summary?.by_category && Object.keys(eval_.summary.by_category).length > 0}
+      {@const bc = eval_.summary.by_category}
+      <div class="overflow-x-auto rounded-md border">
+        <table class="w-full border-collapse font-sans text-sm">
+          <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Category</th>
+              <th class="px-2 py-1.5 text-center">Flat</th>
+              <th class="px-2 py-1.5 text-center">Graph</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each Object.entries(bc) as [cat, st] (cat)}
+              <tr class="border-t">
+                <td class="px-2 py-1.5">{cat}</td>
+                <td class="px-2 py-1.5 text-center font-mono tabular-nums text-muted-foreground">
+                  {st.flat_pass}/{st.total}
+                </td>
+                <td
+                  class="px-2 py-1.5 text-center font-mono tabular-nums {st.graph_pass > st.flat_pass
+                    ? 'font-semibold text-emerald-600'
+                    : ''}"
+                >
+                  {st.graph_pass}/{st.total}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+
     {#if eval_.status === 'idle' && eval_.rows.length === 0 && !eval_.failureMessage}
       <p class="rounded-md border border-dashed px-3 py-6 text-center font-sans text-xs text-muted-foreground">
-        Runs the 12 synthetic questions from <code class="font-mono">eval/l3_questions.yaml</code> in
-        compare mode (flat vs graph-augmented). Results stream live and end with a PROCEED/PIVOT verdict.
-        First run: check both setup boxes. Subsequent runs: leave them off (graph and corpus stay in the workspace).
+        {#if eval_.corpusSource === 'adam'}
+          Ingests the 35-episode Adam corpus (Qdrant + Graphiti) and runs the selected questions in
+          compare mode (flat vs graph). Pick questions above (or leave all unselected to run every
+          one), check "Ingest corpus" on the first run, then Run. Results stream live with a
+          per-category breakdown and a PROCEED/PIVOT verdict.
+        {:else}
+          Runs the synthetic questions from <code class="font-mono">eval/l3_questions.yaml</code> in
+          compare mode (flat vs graph-augmented). First run: check both setup boxes. Subsequent runs:
+          leave them off (graph and corpus stay in the workspace).
+        {/if}
       </p>
     {/if}
   </div>

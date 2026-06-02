@@ -158,6 +158,13 @@ DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID = "knowledge_rewrite"
 # same graph mutations; reasoning off because we want JSON, not chain-of-thought.
 DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID = "knowledge_graph_extraction"
 DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID = "knowledge_graph_disambiguation"
+# Graphiti pivot — Graphiti uses two model tiers (ModelSize.medium / small). The
+# "extraction" tier is the structured-output extraction + edge model (Graphiti
+# fails on weak models per its README); the "small" tier handles cheaper sub-steps
+# (node dedupe, summaries, timestamp extraction). See
+# docs/knowledge-graphiti-pivot-design.md §5.1 / §10.
+DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID = "graphiti_extraction"
+DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID = "graphiti_small"
 
 
 def default_tuning_profiles() -> dict[str, TuningProfile]:
@@ -211,6 +218,26 @@ def default_tuning_profiles() -> dict[str, TuningProfile]:
             # Bounded output keeps cost negligible per ambiguous mention.
             temperature=0.0,
             max_tokens=512,
+            thinking="off",
+        ),
+        DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID: TuningProfile(
+            label="Graphiti extraction",
+            locked=True,
+            # Graphiti's main extraction + edge model (ModelSize.medium). MUST be a
+            # structured-output-capable model — the README warns weak models cause
+            # schema/ingestion failures. Deterministic; reasoning off (we want JSON);
+            # generous budget for multi-entity episodes.
+            temperature=0.0,
+            max_tokens=4096,
+            thinking="off",
+        ),
+        DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID: TuningProfile(
+            label="Graphiti small (sub-steps)",
+            locked=True,
+            # ModelSize.small: node dedupe, summaries, timestamp extraction. Cheaper
+            # than the main tier but bigger than a yes/no (summaries need room).
+            temperature=0.0,
+            max_tokens=2048,
             thinking="off",
         ),
     }
@@ -412,6 +439,42 @@ class KnowledgeRewritePreferences(BaseModel):
     default_on: bool = False
 
 
+KnowledgeGraphBackend = Literal["off", "graphiti", "mix"]
+KnowledgeGraphTemporalDefault = Literal["current", "all"]
+KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
+
+
+class KnowledgeGraphPreferences(BaseModel):
+    """Graphiti-backed temporal knowledge graph (the pivot from the L3 Ladybug slice).
+
+    ``backend`` is the master switch: ``off`` = flat Qdrant only (today); ``graphiti``
+    = answer from graph facts; ``mix`` = fuse graph facts with Qdrant passages (the
+    recommended path, decision G4). Every other field is an admin-settable knob — no
+    hardcoded params. See docs/knowledge-graphiti-pivot-design.md §9–10.
+    """
+
+    backend: KnowledgeGraphBackend = "off"
+    # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
+    extraction_model: str | None = None
+    extraction_tuning_profile: str = DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID
+    small_model: str | None = None
+    small_tuning_profile: str = DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID
+    # ``None`` → shares the knowledge dense embedder (decision G8).
+    embedder_model: str | None = None
+    # Default temporal lens at retrieval: current facts only vs include historical.
+    temporal_default: KnowledgeGraphTemporalDefault = "current"
+    # Opt-in (deferred feature): per-entity community clustering/summaries.
+    communities_enabled: bool = False
+    # Retrieval expansion radius (hops) when gathering related facts/chunks.
+    k_hop: int = Field(default=1, ge=1, le=3)
+    # Graphiti search rerank recipe for the fact-search leg.
+    search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+
+    @property
+    def embedder_model_resolved(self) -> str | None:
+        return (self.embedder_model or "").strip() or None
+
+
 class KnowledgePreferences(BaseModel):
     default_embedding_model: str | None = None
     default_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
@@ -419,6 +482,7 @@ class KnowledgePreferences(BaseModel):
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
     answering: KnowledgeAnsweringPreferences = Field(default_factory=KnowledgeAnsweringPreferences)
     rewrite: KnowledgeRewritePreferences = Field(default_factory=KnowledgeRewritePreferences)
+    graph: KnowledgeGraphPreferences = Field(default_factory=KnowledgeGraphPreferences)
 
     @property
     def default_embedding_model_resolved(self) -> str:
@@ -496,6 +560,14 @@ class WorkspacePreferences(BaseModel):
             raise ValueError(
                 f"Unknown knowledge.default_tuning_profile: {self.knowledge.default_tuning_profile}"
             )
+        for graph_profile_id in (
+            self.knowledge.graph.extraction_tuning_profile,
+            self.knowledge.graph.small_tuning_profile,
+        ):
+            if graph_profile_id not in self.tuning_profiles:
+                raise ValueError(
+                    f"Unknown knowledge.graph tuning profile: {graph_profile_id}"
+                )
         return self
 
 
@@ -844,6 +916,114 @@ def resolve_knowledge_graph_disambiguation_llm(
         tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
         workspace_id=workspace_id,
         credential_store=credential_store,
+    )
+
+
+def _resolve_graphiti_model(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    explicit_model: str | None,
+    tuning_profile_id: str,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve a Graphiti model tier.
+
+    Model id chain: explicit graph override (``knowledge.graph.*_model``) →
+    ``knowledge.answering.model`` → ``llm.default_chat``. Availability checks mirror
+    :func:`_resolve_knowledge_llm` (catalog + provider credentials). The tuning
+    profile is the per-tier graphiti profile.
+    """
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    explicit = (explicit_model or "").strip() or None
+    answering = (prefs.knowledge.answering.model or "").strip() or None
+    model_id = explicit or answering or prefs.llm.default_chat
+    if not model_id:
+        return None
+
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind("chat"):
+        return None
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            logger.debug(
+                "_resolve_graphiti_model: workspace path not in registry — %s", workspace_path
+            )
+            return None
+        store = CredentialStore(workspace_path, wid)
+
+    ams = AvailableModelsService(cat, store)
+    if not ams.is_model_available(model_id):
+        return None
+
+    tuning = _profile_tuning(prefs, tuning_profile_id)
+    return ResolvedModel(
+        model_id=model_id,
+        temperature=tuning.temperature,
+        max_tokens=tuning.max_tokens,
+        thinking=tuning.thinking,
+    )
+
+
+def resolve_graphiti_extraction_model(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Graphiti pivot — the main extraction + edge tier (``ModelSize.medium``)."""
+    return _resolve_graphiti_model(
+        prefs,
+        workspace_path,
+        explicit_model=prefs.knowledge.graph.extraction_model,
+        tuning_profile_id=prefs.knowledge.graph.extraction_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_graphiti_small_model(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Graphiti pivot — the cheap sub-step tier (``ModelSize.small``).
+
+    Falls back to the extraction model id when ``small_model`` is unset, so a single
+    configured model still drives both tiers (with their separate tuning profiles).
+    """
+    explicit = prefs.knowledge.graph.small_model or prefs.knowledge.graph.extraction_model
+    return _resolve_graphiti_model(
+        prefs,
+        workspace_path,
+        explicit_model=explicit,
+        tuning_profile_id=prefs.knowledge.graph.small_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str:
+    """Graphiti pivot — the embedder model id for node/fact embeddings.
+
+    ``knowledge.graph.embedder_model`` when set, else the shared knowledge dense
+    embedder (decision G8). Pure preference read — no availability check (the
+    embedder is resolved by ``create_embedding_model`` at bootstrap)."""
+    return (
+        prefs.knowledge.graph.embedder_model_resolved
+        or prefs.knowledge.default_embedding_model_resolved
     )
 
 

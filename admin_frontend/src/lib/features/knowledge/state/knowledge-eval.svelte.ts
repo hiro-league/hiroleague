@@ -20,7 +20,10 @@ import {
   type EvalSetupProgressPayload,
   type EvalStartedPayload
 } from '$lib/features/knowledge/shared/knowledge-events';
-import { runKnowledgeEval } from '$lib/api/knowledge';
+import { listEvalQuestions, runKnowledgeEval, type EvalQuestionItem } from '$lib/api/knowledge';
+
+/** Max questions selectable in the checklist (cap, per the design). */
+export const EVAL_MAX_SELECTED = 50;
 import { PREF_KEYS } from '$lib/preferences/keys';
 import {
   readLocalBoolean,
@@ -110,6 +113,72 @@ export function createKnowledgeEvalModel(deps: {
   let buildGraph = $state<boolean>(
     readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false)
   );
+
+  // Corpus + checklist state. Default to the Adam temporal corpus (the new path);
+  // 'synthetic' keeps the legacy .md L3 eval. The checklist + per-category results
+  // only apply on the Adam path.
+  let corpusSource = $state<'synthetic' | 'adam'>('adam');
+  let questions = $state<EvalQuestionItem[]>([]);
+  let questionsLoading = $state(false);
+  let questionsError = $state<string | null>(null);
+  // Selected question ids (capped at EVAL_MAX_SELECTED). Reassigned (new Set) on
+  // every mutation so Svelte 5 tracks it. Empty = run ALL questions.
+  let selected = $state<Set<string>>(new Set());
+
+  async function loadQuestions() {
+    if (corpusSource !== 'adam') {
+      questions = [];
+      return;
+    }
+    questionsLoading = true;
+    questionsError = null;
+    try {
+      const res = await listEvalQuestions('adam');
+      questions = res.data.questions ?? [];
+    } catch (err) {
+      questionsError = err instanceof Error ? err.message : 'Failed to load questions.';
+      questions = [];
+    } finally {
+      questionsLoading = false;
+    }
+  }
+
+  function setCorpusSource(v: 'synthetic' | 'adam') {
+    if (corpusSource === v) return;
+    corpusSource = v;
+    selected = new Set();
+    if (v === 'adam') void loadQuestions();
+    else questions = [];
+  }
+
+  function toggleQuestion(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      if (next.size >= EVAL_MAX_SELECTED) return; // cap reached — ignore
+      next.add(id);
+    }
+    selected = next;
+  }
+
+  /** Select/deselect a whole category's ids (respecting the cap on select). */
+  function setCategorySelected(ids: string[], on: boolean) {
+    const next = new Set(selected);
+    if (on) {
+      for (const id of ids) {
+        if (next.size >= EVAL_MAX_SELECTED) break;
+        next.add(id);
+      }
+    } else {
+      for (const id of ids) next.delete(id);
+    }
+    selected = next;
+  }
+
+  function clearSelection() {
+    selected = new Set();
+  }
 
   // Hydrate the run snapshot from session storage so leaving + returning to the
   // Ask tab shows the last completed table (mirrors knowledgeAskResult on the
@@ -237,10 +306,16 @@ export function createKnowledgeEvalModel(deps: {
     ensureSubscribed();
 
     try {
-      const res = await runKnowledgeEval({
+      const req: import('$lib/api/knowledge').EvalRunRequest = {
         ingest_synthetic: ingestSynthetic,
-        build_graph: buildGraph
-      });
+        build_graph: buildGraph,
+        corpus_source: corpusSource
+      };
+      // Empty selection on the Adam path = run ALL questions.
+      if (corpusSource === 'adam' && selected.size > 0) {
+        req.question_ids = [...selected];
+      }
+      const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
       // If a 'started' event already arrived before runId got set above, the
       // controller would have ignored it (isOurRun=false). In practice the
@@ -283,6 +358,18 @@ export function createKnowledgeEvalModel(deps: {
     get summary() { return summary; },
     get failureMessage() { return failureMessage; },
     get setupPhase() { return setupPhase; },
+    // Corpus + checklist surface.
+    get corpusSource() { return corpusSource; },
+    setCorpusSource,
+    get questions() { return questions; },
+    get questionsLoading() { return questionsLoading; },
+    get questionsError() { return questionsError; },
+    get selectedCount() { return selected.size; },
+    isSelected: (id: string) => selected.has(id),
+    toggleQuestion,
+    setCategorySelected,
+    clearSelection,
+    loadQuestions,
     start,
     clear,
     teardown

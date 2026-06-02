@@ -138,6 +138,55 @@ class KnowledgeVectorStore:
             with self._write_lock:
                 client.upsert(collection_name=self.collection_name, points=batch, wait=True)
 
+    def upsert_point(
+        self,
+        *,
+        point_id: str,
+        text: str,
+        dense_vector: list[float],
+        sparse_vector: SparseVectorData,
+        document_id: str,
+        title: str,
+        tags: Sequence[str],
+        now: str,
+        ord: int = 1,
+        source_uri: str = "",
+    ) -> None:
+        """Upsert ONE chunk with a caller-chosen ``point_id`` (no delete-by-document).
+
+        Used by the episode-corpus double-write (one episode = one point, where
+        ``point_id`` is the shared uuid that also keys the Graphiti episode — so a
+        graph fact's ``episodes`` join straight back to this Qdrant point). Unlike
+        :meth:`upsert_document_vectors` this does **not** clear the document first, so
+        many episodes can share a ``document_id`` without erasing each other."""
+        indices, values = sparse_vector
+        payload = {
+            "document_id": document_id,
+            "owner_kind": "system",
+            "owner_id": "0",
+            "category_id": None,
+            "subcategory_id": None,
+            "tags": list(tags),
+            "source_type": "episode",
+            "mime": "text/plain",
+            "title": title,
+            "source_uri": source_uri,
+            "ingested_at": now,
+            "ord": ord,
+            "text": text,
+            "heading_path": None,
+        }
+        point = qm.PointStruct(
+            id=point_id,
+            vector={
+                DENSE_VECTOR_NAME: dense_vector,
+                SPARSE_VECTOR_NAME: qm.SparseVector(indices=list(indices), values=list(values)),
+            },
+            payload=payload,
+        )
+        with self._write_lock:
+            self.qdrant.upsert(collection_name=self.collection_name, points=[point], wait=True)
+
     def delete_document(self, document_id: str) -> None:
         with self._write_lock:
             self.qdrant.delete(

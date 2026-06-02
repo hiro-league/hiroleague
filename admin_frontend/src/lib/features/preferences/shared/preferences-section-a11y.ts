@@ -15,7 +15,8 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   knowledgeRetrieval: 'preferences-section-knowledge-retrieval',
   knowledgeReranker: 'preferences-section-knowledge-reranker',
   knowledgeAnsweringModel: 'preferences-section-knowledge-answering-model',
-  knowledgeRewrite: 'preferences-section-knowledge-rewrite'
+  knowledgeRewrite: 'preferences-section-knowledge-rewrite',
+  knowledgeGraph: 'preferences-section-knowledge-graph'
 } as const;
 
 export function tuningProfileSectionBodyId(profileId: string): string {

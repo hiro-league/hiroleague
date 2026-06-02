@@ -81,10 +81,14 @@ class KnowledgeAgentState(TypedDict, total=False):
     min_score: float
     explain: bool
     rewrite: bool
-    # L3 prototype — when True, the ``graph_expand`` node resolves query entities through
-    # the LadybugDB graph and focuses Qdrant on the resulting chunk_ids. Defaults to False
-    # so existing behavior is unchanged for any caller that hasn't opted in.
+    # When True, the ``graph_expand`` node runs Graphiti fact-search on the query and
+    # focuses Qdrant on the supporting chunk_ids. Defaults to False so existing
+    # behavior is unchanged for any caller that hasn't opted in. Requires the
+    # knowledge.graph backend enabled (graphiti/mix) + a built graph.
     use_graph: bool
+    # Temporal lens for graph_expand: "current" (drop superseded facts) or "all".
+    # Absent → falls back to knowledge.graph.temporal_default.
+    graph_temporal: str
     # Preformatted prior conversation (chat only). When present, ``rewrite_query`` uses it to
     # resolve references ("the second one") into a standalone query. Empty/absent for Ask/CLI.
     history: str
@@ -97,11 +101,10 @@ class KnowledgeAgentState(TypedDict, total=False):
     # L3 — entities extracted by ``rewrite_query`` (proper nouns + qualified relational
     # mentions like "my sister"). Consumed by ``graph_expand``; ignored when use_graph=False.
     query_entities: list[str]
-    # L3 — populated by ``graph_expand``: union of chunk_ids reachable from the resolved
-    # query entities + k=1 neighbors + incident edges. ``build_filters`` folds these into
-    # the Qdrant filter as a ``HasIdCondition`` to focus the candidate set.
+    # Populated by ``graph_expand``: union of chunk_ids (== episode uuids) supporting
+    # the facts Graphiti search returned for the query. ``build_filters`` folds these
+    # into the Qdrant filter as a ``HasIdCondition`` to focus the candidate set.
     graph_chunk_ids: list[str]
-    graph_nodes_touched: int
     qdrant_filter: Any
     query_vector: list[float]
     query_sparse_vector: Any
@@ -454,64 +457,74 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 entry.set_decision("skipped", "use_graph_off")
                 entry.set_output_preview("use_graph=False · no expansion")
             return {}
-        entities = state.get("query_entities") or []
-        if not entities:
+        # Graphiti searches on the full query (hybrid over the graph) — no separate
+        # entity list required (unlike the old Ladybug name-resolution path).
+        query = (state.get("rewritten_query") or state.get("query") or "").strip()
+        if not query:
             if entry:
-                entry.set_decision("skipped", "no_entities")
-                entry.set_output_preview("no query entities · no expansion")
+                entry.set_decision("skipped", "no_query")
+                entry.set_output_preview("no query · no expansion")
             return {}
-        # Local imports keep the agent graph importable when the L3 graph
-        # submodule isn't yet wired in (defensive — same pattern used for the
-        # other knowledge submodules).
-        from hirocli.services.knowledge.constants import (
-            GRAPH_DIR,
-            KNOWLEDGE_DIR,
-            LADYBUG_DB_FILENAME,
-        )
-        from hirocli.services.knowledge.graph.expand import expand_entities_to_chunk_ids
 
-        db_path = (
-            self._workspace_path / KNOWLEDGE_DIR / GRAPH_DIR / LADYBUG_DB_FILENAME
-        )
+        # Graphiti fact-search → episodes→chunk_ids. The result becomes a
+        # HasIdCondition in ``build_filters`` (unchanged wiring), focusing the
+        # existing hybrid+rerank on the graph-relevant slice. SOFT FALLBACK: any
+        # miss/error → empty result → no filter → normal flat search.
+        from hirocli.services.knowledge.graph import GraphitiMemoryService, graphiti_db_path
+
+        db_path = graphiti_db_path(self._workspace_path)
+        if not db_path.exists():
+            # No graph built for this workspace yet — flat search. Don't open
+            # Graphiti (it would create an empty Kuzu DB as a read side effect).
+            if entry:
+                entry.set_decision("skipped", "no_graph")
+                entry.set_output_preview("no graph built · flat search")
+            return {}
         if entry:
-            entry.set_input_preview(
-                f"entities: {entities[:5]}{'…' if len(entities) > 5 else ''}"
-            )
+            entry.set_input_preview(f"query: {query[:80]}{'…' if len(query) > 80 else ''}")
+
+        service = None
         try:
-            expansion = await expand_entities_to_chunk_ids(db_path, entities, k=1)
+            service = GraphitiMemoryService.from_preferences(
+                self._prefs, self._workspace_path, workspace_id=self._workspace_id
+            )
+            if service is None:
+                # backend=off or no extraction model — degrade to flat.
+                if entry:
+                    entry.set_decision("skipped", "backend_off_or_no_model")
+                    entry.set_output_preview("graph backend off / no model · flat search")
+                return {}
+            temporal = (
+                state.get("graph_temporal") or self._prefs.knowledge.graph.temporal_default
+            )
+            num_results = max(1, int(self._prefs.knowledge.retrieval.top_k))
+            expansion = await service.search_chunk_ids(
+                query, num_results=num_results, temporal=temporal
+            )
         except Exception as exc:
-            # SOFT FALLBACK: external store call failed → log + degrade to flat
-            # search (don't break the answer). The ledger row carries the error
-            # for observability.
             log.warning(
-                "⚠️ graph_expand failed · falling back to flat search",
+                "⚠️ graphiti graph_expand failed · falling back to flat search",
                 error=str(exc)[:200],
                 exc_info=True,
             )
             if entry:
                 entry.fail("graph_expand_failed", message=str(exc))
             return {}
+        finally:
+            if service is not None:
+                await service.close()
+
         if entry:
             entry.set_decision(
                 "expanded" if expansion.chunk_ids else "empty",
-                f"chunks_{len(expansion.chunk_ids)}",
+                f"facts_{expansion.facts_used}/{expansion.facts_total}_chunks_{len(expansion.chunk_ids)}",
             )
-            # Show the actual graph data (which mentions matched, which nodes were reached), not
-            # just counts — same principle as the retrieval result snippets.
-            resolved = ", ".join(expansion.resolved_entities) or "none"
-            unmatched = [e for e in entities if e not in expansion.resolved_entities]
-            nodes = ", ".join(expansion.node_names[:6])
-            more = f" (+{len(expansion.node_names) - 6})" if len(expansion.node_names) > 6 else ""
+            facts_preview = " | ".join(expansion.facts[:4])
+            more = f" (+{len(expansion.facts) - 4})" if len(expansion.facts) > 4 else ""
             entry.set_output_preview(
-                f"resolved: {resolved}"
-                + (f" · unmatched: {', '.join(unmatched)}" if unmatched else "")
-                + f" · nodes: {nodes}{more}"
-                + f" · chunks: {len(expansion.chunk_ids)}"
+                f"facts[{expansion.facts_used}]: {facts_preview}{more} · chunks: {len(expansion.chunk_ids)}"
             )
-        return {
-            "graph_chunk_ids": list(expansion.chunk_ids),
-            "graph_nodes_touched": expansion.nodes_touched,
-        }
+        return {"graph_chunk_ids": list(expansion.chunk_ids)}
 
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:
         # L3 — fold the graph_expand result into the Qdrant filter so the same

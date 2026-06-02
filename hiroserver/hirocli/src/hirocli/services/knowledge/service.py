@@ -199,6 +199,41 @@ class KnowledgeService:
     async def preview_file(self, path: str) -> FilePreviewResult:
         return await asyncio.to_thread(read_file_preview, Path(path), loader_registry=self.loader_registry)
 
+    async def ingest_text_chunk(
+        self,
+        *,
+        point_id: str,
+        text: str,
+        document_id: str,
+        title: str = "",
+        tags: Sequence[str] = (),
+        ord: int = 1,
+    ) -> None:
+        """Embed + upsert ONE text chunk to Qdrant with a caller-chosen ``point_id``.
+
+        Used by the episode-corpus double-write (eval / series-ingest): each episode
+        becomes one Qdrant point whose id is the shared uuid that also keys its
+        Graphiti episode, so graph facts (``EntityEdge.episodes``) join straight back
+        to the passage. Computes both the dense and BM25 sparse vectors with the same
+        embedders document ingest uses."""
+        import datetime as _dt
+
+        dense = (await asyncio.to_thread(self.embedder.embed_texts, [text]))[0]
+        sparse = (await asyncio.to_thread(self.sparse_embedder.embed_documents, [text]))[0]
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        await asyncio.to_thread(
+            self.vector_store.upsert_point,
+            point_id=point_id,
+            text=text,
+            dense_vector=dense,
+            sparse_vector=sparse,
+            document_id=document_id,
+            title=title,
+            tags=tuple(tags),
+            now=now,
+            ord=ord,
+        )
+
     def _resolve_file_concurrency(self, file_concurrency: int | None) -> int:
         fallback = default_file_concurrency_for_embedder(self.embedder)
         if file_concurrency is None:

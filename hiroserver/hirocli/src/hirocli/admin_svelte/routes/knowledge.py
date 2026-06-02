@@ -170,6 +170,10 @@ class EvalRunBody(BaseModel):
 
     ingest_synthetic: bool = False
     build_graph: bool = False
+    # "synthetic" (default, .md L3 corpus) or "adam" (temporal JSONL episode corpus).
+    corpus_source: str = "synthetic"
+    # Optional subset (adam path): run only these question ids. None/empty = all.
+    question_ids: list[str] | None = None
     run_id: str | None = None
 
 
@@ -707,18 +711,18 @@ async def graph_export(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
 ) -> dict[str, Any]:
-    """L3 graph viz (MVP) — whole-graph export, the Graph tab's load path.
+    """Graph viz — whole-graph export, the Graph tab's load path.
 
     Read-only and independent of Qdrant: resolves the workspace path and returns
-    all nodes/edges from the LadybugDB graph. Empty graph when none built yet.
+    all entity nodes + RELATES_TO facts from the Graphiti (Kuzu) graph. Empty graph
+    when none built yet.
     """
     from hirocli.tools.knowledge_graph import graph_snapshot_payload
 
     try:
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path).resolve()
-        payload = await run_in_threadpool(
-            graph_snapshot_payload,
+        payload = await graph_snapshot_payload(
             workspace_path,
             node_limit=body.node_limit,
             edge_limit=body.edge_limit,
@@ -744,8 +748,11 @@ async def eval_run(
     """
     # Local imports keep the module's top-level deps thin — eval is a niche path.
     from hirocli.services.knowledge.eval_runner import (
+        ADAM_EVAL_TAG,
         collect_synthetic_doc_ids,
+        ingest_adam_corpus_via_service,
         ingest_synthetic_corpus_via_service,
+        load_adam_questions,
         run_eval,
     )
     from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
@@ -763,6 +770,30 @@ async def eval_run(
             # already does on its own exceptions; setup-phase exceptions are
             # handled explicitly here).
             try:
+                # Adam temporal corpus: ingest episodes (Qdrant + Graphiti) and run the
+                # Adam question bank scoped to its tag. Self-contained — synthetic flags
+                # are ignored on this path.
+                if body.corpus_source == "adam":
+                    # ``ingest_synthetic`` doubles as "ingest the corpus" here — set it
+                    # once, then re-run question subsets without re-ingesting.
+                    if body.ingest_synthetic:
+                        log.info(
+                            "⬇️ knowledge.eval — ingesting Adam episode corpus · run_id=%s",
+                            run_id,
+                        )
+                        await ingest_adam_corpus_via_service(service, workspace_path)
+                    questions = load_adam_questions()
+                    if body.question_ids:
+                        wanted = set(body.question_ids)
+                        questions = [q for q in questions if q["id"] in wanted]
+                    await run_eval(
+                        service,
+                        workspace_path,
+                        questions=questions,
+                        run_id=run_id,
+                        filters={"tags": [ADAM_EVAL_TAG]},
+                    )
+                    return
                 ingested_ids: list[str] = []
                 if body.ingest_synthetic:
                     log.info(
@@ -817,6 +848,31 @@ async def eval_run(
             str(exc),
             exc_info=True,
         )
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/eval/questions")
+async def eval_questions(corpus: str = "adam") -> dict[str, Any]:
+    """List the eval question bank for the checklist (id/category/subcategory/text).
+
+    Workspace-independent — the bank lives in the repo ``eval/`` dir."""
+    from hirocli.services.knowledge.eval_runner import load_adam_questions, load_questions
+
+    try:
+        rows = load_adam_questions() if corpus == "adam" else load_questions()
+        questions = [
+            {
+                "id": q["id"],
+                "category": q.get("category", ""),
+                "subcategory": q.get("subcategory", ""),
+                "question": q["question"],
+                "requires_graph": bool(q.get("requires_graph")),
+            }
+            for q in rows
+        ]
+        return _success({"corpus": corpus, "questions": questions})
+    except Exception as exc:
+        log.error("knowledge eval questions list failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 

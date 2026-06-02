@@ -42,12 +42,17 @@ from hirocli.services.knowledge.constants import (
     KNOWLEDGE_EVAL_STARTED,
 )
 from hirocli.services.knowledge.eval_scoring import (
+    MARK_ABSTAIN,
     MARK_PASS,
     MARK_RANK,
     Score,
     delta_mark,
     score_answer,
 )
+
+# A row "passes" for aggregate counting when it's correct (pass) or correctly
+# abstained (the right outcome on negative-control / abstention rows).
+_PASSING_MARKS = (MARK_PASS, MARK_ABSTAIN)
 
 log = Logger.get("SVC.KNOWLEDGE.EVAL")
 
@@ -88,6 +93,7 @@ class QuestionResult:
     graph_answer: str
     graph_run_id: str | None
     delta: str
+    subcategory: str = ""
 
     def to_payload(self, *, index: int, total: int) -> dict[str, Any]:
         """Event payload shape consumed by the Eval Batch UI.
@@ -101,6 +107,7 @@ class QuestionResult:
             "total": total,
             "id": self.id,
             "category": self.category,
+            "subcategory": self.subcategory,
             "question": self.question,
             "requires_graph": self.requires_graph,
             "flat": {
@@ -136,6 +143,8 @@ class EvalSummary:
     gate: str  # "proceed" | "pivot"
     elapsed_ms: int
     questions: list[QuestionResult] = field(default_factory=list)
+    # category → {total, flat_pass, graph_pass} — the per-category × flat/graph table.
+    by_category: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -151,6 +160,7 @@ class EvalSummary:
             "ties": self.ties,
             "gate": self.gate,
             "elapsed_ms": self.elapsed_ms,
+            "by_category": self.by_category,
         }
 
 
@@ -179,19 +189,36 @@ def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
         qtext = str(row.get("question") or "").strip()
         if not qid or not qtext:
             raise ValueError(f"{target}: row {i} missing id or question")
+        # ``expected_kind: abstain`` is shorthand for the negative-control (empty
+        # expected_fragments) — abstain is the correct outcome, a confident answer fails.
+        expected_kind = str(row.get("expected_kind") or "").strip().lower()
         expected = row.get("expected_fragments")
-        if expected is None or not isinstance(expected, list):
+        if expected_kind == "abstain":
+            expected = expected if isinstance(expected, list) else []
+        elif expected is None or not isinstance(expected, list):
             raise ValueError(
                 f"{target}: row {i} ({qid}): expected_fragments must be a list "
-                f"(use [] for negative-control rows)"
+                f"(use [] or expected_kind: abstain for negative-control rows)"
             )
+        must_not = row.get("must_not_contain") or []
+        if not isinstance(must_not, list):
+            raise ValueError(f"{target}: row {i} ({qid}): must_not_contain must be a list")
+        # requires_graph: explicit bool OR derived from a ``requires`` list that names
+        # graph/temporal/world (those categories are where graph/mix should win).
+        requires_raw = row.get("requires") or []
+        requires_list = requires_raw if isinstance(requires_raw, list) else []
+        requires_graph = bool(row.get("requires_graph")) or any(
+            str(r).strip().lower() in ("graph", "temporal", "world") for r in requires_list
+        )
         out.append(
             {
                 "id": qid,
                 "category": str(row.get("category") or ""),
+                "subcategory": str(row.get("subcategory") or ""),
                 "question": qtext,
                 "expected_fragments": [str(f) for f in expected],
-                "requires_graph": bool(row.get("requires_graph")),
+                "must_not_contain": [str(f) for f in must_not],
+                "requires_graph": requires_graph,
             }
         )
     return out
@@ -333,6 +360,92 @@ async def ingest_synthetic_corpus_via_service(
 
 
 # ---------------------------------------------------------------------------
+# Adam JSONL episode corpus — the temporal-aware eval (Graphiti pivot)
+# ---------------------------------------------------------------------------
+
+ADAM_CORPUS_FILE = _REPO_ROOT / "eval" / "adam_year.episodes.jsonl"
+ADAM_QUESTIONS_FILE = _REPO_ROOT / "eval" / "adam_questions.yaml"
+ADAM_EVAL_TAG = "_adam_eval"
+# Stable namespace: episode id → the uuid used as BOTH the Qdrant point_id AND the
+# Graphiti episode uuid, so a graph fact's ``episodes`` joins straight to the passage.
+_ADAM_NS = uuid.uuid5(uuid.NAMESPACE_URL, "hiro.eval.adam")
+
+
+def adam_point_id(episode_id: str) -> str:
+    """Deterministic uuid for an episode id (Qdrant requires uuid/int ids)."""
+    return str(uuid.uuid5(_ADAM_NS, episode_id))
+
+
+def load_adam_questions(path: Path | None = None) -> list[dict[str, Any]]:
+    """Load the Adam question bank (same validation as ``load_questions``)."""
+    return load_questions(path or ADAM_QUESTIONS_FILE)
+
+
+async def ingest_adam_corpus_via_service(
+    service: Any,
+    workspace_path: Path,
+    *,
+    corpus_path: Path | None = None,
+    tag: str = ADAM_EVAL_TAG,
+) -> int:
+    """Ingest the Adam JSONL episode corpus into BOTH Qdrant and the Graphiti graph.
+
+    Per episode: derive a shared uuid (``adam_point_id``) used as the Qdrant
+    point_id **and** the Graphiti episode uuid. Qdrant gets one tagged point per
+    episode (flat/mix passages); Graphiti gets the episodes sequentially in
+    chronological order (temporal supersession). Requires a configured extraction
+    model for the graph build."""
+    from dataclasses import replace
+
+    from hirocli.domain.preferences import load_preferences
+    from hirocli.services.knowledge.graph import GraphitiMemoryService
+    from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+
+    episodes = load_episodes_file(corpus_path or ADAM_CORPUS_FILE)
+    bus = get_domain_event_bus()
+    _publish(
+        bus,
+        workspace_path,
+        KNOWLEDGE_EVAL_SETUP_PROGRESS,
+        {"phase": "ingest_adam", "episode_count": len(episodes)},
+    )
+
+    # 1) Qdrant double-write — one tagged point per episode, point_id == shared uuid.
+    graphiti_eps = []
+    for ep in episodes:
+        qid = adam_point_id(ep.chunk_id)
+        await service.ingest_text_chunk(
+            point_id=qid,
+            text=ep.text,
+            document_id=ep.document_id,
+            title=ep.document_title,
+            tags=[tag],
+        )
+        graphiti_eps.append(replace(ep, chunk_id=qid))
+
+    # 2) Graphiti graph build — sequential + chronological (require_backend=False so an
+    #    explicit eval build works even with the retrieval backend toggle off).
+    prefs = load_preferences(workspace_path)
+    _publish(
+        bus,
+        workspace_path,
+        KNOWLEDGE_EVAL_SETUP_PROGRESS,
+        {"phase": "build_graph", "episode_count": len(graphiti_eps)},
+    )
+    gsvc = GraphitiMemoryService.from_preferences(prefs, workspace_path, require_backend=False)
+    if gsvc is None:
+        raise RuntimeError(
+            "Adam eval: no extraction model configured for the Graphiti graph build. "
+            "Set knowledge.graph.extraction_model or knowledge.answering.model (+ provider key)."
+        )
+    try:
+        await gsvc.ingest_chunks(graphiti_eps, source_role="user_document")
+    finally:
+        await gsvc.close()
+    return len(episodes)
+
+
+# ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
 
@@ -354,15 +467,23 @@ async def _run_one_question(
         rewrite=True,
     )
     expected = q["expected_fragments"]
+    must_not = q.get("must_not_contain") or []
     flat_score = score_answer(
-        comparison.flat.answer, expected, no_results=bool(comparison.flat.no_results)
+        comparison.flat.answer,
+        expected,
+        no_results=bool(comparison.flat.no_results),
+        must_not_contain=must_not,
     )
     graph_score = score_answer(
-        comparison.graph.answer, expected, no_results=bool(comparison.graph.no_results)
+        comparison.graph.answer,
+        expected,
+        no_results=bool(comparison.graph.no_results),
+        must_not_contain=must_not,
     )
     return QuestionResult(
         id=q["id"],
         category=q.get("category", ""),
+        subcategory=q.get("subcategory", ""),
         question=q["question"],
         requires_graph=bool(q.get("requires_graph")),
         flat_mark=flat_score.mark,
@@ -377,13 +498,30 @@ async def _run_one_question(
     )
 
 
+def category_breakdown(rows: list[QuestionResult]) -> dict[str, dict[str, int]]:
+    """Per-category flat/graph passing counts — the per-category × flat/graph table.
+
+    Pure so the standalone harness + tests can reuse it. ``category`` empty →
+    ``"uncategorized"``."""
+    out: dict[str, dict[str, int]] = {}
+    for r in rows:
+        cat = r.category or "uncategorized"
+        bucket = out.setdefault(cat, {"total": 0, "flat_pass": 0, "graph_pass": 0})
+        bucket["total"] += 1
+        if r.flat_mark in _PASSING_MARKS:
+            bucket["flat_pass"] += 1
+        if r.graph_mark in _PASSING_MARKS:
+            bucket["graph_pass"] += 1
+    return out
+
+
 def _summarize(run_id: str, rows: list[QuestionResult], started_at: float) -> EvalSummary:
     """Compute the gate + aggregate counts the UI/CLI surfaces."""
-    flat_passing = sum(1 for r in rows if r.flat_mark in (MARK_PASS, "🛇"))
-    graph_passing = sum(1 for r in rows if r.graph_mark in (MARK_PASS, "🛇"))
+    flat_passing = sum(1 for r in rows if r.flat_mark in _PASSING_MARKS)
+    graph_passing = sum(1 for r in rows if r.graph_mark in _PASSING_MARKS)
     requires = [r for r in rows if r.requires_graph]
-    req_flat = sum(1 for r in requires if r.flat_mark in (MARK_PASS, "🛇"))
-    req_graph = sum(1 for r in requires if r.graph_mark in (MARK_PASS, "🛇"))
+    req_flat = sum(1 for r in requires if r.flat_mark in _PASSING_MARKS)
+    req_graph = sum(1 for r in requires if r.graph_mark in _PASSING_MARKS)
     wins = sum(
         1 for r in rows if MARK_RANK.get(r.graph_mark, 0) > MARK_RANK.get(r.flat_mark, 0)
     )
@@ -407,6 +545,7 @@ def _summarize(run_id: str, rows: list[QuestionResult], started_at: float) -> Ev
         gate=gate,
         elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         questions=list(rows),
+        by_category=category_breakdown(rows),
     )
 
 
@@ -442,13 +581,20 @@ async def collect_synthetic_doc_ids(service: Any) -> list[str]:
 
 
 __all__ = [
+    "ADAM_CORPUS_FILE",
+    "ADAM_EVAL_TAG",
+    "ADAM_QUESTIONS_FILE",
     "DEFAULT_CORPUS_DIR",
     "DEFAULT_QUESTIONS_FILE",
     "EVAL_SYNTHETIC_TAG",
     "EvalSummary",
     "QuestionResult",
+    "adam_point_id",
+    "category_breakdown",
     "collect_synthetic_doc_ids",
+    "ingest_adam_corpus_via_service",
     "ingest_synthetic_corpus_via_service",
+    "load_adam_questions",
     "load_questions",
     "run_eval",
 ]

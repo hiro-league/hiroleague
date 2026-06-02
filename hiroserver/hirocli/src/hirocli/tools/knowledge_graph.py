@@ -1,13 +1,17 @@
-"""L3 prototype Tools — knowledge graph ingest.
+"""Knowledge graph Tools — Graphiti ingest + export.
 
 Per the Tools Architecture rule, knowledge-graph operations are exposed as
-:class:`Tool` so the same implementation serves CLI / HTTP / agent callers.
+:class:`Tool` so one implementation serves CLI / HTTP / agent callers.
 
-This tool reads chunks for a previously-ingested document from the existing
-:class:`KnowledgeService` (Qdrant-backed), feeds them through
-:class:`GraphIngestService`, and reports stats. The chunk_ids used in the graph
-are the Qdrant ``point_id`` values — so graph→evidence lookups in Phase 3 are
-a direct id join, no separate mapping table.
+The ingest tool reads a document's chunks from the existing
+:class:`KnowledgeService` (Qdrant-backed) and ingests them as **Graphiti
+episodes** (``uuid = point_id``), via :class:`GraphitiMemoryService`. Graphiti
+dedupes by uuid, so re-running on the same document is idempotent.
+
+The export tool is the admin Graph tab's load path. The real Kuzu snapshot →
+Graphiti-schema DTO mapping lands in Phase 4
+(docs/knowledge-graphiti-pivot-design.md §5.6); until then it returns an empty
+graph so the tab loads without error.
 """
 
 from __future__ import annotations
@@ -18,24 +22,17 @@ from typing import Any
 
 from hiro_commons.log import Logger
 
-from ..domain.model_factory import create_chat_model
-from ..domain.preferences import (
-    load_preferences,
-    resolve_knowledge_graph_disambiguation_llm,
-    resolve_knowledge_graph_extraction_llm,
-)
+from ..domain.preferences import load_preferences
 from ..domain.workspace import resolve_workspace
 from ..services.knowledge import KnowledgeService, create_knowledge_service
-from ..services.knowledge.constants import GRAPH_DIR, KNOWLEDGE_DIR, LADYBUG_DB_FILENAME
-from ..services.knowledge.graph import GraphStore  # Protocol re-exported
-from ..services.knowledge.graph.ingest import (
-    ChunkInput,
-    GraphEventSink,
-    GraphIngestService,
-    make_llm_disambiguator,
+from ..services.knowledge.graph import (
+    GraphitiEpisodeInput,
+    GraphitiMemoryService,
+    graphiti_db_path,
 )
-from ..services.knowledge.graph.ladybug_adapter import LadybugGraphStore
-from ..services.knowledge.graph.serialize import edge_to_dto, node_to_dto
+from ..services.knowledge.graph.graphiti_ingest import GraphEventSink
+from ..services.knowledge.graph.graphiti_serialize import edge_to_dto, node_to_dto
+from ..services.knowledge.graph.graphiti_service import read_graph_snapshot
 from .base import Tool, ToolParam
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
@@ -45,9 +42,9 @@ log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
 # than this are paged via scroll_offset. 200 covers a typical .md note.
 _CHUNK_PAGE_SIZE = 200
 
-# Safety caps for the whole-graph export (the Graph tab's load path). The graph
-# is tiny by design; these only exist so a runaway graph can't produce an
-# unbounded payload. The response flags ``truncated`` when a cap is hit.
+# Safety caps for the whole-graph export (the Graph tab's load path). The graph is
+# small by design; these only exist so a runaway graph can't produce an unbounded
+# payload. The response flags ``truncated`` when a cap is hit.
 _DEFAULT_NODE_LIMIT = 5000
 _DEFAULT_EDGE_LIMIT = 10000
 
@@ -82,40 +79,30 @@ def _resolve_service(
 ) -> tuple[KnowledgeService, Path, bool]:
     service = _runtime_service(runtime)
     if service is not None:
-        # Reuse the live service; figure out its workspace_path from runtime.
         ws = _runtime_workspace(runtime) or _resolve_path(workspace)
         return service, ws, False
     workspace_path = _runtime_workspace(runtime) or _resolve_path(workspace)
     return create_knowledge_service(workspace_path), workspace_path, True
 
 
-def _graph_db_path(workspace_path: Path) -> Path:
-    return workspace_path / KNOWLEDGE_DIR / GRAPH_DIR / LADYBUG_DB_FILENAME
-
-
-def graph_snapshot_payload(
+async def graph_snapshot_payload(
     workspace_path: Path,
     *,
     node_limit: int | None = None,
     edge_limit: int | None = None,
 ) -> dict[str, Any]:
-    """Whole-graph export for the admin Graph tab (sync — Ladybug is sync).
+    """Whole-graph export for the admin Graph tab (Graphiti → wire DTO).
 
-    Returns ``{nodes, edges, truncated, counts}``. When the graph DB does not
-    exist yet (no document graph-ingested), returns an empty graph rather than
-    creating the DB file — export must never have ingest side effects.
+    Read-only: reads every entity node + RELATES_TO fact from Kuzu (no models),
+    maps to the viz DTO (entities + relations + temporal windows). Returns an empty
+    graph when none is built yet — never an ingest side effect. ``truncated`` flags
+    a safety-cap hit.
     """
     node_limit = node_limit or _DEFAULT_NODE_LIMIT
     edge_limit = edge_limit or _DEFAULT_EDGE_LIMIT
-    db_path = _graph_db_path(workspace_path)
-    if not db_path.exists():
-        return {"nodes": [], "edges": [], "truncated": False, "counts": {"nodes": 0, "edges": 0}}
-
-    store = LadybugGraphStore.open(db_path)
-    try:
-        nodes, edges = store.snapshot(node_limit=node_limit, edge_limit=edge_limit)
-    finally:
-        store.close()
+    nodes, edges = await read_graph_snapshot(
+        graphiti_db_path(workspace_path), node_limit=node_limit, edge_limit=edge_limit
+    )
     truncated = len(nodes) >= node_limit or len(edges) >= edge_limit
     return {
         "nodes": [node_to_dto(n) for n in nodes],
@@ -125,11 +112,11 @@ def graph_snapshot_payload(
     }
 
 
-async def _gather_chunks(
+async def _gather_episodes(
     service: KnowledgeService, document_id: str
-) -> tuple[list[ChunkInput], str | None]:
-    """Walk all pages of a document's chunks. Returns (chunks, document_title)."""
-    chunks: list[ChunkInput] = []
+) -> tuple[list[GraphitiEpisodeInput], str | None]:
+    """Walk all pages of a document's chunks → episodes. Returns (episodes, title)."""
+    episodes: list[GraphitiEpisodeInput] = []
     title: str | None = None
     offset: str | None = None
     while True:
@@ -144,13 +131,35 @@ async def _gather_chunks(
             point_id = str(raw.get("point_id") or "")
             if not text or not point_id:
                 continue
-            chunks.append(
-                ChunkInput(chunk_id=point_id, document_id=document_id, text=text)
+            episodes.append(
+                GraphitiEpisodeInput(
+                    chunk_id=point_id,
+                    document_id=document_id,
+                    text=text,
+                    document_title=title or "",
+                )
             )
         offset = detail.chunk_next_offset
         if not offset:
             break
-    return chunks, title
+    return episodes, title
+
+
+def _empty_totals() -> dict[str, int]:
+    return {
+        "episodes_processed": 0,
+        "episodes_rejected": 0,
+        "episodes_failed": 0,
+        "entities_total": 0,
+        "edges_total": 0,
+    }
+
+
+def _fold_into_totals(totals: dict[str, int], stats: dict[str, Any]) -> None:
+    for key in totals:
+        value = stats.get(key)
+        if isinstance(value, (int, float)):
+            totals[key] += int(value)
 
 
 async def _run_graph_ingest_for_documents(
@@ -162,70 +171,36 @@ async def _run_graph_ingest_for_documents(
     on_progress: Any | None = None,
     event_sink: GraphEventSink | None = None,
 ) -> dict[str, Any]:
-    """Shared helper used by the single and batch graph-ingest tools.
+    """Shared helper for the single + batch graph-ingest tools.
 
-    Opens the LadybugDB store + builds the extraction (and optional
-    disambiguation) models ONCE, then iterates documents — so a batch of N
-    documents pays one set of model/store-open costs, not N.
+    Builds ONE :class:`GraphitiMemoryService` (model tiers + shared embedder + Kuzu)
+    and initializes it once, then iterates documents — so a batch pays one setup
+    cost, not N. Per-document failures are **isolated**: a bad doc is marked
+    ``ok=False`` with its error and the batch continues.
 
-    Per-document failures are **isolated**: if one document throws, that
-    document's entry is marked ``ok=False`` with the error message and the
-    batch continues. The store + models stay alive for the remaining docs.
-
-    ``on_progress`` is an optional sync callable invoked after each document
-    completes — Phase 5c (streaming) wires it to the event bus so the Eval
-    Batch UI updates live without waiting for the full batch. Signature:
-    ``on_progress({"index": i, "total": n, "document_id": str, "document_title": str, "ok": bool, "stats": dict|None, "error": str})``.
-
-    ``event_sink`` is an optional ``(event_type, payload)`` callable wired by the
-    HTTP layer to the Domain Event Bus; when present the ingest emits per-node /
-    per-edge events so the admin Graph tab updates live (graph viz, MVP).
+    ``on_progress`` fires after each document (Phase 5c live UI). ``event_sink``
+    (HTTP layer) makes ingest emit live progress events for the Graph tab.
     """
     if not document_ids:
-        return {
-            "document_count": 0,
-            "documents": [],
-            "totals": _empty_totals(),
-        }
+        return {"document_count": 0, "documents": [], "totals": _empty_totals()}
 
     prefs = load_preferences(workspace_path)
-    extraction = resolve_knowledge_graph_extraction_llm(prefs, workspace_path)
-    if extraction is None:
-        # No model configured — caller-facing error (the caller explicitly asked
-        # for graph ingest; silent fall-through would be wrong).
+    # require_backend=False: an explicit build-graph action ingests even when the
+    # retrieval backend toggle is off (build now, enable retrieval later).
+    svc = GraphitiMemoryService.from_preferences(
+        prefs, workspace_path, require_backend=False
+    )
+    if svc is None:
         raise RuntimeError(
-            "knowledge_graph_ingest: no extraction model configured. "
-            "Set knowledge.answering.model (or llm.default_chat) and "
-            "ensure the provider key is configured."
+            "knowledge_graph_ingest: no extraction model configured. Set "
+            "knowledge.graph.extraction_model or knowledge.answering.model (or "
+            "llm.default_chat) and ensure the provider key is configured."
         )
-    extract_model = create_chat_model(
-        extraction.model_id,
-        workspace_path=workspace_path,
-        temperature=extraction.temperature,
-        max_tokens=extraction.max_tokens,
-        thinking=extraction.thinking,
-    )
-    disambig = resolve_knowledge_graph_disambiguation_llm(prefs, workspace_path)
-    disambiguator = None
-    if disambig is not None:
-        disambig_model = create_chat_model(
-            disambig.model_id,
-            workspace_path=workspace_path,
-            temperature=disambig.temperature,
-            max_tokens=disambig.max_tokens,
-            thinking=disambig.thinking,
-        )
-        disambiguator = make_llm_disambiguator(disambig_model)
 
-    store = LadybugGraphStore.open(_graph_db_path(workspace_path))
-    # ``event_sink`` (when provided by the HTTP layer) makes the ingest emit live
-    # node/edge events so the admin Graph tab pops new elements in real time.
-    ingest = GraphIngestService(
-        store, workspace_path=workspace_path, event_sink=event_sink
-    )
     per_doc: list[dict[str, Any]] = []
     totals = _empty_totals()
     try:
+        await svc.initialize()
         for index, document_id in enumerate(document_ids):
             entry: dict[str, Any] = {
                 "index": index,
@@ -237,32 +212,25 @@ async def _run_graph_ingest_for_documents(
                 "error": "",
             }
             try:
-                chunks, title = await _gather_chunks(service, document_id)
+                episodes, title = await _gather_episodes(service, document_id)
                 entry["document_title"] = title or ""
                 log.info(
-                    "⬇️ graph.ingest — %d chunk(s) from document · doc_id=%s title=%r",
-                    len(chunks),
+                    "⬇️ graphiti.ingest — %d episode(s) from document · doc_id=%s title=%r",
+                    len(episodes),
                     document_id,
                     title or "",
                 )
-                stats = await ingest.ingest_chunks(
-                    chunks,
-                    source_role=source_role,
-                    model=extract_model,
-                    model_id=extraction.model_id,
-                    disambiguator=disambiguator,
-                    document_id=document_id,
-                    document_title=title or "",
+                stats = await svc.ingest_chunks(
+                    episodes, source_role=source_role, event_sink=event_sink
                 )
                 stats_dict = stats.as_dict()
                 entry["ok"] = True
                 entry["stats"] = stats_dict
                 _fold_into_totals(totals, stats_dict)
             except Exception as exc:
-                # Per-doc failure isolation. Log + record + continue. The caller
-                # sees ok=False on this entry; batch totals reflect what succeeded.
+                # Per-doc failure isolation. Log + record + continue.
                 log.warning(
-                    "⚠️ graph.ingest — document failed · doc_id=%s · %s",
+                    "⚠️ graphiti.ingest — document failed · doc_id=%s · %s",
                     document_id,
                     str(exc)[:200],
                     exc_info=True,
@@ -270,14 +238,12 @@ async def _run_graph_ingest_for_documents(
                 entry["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
             per_doc.append(entry)
             if on_progress is not None:
-                # Notify even on failure so the UI can show the row turning red.
-                # Wrap callback errors so progress glitches never abort the batch.
                 try:
                     on_progress(dict(entry))
                 except Exception:
-                    log.exception("⚠️ graph.ingest — on_progress callback failed")
+                    log.exception("⚠️ graphiti.ingest — on_progress callback failed")
     finally:
-        store.close()
+        await svc.close()
 
     return {
         "document_count": len(document_ids),
@@ -286,50 +252,22 @@ async def _run_graph_ingest_for_documents(
     }
 
 
-def _empty_totals() -> dict[str, int]:
-    return {
-        "entities_created": 0,
-        "entities_linked_exact": 0,
-        "entities_linked_fuzzy": 0,
-        "entities_linked_llm": 0,
-        "edges_written": 0,
-        "edges_dropped_orphan": 0,
-        "llm_extraction_calls": 0,
-        "llm_disambiguation_calls": 0,
-        "total_input_tokens": 0,
-        "total_output_tokens": 0,
-        "chunks_processed": 0,
-        "chunks_rejected": 0,
-        "chunks_extraction_failed": 0,
-    }
-
-
-def _fold_into_totals(totals: dict[str, int], stats: dict[str, Any]) -> None:
-    for key in totals:
-        value = stats.get(key)
-        if isinstance(value, (int, float)):
-            totals[key] += int(value)
-
-
 class KnowledgeGraphIngestTool(Tool):
-    """Build entity/relationship graph nodes for a previously-ingested document.
+    """Build the Graphiti temporal graph for a previously-ingested document.
 
-    L3 prototype. Reads chunks for the document from Qdrant (via the existing
-    knowledge service), runs single-call extraction + deterministic-first
-    resolution, and writes nodes/edges into the workspace LadybugDB graph.
+    Reads the document's chunks from Qdrant (via the knowledge service) and
+    ingests them as Graphiti episodes (``uuid = point_id``). Idempotent: Graphiti
+    dedupes by episode uuid, so re-running merges rather than duplicates.
 
-    Idempotent: re-running on the same document MERGES provenance into existing
-    nodes/edges (chunk_ids stay deduped, ordered). Safe to invoke repeatedly.
-
-    For multiple documents in one call, use ``knowledge_graph_ingest_batch`` —
-    it pays the model/store-open cost once instead of N times.
+    For multiple documents in one call, use ``knowledge_graph_ingest_batch`` — it
+    pays the model/graph setup cost once instead of N times.
     """
 
     runtime = True
     name = "knowledge_graph_ingest"
     description = (
-        "L3 prototype: build entity/relationship graph from a knowledge document's chunks. "
-        "Idempotent; pairs with the existing Qdrant evidence pipeline."
+        "Build the Graphiti temporal knowledge graph from a knowledge document's "
+        "chunks (one episode per chunk). Idempotent; pairs with the Qdrant evidence pipeline."
     )
     params = {
         "document_id": ToolParam(str, "Knowledge document UUID to graph-ingest"),
@@ -374,7 +312,6 @@ class KnowledgeGraphIngestTool(Tool):
                 [document_id],
                 source_role=source_role,
             )
-            # Unwrap to the single-document shape this tool has always returned.
             doc = batch["documents"][0] if batch["documents"] else {}
             return {
                 "document_id": document_id,
@@ -390,29 +327,20 @@ class KnowledgeGraphIngestTool(Tool):
 
 
 class KnowledgeGraphIngestBatchTool(Tool):
-    """Batch variant of ``knowledge_graph_ingest`` — same write side, but
-    pays the model/store-open cost ONCE for N documents instead of N times.
+    """Batch variant of ``knowledge_graph_ingest`` — pays the model/graph setup
+    cost ONCE for N documents instead of N times.
 
-    L3 prototype. Used by:
-
-    * Tab 1 Ingest's "Also build entity graph (L3)" checkbox (5f) — when N
-      documents are freshly ingested, this tool graph-ingests them in one call.
-    * L3 Eval Batch setup (5e) — graph-ingests every synthetic-corpus document
-      before the question loop runs.
-
-    Per-document failures are **isolated** — one bad doc doesn't abort the
-    batch; its entry is marked ``ok=False`` with the error and processing
-    continues. The aggregate ``totals`` reflect what succeeded.
+    Used by the Ingest tab's "Also build graph" checkbox and the Eval Batch setup.
+    Per-document failures are isolated; idempotent re-run (Graphiti dedupes by uuid).
     """
 
     runtime = True
     name = "knowledge_graph_ingest_batch"
     description = (
-        "L3 prototype: graph-ingest N already-ingested documents in one call. "
+        "Graph-ingest N already-ingested documents in one call (Graphiti). "
         "Per-doc failure isolation; idempotent re-run."
     )
     params = {
-        # list[str] for the same Gemini-tool-schema reason knowledge_ingest uses it.
         "document_ids": ToolParam(list[str], "Knowledge document UUIDs to graph-ingest"),
         "source_role": ToolParam(
             str,
@@ -450,7 +378,6 @@ class KnowledgeGraphIngestBatchTool(Tool):
             raise ValueError(
                 f"document_ids must be a list of strings, got {type(document_ids).__name__}"
             )
-        # Dedupe defensively (callers iterating over docs may pass dupes).
         deduped: list[str] = []
         seen: set[str] = set()
         for did in document_ids:
@@ -475,20 +402,17 @@ class KnowledgeGraphIngestBatchTool(Tool):
 
 
 class KnowledgeGraphExportTool(Tool):
-    """Export the whole entity/relationship graph (nodes + edges) for the viz.
+    """Export the whole knowledge graph (nodes + edges) for the admin Graph tab.
 
-    L3 prototype — the **load path** for the admin Graph tab's force-directed
-    view. Read-only: opens the workspace LadybugDB graph, returns all nodes and
-    edges as plain dicts (``source``/``target`` on edges for force-graph), with
-    a ``truncated`` flag + ``counts``. Returns an empty graph (no DB created)
-    when nothing has been graph-ingested yet. See docs/knowledge-graph-viz-design.md.
+    Read-only load path. Phase 4 implements the real Kuzu snapshot; for now it
+    returns an empty graph (no DB side effect). See docs/knowledge-graphiti-pivot-design.md.
     """
 
     runtime = True
     name = "knowledge_graph_export"
     description = (
-        "L3 prototype: export the whole knowledge graph (nodes + edges) as JSON "
-        "for visualization. Read-only; empty graph when none built yet."
+        "Export the whole knowledge graph (nodes + edges) as JSON for "
+        "visualization. Read-only; empty graph until the Phase 4 snapshot lands."
     )
     params = {
         "workspace": ToolParam(
@@ -521,13 +445,8 @@ class KnowledgeGraphExportTool(Tool):
     ) -> dict[str, Any]:
         runtime = getattr(self, "_runtime", None)
         workspace_path = _runtime_workspace(runtime) or _resolve_path(workspace)
-        # Snapshot is sync (Ladybug) — run off the event loop so the HTTP handler
-        # doesn't block on the DB read.
-        return await asyncio.to_thread(
-            graph_snapshot_payload,
-            workspace_path,
-            node_limit=node_limit,
-            edge_limit=edge_limit,
+        return await graph_snapshot_payload(
+            workspace_path, node_limit=node_limit, edge_limit=edge_limit
         )
 
 
@@ -535,4 +454,5 @@ __all__ = [
     "KnowledgeGraphExportTool",
     "KnowledgeGraphIngestBatchTool",
     "KnowledgeGraphIngestTool",
+    "graph_snapshot_payload",
 ]

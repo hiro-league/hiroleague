@@ -360,6 +360,10 @@ export function searchKnowledge(
 export type EvalRunRequest = {
   ingest_synthetic?: boolean;
   build_graph?: boolean;
+  // 'synthetic' (default .md L3 corpus) | 'adam' (temporal JSONL episode corpus).
+  corpus_source?: 'synthetic' | 'adam';
+  // Adam path: run only this subset of question ids (empty/undefined = all).
+  question_ids?: string[];
   run_id?: string;
 };
 
@@ -369,6 +373,25 @@ export function runKnowledgeEval(req: EvalRunRequest = {}): Promise<ApiResponse<
     body: req,
     timeoutMs: 30000  // setup can take a few seconds; the eval itself runs in the background
   });
+}
+
+/** One row in the eval question bank (for the checklist). */
+export type EvalQuestionItem = {
+  id: string;
+  category: string;
+  subcategory: string;
+  question: string;
+  requires_graph: boolean;
+};
+
+/** List the eval question bank for a corpus (the checklist's source). */
+export function listEvalQuestions(
+  corpus: 'synthetic' | 'adam' = 'adam'
+): Promise<ApiResponse<{ corpus: string; questions: EvalQuestionItem[] }>> {
+  return apiRequest<{ corpus: string; questions: EvalQuestionItem[] }>(
+    `/knowledge/eval/questions?corpus=${encodeURIComponent(corpus)}`,
+    { method: 'GET', timeoutMs: 15000 }
+  );
 }
 
 /** L3 (Phase 5f) — per-document result inside a batch graph-ingest response. */

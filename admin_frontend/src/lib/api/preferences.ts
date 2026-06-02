@@ -78,6 +78,19 @@ export type KnowledgePreferences = {
     prompt: string;
     default_on: boolean;
   };
+  // Graphiti temporal knowledge graph (pivot). backend off = flat Qdrant only.
+  graph: {
+    backend: 'off' | 'graphiti' | 'mix';
+    extraction_model: string | null;
+    extraction_tuning_profile: string;
+    small_model: string | null;
+    small_tuning_profile: string;
+    embedder_model: string | null;
+    temporal_default: 'current' | 'all';
+    communities_enabled: boolean;
+    k_hop: number;
+    search_recipe: 'rrf' | 'mmr' | 'cross_encoder';
+  };
 };
 
 export type ChatPreferences = {
@@ -164,6 +177,18 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
   rewrite: {
     prompt: '',
     default_on: false
+  },
+  graph: {
+    backend: 'off',
+    extraction_model: null,
+    extraction_tuning_profile: 'graphiti_extraction',
+    small_model: null,
+    small_tuning_profile: 'graphiti_small',
+    embedder_model: null,
+    temporal_default: 'current',
+    communities_enabled: false,
+    k_hop: 1,
+    search_recipe: 'rrf'
   }
 };
 

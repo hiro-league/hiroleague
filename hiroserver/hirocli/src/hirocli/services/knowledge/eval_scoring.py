@@ -37,22 +37,13 @@ class Score:
     expected: int     # how many fragments were expected (0 = negative control)
 
 
-def score_answer(
+def _score_fragments(
     answer_text: str,
     expected_fragments: list[str],
     *,
     no_results: bool,
 ) -> Score:
-    """Score one answer against expected substring fragments.
-
-    Substring match is case-insensitive and order-independent — a deliberate
-    lower bound on quality, so a passing row means the bare strings appeared
-    but doesn't guarantee the answer was coherent.
-
-    Empty ``expected_fragments`` is the **negative control**: abstain (no_results
-    or empty answer) is the correct outcome; a confident answer is a fail
-    (likely hallucination).
-    """
+    """Base substring scoring (no forbidden-fragment check)."""
     # Negative control — abstain wins.
     if not expected_fragments:
         if no_results or not (answer_text or "").strip():
@@ -75,6 +66,44 @@ def score_answer(
     if found > 0:
         return Score(mark=MARK_PARTIAL, label="partial", found=found, expected=total)
     return Score(mark=MARK_FAIL, label="fail", found=found, expected=total)
+
+
+def score_answer(
+    answer_text: str,
+    expected_fragments: list[str],
+    *,
+    no_results: bool,
+    must_not_contain: list[str] | None = None,
+) -> Score:
+    """Score one answer against expected substring fragments.
+
+    Substring match is case-insensitive and order-independent — a deliberate
+    lower bound on quality, so a passing row means the bare strings appeared
+    but doesn't guarantee the answer was coherent.
+
+    Empty ``expected_fragments`` is the **negative control**: abstain (no_results
+    or empty answer) is the correct outcome; a confident answer is a fail
+    (likely hallucination).
+
+    ``must_not_contain`` is the **superseded-fact / contradiction guard**: if the
+    answer contains any forbidden fragment (e.g. the old city after a move, the
+    old job after a switch), the row is forced to ``fail`` even if the expected
+    fragments were present. Catches the temporal-leak failure mode the Graphiti
+    pivot is meant to fix (docs/knowledge-graphiti-pivot-design.md §8.6).
+    """
+    base = _score_fragments(answer_text, expected_fragments, no_results=no_results)
+
+    forbidden = [f for f in (must_not_contain or []) if f]
+    if forbidden and base.mark != MARK_FAIL and (answer_text or "").strip():
+        text = (answer_text or "").lower()
+        if any(f.lower() in text for f in forbidden):
+            return Score(
+                mark=MARK_FAIL,
+                label="forbidden_leak",
+                found=base.found,
+                expected=base.expected,
+            )
+    return base
 
 
 def delta_mark(off: Score, on: Score) -> str:

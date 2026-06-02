@@ -59,12 +59,16 @@ export type EvalQuestionPayload = {
   total: number;
   id: string;
   category: string;
+  subcategory?: string;
   question: string;
   requires_graph: boolean;
   flat: EvalQuestionLeg;
   graph: EvalQuestionLeg;
   delta: string;
 };
+
+/** Per-category flat/graph passing counts (the per-category results table). */
+export type EvalCategoryStat = { total: number; flat_pass: number; graph_pass: number };
 
 /** Payload shape of ``knowledge.eval.completed`` events (aggregate summary). */
 export type EvalCompletedPayload = {
@@ -80,6 +84,7 @@ export type EvalCompletedPayload = {
   ties: number;
   gate: 'proceed' | 'pivot';
   elapsed_ms: number;
+  by_category?: Record<string, EvalCategoryStat>;
 };
 
 /** Payload shape of ``knowledge.eval.failed`` events. */
@@ -90,8 +95,9 @@ export type EvalFailedPayload = {
 
 /** Payload shape of ``knowledge.eval.setup_progress`` events. */
 export type EvalSetupProgressPayload = {
-  phase: 'ingest_synthetic' | 'graph_build';
+  phase: 'ingest_synthetic' | 'graph_build' | 'ingest_adam' | 'build_graph';
   file_count?: number;
+  episode_count?: number;
 };
 
 export type EvalEventHandlers = {
