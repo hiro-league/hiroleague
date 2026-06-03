@@ -472,45 +472,137 @@ sequenceDiagram
 
 ## 9. Admin UI changes (every settable → preference)
 
-| Setting | Type | Where it renders | Notes |
-|---|---|---|---|
-| **Memory/graph backend** | enum `off / graphiti / mix` (+ legacy off) | Knowledge settings | master switch for the new path |
-| **Graphiti extraction model + tuning profile** | model + profile id | Knowledge/Models settings | structured-output-capable (medium) |
-| **Graphiti small-model + profile** | model + profile id | Knowledge/Models settings | cheap sub-steps (`model_size=small`) |
-| **Graph embedder** | model (default = shared knowledge embedder) | Knowledge settings | G8; still selectable |
-| **Temporal filter default** | enum `current-only / include-historical` | Knowledge settings | per-query override allowed |
-| **Communities** | bool (default off) | Knowledge settings (advanced) | G9 — placeholder, deferred |
-| **k-hop / BFS depth** | int | Knowledge settings (advanced) | retrieval expansion |
-| **Search recipe** | enum (RRF / MMR / cross-encoder) | Knowledge settings (advanced) | Graphiti `search_` config |
-| **Chunk density knobs** | ints (`CHUNK_*`) | Knowledge settings (advanced) | only if we override Graphiti defaults |
-| **Use-graph at query** | bool / per-request | Ask tab + tool param | A/B + runtime control |
-| **Eval: question selection** | multi-select checklist, **cap 50** | new **Eval panel** | grouped by category; per-category select-all; live counter |
-| **Eval: modes** | multi `flat/graphiti/mix` | Eval panel | which retrievers to compare |
-| **Eval: model/profile** | reuse knowledge models | Eval panel | the answering model under test |
+There are **two** kinds of "settables" here, and the original table blurred them. They
+are split below: **(A)** the durable `KnowledgeGraphPreferences` written to
+`preferences.json`, and **(B)** runtime/eval controls that are **not** preferences (they
+are per-request or per-eval-run inputs and persist nothing).
 
-- Schema lives in `domain/preferences.py` (`KnowledgePreferences` / a new `KnowledgeGraphPreferences` group + validated writes + change events).
-- Frontend: extend the knowledge settings/preferences Svelte surface (follow
-  `svelte-best-practice`; reuse existing settings controls). Exact files confirmed at implementation.
-- **Rule:** no knob ships hardcoded; each lands with its preference key + UI control in the same phase.
+> **How to read Table A.** Order = the order the controls appear in the admin UI
+> (gate → model+profile pairs → embedder → behavior → advanced). **Default** is what you
+> get if you touch nothing. **Must set?** answers "do I *have* to choose a value": models
+> default to `null` and fall back down a documented chain, so the only thing you must
+> consciously flip to turn the feature on is `backend`.
+
+### 9.A `KnowledgeGraphPreferences` — durable, in `preferences.json`
+
+| Pref key (UI label) | Type / values | Default | Must set? | Description |
+|---|---|---|---|---|
+| `backend`<br/>*(Graph backend)* | `off` \| `graphiti` \| `mix` | `off` | **Yes, to enable** | Master switch for the whole graph path. `off` = today's flat Qdrant retrieval, graph untouched. `graphiti` = answer from graph facts. `mix` = graph facts **focus** the Qdrant passage search and the two fuse (recommended — best relational+grounding balance, decision G4). |
+| `extraction_model`<br/>*(Graph extraction model)* | model id \| `null` | `null` | Optional | The "heavy" LLM Graphiti uses to read each chunk and pull out entities + facts. Must be **structured-output-capable** (small models fail the schema, vendor-confirmed). `null` → falls back to the knowledge **answering** model, then to `llm.default_chat`. |
+| `extraction_tuning_profile`<br/>*(Graph extraction profile)* | profile id | `graphiti_extraction` | No (has default) | Tuning profile (temperature / max-tokens / thinking) applied to the extraction model. Ships deterministic (low temp) so extraction is repeatable. |
+| `small_model`<br/>*(Graph small-step model)* | model id \| `null` | `null` | Optional | A cheaper LLM for Graphiti's mechanical sub-steps (entity dedupe, summaries, timestamp parsing). `null` → falls back to `extraction_model`. Set this to cut cost when extraction runs a pricey model. |
+| `small_tuning_profile`<br/>*(Graph small-step profile)* | profile id | `graphiti_small` | No (has default) | Tuning profile for the small-step model. |
+| `embedder_model`<br/>*(Graph embedder)* | model id \| `null` | `null` | Optional | Embeds entity names + facts for the graph's vector lookups. `null` → **shares the knowledge dense embedder** (decision G8 — one model to manage, keeps graph and Qdrant in the same vector space). Override only if the graph needs a different embedder. |
+| `temporal_default`<br/>*(Temporal lens)* | `current` \| `all` | `current` | No (has default) | Default time lens at retrieval. `current` = only facts valid *now* (superseded facts hidden — e.g. "where does Adam work?" → Cedar Labs, not Brightloom). `all` = include historical/invalidated facts. Per-query override via the `graph_temporal` request param. |
+| `k_hop`<br/>*(Expansion hops)* | `int` 1–3 | `1` | No (has default) | How many relationship hops out from the matched entities to pull related facts. `1` = direct neighbors only (cheap, precise). Higher = more multi-hop reach at more noise/cost. |
+| `search_recipe`<br/>*(Search recipe)* | `rrf` \| `mmr` \| `cross_encoder` | `rrf` | No (has default) | How Graphiti ranks/fuses fact-search candidates. `rrf` = reciprocal-rank fusion (fast default). `mmr` = diversity-favoring. `cross_encoder` = highest quality, slowest/most costly. |
+| `communities_enabled`<br/>*(Communities — advanced)* | `bool` | `false` | No (off) | **Deferred / experimental** (decision G9). When on, Graphiti clusters entities into community summaries — extra LLM cost. Leave off for the eval. |
+
+- **Resolved fallbacks** are exposed as `*_resolved` properties (e.g. `embedder_model_resolved`)
+  so callers never re-implement the `null → parent → constant` chain.
+- **Enums** are module-level `Literal` aliases (`KnowledgeGraphBackend`,
+  `KnowledgeGraphTemporalDefault`, `KnowledgeGraphSearchRecipe`).
+- Schema lives in `domain/preferences.py` under `KnowledgePreferences.graph`
+  (`KnowledgeGraphPreferences`), with validated writes + `preferences.saved` change events.
+- Frontend renders in `KnowledgeSection.svelte` ("Knowledge Graph (Graphiti)" subsection),
+  following `svelte-best-practice` and reusing the existing settings controls.
+
+### 9.B Runtime / eval controls — **not** preferences (persist nothing)
+
+These were previously listed alongside the prefs; they are **per-request or per-eval-run**
+inputs, not values stored in `preferences.json`.
+
+| Control | Type | Where | Description |
+|---|---|---|---|
+| **Use-graph at query** | `bool` / per-request | Ask tab + `knowledge_answer` tool param | Runtime A/B override of `backend` for a single question (forces graph on/off without changing the saved pref). |
+| **Eval: corpus source** | enum `synthetic` \| `adam` | Eval panel | Which corpus to ingest + ask against. |
+| **Eval: question selection** | multi-select checklist, **cap 50** | Eval panel | Questions to run; grouped by category, per-category select-all, live counter. |
+| **Eval: modes** | multi `flat` \| `graphiti` \| `mix` | Eval panel | Which retrievers to compare in the 3-way table. |
+| **Eval: model/profile** | reuse knowledge models | Eval panel | The answering model/profile under test (reuses the knowledge model pickers). |
+
+- **Rule:** no knob ships hardcoded; each durable knob lands with its preference key + UI
+  control in the same phase. Runtime controls thread through the Tool/route params instead.
+
+### 9.C Suggested settings to run the eval
+
+A practical starting configuration — set these once in **Admin → Preferences → Knowledge →
+Knowledge Graph (Graphiti)**, then drive the rest from the Eval panel:
+
+| Setting | Suggested value | Why |
+|---|---|---|
+| `backend` | **`mix`** | The recommended fused path, and the configuration you actually want to validate. (The Eval panel still runs `flat`/`graphiti`/`mix` side-by-side regardless — this just sets the live default.) |
+| `extraction_model` | a **medium, structured-output-capable** chat model | Extraction quality is the single biggest driver of graph quality; a weak model here corrupts every downstream answer. Leave `null` only if your default chat model is already strong + structured-output-capable. |
+| `extraction_tuning_profile` | `graphiti_extraction` (default) | Deterministic profile → repeatable extraction across eval runs. |
+| `small_model` | a **cheap** chat model | Keeps dedupe/summary sub-steps inexpensive over 35 sequential episodes. `null` is fine but reuses the (pricier) extraction model. |
+| `small_tuning_profile` | `graphiti_small` (default) | — |
+| `embedder_model` | `null` (share knowledge embedder) | Keeps graph + Qdrant in one vector space and one model to manage (G8). |
+| `temporal_default` | `current` (default) | The eval's `knowledge_update` / `temporal/latest_state` questions expect "latest wins" — `current` is what proves supersession works. |
+| `k_hop` | `1` (default) | Enough for the corpus's mostly 1–2-hop questions; raise to `2` only if `multi_hop` answers come back thin. |
+| `search_recipe` | `rrf` (default) | Fast, good enough for a personal-KG-scale eval; switch to `cross_encoder` only to chase the last few points of recall. |
+| `communities_enabled` | `false` (default) | Deferred; adds cost, nothing in the eval needs it. |
+
+**Then in the Eval panel:** corpus source = **`adam`**, modes = **all three (`flat` /
+`graphiti` / `mix`)** so you get the comparison table, select the question set (or all,
+≤50), and set the answering model/profile to the same model family you use for chat. Run.
+Read the **per-category × 3-way** table (§8.6): expect parity on `direct` /
+`preference_recall`, and the wins to show up in `multi_hop` / `temporal` /
+`knowledge_update` / `abstention`.
 
 ---
 
-## 10. Preferences schema additions (sketch)
+## 10. Preferences schema additions (as-built)
 
-```text
-KnowledgeGraphPreferences:
-    backend: "off" | "graphiti" | "mix" = "off"
-    extraction_model: str | None
-    extraction_tuning_profile: str = "graphiti_extraction"
-    small_model: str | None
+`KnowledgeGraphPreferences` is nested under `KnowledgePreferences.graph` in
+`domain/preferences.py`. Enums are module-level `Literal` aliases; `null`-defaulted models
+expose a `*_resolved` property that walks the fallback chain.
+
+```python
+# module-level enum aliases
+KnowledgeGraphBackend         = Literal["off", "graphiti", "mix"]
+KnowledgeGraphTemporalDefault = Literal["current", "all"]
+KnowledgeGraphSearchRecipe    = Literal["rrf", "mmr", "cross_encoder"]
+
+class KnowledgeGraphPreferences(BaseModel):
+    # master switch — off = flat Qdrant only; graphiti = graph facts; mix = fuse (G4)
+    backend: KnowledgeGraphBackend = "off"
+    # heavy extraction LLM; null → knowledge answering model → llm.default_chat
+    extraction_model: str | None = None
+    extraction_tuning_profile: str = "graphiti_extraction"   # deterministic profile
+    # cheap sub-step LLM (dedupe/summaries/timestamps); null → extraction_model
+    small_model: str | None = None
     small_tuning_profile: str = "graphiti_small"
-    embedder_model: str | None            # default → knowledge.default_embedding_model
-    temporal_default: "current" | "all" = "current"
-    communities_enabled: bool = False     # deferred
-    k_hop: int = 1
-    search_recipe: str = "rrf"
-# tuning_profiles[]: add graphiti_extraction (medium) + graphiti_small (small)
+    # graph embedder; null → shares the knowledge dense embedder (G8)
+    embedder_model: str | None = None
+    # retrieval time-lens; per-query override via the graph_temporal request param
+    temporal_default: KnowledgeGraphTemporalDefault = "current"
+    # deferred/experimental community clustering (G9) — extra LLM cost
+    communities_enabled: bool = False
+    # relationship expansion radius at retrieval (1 = direct neighbors only)
+    k_hop: int = Field(default=1, ge=1, le=3)
+    # fact-search rerank/fusion recipe
+    search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+
+    @property
+    def embedder_model_resolved(self) -> str | None: ...   # null → knowledge embedder
 ```
+
+| Field | Type | Default | Required? |
+|---|---|---|---|
+| `backend` | enum `off/graphiti/mix` | `off` | flip to enable |
+| `extraction_model` | `str \| None` | `None` | optional (fallback chain) |
+| `extraction_tuning_profile` | `str` | `graphiti_extraction` | no (default) |
+| `small_model` | `str \| None` | `None` | optional (fallback chain) |
+| `small_tuning_profile` | `str` | `graphiti_small` | no (default) |
+| `embedder_model` | `str \| None` | `None` | optional (→ knowledge embedder) |
+| `temporal_default` | enum `current/all` | `current` | no (default) |
+| `communities_enabled` | `bool` | `False` | no (deferred) |
+| `k_hop` | `int` (`ge=1, le=3`) | `1` | no (default) |
+| `search_recipe` | enum `rrf/mmr/cross_encoder` | `rrf` | no (default) |
+
+> **Tuning profiles (separate, not part of this schema):** add two entries to the workspace
+> `tuning_profiles[]` — `graphiti_extraction` (medium / structured-output-capable) and
+> `graphiti_small` (cheap sub-steps). These are referenced by id from
+> `extraction_tuning_profile` / `small_tuning_profile` above.
 
 ---
 

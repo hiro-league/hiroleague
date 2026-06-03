@@ -15,6 +15,16 @@ HIRO_UV_PYTHON="${HIRO_UV_PYTHON:-3.12}"
 
 export HIRO_ENV="${HIRO_ENV:-dev}"
 
+# Some endpoint-security / TLS-inspection tools inject SSLKEYLOGFILE pointing at an
+# unwritable virtual file (e.g. \\?\Volume{GUID}\virtual_file.log). Python's
+# ssl.create_default_context() then raises PermissionError as soon as any TLS client
+# is imported (ollama -> httpx), crashing the server on start. Drop the var for the
+# launched dev processes when its target is not writable.
+if [ -n "${SSLKEYLOGFILE:-}" ] && ! ( : >> "$SSLKEYLOGFILE" ) 2>/dev/null; then
+  echo "==> SSLKEYLOGFILE points at an unwritable path ('$SSLKEYLOGFILE'); clearing it for this run."
+  unset SSLKEYLOGFILE
+fi
+
 # --force bypasses all fingerprint caches and reinstalls everything.
 FORCE_SYNC=0
 if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ]; then

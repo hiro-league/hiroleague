@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.driver.kuzu_driver import KuzuDriver
+from graphiti_core.graph_queries import get_fulltext_indices
 from graphiti_core.helpers import get_default_group_id
 from hiro_commons.log import Logger
 
@@ -63,6 +64,30 @@ if TYPE_CHECKING:
     from hirocli.domain.credential_store import CredentialStore
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
+
+
+async def _ensure_fts_indices(driver: Any) -> None:
+    """Create the Kuzu full-text indices graphiti-core 0.29.1 never builds.
+
+    graphiti's ``KuzuDriver.build_indices_and_constraints()`` is a no-op and
+    ``setup_schema()`` only creates the node/rel TABLES — but its edge/node dedup
+    search runs ``QUERY_FTS_INDEX('RelatesToNode_', 'edge_name_and_fact', …)``. Without
+    these indices, the FIRST ``add_episode`` crashes with "Table RelatesToNode_ doesn't
+    have an index with name edge_name_and_fact". We run graphiti's OWN DDL
+    (``get_fulltext_indices`` — no duplication) once here. Kuzu auto-loads the ``fts``
+    extension, and creating over empty tables is fine.
+
+    Idempotent: the DB file persists across restarts, so a re-create raises
+    "Index … already exists" — swallow only that, raise anything else.
+    """
+    for stmt in get_fulltext_indices(driver.provider):
+        try:
+            await driver.execute_query(stmt)
+        except Exception as exc:
+            if "already exists" in str(exc).lower():
+                continue
+            log.exception("❌ graphiti — FTS index creation failed · stmt=%s", stmt[:64])
+            raise
 
 
 def _release_kuzu(driver: Any) -> None:
@@ -150,10 +175,17 @@ class GraphitiMemoryService:
             cross_encoder=cross_encoder or _RankByInputOrderCrossEncoder(),
             max_coroutines=max_coroutines,
         )
-        # Ingest passes group_id=None → Graphiti's add_episode stamps the provider
-        # default. Resolve it here so ingest / search / snapshot all share ONE
-        # concrete group_id (snapshot's get_by_group_ids needs a concrete list).
+        # Resolve ONE concrete group_id shared by ingest / search / snapshot
+        # (snapshot's get_by_group_ids needs a concrete list).
         self._group_id = group_id or get_default_group_id(driver.provider)
+        # graphiti-core 0.29.1's KuzuDriver never initializes `_database` (the base
+        # GraphDriver only declares the annotation, no default). add_episode() with an
+        # explicit group_id does `group_id != self.driver._database`, which raises
+        # AttributeError on Kuzu. Seed it with our group_id so the comparison is False
+        # → graphiti skips the Neo4j-only "clone to a per-group database" switch and
+        # reuses the single embedded Kuzu file (one DB per workspace, group_id is just
+        # a partition tag inside it). Fixes: add_episode AttributeError on ingest.
+        driver._database = self._group_id
         self._initialized = False
         self._closed = False
 
@@ -172,6 +204,12 @@ class GraphitiMemoryService:
             return
         try:
             await self._graphiti.build_indices_and_constraints()
+            # No-op for Kuzu (above) → we must create the FTS indices ourselves, else
+            # the first add_episode's edge dedup search crashes (graphiti-core gap). The
+            # unit-test fake graphiti has no real `.driver` → skip (no Kuzu there).
+            driver = getattr(self._graphiti, "driver", None)
+            if driver is not None:
+                await _ensure_fts_indices(driver)
         except Exception:
             log.exception("❌ graphiti — build_indices_and_constraints failed")
             raise

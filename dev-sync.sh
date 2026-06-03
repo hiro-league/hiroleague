@@ -10,6 +10,16 @@ source "$SCRIPT_DIR/scripts/stop-hiro-dev-processes.sh"
 
 export HIRO_ENV="${HIRO_ENV:-dev}"
 
+# Some endpoint-security / TLS-inspection tools inject SSLKEYLOGFILE pointing at an
+# unwritable virtual file (e.g. \\?\Volume{GUID}\virtual_file.log). Python's
+# ssl.create_default_context() then raises PermissionError as soon as any TLS client
+# is imported (ollama -> httpx), crashing the server on start. Drop the var for the
+# launched dev processes when its target is not writable.
+if [ -n "${SSLKEYLOGFILE:-}" ] && ! ( : >> "$SSLKEYLOGFILE" ) 2>/dev/null; then
+  echo "==> SSLKEYLOGFILE points at an unwritable path ('$SSLKEYLOGFILE'); clearing it for this run."
+  unset SSLKEYLOGFILE
+fi
+
 # Stop the server if running so Windows releases the file lock on hiro.exe
 echo "==> Stopping Hiro server (if running)..."
 hiro stop 2>/dev/null || true

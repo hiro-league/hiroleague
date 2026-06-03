@@ -826,11 +826,25 @@ async def eval_run(
                 # run_eval emits started / question_completed / completed / failed
                 # events on its own — no need for us to wrap those.
                 await run_eval(service, workspace_path, run_id=run_id)
-            except Exception:
+            except Exception as exc:
                 log.error(
                     "❌ knowledge.eval — background run failed · run_id=%s",
                     run_id,
                     exc_info=True,
+                )
+                # Emit the terminal FAILED event. run_eval emits this on its OWN
+                # failures, but a SETUP-phase crash (corpus ingest / build-graph) happens
+                # before run_eval runs — without this the admin Eval panel never receives
+                # a terminal event and spins forever. Same payload shape as run_eval.
+                get_domain_event_bus().publish(
+                    DomainEvent(
+                        type=KNOWLEDGE_EVAL_FAILED,
+                        workspace_path=workspace_path,
+                        payload={
+                            "run_id": run_id,
+                            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                        },
+                    )
                 )
             finally:
                 if owned:

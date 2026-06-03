@@ -394,7 +394,11 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraph}
     >
-      <FormField label="Graph backend" class="max-w-md">
+      <FormField
+        label="Graph backend"
+        hint="Master switch. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from graph facts. Mix = graph facts focus the Qdrant passage search and the two fuse (recommended — best relational + grounding balance)."
+        class="max-w-md"
+      >
         <select
           class={ADMIN_SELECT_LG}
           bind:value={ctrl.draft.knowledge.graph.backend}
@@ -408,8 +412,9 @@
 
       <SingleModelPicker
         embedded
+        labelled
         label="Graph extraction model"
-        hint="Structured-output-capable chat model (Graphiti extraction). Null falls back to the answering model / default chat."
+        hint="The heavy LLM Graphiti uses to read each chunk and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat."
         selectedId={ctrl.draft.knowledge.graph.extraction_model}
         catalogModels={ctrl.chatOptions}
         catalogAllProviders={ctrl.catalogAllProviders}
@@ -421,7 +426,11 @@
         onSelect={ctrl.setKnowledgeGraphExtractionModel}
         onChange={ctrl.markDirty}
       />
-      <FormField label="Graph extraction profile" class="max-w-md">
+      <FormField
+        label="Graph extraction profile"
+        hint="Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs."
+        class="max-w-md"
+      >
         <select
           class={ADMIN_SELECT_LG}
           bind:value={ctrl.draft.knowledge.graph.extraction_tuning_profile}
@@ -435,6 +444,7 @@
 
       <SingleModelPicker
         embedded
+        labelled
         label="Graph small-step model"
         hint="Cheaper model for dedupe / summaries / timestamps. Null falls back to the extraction model."
         selectedId={ctrl.draft.knowledge.graph.small_model}
@@ -448,7 +458,11 @@
         onSelect={ctrl.setKnowledgeGraphSmallModel}
         onChange={ctrl.markDirty}
       />
-      <FormField label="Graph small-step profile" class="max-w-md">
+      <FormField
+        label="Graph small-step profile"
+        hint="Tuning profile for the cheaper small-step model (dedupe / summaries / timestamps)."
+        class="max-w-md"
+      >
         <select
           class={ADMIN_SELECT_LG}
           bind:value={ctrl.draft.knowledge.graph.small_tuning_profile}
@@ -462,6 +476,7 @@
 
       <SingleModelPicker
         embedded
+        labelled
         label="Graph embedder"
         hint="Embeds entity names + facts into the graph. Null shares the knowledge embedding model above."
         selectedId={ctrl.draft.knowledge.graph.embedder_model}
@@ -477,7 +492,10 @@
       />
 
       <div class="grid gap-3 md:grid-cols-2">
-        <FormField label="Temporal lens (default)">
+        <FormField
+          label="Temporal lens (default)"
+          hint="Default time lens at retrieval. Current = only facts valid now (superseded facts hidden). Include historical = also surface invalidated facts. Overridable per query."
+        >
           <select
             class={ADMIN_SELECT_LG}
             bind:value={ctrl.draft.knowledge.graph.temporal_default}
@@ -487,7 +505,10 @@
             <option value="all">Include historical</option>
           </select>
         </FormField>
-        <FormField label="Expansion hops (k)">
+        <FormField
+          label="Expansion hops (k)"
+          hint="Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost."
+        >
           <input
             type="number"
             min="1"
@@ -498,7 +519,11 @@
           />
         </FormField>
       </div>
-      <FormField label="Search recipe" class="max-w-md">
+      <FormField
+        label="Search recipe"
+        hint="How fact-search candidates are ranked/fused. RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly."
+        class="max-w-md"
+      >
         <select
           class={ADMIN_SELECT_LG}
           bind:value={ctrl.draft.knowledge.graph.search_recipe}

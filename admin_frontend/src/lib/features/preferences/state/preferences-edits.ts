@@ -124,6 +124,50 @@ export function editsForSave(
   );
   add('knowledge.rewrite.prompt', baseline.knowledge.rewrite.prompt, draft.knowledge.rewrite.prompt);
   add('knowledge.rewrite.default_on', baseline.knowledge.rewrite.default_on, draft.knowledge.rewrite.default_on);
+  // Knowledge Graph (Graphiti) prefs were missing here, so backend/model/etc. edits were
+  // silently dropped from the save payload (UI showed "saved" but the value snapped back).
+  add('knowledge.graph.backend', baseline.knowledge.graph.backend, draft.knowledge.graph.backend);
+  add(
+    'knowledge.graph.extraction_model',
+    baseline.knowledge.graph.extraction_model,
+    draft.knowledge.graph.extraction_model || null
+  );
+  add(
+    'knowledge.graph.extraction_tuning_profile',
+    baseline.knowledge.graph.extraction_tuning_profile,
+    draft.knowledge.graph.extraction_tuning_profile
+  );
+  add(
+    'knowledge.graph.small_model',
+    baseline.knowledge.graph.small_model,
+    draft.knowledge.graph.small_model || null
+  );
+  add(
+    'knowledge.graph.small_tuning_profile',
+    baseline.knowledge.graph.small_tuning_profile,
+    draft.knowledge.graph.small_tuning_profile
+  );
+  add(
+    'knowledge.graph.embedder_model',
+    baseline.knowledge.graph.embedder_model,
+    draft.knowledge.graph.embedder_model || null
+  );
+  add(
+    'knowledge.graph.temporal_default',
+    baseline.knowledge.graph.temporal_default,
+    draft.knowledge.graph.temporal_default
+  );
+  add(
+    'knowledge.graph.communities_enabled',
+    baseline.knowledge.graph.communities_enabled,
+    draft.knowledge.graph.communities_enabled
+  );
+  add('knowledge.graph.k_hop', baseline.knowledge.graph.k_hop, draft.knowledge.graph.k_hop);
+  add(
+    'knowledge.graph.search_recipe',
+    baseline.knowledge.graph.search_recipe,
+    draft.knowledge.graph.search_recipe
+  );
   add('chat.instructions', baseline.chat.instructions, draft.chat.instructions);
   add('chat.max_messages', baseline.chat.max_messages, draft.chat.max_messages);
   add('chat.cite_sources', baseline.chat.cite_sources, draft.chat.cite_sources);

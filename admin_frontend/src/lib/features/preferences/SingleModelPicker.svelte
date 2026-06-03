@@ -24,7 +24,8 @@
     onSelect,
     onChange,
     toolbar,
-    embedded = false
+    embedded = false,
+    labelled = false
   }: {
     label: string;
     hint: string;
@@ -42,6 +43,12 @@
     toolbar?: Snippet;
     /** When true, omit outer card chrome — host `<SectionCardMuted>` owns title/collapse. */
     embedded?: boolean;
+    /**
+     * When embedded, still render the `label`/`hint` as a FormField-style header.
+     * Use when several embedded pickers share ONE host card (so the card title can't
+     * stand in for each picker's label) — e.g. the Graphiti model pickers.
+     */
+    labelled?: boolean;
   } = $props();
 
   let pickProviderId = $state('');
@@ -241,8 +248,18 @@
 {/snippet}
 
 {#if embedded}
-  <div class="grid gap-3">
-    {@render pickerBody()}
+  <div class="grid gap-2">
+    {#if labelled && label?.trim()}
+      <div class="grid gap-0.5">
+        <h4 class="font-sans text-base font-semibold leading-snug text-foreground">{label}</h4>
+        {#if hint?.trim()}
+          <p class="font-sans text-xs leading-snug text-muted-foreground">{hint}</p>
+        {/if}
+      </div>
+    {/if}
+    <div class="grid gap-3">
+      {@render pickerBody()}
+    </div>
   </div>
 {:else}
   <section class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">

@@ -7,10 +7,13 @@
 
   let {
     label,
+    hint,
     class: className = '',
     children
   }: {
     label?: string;
+    // Optional help text rendered below the control (reused across settings forms).
+    hint?: string;
     class?: string;
     children: Snippet;
   } = $props();
@@ -21,6 +24,9 @@
     <span class="font-sans text-sm font-semibold leading-snug text-muted-foreground">{label}</span>
   {/if}
   {@render children()}
+  {#if hint?.trim()}
+    <span class="font-sans text-xs leading-snug text-muted-foreground">{hint}</span>
+  {/if}
 </label>
 
 <style>

@@ -23,7 +23,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from graphiti_core.nodes import EpisodeType
+from graphiti_core.nodes import EpisodeType, EpisodicNode
 from hiro_commons.log import Logger
 from pydantic import BaseModel
 
@@ -100,6 +100,48 @@ def _episode_body(ep: GraphitiEpisodeInput, source: EpisodeType) -> str:
     if source == EpisodeType.message and ep.speaker:
         return f"{ep.speaker}: {ep.text}"
     return ep.text
+
+
+async def _preseed_episode_node(
+    driver: Any,
+    ep: GraphitiEpisodeInput,
+    *,
+    body: str,
+    source: EpisodeType,
+    group_id: str | None,
+    ref: dt.datetime,
+    now: dt.datetime,
+) -> None:
+    """Create the Episodic node up-front with our ``uuid = chunk_id`` (== point_id).
+
+    graphiti-core 0.29.1's ``add_episode(uuid=...)`` treats a supplied ``uuid`` as
+    "UPDATE the existing episode" — it does ``EpisodicNode.get_by_uuid`` and raises
+    ``NodeNotFoundError`` when the node doesn't exist yet. Our provenance bridge (G6)
+    needs the *opposite*: CREATE the episode WITH that id so ``episode.uuid ==
+    point_id`` (the Qdrant join key, no mapping table). So we persist the node first;
+    ``add_episode`` then finds it via ``get_by_uuid`` and enriches it (extraction +
+    edges) before re-saving. One extra write per chunk; keeps the design intact.
+    """
+    node = EpisodicNode(
+        uuid=ep.chunk_id,
+        name=_episode_name(ep),
+        group_id=group_id or "",
+        source=source,
+        source_description=ep.document_id,
+        content=body,
+        valid_at=ref,
+        created_at=now,
+    )
+    try:
+        await node.save(driver)
+    except Exception:
+        # Real Kuzu write — fail loud + let the caller count/raise (general-coding-rule).
+        log.exception(
+            "❌ graphiti.ingest — episode pre-seed failed · chunk=%s doc=%s",
+            ep.chunk_id,
+            ep.document_id,
+        )
+        raise
 
 
 def _safe_emit(
@@ -190,12 +232,28 @@ async def ingest_episodes(
     )
     total = len(prepared)
 
+    # Real Graphiti exposes `.driver`; the unit-test fake does not → pre-seed only on
+    # the real path (production always has a driver). Lets the fake-client tests stay
+    # Kuzu-free while the live path creates episodes with our point_id (see helper).
+    driver = getattr(graphiti, "driver", None)
+
     for index, (ep, ref) in enumerate(prepared):
         source = EpisodeType.message if ep.source == "message" else EpisodeType.text
+        body = _episode_body(ep, source)
         try:
+            if driver is not None and ep.chunk_id:
+                await _preseed_episode_node(
+                    driver,
+                    ep,
+                    body=body,
+                    source=source,
+                    group_id=group_id,
+                    ref=ref,
+                    now=_now(),
+                )
             result = await graphiti.add_episode(
                 name=_episode_name(ep),
-                episode_body=_episode_body(ep, source),
+                episode_body=body,
                 source_description=ep.document_id,
                 reference_time=ref,
                 source=source,

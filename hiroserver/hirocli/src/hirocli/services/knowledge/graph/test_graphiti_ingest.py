@@ -19,6 +19,8 @@ from hirocli.services.knowledge.constants import (
     KNOWLEDGE_GRAPH_INGEST_PROGRESS,
     KNOWLEDGE_GRAPH_NODE_UPSERTED,
 )
+from graphiti_core.nodes import EpisodicNode
+
 from hirocli.services.knowledge.graph.graphiti_ingest import (
     GraphitiEpisodeInput,
     ingest_episodes,
@@ -106,6 +108,33 @@ async def test_sorted_chronologically() -> None:
     ]
     await ingest_episodes(g, eps, source_role="user_document")
     assert [c["uuid"] for c in g.calls] == ["jan", "may", "aug"]
+
+
+@pytest.mark.asyncio
+async def test_preseeds_episode_node_with_chunk_uuid(monkeypatch) -> None:
+    """When the client exposes a real driver, the episode is pre-created with
+    uuid=chunk_id BEFORE add_episode — so graphiti's get_by_uuid finds it (G6) instead
+    of raising NodeNotFoundError. Guards the regression fixed for the Adam eval."""
+    saved: list[dict] = []
+
+    async def _fake_save(self, driver) -> None:  # noqa: ANN001
+        saved.append({"uuid": self.uuid, "content": self.content, "group_id": self.group_id})
+
+    monkeypatch.setattr(EpisodicNode, "save", _fake_save)
+
+    g = _FakeGraphiti()
+    g.driver = object()  # presence of a driver triggers the real-path pre-seed
+    eps = [
+        GraphitiEpisodeInput(
+            chunk_id="pt-1", document_id="d1", text="hello", reference_time=_ts(1)
+        )
+    ]
+    stats = await ingest_episodes(g, eps, source_role="user_document", group_id="grp")
+
+    assert stats.episodes_processed == 1
+    # Pre-seed happened with our point_id + content, BEFORE add_episode recorded its call.
+    assert saved == [{"uuid": "pt-1", "content": "hello", "group_id": "grp"}]
+    assert g.calls[0]["uuid"] == "pt-1"
 
 
 @pytest.mark.asyncio
