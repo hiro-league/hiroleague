@@ -38,23 +38,33 @@ export function connectKnowledgeJobEvents(onJob: (job: KnowledgeJobData) => void
 // different event types — the controller dispatches on event.type.
 // ---------------------------------------------------------------------------
 
+/** The selectable eval legs (retrieval modes). */
+export type EvalLeg = 'flat' | 'graphiti' | 'mix';
+
 /** Payload shape of ``knowledge.eval.started`` events. */
 export type EvalStartedPayload = {
   run_id: string;
   total_questions: number;
   filters: Record<string, unknown>;
+  // Selected legs — the UI renders one column per leg, in this order.
+  modes: string[];
 };
 
 /** Per-leg result inside a ``knowledge.eval.question_completed`` event. */
 export type EvalQuestionLeg = {
+  mode?: string;
   mark: string;            // ✓ / ◐ / ✗ / 🛇
   elapsed_ms: number;
-  answer_preview: string;
+  answer_preview: string;  // compact teaser for the live terminal line
+  answer: string;          // FULL answer for the expandable table row
   run_id: string | null;   // per-leg knowledge_answer ledger run for drill-in
 };
 
-/** Payload shape of ``knowledge.eval.question_completed`` events. */
+/** Payload shape of ``knowledge.eval.question_completed`` events.
+ *  ``legs`` is keyed by leg name (flat/graphiti/mix) — only the run's selected
+ *  legs are present, so 1–3 entries. */
 export type EvalQuestionPayload = {
+  run_id?: string;
   index: number;
   total: number;
   id: string;
@@ -62,27 +72,24 @@ export type EvalQuestionPayload = {
   subcategory?: string;
   question: string;
   requires_graph: boolean;
-  flat: EvalQuestionLeg;
-  graph: EvalQuestionLeg;
-  delta: string;
+  legs: Record<string, EvalQuestionLeg>;
+  delta: string; // best graph leg vs flat
 };
 
-/** Per-category flat/graph passing counts (the per-category results table). */
-export type EvalCategoryStat = { total: number; flat_pass: number; graph_pass: number };
+/** Per-category passing counts, keyed by leg (the per-category results table). */
+export type EvalCategoryStat = { total: number; pass: Record<string, number> };
 
 /** Payload shape of ``knowledge.eval.completed`` events (aggregate summary). */
 export type EvalCompletedPayload = {
   run_id: string;
   total_questions: number;
-  flat_passing: number;
-  graph_passing: number;
+  modes: string[];
+  // leg → number of passing rows.
+  passing: Record<string, number>;
   requires_graph_total: number;
-  requires_graph_flat_passing: number;
-  requires_graph_graph_passing: number;
-  graph_wins: number;
-  graph_loses: number;
-  ties: number;
-  gate: 'proceed' | 'pivot';
+  // leg → passing rows within the requires_graph subset.
+  requires_graph_passing: Record<string, number>;
+  gate: 'proceed' | 'pivot' | 'n/a';
   elapsed_ms: number;
   by_category?: Record<string, EvalCategoryStat>;
 };
@@ -93,11 +100,24 @@ export type EvalFailedPayload = {
   error: string;
 };
 
-/** Payload shape of ``knowledge.eval.setup_progress`` events. */
+/** Payload shape of ``knowledge.eval.cancelled`` events (user pressed Cancel). */
+export type EvalCancelledPayload = {
+  run_id: string;
+};
+
+/** Payload shape of ``knowledge.eval.setup_progress`` events.
+ *  Fires once per phase AND once per episode (index/total set on the per-episode
+ *  events) so the live terminal can show fine-grained ingest/graph-build progress. */
 export type EvalSetupProgressPayload = {
+  run_id?: string;
   phase: 'ingest_synthetic' | 'graph_build' | 'ingest_adam' | 'build_graph';
   file_count?: number;
   episode_count?: number;
+  // Per-episode granularity (absent on the coarse phase-start events).
+  index?: number;
+  total?: number;
+  title?: string;
+  snippet?: string;
 };
 
 export type EvalEventHandlers = {
@@ -106,6 +126,7 @@ export type EvalEventHandlers = {
   onQuestion?: (p: EvalQuestionPayload) => void;
   onCompleted?: (p: EvalCompletedPayload) => void;
   onFailed?: (p: EvalFailedPayload) => void;
+  onCancelled?: (p: EvalCancelledPayload) => void;
 };
 
 const KNOWLEDGE_EVAL_EVENT_TYPES = [
@@ -113,7 +134,8 @@ const KNOWLEDGE_EVAL_EVENT_TYPES = [
   'knowledge.eval.setup_progress',
   'knowledge.eval.question_completed',
   'knowledge.eval.completed',
-  'knowledge.eval.failed'
+  'knowledge.eval.failed',
+  'knowledge.eval.cancelled'
 ] as const;
 
 /** Subscribe to L3 eval batch SSE events; returns teardown. */
@@ -152,6 +174,10 @@ export function connectKnowledgeEvalEvents(handlers: EvalEventHandlers): () => v
     'knowledge.eval.failed': (e) => {
       const p = parse<EvalFailedPayload>(e);
       if (p && handlers.onFailed) handlers.onFailed(p);
+    },
+    'knowledge.eval.cancelled': (e) => {
+      const p = parse<EvalCancelledPayload>(e);
+      if (p && handlers.onCancelled) handlers.onCancelled(p);
     }
   };
 
@@ -160,6 +186,23 @@ export function connectKnowledgeEvalEvents(handlers: EvalEventHandlers): () => v
   }
   return () => source.close();
 }
+
+/** Replay snapshot from ``GET /knowledge/eval/state`` — the server-side run
+ *  store the panel hydrates from on mount (mid-run replay + cross-origin
+ *  consistency between the Vite and packaged UIs). ``null`` = no run / idle. */
+export type EvalRunStateData = {
+  run_id: string;
+  corpus_source: string;
+  status: 'starting' | 'running' | 'completed' | 'failed' | 'cancelled';
+  total_questions: number;
+  modes: string[];
+  filters: Record<string, unknown>;
+  setup_events: EvalSetupProgressPayload[];
+  rows: EvalQuestionPayload[];
+  summary: EvalCompletedPayload | null;
+  failure_message: string | null;
+  cancel_requested: boolean;
+};
 
 // ---------------------------------------------------------------------------
 // Graph viz (MVP) — live node/edge updates for the admin "Graph" tab. Same

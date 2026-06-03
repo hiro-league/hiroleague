@@ -45,8 +45,6 @@ from hirocli.services.knowledge.eval_scoring import (
     MARK_ABSTAIN,
     MARK_PASS,
     MARK_RANK,
-    Score,
-    delta_mark,
     score_answer,
 )
 
@@ -76,32 +74,70 @@ EVAL_SYNTHETIC_TAG = "_l3_eval_synthetic"
 # ---------------------------------------------------------------------------
 
 
+# The selectable eval legs (retrieval modes). "flat" = no graph (Qdrant hybrid);
+# "graphiti" = graph facts + their episode chunks by-id (no query hybrid); "mix" =
+# graph facts focus the Qdrant hybrid (fused). Any non-empty subset is runnable,
+# including a single leg. Order here is the canonical column order in the UI.
+ALL_EVAL_MODES: tuple[str, ...] = ("flat", "graphiti", "mix")
+DEFAULT_EVAL_MODES: list[str] = list(ALL_EVAL_MODES)
+
+
+def normalize_modes(modes: list[str] | None) -> list[str]:
+    """Validate + order a requested leg subset; fall back to all legs.
+
+    Drops unknown names, de-dupes, and preserves the canonical column order so the
+    UI columns are stable regardless of selection order. Empty/invalid → all legs."""
+    if not modes:
+        return list(DEFAULT_EVAL_MODES)
+    wanted = {m for m in modes if m in ALL_EVAL_MODES}
+    ordered = [m for m in ALL_EVAL_MODES if m in wanted]
+    return ordered or list(DEFAULT_EVAL_MODES)
+
+
+@dataclass(frozen=True)
+class LegResult:
+    """One leg's scored outcome for a single question."""
+
+    mode: str          # "flat" | "graphiti" | "mix"
+    mark: str          # one of MARK_*
+    elapsed_ms: int
+    answer: str
+    run_id: str | None
+
+    def to_payload(self) -> dict[str, Any]:
+        # Compact ``answer_preview`` for the live terminal line + the FULL ``answer``
+        # for the expandable row; ``run_id`` for the per-leg "Open in Graph Runs" link.
+        return {
+            "mode": self.mode,
+            "mark": self.mark,
+            "elapsed_ms": self.elapsed_ms,
+            "answer_preview": _preview(self.answer, 200),
+            "answer": self.answer,
+            "run_id": self.run_id,
+        }
+
+
 @dataclass(frozen=True)
 class QuestionResult:
-    """Per-question outcome captured for the aggregate summary."""
+    """Per-question outcome across the selected legs."""
 
     id: str
     category: str
     question: str
     requires_graph: bool
-    flat_mark: str
-    flat_elapsed_ms: int
-    flat_answer: str
-    flat_run_id: str | None
-    graph_mark: str
-    graph_elapsed_ms: int
-    graph_answer: str
-    graph_run_id: str | None
+    # Leg name → that leg's scored result. Keyed by the modes the run selected.
+    legs: dict[str, LegResult]
+    # Best graph leg (graphiti/mix) vs flat, as a signed rank delta for the table's
+    # Δ column. "0" when flat wasn't run or no graph leg beat it.
     delta: str
     subcategory: str = ""
 
     def to_payload(self, *, index: int, total: int) -> dict[str, Any]:
         """Event payload shape consumed by the Eval Batch UI.
 
-        ``flat.run_id`` / ``graph.run_id`` let the UI render per-leg
-        "Open in Graph Runs" links — each leg has its own knowledge_answer
-        ledger run (from ``knowledge_answer_ledger``), so the user can drill
-        into whichever leg's trace is interesting."""
+        ``legs`` is keyed by leg name so the panel renders one column per selected
+        leg (1–3). For a ≤50-question eval the full-answer bytes are negligible and
+        let the panel show full answers live without a second round-trip."""
         return {
             "index": index,
             "total": total,
@@ -110,18 +146,7 @@ class QuestionResult:
             "subcategory": self.subcategory,
             "question": self.question,
             "requires_graph": self.requires_graph,
-            "flat": {
-                "mark": self.flat_mark,
-                "elapsed_ms": self.flat_elapsed_ms,
-                "answer_preview": _preview(self.flat_answer, 200),
-                "run_id": self.flat_run_id,
-            },
-            "graph": {
-                "mark": self.graph_mark,
-                "elapsed_ms": self.graph_elapsed_ms,
-                "answer_preview": _preview(self.graph_answer, 200),
-                "run_id": self.graph_run_id,
-            },
+            "legs": {mode: leg.to_payload() for mode, leg in self.legs.items()},
             "delta": self.delta,
         }
 
@@ -132,32 +157,26 @@ class EvalSummary:
 
     run_id: str
     total_questions: int
-    flat_passing: int
-    graph_passing: int
+    modes: list[str]
+    # leg name → number of passing rows (pass or correct-abstain).
+    passing: dict[str, int]
     requires_graph_total: int
-    requires_graph_flat_passing: int
-    requires_graph_graph_passing: int
-    graph_wins: int
-    graph_loses: int
-    ties: int
-    gate: str  # "proceed" | "pivot"
+    # leg name → passing rows within the requires_graph subset.
+    requires_graph_passing: dict[str, int]
+    gate: str  # "proceed" | "pivot" | "n/a"
     elapsed_ms: int
     questions: list[QuestionResult] = field(default_factory=list)
-    # category → {total, flat_pass, graph_pass} — the per-category × flat/graph table.
-    by_category: dict[str, dict[str, int]] = field(default_factory=dict)
+    # category → {total, pass: {leg: count}} — the per-category × N-leg table.
+    by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "total_questions": self.total_questions,
-            "flat_passing": self.flat_passing,
-            "graph_passing": self.graph_passing,
+            "modes": self.modes,
+            "passing": self.passing,
             "requires_graph_total": self.requires_graph_total,
-            "requires_graph_flat_passing": self.requires_graph_flat_passing,
-            "requires_graph_graph_passing": self.requires_graph_graph_passing,
-            "graph_wins": self.graph_wins,
-            "graph_loses": self.graph_loses,
-            "ties": self.ties,
+            "requires_graph_passing": self.requires_graph_passing,
             "gate": self.gate,
             "elapsed_ms": self.elapsed_ms,
             "by_category": self.by_category,
@@ -233,6 +252,7 @@ async def run_eval(
     filters: dict[str, Any] | None = None,
     top_k: int | None = None,
     min_score: float | None = None,
+    modes: list[str] | None = None,
 ) -> EvalSummary:
     """Run the question loop against ``service`` — emitting events as it goes.
 
@@ -251,6 +271,7 @@ async def run_eval(
     rid = run_id or f"l3eval-{uuid.uuid4()}"
     questions = questions if questions is not None else load_questions()
     total = len(questions)
+    run_modes = normalize_modes(modes)
     started_at = time.perf_counter()
 
     # Default the synthetic-tag filter unless the caller passed their own.
@@ -265,6 +286,9 @@ async def run_eval(
             "run_id": rid,
             "total_questions": total,
             "filters": eval_filters,
+            # Selected legs — the UI needs these up front to render the right
+            # columns before the first question row arrives.
+            "modes": run_modes,
         },
     )
 
@@ -274,16 +298,20 @@ async def run_eval(
             result = await _run_one_question(
                 service,
                 q,
+                modes=run_modes,
                 filters=eval_filters,
                 top_k=top_k,
                 min_score=min_score,
             )
             rows.append(result)
+            # run_id on every event so the per-workspace registry can attribute
+            # this row to the right run (the registry replays state on mount /
+            # cross-origin; see eval_registry.py).
             _publish(
                 bus,
                 workspace_path,
                 KNOWLEDGE_EVAL_QUESTION_COMPLETED,
-                result.to_payload(index=index, total=total),
+                {"run_id": rid, **result.to_payload(index=index, total=total)},
             )
     except Exception as exc:
         log.error(
@@ -300,7 +328,7 @@ async def run_eval(
         )
         raise
 
-    summary = _summarize(rid, rows, started_at)
+    summary = _summarize(rid, rows, started_at, run_modes)
     _publish(
         bus,
         workspace_path,
@@ -321,6 +349,7 @@ async def ingest_synthetic_corpus_via_service(
     *,
     corpus_dir: Path | None = None,
     tag: str = EVAL_SYNTHETIC_TAG,
+    run_id: str | None = None,
 ) -> list[str]:
     """Ingest the synthetic corpus into the workspace's knowledge index and
     return the freshly-ingested document_ids.
@@ -339,7 +368,7 @@ async def ingest_synthetic_corpus_via_service(
         bus,
         workspace_path,
         KNOWLEDGE_EVAL_SETUP_PROGRESS,
-        {"phase": "ingest_synthetic", "file_count": len(paths)},
+        {"run_id": run_id, "phase": "ingest_synthetic", "file_count": len(paths)},
     )
 
     await service.ingest_and_wait(
@@ -387,6 +416,7 @@ async def ingest_adam_corpus_via_service(
     *,
     corpus_path: Path | None = None,
     tag: str = ADAM_EVAL_TAG,
+    run_id: str | None = None,
 ) -> int:
     """Ingest the Adam JSONL episode corpus into BOTH Qdrant and the Graphiti graph.
 
@@ -394,20 +424,27 @@ async def ingest_adam_corpus_via_service(
     point_id **and** the Graphiti episode uuid. Qdrant gets one tagged point per
     episode (flat/mix passages); Graphiti gets the episodes sequentially in
     chronological order (temporal supersession). Requires a configured extraction
-    model for the graph build."""
+    model for the graph build.
+
+    Emits a ``setup_progress`` event **per episode** for both the Qdrant write
+    and the (slow, LLM-bound) graph extraction, so the admin terminal shows live
+    progress instead of freezing for minutes on the coarse two-phase view."""
     from dataclasses import replace
 
     from hirocli.domain.preferences import load_preferences
+    from hirocli.runtime.agent_graph.ledger import LedgerSink
+    from hirocli.services.knowledge.constants import KNOWLEDGE_GRAPH_INGEST_PROGRESS
     from hirocli.services.knowledge.graph import GraphitiMemoryService
     from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
 
     episodes = load_episodes_file(corpus_path or ADAM_CORPUS_FILE)
     bus = get_domain_event_bus()
+    total = len(episodes)
     _publish(
         bus,
         workspace_path,
         KNOWLEDGE_EVAL_SETUP_PROGRESS,
-        {"phase": "ingest_adam", "episode_count": len(episodes)},
+        {"run_id": run_id, "phase": "ingest_adam", "episode_count": total},
     )
 
     # 1) Qdrant double-write — one tagged point per episode, point_id == shared uuid.
@@ -422,6 +459,19 @@ async def ingest_adam_corpus_via_service(
             tags=[tag],
         )
         graphiti_eps.append(replace(ep, chunk_id=qid))
+        _publish(
+            bus,
+            workspace_path,
+            KNOWLEDGE_EVAL_SETUP_PROGRESS,
+            {
+                "run_id": run_id,
+                "phase": "ingest_adam",
+                "index": len(graphiti_eps),
+                "total": total,
+                "title": ep.document_title,
+                "snippet": _preview(ep.text, 90),
+            },
+        )
 
     # 2) Graphiti graph build — sequential + chronological (require_backend=False so an
     #    explicit eval build works even with the retrieval backend toggle off).
@@ -430,7 +480,7 @@ async def ingest_adam_corpus_via_service(
         bus,
         workspace_path,
         KNOWLEDGE_EVAL_SETUP_PROGRESS,
-        {"phase": "build_graph", "episode_count": len(graphiti_eps)},
+        {"run_id": run_id, "phase": "build_graph", "episode_count": len(graphiti_eps)},
     )
     gsvc = GraphitiMemoryService.from_preferences(prefs, workspace_path, require_backend=False)
     if gsvc is None:
@@ -438,8 +488,36 @@ async def ingest_adam_corpus_via_service(
             "Adam eval: no extraction model configured for the Graphiti graph build. "
             "Set knowledge.graph.extraction_model or knowledge.answering.model (+ provider key)."
         )
+
+    # Bridge Graphiti's per-episode progress into eval terminal lines. The build
+    # is the multi-minute part (one LLM extraction per episode), so this is the
+    # progress the user most needs to see ticking.
+    def _graph_sink(event_type: str, payload: dict[str, Any]) -> None:
+        if event_type != KNOWLEDGE_GRAPH_INGEST_PROGRESS:
+            return
+        _publish(
+            bus,
+            workspace_path,
+            KNOWLEDGE_EVAL_SETUP_PROGRESS,
+            {
+                "run_id": run_id,
+                "phase": "build_graph",
+                "index": int(payload.get("chunk_index") or 0),
+                "total": int(payload.get("chunk_total") or len(graphiti_eps)),
+            },
+        )
+
+    # Record the Adam-corpus graph build as a ``graph_ingest`` run (per-episode +
+    # per-operation nodes) so the ingestion is visible in Graph Runs — previously
+    # this path bypassed the ledger entirely (only the answers showed up).
+    ledger_sink = LedgerSink(workspace_path)
     try:
-        await gsvc.ingest_chunks(graphiti_eps, source_role="user_document")
+        await gsvc.ingest_chunks(
+            graphiti_eps,
+            source_role="user_document",
+            event_sink=_graph_sink,
+            ledger_sink=ledger_sink,
+        )
     finally:
         await gsvc.close()
     return len(episodes)
@@ -454,13 +532,15 @@ async def _run_one_question(
     service: Any,
     q: dict[str, Any],
     *,
+    modes: list[str],
     filters: dict[str, Any],
     top_k: int | None,
     min_score: float | None,
 ) -> QuestionResult:
-    """One question → one compare → two scores → one row."""
-    comparison = await service.compare(
+    """One question → one N-leg fan-out → per-leg scores → one row."""
+    results = await service.answer_legs(
         q["question"],
+        modes=modes,
         top_k=top_k,
         min_score=min_score,
         filters=filters,
@@ -468,84 +548,113 @@ async def _run_one_question(
     )
     expected = q["expected_fragments"]
     must_not = q.get("must_not_contain") or []
-    flat_score = score_answer(
-        comparison.flat.answer,
-        expected,
-        no_results=bool(comparison.flat.no_results),
-        must_not_contain=must_not,
-    )
-    graph_score = score_answer(
-        comparison.graph.answer,
-        expected,
-        no_results=bool(comparison.graph.no_results),
-        must_not_contain=must_not,
-    )
+    legs: dict[str, LegResult] = {}
+    scores: dict[str, Any] = {}
+    # Preserve the requested column order even though gather returns a dict.
+    for mode in modes:
+        res = results.get(mode)
+        if res is None:
+            continue
+        score = score_answer(
+            res.answer,
+            expected,
+            no_results=bool(res.no_results),
+            must_not_contain=must_not,
+        )
+        scores[mode] = score
+        legs[mode] = LegResult(
+            mode=mode,
+            mark=score.mark,
+            elapsed_ms=int(res.elapsed_ms or 0),
+            answer=res.answer or "",
+            run_id=getattr(res, "run_id", None),
+        )
     return QuestionResult(
         id=q["id"],
         category=q.get("category", ""),
         subcategory=q.get("subcategory", ""),
         question=q["question"],
         requires_graph=bool(q.get("requires_graph")),
-        flat_mark=flat_score.mark,
-        flat_elapsed_ms=int(comparison.flat.elapsed_ms or 0),
-        flat_answer=comparison.flat.answer or "",
-        flat_run_id=getattr(comparison.flat, "run_id", None),
-        graph_mark=graph_score.mark,
-        graph_elapsed_ms=int(comparison.graph.elapsed_ms or 0),
-        graph_answer=comparison.graph.answer or "",
-        graph_run_id=getattr(comparison.graph, "run_id", None),
-        delta=delta_mark(flat_score, graph_score),
+        legs=legs,
+        delta=_best_graph_delta(scores),
     )
 
 
-def category_breakdown(rows: list[QuestionResult]) -> dict[str, dict[str, int]]:
-    """Per-category flat/graph passing counts — the per-category × flat/graph table.
+def _best_graph_delta(scores: dict[str, Any]) -> str:
+    """Signed rank delta of the BEST graph leg vs flat — the table's Δ column.
 
-    Pure so the standalone harness + tests can reuse it. ``category`` empty →
-    ``"uncategorized"``."""
-    out: dict[str, dict[str, int]] = {}
+    "+N" when a graph leg (graphiti/mix) beats flat, "-N" when the best graph leg
+    still trails flat, "0" on tie or when flat / all graph legs are absent."""
+    flat = scores.get("flat")
+    graph_marks = [s.mark for m, s in scores.items() if m != "flat"]
+    if flat is None or not graph_marks:
+        return "0"
+    best_graph = max(MARK_RANK.get(mk, 0) for mk in graph_marks)
+    diff = best_graph - MARK_RANK.get(flat.mark, 0)
+    if diff > 0:
+        return f"+{diff}"
+    if diff < 0:
+        return str(diff)
+    return "0"
+
+
+def category_breakdown(
+    rows: list[QuestionResult], modes: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Per-category × N-leg passing counts — the per-category results table.
+
+    Shape: ``{category: {"total": int, "pass": {leg: count}}}``. Pure so the
+    standalone harness + tests can reuse it. ``category`` empty → ``"uncategorized"``."""
+    out: dict[str, dict[str, Any]] = {}
     for r in rows:
         cat = r.category or "uncategorized"
-        bucket = out.setdefault(cat, {"total": 0, "flat_pass": 0, "graph_pass": 0})
+        bucket = out.setdefault(cat, {"total": 0, "pass": {m: 0 for m in modes}})
         bucket["total"] += 1
-        if r.flat_mark in _PASSING_MARKS:
-            bucket["flat_pass"] += 1
-        if r.graph_mark in _PASSING_MARKS:
-            bucket["graph_pass"] += 1
+        for mode in modes:
+            leg = r.legs.get(mode)
+            if leg is not None and leg.mark in _PASSING_MARKS:
+                bucket["pass"][mode] += 1
     return out
 
 
-def _summarize(run_id: str, rows: list[QuestionResult], started_at: float) -> EvalSummary:
-    """Compute the gate + aggregate counts the UI/CLI surfaces."""
-    flat_passing = sum(1 for r in rows if r.flat_mark in _PASSING_MARKS)
-    graph_passing = sum(1 for r in rows if r.graph_mark in _PASSING_MARKS)
+def _summarize(
+    run_id: str, rows: list[QuestionResult], started_at: float, modes: list[str]
+) -> EvalSummary:
+    """Compute the gate + per-leg aggregate counts the UI/CLI surfaces."""
+
+    def _passing(subset: list[QuestionResult]) -> dict[str, int]:
+        return {
+            m: sum(
+                1
+                for r in subset
+                if (leg := r.legs.get(m)) is not None and leg.mark in _PASSING_MARKS
+            )
+            for m in modes
+        }
+
     requires = [r for r in rows if r.requires_graph]
-    req_flat = sum(1 for r in requires if r.flat_mark in _PASSING_MARKS)
-    req_graph = sum(1 for r in requires if r.graph_mark in _PASSING_MARKS)
-    wins = sum(
-        1 for r in rows if MARK_RANK.get(r.graph_mark, 0) > MARK_RANK.get(r.flat_mark, 0)
-    )
-    loses = sum(
-        1 for r in rows if MARK_RANK.get(r.graph_mark, 0) < MARK_RANK.get(r.flat_mark, 0)
-    )
-    ties = len(rows) - wins - loses
-    # Strict gate: graph must MEASURABLY win on the requires_graph subset.
-    gate = "proceed" if req_graph > req_flat else "pivot"
+    passing = _passing(rows)
+    req_passing = _passing(requires)
+    # Gate: a graph leg must MEASURABLY beat flat on the requires_graph subset.
+    # Needs flat AND at least one graph leg in the run; otherwise the comparison is
+    # undefined → "n/a" (e.g. the user ran a single leg).
+    graph_modes = [m for m in modes if m != "flat"]
+    if "flat" in modes and graph_modes:
+        best_graph_req = max(req_passing[m] for m in graph_modes)
+        gate = "proceed" if best_graph_req > req_passing["flat"] else "pivot"
+    else:
+        gate = "n/a"
     return EvalSummary(
         run_id=run_id,
         total_questions=len(rows),
-        flat_passing=flat_passing,
-        graph_passing=graph_passing,
+        modes=list(modes),
+        passing=passing,
         requires_graph_total=len(requires),
-        requires_graph_flat_passing=req_flat,
-        requires_graph_graph_passing=req_graph,
-        graph_wins=wins,
-        graph_loses=loses,
-        ties=ties,
+        requires_graph_passing=req_passing,
         gate=gate,
         elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         questions=list(rows),
-        by_category=category_breakdown(rows),
+        by_category=category_breakdown(rows, modes),
     )
 
 
@@ -584,10 +693,13 @@ __all__ = [
     "ADAM_CORPUS_FILE",
     "ADAM_EVAL_TAG",
     "ADAM_QUESTIONS_FILE",
+    "ALL_EVAL_MODES",
     "DEFAULT_CORPUS_DIR",
+    "DEFAULT_EVAL_MODES",
     "DEFAULT_QUESTIONS_FILE",
     "EVAL_SYNTHETIC_TAG",
     "EvalSummary",
+    "LegResult",
     "QuestionResult",
     "adam_point_id",
     "category_breakdown",
@@ -596,5 +708,6 @@ __all__ = [
     "ingest_synthetic_corpus_via_service",
     "load_adam_questions",
     "load_questions",
+    "normalize_modes",
     "run_eval",
 ]

@@ -157,16 +157,31 @@ export function editsForSave(
     baseline.knowledge.graph.temporal_default,
     draft.knowledge.graph.temporal_default
   );
-  add(
-    'knowledge.graph.communities_enabled',
-    baseline.knowledge.graph.communities_enabled,
-    draft.knowledge.graph.communities_enabled
-  );
   add('knowledge.graph.k_hop', baseline.knowledge.graph.k_hop, draft.knowledge.graph.k_hop);
   add(
     'knowledge.graph.search_recipe',
     baseline.knowledge.graph.search_recipe,
     draft.knowledge.graph.search_recipe
+  );
+  add(
+    'knowledge.graph.ledger_detail',
+    baseline.knowledge.graph.ledger_detail,
+    draft.knowledge.graph.ledger_detail
+  );
+  add(
+    'knowledge.graph.reranker.model_id',
+    baseline.knowledge.graph.reranker.model_id,
+    draft.knowledge.graph.reranker.model_id || null
+  );
+  add(
+    'knowledge.graph.reranker.min_relevance',
+    baseline.knowledge.graph.reranker.min_relevance,
+    draft.knowledge.graph.reranker.min_relevance
+  );
+  add(
+    'knowledge.graph.reranker.device',
+    baseline.knowledge.graph.reranker.device,
+    draft.knowledge.graph.reranker.device || null
   );
   add('chat.instructions', baseline.chat.instructions, draft.chat.instructions);
   add('chat.max_messages', baseline.chat.max_messages, draft.chat.max_messages);

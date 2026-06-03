@@ -534,20 +534,82 @@
           <option value="cross_encoder">Cross-encoder</option>
         </select>
       </FormField>
-      <label class="flex items-start gap-3 rounded-md border border-border/50 bg-card/45 px-3 py-2.5">
-        <input
-          type="checkbox"
-          class="mt-0.5"
-          bind:checked={ctrl.draft.knowledge.graph.communities_enabled}
+      <FormField
+        label="Graph Runs detail"
+        hint="Verbosity of the Graph Runs ledger for graph ingest + retrieval. Rich = per-node content previews (extracted entities, resolution/invalidation decisions, ranked facts) and one row per edge in resolve_facts. Compact = stats only. Lower to Compact for noisy bulk/series ingests."
+        class="max-w-md"
+      >
+        <select
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.knowledge.graph.ledger_detail}
           onchange={ctrl.markDirty}
+        >
+          <option value="rich">Rich (content previews)</option>
+          <option value="compact">Compact (stats only)</option>
+        </select>
+      </FormField>
+    </SectionCardMuted>
+
+    <SectionCardMuted
+      title="Graphiti Reranker (Cross-encoder)"
+      description="Reranks graph fact-search candidates with a real cross-encoder. Only active when the graph Search recipe above is set to Cross-encoder — otherwise these settings are disabled. Reuses the same reranker models as the flat path (cloud or local)."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraphReranker}
+    >
+      {#if ctrl.draft.knowledge.graph.search_recipe !== 'cross_encoder'}
+        <p class="rounded-md border border-border/50 bg-card/45 px-3 py-2 font-sans text-xs text-muted-foreground">
+          Set <span class="font-medium">Search recipe → Cross-encoder</span> in the Knowledge Graph
+          section above to enable these settings.
+        </p>
+      {/if}
+      <fieldset
+        disabled={ctrl.draft.knowledge.graph.search_recipe !== 'cross_encoder'}
+        class="grid gap-4 border-0 p-0 disabled:opacity-50"
+      >
+        <SingleModelPicker
+          embedded
+          label="Reranker model"
+          hint="Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model above (one model to manage). Local models must be downloaded first."
+          selectedId={ctrl.draft.knowledge.graph.reranker.model_id}
+          catalogModels={ctrl.rerankPickerOptions}
+          catalogAllProviders={ctrl.catalogAllProviders}
+          workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
+          workspaceActiveProviderIds={ctrl.activeProvidersStore.rerankActiveProviderIds}
+          busy={ctrl.busy}
+          emptyProviders="No reranker providers."
+          emptyModelsForProvider="No reranker models for this provider."
+          onSelect={ctrl.setKnowledgeGraphRerankerModel}
+          onChange={ctrl.markDirty}
         />
-        <span class="grid gap-0.5">
-          <span class="font-sans text-sm font-medium">Communities (advanced)</span>
-          <span class="font-sans text-xs text-muted-foreground">
-            Cluster entities into community summaries. Off by default — extra LLM cost; experimental.
-          </span>
-        </span>
-      </label>
+        <div class="grid gap-3 md:grid-cols-2">
+          <FormField
+            label="Min relevance"
+            hint="Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR."
+          >
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              class={ADMIN_SELECT_LG}
+              bind:value={ctrl.draft.knowledge.graph.reranker.min_relevance}
+              oninput={ctrl.markDirty}
+            />
+          </FormField>
+          <FormField
+            label="Device (local only)"
+            hint="Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models."
+          >
+            <input
+              type="text"
+              placeholder="auto"
+              class={ADMIN_SELECT_LG}
+              bind:value={ctrl.draft.knowledge.graph.reranker.device}
+              oninput={ctrl.markDirty}
+            />
+          </FormField>
+        </div>
+      </fieldset>
     </SectionCardMuted>
   {/if}
 </div>

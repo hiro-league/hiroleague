@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import KnowledgeBrowseDeleteDialog from '$lib/features/knowledge/browse/KnowledgeBrowseDeleteDialog.svelte';
   import KnowledgeBrowseDocumentListSection from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentListSection.svelte';
@@ -19,7 +20,7 @@
   let { ctl }: Props = $props();
 
   const toasts = createToastNotifier();
-  const ui = createKnowledgeBrowsePanelUi({ ctl, notify: toasts.notify });
+  const ui = untrack(() => createKnowledgeBrowsePanelUi({ ctl, notify: toasts.notify }));
 </script>
 
 <section class="grid gap-4">

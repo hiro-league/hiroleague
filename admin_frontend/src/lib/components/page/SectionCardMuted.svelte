@@ -6,7 +6,7 @@
    * the DOM with `hidden` (see svelte-best-practice §10 / §11.3).
    */
   import type { Snippet } from 'svelte';
-  import { getContext, hasContext, onMount } from 'svelte';
+  import { getContext, hasContext, onMount, untrack } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
   import { cn } from '$lib/utils';
   import { ADMIN_SECTION_CARD_MUTED } from '$lib/styling/admin-tokens';
@@ -45,7 +45,7 @@
     children
   }: Props = $props();
 
-  let expanded = $state(defaultExpanded);
+  let expanded = $state(untrack(() => defaultExpanded));
 
   const contextRegistry = hasContext(COLLAPSIBLE_SECTION_REGISTRY)
     ? getContext<CollapsibleSectionRegistry>(COLLAPSIBLE_SECTION_REGISTRY)

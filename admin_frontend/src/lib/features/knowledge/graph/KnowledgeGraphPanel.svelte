@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { Maximize2, Minimize2, RefreshCw } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
@@ -10,7 +10,7 @@
     ctl: KnowledgePageController;
   }
   let { ctl }: Props = $props();
-  const graph = ctl.graph;
+  const graph = untrack(() => ctl.graph);
 
   // Node mount point for force-graph (it appends its own <canvas>).
   let container = $state<HTMLDivElement | null>(null);

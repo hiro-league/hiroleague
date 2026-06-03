@@ -60,10 +60,10 @@ class FakeService:
         self.answer_calls.append({"query": query, **kwargs})
         if self._sleep:
             await asyncio.sleep(self._sleep)
-        use_graph = bool(kwargs.get("use_graph"))
+        graph_on = kwargs.get("graph_mode") in ("graphiti", "mix")
         return KnowledgeAnswerResult(
             query=query,
-            answer=f"{'graph' if use_graph else 'flat'} answer for {query!r}",
+            answer=f"{'graph' if graph_on else 'flat'} answer for {query!r}",
             sources=[],
             elapsed_ms=int(self._sleep * 1000),
             no_results=False,
@@ -73,8 +73,8 @@ class FakeService:
         self.compare_calls.append({"query": query, **kwargs})
         t0 = time.perf_counter()
         flat, graph = await asyncio.gather(
-            self.answer(query, **{**kwargs, "use_graph": False}),
-            self.answer(query, **{**kwargs, "use_graph": True}),
+            self.answer(query, **{**kwargs, "graph_mode": "off"}),
+            self.answer(query, **{**kwargs, "graph_mode": "mix"}),
         )
         return KnowledgeAnswerComparison(
             query=query,
@@ -117,8 +117,8 @@ async def test_compare_returns_both_legs_in_comparison_shape() -> None:
     assert result.graph.answer.startswith("graph ")
     # answer() was invoked twice — once per leg
     assert len(fake.answer_calls) == 2
-    use_graph_flags = sorted(call["use_graph"] for call in fake.answer_calls)
-    assert use_graph_flags == [False, True]
+    graph_modes = sorted(call["graph_mode"] for call in fake.answer_calls)
+    assert graph_modes == ["mix", "off"]
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_tool_graph_mode_off_calls_answer_with_use_graph_false(
     result = await tool.execute_async(query="q", rewrite=True, graph_mode=GRAPH_MODE_OFF)
     assert isinstance(result, KnowledgeAnswerResult)
     assert len(fake.answer_calls) == 1
-    assert fake.answer_calls[0]["use_graph"] is False
+    assert fake.answer_calls[0]["graph_mode"] == "off"
     assert fake.compare_calls == []
 
 
@@ -184,7 +184,8 @@ async def test_tool_graph_mode_on_calls_answer_with_use_graph_true(
     result = await tool.execute_async(query="q", rewrite=True, graph_mode=GRAPH_MODE_ON)
     assert isinstance(result, KnowledgeAnswerResult)
     assert len(fake.answer_calls) == 1
-    assert fake.answer_calls[0]["use_graph"] is True
+    # Ask tab's "on" maps to the fused "mix" leg.
+    assert fake.answer_calls[0]["graph_mode"] == "mix"
 
 
 @pytest.mark.asyncio
@@ -211,7 +212,7 @@ async def test_tool_graph_mode_default_is_off(injected_service) -> None:
     tool = KnowledgeAnswerTool()
     result = await tool.execute_async(query="q", rewrite=True)  # no graph_mode
     assert isinstance(result, KnowledgeAnswerResult)
-    assert fake.answer_calls[0]["use_graph"] is False
+    assert fake.answer_calls[0]["graph_mode"] == "off"
 
 
 @pytest.mark.asyncio
@@ -259,3 +260,48 @@ async def test_tool_invalid_graph_mode_message_lists_valid_values(
     msg = str(exc_info.value)
     # Message contains the valid set — actionable for the caller.
     assert "off" in msg and "on" in msg and "compare" in msg
+
+
+# ---------------------------------------------------------------------------
+# Tool dispatch — graph_temporal per-query override (§7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tool_graph_temporal_threads_into_answer(injected_service) -> None:
+    """The per-query temporal override reaches service.answer (was dead plumbing)."""
+    fake = injected_service()
+    tool = KnowledgeAnswerTool()
+    await tool.execute_async(
+        query="where did Adam live before?", rewrite=True, graph_mode=GRAPH_MODE_ON,
+        graph_temporal="all",
+    )
+    assert fake.answer_calls[0]["graph_temporal"] == "all"
+
+
+@pytest.mark.asyncio
+async def test_tool_graph_temporal_threads_into_compare(injected_service) -> None:
+    fake = injected_service()
+    tool = KnowledgeAnswerTool()
+    await tool.execute_async(
+        query="q", rewrite=True, graph_mode=GRAPH_MODE_COMPARE, graph_temporal="current",
+    )
+    assert fake.compare_calls[0]["graph_temporal"] == "current"
+
+
+@pytest.mark.asyncio
+async def test_tool_graph_temporal_default_is_none(injected_service) -> None:
+    """Omitted → None so service.answer falls back to the admin temporal_default pref."""
+    fake = injected_service()
+    tool = KnowledgeAnswerTool()
+    await tool.execute_async(query="q", rewrite=True, graph_mode=GRAPH_MODE_ON)
+    assert fake.answer_calls[0]["graph_temporal"] is None
+
+
+@pytest.mark.asyncio
+async def test_tool_invalid_graph_temporal_raises(injected_service) -> None:
+    fake = injected_service()
+    tool = KnowledgeAnswerTool()
+    with pytest.raises(ValueError, match="graph_temporal must be one of"):
+        await tool.execute_async(query="q", graph_mode=GRAPH_MODE_ON, graph_temporal="yesterday")
+    assert fake.answer_calls == []

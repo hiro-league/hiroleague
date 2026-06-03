@@ -29,6 +29,7 @@ from hirocli.services.knowledge.constants import (
 )
 from hirocli.services.knowledge.eval_runner import (
     EVAL_SYNTHETIC_TAG,
+    LegResult,
     QuestionResult,
     load_questions,
     run_eval,
@@ -42,10 +43,6 @@ from hirocli.services.knowledge.eval_scoring import (
     Score,
     delta_mark,
     score_answer,
-)
-from hirocli.services.knowledge.models import (
-    KnowledgeAnswerComparison,
-    KnowledgeAnswerResult,
 )
 
 
@@ -149,37 +146,42 @@ class FakeAnswerResult:
     answer: str
     no_results: bool = False
     elapsed_ms: int = 5
+    run_id: str | None = None
 
 
 class FakeService:
-    """Compare returns canned (flat, graph) answers based on the question id
-    so each scenario maps cleanly to a row in the scoring table."""
+    """``answer_legs`` returns canned per-leg answers based on the question text
+    so each scenario maps cleanly to a row in the scoring table.
+
+    The script is ``query → (flat_answer, graph_answer)``; the graph answer is used
+    for BOTH the "graphiti" and "mix" legs (the runner scores whatever legs the run
+    selected). Per-leg elapsed differs so the payload's per-leg timings are testable."""
+
+    _LEG_ELAPSED = {"flat": 10, "graphiti": 15, "mix": 20}
 
     def __init__(self, *, script: dict[str, tuple[str, str]]):
         # qid → (flat_answer, graph_answer)
         self._script = script
-        self.compare_calls: list[dict[str, Any]] = []
+        self.legs_calls: list[dict[str, Any]] = []
 
-    async def compare(self, query, *, top_k=None, min_score=None,
-                       filters=None, workspace_id=None, explain=False, rewrite=False):
-        self.compare_calls.append({
-            "query": query, "filters": filters, "rewrite": rewrite,
-            "top_k": top_k, "min_score": min_score,
+    async def answer_legs(self, query, *, modes, top_k=None, min_score=None,
+                          filters=None, workspace_id=None, explain=False,
+                          rewrite=False, graph_temporal=None):
+        self.legs_calls.append({
+            "query": query, "modes": list(modes), "filters": filters,
+            "rewrite": rewrite, "top_k": top_k, "min_score": min_score,
         })
-        # Find the matching script entry by exact question text.
         flat_ans, graph_ans = self._script.get(query, ("", ""))
-        return KnowledgeAnswerComparison(
-            query=query,
-            flat=KnowledgeAnswerResult(
-                query=query, answer=flat_ans, sources=[], elapsed_ms=10,
-                no_results=(flat_ans == ""),
-            ),
-            graph=KnowledgeAnswerResult(
-                query=query, answer=graph_ans, sources=[], elapsed_ms=20,
-                no_results=(graph_ans == ""),
-            ),
-            elapsed_ms=30,
-        )
+        ans_for = {"flat": flat_ans, "graphiti": graph_ans, "mix": graph_ans}
+        out: dict[str, FakeAnswerResult] = {}
+        for mode in modes:
+            text = ans_for.get(mode, "")
+            out[mode] = FakeAnswerResult(
+                answer=text,
+                no_results=(text == ""),
+                elapsed_ms=self._LEG_ELAPSED.get(mode, 5),
+            )
+        return out
 
 
 @pytest.fixture
@@ -248,20 +250,23 @@ async def test_run_eval_publishes_started_per_question_and_completed_in_order(
         KNOWLEDGE_EVAL_QUESTION_COMPLETED,
         KNOWLEDGE_EVAL_COMPLETED,
     ]
-    # Started payload
+    # Started payload — carries the selected legs so the UI renders columns up front.
     assert event_capture[0].payload["run_id"] == "rid-1"
     assert event_capture[0].payload["total_questions"] == 2
-    # Question events carry index/total/marks
+    assert event_capture[0].payload["modes"] == ["flat", "graphiti", "mix"]
+    # Question events carry index/total + per-leg marks under ``legs``.
     qc1 = event_capture[1].payload
     assert qc1["index"] == 0 and qc1["total"] == 2 and qc1["id"] == "a"
-    assert qc1["flat"]["mark"] == MARK_FAIL
-    assert qc1["graph"]["mark"] == MARK_PASS
-    assert qc1["delta"] == "+3"
+    assert qc1["legs"]["flat"]["mark"] == MARK_FAIL
+    assert qc1["legs"]["graphiti"]["mark"] == MARK_PASS
+    assert qc1["legs"]["mix"]["mark"] == MARK_PASS
+    assert qc1["delta"] == "+3"  # best graph leg vs flat
     # Summary payload matches what run_eval returned
     completed_payload = event_capture[-1].payload
     assert completed_payload["run_id"] == "rid-1"
-    assert completed_payload["graph_wins"] == 1
-    assert completed_payload["ties"] == 1
+    assert completed_payload["modes"] == ["flat", "graphiti", "mix"]
+    # Q1 graph legs pass + Q2 all pass → graphiti/mix each pass 2, flat passes 1.
+    assert completed_payload["passing"] == {"flat": 1, "graphiti": 2, "mix": 2}
     assert summary.gate == "proceed"
 
 
@@ -275,8 +280,8 @@ async def test_run_eval_default_filters_scope_to_synthetic_tag(
     questions = [_q("only", "Q?", expected=["ok"])]
     await run_eval(fake, tmp_path, questions=questions)
 
-    assert len(fake.compare_calls) == 1
-    assert fake.compare_calls[0]["filters"]["tags"] == [EVAL_SYNTHETIC_TAG]
+    assert len(fake.legs_calls) == 1
+    assert fake.legs_calls[0]["filters"]["tags"] == [EVAL_SYNTHETIC_TAG]
 
 
 @pytest.mark.asyncio
@@ -286,7 +291,7 @@ async def test_run_eval_passes_through_caller_filters(event_capture, tmp_path) -
     fake = FakeService(script={"Q?": ("ok", "ok")})
     custom = {"tags": ["custom_tag"], "owner_kind": "system"}
     await run_eval(fake, tmp_path, questions=[_q("x", "Q?", expected=["ok"])], filters=custom)
-    assert fake.compare_calls[0]["filters"] == custom
+    assert fake.legs_calls[0]["filters"] == custom
 
 
 @pytest.mark.asyncio
@@ -305,7 +310,7 @@ async def test_gate_pivots_when_graph_does_not_beat_flat_on_required_subset(
     })
     summary = await run_eval(fake, tmp_path, questions=questions)
     assert summary.gate == "pivot"
-    assert summary.requires_graph_graph_passing == summary.requires_graph_flat_passing
+    assert summary.requires_graph_passing["mix"] == summary.requires_graph_passing["flat"]
 
 
 @pytest.mark.asyncio
@@ -324,8 +329,9 @@ async def test_gate_proceeds_when_graph_strictly_beats_flat_on_required_subset(
     })
     summary = await run_eval(fake, tmp_path, questions=questions)
     assert summary.gate == "proceed"
-    assert summary.requires_graph_graph_passing == 2
-    assert summary.requires_graph_flat_passing == 1
+    assert summary.requires_graph_passing["mix"] == 2
+    assert summary.requires_graph_passing["graphiti"] == 2
+    assert summary.requires_graph_passing["flat"] == 1
 
 
 @pytest.mark.asyncio
@@ -337,7 +343,7 @@ async def test_run_eval_publishes_failed_event_on_exception(
     questions = [_q("x", "Q?", expected=["a"])]
 
     class BoomService:
-        async def compare(self, *args, **kwargs):
+        async def answer_legs(self, *args, **kwargs):
             raise RuntimeError("provider blew up")
 
     with pytest.raises(RuntimeError, match="provider blew up"):
@@ -366,20 +372,25 @@ def test_question_result_to_payload_shape() -> None:
     """Lock the payload shape — admin UI subscribes to these field names."""
     r = QuestionResult(
         id="x", category="c", question="q?", requires_graph=True,
-        flat_mark=MARK_FAIL, flat_elapsed_ms=10, flat_answer="flat",
-        flat_run_id="knowledge-flat-abc",
-        graph_mark=MARK_PASS, graph_elapsed_ms=20, graph_answer="graph",
-        graph_run_id="knowledge-graph-xyz",
+        legs={
+            "flat": LegResult("flat", MARK_FAIL, 10, "flat", "knowledge-flat-abc"),
+            "graphiti": LegResult("graphiti", MARK_PARTIAL, 15, "gx", "knowledge-gx"),
+            "mix": LegResult("mix", MARK_PASS, 20, "graph", "knowledge-graph-xyz"),
+        },
         delta="+3",
     )
     p = r.to_payload(index=0, total=5)
     assert p["index"] == 0 and p["total"] == 5
-    # 5e — per-leg run_id is part of the payload so the UI can render
-    # "Open in Graph Runs" links per leg without an extra round-trip.
-    assert set(p["flat"].keys()) == {"mark", "elapsed_ms", "answer_preview", "run_id"}
-    assert set(p["graph"].keys()) == {"mark", "elapsed_ms", "answer_preview", "run_id"}
-    assert p["flat"]["run_id"] == "knowledge-flat-abc"
-    assert p["graph"]["run_id"] == "knowledge-graph-xyz"
+    # legs is keyed by leg name; each leg carries the compact preview (terminal
+    # line) AND the full answer (expandable row) + per-leg run_id for drill-in.
+    assert set(p["legs"].keys()) == {"flat", "graphiti", "mix"}
+    assert set(p["legs"]["flat"].keys()) == {
+        "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id"
+    }
+    assert p["legs"]["flat"]["answer"] == "flat"
+    assert p["legs"]["mix"]["answer"] == "graph"
+    assert p["legs"]["flat"]["run_id"] == "knowledge-flat-abc"
+    assert p["legs"]["mix"]["run_id"] == "knowledge-graph-xyz"
     assert p["delta"] == "+3"
 
 
@@ -389,26 +400,45 @@ def test_question_result_to_payload_run_id_may_be_null() -> None:
     key — UI keeps its layout stable."""
     r = QuestionResult(
         id="x", category="c", question="q?", requires_graph=False,
-        flat_mark=MARK_PASS, flat_elapsed_ms=5, flat_answer="a",
-        flat_run_id=None,
-        graph_mark=MARK_PASS, graph_elapsed_ms=5, graph_answer="a",
-        graph_run_id=None,
+        legs={
+            "flat": LegResult("flat", MARK_PASS, 5, "a", None),
+            "mix": LegResult("mix", MARK_PASS, 5, "a", None),
+        },
         delta="0",
     )
     p = r.to_payload(index=0, total=1)
-    assert p["flat"]["run_id"] is None
-    assert p["graph"]["run_id"] is None
+    assert p["legs"]["flat"]["run_id"] is None
+    assert p["legs"]["mix"]["run_id"] is None
 
 
 @pytest.mark.asyncio
-async def test_question_result_answer_preview_is_truncated(
+async def test_run_eval_single_leg_runs_only_that_leg(event_capture, tmp_path) -> None:
+    """A single-leg selection runs only that leg and gate is 'n/a' (no
+    flat-vs-graph comparison possible)."""
+    fake = FakeService(script={"Q?": ("flat ok", "graph ok")})
+    summary = await run_eval(
+        fake, tmp_path, questions=[_q("x", "Q?", expected=["ok"])], modes=["mix"]
+    )
+    assert summary.modes == ["mix"]
+    assert fake.legs_calls[0]["modes"] == ["mix"]
+    assert set(summary.passing.keys()) == {"mix"}
+    assert summary.gate == "n/a"
+
+
+@pytest.mark.asyncio
+async def test_question_result_answer_preview_truncated_full_answer_intact(
     event_capture, tmp_path
 ) -> None:
-    """200-char preview — the SSE stream stays compact even when answers
-    are long. Catches a future regression that ships full bodies."""
+    """The terminal-line ``answer_preview`` stays a compact 200-char teaser,
+    while the full ``answer`` ships intact for the expandable table row."""
     long_answer = "a" * 500
     fake = FakeService(script={"Q?": (long_answer, long_answer)})
     await run_eval(fake, tmp_path, questions=[_q("x", "Q?", expected=["a"])])
     qc = next(e for e in event_capture if e.type == KNOWLEDGE_EVAL_QUESTION_COMPLETED)
-    assert len(qc.payload["flat"]["answer_preview"]) <= 200
-    assert len(qc.payload["graph"]["answer_preview"]) <= 200
+    assert len(qc.payload["legs"]["flat"]["answer_preview"]) <= 200
+    assert len(qc.payload["legs"]["mix"]["answer_preview"]) <= 200
+    # Full answer is preserved (the panel reads the whole thing on row expand).
+    assert qc.payload["legs"]["flat"]["answer"] == long_answer
+    assert qc.payload["legs"]["mix"]["answer"] == long_answer
+    # run_id rides on the question event too (registry correlation).
+    assert qc.payload["run_id"]

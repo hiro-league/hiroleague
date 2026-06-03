@@ -17,6 +17,7 @@ import {
   writePersistedKnowledgeAskResult,
   writePersistedKnowledgeGraphMode
 } from '../shared/knowledge-pure';
+import { untrack } from 'svelte';
 import type { KnowledgeBrowseModel } from './knowledge-browse.svelte';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
@@ -60,9 +61,11 @@ export function createKnowledgeAskModel(deps: {
   let graphMode = $state<KnowledgeGraphMode>(readPersistedKnowledgeGraphMode());
   // Seed the query box from whichever result is "active" given the current mode.
   let query = $state(
-    graphMode === 'compare'
-      ? (compareResult?.query ?? '')
-      : (answerResult?.query ?? '')
+    untrack(() =>
+      graphMode === 'compare'
+        ? (compareResult?.query ?? '')
+        : (answerResult?.query ?? '')
+    )
   );
 
   const askDocumentScope = $derived(

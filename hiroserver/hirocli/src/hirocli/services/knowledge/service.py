@@ -604,7 +604,8 @@ class KnowledgeService:
         workspace_id: str | None = None,
         explain: bool = False,
         rewrite: bool = False,
-        use_graph: bool = False,
+        graph_mode: str = "off",
+        graph_temporal: str | None = None,
     ) -> KnowledgeAnswerResult:
         prefs = self.workspace_prefs()
         retrieval = prefs.knowledge.retrieval
@@ -615,13 +616,14 @@ class KnowledgeService:
             workspace_id=workspace_id,
         )
         graph = graph_builder.build()
-        # L3 — use_graph=True turns on the graph_expand node. Useful only when
-        # rewrite=True too (the rewrite step is what extracts query entities for
-        # the graph). use_graph=True with rewrite=False is a no-op + a warning.
-        if use_graph and not rewrite:
+        # graph_mode in ("graphiti", "mix") turns on the graph_expand node. Useful
+        # only when rewrite=True too (rewrite extracts query entities for the graph);
+        # a graph mode with rewrite=False is a no-op + a warning.
+        if graph_mode in ("graphiti", "mix") and not rewrite:
             log.warning(
-                "⚠️ knowledge.answer — use_graph=True without rewrite=True · "
-                "graph_expand needs entities from rewrite_query · effectively off"
+                "⚠️ knowledge.answer — graph_mode=%s without rewrite=True · "
+                "graph_expand needs entities from rewrite_query · effectively off",
+                graph_mode,
             )
         initial_state: dict[str, Any] = {
             "query": query,
@@ -630,7 +632,10 @@ class KnowledgeService:
             "min_score": min_score if min_score is not None else retrieval.min_score,
             "explain": explain,
             "rewrite": rewrite,
-            "use_graph": use_graph,
+            "graph_mode": graph_mode,
+            # Per-query temporal override (G9/§7): "current" | "all". Empty/None →
+            # graph_expand falls back to the admin pref ``temporal_default``.
+            "graph_temporal": graph_temporal or "",
         }
         parent = current_run.get()
         if parent is not None:
@@ -712,6 +717,7 @@ class KnowledgeService:
         workspace_id: str | None = None,
         explain: bool = False,
         rewrite: bool = False,
+        graph_temporal: str | None = None,
     ) -> "KnowledgeAnswerComparison":
         """L3 — run :meth:`answer` twice (use_graph False/True) **concurrently** and
         return a side-by-side comparison.
@@ -745,7 +751,7 @@ class KnowledgeService:
                 workspace_id=workspace_id,
                 explain=explain,
                 rewrite=rewrite,
-                use_graph=False,
+                graph_mode="off",
             ),
             self.answer(
                 query,
@@ -755,7 +761,8 @@ class KnowledgeService:
                 workspace_id=workspace_id,
                 explain=explain,
                 rewrite=rewrite,
-                use_graph=True,
+                graph_mode="mix",
+                graph_temporal=graph_temporal,
             ),
         )
         return KnowledgeAnswerComparison(
@@ -764,6 +771,77 @@ class KnowledgeService:
             graph=graph_result,
             elapsed_ms=int((time.perf_counter() - t0) * 1000),
         )
+
+    # Eval leg name → agent graph_mode. "flat" is the no-graph baseline (graph_mode
+    # "off"); "graphiti"/"mix" map straight through. Keeps the eval's user-facing
+    # leg vocabulary (flat/graphiti/mix) decoupled from the graph's internal mode.
+    _LEG_TO_GRAPH_MODE = {"flat": "off", "graphiti": "graphiti", "mix": "mix"}
+
+    async def answer_legs(
+        self,
+        query: str,
+        *,
+        modes: list[str],
+        top_k: int | None = None,
+        min_score: float | None = None,
+        filters: dict[str, Any] | None = None,
+        workspace_id: str | None = None,
+        explain: bool = False,
+        rewrite: bool = False,
+        graph_temporal: str | None = None,
+    ) -> dict[str, KnowledgeAnswerResult]:
+        """Run :meth:`answer` once per selected leg, concurrently, keyed by leg name.
+
+        Generalizes :meth:`compare` to an arbitrary subset of {flat, graphiti, mix}
+        (one leg is fine). Same query/filters/tuning across legs — only ``graph_mode``
+        differs. Used by the eval batch so the per-question table can show any chosen
+        set of legs side by side. Wall-clock ≈ slowest leg (``asyncio.gather``).
+
+        Unknown leg names are dropped (defensive); an empty/invalid ``modes`` falls
+        back to the flat baseline so a misconfigured caller still gets a result.
+        """
+        legs = [m for m in modes if m in self._LEG_TO_GRAPH_MODE]
+        if not legs:
+            legs = ["flat"]
+        results = await asyncio.gather(
+            *(
+                self.answer(
+                    query,
+                    top_k=top_k,
+                    min_score=min_score,
+                    filters=filters,
+                    workspace_id=workspace_id,
+                    explain=explain,
+                    rewrite=rewrite,
+                    graph_mode=self._LEG_TO_GRAPH_MODE[m],
+                    graph_temporal=graph_temporal,
+                )
+                for m in legs
+            )
+        )
+        return dict(zip(legs, results, strict=True))
+
+    async def fetch_hits_by_point_ids(self, point_ids: list[str]) -> list[KnowledgeSearchHit]:
+        """Fetch chunk hits for explicit Qdrant point_ids, in caller order.
+
+        Used by the "graphiti" eval leg: the graph picks the fact-supporting
+        chunk_ids and we retrieve those verbatim passages by id (no query hybrid /
+        no min_score drop). Points with empty text (a chunk_id not in Qdrant) are
+        skipped. Scores descend with rank so build_context's ordinal normalization
+        preserves the graph's ranking."""
+        if not point_ids:
+            return []
+
+        def _fetch() -> list[KnowledgeSearchHit]:
+            out: list[KnowledgeSearchHit] = []
+            count = len(point_ids)
+            for rank, pid in enumerate(point_ids):
+                hit = self.vector_store.hit_from_point_id(pid, score=float(count - rank))
+                if (hit.text or "").strip():
+                    out.append(hit)
+            return out
+
+        return await asyncio.to_thread(_fetch)
 
     async def list_documents(
         self,

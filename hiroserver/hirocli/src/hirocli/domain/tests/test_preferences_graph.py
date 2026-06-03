@@ -26,7 +26,6 @@ def test_default_prefs_have_graph_section_off() -> None:
     assert prefs.knowledge.graph.backend == "off"
     assert prefs.knowledge.graph.k_hop == 1
     assert prefs.knowledge.graph.temporal_default == "current"
-    assert prefs.knowledge.graph.communities_enabled is False
     assert (
         prefs.knowledge.graph.extraction_tuning_profile
         == DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID
@@ -91,3 +90,19 @@ def test_extraction_resolver_none_when_no_model_configured(tmp_path) -> None:
     prefs = WorkspacePreferences()
     assert prefs.llm.default_chat is None
     assert resolve_graphiti_extraction_model(prefs, tmp_path, workspace_id="w") is None
+
+
+def test_graph_reranker_defaults() -> None:
+    # Cross-encoder reranker sub-prefs: off-by-default, no model, no gate.
+    rr = WorkspacePreferences().knowledge.graph.reranker
+    assert rr.model_id is None  # null → reuse the shared knowledge reranker
+    assert rr.min_relevance == 0.0  # keep all (gate disabled)
+    assert rr.device is None
+
+
+def test_graph_reranker_min_relevance_bounds() -> None:
+    from hirocli.domain.preferences import KnowledgeGraphRerankerPreferences
+
+    assert KnowledgeGraphRerankerPreferences(min_relevance=1.0).min_relevance == 1.0
+    with pytest.raises(ValidationError):
+        KnowledgeGraphRerankerPreferences(min_relevance=1.5)

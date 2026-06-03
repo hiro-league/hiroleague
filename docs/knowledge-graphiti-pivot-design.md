@@ -252,9 +252,17 @@ expand(query) ->
 ### 5.6 Viz/export DTO re-map (Graph tab)
 `snapshot()` maps Graphiti's schema → existing wire DTO:
 - `EntityNode` → `GraphNodeDTO{ id=uuid, name, type=labels[0], aliases, chunk_ids=mentioned_episode_uuids, document_ids }`
-- `EntityEdge` (RELATES_TO) → `GraphEdgeDTO{ id, source, target, rel_type=fact_type, fact, valid_at, invalid_at, chunk_ids=episodes }`
+- `EntityEdge` (RELATES_TO) → `GraphEdgeDTO{ id, source, target, rel_type=fact_type, fact, valid_at, invalid_at, expired_at, chunk_ids=episodes }`
 - (optional) `EpisodicNode` exposed as a distinct node kind later.
 - `knowledge.graph.*` SSE events emitted from `AddEpisodeResults` (nodes/edges/episode).
+
+> **As-built (`build_graph_dtos`, `graphiti_serialize.py`):** entity nodes don't carry
+> episodes, so a node's `chunk_ids` are **derived from the union of edges that touch it**;
+> `document_ids` map those chunk_ids through the episode `source_description` (== document_id),
+> loaded alongside nodes/edges in `read_graph_snapshot` as a `chunk_id → document_id` map.
+> Edges now carry the **full temporal window incl. `expired_at`** so the Graph tab marks
+> **retired/superseded** facts (amber badge + valid/invalid dates). `aliases` are read from
+> `EntityNode.attributes['aliases']` when a custom ontology supplies them, else empty.
 
 ---
 
@@ -313,6 +321,14 @@ flowchart TB
   with a per-query override — Graphiti's default `search` is relevance-first, *not*
   current-only, so we set `SearchFilters` explicitly.
 - `use_graph` / backend selection threaded `KnowledgeService.answer → KnowledgeAnswerTool`.
+
+> **As-built — per-query override now wired (was dead plumbing).** `graph_temporal`
+> (`"current"` | `"all"` | omit→admin default) threads **end-to-end**:
+> `KnowledgeAnswerTool` param + `/knowledge/answer` body (`AnswerBody.graph_temporal`,
+> validated) → `service.answer`/`service.compare` → `initial_state["graph_temporal"]` →
+> `graph_expand` (`state.get("graph_temporal") or temporal_default`). Admin Ask tab gets a
+> **Time** selector (Default / Current / History) shown when graph mode is on/compare;
+> it's transient (a per-query lens, not a sticky setting).
 
 ---
 
@@ -429,6 +445,27 @@ disabled at the cap); per-category "select all"; pick **modes** (flat / graphiti
 selected Qs × modes → returns per-question verdicts, **per-category aggregates**, and the
 3-way table (Tool Registry, like every surface).
 
+> **As-built (selectable legs — LOCKED).** The eval runs an **arbitrary subset** of
+> the three legs (`modes[]`), **including a single leg**. The legs are genuinely
+> distinct retrieval paths, selected per `answer(graph_mode=…)` in the knowledge
+> agent graph:
+> - **`flat`** (`graph_mode="off"`) — Qdrant hybrid over all chunks; no graph.
+> - **`mix`** (`graph_mode="mix"`) — graph facts focus the Qdrant hybrid on the
+>   supporting `chunk_ids` **and** inject the facts as the answer skeleton (G4).
+> - **`graphiti`** (`graph_mode="graphiti"`) — the **control leg**: graph facts as
+>   skeleton + the verbatim episode chunks fetched **by-id** (`graph_fetch` node →
+>   `fetch_hits_by_point_ids`), **no query hybrid**. Isolates the graph's own
+>   contribution vs `mix` (without it `graphiti` and `mix` are indistinguishable —
+>   the prior 2-way gap). Soft-falls-back to flat when the graph has nothing.
+>
+> Per-question payload carries `legs: {mode → {mark, elapsed_ms, answer, run_id}}`;
+> the summary carries `modes`, per-leg `passing`, `requires_graph_passing`, and a
+> per-category `pass: {mode → count}`. The UI renders **one column per selected
+> leg** (live table + per-category table + expandable per-leg answers). The **gate**
+> needs `flat` **and** ≥1 graph leg to compare — otherwise it reports **`n/a`** (e.g.
+> a single-leg run). `service.answer_legs(query, modes=[…])` is the N-leg fan-out
+> (generalizes `compare`; Ask tab still uses the 2-leg `compare`, "on"→`mix`).
+
 ### 8.6 Scoring & gate
 
 - **fragments:** all `expected` present (substring, normalized) **and** none of
@@ -496,12 +533,13 @@ are per-request or per-eval-run inputs and persist nothing).
 | `temporal_default`<br/>*(Temporal lens)* | `current` \| `all` | `current` | No (has default) | Default time lens at retrieval. `current` = only facts valid *now* (superseded facts hidden — e.g. "where does Adam work?" → Cedar Labs, not Brightloom). `all` = include historical/invalidated facts. Per-query override via the `graph_temporal` request param. |
 | `k_hop`<br/>*(Expansion hops)* | `int` 1–3 | `1` | No (has default) | How many relationship hops out from the matched entities to pull related facts. `1` = direct neighbors only (cheap, precise). Higher = more multi-hop reach at more noise/cost. |
 | `search_recipe`<br/>*(Search recipe)* | `rrf` \| `mmr` \| `cross_encoder` | `rrf` | No (has default) | How Graphiti ranks/fuses fact-search candidates. `rrf` = reciprocal-rank fusion (fast default). `mmr` = diversity-favoring. `cross_encoder` = highest quality, slowest/most costly. |
-| `communities_enabled`<br/>*(Communities — advanced)* | `bool` | `false` | No (off) | **Deferred / experimental** (decision G9). When on, Graphiti clusters entities into community summaries — extra LLM cost. Leave off for the eval. |
+| ~~`communities_enabled`~~ | — | — | — | **Removed as a pref** (decision G9 still deferred). The toggle did nothing (no backend wiring), so it was ripped out to avoid a dead knob; re-add the pref **with** wiring when communities actually land. |
+| `ledger_detail`<br/>*(Graph Runs detail)* | `compact` \| `rich` | `rich` | No (has default) | Verbosity of the **Graph Runs** ledger for graph ingest + retrieval (§12.2). `rich` = per-node content previews (extracted entities, resolution/invalidation decisions, ranked facts) **and** one row per edge in `resolve_facts`. `compact` = stats only (calls/tokens/elapsed), `resolve_facts` aggregated. Drop to `compact` for noisy bulk/series ingests (e.g. the 35-episode Adam corpus). |
 
 - **Resolved fallbacks** are exposed as `*_resolved` properties (e.g. `embedder_model_resolved`)
   so callers never re-implement the `null → parent → constant` chain.
 - **Enums** are module-level `Literal` aliases (`KnowledgeGraphBackend`,
-  `KnowledgeGraphTemporalDefault`, `KnowledgeGraphSearchRecipe`).
+  `KnowledgeGraphTemporalDefault`, `KnowledgeGraphSearchRecipe`, `KnowledgeGraphLedgerDetail`).
 - Schema lives in `domain/preferences.py` under `KnowledgePreferences.graph`
   (`KnowledgeGraphPreferences`), with validated writes + `preferences.saved` change events.
 - Frontend renders in `KnowledgeSection.svelte` ("Knowledge Graph (Graphiti)" subsection),
@@ -539,7 +577,6 @@ Knowledge Graph (Graphiti)**, then drive the rest from the Eval panel:
 | `temporal_default` | `current` (default) | The eval's `knowledge_update` / `temporal/latest_state` questions expect "latest wins" — `current` is what proves supersession works. |
 | `k_hop` | `1` (default) | Enough for the corpus's mostly 1–2-hop questions; raise to `2` only if `multi_hop` answers come back thin. |
 | `search_recipe` | `rrf` (default) | Fast, good enough for a personal-KG-scale eval; switch to `cross_encoder` only to chase the last few points of recall. |
-| `communities_enabled` | `false` (default) | Deferred; adds cost, nothing in the eval needs it. |
 
 **Then in the Eval panel:** corpus source = **`adam`**, modes = **all three (`flat` /
 `graphiti` / `mix`)** so you get the comparison table, select the question set (or all,
@@ -561,6 +598,7 @@ expose a `*_resolved` property that walks the fallback chain.
 KnowledgeGraphBackend         = Literal["off", "graphiti", "mix"]
 KnowledgeGraphTemporalDefault = Literal["current", "all"]
 KnowledgeGraphSearchRecipe    = Literal["rrf", "mmr", "cross_encoder"]
+KnowledgeGraphLedgerDetail    = Literal["compact", "rich"]
 
 class KnowledgeGraphPreferences(BaseModel):
     # master switch — off = flat Qdrant only; graphiti = graph facts; mix = fuse (G4)
@@ -575,12 +613,13 @@ class KnowledgeGraphPreferences(BaseModel):
     embedder_model: str | None = None
     # retrieval time-lens; per-query override via the graph_temporal request param
     temporal_default: KnowledgeGraphTemporalDefault = "current"
-    # deferred/experimental community clustering (G9) — extra LLM cost
-    communities_enabled: bool = False
+    # NOTE: communities_enabled (G9) removed — re-add with real wiring when it lands
     # relationship expansion radius at retrieval (1 = direct neighbors only)
     k_hop: int = Field(default=1, ge=1, le=3)
     # fact-search rerank/fusion recipe
     search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+    # Graph Runs ledger verbosity (§12.2); rich = content previews + per-edge resolve_facts
+    ledger_detail: KnowledgeGraphLedgerDetail = "rich"
 
     @property
     def embedder_model_resolved(self) -> str | None: ...   # null → knowledge embedder
@@ -595,9 +634,9 @@ class KnowledgeGraphPreferences(BaseModel):
 | `small_tuning_profile` | `str` | `graphiti_small` | no (default) |
 | `embedder_model` | `str \| None` | `None` | optional (→ knowledge embedder) |
 | `temporal_default` | enum `current/all` | `current` | no (default) |
-| `communities_enabled` | `bool` | `False` | no (deferred) |
 | `k_hop` | `int` (`ge=1, le=3`) | `1` | no (default) |
 | `search_recipe` | enum `rrf/mmr/cross_encoder` | `rrf` | no (default) |
+| `ledger_detail` | enum `compact/rich` | `rich` | no (default) |
 
 > **Tuning profiles (separate, not part of this schema):** add two entries to the workspace
 > `tuning_profiles[]` — `graphiti_extraction` (medium / structured-output-capable) and
@@ -624,8 +663,169 @@ All surfaces go through the **Tool Registry** (repo rule *consider-creating-tool
 - Token/cost captured in the **LLM adapter** (§5.1) → existing ledger rows, per
   add_episode sub-step where feasible (extract / dedupe / edge-resolve).
 - Ingest stats row: episodes, entities created/merged, facts created/invalidated, tokens.
+  **As-built:** `GraphitiIngestStats` now folds per-episode totals into
+  `facts_invalidated` + `tokens_input`/`tokens_output` (sourced from the `add_episode`
+  tracer span's `edge.invalidated_count` and the per-call usage sink), surfaced in the
+  `@run` output preview and the tool result `as_dict()`.
 - Retrieval ledger: facts returned, episodes→chunk_ids, passages, fusion outcome
   (so cost/quality stays visible per Ask, like today).
+- **Token sourcing (§5.1) as-built:** the LLM adapter reads `usage_metadata` first and
+  **falls back to `response_metadata.token_usage`/`usage`** for providers/streams that
+  leave `usage_metadata` empty; if both are empty it logs a **once-per-model warning** so
+  the silent-zero case is visible rather than mistaken for "free" calls.
+
+### 12.1 Ingest ledger — **as-built** (graph-ingest run + per-operation nodes)
+
+> **Sourcing superseded by §12.2 (LOCKED).** This is the interim
+> `response_model` sourcing. §12.2 unifies ingest **and retrieval** on the
+> graphiti `Tracer` and adds per-node content previews; the **node taxonomy below
+> is kept** as the render layer, only the **data source** changes.
+
+`add_episode` is opaque, but every internal LLM call routes through
+`GraphitiLLMClient`, which tags each call with its Graphiti **response-model name**
+(`GraphitiLLMUsage.operation`) + per-call elapsed; the embedder reports
+`(vectors, elapsed)`. `ingest_ledger.py` turns that stream into Graph-Runs rows:
+
+- **Run** (`row_kind=run`, id `knowledge_graph_ingest-<uuid>`, label `graph_ingest`) —
+  one per `ingest_chunks` call (== per document). Folds token/cost totals; `@run`
+  summary = `doc · role · N episode(s)` / `episodes=p/r · entities · edges`.
+- **Step** = one per episode (`knowledge_graph_ingest/episode`, no own usage so totals
+  don't double-count); preview = `episode i/N · chunk · title · t=…` / `entities · facts · tok`.
+- **Sub-step nodes** (nested `N.k`), mapped from the response model that fired:
+
+  | Node | Graphiti response model | docs §6 step |
+  |---|---|---|
+  | `extract_entities` | `ExtractedEntities` | extract entities |
+  | `resolve_entities` | `NodeResolutions` / `NodeDuplicate` | dedupe |
+  | `summarize_entities` | `SummarizedEntities` | (node enrich) |
+  | `extract_facts` | `ExtractedEdges` | extract facts |
+  | `date_facts` | `EdgeTimestamps` | resolve/invalidate (temporal) |
+  | `resolve_facts` | `EdgeDuplicate` | resolve/invalidate |
+  | `attributes` | custom entity/edge type | (enrich — no-op with field-less ontology §5.4) |
+  | `embed` | embedder (names + facts; merged — Graphiti doesn't tell the adapter which) | embed |
+  | `persist` | Kuzu commit (no model; residual elapsed; lists upserted nodes/edges) | persist |
+
+- **Wiring:** `from_preferences` defaults `on_usage`/`on_embed` to the episode recorders
+  (no-op outside an active episode → retrieval/memory paths unaffected). Callers pass a
+  `LedgerSink`: `_run_graph_ingest_for_documents` (build-graph tool/route, incl. synthetic
+  eval) and `ingest_adam_corpus_via_service` (Adam eval — previously **bypassed the ledger
+  entirely**, the gap this closes). Tests: `graph/test_ingest_ledger.py`.
+
+### 12.2 Unified ledger via tracer — **LOCKED** (supersedes §12.1 sourcing · adds retrieval)
+
+> **Decision (this thread): Option B.** Replace the response-model sourcing with a
+> single `LedgerTracer` (graphiti-core `Tracer` ABC) injected via
+> `Graphiti(tracer=…)`. graphiti calls `llm_client.set_tracer(self.tracer)` and
+> threads it into search, so **one** tracer observes **ingest (`add_episode`),
+> retrieval (`search`), and every `llm.generate`** — the *only* viable hook for
+> retrieval (`search()` is ~LLM-free, so the response-model trick yields nothing
+> there). The §12.1 node taxonomy is **kept as the render layer**; the **source**
+> changes (no-backward-compat: rip & replace the sourcing, not wrapped).
+
+**Connecting points (only these change).** Every other node (`parse_query`,
+`build_filters`, `vector_search`, `build_context`, …) already renders, untouched.
+
+| Source | Provides |
+|---|---|
+| `LedgerTracer` (graphiti `Tracer`) | span name → node, span attributes → details, status/elapsed |
+| `on_usage` (extended) | tokens **+ a compact preview of the parsed result** per call (forward `parsed`, not just usage) |
+| `on_embed` | embed vector count + elapsed (no graphiti span for embeddings) |
+| our wrapper (`graphiti_search.py` / ingest loop) | `temporal_filter`, `map→chunk_ids`, `persist` residual |
+
+**Levels = 2 (locked).** The ledger renders only `step_index.sub_step`
+(`spawn_child` flattens grandchildren). graphiti's nested `search → edge_search →
+leaves` tree is **flattened into one sub-step level** under `graph_expand` — same
+shape as `episode → sub-steps`. No new run/depth tier; chat↔knowledge stay
+separate cross-linked runs.
+
+#### 12.2.1 Ingest — deltas vs §12.1 (keep nodes, change source)
+
+- **Label** ← `llm.generate` **`prompt.name`** (finer than response-model — separates
+  `extract_edges.edge` / `…extract_timestamps` / `…extract_attributes`).
+- **Episode rollup** ← `add_episode` span attrs incl. **`edge.invalidated_count`**
+  (today's blind spot), `node.count`, `edge.count`, `duration_ms`.
+- **Per-node content previews** (extracted entities, resolution decisions, fact, date,
+  invalidation) from the extended `on_usage` `parsed` preview.
+- **`resolve_facts` = per-item rows** (one per edge; fires per edge via
+  `semaphore_gather`). All other multi-call ops (`*_attributes`) **aggregate**
+  (`calls=N`). → **Hybrid granularity (LOCKED).**
+
+```
+▾ 22  episode (add_episode)   ok · 4.20s   node.count=3 · edge.count=1 · edge.invalidated_count=1
+      in: episode 22/35 · chunk 8628… · source=message · t=2024-08-12
+      out: entities=3 · facts=1(+1 invalidated) · llm=6 · 4370i/440o
+   ├ 22.1 extract_entities   1.30s  1180i/95o   entities[3]: Adam(Person), Brightloom(Org), Cedar Labs(Org)
+   ├ 22.2 resolve_entities   0.70s   540i/60o   Adam→exact · Brightloom→exact · Cedar Labs→new
+   ├ 22.3 extract_facts      1.50s  1320i/140o  Adam—WORKS_AT→Cedar Labs
+   ├ 22.4 date_facts         0.30s   420i/35o   valid_at=2024-08-12
+   ├ 22.5 resolve_facts[1]   0.65s   610i/70o   Adam—WORKS_AT→Brightloom → INVALIDATE (contradiction, invalid_at=2024-08)
+   ├ 22.6 summarize_entities 0.25s   300i/40o
+   ├ 22.7 embed              0.09s   vectors=5 · calls=2
+   └ 22.8 persist            0.21s   Kuzu upsert · nodes=3 · edges=1 · invalidated=1 · mentions=3
+```
+
+#### 12.2.2 Retrieval nodes — `graph_expand` unfolded (NEW; today a single opaque node)
+
+`knowledge run → graph_expand step → sub-steps`. Step IO: **in** = query + rewritten
++ `entities[]`; **out** = facts kept/found + `chunk_ids`.
+
+| Ledger node | ← graphiti span / source | Fires | Detail (**Boundary-content**, LOCKED) |
+|---|---|---|---|
+| `embed_query` | `search.embed_query_vector` | always | `dim` |
+| `candidate_gen` | `search.edge_search.execute_methods` | always | methods · `candidate_count` |
+| `bfs_expand` | `search.edge_search.expand_bfs` | `k_hop>1` | origin · depth · +facts |
+| `rrf_fuse` | `search.edge_search.seed_rrf` | `recipe=rrf` | `candidate_count` |
+| `rerank` | `edge_search.rerank` / `cross_encoder_rank` / `compute_mmr` | per `recipe` | `candidate→reranked` **+ ranked fact list (text · valid/invalid · chunk_id)** |
+| `temporal_filter` | our wrapper | always | `current` → current-only pushed down to the query via `SearchFilters` (`invalid_at`/`expired_at` `IS NULL`), reports current facts kept; `all` → history kept, superseded shown. Any superseded fact that slips the push-down is defensively dropped. |
+| `map→chunk_ids` | our wrapper | always | facts→chunk_ids (folded into `graph_expand` out) |
+
+Internal steps show **counts only** (graphiti spans expose only counts); the
+**ranked fact content** is attached at `rerank` from the final `SearchResults`.
+
+```
+▾ graph_expand   ok · 198ms
+   in:  query="Where does Adam work now?" · rewritten="Adam current employer" · entities=[Adam] · temporal=current
+   out: 6 facts kept / 8 found → 9 chunk_ids
+   ├ 1 embed_query     41ms  dim=1024
+   ├ 2 candidate_gen   96ms  methods=2 (fulltext+cosine) · candidates=14
+   ├ 3 bfs_expand      28ms  origin=[Adam] · depth=2 · +5 facts
+   ├ 4 rrf_fuse         3ms  14 candidates → ranked
+   ├ 5 rerank           5ms  6 → 6 kept (recipe=rrf)
+   │     1. Adam—WORKS_AT→Cedar Labs    valid 2024-08 · current        [chunk 8628…]
+   │     2. Adam—TITLE→backend engineer current                        [chunk a1f…]   (+4)
+   └ 6 temporal_filter <1ms  current-only applied at query (push-down) · 6 current facts → chunk_ids[9]
+```
+
+> **As-built (design §7):** `temporal=current` pushes a `SearchFilters`
+> (`invalid_at IS NULL AND expired_at IS NULL`) into `graphiti.search`, so
+> superseded facts (`Boston LIVES_IN`, `Brightloom WORKS_AT`) never enter the
+> ranked set and never consume the `num_results` budget — they're excluded at the
+> query, not dropped after. The ⊘-marked superseded rows in the ranked list appear
+> only under `temporal=all`.
+
+#### 12.2.3 Verbosity preference (LOCKED)
+
+New durable pref **`knowledge.graph.ledger_detail`** (`compact` | `rich`, default
+`rich`) — registered in §9.A / §10:
+
+- **`rich`** — per-node content previews + per-item `resolve_facts` rows (the trees above).
+- **`compact`** — stats only (`calls`/tokens/elapsed); `resolve_facts` aggregated.
+  ≈ the §12.1 as-built behavior. Escape hatch for noisy bulk/series ingest
+  (e.g. the 35-episode Adam corpus).
+
+#### 12.2.4 Wiring (the points to change)
+
+1. `GraphitiMemoryService.__init__` — pass `tracer=LedgerTracer(...)` into `Graphiti(...)`; resolve `ledger_detail` from prefs.
+2. `GraphitiLLMClient` `on_usage` — forward a compact `parsed`-result preview alongside `GraphitiLLMUsage`.
+3. `LedgerTracer` — bridge spans → `LedgerEntry.spawn_child` (flatten to 2 levels); **allowlist** the nodes in §12.1/§12.2.2 (ignore attribute-only spans like `edge.count`).
+4. `graphiti_search.py` — emit `temporal_filter` / `map→chunk_ids` wrapper sub-steps + attach the ranked-fact preview from `SearchResults`; open a `graph_retrieve` run on the Ask path.
+5. Retire `ingest_ledger.py`'s `response_model` sourcing once the tracer feeds the same node names (taxonomy kept).
+
+#### 12.2.5 Not captured (deferred)
+
+- **Per-stage** retrieval ranked lists (needs the staged `search_()` instead of one-shot `search()`).
+- Embeddings / Kuzu persist as their own graphiti spans — **none exist**; covered by `on_embed` + `persist` residual.
+- Cross-encoder / MMR internals beyond `candidate→reranked` counts.
 
 ---
 
@@ -655,7 +855,7 @@ All surfaces go through the **Tool Registry** (repo rule *consider-creating-tool
 
 ### Phase 3 — Retrieval fusion ✅
 - [x] `graph_expand` node → Graphiti `search()` → facts → `episodes`→chunk_ids → existing Qdrant `HasIdCondition` focus — `graphiti_search.py`.
-- [x] Temporal filter (drop superseded for `current`) + admin pref `temporal_default` + per-query `graph_temporal`.
+- [x] Temporal filter — `current` pushes `SearchFilters` (`invalid_at`/`expired_at` `IS NULL`) into the query (§7; superseded facts never consume the `num_results` budget) + defensive post-drop + admin pref `temporal_default` + per-query `graph_temporal`.
 - [x] Soft-fallback to flat on miss/error; no-graph guard (no empty-DB side effect). `use_graph` threading reused.
 - [x] Tests: 7 search + 21 agent compat.
 
@@ -688,6 +888,16 @@ All surfaces go through the **Tool Registry** (repo rule *consider-creating-tool
 - [x] Controller setters + `KnowledgePreferences` TS type + `DEFAULT_KNOWLEDGE` extended with `graph`. svelte-check 0 errors.
 - [ ] Add-tab build-graph result fields → new Graphiti stat keys (minor cosmetic; deferred).
 - [~] Live browser check pending (needs backend running).
+
+### Phase 10 — Unified ledger via tracer (§12.2) ✅
+- [x] `LedgerTracer` (graphiti `Tracer` ABC) buffers allowlisted spans into `current_spans`; consumers flatten to 2 levels — `graph/ledger_tracer.py`.
+- [x] Inject the tracer in `GraphitiMemoryService.__init__` — **post-construction** override of `g.tracer` / `g.clients.tracer` / `llm_client.set_tracer` (graphiti's `create_tracer` discards a custom `Tracer`, so `Graphiti(tracer=…)` does NOT work); resolve `ledger_detail` pref via `from_preferences`.
+- [x] Extended `on_usage` to forward a compact `parsed`-result preview (`GraphitiLLMUsage.preview` + `_result_preview`) for per-node content.
+- [x] Retrieval: `graph_expand` sub-steps from `search.*` spans + wrapper `temporal_filter` + ranked-fact preview at `rerank` — `graph/retrieval_ledger.py`, wired in `agent/graph.py` (runs in the existing knowledge-answer run; no separate run needed).
+- [x] Ingest: per-edge `resolve_facts` rows (Hybrid), content previews, **`edge.invalidated_count`** from the `add_episode` span — `ingest_ledger.py`.
+- [x] New pref `ledger_detail` (`compact`/`rich`) — schema (§10) + admin UI (§9.A) + TS type + edits tracking.
+- [x] Tests: tracer bridge, retrieval sub-steps + ranked facts + `compact` collapse, per-edge `resolve_facts`, invalidated rollup — `test_ledger_tracer.py` / `test_retrieval_ledger.py` / `test_ingest_ledger_detail.py`.
+- [~] **Response-model sourcing kept (not retired):** `on_usage` carries the *tokens* (the `llm.generate` span doesn't), so ingest still labels ops by response-model; the tracer *adds* the `add_episode` rollup + retrieval decomposition. "Unify on one tracer" = one tracer injected serving both paths, not removing the token sink.
 
 ### Phase 9 — Deferred / follow-up (not now)
 - [ ] **mintdocs** — Graph view, `knowledge.graph.*` events, tools/routes, new prefs, first-time-setup deps, workspace-folder Kuzu file (all docs deferred to here).

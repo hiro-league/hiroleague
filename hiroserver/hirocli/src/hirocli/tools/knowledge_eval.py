@@ -92,6 +92,12 @@ class KnowledgeL3EvalRunTool(Tool):
             "Adam path only: run just these question ids (empty = all).",
             required=False,
         ),
+        "modes": ToolParam(
+            list[str],
+            "Legs to compare: any subset of ['flat','graphiti','mix'] (one is fine). "
+            "Empty = all three. Unknown names are dropped.",
+            required=False,
+        ),
         "run_id": ToolParam(
             str,
             "Correlation id for the event stream (auto-generated when blank).",
@@ -111,6 +117,7 @@ class KnowledgeL3EvalRunTool(Tool):
         build_graph: bool = False,
         corpus_source: str = "synthetic",
         question_ids: list[str] | None = None,
+        modes: list[str] | None = None,
         run_id: str = "",
         workspace: str | None = None,
     ) -> dict[str, Any]:
@@ -120,6 +127,7 @@ class KnowledgeL3EvalRunTool(Tool):
                 build_graph=build_graph,
                 corpus_source=corpus_source,
                 question_ids=question_ids,
+                modes=modes,
                 run_id=run_id,
                 workspace=workspace,
             )
@@ -131,6 +139,7 @@ class KnowledgeL3EvalRunTool(Tool):
         build_graph: bool = False,
         corpus_source: str = "synthetic",
         question_ids: list[str] | None = None,
+        modes: list[str] | None = None,
         run_id: str = "",
         workspace: str | None = None,
     ) -> dict[str, Any]:
@@ -155,6 +164,7 @@ class KnowledgeL3EvalRunTool(Tool):
                     questions=questions,
                     run_id=rid,
                     filters={"tags": [ADAM_EVAL_TAG]},
+                    modes=modes,
                 )
                 return {
                     "run_id": rid,
@@ -201,7 +211,7 @@ class KnowledgeL3EvalRunTool(Tool):
                 DEFAULT_CORPUS_DIR,
                 DEFAULT_QUESTIONS_FILE,
             )
-            summary = await run_eval(service, workspace_path, run_id=rid)
+            summary = await run_eval(service, workspace_path, run_id=rid, modes=modes)
             return {
                 "run_id": rid,
                 "summary": summary.to_payload(),

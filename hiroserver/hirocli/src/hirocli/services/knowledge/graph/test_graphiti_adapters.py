@@ -19,6 +19,7 @@ from hirocli.services.knowledge.graph.graphiti_adapters import (
     GraphitiEmbedderClient,
     GraphitiLLMClient,
     GraphitiModelSpec,
+    HiroRerankerCrossEncoder,
 )
 
 
@@ -209,3 +210,53 @@ async def test_embedder_dim_defaults_to_backend_dimension() -> None:
 def test_embedder_rejects_bad_dim() -> None:
     with pytest.raises(ValueError, match="embedding_dim"):
         GraphitiEmbedderClient(_FakeBackend(dimension=0))
+
+
+# ---------------------------------------------------------------------------
+# Cross-encoder (reranker) adapter
+# ---------------------------------------------------------------------------
+
+
+class _FakeCompressor:
+    """Stand-in for a BaseDocumentCompressor: reorders docs by a fixed score map."""
+
+    def __init__(self, scores: dict[str, float]) -> None:
+        self._scores = scores
+
+    def compress_documents(self, documents, query, callbacks=None):
+        from langchain_core.documents import Document
+
+        ranked = sorted(documents, key=lambda d: self._scores.get(d.page_content, 0.0), reverse=True)
+        return [
+            Document(
+                page_content=d.page_content,
+                metadata={**d.metadata, "relevance_score": self._scores.get(d.page_content, 0.0)},
+            )
+            for d in ranked
+        ]
+
+
+@pytest.mark.asyncio
+async def test_cross_encoder_reranks_by_compressor_score() -> None:
+    xenc = HiroRerankerCrossEncoder(_FakeCompressor({"a": 0.1, "b": 0.9, "c": 0.5}))
+    ranked = await xenc.rank("q", ["a", "b", "c"])
+    assert [p for p, _ in ranked] == ["b", "c", "a"]  # sorted by score desc
+    assert ranked[0] == ("b", 0.9)
+
+
+@pytest.mark.asyncio
+async def test_cross_encoder_empty_passages_noop() -> None:
+    xenc = HiroRerankerCrossEncoder(_FakeCompressor({}))
+    assert await xenc.rank("q", []) == []
+
+
+@pytest.mark.asyncio
+async def test_cross_encoder_falls_back_to_input_order_on_error() -> None:
+    class _Boom:
+        def compress_documents(self, *a, **k):
+            raise RuntimeError("model down")
+
+    xenc = HiroRerankerCrossEncoder(_Boom())
+    ranked = await xenc.rank("q", ["x", "y", "z"])
+    # Input order preserved (defensive, never aborts the search).
+    assert [p for p, _ in ranked] == ["x", "y", "z"]

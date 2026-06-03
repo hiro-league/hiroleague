@@ -33,13 +33,10 @@ export const PREF_KEYS = {
   // Phase 5f — Tab 1 "Also build entity graph (L3)" checkbox preference.
   // Persists so the user's default sticks across uploads.
   knowledgeIngestBuildGraph: 'hiro.admin.knowledge.ingestBuildGraph',
-  // Phase 5g (follow-up to 5e) — last completed/failed eval run snapshot
-  // (rows + summary + status). Session-scoped, parallel to knowledgeAskResult,
-  // so leaving the page and coming back shows the table you ran last.
-  knowledgeAskEvalRun: 'hiro.admin.knowledge.askEvalRun',
   // Phase 5g — setup-form checkboxes for the Eval Batch (persist defaults
-  // across reloads; localStorage so they survive tab close, unlike the run
-  // snapshot above which is session-scoped).
+  // across reloads). The eval *run* itself is no longer cached client-side:
+  // it's replayed from the server registry (GET /knowledge/eval/state) so the
+  // run stays consistent across navigation and across origins (Vite vs packaged).
   knowledgeAskEvalIngest: 'hiro.admin.knowledge.askEvalIngest',
   knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph'
 } as const;

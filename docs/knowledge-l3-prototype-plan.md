@@ -402,6 +402,16 @@ the thesis test.**
 - [x] `eval/README.md` — prerequisites, cost expectation, how to read the output, how to wipe between runs.
 - [ ] **Gate: run it.** Needs a workspace with `knowledge.answering.model` (or `llm.default_chat`) set + provider key. Harness fails loud if not. Cost: cents at `gpt-5-mini` scale (~$0.05–0.20 first ingest + few cents per question pass).
 
+### Phase 5 — In-server eval + admin Eval Batch UI ✅
+The CLI harness has an in-server twin so the eval runs from the admin **Ask → L3 Eval Batch** panel, streaming live.
+
+- [x] `services/knowledge/eval_runner.py` — `run_eval()` mirrors the CLI logic but publishes `knowledge.eval.*` Domain Events (started / setup_progress / question_completed / completed / failed / cancelled). Two corpora: legacy synthetic `.md` and the Adam temporal JSONL episodes.
+- [x] **Live activity terminal** — setup emits a `setup_progress` event **per episode** (Qdrant write + the slow per-episode Graphiti extraction, bridged via the graph `event_sink`), so the panel shows fine-grained progress instead of freezing for minutes. The admin `KnowledgeAskEvalTerminal.svelte` renders these + per-question lines in a scrollable, auto-following log.
+- [x] **Full answers** — `question_completed` carries both a compact `answer_preview` (terminal line) and the FULL `answer`; table rows expand to show the whole flat/graph answers side-by-side.
+- [x] **Cancel** — `POST /knowledge/eval/cancel` cancels the background task; the runner catches `CancelledError` and emits the neutral `cancelled` terminal event.
+- [x] **Server-side run store** — `services/knowledge/eval_registry.py` is a per-workspace, in-memory registry that folds the eval events into replayable state (setup trail + full-answer rows + summary + the cancel handle). `GET /knowledge/eval/state` replays it on mount. This is the single source of truth, so the run survives navigation **mid-run** and is **consistent across origins** (the Vite dev UI and the packaged admin UI are different origins with separate `sessionStorage`; the old client-only snapshot diverged). State lives in the server process — a restart drops it.
+- [x] Tests: `test_eval_runner.py` (event order + payload shape incl. full answer + run_id), `test_eval_registry.py` (event folding, row upsert, stale-run drop, cancel).
+
 ## 8. Risks & mitigations
 
 | Risk | Mitigation |

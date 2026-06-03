@@ -28,6 +28,7 @@
   let search = $state('');
   let inputEl = $state<HTMLInputElement | null>(null);
   let rootEl = $state<HTMLDivElement | null>(null);
+  const listboxId = `creatable-tags-listbox-${crypto.randomUUID()}`;
 
   const trimmedSearch = $derived(search.trim());
   const normalizedSearch = $derived(trimmedSearch.toLowerCase());
@@ -158,6 +159,8 @@
   <div bind:this={rootEl} class={cn('relative w-full', className)}>
     <div
       role="combobox"
+      tabindex="-1"
+      aria-controls={listboxId}
       aria-expanded={open}
       aria-haspopup="listbox"
       aria-disabled={disabled}
@@ -223,7 +226,14 @@
     onCloseAutoFocus={(event) => event.preventDefault()}
     onInteractOutside={handleInteractOutside}
   >
-    <div role="listbox" aria-label="Tag suggestions" class="overflow-hidden" onmousedown={keepFocus}>
+    <div
+      id={listboxId}
+      role="listbox"
+      tabindex="-1"
+      aria-label="Tag suggestions"
+      class="overflow-hidden"
+      onmousedown={keepFocus}
+    >
       <div class="max-h-56 overflow-y-auto p-1">
         {#if filteredOptions.length === 0 && !showCreate}
           <div class="px-2 py-3 text-center font-sans text-sm text-muted-foreground">

@@ -152,6 +152,26 @@
       </button>
     {/each}
   </fieldset>
+  <!-- Per-query temporal override (§7): overrides the admin temporal_default for THIS
+       query only. Relevant only when the graph leg runs (mode on/compare). -->
+  {#if ask.graphMode !== 'off'}
+    <label
+      class="flex shrink-0 items-center gap-1 self-end pb-2"
+      title="Temporal lens for this query: Default (admin pref) · Current (facts valid now) · History (include superseded facts)"
+    >
+      <span class="text-sm text-muted-foreground">Time</span>
+      <select
+        class="rounded-md border border-input bg-background px-2 py-1 font-sans text-xs text-foreground"
+        value={ask.graphTemporal}
+        onchange={(e) =>
+          ask.setGraphTemporal(e.currentTarget.value as 'default' | 'current' | 'all')}
+      >
+        <option value="default">Default</option>
+        <option value="current">Current</option>
+        <option value="all">History</option>
+      </select>
+    </label>
+  {/if}
   <div class="flex items-end">
     <Button variant="outline" disabled={!ask.hasAskFilters} onclick={() => ask.clearAskFilters()}>
       <FilterX size={15} /> Clear

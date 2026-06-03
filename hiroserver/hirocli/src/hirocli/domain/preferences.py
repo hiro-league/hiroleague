@@ -442,6 +442,30 @@ class KnowledgeRewritePreferences(BaseModel):
 KnowledgeGraphBackend = Literal["off", "graphiti", "mix"]
 KnowledgeGraphTemporalDefault = Literal["current", "all"]
 KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
+# Graph Runs ledger verbosity for graph ingest + retrieval (docs §12.2).
+KnowledgeGraphLedgerDetail = Literal["compact", "rich"]
+
+
+class KnowledgeGraphRerankerPreferences(BaseModel):
+    """Cross-encoder reranker for the graph fact-search leg.
+
+    Only takes effect when ``KnowledgeGraphPreferences.search_recipe == 'cross_encoder'``
+    (the admin UI greys this whole group out otherwise). Every field is resolved by the
+    SAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and
+    local (FlashRank/FastEmbed/sentence-transformers) models are both available — and a
+    local model that was never downloaded fails fast, degrading the fact search to RRF
+    (no silent fetch). ``model_id`` null = reuse the knowledge reranker model
+    (``knowledge.retrieval.reranker.model_id``) — one model to manage (the G8 play).
+    """
+
+    # null → fall back to the shared knowledge reranker model id.
+    model_id: str | None = None
+    # Drop facts whose post-rerank relevance is below this (maps to Graphiti
+    # ``SearchConfig.reranker_min_score``). 0.0 = keep all. Cross-encoder only —
+    # RRF/MMR scores are rank-fusion artifacts, so this is ignored for those recipes.
+    min_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Local torch lane only (sentence-transformers); ignored by cloud + ONNX models.
+    device: str | None = None
 
 
 class KnowledgeGraphPreferences(BaseModel):
@@ -463,12 +487,17 @@ class KnowledgeGraphPreferences(BaseModel):
     embedder_model: str | None = None
     # Default temporal lens at retrieval: current facts only vs include historical.
     temporal_default: KnowledgeGraphTemporalDefault = "current"
-    # Opt-in (deferred feature): per-entity community clustering/summaries.
-    communities_enabled: bool = False
     # Retrieval expansion radius (hops) when gathering related facts/chunks.
     k_hop: int = Field(default=1, ge=1, le=3)
     # Graphiti search rerank recipe for the fact-search leg.
     search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+    # Graph Runs ledger verbosity (docs §12.2): ``rich`` = per-node content previews
+    # + one row per edge in ``resolve_facts``; ``compact`` = stats only, aggregated.
+    ledger_detail: KnowledgeGraphLedgerDetail = "rich"
+    # Cross-encoder reranker for the fact-search leg (only when search_recipe='cross_encoder').
+    reranker: KnowledgeGraphRerankerPreferences = Field(
+        default_factory=KnowledgeGraphRerankerPreferences
+    )
 
     @property
     def embedder_model_resolved(self) -> str | None:

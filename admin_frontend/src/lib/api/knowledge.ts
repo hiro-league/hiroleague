@@ -1,4 +1,5 @@
 import { apiRequest, type ApiResponse } from './client';
+import type { EvalRunStateData } from '$lib/features/knowledge/shared/knowledge-events';
 
 export type KnowledgeScannedFile = {
   path: string;
@@ -178,6 +179,10 @@ export type KnowledgeAnswerCompareData = {
 };
 
 export type KnowledgeGraphMode = 'off' | 'on' | 'compare';
+
+// Per-query temporal lens override for graph_mode 'on'/'compare'. 'default' defers
+// to the admin pref (knowledge.graph.temporal_default) and sends no override.
+export type KnowledgeGraphTemporal = 'default' | 'current' | 'all';
 
 /** Type guard — distinguish a compare-mode response from a single-leg response. */
 export function isAnswerCompareData(
@@ -364,6 +369,9 @@ export type EvalRunRequest = {
   corpus_source?: 'synthetic' | 'adam';
   // Adam path: run only this subset of question ids (empty/undefined = all).
   question_ids?: string[];
+  // Legs to compare: any subset of ['flat','graphiti','mix'] (one is fine).
+  // Empty/undefined = all three.
+  modes?: string[];
   run_id?: string;
 };
 
@@ -372,6 +380,28 @@ export function runKnowledgeEval(req: EvalRunRequest = {}): Promise<ApiResponse<
     method: 'POST',
     body: req,
     timeoutMs: 30000  // setup can take a few seconds; the eval itself runs in the background
+  });
+}
+
+/** L3 — replay the latest eval run's live state for the workspace (server-side
+ *  store). The panel calls this on mount so navigation + cross-origin (Vite vs
+ *  packaged UI) both show the same run. ``data`` is null when no run exists. */
+export function getKnowledgeEvalState(): Promise<ApiResponse<EvalRunStateData | null>> {
+  return apiRequest<EvalRunStateData | null>('/knowledge/eval/state', {
+    method: 'GET',
+    timeoutMs: 15000
+  });
+}
+
+/** L3 — request cancellation of the in-flight eval run. The runner emits a
+ *  terminal ``knowledge.eval.cancelled`` event once it stops. */
+export function cancelKnowledgeEval(
+  runId?: string | null
+): Promise<ApiResponse<{ cancelled: boolean; run_id: string | null }>> {
+  return apiRequest<{ cancelled: boolean; run_id: string | null }>('/knowledge/eval/cancel', {
+    method: 'POST',
+    body: { run_id: runId ?? null },
+    timeoutMs: 15000
   });
 }
 
@@ -436,14 +466,26 @@ export function answerKnowledge(
   filters: KnowledgeFilters = {},
   explain = false,
   rewrite = false,
-  graphMode: KnowledgeGraphMode = 'off'
+  graphMode: KnowledgeGraphMode = 'off',
+  graphTemporal: KnowledgeGraphTemporal = 'default'
 ): Promise<ApiResponse<KnowledgeAnswerData | KnowledgeAnswerCompareData>> {
   // graph_mode='compare' makes the server run both legs (use_graph=False/True)
   // concurrently and return a compare shape. The route response type is a
   // union; callers use isAnswerCompareData() to discriminate.
+  // graph_temporal overrides the admin temporal default for THIS query only;
+  // 'default' sends no override so the server uses the pref.
   return apiRequest<KnowledgeAnswerData | KnowledgeAnswerCompareData>('/knowledge/answer', {
     method: 'POST',
-    body: { query, top_k: topK, min_score: minScore, filters, explain, rewrite, graph_mode: graphMode },
+    body: {
+      query,
+      top_k: topK,
+      min_score: minScore,
+      filters,
+      explain,
+      rewrite,
+      graph_mode: graphMode,
+      ...(graphTemporal === 'default' ? {} : { graph_temporal: graphTemporal })
+    },
     // Compare runs two legs (still concurrent), so allow a bit more headroom.
     timeoutMs: graphMode === 'compare' ? 240000 : 180000
   });
@@ -531,6 +573,11 @@ export type GraphEdgeDTO = {
   fact: string;
   chunk_ids: string[];
   document_ids: string[];
+  // Temporal window: valid_at = became true, invalid_at = stopped being true,
+  // expired_at = when the system learned it was superseded (set → retired fact).
+  valid_at: string | null;
+  invalid_at: string | null;
+  expired_at: string | null;
 };
 
 export type KnowledgeGraphExportData = {

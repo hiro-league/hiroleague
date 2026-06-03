@@ -24,6 +24,7 @@ from hiro_commons.log import Logger
 
 from ..domain.preferences import load_preferences
 from ..domain.workspace import resolve_workspace
+from ..runtime.agent_graph.ledger import LedgerSink
 from ..services.knowledge import KnowledgeService, create_knowledge_service
 from ..services.knowledge.graph import (
     GraphitiEpisodeInput,
@@ -31,7 +32,7 @@ from ..services.knowledge.graph import (
     graphiti_db_path,
 )
 from ..services.knowledge.graph.graphiti_ingest import GraphEventSink
-from ..services.knowledge.graph.graphiti_serialize import edge_to_dto, node_to_dto
+from ..services.knowledge.graph.graphiti_serialize import build_graph_dtos
 from ..services.knowledge.graph.graphiti_service import read_graph_snapshot
 from .base import Tool, ToolParam
 
@@ -100,13 +101,14 @@ async def graph_snapshot_payload(
     """
     node_limit = node_limit or _DEFAULT_NODE_LIMIT
     edge_limit = edge_limit or _DEFAULT_EDGE_LIMIT
-    nodes, edges = await read_graph_snapshot(
+    nodes, edges, chunk_to_document = await read_graph_snapshot(
         graphiti_db_path(workspace_path), node_limit=node_limit, edge_limit=edge_limit
     )
     truncated = len(nodes) >= node_limit or len(edges) >= edge_limit
+    dtos = build_graph_dtos(nodes, edges, chunk_to_document=chunk_to_document)
     return {
-        "nodes": [node_to_dto(n) for n in nodes],
-        "edges": [edge_to_dto(e) for e in edges],
+        "nodes": dtos["nodes"],
+        "edges": dtos["edges"],
         "truncated": truncated,
         "counts": {"nodes": len(nodes), "edges": len(edges)},
     }
@@ -197,6 +199,9 @@ async def _run_graph_ingest_for_documents(
             "llm.default_chat) and ensure the provider key is configured."
         )
 
+    # One ledger run per document (per ingest_chunks call) → each document's graph
+    # build is drillable in Graph Runs with per-operation step detail.
+    ledger_sink = LedgerSink(workspace_path)
     per_doc: list[dict[str, Any]] = []
     totals = _empty_totals()
     try:
@@ -221,7 +226,10 @@ async def _run_graph_ingest_for_documents(
                     title or "",
                 )
                 stats = await svc.ingest_chunks(
-                    episodes, source_role=source_role, event_sink=event_sink
+                    episodes,
+                    source_role=source_role,
+                    event_sink=event_sink,
+                    ledger_sink=ledger_sink,
                 )
                 stats_dict = stats.as_dict()
                 entry["ok"] = True

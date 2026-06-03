@@ -27,12 +27,20 @@ from graphiti_core.nodes import EpisodeType, EpisodicNode
 from hiro_commons.log import Logger
 from pydantic import BaseModel
 
+from hirocli.runtime.agent_graph.ledger import LedgerSink
+
 from ..constants import (
     KNOWLEDGE_GRAPH_EDGE_UPSERTED,
     KNOWLEDGE_GRAPH_INGEST_PROGRESS,
     KNOWLEDGE_GRAPH_NODE_UPSERTED,
 )
 from .graphiti_serialize import edge_to_dto, node_to_dto
+from .ingest_ledger import (
+    apply_episode_span_rollup,
+    finalize_graph_ingest_run,
+    knowledge_graph_ingest_ledger,
+    ledger_episode,
+)
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI.INGEST")
 
@@ -77,6 +85,9 @@ class GraphitiIngestStats:
     episodes_failed: int = 0
     entities_total: int = 0      # nodes touched across all episodes (created or merged)
     edges_total: int = 0         # facts touched across all episodes
+    facts_invalidated: int = 0   # facts superseded (from the add_episode tracer span)
+    tokens_input: int = 0        # LLM input tokens across episodes (ledgered path)
+    tokens_output: int = 0       # LLM output tokens across episodes (ledgered path)
     rejected_roles: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -87,6 +98,9 @@ class GraphitiIngestStats:
             "episodes_failed": self.episodes_failed,
             "entities_total": self.entities_total,
             "edges_total": self.edges_total,
+            "facts_invalidated": self.facts_invalidated,
+            "tokens_input": self.tokens_input,
+            "tokens_output": self.tokens_output,
             "rejected_roles": list(self.rejected_roles),
         }
 
@@ -156,6 +170,20 @@ def _safe_emit(
         log.warning("⚠️ graphiti.ingest — event emit failed · type=%s", event_type, exc_info=True)
 
 
+def _result_names(result: Any) -> tuple[list[str], list[str]]:
+    """Pull touched entity names + fact texts off ``AddEpisodeResults`` for the
+    ledger ``persist`` row (so the run shows *what* the episode produced).
+
+    Defensive: a missing attribute yields an empty list, never raises.
+    """
+    node_names = [str(getattr(n, "name", "") or "") for n in (getattr(result, "nodes", None) or [])]
+    edge_facts = [
+        str(getattr(e, "fact", "") or getattr(e, "name", "") or "")
+        for e in (getattr(result, "edges", None) or [])
+    ]
+    return [n for n in node_names if n], [e for e in edge_facts if e]
+
+
 def _emit_progress(
     event_sink: GraphEventSink | None, *, document_id: str, index: int, total: int
 ) -> None:
@@ -177,17 +205,23 @@ def _emit_graph_elements(
     """
     if event_sink is None:
         return
+    # document_id is known here; pass it so live nodes/edges carry document provenance.
+    # Node chunk_ids stay thin live (the node doesn't carry episodes) — the
+    # reconcile-on-completed full export heals node chunk_ids/document_ids.
+    doc_ids = [document_id] if document_id else []
     for node in getattr(result, "nodes", None) or []:
         _safe_emit(
             event_sink,
             KNOWLEDGE_GRAPH_NODE_UPSERTED,
-            {"node": node_to_dto(node), "is_new": True, "document_id": document_id},
+            {"node": node_to_dto(node, document_ids=doc_ids), "is_new": True,
+             "document_id": document_id},
         )
     for edge in getattr(result, "edges", None) or []:
         _safe_emit(
             event_sink,
             KNOWLEDGE_GRAPH_EDGE_UPSERTED,
-            {"edge": edge_to_dto(edge), "is_new": True, "document_id": document_id},
+            {"edge": edge_to_dto(edge, document_ids=doc_ids), "is_new": True,
+             "document_id": document_id},
         )
 
 
@@ -201,92 +235,164 @@ async def ingest_episodes(
     edge_types: dict[str, type[BaseModel]] | None = None,
     edge_type_map: dict[tuple[str, str], list[str]] | None = None,
     event_sink: GraphEventSink | None = None,
+    ledger_sink: LedgerSink | None = None,
+    ledger_detail: str = "rich",
 ) -> GraphitiIngestStats:
     """Ingest chunks as Graphiti episodes — sequential, chronological, write-gated.
 
     ``graphiti`` is anything exposing an async ``add_episode(...)`` (the real client
     or a test fake). Episodes are sorted by ``reference_time`` so temporal
     supersession is correct regardless of input order.
+
+    ``ledger_sink`` (when given) records a ``graph_ingest`` run with a per-episode
+    step and per-operation sub-step nodes (extract/resolve/dates/…), so ingestion
+    is visible in Graph Runs (docs §6/§12). ``None`` = no ledger (tests/CLI).
     """
     stats = GraphitiIngestStats(episodes_received=len(episodes))
+    # Run row groups all episodes from this call (== one document for the per-doc
+    # tool path; the whole series for an eval corpus sharing one document_id).
+    doc_id = episodes[0].document_id if episodes else ""
+    doc_title = episodes[0].document_title if episodes else ""
 
-    # F7 write-gate — one log + bail, before any model call.
-    if source_role not in ALLOWED_SOURCE_ROLES:
-        stats.episodes_rejected = len(episodes)
-        if source_role:
-            stats.rejected_roles.append(source_role)
-        log.warning(
-            "❌ graphiti.ingest — REJECTED %d episode(s) · role=%s not in allow-list %s",
-            len(episodes),
-            source_role,
-            sorted(ALLOWED_SOURCE_ROLES),
-        )
-        return stats
-
-    if not episodes:
-        return stats
-
-    # Stamp + sort by reference_time so a later fact supersedes an earlier one.
-    prepared = sorted(
-        ((ep, ep.reference_time or _now()) for ep in episodes), key=lambda pair: pair[1]
-    )
-    total = len(prepared)
-
-    # Real Graphiti exposes `.driver`; the unit-test fake does not → pre-seed only on
-    # the real path (production always has a driver). Lets the fake-client tests stay
-    # Kuzu-free while the live path creates episodes with our point_id (see helper).
-    driver = getattr(graphiti, "driver", None)
-
-    for index, (ep, ref) in enumerate(prepared):
-        source = EpisodeType.message if ep.source == "message" else EpisodeType.text
-        body = _episode_body(ep, source)
+    async with knowledge_graph_ingest_ledger(
+        sink=ledger_sink, document_id=doc_id, ledger_detail=ledger_detail
+    ) as run:
         try:
-            if driver is not None and ep.chunk_id:
-                await _preseed_episode_node(
-                    driver,
-                    ep,
-                    body=body,
-                    source=source,
-                    group_id=group_id,
-                    ref=ref,
-                    now=_now(),
+            # F7 write-gate — one log + bail, before any model call.
+            if source_role not in ALLOWED_SOURCE_ROLES:
+                stats.episodes_rejected = len(episodes)
+                if source_role:
+                    stats.rejected_roles.append(source_role)
+                log.warning(
+                    "❌ graphiti.ingest — REJECTED %d episode(s) · role=%s not in allow-list %s",
+                    len(episodes),
+                    source_role,
+                    sorted(ALLOWED_SOURCE_ROLES),
                 )
-            result = await graphiti.add_episode(
-                name=_episode_name(ep),
-                episode_body=body,
-                source_description=ep.document_id,
-                reference_time=ref,
-                source=source,
-                group_id=group_id,
-                uuid=ep.chunk_id or None,
-                entity_types=entity_types,
-                edge_types=edge_types,
-                edge_type_map=edge_type_map,
+                if run.accumulator is not None and not run.nested:
+                    finalize_graph_ingest_run(
+                        run.accumulator,
+                        document_id=doc_id,
+                        document_title=doc_title,
+                        source_role=source_role,
+                        episode_count=len(episodes),
+                        stats=stats,
+                        status="completed",  # finalize maps rejected>0 → "rejected"
+                    )
+                return stats
+
+            if not episodes:
+                return stats
+
+            # Stamp + sort by reference_time so a later fact supersedes an earlier one.
+            prepared = sorted(
+                ((ep, ep.reference_time or _now()) for ep in episodes),
+                key=lambda pair: pair[1],
             )
-        except Exception:
-            # External model + DB call — log + re-raise (general-coding-rule).
-            stats.episodes_failed += 1
-            log.exception(
-                "❌ graphiti.ingest — add_episode failed · chunk=%s doc=%s",
-                ep.chunk_id,
-                ep.document_id,
+            total = len(prepared)
+
+            # Real Graphiti exposes `.driver`; the unit-test fake does not → pre-seed only
+            # on the real path (production always has a driver). Lets the fake-client tests
+            # stay Kuzu-free while the live path creates episodes with our point_id.
+            driver = getattr(graphiti, "driver", None)
+
+            for index, (ep, ref) in enumerate(prepared):
+                async with ledger_episode(
+                    run,
+                    episode_index=index + 1,
+                    total=total,
+                    chunk_id=ep.chunk_id,
+                    document_id=ep.document_id,
+                    title=ep.document_title,
+                    reference_time=ref,
+                ) as episode:
+                    source = EpisodeType.message if ep.source == "message" else EpisodeType.text
+                    body = _episode_body(ep, source)
+                    try:
+                        if driver is not None and ep.chunk_id:
+                            await _preseed_episode_node(
+                                driver,
+                                ep,
+                                body=body,
+                                source=source,
+                                group_id=group_id,
+                                ref=ref,
+                                now=_now(),
+                            )
+                        result = await graphiti.add_episode(
+                            name=_episode_name(ep),
+                            episode_body=body,
+                            source_description=ep.document_id,
+                            reference_time=ref,
+                            source=source,
+                            group_id=group_id,
+                            uuid=ep.chunk_id or None,
+                            entity_types=entity_types,
+                            edge_types=edge_types,
+                            edge_type_map=edge_type_map,
+                        )
+                    except Exception:
+                        # External model + DB call — log + re-raise (general-coding-rule).
+                        stats.episodes_failed += 1
+                        log.exception(
+                            "❌ graphiti.ingest — add_episode failed · chunk=%s doc=%s",
+                            ep.chunk_id,
+                            ep.document_id,
+                        )
+                        raise
+
+                    stats.episodes_processed += 1
+                    node_names, edge_facts = _result_names(result)
+                    stats.entities_total += len(getattr(result, "nodes", None) or [])
+                    stats.edges_total += len(getattr(result, "edges", None) or [])
+                    if episode is not None:
+                        episode.set_persist(node_names=node_names, edge_facts=edge_facts)
+                        # Fold this episode's supersession + token totals into the run
+                        # stats (§12). invalidated_count comes from the add_episode
+                        # tracer span (already buffered now that add_episode returned);
+                        # tokens come from the per-call usage sink. Ledgered path only —
+                        # without a sink there's no collector and these stay 0.
+                        apply_episode_span_rollup(episode)
+                        stats.facts_invalidated += episode.invalidated_count
+                        stats.tokens_input += episode.total_input_tokens
+                        stats.tokens_output += episode.total_output_tokens
+                    _emit_graph_elements(event_sink, result, document_id=ep.document_id)
+                    _emit_progress(
+                        event_sink, document_id=ep.document_id, index=index + 1, total=total
+                    )
+
+            log.info(
+                "✅ graphiti.ingest — done · episodes=%d/%d entities=%d edges=%d",
+                stats.episodes_processed,
+                stats.episodes_received,
+                stats.entities_total,
+                stats.edges_total,
             )
+        except Exception as exc:
+            if run.accumulator is not None and not run.nested:
+                finalize_graph_ingest_run(
+                    run.accumulator,
+                    document_id=doc_id,
+                    document_title=doc_title,
+                    source_role=source_role,
+                    episode_count=stats.episodes_processed,
+                    stats=stats,
+                    status="failed",
+                    error_code=type(exc).__name__,
+                )
             raise
-
-        stats.episodes_processed += 1
-        stats.entities_total += len(getattr(result, "nodes", None) or [])
-        stats.edges_total += len(getattr(result, "edges", None) or [])
-        _emit_graph_elements(event_sink, result, document_id=ep.document_id)
-        _emit_progress(event_sink, document_id=ep.document_id, index=index + 1, total=total)
-
-    log.info(
-        "✅ graphiti.ingest — done · episodes=%d/%d entities=%d edges=%d",
-        stats.episodes_processed,
-        stats.episodes_received,
-        stats.entities_total,
-        stats.edges_total,
-    )
-    return stats
+        else:
+            if run.accumulator is not None and not run.nested:
+                finalize_graph_ingest_run(
+                    run.accumulator,
+                    document_id=doc_id,
+                    document_title=doc_title,
+                    source_role=source_role,
+                    episode_count=stats.episodes_received,
+                    stats=stats,
+                    status="completed",
+                )
+        return stats
 
 
 __all__ = [

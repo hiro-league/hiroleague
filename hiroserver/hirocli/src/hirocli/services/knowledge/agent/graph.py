@@ -29,6 +29,7 @@ from hirocli.runtime.agent_graph.base import _llm_usage_payload as llm_usage_pay
 from hirocli.runtime.agent_graph.base import _normalize_reply_content
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
 from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged
+from hirocli.services.knowledge.graph.ledger_tracer import SpanRecord, current_spans
 
 from .helpers import (
     NormalizedQuery,
@@ -81,11 +82,20 @@ class KnowledgeAgentState(TypedDict, total=False):
     min_score: float
     explain: bool
     rewrite: bool
-    # When True, the ``graph_expand`` node runs Graphiti fact-search on the query and
-    # focuses Qdrant on the supporting chunk_ids. Defaults to False so existing
-    # behavior is unchanged for any caller that hasn't opted in. Requires the
-    # knowledge.graph backend enabled (graphiti/mix) + a built graph.
-    use_graph: bool
+    # Retrieval mode for the graph layer (eval "legs"):
+    #   "off"      → flat Qdrant hybrid over all chunks (graph_expand no-ops)
+    #   "mix"      → graph facts focus Qdrant hybrid on the supporting chunk_ids
+    #                AND inject the facts as an answer skeleton (G4 fusion)
+    #   "graphiti" → graph facts ARE the source: facts as skeleton + the verbatim
+    #                episode chunks fetched by-id (no query hybrid). The control
+    #                leg that isolates the graph's own contribution vs "mix".
+    # Defaults to "off" so any caller that hasn't opted in stays flat. The graph
+    # legs require the knowledge.graph backend enabled (graphiti/mix) + a built graph.
+    graph_mode: str
+    # Facts (statements) returned by ``graph_expand`` for the query. Injected into
+    # the answer context for the graph legs ("graphiti"/"mix") as the skeleton;
+    # empty on the flat leg. Carries the temporal supersession the LLM reasons over.
+    graph_facts: list[str]
     # Temporal lens for graph_expand: "current" (drop superseded facts) or "all".
     # Absent → falls back to knowledge.graph.temporal_default.
     graph_temporal: str
@@ -172,6 +182,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/graph_expand", self.graph_expand),
         )
         graph.add_node(
+            "graph_fetch",
+            self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/graph_fetch", self.graph_fetch),
+        )
+        graph.add_node(
             "build_filters",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/build_filters", self.build_filters),
         )
@@ -201,10 +215,21 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             self._route_after_rewrite,
             {"retrieve": "graph_expand", "skip": "build_context"},
         )
-        # L3 prototype — graph_expand runs unconditionally on the retrieve path; it
-        # short-circuits internally when ``use_graph=False`` (the default) or there
-        # are no entities to resolve. Cost when off = ~zero. See ``graph_expand`` impl.
-        graph.add_edge("graph_expand", "build_filters")
+        # graph_expand runs unconditionally on the retrieve path; it short-circuits
+        # internally when ``graph_mode=off`` (the default) or there's no query/graph.
+        # Cost when off = ~zero. See ``graph_expand`` impl.
+        #
+        # Routing after expand splits the three eval legs:
+        #   - "graphiti" WITH chunk_ids → graph_fetch (by-id passages, no hybrid)
+        #   - everything else (flat, mix, or graphiti soft-fallback) → the hybrid path
+        # graphiti with no chunk_ids falls through to the hybrid path = full flat
+        # search (the design's soft-fallback when the graph has nothing for the query).
+        graph.add_conditional_edges(
+            "graph_expand",
+            self._route_after_expand,
+            {"graph_only": "graph_fetch", "vector": "build_filters"},
+        )
+        graph.add_edge("graph_fetch", "build_context")
         graph.add_edge("build_filters", "embed_query")
         graph.add_edge("embed_query", "vector_search")
         graph.add_edge("vector_search", "rerank")
@@ -254,6 +279,16 @@ class KnowledgeAgentGraph(BaseAgentGraph):
     def _route_after_rewrite(state: KnowledgeAgentState) -> str:
         # Only an explicit False skips; absent/True (rewrite off, no LLM, parse failure) retrieves.
         return "skip" if state.get("knowledge_needed") is False else "retrieve"
+
+    @staticmethod
+    def _route_after_expand(state: KnowledgeAgentState) -> str:
+        # The "graphiti" leg answers from the graph alone: fetch the fact episodes'
+        # chunks by-id (graph_fetch), skipping the query-driven hybrid search. It
+        # needs chunk_ids to do that — with none (empty graph / miss / error) it
+        # soft-falls-back to the hybrid path, which becomes a full flat search.
+        if state.get("graph_mode") == "graphiti" and state.get("graph_chunk_ids"):
+            return "graph_only"
+        return "vector"
 
     @staticmethod
     def _route_after_context(state: KnowledgeAgentState) -> str:
@@ -452,10 +487,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # graph-relevant slice. SOFT FALLBACK: empty result → no filter added →
         # caller gets normal flat search (graph silently did nothing).
         entry = current_entry.get()
-        if not state.get("use_graph"):
+        if (state.get("graph_mode") or "off") not in ("graphiti", "mix"):
             if entry:
-                entry.set_decision("skipped", "use_graph_off")
-                entry.set_output_preview("use_graph=False · no expansion")
+                entry.set_decision("skipped", "graph_mode_off")
+                entry.set_output_preview("graph_mode=off · no expansion")
             return {}
         # Graphiti searches on the full query (hybrid over the graph) — no separate
         # entity list required (unlike the old Ladybug name-resolution path).
@@ -498,9 +533,16 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 state.get("graph_temporal") or self._prefs.knowledge.graph.temporal_default
             )
             num_results = max(1, int(self._prefs.knowledge.retrieval.top_k))
-            expansion = await service.search_chunk_ids(
-                query, num_results=num_results, temporal=temporal
-            )
+            # Buffer graphiti's ``search.*`` tracer spans so graph_expand can render
+            # them as sub-steps (docs §12.2.2). The tracer no-ops without this.
+            spans: list[SpanRecord] = []
+            spans_token = current_spans.set(spans)
+            try:
+                expansion = await service.search_chunk_ids(
+                    query, num_results=num_results, temporal=temporal
+                )
+            finally:
+                current_spans.reset(spans_token)
         except Exception as exc:
             log.warning(
                 "⚠️ graphiti graph_expand failed · falling back to flat search",
@@ -524,7 +566,60 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             entry.set_output_preview(
                 f"facts[{expansion.facts_used}]: {facts_preview}{more} · chunks: {len(expansion.chunk_ids)}"
             )
-        return {"graph_chunk_ids": list(expansion.chunk_ids)}
+            # Unfold the opaque graph_expand node into Graphiti search sub-steps
+            # (embed_query / candidate_gen / bfs_expand / rrf_fuse / rerank +
+            # temporal_filter), with the ranked facts in rich mode (docs §12.2.2).
+            from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
+
+            flush_graph_expand(
+                entry,
+                spans,
+                expansion,
+                temporal=temporal,
+                ledger_detail=self._prefs.knowledge.graph.ledger_detail,
+            )
+        # graph_facts feed the answer skeleton for BOTH graph legs (mix + graphiti);
+        # graph_chunk_ids focus Qdrant (mix) or drive the by-id fetch (graphiti).
+        return {
+            "graph_chunk_ids": list(expansion.chunk_ids),
+            "graph_facts": list(expansion.facts),
+        }
+
+    @graph_logged(captures={"decision"})
+    async def graph_fetch(self, state: KnowledgeAgentState) -> dict[str, Any]:
+        # "graphiti" leg — the graph alone decides: fetch the verbatim episode
+        # chunks for the fact-supporting chunk_ids directly by id (graph-ranked
+        # order, no query hybrid / no min_score drop). Empty-text points (chunk
+        # not in Qdrant) are skipped. Pairs with the facts injected in build_context.
+        entry = current_entry.get()
+        chunk_ids = state.get("graph_chunk_ids") or []
+        if not chunk_ids:
+            if entry:
+                entry.set_decision("skipped", "no_chunk_ids")
+                entry.set_output_preview("graphiti leg · no chunk_ids · facts-only")
+            return {"hits": []}
+        if entry:
+            entry.set_input_preview(f"chunk_ids: {len(chunk_ids)} (graph-ranked, by-id)")
+        try:
+            hits = await self._service.fetch_hits_by_point_ids(chunk_ids)
+        except Exception as exc:
+            log.warning(
+                "⚠️ graphiti graph_fetch failed · falling back to facts-only context",
+                error=str(exc)[:200],
+                exc_info=True,
+            )
+            if entry:
+                entry.fail("graph_fetch_failed", message=str(exc))
+            return {"hits": []}
+        if entry:
+            entry.set_decision("ok" if hits else "empty", f"passages_{len(hits)}")
+            rows = knowledge_results_rows(hits)
+            head = f"passages {len(hits)} of {len(chunk_ids)} (by-id)"
+            entry.set_output_preview(
+                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
+            )
+        # reranked=False so build_context tags relevance as ordinal (graph-ranked).
+        return {"hits": hits, "reranked": False}
 
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:
         # L3 — fold the graph_expand result into the Qdrant filter so the same
@@ -736,10 +831,21 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                     score_source=score_source,
                 )
             )
+        # Graph legs (mix/graphiti) prepend the fact statements as an answer
+        # skeleton (G4 / §5.5) — this is what carries the temporal supersession the
+        # passages alone can't express. Facts count as context too, so a graphiti
+        # leg with thin passages still answers (not dropped as no_results).
+        facts = [f for f in (state.get("graph_facts") or []) if (f or "").strip()]
+        context = build_context(sources)
+        if facts:
+            facts_block = "Known facts from the knowledge graph:\n" + "\n".join(
+                f"- {f}" for f in facts
+            )
+            context = f"{facts_block}\n\n{context}" if context else facts_block
         return {
             "sources": sources,
-            "context": build_context(sources),
-            "no_results": not bool(sources),
+            "context": context,
+            "no_results": not (sources or facts),
         }
 
     @graph_logged(captures={"usage", "decision"})

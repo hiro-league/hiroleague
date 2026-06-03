@@ -43,6 +43,7 @@ from .graphiti_adapters import (
     GraphitiEmbedderClient,
     GraphitiLLMClient,
     GraphitiModelSpec,
+    HiroRerankerCrossEncoder,
     UsageSink,
 )
 from .graphiti_ingest import (
@@ -54,6 +55,8 @@ from .graphiti_ingest import (
 from .graphiti_ontology import GRAPHITI_ENTITY_TYPES
 from .graphiti_search import GraphitiExpansion
 from .graphiti_search import search_chunk_ids as _search_chunk_ids
+from .ingest_ledger import record_episode_embed, record_episode_llm_usage
+from .ledger_tracer import LedgerTracer
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -62,8 +65,13 @@ if TYPE_CHECKING:
     from graphiti_core.llm_client.client import LLMClient
 
     from hirocli.domain.credential_store import CredentialStore
+    from hirocli.runtime.agent_graph.ledger import LedgerSink
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
+
+# Reranker ``top_n`` for the cross-encoder: rank ALL candidate facts Graphiti hands it
+# (the final cut is Graphiti's ``SearchConfig.limit``). Generous so we never pre-trim.
+_RERANK_CANDIDATE_CAP = 512
 
 
 async def _ensure_fts_indices(driver: Any) -> None:
@@ -159,7 +167,16 @@ class GraphitiMemoryService:
         cross_encoder: CrossEncoderClient | None = None,
         group_id: str | None = None,
         max_coroutines: int | None = None,
+        ledger_detail: str = "rich",
+        search_recipe: str = "rrf",
+        k_hop: int = 1,
+        reranker_min_score: float = 0.0,
     ) -> None:
+        self._ledger_detail = ledger_detail
+        # Retrieval knobs (admin prefs) threaded into every search_chunk_ids call.
+        self._search_recipe = search_recipe
+        self._k_hop = k_hop
+        self._reranker_min_score = reranker_min_score
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         log.info("⬇️ graphiti — opening Kuzu graph · path=%s", self._db_path)
@@ -175,6 +192,21 @@ class GraphitiMemoryService:
             cross_encoder=cross_encoder or _RankByInputOrderCrossEncoder(),
             max_coroutines=max_coroutines,
         )
+        # Inject our Graph-Runs tracer (docs §12.2). graphiti's ``create_tracer``
+        # only accepts an OpenTelemetry tracer (it would discard a custom ``Tracer``),
+        # so we override post-construction on all three holders: the orchestrator
+        # (``add_episode`` span), the search clients bundle (``search.*`` spans), and
+        # the LLM client (``llm.generate``). The tracer no-ops unless a consumer has
+        # set ``current_spans`` (graph_expand / ledger_episode), so this is safe for
+        # every other graphiti caller.
+        try:
+            tracer = LedgerTracer()
+            self._graphiti.tracer = tracer
+            self._graphiti.clients.tracer = tracer
+            self._graphiti.llm_client.set_tracer(tracer)
+        except Exception:
+            # Observability must never break the graph itself.
+            log.warning("⚠️ graphiti — ledger tracer injection failed", exc_info=True)
         # Resolve ONE concrete group_id shared by ingest / search / snapshot
         # (snapshot's get_by_group_ids needs a concrete list).
         self._group_id = group_id or get_default_group_id(driver.provider)
@@ -222,11 +254,15 @@ class GraphitiMemoryService:
         *,
         source_role: str,
         event_sink: GraphEventSink | None = None,
+        ledger_sink: "LedgerSink | None" = None,
     ) -> GraphitiIngestStats:
         """Ingest document chunks as Graphiti episodes (F7 write-gated, sequential).
 
         Auto-initializes the graph on first use. Uses the pinned entity ontology;
-        edge-type vocabulary is left free-form for now (see graphiti_ontology)."""
+        edge-type vocabulary is left free-form for now (see graphiti_ontology).
+
+        ``ledger_sink`` records a ``graph_ingest`` run (per-episode step + per-operation
+        sub-step nodes) in Graph Runs; ``None`` = no ledger (tests/CLI)."""
         await self.initialize()
         return await ingest_episodes(
             self._graphiti,
@@ -235,6 +271,8 @@ class GraphitiMemoryService:
             group_id=self._group_id,
             entity_types=GRAPHITI_ENTITY_TYPES,
             event_sink=event_sink,
+            ledger_sink=ledger_sink,
+            ledger_detail=self._ledger_detail,
         )
 
     async def search_chunk_ids(
@@ -256,6 +294,9 @@ class GraphitiMemoryService:
             group_id=self._group_id,
             num_results=num_results,
             temporal=temporal,
+            recipe=self._search_recipe,
+            k_hop=self._k_hop,
+            min_relevance=self._reranker_min_score,
         )
 
     async def close(self) -> None:
@@ -325,14 +366,65 @@ class GraphitiMemoryService:
             workspace_path=workspace_path,
             workspace_id=workspace_id,
             credential_store=credential_store,
-            on_usage=on_usage,
+            # Route per-call usage into the active ingest episode (no-op outside
+            # ingest, so retrieval/memory paths are unaffected). An explicit
+            # ``on_usage`` still overrides for callers that want their own sink.
+            on_usage=on_usage or record_episode_llm_usage,
         )
-        embedder = GraphitiEmbedderClient(backend)
+        embedder = GraphitiEmbedderClient(backend, on_embed=record_episode_embed)
+
+        # Cross-encoder reranker for the fact-search leg (only when the recipe asks for
+        # it). Resolve the SAME reranker the flat path uses (cloud or local) and wrap it
+        # as Graphiti's CrossEncoderClient. If it can't resolve (unconfigured / local
+        # model not downloaded), degrade the recipe to RRF rather than ship a no-op that
+        # masquerades as reranking.
+        graph = prefs.knowledge.graph
+        recipe = graph.search_recipe
+        cross_encoder: CrossEncoderClient | None = None
+        reranker_min_score = 0.0
+        if recipe == "cross_encoder":
+            reranker_model_id = (graph.reranker.model_id or "").strip() or (
+                prefs.knowledge.retrieval.reranker.model_id or ""
+            ).strip() or None
+            if reranker_model_id:
+                try:
+                    from hirocli.services.knowledge.reranker import resolve_reranker
+
+                    compressor, _calibrated = resolve_reranker(
+                        reranker_model_id,
+                        workspace_path=workspace_path,
+                        workspace_id=workspace_id,
+                        top_n=_RERANK_CANDIDATE_CAP,  # rank ALL candidates; SearchConfig.limit cuts
+                        device=graph.reranker.device,
+                        credential_store=credential_store,
+                    )
+                    cross_encoder = HiroRerankerCrossEncoder(compressor)
+                    reranker_min_score = graph.reranker.min_relevance
+                    log.info("⬇️ graphiti — cross-encoder reranker · model=%s", reranker_model_id)
+                except Exception:
+                    log.warning(
+                        "⚠️ graphiti — cross-encoder reranker %r unavailable; falling back to "
+                        "RRF (configure/download the reranker model)",
+                        reranker_model_id,
+                        exc_info=True,
+                    )
+                    recipe = "rrf"
+            else:
+                log.info(
+                    "⬇️ graphiti — search_recipe=cross_encoder but no reranker model set "
+                    "(graph.reranker.model_id / knowledge.retrieval.reranker.model_id) · using RRF"
+                )
+                recipe = "rrf"
 
         return cls(
             db_path=graphiti_db_path(workspace_path),
             llm_client=llm_client,
             embedder=embedder,
+            cross_encoder=cross_encoder,
+            ledger_detail=graph.ledger_detail,
+            search_recipe=recipe,
+            k_hop=graph.k_hop,
+            reranker_min_score=reranker_min_score,
         )
 
 
@@ -341,24 +433,27 @@ async def read_graph_snapshot(
     *,
     node_limit: int | None = None,
     edge_limit: int | None = None,
-) -> tuple[list[Any], list[Any]]:
+) -> tuple[list[Any], list[Any], dict[str, str]]:
     """Read all entity nodes + RELATES_TO facts for the default group (read-only).
 
     Opens a Kuzu driver **directly** — a snapshot only touches the graph, so no
-    LLM/embedder (and thus no provider key) is needed. Returns ``([], [])`` when the
-    DB file does not exist (nothing graph-ingested yet) — never a side effect.
+    LLM/embedder (and thus no provider key) is needed. Returns ``([], [], {})`` when
+    the DB file does not exist (nothing graph-ingested yet) — never a side effect.
+    The third element is a ``chunk_id → document_id`` map (episode uuid →
+    ``source_description``) so the viz can fill node/edge ``document_ids`` (§5.6).
     The load path for the admin Graph tab (docs/knowledge-graphiti-pivot-design.md §5.6).
     """
     from graphiti_core.edges import EntityEdge
     from graphiti_core.errors import GroupsEdgesNotFoundError, GroupsNodesNotFoundError
-    from graphiti_core.nodes import EntityNode
+    from graphiti_core.nodes import EntityNode, EpisodicNode
 
     path = Path(db_path)
     if not path.exists():
-        return [], []
+        return [], [], {}
     driver = KuzuDriver(str(path))
     nodes: list[Any] = []
     edges: list[Any] = []
+    chunk_to_document: dict[str, str] = {}
     try:
         gid = get_default_group_id(driver.provider)
         # The get_by_group_ids helpers RAISE (not return []) on an empty graph.
@@ -370,13 +465,24 @@ async def read_graph_snapshot(
             edges = await EntityEdge.get_by_group_ids(driver, [gid], limit=edge_limit)
         except GroupsEdgesNotFoundError:
             edges = []
+        # Episodes carry document_id in ``source_description`` (set at ingest); map
+        # chunk_id (episode uuid) → document_id for node/edge document_ids provenance.
+        try:
+            episodes = await EpisodicNode.get_by_group_ids(driver, [gid], limit=node_limit)
+        except GroupsNodesNotFoundError:
+            episodes = []
+        for ep in episodes or []:
+            uuid = getattr(ep, "uuid", "") or ""
+            doc = getattr(ep, "source_description", "") or ""
+            if uuid and doc:
+                chunk_to_document[uuid] = doc
     finally:
         try:
             await driver.close()
         except Exception:
             log.warning("⚠️ graphiti — snapshot driver close failed", exc_info=True)
         _release_kuzu(driver)
-    return list(nodes or []), list(edges or [])
+    return list(nodes or []), list(edges or []), chunk_to_document
 
 
 __all__ = ["GraphitiMemoryService", "graphiti_db_path", "read_graph_snapshot"]

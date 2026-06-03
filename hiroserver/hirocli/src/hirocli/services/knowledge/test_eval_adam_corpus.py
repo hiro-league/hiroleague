@@ -46,7 +46,7 @@ class _FakeGsvc:
     def __init__(self) -> None:
         self.ingested = None
 
-    async def ingest_chunks(self, episodes, *, source_role):
+    async def ingest_chunks(self, episodes, *, source_role, event_sink=None, ledger_sink=None):
         self.ingested = list(episodes)
 
     async def close(self) -> None:

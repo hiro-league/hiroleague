@@ -192,6 +192,12 @@ export function createPreferencesController(notify: Notify) {
     markDirty();
   }
 
+  function setKnowledgeGraphRerankerModel(id: string | null) {
+    if (!draft) return;
+    draft.knowledge.graph.reranker.model_id = id;
+    markDirty();
+  }
+
   // Model ids currently being polled by this browser session (so resume + click never
   // double-poll the same download). The download itself runs server-side regardless.
   const polling = new Set<string>();
@@ -533,6 +539,7 @@ export function createPreferencesController(notify: Notify) {
     setKnowledgeGraphExtractionModel,
     setKnowledgeGraphSmallModel,
     setKnowledgeGraphEmbedderModel,
+    setKnowledgeGraphRerankerModel,
     downloadReranker,
     cancelReranker,
     setDefaultTuningProfile,

@@ -210,6 +210,7 @@ async def test_service_ingest_chunks_delegates_and_inits() -> None:
     svc._initialized = False  # type: ignore[attr-defined]
     svc._closed = False  # type: ignore[attr-defined]
     svc._db_path = "test.db"  # type: ignore[attr-defined]  # only used in a log line
+    svc._ledger_detail = "rich"  # type: ignore[attr-defined]
 
     stats = await svc.ingest_chunks(
         [GraphitiEpisodeInput(chunk_id="c1", document_id="d", text="hi")],

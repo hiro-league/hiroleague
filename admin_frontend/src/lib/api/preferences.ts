@@ -87,9 +87,16 @@ export type KnowledgePreferences = {
     small_tuning_profile: string;
     embedder_model: string | null;
     temporal_default: 'current' | 'all';
-    communities_enabled: boolean;
     k_hop: number;
     search_recipe: 'rrf' | 'mmr' | 'cross_encoder';
+    ledger_detail: 'compact' | 'rich';
+    // Cross-encoder reranker for the fact-search leg (only active when
+    // search_recipe === 'cross_encoder'). model_id null = reuse knowledge reranker.
+    reranker: {
+      model_id: string | null;
+      min_relevance: number;
+      device: string | null;
+    };
   };
 };
 
@@ -186,9 +193,14 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
     small_tuning_profile: 'graphiti_small',
     embedder_model: null,
     temporal_default: 'current',
-    communities_enabled: false,
     k_hop: 1,
-    search_recipe: 'rrf'
+    search_recipe: 'rrf',
+    ledger_detail: 'rich',
+    reranker: {
+      model_id: null,
+      min_relevance: 0.0,
+      device: null
+    }
   }
 };
 
@@ -231,6 +243,14 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       },
       answering: { ...DEFAULT_KNOWLEDGE.answering, ...(prefs.knowledge?.answering ?? {}) },
       rewrite: { ...DEFAULT_KNOWLEDGE.rewrite, ...(prefs.knowledge?.rewrite ?? {}) },
+      graph: {
+        ...DEFAULT_KNOWLEDGE.graph,
+        ...(prefs.knowledge?.graph ?? {}),
+        reranker: {
+          ...DEFAULT_KNOWLEDGE.graph.reranker,
+          ...(prefs.knowledge?.graph?.reranker ?? {})
+        }
+      },
       default_tuning_profile:
         prefs.knowledge?.default_tuning_profile ?? DEFAULT_KNOWLEDGE.default_tuning_profile
     }

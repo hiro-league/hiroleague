@@ -26,6 +26,7 @@ from hirocli.domain.workspace import resolve_workspace
 from hirocli.services.knowledge import KnowledgeService, create_knowledge_service
 from hirocli.services.knowledge.constants import (
     KNOWLEDGE_DELETED,
+    KNOWLEDGE_EVAL_CANCELLED,
     KNOWLEDGE_EVAL_COMPLETED,
     KNOWLEDGE_EVAL_FAILED,
     KNOWLEDGE_EVAL_QUESTION_COMPLETED,
@@ -139,12 +140,20 @@ class AnswerBody(SearchBody):
     # 'on' = graph_expand focuses Qdrant on chunks linked to query entities,
     # 'compare' = run both concurrently and return both legs side-by-side.
     graph_mode: str = "off"
+    # Per-query temporal lens override (§7). None = use the admin pref
+    # ``knowledge.graph.temporal_default``; 'current' = facts valid now only;
+    # 'all' = include superseded/historical facts.
+    graph_temporal: str | None = None
 
     @model_validator(mode="after")
     def _validate_graph_mode(self) -> AnswerBody:
         if self.graph_mode not in ("off", "on", "compare"):
             raise ValueError(
                 f"graph_mode must be 'off', 'on', or 'compare', got {self.graph_mode!r}"
+            )
+        if self.graph_temporal is not None and self.graph_temporal not in ("current", "all"):
+            raise ValueError(
+                f"graph_temporal must be 'current', 'all', or null, got {self.graph_temporal!r}"
             )
         return self
 
@@ -174,6 +183,9 @@ class EvalRunBody(BaseModel):
     corpus_source: str = "synthetic"
     # Optional subset (adam path): run only these question ids. None/empty = all.
     question_ids: list[str] | None = None
+    # Legs to compare: any subset of ["flat", "graphiti", "mix"] (one is fine).
+    # None/empty = all three. Normalized server-side (unknown names dropped).
+    modes: list[str] | None = None
     run_id: str | None = None
 
 
@@ -510,6 +522,7 @@ async def stream_knowledge_events(
         KNOWLEDGE_EVAL_QUESTION_COMPLETED,
         KNOWLEDGE_EVAL_COMPLETED,
         KNOWLEDGE_EVAL_FAILED,
+        KNOWLEDGE_EVAL_CANCELLED,
         # L3 graph viz (MVP) — live node/edge updates for the admin Graph tab.
         KNOWLEDGE_GRAPH_NODE_UPSERTED,
         KNOWLEDGE_GRAPH_EDGE_UPSERTED,
@@ -605,6 +618,7 @@ async def answer(
                     workspace_id=workspace_id,
                     explain=body.explain,
                     rewrite=body.rewrite,
+                    graph_temporal=body.graph_temporal,
                 )
                 # Serialize manually: KnowledgeAnswerComparison's helpers
                 # (sources_delta / both_no_results) are @properties and
@@ -628,7 +642,11 @@ async def answer(
                     workspace_id=workspace_id,
                     explain=body.explain,
                     rewrite=body.rewrite,
-                    use_graph=(body.graph_mode == "on"),
+                    # Ask tab keeps its off/on toggle; "on" maps to the fused "mix"
+                    # leg (graph-focused Qdrant). The selectable graphiti/mix split
+                    # lives in the eval batch, not the single-answer Ask path.
+                    graph_mode=("mix" if body.graph_mode == "on" else "off"),
+                    graph_temporal=body.graph_temporal,
                 )
             )
         finally:
@@ -747,12 +765,14 @@ async def eval_run(
     drops events for other workspaces.
     """
     # Local imports keep the module's top-level deps thin — eval is a niche path.
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
     from hirocli.services.knowledge.eval_runner import (
         ADAM_EVAL_TAG,
         collect_synthetic_doc_ids,
         ingest_adam_corpus_via_service,
         ingest_synthetic_corpus_via_service,
         load_adam_questions,
+        normalize_modes,
         run_eval,
     )
     from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
@@ -761,6 +781,11 @@ async def eval_run(
         service, owned = await _resolve_service(request, workspace_id)
         run_id = (body.run_id or "").strip() or f"l3eval-{uuid.uuid4()}"
         workspace_path = service.workspace_path
+        run_modes = normalize_modes(body.modes)
+        # Subscribe the per-workspace run registry BEFORE the task starts so it
+        # captures the full event trail for mid-run replay / cross-origin reads.
+        registry = get_eval_registry()
+        registry.ensure_subscribed()
 
         async def _runner() -> None:
             # All exceptions caught inside the task: a background-task crash that
@@ -781,7 +806,9 @@ async def eval_run(
                             "⬇️ knowledge.eval — ingesting Adam episode corpus · run_id=%s",
                             run_id,
                         )
-                        await ingest_adam_corpus_via_service(service, workspace_path)
+                        await ingest_adam_corpus_via_service(
+                            service, workspace_path, run_id=run_id
+                        )
                     questions = load_adam_questions()
                     if body.question_ids:
                         wanted = set(body.question_ids)
@@ -792,6 +819,7 @@ async def eval_run(
                         questions=questions,
                         run_id=run_id,
                         filters={"tags": [ADAM_EVAL_TAG]},
+                        modes=run_modes,
                     )
                     return
                 ingested_ids: list[str] = []
@@ -801,7 +829,7 @@ async def eval_run(
                         run_id,
                     )
                     ingested_ids = await ingest_synthetic_corpus_via_service(
-                        service, workspace_path
+                        service, workspace_path, run_id=run_id
                     )
                 if body.build_graph:
                     doc_ids = ingested_ids or await collect_synthetic_doc_ids(service)
@@ -825,7 +853,21 @@ async def eval_run(
                         )
                 # run_eval emits started / question_completed / completed / failed
                 # events on its own — no need for us to wrap those.
-                await run_eval(service, workspace_path, run_id=run_id)
+                await run_eval(service, workspace_path, run_id=run_id, modes=run_modes)
+            except asyncio.CancelledError:
+                # User pressed Cancel (the cancel route called task.cancel(), which
+                # raises here at the next await). Emit the neutral terminal CANCELLED
+                # event so the panel stops spinning and reads it as "stopped", not
+                # "failed". Re-raise so the task is properly marked cancelled.
+                log.info("🛑 knowledge.eval — run cancelled · run_id=%s", run_id)
+                get_domain_event_bus().publish(
+                    DomainEvent(
+                        type=KNOWLEDGE_EVAL_CANCELLED,
+                        workspace_path=workspace_path,
+                        payload={"run_id": run_id},
+                    )
+                )
+                raise
             except Exception as exc:
                 log.error(
                     "❌ knowledge.eval — background run failed · run_id=%s",
@@ -852,8 +894,18 @@ async def eval_run(
 
         # ``create_task`` is fire-and-forget here. The route returns immediately
         # so the UI gets ``run_id`` without blocking on the eval (which can take
-        # minutes for a real corpus). The task ref is kept by the loop until done.
-        asyncio.create_task(_runner())
+        # minutes for a real corpus). Register the task with the run registry
+        # synchronously (before it gets a chance to run) so a Cancel that arrives
+        # before the first event still finds a handle, and so the registry holds
+        # the live state for replay.
+        task = asyncio.create_task(_runner())
+        registry.begin_run(
+            workspace_path,
+            run_id,
+            corpus_source=body.corpus_source,
+            modes=run_modes,
+            task=task,
+        )
         return _success({"run_id": run_id})
     except Exception as exc:
         log.error(
@@ -862,6 +914,59 @@ async def eval_run(
             str(exc),
             exc_info=True,
         )
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/eval/state")
+async def eval_state(
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """L3 — replay the latest eval run's live state for this workspace.
+
+    The admin panel calls this on mount so leaving + returning (or opening the
+    Vite dev UI vs the packaged UI — different origins, separate sessionStorage)
+    shows the SAME run: the setup activity trail, the per-question rows with full
+    answers, and the summary. ``data`` is ``null`` when no run exists (idle, or
+    the server restarted since the last run)."""
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        state = get_eval_registry().get_run(workspace_path)
+        return _success(state.to_payload() if state is not None else None)
+    except Exception as exc:
+        log.error("knowledge eval state failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+class EvalCancelBody(BaseModel):
+    """L3 — cancel a running eval. ``run_id`` is optional (defensive): when
+    present we only cancel if it matches the live run, so a stale Cancel click
+    from a previous run can't kill a new one."""
+
+    run_id: str | None = None
+
+
+@knowledge_router.post("/knowledge/eval/cancel")
+async def eval_cancel(
+    body: EvalCancelBody,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """L3 — request cancellation of the in-flight eval run for this workspace.
+
+    Cancels the background task; the runner catches ``CancelledError`` and emits
+    the terminal ``knowledge.eval.cancelled`` event. Returns whether a live run
+    was actually signalled."""
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        cancelled = get_eval_registry().request_cancel(workspace_path, body.run_id)
+        return _success({"cancelled": cancelled, "run_id": body.run_id})
+    except Exception as exc:
+        log.error("knowledge eval cancel failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 

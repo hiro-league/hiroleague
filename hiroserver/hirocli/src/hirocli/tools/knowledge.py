@@ -231,6 +231,10 @@ GRAPH_MODE_ON = "on"
 GRAPH_MODE_COMPARE = "compare"
 GRAPH_MODES = (GRAPH_MODE_OFF, GRAPH_MODE_ON, GRAPH_MODE_COMPARE)
 
+# Per-query temporal override (§7). "" = use the admin pref ``temporal_default``;
+# "current" = only facts valid now; "all" = include superseded/historical facts.
+GRAPH_TEMPORAL_VALUES = ("current", "all")
+
 
 class KnowledgeAnswerTool(Tool):
     runtime = True
@@ -255,6 +259,13 @@ class KnowledgeAnswerTool(Tool):
             "Default 'off'.",
             required=False,
         ),
+        "graph_temporal": ToolParam(
+            str,
+            "Per-query temporal lens override for graph_mode='on'/'compare': "
+            "'current' (only facts valid now) or 'all' (include superseded/historical "
+            "facts). Omit to use the admin default (knowledge.graph.temporal_default).",
+            required=False,
+        ),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
@@ -269,6 +280,7 @@ class KnowledgeAnswerTool(Tool):
         filters: dict[str, Any] | None = None,
         rewrite: bool = False,
         graph_mode: str = GRAPH_MODE_OFF,
+        graph_temporal: str | None = None,
         workspace: str | None = None,
     ) -> Any:
         return asyncio.run(
@@ -279,6 +291,7 @@ class KnowledgeAnswerTool(Tool):
                 filters=filters,
                 rewrite=rewrite,
                 graph_mode=graph_mode,
+                graph_temporal=graph_temporal,
                 workspace=workspace,
             )
         )
@@ -291,6 +304,7 @@ class KnowledgeAnswerTool(Tool):
         filters: dict[str, Any] | None = None,
         rewrite: bool = False,
         graph_mode: str = GRAPH_MODE_OFF,
+        graph_temporal: str | None = None,
         workspace: str | None = None,
     ) -> Any:
         # Validate mode at the Tool boundary so CLI/HTTP callers get a clear
@@ -299,6 +313,13 @@ class KnowledgeAnswerTool(Tool):
         if mode not in GRAPH_MODES:
             raise ValueError(
                 f"graph_mode must be one of {GRAPH_MODES}, got {graph_mode!r}"
+            )
+        # "" / None = use the admin default; otherwise must be a known lens.
+        temporal = (graph_temporal or "").strip().lower()
+        if temporal and temporal not in GRAPH_TEMPORAL_VALUES:
+            raise ValueError(
+                f"graph_temporal must be one of {GRAPH_TEMPORAL_VALUES} or empty, "
+                f"got {graph_temporal!r}"
             )
 
         service, owned = _resolve_service(getattr(self, "_runtime", None), workspace)
@@ -311,6 +332,7 @@ class KnowledgeAnswerTool(Tool):
                     filters=filters,
                     workspace_id=workspace,
                     rewrite=rewrite,
+                    graph_temporal=temporal or None,
                 )
             return await service.answer(
                 query,
@@ -319,7 +341,9 @@ class KnowledgeAnswerTool(Tool):
                 filters=filters,
                 workspace_id=workspace,
                 rewrite=rewrite,
-                use_graph=(mode == GRAPH_MODE_ON),
+                # "on" → the fused "mix" leg (graph-focused Qdrant).
+                graph_mode=("mix" if mode == GRAPH_MODE_ON else "off"),
+                graph_temporal=temporal or None,
             )
         finally:
             await _close_if_owned(service, owned)

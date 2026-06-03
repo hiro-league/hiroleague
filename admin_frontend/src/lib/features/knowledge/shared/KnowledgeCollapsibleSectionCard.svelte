@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
   import { KNOWLEDGE_SECTION_CARD, KNOWLEDGE_SECTION_TITLE } from '$lib/features/knowledge/shared/knowledge-ui';
   import { cn } from '$lib/utils';
@@ -24,7 +24,7 @@
     children
   }: Props = $props();
 
-  let expanded = $state(defaultExpanded);
+  let expanded = $state(untrack(() => defaultExpanded));
 </script>
 
 <section class={KNOWLEDGE_SECTION_CARD}>

@@ -1,118 +1,98 @@
 /**
- * L3 prototype (Phase 5e) — controller for the Eval Batch section under the Ask tab.
+ * L3 prototype (Phase 5e/5g) — controller for the Eval Batch section under the Ask tab.
  *
  * Responsibilities:
- *  - Setup form state (ingest_synthetic / build_graph checkboxes + Run button)
+ *  - Setup form state (corpus + ingest / build_graph checkboxes + question checklist)
  *  - Triggering ``POST /knowledge/eval/run`` (returns run_id; eval runs in background)
- *  - Subscribing to the ``/knowledge/events`` SSE stream for the matching run_id
- *  - Buffering per-question rows as they arrive (UI table re-renders reactively)
- *  - Surface the final PROCEED/PIVOT gate when the ``completed`` event lands
+ *  - Subscribing to the ``/knowledge/events`` SSE stream for live updates
+ *  - Accumulating the live activity trail (``setupEvents``) + per-question rows
+ *    (with FULL answers) so the terminal + expandable table render reactively
+ *  - Surfacing the final PROCEED/PIVOT gate when ``completed`` lands
+ *  - Cancelling an in-flight run
  *
- * SSE subscription stays open for the lifetime of the controller — events for runs
- * we don't care about (different run_id) are dropped at the controller layer. That
- * lets one connection survive across multiple sequential eval runs.
+ * Source of truth is SERVER-SIDE (``GET /knowledge/eval/state``), not
+ * sessionStorage. On mount we subscribe (so an in-flight run keeps streaming)
+ * and then hydrate from the server. This is what makes the panel:
+ *   - survive navigation *mid-run* (the SSE alone has no backlog), and
+ *   - show the SAME run on the Vite dev UI and the packaged admin UI (different
+ *     origins → separate sessionStorage; the old client-only snapshot diverged).
  */
 import {
   connectKnowledgeEvalEvents,
+  type EvalCancelledPayload,
   type EvalCompletedPayload,
   type EvalFailedPayload,
+  type EvalLeg,
+  type EvalQuestionLeg,
   type EvalQuestionPayload,
+  type EvalRunStateData,
   type EvalSetupProgressPayload,
   type EvalStartedPayload
 } from '$lib/features/knowledge/shared/knowledge-events';
-import { listEvalQuestions, runKnowledgeEval, type EvalQuestionItem } from '$lib/api/knowledge';
+import {
+  cancelKnowledgeEval,
+  getKnowledgeEvalState,
+  listEvalQuestions,
+  runKnowledgeEval,
+  type EvalQuestionItem
+} from '$lib/api/knowledge';
 
 /** Max questions selectable in the checklist (cap, per the design). */
 export const EVAL_MAX_SELECTED = 50;
+
+/** All selectable legs, in canonical column order. */
+export const EVAL_ALL_LEGS: EvalLeg[] = ['flat', 'graphiti', 'mix'];
+
+/** Human label for a leg (column header / chip). */
+export const EVAL_LEG_LABEL: Record<string, string> = {
+  flat: 'Flat',
+  graphiti: 'Graphiti',
+  mix: 'Mix'
+};
 import { PREF_KEYS } from '$lib/preferences/keys';
-import {
-  readLocalBoolean,
-  readSessionString,
-  removeSessionString,
-  writeLocalBoolean,
-  writeSessionString
-} from '$lib/preferences/storage';
+import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
 
 export type EvalStatus =
-  | 'idle'         // nothing has run yet (or the last run was cleared)
-  | 'starting'    // POST sent, waiting for the started event
-  | 'running'     // started event received, question events streaming
-  | 'completed'   // completed event received
-  | 'failed';     // failed event received OR transport error
+  | 'idle' // nothing has run yet (or the last run was cleared)
+  | 'starting' // POST sent, waiting for the started event
+  | 'running' // started event received, question events streaming
+  | 'completed' // completed event received
+  | 'failed' // failed event received OR transport error
+  | 'cancelled'; // user cancelled the run
 
-/** What we render per question — populated as ``question_completed`` events arrive. */
+/** What we render per question — ``legs`` keyed by leg name (only the run's
+ *  selected legs), full answers included for the expandable row. */
 export type EvalRow = {
   index: number;
   total: number;
   id: string;
   category: string;
+  subcategory: string;
   question: string;
   requires_graph: boolean;
-  flatMark: string;
-  flatElapsedMs: number;
-  flatRunId: string | null;
-  graphMark: string;
-  graphElapsedMs: number;
-  graphRunId: string | null;
+  legs: Record<string, EvalQuestionLeg>;
   delta: string;
 };
 
-/** Persisted snapshot of the last terminal (completed/failed) eval run.
- *  Mid-run state is intentionally NOT persisted — if the user navigates away
- *  during a run, the SSE closes and partial state would be misleading (the
- *  backend keeps running in a fire-and-forget task; coming back shows the
- *  PREVIOUS terminal run, not the in-flight one). When the in-flight run
- *  later completes its event is missed → user re-asks if they want it. */
-type EvalRunSnapshot = {
-  runId: string | null;
-  totalQuestions: number;
-  status: 'completed' | 'failed';
-  rows: EvalRow[];
-  summary: EvalCompletedPayload | null;
-  failureMessage: string | null;
-};
-
-function readPersistedEvalRun(): EvalRunSnapshot | null {
-  const raw = readSessionString(PREF_KEYS.knowledgeAskEvalRun);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as EvalRunSnapshot;
-    // Defensive shape check — corrupt payloads (e.g. schema drift across
-    // versions) drop rather than crash the panel on first paint.
-    if (
-      parsed
-      && typeof parsed === 'object'
-      && Array.isArray(parsed.rows)
-      && (parsed.status === 'completed' || parsed.status === 'failed')
-    ) {
-      return parsed;
-    }
-  } catch {
-    // Fall through to clear.
-  }
-  removeSessionString(PREF_KEYS.knowledgeAskEvalRun);
-  return null;
+function rowFromPayload(p: EvalQuestionPayload): EvalRow {
+  return {
+    index: p.index,
+    total: p.total,
+    id: p.id,
+    category: p.category,
+    subcategory: p.subcategory ?? '',
+    question: p.question,
+    requires_graph: p.requires_graph,
+    legs: p.legs ?? {},
+    delta: p.delta
+  };
 }
 
-function writePersistedEvalRun(snapshot: EvalRunSnapshot) {
-  writeSessionString(PREF_KEYS.knowledgeAskEvalRun, JSON.stringify(snapshot));
-}
-
-function clearPersistedEvalRun() {
-  removeSessionString(PREF_KEYS.knowledgeAskEvalRun);
-}
-
-export function createKnowledgeEvalModel(deps: {
-  setError: (message: string | null) => void;
-}) {
+export function createKnowledgeEvalModel(deps: { setError: (message: string | null) => void }) {
   // Setup-form state — defaults off, but the user's last choice persists across
   // reloads via localStorage (mirrors the ingest tab's buildGraphAfter pattern).
-  let ingestSynthetic = $state<boolean>(
-    readLocalBoolean(PREF_KEYS.knowledgeAskEvalIngest, false)
-  );
-  let buildGraph = $state<boolean>(
-    readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false)
-  );
+  let ingestSynthetic = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalIngest, false));
+  let buildGraph = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false));
 
   // Corpus + checklist state. Default to the Adam temporal corpus (the new path);
   // 'synthetic' keeps the legacy .md L3 eval. The checklist + per-category results
@@ -124,6 +104,28 @@ export function createKnowledgeEvalModel(deps: {
   // Selected question ids (capped at EVAL_MAX_SELECTED). Reassigned (new Set) on
   // every mutation so Svelte 5 tracks it. Empty = run ALL questions.
   let selected = $state<Set<string>>(new Set());
+
+  // Selected legs to compare (flat/graphiti/mix). Default = all three. At least
+  // one must stay selected; toggling the last one off is ignored. Stored as an
+  // ordered array (canonical order) so the table columns are stable.
+  let selectedModes = $state<EvalLeg[]>([...EVAL_ALL_LEGS]);
+  // The legs the CURRENT run actually used (from the started/state event) — drives
+  // the live table/summary columns, independent of the next run's selection.
+  let runModes = $state<string[]>([...EVAL_ALL_LEGS]);
+
+  function isModeSelected(mode: EvalLeg): boolean {
+    return selectedModes.includes(mode);
+  }
+
+  function toggleMode(mode: EvalLeg) {
+    if (selectedModes.includes(mode)) {
+      if (selectedModes.length === 1) return; // keep at least one leg
+      selectedModes = selectedModes.filter((m) => m !== mode);
+    } else {
+      // Re-insert in canonical order so columns don't reorder by click order.
+      selectedModes = EVAL_ALL_LEGS.filter((m) => m === mode || selectedModes.includes(m));
+    }
+  }
 
   async function loadQuestions() {
     if (corpusSource !== 'adam') {
@@ -180,21 +182,22 @@ export function createKnowledgeEvalModel(deps: {
     selected = new Set();
   }
 
-  // Hydrate the run snapshot from session storage so leaving + returning to the
-  // Ask tab shows the last completed table (mirrors knowledgeAskResult on the
-  // single-mode side). Only terminal states are ever written, so the restored
-  // status is always 'completed' or 'failed' — no half-finished runs.
-  const persisted = readPersistedEvalRun();
-  let status = $state<EvalStatus>(persisted?.status ?? 'idle');
-  let runId = $state<string | null>(persisted?.runId ?? null);
-  let totalQuestions = $state(persisted?.totalQuestions ?? 0);
-  let rows = $state<EvalRow[]>(persisted?.rows ?? []);
-  let summary = $state<EvalCompletedPayload | null>(persisted?.summary ?? null);
-  let failureMessage = $state<string | null>(persisted?.failureMessage ?? null);
+  // Run state — hydrated from the server on mount (see ``init``), then kept live
+  // by the SSE handlers below. No sessionStorage: the server registry is the
+  // single source of truth so navigation + cross-origin stay consistent.
+  let status = $state<EvalStatus>('idle');
+  let runId = $state<string | null>(null);
+  let totalQuestions = $state(0);
+  let rows = $state<EvalRow[]>([]);
+  let summary = $state<EvalCompletedPayload | null>(null);
+  let failureMessage = $state<string | null>(null);
+  // Latest setup event (for the collapsed header summary).
   let setupPhase = $state<EvalSetupProgressPayload | null>(null);
+  // Full setup activity trail (the live terminal renders this + rows).
+  let setupEvents = $state<EvalSetupProgressPayload[]>([]);
+  let cancelling = $state(false);
 
-  // ONE EventSource for the controller's lifetime. We filter by run_id below
-  // — events from other runs (e.g. a parallel CLI invocation) are ignored.
+  // ONE EventSource for the controller's lifetime.
   let teardownEvents: (() => void) | null = null;
 
   function ensureSubscribed() {
@@ -204,8 +207,60 @@ export function createKnowledgeEvalModel(deps: {
       onSetupProgress: handleSetupProgress,
       onQuestion: handleQuestion,
       onCompleted: handleCompleted,
-      onFailed: handleFailed
+      onFailed: handleFailed,
+      onCancelled: handleCancelled
     });
+  }
+
+  /** Mount hook: subscribe (so an already-running eval keeps streaming) then
+   *  replay the server's run state. Subscribe-first avoids a gap; the hydrate's
+   *  index-keyed upsert dedupes any event seen in the tiny overlap window. */
+  async function init() {
+    ensureSubscribed();
+    await hydrateFromServer();
+  }
+
+  async function hydrateFromServer() {
+    try {
+      const res = await getKnowledgeEvalState();
+      const state = res.data;
+      if (!state) {
+        // No run on the server (idle, or server restarted) — only reset if we're
+        // not mid-start locally (don't clobber a run we just kicked off).
+        if (status === 'idle') resetRunState();
+        return;
+      }
+      applyServerState(state);
+    } catch (err) {
+      // Replay is best-effort — a failed hydrate just means no history to show;
+      // live events still flow. Surface nothing (the panel isn't broken).
+      console.warn('eval state hydrate failed', err);
+    }
+  }
+
+  function applyServerState(state: EvalRunStateData) {
+    runId = state.run_id;
+    status = state.status;
+    totalQuestions = state.total_questions;
+    if (state.modes?.length) runModes = state.modes;
+    setupEvents = state.setup_events ?? [];
+    setupPhase = setupEvents.length > 0 ? setupEvents[setupEvents.length - 1] : null;
+    rows = (state.rows ?? []).map(rowFromPayload).sort((a, b) => a.index - b.index);
+    summary = state.summary;
+    failureMessage = state.failure_message;
+    cancelling = state.cancel_requested && state.status === 'running';
+  }
+
+  function resetRunState() {
+    status = 'idle';
+    runId = null;
+    totalQuestions = 0;
+    rows = [];
+    summary = null;
+    failureMessage = null;
+    setupPhase = null;
+    setupEvents = [];
+    cancelling = false;
   }
 
   /** Called on component unmount; closes the SSE connection. */
@@ -224,36 +279,23 @@ export function createKnowledgeEvalModel(deps: {
     if (!isOurRun(p.run_id)) return;
     status = 'running';
     totalQuestions = p.total_questions;
-    setupPhase = null;  // we're past setup once started fires
+    if (p.modes?.length) runModes = p.modes;
+    setupPhase = null; // we're past setup once started fires
   }
 
   function handleSetupProgress(p: EvalSetupProgressPayload) {
-    // Setup events fire BEFORE started, while runId is still set (we set it
-    // from the POST response). No run_id on this event by current design;
-    // accept any setup event while we're in 'starting' state.
-    if (status === 'starting') {
-      setupPhase = p;
-    }
+    // Setup events fire during 'starting' (before started). Gate by run_id when
+    // we know it, else accept while starting (run_id may not be set yet).
+    if (p.run_id && runId && p.run_id !== runId) return;
+    if (status !== 'starting' && status !== 'running') return;
+    setupPhase = p;
+    setupEvents = [...setupEvents, p];
   }
 
   function handleQuestion(p: EvalQuestionPayload) {
-    // We don't have a per-event run_id on question events today; gate by status.
+    if (p.run_id && runId && p.run_id !== runId) return;
     if (status !== 'running') return;
-    const row: EvalRow = {
-      index: p.index,
-      total: p.total,
-      id: p.id,
-      category: p.category,
-      question: p.question,
-      requires_graph: p.requires_graph,
-      flatMark: p.flat.mark,
-      flatElapsedMs: p.flat.elapsed_ms,
-      flatRunId: p.flat.run_id,
-      graphMark: p.graph.mark,
-      graphElapsedMs: p.graph.elapsed_ms,
-      graphRunId: p.graph.run_id,
-      delta: p.delta
-    };
+    const row = rowFromPayload(p);
     // Replace if the same index already exists (defensive against duplicate
     // delivery), else append. Keeps the table ordered by question index.
     const existingAt = rows.findIndex((r) => r.index === row.index);
@@ -268,28 +310,20 @@ export function createKnowledgeEvalModel(deps: {
     if (!isOurRun(p.run_id)) return;
     summary = p;
     status = 'completed';
-    persistCurrentRun();
+    cancelling = false;
   }
 
   function handleFailed(p: EvalFailedPayload) {
     if (!isOurRun(p.run_id)) return;
     failureMessage = p.error;
     status = 'failed';
-    persistCurrentRun();
+    cancelling = false;
   }
 
-  /** Snapshot terminal state to sessionStorage. Called only from completed/
-   *  failed handlers — see EvalRunSnapshot for why mid-run isn't persisted. */
-  function persistCurrentRun() {
-    if (status !== 'completed' && status !== 'failed') return;
-    writePersistedEvalRun({
-      runId,
-      totalQuestions,
-      status,
-      rows,
-      summary,
-      failureMessage
-    });
+  function handleCancelled(p: EvalCancelledPayload) {
+    if (!isOurRun(p.run_id)) return;
+    status = 'cancelled';
+    cancelling = false;
   }
 
   async function start() {
@@ -299,9 +333,14 @@ export function createKnowledgeEvalModel(deps: {
     summary = null;
     failureMessage = null;
     setupPhase = null;
+    setupEvents = [];
+    cancelling = false;
     runId = null;
     totalQuestions = 0;
     status = 'starting';
+    // Lock the table columns to this run's selection immediately (before the
+    // started event echoes it back) so the live table renders the right columns.
+    runModes = [...selectedModes];
     deps.setError(null);
     ensureSubscribed();
 
@@ -309,7 +348,8 @@ export function createKnowledgeEvalModel(deps: {
       const req: import('$lib/api/knowledge').EvalRunRequest = {
         ingest_synthetic: ingestSynthetic,
         build_graph: buildGraph,
-        corpus_source: corpusSource
+        corpus_source: corpusSource,
+        modes: [...selectedModes]
       };
       // Empty selection on the Adam path = run ALL questions.
       if (corpusSource === 'adam' && selected.size > 0) {
@@ -317,10 +357,6 @@ export function createKnowledgeEvalModel(deps: {
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
-      // If a 'started' event already arrived before runId got set above, the
-      // controller would have ignored it (isOurRun=false). In practice the
-      // POST response returns before the started event, but if a future change
-      // reverses that ordering we'd need to buffer events. Documented for now.
     } catch (err) {
       status = 'failed';
       failureMessage = err instanceof Error ? err.message : 'Failed to start eval run.';
@@ -328,49 +364,100 @@ export function createKnowledgeEvalModel(deps: {
     }
   }
 
+  async function cancel() {
+    if ((status !== 'running' && status !== 'starting') || cancelling) return;
+    cancelling = true;
+    try {
+      await cancelKnowledgeEval(runId);
+      // The terminal 'cancelled' event flips status; if it never arrives (e.g.
+      // the run finished first), the completed/failed handler clears cancelling.
+    } catch (err) {
+      cancelling = false;
+      deps.setError(err instanceof Error ? err.message : 'Failed to cancel eval run.');
+    }
+  }
+
   function clear() {
     if (status === 'starting' || status === 'running') return;
-    rows = [];
-    summary = null;
-    failureMessage = null;
-    setupPhase = null;
-    runId = null;
-    totalQuestions = 0;
-    status = 'idle';
-    clearPersistedEvalRun();
+    resetRunState();
   }
 
   return {
-    get ingestSynthetic() { return ingestSynthetic; },
+    get ingestSynthetic() {
+      return ingestSynthetic;
+    },
     set ingestSynthetic(v: boolean) {
       ingestSynthetic = v;
       writeLocalBoolean(PREF_KEYS.knowledgeAskEvalIngest, v);
     },
-    get buildGraph() { return buildGraph; },
+    get buildGraph() {
+      return buildGraph;
+    },
     set buildGraph(v: boolean) {
       buildGraph = v;
       writeLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, v);
     },
-    get status() { return status; },
-    get runId() { return runId; },
-    get totalQuestions() { return totalQuestions; },
-    get rows() { return rows; },
-    get summary() { return summary; },
-    get failureMessage() { return failureMessage; },
-    get setupPhase() { return setupPhase; },
+    get status() {
+      return status;
+    },
+    get runId() {
+      return runId;
+    },
+    get totalQuestions() {
+      return totalQuestions;
+    },
+    get rows() {
+      return rows;
+    },
+    get summary() {
+      return summary;
+    },
+    get failureMessage() {
+      return failureMessage;
+    },
+    get setupPhase() {
+      return setupPhase;
+    },
+    get setupEvents() {
+      return setupEvents;
+    },
+    get cancelling() {
+      return cancelling;
+    },
     // Corpus + checklist surface.
-    get corpusSource() { return corpusSource; },
+    get corpusSource() {
+      return corpusSource;
+    },
     setCorpusSource,
-    get questions() { return questions; },
-    get questionsLoading() { return questionsLoading; },
-    get questionsError() { return questionsError; },
-    get selectedCount() { return selected.size; },
+    get questions() {
+      return questions;
+    },
+    get questionsLoading() {
+      return questionsLoading;
+    },
+    get questionsError() {
+      return questionsError;
+    },
+    get selectedCount() {
+      return selected.size;
+    },
     isSelected: (id: string) => selected.has(id),
     toggleQuestion,
     setCategorySelected,
     clearSelection,
+    // Leg selection + the current run's active legs (table/summary columns).
+    get selectedModes() {
+      return selectedModes;
+    },
+    get runModes() {
+      return runModes;
+    },
+    isModeSelected,
+    toggleMode,
     loadQuestions,
+    init,
     start,
+    cancel,
     clear,
     teardown
   };

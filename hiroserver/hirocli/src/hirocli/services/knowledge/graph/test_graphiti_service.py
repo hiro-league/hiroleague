@@ -76,9 +76,10 @@ def test_from_preferences_none_when_no_model(tmp_path) -> None:
 async def test_snapshot_empty_when_no_db(tmp_path) -> None:
     # No graph built → empty, and no DB file created (read must not have side effects).
     db = graphiti_db_path(tmp_path)
-    nodes, edges = await read_graph_snapshot(db)
+    nodes, edges, chunk_to_document = await read_graph_snapshot(db)
     assert nodes == []
     assert edges == []
+    assert chunk_to_document == {}
     assert not db.exists()
 
 
@@ -92,6 +93,6 @@ async def test_snapshot_empty_graph_against_real_kuzu(tmp_path) -> None:
         await svc.initialize()
     finally:
         await svc.close()
-    nodes, edges = await read_graph_snapshot(db)
+    nodes, edges, _chunk_to_document = await read_graph_snapshot(db)
     assert nodes == []
     assert edges == []
