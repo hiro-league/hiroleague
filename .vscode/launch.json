@@ -5,7 +5,8 @@
         "name": "Server + Gateway - Rebuild Components (fast)",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh"
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh",
+        "autoAttachChildProcesses": false
       },
       {
         "name": "Bash startup (Windows Terminal) — no Flutter",
@@ -23,7 +24,8 @@
         "name": "Server + Gateway - Rebuild Components",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync.sh"
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync.sh",
+        "autoAttachChildProcesses": false
       },
       {
         "name": "PyPI Publish",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import sqlite3
 import uuid
@@ -47,6 +48,14 @@ from hirocli.services.knowledge.live_registry import maybe_recover_abandoned_wor
 log = Logger.get("ADMIN.KNOWLEDGE")
 
 knowledge_router = APIRouter()
+
+# Process-wide count of OPEN ``/knowledge/events`` SSE streams. After the frontend
+# multiplexer change each browser tab on the Knowledge page holds exactly ONE such stream
+# (not one per feature). Logged on connect/disconnect so a later run shows (a) how many
+# live streams are open during an ingest/eval — the "connection budget" the admin keeps
+# hitting — and (b) whether a stream is even connected while a graph build emits deltas
+# (the live-updates question). Mutated only on the single server event loop → plain int.
+_active_sse_streams = 0
 
 
 def _success(data: Any) -> dict[str, Any]:
@@ -545,9 +554,21 @@ async def stream_knowledge_events(
             except asyncio.QueueFull:
                 log.warning("knowledge event stream queue full", event_type=event.type)
 
+        global _active_sse_streams
         bus = get_domain_event_bus()
         for event_type in event_types:
             bus.subscribe(event_type, handler)
+        # Per-stream delivery tally (per event type) so the disconnect log shows what this
+        # connection actually carried — e.g. did it deliver knowledge.graph.* deltas?
+        delivered: dict[str, int] = {}
+        client = getattr(request.client, "host", "?")
+        _active_sse_streams += 1
+        log.info(
+            "🔌 SSE connect — knowledge events · active=%d · ws=%s · client=%s",
+            _active_sse_streams,
+            workspace_path.name,
+            client,
+        )
         try:
             while not await request.is_disconnected():
                 try:
@@ -556,12 +577,22 @@ async def stream_knowledge_events(
                     yield ": heartbeat\n\n"
                     continue
                 payload = json.dumps(event.payload, separators=(",", ":"))
+                delivered[event.type] = delivered.get(event.type, 0) + 1
                 yield f"event: {event.type}\ndata: {payload}\n\n"
         except asyncio.CancelledError:
             return
         finally:
             for event_type in event_types:
                 bus.unsubscribe(event_type, handler)
+            _active_sse_streams -= 1
+            # `delivered` summarizes the whole stream lifetime — graph.* counts here being
+            # 0 during a build that ran means no consumer was attached for those deltas.
+            log.info(
+                "🔌 SSE disconnect — knowledge events · active=%d · ws=%s · delivered=%s",
+                _active_sse_streams,
+                workspace_path.name,
+                delivered or "{}",
+            )
 
     return StreamingResponse(
         events(),
@@ -723,6 +754,19 @@ class GraphExportBody(BaseModel):
     edge_limit: int | None = None
 
 
+class GraphChunksDetailBody(BaseModel):
+    """Graph viz — resolve a selected node/edge's provenance chunk_ids to text."""
+
+    chunk_ids: list[str] = []
+
+
+class GraphSearchChunksBody(BaseModel):
+    """Graph viz — chunk-text search: find point_ids whose chunk text matches ``text``."""
+
+    text: str = ""
+    limit: int = 200
+
+
 @knowledge_router.post("/knowledge/graph/export")
 async def graph_export(
     body: GraphExportBody,
@@ -759,6 +803,62 @@ async def graph_export(
                 "try again shortly."
             )
         log.error("knowledge graph export failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/graph/chunks-detail")
+async def graph_chunks_detail(
+    body: GraphChunksDetailBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Graph viz — chunk text + document titles for a selected node/edge's chunk_ids.
+
+    Lazy provenance lookup (Qdrant-backed): the Graph tab calls this when a node or
+    edge is selected so the detail panel can show real chunk text + document names
+    instead of opaque chunk ids. Mirrors the get_document route's service wiring.
+    """
+    # Cap one selection's lookup — a node rolls up the chunks of every touching edge.
+    ids = [str(c) for c in (body.chunk_ids or []) if c][:200]
+    if not ids:
+        return _success({"chunks": []})
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            return _success({"chunks": await service.get_chunk_details(ids)})
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error("knowledge graph chunks-detail failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/graph/search-chunks")
+async def graph_search_chunks(
+    body: GraphSearchChunksBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Graph viz — chunk-text search → matching Qdrant point_ids (== graph chunk_ids).
+
+    Literal case-insensitive substring scan over chunk payloads. The Graph tab maps the
+    returned ids onto nodes/edges via their ``chunk_ids`` (G6) to highlight everything
+    sourced from a matching chunk. Blank query → empty result (caller clears the search).
+    """
+    text = (body.text or "").strip()
+    if not text:
+        return _success({"point_ids": []})
+    # Cap the scan so a hot search box can't sweep an unbounded collection per keystroke.
+    limit = max(1, min(int(body.limit or 200), 500))
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            point_ids = await service.search_chunk_ids_by_text(text, limit=limit)
+            return _success({"point_ids": point_ids})
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error("knowledge graph search-chunks failed", error=str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 
@@ -855,6 +955,19 @@ async def eval_run(
                             workspace_path,
                             doc_ids,
                             source_role="user_document",
+                            # Emit live node/edge events so the Graph tab updates while the
+                            # eval's graph build runs (matches the ingest_batch path). Without
+                            # this sink the eval build was silent → no live viz updates.
+                            event_sink=functools.partial(
+                                _publish_graph_event, workspace_path
+                            ),
+                        )
+                        # Burst over — let the Graph tab run one reconciling full export to
+                        # heal any deltas dropped under the SSE queue cap (mirrors ingest_batch).
+                        _publish_graph_event(
+                            workspace_path,
+                            KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+                            {"document_count": len(doc_ids), "totals": {}},
                         )
                     else:
                         log.warning(

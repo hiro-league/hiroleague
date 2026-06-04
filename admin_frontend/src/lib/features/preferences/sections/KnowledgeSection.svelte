@@ -519,21 +519,36 @@
           />
         </FormField>
       </div>
-      <FormField
-        label="Search recipe"
-        hint="How fact-search candidates are ranked/fused. RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly."
-        class="max-w-md"
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.knowledge.graph.search_recipe}
-          onchange={ctrl.markDirty}
+      <div class="grid gap-4 md:grid-cols-2">
+        <FormField
+          label="Search recipe"
+          hint="How fact-search candidates are ranked/fused. RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly."
         >
-          <option value="rrf">RRF</option>
-          <option value="mmr">MMR</option>
-          <option value="cross_encoder">Cross-encoder</option>
-        </select>
-      </FormField>
+          <select
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.knowledge.graph.search_recipe}
+            onchange={ctrl.markDirty}
+          >
+            <option value="rrf">RRF</option>
+            <option value="mmr">MMR</option>
+            <option value="cross_encoder">Cross-encoder</option>
+          </select>
+        </FormField>
+        <FormField
+          label="Candidate similarity floor"
+          hint="Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep low (≈0.3) for recall — too high and paraphrased questions (e.g. asking 'wife' when the stored fact says 'married to') return no facts at all. Graphiti's own default is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here."
+        >
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.knowledge.graph.sim_min_score}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+      </div>
       <FormField
         label="Graph Runs detail"
         hint="Verbosity of the Graph Runs ledger for graph ingest + retrieval. Rich = per-node content previews (extracted entities, resolution/invalidation decisions, ranked facts) and one row per edge in resolve_facts. Compact = stats only. Lower to Compact for noisy bulk/series ingests."

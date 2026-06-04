@@ -304,6 +304,10 @@ async def ingest_episodes(
             write_guard = write_lock if write_lock is not None else contextlib.nullcontext()
 
             for index, (ep, ref) in enumerate(prepared):
+                # Compute body before the ledger context so the episode step can show the
+                # ingested text in its input preview (#1).
+                source = EpisodeType.message if ep.source == "message" else EpisodeType.text
+                body = _episode_body(ep, source)
                 async with ledger_episode(
                     run,
                     episode_index=index + 1,
@@ -312,9 +316,8 @@ async def ingest_episodes(
                     document_id=ep.document_id,
                     title=ep.document_title,
                     reference_time=ref,
+                    text=body,
                 ) as episode:
-                    source = EpisodeType.message if ep.source == "message" else EpisodeType.text
-                    body = _episode_body(ep, source)
                     try:
                         # One writer at a time: preseed + add_episode are this episode's
                         # write unit. The lock spans the WHOLE add_episode (not just the

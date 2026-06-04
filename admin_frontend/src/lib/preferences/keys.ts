@@ -38,7 +38,13 @@ export const PREF_KEYS = {
   // it's replayed from the server registry (GET /knowledge/eval/state) so the
   // run stays consistent across navigation and across origins (Vite vs packaged).
   knowledgeAskEvalIngest: 'hiro.admin.knowledge.askEvalIngest',
-  knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph'
+  knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph',
+  /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
+  knowledgeGraphOptions: 'hiro.admin.knowledge.graphOptions',
+  /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */
+  knowledgeGraphHideNodes: 'hiro.admin.knowledge.graphHideNodes',
+  /** Graph tab: hidden edge types (CSV) — sessionStorage; no URL param (not shareable). */
+  knowledgeGraphHideEdges: 'hiro.admin.knowledge.graphHideEdges'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';

@@ -127,6 +127,26 @@ async def test_snapshot_while_service_open_shares_driver(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_snapshot_reads_on_dedicated_connection(tmp_path) -> None:
+    """3b (docs/kuzu-shared-database-design.md §8, option b): the snapshot reads on its
+    OWN AsyncConnection over the shared Database, so it must NOT touch the shared writer
+    driver's ``client``. Guards against regressing to a shared-client swap (which would
+    re-introduce read/write head-of-line blocking on the writer's pool=1 connection)."""
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    try:
+        await svc.initialize()
+        writer_client = svc.graphiti.driver.client  # the pinned pool=1 writer connection
+        nodes, edges, _ = await read_graph_snapshot(db)
+        assert nodes == [] and edges == []
+        # The writer's connection object is untouched — the snapshot used its own.
+        assert svc.graphiti.driver.client is writer_client
+    finally:
+        await svc.close()
+    assert kuzu_registry._active_keys() == []
+
+
+@pytest.mark.asyncio
 async def test_two_services_same_path_share_one_driver(tmp_path) -> None:
     db = graphiti_db_path(tmp_path)
     key = _registry_key(db)
@@ -146,3 +166,18 @@ async def test_two_services_same_path_share_one_driver(tmp_path) -> None:
 def test_is_kuzu_lock_error_predicate() -> None:
     assert is_kuzu_lock_error(RuntimeError("IO exception: Could not set lock on file X"))
     assert not is_kuzu_lock_error(RuntimeError("some unrelated failure"))
+
+
+@pytest.mark.asyncio
+async def test_remove_episodes_skips_missing_ids(tmp_path) -> None:
+    """The eval-reset primitive: removing ids absent from the graph (first run /
+    partial prior run) is a no-op, not an error — ``remove_episode``'s
+    NodeNotFoundError is swallowed and the returned count reflects only real
+    deletions. Runs against an empty real Kuzu graph (no LLM/embedder needed)."""
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    try:
+        removed = await svc.remove_episodes(["does-not-exist-1", "does-not-exist-2"])
+    finally:
+        await svc.close()
+    assert removed == 0

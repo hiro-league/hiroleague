@@ -896,6 +896,72 @@ class KnowledgeService:
             chunk_next_offset=json.dumps(next_offset) if next_offset is not None else None,
         )
 
+    async def get_chunk_details(self, point_ids: list[str]) -> list[dict[str, Any]]:
+        """Resolve chunk point_ids → text + document title for the graph viz panel.
+
+        Lazy provenance lookup: the Graph tab passes a selected node/edge's
+        ``chunk_ids`` and gets back the real chunk text + owning document name so the
+        panel can show content instead of opaque ids. Result order follows
+        ``point_ids``; ids missing from Qdrant are dropped."""
+        hits = await asyncio.to_thread(self.vector_store.hits_from_point_ids, point_ids)
+        by_id = {hit.point_id: hit for hit in hits}
+        # Trace the graph-viz "Chunk text unavailable" case: when a selected node/edge's
+        # chunk_ids (== Graphiti episode uuids == Qdrant point_ids, G6) are NOT in the
+        # current collection, they're silently dropped below. Surface which/how many missed
+        # so we can tell a real provenance gap (graph built from episodes whose Qdrant
+        # points were rebuilt/reset away) from an empty selection. WARNING because a graph
+        # node with provenance that no longer resolves is an inconsistency worth noticing.
+        missing = [pid for pid in point_ids if pid not in by_id]
+        if missing:
+            log.warning(
+                "⚠️ knowledge.graph — %d/%d chunk id(s) not found in Qdrant (collection=%s) · "
+                "graph provenance may predate a collection rebuild/reset · sample=%s",
+                len(missing),
+                len(point_ids),
+                self.vector_store.collection_name,
+                missing[:5],
+            )
+        # Each chunk's SEMANTIC event date (``valid_at``) lives on its Graphiti episode
+        # (uuid == point_id, G6), not in the Qdrant payload — fetch it so the viz panel can
+        # show "when this happened" instead of the ingest/processing time. Best-effort: an
+        # empty map (graph off / never built) just omits dates.
+        from hirocli.services.knowledge.graph.graphiti_service import (
+            graphiti_db_path,
+            read_episode_valid_at,
+        )
+
+        valid_at_by_id = await read_episode_valid_at(
+            graphiti_db_path(self.workspace_path), point_ids
+        )
+        details: list[dict[str, Any]] = []
+        for pid in point_ids:
+            hit = by_id.get(pid)
+            if hit is None:
+                continue
+            details.append(
+                {
+                    "id": hit.point_id,
+                    "text": hit.text,
+                    "document_id": hit.document_id,
+                    "document_title": hit.title,
+                    "ord": hit.ord,
+                    "heading_path": hit.heading_path,
+                    # Episode event time (ISO) — null when no episode / no temporal date.
+                    "valid_at": valid_at_by_id.get(pid),
+                }
+            )
+        return details
+
+    async def search_chunk_ids_by_text(self, text: str, *, limit: int = 200) -> list[str]:
+        """Graph viz — chunk-text search → matching Qdrant point_ids (== graph chunk_ids).
+
+        Literal case-insensitive substring scan; the Graph tab maps the returned ids onto
+        nodes/edges (via their ``chunk_ids``, G6) to highlight everything sourced from a
+        chunk whose text matches. Blank query → ``[]``."""
+        return await asyncio.to_thread(
+            self.vector_store.point_ids_matching_text, text, limit=limit
+        )
+
     async def list_tags(self) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.catalog.list_table, "knowledge_tags")
 

@@ -100,8 +100,8 @@ if [ -f admin_frontend/package.json ]; then
   if cache_check admin_frontend.build "$svelte_fp" && [ -d "$SVELTE_OUT_DIR" ] && [ -n "$(ls -A "$SVELTE_OUT_DIR" 2>/dev/null)" ]; then
     echo "==> Svelte admin static assets up to date, skipping build"
   else
-    echo "==> Building Svelte admin static assets..."
-    npm --prefix admin_frontend run package:python
+    echo "==> Building Svelte admin static assets (fast: no minify / no gzip report)..."
+    HIRO_FAST_BUILD=1 npm --prefix admin_frontend run package:python
     cache_store admin_frontend.build "$svelte_fp"
   fi
 fi

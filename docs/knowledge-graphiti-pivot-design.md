@@ -533,6 +533,7 @@ are per-request or per-eval-run inputs and persist nothing).
 | `temporal_default`<br/>*(Temporal lens)* | `current` \| `all` | `current` | No (has default) | Default time lens at retrieval. `current` = only facts valid *now* (superseded facts hidden — e.g. "where does Adam work?" → Cedar Labs, not Brightloom). `all` = include historical/invalidated facts. Per-query override via the `graph_temporal` request param. |
 | `k_hop`<br/>*(Expansion hops)* | `int` 1–3 | `1` | No (has default) | How many relationship hops out from the matched entities to pull related facts. `1` = direct neighbors only (cheap, precise). Higher = more multi-hop reach at more noise/cost. |
 | `search_recipe`<br/>*(Search recipe)* | `rrf` \| `mmr` \| `cross_encoder` | `rrf` | No (has default) | How Graphiti ranks/fuses fact-search candidates. `rrf` = reciprocal-rank fusion (fast default). `mmr` = diversity-favoring. `cross_encoder` = highest quality, slowest/most costly. |
+| `sim_min_score`<br/>*(Candidate similarity floor)* | `float` 0–1 | `0.3` | No (has default) | Minimum cosine similarity for a fact to become a **search candidate** (maps to Graphiti `EdgeSearchConfig.sim_min_score`). Graphiti hardcodes **0.6**, which is too strict for our embedder — a paraphrase-distant query (asking "wife" when the extracted fact says "married to") scores below it, the cosine leg returns **zero** candidates, and if bm25 also misses the discriminating word the whole fact search comes back empty (`facts_0/0`) and silently falls back to flat. Keep **low for recall**; precision belongs in `reranker.min_relevance`, not here. Applies to all recipes (each uses cosine as a search method). |
 | ~~`communities_enabled`~~ | — | — | — | **Removed as a pref** (decision G9 still deferred). The toggle did nothing (no backend wiring), so it was ripped out to avoid a dead knob; re-add the pref **with** wiring when communities actually land. |
 | `ledger_detail`<br/>*(Graph Runs detail)* | `compact` \| `rich` | `rich` | No (has default) | Verbosity of the **Graph Runs** ledger for graph ingest + retrieval (§12.2). `rich` = per-node content previews (extracted entities, resolution/invalidation decisions, ranked facts) **and** one row per edge in `resolve_facts`. `compact` = stats only (calls/tokens/elapsed), `resolve_facts` aggregated. Drop to `compact` for noisy bulk/series ingests (e.g. the 35-episode Adam corpus). |
 
@@ -577,6 +578,7 @@ Knowledge Graph (Graphiti)**, then drive the rest from the Eval panel:
 | `temporal_default` | `current` (default) | The eval's `knowledge_update` / `temporal/latest_state` questions expect "latest wins" — `current` is what proves supersession works. |
 | `k_hop` | `1` (default) | Enough for the corpus's mostly 1–2-hop questions; raise to `2` only if `multi_hop` answers come back thin. |
 | `search_recipe` | `rrf` (default) | Fast, good enough for a personal-KG-scale eval; switch to `cross_encoder` only to chase the last few points of recall. |
+| `sim_min_score` | `0.3` (default) | Recall floor for the cosine candidate leg. Leave low — at graphiti's 0.6 default, `direct`/`temporal` questions whose phrasing differs from the terse extracted fact (e.g. "wife" vs "married to") return `facts_0/0`. Raise only if the graph leg pulls in too much loosely-related noise. |
 
 **Then in the Eval panel:** corpus source = **`adam`**, modes = **all three (`flat` /
 `graphiti` / `mix`)** so you get the comparison table, select the question set (or all,
@@ -618,6 +620,9 @@ class KnowledgeGraphPreferences(BaseModel):
     k_hop: int = Field(default=1, ge=1, le=3)
     # fact-search rerank/fusion recipe
     search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+    # cosine CANDIDATE floor (graphiti's EdgeSearchConfig.sim_min_score; its 0.6 default
+    # was too strict → empty fact searches). Low = recall; precision = reranker.min_relevance
+    sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0)
     # Graph Runs ledger verbosity (§12.2); rich = content previews + per-edge resolve_facts
     ledger_detail: KnowledgeGraphLedgerDetail = "rich"
 
@@ -636,6 +641,7 @@ class KnowledgeGraphPreferences(BaseModel):
 | `temporal_default` | enum `current/all` | `current` | no (default) |
 | `k_hop` | `int` (`ge=1, le=3`) | `1` | no (default) |
 | `search_recipe` | enum `rrf/mmr/cross_encoder` | `rrf` | no (default) |
+| `sim_min_score` | `float` (`ge=0, le=1`) | `0.3` | no (default) |
 | `ledger_detail` | enum `compact/rich` | `rich` | no (default) |
 
 > **Tuning profiles (separate, not part of this schema):** add two entries to the workspace

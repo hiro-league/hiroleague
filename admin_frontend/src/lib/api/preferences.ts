@@ -89,6 +89,9 @@ export type KnowledgePreferences = {
     temporal_default: 'current' | 'all';
     k_hop: number;
     search_recipe: 'rrf' | 'mmr' | 'cross_encoder';
+    // Cosine candidate floor for the fact-search leg (Graphiti EdgeSearchConfig.sim_min_score).
+    // Low = recall (default); raise toward 0.6 for tighter candidates. See KnowledgeSection hint.
+    sim_min_score: number;
     ledger_detail: 'compact' | 'rich';
     // Cross-encoder reranker for the fact-search leg (only active when
     // search_recipe === 'cross_encoder'). model_id null = reuse knowledge reranker.
@@ -195,6 +198,7 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
     temporal_default: 'current',
     k_hop: 1,
     search_recipe: 'rrf',
+    sim_min_score: 0.3,
     ledger_detail: 'rich',
     reranker: {
       model_id: null,

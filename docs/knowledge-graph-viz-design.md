@@ -243,11 +243,24 @@ export function connectKnowledgeGraphEvents(handlers: {
 }): () => void;
 ```
 
-`EventSource` on `/api/knowledge/events?workspace=…`, `addEventListener` per
-`knowledge.graph.*` type, returns `() => source.close()`. The controller **coalesces**
-bursts: buffer incoming events and flush into the maps once per animation frame so a
-fast ingest doesn't thrash the force simulation. On `onCompleted`, debounce a single
-`reconcile()` to heal any dropped deltas.
+Subscribes to `knowledge.graph.*` on the **shared per-tab SSE multiplexer**
+(`knowledge-event-stream.svelte.ts`) — NOT a dedicated `EventSource`. Every knowledge
+feature (jobs, eval, graph) rides **one** connection per browser tab; the multiplexer
+fans each frame out by `event.type`. (Previously each feature opened its own
+`EventSource`, so a few admin tabs exhausted the browser's ~6-per-origin HTTP/1.1
+budget and unrelated requests — e.g. opening logs — would stall to their timeout.) The
+controller **coalesces** bursts: buffer incoming events and flush into the maps once per
+animation frame so a fast ingest doesn't thrash the force simulation. On `onCompleted`,
+debounce a single `reconcile()` to heal any dropped deltas.
+
+**Subscription ownership = the page controller, not the Graph panel.** The graph SSE
+subscription is opened in `knowledge-controller.svelte.ts` `mount()` and lives for the
+whole Knowledge page, so deltas keep landing in the in-memory model **even while the user
+is on the Ingest/Ask tab** (where a build is actually triggered). The Graph panel only
+owns rendering + the initial `load()` when it mounts. (Earlier the panel owned the
+subscription, so it only existed while the Graph tab was open — and every delta emitted
+during a build was lost because nothing was listening; you only ever saw a one-shot
+export.)
 
 ### 6.5 Interactions
 
@@ -379,8 +392,13 @@ sequenceDiagram
 ➡️ **Checkpoint: see it working.** Ingest a doc, watch nodes pop, click for provenance.
 
 ### Phase 2 — Inspection controls
-- [ ] Type filter + document filter (`$derived` visible set).
-- [ ] Name search (highlight + center).
+- [x] Type filter + document filter (`$derived` visible set).
+- [x] **Unified search** (highlight + bring-into-view). One toolbar box matches node
+  `name`/`aliases` + edge `rel_type`/`fact` (client-side) **and chunk text** (backend) in
+  one query — matches get a theme-aware **amber ring** (nodes) / bold amber stroke (edges),
+  never dimming/hiding the rest, and `zoomToFit` frames the matched subset. See §12.
+- [x] **Chunk event dates** in the provenance panel — each chunk card shows its episode
+  `valid_at` (semantic event time, not ingest time). See §12.
 - [ ] Freeze/pin layout.
 - [ ] Persist filter/freeze prefs (optional).
 
@@ -396,7 +414,57 @@ sequenceDiagram
 1. **Delete handling** — this slice reconciles deletes via re-export rather than emitting
    delete events (§4.1). Add `knowledge.graph.node_deleted` later if live removal matters.
 
-## 12. TL;DR
+## 12. Search highlight + chunk dates (Phase 2 — built)
+
+Three additions, all **initial-development mode (no backward compat / no migration / no wrappers)**:
+
+### 12.1 Chunk event dates (`valid_at`)
+The provenance panel's chunk cards now show each chunk's **semantic event time**, not its
+processing time. Two distinct timestamps exist per chunk:
+- **`valid_at`** — the episode's `reference_time` (the eval/corpus date, "when it happened").
+  Lives on the Graphiti `EpisodicNode` in Kuzu, **not** the Qdrant payload.
+- **`ingested_at`** — wall-clock Qdrant write time (≈ episode `created_at`). For a temporal
+  corpus these diverge sharply (a 2024 fact ingested today).
+
+We surface **`valid_at`**. `read_episode_valid_at(db_path, uuids)` (in `graphiti_service.py`,
+sharing a new `_snapshot_read_driver` async-CM with `read_graph_snapshot` — lock-free read on
+the shared Kuzu DB) maps `uuid → valid_at`; `KnowledgeService.get_chunk_details` merges it onto
+each chunk DTO as `valid_at: str | null`. Null (no episode / no date) → no date shown.
+
+### 12.2 Unified search → highlight (no hide)
+One toolbar input drives `graph.setSearchQuery(q)`:
+- **Client-side, instant:** node `name`/`aliases`, edge `rel_type`/`fact` substring match →
+  `matchedNodeIds` / `matchedEdgeIds` (`$derived` in `knowledge-graph.svelte.ts`).
+- **Backend, debounced (250 ms) + aborted:** chunk **text** → `POST /knowledge/graph/search-chunks`
+  → matching Qdrant `point_ids` (`VectorStore.point_ids_matching_text`, a capped case-insensitive
+  scroll scan) → pushed back via `setMatchedChunkIds` → mapped onto nodes/edges by `chunk_ids` (G6).
+
+Highlight is **additive only** (the user asked to *only highlight*): matched nodes get a
+theme-aware amber **ring**, matched edges an amber bold stroke (`Scheme.matchRing`, amber-400
+dark / amber-600 light); non-matches are untouched. The canvas is idle-paused, so a `matchCount`
+`$effect` kicks `keepRedrawing` so rings appear/clear without interaction.
+
+### 12.3 Bring-into-view
+A `focusNodeIds` `$derived` (matched nodes ∪ endpoints of matched edges) feeds a `$effect` that
+calls `fg.zoomToFit(450, 80, nodeFilter)` to frame just the matched subset. Skipped when zero
+matches (no camera yank on a typo); clearing the search leaves the view where it is.
+
+### 12.4 New/changed surfaces
+| Layer | Change |
+|---|---|
+| `graphiti_service.py` | `_snapshot_read_driver` CM + `read_episode_valid_at()` |
+| `service.py` | `get_chunk_details` adds `valid_at`; new `search_chunk_ids_by_text()` |
+| `vector_store.py` | `point_ids_matching_text()` (substring scroll scan) |
+| route `knowledge.py` | `chunks-detail` returns `valid_at`; new `POST /knowledge/graph/search-chunks` |
+| `api/knowledge.ts` | `GraphChunkDetail.valid_at`; `searchGraphChunks()` |
+| `knowledge-graph.svelte.ts` | search query + match sets (`matchedNodeIds`/`matchedEdgeIds`/`matchCount`) |
+| `KnowledgeGraphPanel.svelte` | search box, amber ring/edge highlight, zoom-to-fit, chunk date |
+
+> **Build note:** the new route + `valid_at` enrichment require the **Hiro server to restart**
+> (the live `127.0.0.1:18083` process must reload to register them) — a stale server returns
+> `405` on `search-chunks` and omits `valid_at`.
+
+## 13. TL;DR
 
 - **What:** a 4th **Graph** tab on the knowledge page — **2D** physics layout
   (`force-graph`), color-by-type, click→provenance, **live pop/glow** as the graph builds.

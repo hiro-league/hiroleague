@@ -3,6 +3,8 @@
 - [Read Here](../hiro-docs/mintdocs/hiro/get-started/introduction.mdx)
 - [Architecture Docs](../hiro-docs/mintdocs/architecture/concepts/architecture-overview.mdx)
 
+> **Editing mintdocs?** Before adding or changing any documentation under `../hiro-docs/mintdocs/`, read [mintdocs/AGENTS.md](../hiro-docs/mintdocs/AGENTS.md) and follow its rules (folder structure, style, and especially the **Diagrams** rule — mermaid wrapped in `<DiagramViewer>` with `actions={false}`).
+
 # Architecture Documentation Index
 
 This mirrors the `Architecture` tab in `../hiro-docs/mintdocs/docs.json`; use it to choose the right document before making architecture-sensitive changes.

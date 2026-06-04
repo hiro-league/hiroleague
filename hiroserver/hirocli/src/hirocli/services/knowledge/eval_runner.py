@@ -425,6 +425,7 @@ async def ingest_adam_corpus_via_service(
     corpus_path: Path | None = None,
     tag: str = ADAM_EVAL_TAG,
     run_id: str | None = None,
+    reset_first: bool = True,
 ) -> int:
     """Ingest the Adam JSONL episode corpus into BOTH Qdrant and the Graphiti graph.
 
@@ -455,71 +456,89 @@ async def ingest_adam_corpus_via_service(
         {"run_id": run_id, "phase": "ingest_adam", "episode_count": total},
     )
 
-    # 1) Qdrant double-write — one tagged point per episode, point_id == shared uuid.
-    graphiti_eps = []
-    for ep in episodes:
-        qid = adam_point_id(ep.chunk_id)
-        await service.ingest_text_chunk(
-            point_id=qid,
-            text=ep.text,
-            document_id=ep.document_id,
-            title=ep.document_title,
-            tags=[tag],
-        )
-        graphiti_eps.append(replace(ep, chunk_id=qid))
-        _publish(
-            bus,
-            workspace_path,
-            KNOWLEDGE_EVAL_SETUP_PROGRESS,
-            {
-                "run_id": run_id,
-                "phase": "ingest_adam",
-                "index": len(graphiti_eps),
-                "total": total,
-                "title": ep.document_title,
-                "snippet": _preview(ep.text, 90),
-            },
-        )
-
-    # 2) Graphiti graph build — sequential + chronological (require_backend=False so an
-    #    explicit eval build works even with the retrieval backend toggle off).
+    # The graph service is built up-front because it's needed BOTH for the optional
+    # pre-run reset and the graph build below. Kuzu driver is shared/refcounted, so one
+    # instance — closed once in the finally — is enough (require_backend=False so an
+    # explicit eval build works even with the retrieval backend toggle off).
     prefs = load_preferences(workspace_path)
-    _publish(
-        bus,
-        workspace_path,
-        KNOWLEDGE_EVAL_SETUP_PROGRESS,
-        {"run_id": run_id, "phase": "build_graph", "episode_count": len(graphiti_eps)},
-    )
     gsvc = GraphitiMemoryService.from_preferences(prefs, workspace_path, require_backend=False)
     if gsvc is None:
         raise RuntimeError(
             "Adam eval: no extraction model configured for the Graphiti graph build. "
             "Set knowledge.graph.extraction_model or knowledge.answering.model (+ provider key)."
         )
+    ledger_sink = LedgerSink(workspace_path)
+    try:
+        # 0) Pre-run reset — keep the eval deterministic run-to-run by deleting ONLY what a
+        #    previous eval created (its Qdrant points by document_id + its graph episodes and
+        #    the nodes/edges those episodes exclusively own) before re-ingesting. Targeted so
+        #    other knowledge data is never touched; idempotent (a first run finds nothing).
+        if reset_first:
+            _publish(
+                bus,
+                workspace_path,
+                KNOWLEDGE_EVAL_SETUP_PROGRESS,
+                {"run_id": run_id, "phase": "reset_adam", "episode_count": total},
+            )
+            for doc_id in {ep.document_id for ep in episodes}:
+                await asyncio.to_thread(service.vector_store.delete_document, doc_id)
+            await gsvc.remove_episodes([adam_point_id(ep.chunk_id) for ep in episodes])
 
-    # Bridge Graphiti's per-episode progress into eval terminal lines. The build
-    # is the multi-minute part (one LLM extraction per episode), so this is the
-    # progress the user most needs to see ticking.
-    def _graph_sink(event_type: str, payload: dict[str, Any]) -> None:
-        if event_type != KNOWLEDGE_GRAPH_INGEST_PROGRESS:
-            return
+        # 1) Qdrant double-write — one tagged point per episode, point_id == shared uuid.
+        graphiti_eps = []
+        for ep in episodes:
+            qid = adam_point_id(ep.chunk_id)
+            await service.ingest_text_chunk(
+                point_id=qid,
+                text=ep.text,
+                document_id=ep.document_id,
+                title=ep.document_title,
+                tags=[tag],
+            )
+            graphiti_eps.append(replace(ep, chunk_id=qid))
+            _publish(
+                bus,
+                workspace_path,
+                KNOWLEDGE_EVAL_SETUP_PROGRESS,
+                {
+                    "run_id": run_id,
+                    "phase": "ingest_adam",
+                    "index": len(graphiti_eps),
+                    "total": total,
+                    "title": ep.document_title,
+                    "snippet": _preview(ep.text, 90),
+                },
+            )
+
+        # 2) Graphiti graph build — sequential + chronological.
         _publish(
             bus,
             workspace_path,
             KNOWLEDGE_EVAL_SETUP_PROGRESS,
-            {
-                "run_id": run_id,
-                "phase": "build_graph",
-                "index": int(payload.get("chunk_index") or 0),
-                "total": int(payload.get("chunk_total") or len(graphiti_eps)),
-            },
+            {"run_id": run_id, "phase": "build_graph", "episode_count": len(graphiti_eps)},
         )
 
-    # Record the Adam-corpus graph build as a ``graph_ingest`` run (per-episode +
-    # per-operation nodes) so the ingestion is visible in Graph Runs — previously
-    # this path bypassed the ledger entirely (only the answers showed up).
-    ledger_sink = LedgerSink(workspace_path)
-    try:
+        # Bridge Graphiti's per-episode progress into eval terminal lines. The build
+        # is the multi-minute part (one LLM extraction per episode), so this is the
+        # progress the user most needs to see ticking.
+        def _graph_sink(event_type: str, payload: dict[str, Any]) -> None:
+            if event_type != KNOWLEDGE_GRAPH_INGEST_PROGRESS:
+                return
+            _publish(
+                bus,
+                workspace_path,
+                KNOWLEDGE_EVAL_SETUP_PROGRESS,
+                {
+                    "run_id": run_id,
+                    "phase": "build_graph",
+                    "index": int(payload.get("chunk_index") or 0),
+                    "total": int(payload.get("chunk_total") or len(graphiti_eps)),
+                },
+            )
+
+        # Record the Adam-corpus graph build as a ``graph_ingest`` run (per-episode +
+        # per-operation nodes) so the ingestion is visible in Graph Runs — previously
+        # this path bypassed the ledger entirely (only the answers showed up).
         await gsvc.ingest_chunks(
             graphiti_eps,
             source_role="user_document",

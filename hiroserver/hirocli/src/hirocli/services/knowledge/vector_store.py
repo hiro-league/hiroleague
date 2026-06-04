@@ -242,6 +242,61 @@ class KnowledgeVectorStore:
             )
         return hit_from_payload(records[0].payload or {}, point_id=point_id, score=score)
 
+    def hits_from_point_ids(self, point_ids: list[str]) -> list[KnowledgeSearchHit]:
+        """Batch-fetch chunks by their Qdrant point_ids (== Graphiti episode uuids).
+
+        One ``retrieve`` round-trip; ids not present in the collection are simply
+        absent from the result (no placeholder). Backs the graph viz detail panel,
+        which resolves a selected node/edge's provenance chunk_ids to real chunk
+        text + document title (G6: point_id is the shared uuid)."""
+        ids = [pid for pid in point_ids if pid]
+        if not ids:
+            return []
+        records = self.qdrant.retrieve(
+            collection_name=self.collection_name,
+            ids=ids,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return [
+            hit_from_payload(record.payload or {}, point_id=str(record.id), score=0.0)
+            for record in records
+        ]
+
+    def point_ids_matching_text(self, needle: str, *, limit: int = 200) -> list[str]:
+        """Return point_ids whose chunk ``text`` contains ``needle`` (case-insensitive substring).
+
+        Backs the Graph tab's chunk-text search: a literal substring scan (no embedding,
+        no vector query) over chunk payloads, so callers can map the matching point_ids →
+        graph nodes/edges via their ``chunk_ids`` (G6). Paginates the collection with
+        ``scroll`` and filters in Python — Qdrant ``MatchText`` needs a full-text payload
+        index we don't maintain, and the personal-KG corpus is small. Stops at ``limit``
+        matches. Blank/whitespace needle → ``[]`` (caller clears the search)."""
+        term = (needle or "").strip().lower()
+        if not term:
+            return []
+        cap = max(1, int(limit))
+        matches: list[str] = []
+        offset: Any = None
+        while True:
+            records, offset = self.qdrant.scroll(
+                collection_name=self.collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for record in records:
+                payload = record.payload or {}
+                text = str(payload.get("text") or "")
+                if term in text.lower():
+                    matches.append(str(record.id))
+                    if len(matches) >= cap:
+                        return matches
+            if offset is None:  # exhausted the collection
+                break
+        return matches
+
     def search_hybrid(
         self,
         dense_vector: list[float],

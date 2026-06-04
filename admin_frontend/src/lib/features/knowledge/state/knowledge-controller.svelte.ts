@@ -44,8 +44,12 @@ export function createKnowledgePageController(
   });
 
   const ask = createKnowledgeAskModel({ browse, options, setError });
-  // Graph viz (MVP). SSE + data load are owned by KnowledgeGraphPanel so the
-  // EventSource only lives while the Graph tab is open.
+  // Graph viz. The live SSE subscription is owned HERE (page level), not by
+  // KnowledgeGraphPanel, so graph deltas keep accumulating in the model even while the
+  // user is on another tab (eval/ingest is where a build is triggered). Otherwise the
+  // panel — only mounted on the Graph tab — would miss every delta emitted during a build
+  // and you'd only ever see a one-shot export. The panel still owns rendering + initial
+  // load() when it mounts. Cheap when idle (one shared SSE connection, data in JS maps).
   const graph = createKnowledgeGraphModel({ setError });
 
   function setActiveTab(tab: KnowledgeTabId) {
@@ -77,8 +81,12 @@ export function createKnowledgePageController(
     ingest.restoreFolderFromStorage();
     void bootstrap();
     const stopEvents = ingest.connectEvents();
+    // Page-level graph SSE subscription (see note at `graph` above): stays connected for
+    // the whole Knowledge page so live deltas land regardless of the active tab.
+    const stopGraphEvents = graph.connectEvents();
     return () => {
       stopEvents();
+      stopGraphEvents();
     };
   }
 

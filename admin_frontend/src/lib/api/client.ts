@@ -14,6 +14,10 @@ type RequestOptions = {
   method?: string;
   body?: unknown;
   timeoutMs?: number;
+  // Optional caller-owned signal so a component can cancel an in-flight request
+  // (e.g. selection changed / panel unmounted) instead of leaking the connection.
+  // Combined with the internal timeout controller below.
+  signal?: AbortSignal;
 };
 
 export async function apiRequest<T>(
@@ -33,6 +37,11 @@ export async function apiRequest<T>(
 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 20000);
+  // Cancel too if the caller's signal fires (forwards an external abort to the fetch).
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
 
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method ?? 'GET',

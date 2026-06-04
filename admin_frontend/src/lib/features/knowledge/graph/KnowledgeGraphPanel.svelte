@@ -1,13 +1,39 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { Maximize2, Minimize2, RefreshCw, SlidersHorizontal } from '@lucide/svelte';
+  import {
+    Building2,
+    CalendarDays,
+    Circle,
+    FileText,
+    MapPin,
+    Maximize2,
+    Minimize2,
+    Package,
+    RefreshCw,
+    Search,
+    SlidersHorizontal,
+    Spline,
+    User,
+    X
+  } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
+  import {
+    fetchGraphChunksDetail,
+    searchGraphChunks,
+    type GraphChunkDetail
+  } from '$lib/api/knowledge';
   import type { KnowledgePageController } from '../state/knowledge-controller.svelte';
   import KnowledgeGraphFilterBar from './KnowledgeGraphFilterBar.svelte';
   import KnowledgeGraphOptionsPanel from './KnowledgeGraphOptionsPanel.svelte';
   import { colorFor } from './knowledge-graph-style';
+  import {
+    GRAPH_OPTION_DEFAULTS,
+    MAX_LINKS_CAP,
+    readGraphOptions,
+    writeGraphOptions
+  } from './knowledge-graph-prefs';
 
   interface Props {
     ctl: KnowledgePageController;
@@ -21,13 +47,23 @@
   // worth threading through for the MVP).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let fg: any = null;
-  let disconnect: (() => void) | null = null;
+  // Set when the visible node/link set changes so the next engine-stop auto-fits the
+  // view (see onEngineStop). Plain let — only read inside the force-graph callback.
+  let fitPending = false;
 
   // Graph options panel (left overlay) + its live layout controls. The panel
   // edits these; $effects below push them into the force-graph instance.
   let optionsOpen = $state(false);
-  let linkStrength = $state(0.5); // d3 link-force strength: 0 loose … 1 rigid
-  let curveAmount = $state(0.45); // max bow for fanned parallel edges (0 = straight)
+  // Graph-options sliders, seeded from localStorage so a tuned layout survives
+  // reloads/navigation (persisted by the $effect below; see knowledge-graph-prefs).
+  // MAX_LINKS_CAP doubles as the maxLinksPerPair slider max AND the "show all" value.
+  const savedOptions = readGraphOptions();
+  let linkStrength = $state(savedOptions.linkStrength); // d3 link-force strength: 0 loose … 1 rigid
+  let linkDistance = $state(savedOptions.linkDistance); // d3 link-force resting length in px
+  let curveAmount = $state(savedOptions.curveAmount); // max bow for fanned parallel edges (0 = straight)
+  let maxLinksPerPair = $state(savedOptions.maxLinksPerPair); // parallel edges per pair; MAX = all
+  // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
+  let searchFocusMode = $state(savedOptions.searchFocusMode);
 
   // Expand: fills the content area below the sticky knowledge header/tabs.
   // Uses position:fixed so it escapes the page's padding/max-width wrapper;
@@ -131,7 +167,8 @@
   // Negative CHARGE_STRENGTH = repulsion; less negative (or positive) = attract.
   // CENTER_STRENGTH < 1 loosens the pull-to-(0,0) so clusters can drift apart.
   // ───────────────────────────────────────────────────────────────────────────
-  const LINK_DISTANCE = 80;
+  // LINK_DISTANCE is now the live `linkDistance` control (default 80) declared at
+  // the top with the other graph-options state; the guide above still applies.
   const CHARGE_STRENGTH = -240;
   const CENTER_STRENGTH = 0.05;
   // Keeping orphaned / weakly-connected nodes from flying off:
@@ -143,18 +180,31 @@
   //    charge. Together they corral strays near the connected mass.
   const GRAVITY_STRENGTH = 0.03;
   const CHARGE_DISTANCE_MAX = 320;
+  // Degree-based "centrality" layout: pull strength toward the per-node target ring,
+  // and how far the outermost (least-connected) ring sits. See degreeRadial + the
+  // graphData $effect (which assigns each node's __targetR from its connection count).
+  const RADIAL_STRENGTH = 0.08;
+  const RADIAL_RING = 90; // outer-ring spacing; scaled by √(node count) in the $effect
 
-  // A d3-force that pulls every node toward the origin (equivalent to
-  // forceX(0)+forceY(0)) — written inline so we don't add a d3-force import just
-  // for this. d3 calls force(alpha) each tick and force.initialize(nodes) on bind.
-  function radialGravity(strength: number) {
+  // A d3-force implementing the "most-connected in the middle, others around it"
+  // layout the user asked for: each node is pulled toward a ring whose radius encodes
+  // its connectivity (``n.__targetR``, assigned per-node in the graphData $effect from
+  // its degree) — hubs target the centre, leaf/orphan nodes target the outer ring, so
+  // the graph self-organizes around its busiest nodes instead of drifting into a blob.
+  // Written inline to avoid a d3-force import; d3 calls force(alpha) each tick and
+  // force.initialize(nodes) on bind. Replaces the old origin-only gravity.
+  function degreeRadial(strength: number) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let simNodes: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const force: any = (alpha: number) => {
       for (const n of simNodes) {
-        n.vx -= n.x * strength * alpha;
-        n.vy -= n.y * strength * alpha;
+        const r = Math.hypot(n.x, n.y);
+        if (r < 1e-6) continue; // sitting at the origin: let charge nudge it out first
+        // <0 pulls the node inward toward its ring, >0 pushes it outward.
+        const k = (((n.__targetR ?? 0) - r) / r) * strength * alpha;
+        n.vx += n.x * k;
+        n.vy += n.y * k;
       }
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -164,36 +214,45 @@
     return force;
   }
 
-  // Dark-mode-aware color scheme — read once per canvas callback.
+  // Dark-mode-aware color scheme.
   // This app sets `data-theme="dark"` / `data-theme="light"` on <html>
   // (see shell-preferences.svelte.ts setTheme → `document.documentElement.dataset.theme`).
-  // dataset.theme access is a single property read — essentially free per frame.
   type Scheme = {
     pillBg: string;      // node name pill background
     nodeText: string;    // node name pill text
-    edgePillBg: string;  // edge label pill background
-    edgeText: string;    // edge label pill text
+    edgeText: string;    // edge label text (drawn directly on the edge, no pill bg)
     linkColor: string;   // edge line color
+    linkColorDim: string; // edge line color for non-matches in "dim" search-focus mode
+    matchRing: string;   // search-highlight ring/stroke (amber, semi-transparent)
   };
-  function getScheme(): Scheme {
+  function computeScheme(): Scheme {
     const dark = typeof document !== 'undefined' &&
       document.documentElement.dataset.theme === 'dark';
     return dark
       ? {
-          pillBg:     'rgba(2,6,23,0.88)',
+          pillBg:     'rgba(2,6,23,0.72)',
           nodeText:   'rgba(226,232,240,0.95)',
-          edgePillBg: 'rgba(2,6,23,0.82)',
-          edgeText:   'rgba(148,163,184,0.95)',
-          linkColor:  'rgba(148,163,184,0.5)'
+          // Stronger edge text (lighter + opaque) since it sits on the line with no
+          // pill; lines themselves are more transparent so labels stay readable.
+          edgeText:   'rgba(226,232,240,1)',
+          linkColor:  'rgba(148,163,184,0.28)',
+          linkColorDim: 'rgba(148,163,184,0.07)', // dimmed non-matches
+          matchRing:  'rgba(251,191,36,0.6)' // amber-400, semi-transparent — pops but soft on dark
         }
       : {
-          pillBg:     'rgba(255,255,255,0.88)',
+          pillBg:     'rgba(255,255,255,0.72)',
           nodeText:   'rgba(15,23,42,0.92)',
-          edgePillBg: 'rgba(255,255,255,0.82)',
-          edgeText:   'rgba(71,85,105,0.95)',
-          linkColor:  'rgba(148,163,184,0.45)'
+          edgeText:   'rgba(30,41,59,1)',
+          linkColor:  'rgba(148,163,184,0.25)',
+          linkColorDim: 'rgba(148,163,184,0.08)', // dimmed non-matches
+          matchRing:  'rgba(217,119,6,0.7)' // amber-600, semi-transparent — readable on light
         };
   }
+  // PERF: getScheme() used to run inside every node AND edge draw callback, so it
+  // read the DOM (dataset.theme) and allocated a fresh object thousands of times
+  // per second at 60fps. The scheme only changes on theme toggle, so cache it here
+  // and refresh via the MutationObserver wired up in onMount.
+  let scheme: Scheme = computeScheme();
 
   // Lucide icon path data — 24×24 viewBox, drawn in white inside each colored disc.
   // Hardcoded so the canvas render stays deterministic across platforms (emoji
@@ -242,6 +301,21 @@
     }
   };
 
+  // PERF: `new Path2D(d)` parses the SVG path mini-language on construction, which
+  // is wasteful to redo for every icon path on every frame. Build each type's
+  // Path2D[] once (lazily — Path2D is browser-only and this component also runs
+  // during SSR) and reuse the cached objects in drawIcon.
+  const iconPath2DCache = new Map<string, Path2D[]>();
+  function iconPaths(type: string): Path2D[] {
+    let cached = iconPath2DCache.get(type);
+    if (!cached) {
+      const icon = ICONS[type] ?? ICONS.Entity;
+      cached = icon.paths.map((d) => new Path2D(d));
+      iconPath2DCache.set(type, cached);
+    }
+    return cached;
+  }
+
   function resize(): void {
     if (fg && container) {
       fg.width(container.clientWidth).height(container.clientHeight);
@@ -266,8 +340,9 @@
     ctx.lineWidth = 1.8 / (s * scale);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    for (const d of icon.paths) {
-      ctx.stroke(new Path2D(d));
+    // Reuse cached Path2D objects instead of re-parsing the path strings per frame.
+    for (const p of iconPaths(type)) {
+      ctx.stroke(p);
     }
     if (icon.circles) {
       for (const [cx, cy, r] of icon.circles) {
@@ -279,6 +354,8 @@
     ctx.restore();
   }
 
+  // Draw a centered text label. When bgColor is null the text is drawn directly
+  // (no pill background) — edge labels use this; node labels still pass a pill bg.
   function drawTextPill(
     ctx: CanvasRenderingContext2D,
     text: string,
@@ -286,23 +363,66 @@
     cy: number,
     fontSize: number,
     textColor: string,
-    bgColor: string
+    bgColor: string | null
   ): void {
     ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const m = ctx.measureText(text);
-    const padX = fontSize * 0.35;
-    const padY = fontSize * 0.18;
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(
-      cx - m.width / 2 - padX,
-      cy - fontSize / 2 - padY,
-      m.width + 2 * padX,
-      fontSize + 2 * padY
-    );
+    if (bgColor) {
+      const m = ctx.measureText(text);
+      const padX = fontSize * 0.35;
+      const padY = fontSize * 0.18;
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(
+        cx - m.width / 2 - padX,
+        cy - fontSize / 2 - padY,
+        m.width + 2 * padX,
+        fontSize + 2 * padY
+      );
+    }
     ctx.fillStyle = textColor;
     ctx.fillText(text, cx, cy);
+  }
+
+  // Wrap a node name onto multiple lines when it exceeds NODE_LABEL_WRAP chars.
+  // Word-aware, with a hard break for single words longer than the limit; capped
+  // at NODE_LABEL_MAX_LINES with an ellipsis on the last line if it overflows.
+  const NODE_LABEL_WRAP = 12;
+  const NODE_LABEL_MAX_LINES = 3;
+  function wrapLabel(name: string): string[] {
+    if (name.length <= NODE_LABEL_WRAP) return [name];
+    const lines: string[] = [];
+    let cur = '';
+    const flush = () => {
+      if (cur) lines.push(cur);
+      cur = '';
+    };
+    for (const word of name.split(/\s+/)) {
+      if (word.length > NODE_LABEL_WRAP) {
+        flush();
+        let rest = word;
+        while (rest.length > NODE_LABEL_WRAP) {
+          lines.push(rest.slice(0, NODE_LABEL_WRAP));
+          rest = rest.slice(NODE_LABEL_WRAP);
+        }
+        cur = rest;
+      } else if (!cur) {
+        cur = word;
+      } else if (`${cur} ${word}`.length <= NODE_LABEL_WRAP) {
+        cur = `${cur} ${word}`;
+      } else {
+        flush();
+        cur = word;
+      }
+    }
+    flush();
+    if (lines.length > NODE_LABEL_MAX_LINES) {
+      const kept = lines.slice(0, NODE_LABEL_MAX_LINES);
+      const last = kept[NODE_LABEL_MAX_LINES - 1];
+      kept[NODE_LABEL_MAX_LINES - 1] = `${last.slice(0, NODE_LABEL_WRAP - 1)}…`;
+      return kept;
+    }
+    return lines;
   }
 
   // Replace force-graph's default node render so we stack: glow halo → colored
@@ -312,7 +432,18 @@
     const x = node.x ?? 0;
     const y = node.y ?? 0;
     const radius = NODE_RADIUS;
-    const s = getScheme();
+    const s = scheme; // cached; refreshed only on theme toggle (see onMount observer)
+
+    // Search focus: a node is "off-focus" when a search is active and it's neither a match
+    // nor an endpoint of a matched edge (focusNodeIds). 'hide' skips it entirely; 'dim'
+    // fades it. 'highlight' (default) leaves non-matches fully drawn — ring only.
+    const offFocus = searchActive && !focusNodeIds?.has(node.id);
+    if (offFocus && searchFocusMode === 'hide') return; // fully hidden (layout unchanged)
+    const dimmed = offFocus && searchFocusMode === 'dim';
+    if (dimmed) {
+      ctx.save();
+      ctx.globalAlpha = 0.12; // faded non-match; restored at the end of this draw
+    }
 
     // 1. Glow halo for fresh nodes (fades over GLOW_MS).
     const ts = graph.recent()[`n:${node.id}`];
@@ -334,10 +465,22 @@
     ctx.fillStyle = colorFor(node.type);
     ctx.fill();
 
+    // 2b. Search highlight: semi-transparent amber ring around matched nodes. Non-matches
+    // are dimmed/hidden (or left as-is) per searchFocusMode above. Repaints are kicked by
+    // the matchCount $effect so the ring appears/clears even while the canvas is idle.
+    if (searchActive && matchedNodeIds.has(node.id)) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
+      ctx.strokeStyle = s.matchRing;
+      ctx.lineWidth = 2.5 / scale; // ≈2.5px on-screen regardless of zoom
+      ctx.stroke();
+    }
+
     // 3. White Lucide icon inside.
     drawIcon(ctx, node.type, x, y, radius * 1.45, scale);
 
-    // 4. Name label below the disc — pill colors adapt to light/dark theme.
+    // 4. Name label below the disc — pill colors adapt to light/dark theme. Names
+    // longer than NODE_LABEL_WRAP chars wrap onto stacked lines (one pill each).
     // Skip when zoomed out — a dense graph at low zoom would just be a mess of labels.
     const fontSize = labelFontSize(
       scale,
@@ -347,9 +490,15 @@
       NODE_FONT_MAX
     );
     if (fontSize !== null && node.name) {
-      const text = node.name.length > 28 ? node.name.slice(0, 27) + '…' : node.name;
-      drawTextPill(ctx, text, x, y + radius + fontSize, fontSize, s.nodeText, s.pillBg);
+      const lines = wrapLabel(node.name);
+      const lineH = fontSize * 1.25;
+      const top = y + radius + fontSize; // baseline of the first line (unchanged)
+      lines.forEach((line, i) =>
+        drawTextPill(ctx, line, x, top + i * lineH, fontSize, s.nodeText, s.pillBg)
+      );
     }
+
+    if (dimmed) ctx.restore(); // balance the globalAlpha save from the focus block above
   }
 
   // Draw the relation name on each edge, rotated to follow the edge, kept upright.
@@ -368,6 +517,11 @@
       EDGE_FONT_MAX
     );
     if (fontSize === null) return;
+    // Search focus: a non-matching edge's label is hidden ('hide') or faded ('dim') to
+    // match its line treatment; 'highlight' leaves it as-is.
+    const edgeOffFocus = searchActive && !matchedEdgeIds.has(link.id);
+    if (edgeOffFocus && searchFocusMode === 'hide') return;
+    const edgeDim = edgeOffFocus && searchFocusMode === 'dim';
     const src = link.source;
     const tgt = link.target;
     if (!src || !tgt || typeof src !== 'object' || typeof tgt !== 'object') return;
@@ -379,7 +533,7 @@
     const text = link.rel_type;
     if (!text) return;
 
-    const s = getScheme();
+    const s = scheme; // cached; refreshed only on theme toggle (see onMount observer)
     // Label anchor = bezier point at t=0.5 (the visual middle of the arc).
     const cps = link.__controlPoints as number[] | null;
     let lx: number;
@@ -407,9 +561,11 @@
     if (angle < -Math.PI / 2) angle += Math.PI;
 
     ctx.save();
+    if (edgeDim) ctx.globalAlpha = 0.15; // faded label for a dimmed non-match
     ctx.translate(lx, ly);
     ctx.rotate(angle);
-    drawTextPill(ctx, text, 0, 0, fontSize, s.edgeText, s.edgePillBg);
+    // null bg → edge label text drawn directly on the line (no background pill).
+    drawTextPill(ctx, text, 0, 0, fontSize, s.edgeText, null);
     ctx.restore();
   }
 
@@ -462,6 +618,68 @@
     }
   }
 
+  // Cap how many parallel edges are drawn between any node pair (and per self-
+  // loop) so a densely-connected pair doesn't render as an unreadable fan. Keeps
+  // the first `max` edges per group in visible-link order. max >= MAX_LINKS_CAP
+  // means "show all" (no cap). The "Max links per pair" option drives this.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function capParallelLinks(links: any[], max: number): any[] {
+    if (max >= MAX_LINKS_CAP) return links; // sentinel: unlimited
+    const counts = new Map<string, number>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out: any[] = [];
+    for (const l of links) {
+      const a = String(linkEndId(l.source));
+      const b = String(linkEndId(l.target));
+      //   delimiter can't collide with an id (same rationale as assignLinkCurvatures).
+      const key = a === b ? `self ${a}` : a < b ? `${a} ${b}` : `${b} ${a}`;
+      const n = counts.get(key) ?? 0;
+      if (n >= max) continue; // pair already at the cap → drop this edge
+      counts.set(key, n + 1);
+      out.push(l);
+    }
+    return out;
+  }
+
+  // The capped link set fed to force-graph + curvature assignment. Recomputes when
+  // the visible links change OR the "Max links per pair" control changes.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const displayLinks = $derived<any[]>(capParallelLinks(graph.visibleLinks(), maxLinksPerPair));
+
+  // ── Search highlight aliases ────────────────────────────────────────────────
+  // Local mirrors of the model's search state so the (non-reactive) force-graph
+  // canvas callbacks can close over plain reactive values, and the redraw/zoom
+  // $effects below can track them. Reading the model getters directly inside a
+  // force-graph callback would work but wouldn't drive Svelte reactivity.
+  const searchActive = $derived(graph.searchActive());
+  const matchedNodeIds = $derived(graph.matchedNodeIds());
+  const matchedEdgeIds = $derived(graph.matchedEdgeIds());
+
+  // ── Redraw gating ─────────────────────────────────────────────────────────
+  // PERF: force-graph's autoPauseRedraw (default true) lets the canvas go idle
+  // once the simulation settles and there's no interaction. We previously forced
+  // autoPauseRedraw(false), which repainted at 60fps FOREVER. Instead we keep
+  // auto-pause on and only kick frames for our own animations (the glow-halo
+  // fade) and one-off updates (theme switch), restoring idle after a deadline.
+  let redrawUntil = 0;
+  let redrawTimer: ReturnType<typeof setTimeout> | null = null;
+  function keepRedrawing(ms: number): void {
+    if (!fg) return;
+    const until = Date.now() + ms;
+    if (until <= redrawUntil) return; // a longer redraw window is already pending
+    redrawUntil = until;
+    fg.autoPauseRedraw(false);
+    if (redrawTimer) clearTimeout(redrawTimer);
+    redrawTimer = setTimeout(() => {
+      redrawTimer = null;
+      redrawUntil = 0;
+      fg?.autoPauseRedraw(true); // let the canvas idle again
+    }, ms);
+  }
+
+  // Observes <html data-theme> so a light/dark toggle refreshes the cached scheme.
+  let themeObserver: MutationObserver | null = null;
+
   onMount(async () => {
     const { default: ForceGraph } = await import('force-graph');
     if (!container) return;
@@ -478,16 +696,35 @@
       .nodeLabel((n: { name: string; type: string }) => `${n.name} · ${n.type}`)
       .nodeRelSize(NODE_RADIUS) // matches drawn radius → default hit-test region works
       // Link color is read from the scheme on every frame so it responds to
-      // light/dark theme switches without needing to re-init.
-      .linkColor(() => getScheme().linkColor)
-      .linkWidth(1.2)
+      // light/dark theme switches without needing to re-init. A matched edge (search
+      // highlight) is drawn in the amber match color and thicker; non-matches are
+      // dimmed/hidden per searchFocusMode. Repaints kicked by the matchCount $effect.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .linkColor((l: any) => {
+        if (!searchActive) return scheme.linkColor;
+        if (matchedEdgeIds.has(l.id)) return scheme.matchRing;
+        if (searchFocusMode === 'hide') return 'rgba(0,0,0,0)'; // invisible non-match
+        if (searchFocusMode === 'dim') return scheme.linkColorDim;
+        return scheme.linkColor;
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .linkWidth((l: any) => {
+        if (searchActive && matchedEdgeIds.has(l.id)) return 2.5;
+        if (searchActive && searchFocusMode === 'hide' && !matchedEdgeIds.has(l.id)) return 0;
+        return 1.2;
+      })
       // Parallel edges between the same pair fan into arcs (see
       // assignLinkCurvatures); force-graph reads the per-link value each frame.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .linkCurvature((l: any) => l.__curvature ?? 0)
-      .linkDirectionalArrowLength(5)
+      // Hide arrowheads of non-matching edges in "hide" focus (color/width alone leaves
+      // the arrow glyph visible). eslint-disable for the loosely-typed link param.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .linkDirectionalArrowLength((l: any) =>
+        searchActive && searchFocusMode === 'hide' && !matchedEdgeIds.has(l.id) ? 0 : 5
+      )
       .linkDirectionalArrowRelPos(0.92) // pull arrowhead inside the target disc
-      .autoPauseRedraw(false)
+      .autoPauseRedraw(true) // PERF: idle when settled; we kick frames via keepRedrawing()
       .onNodeClick((n: { id: string }) => graph.selectNode(n.id))
       .onLinkClick((l: { id: string }) => graph.selectEdge(l.id))
       .onBackgroundClick(() => graph.clearSelection())
@@ -502,17 +739,49 @@
     // kicks the cooled-down sim so the new params take effect on the existing graph.
     // strength = the "Link strength" slider (overrides d3's auto value so the
     // control has a predictable effect); the strength $effect keeps it live.
-    fg.d3Force('link')?.distance(LINK_DISTANCE).strength(linkStrength);
+    fg.d3Force('link')?.distance(linkDistance).strength(linkStrength);
     // distanceMax caps repulsion range so strays aren't pushed to infinity.
     fg.d3Force('charge')?.strength(CHARGE_STRENGTH).distanceMax(CHARGE_DISTANCE_MAX);
     fg.d3Force('center')?.strength(CENTER_STRENGTH);
-    // Gravity toward origin corrals orphaned / weakly-linked nodes near the rest.
-    fg.d3Force('gravity', radialGravity(GRAVITY_STRENGTH));
+    // Degree-based radial centrality (hubs centre, leaves out) — replaces plain gravity.
+    void GRAVITY_STRENGTH; // retained for the tuning guide above; radial uses RADIAL_STRENGTH
+    fg.d3Force('gravity', degreeRadial(RADIAL_STRENGTH));
+    // Auto zoom-to-fit once a relayout settles, but only when the visible set changed
+    // (filters / cap / load) — so the user never has to pan-and-zoom after filtering.
+    // Gated by fitPending so manual drags (which also cool the sim) don't snap the view.
+    fg.onEngineStop(() => {
+      if (!fitPending) return;
+      fitPending = false;
+      fg.zoomToFit?.(450, 60);
+    });
     fg.d3ReheatSimulation?.();
 
+    // Refresh the cached scheme + repaint once whenever the app toggles theme.
+    // Replaces the old per-frame DOM read inside the draw callbacks.
+    scheme = computeScheme();
+    if (typeof MutationObserver !== 'undefined') {
+      themeObserver = new MutationObserver(() => {
+        scheme = computeScheme();
+        keepRedrawing(150); // a few frames so new colors paint even while idle
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+      });
+    }
+
     resize();
+    // Initial paint of the current graph. The LIVE SSE subscription is owned by the page
+    // controller (knowledge-controller.svelte.ts), NOT here — so deltas emitted during a
+    // build that started while this tab was closed are already in the model when we mount.
     await graph.load();
-    disconnect = graph.connectEvents();
+  });
+
+  // Drive frames while glow halos fade in after fresh nodes/edges arrive, then
+  // let the canvas idle. graph.recent() gains entries on each live upsert.
+  $effect(() => {
+    const r = graph.recent(); // tracked
+    if (fg && Object.keys(r).length > 0) keepRedrawing(GLOW_MS + 150);
   });
 
   // Recreate the graph from the visible subset whenever membership OR filters
@@ -522,11 +791,29 @@
   // hidden-type sets.
   $effect(() => {
     const nodes = graph.visibleNodes(); // tracked
-    const links = graph.visibleLinks(); // tracked
-    if (fg) {
-      assignLinkCurvatures(links); // fan out any parallel edges before painting
-      fg.graphData({ nodes, links });
+    const links = displayLinks; // tracked: visible links capped to maxLinksPerPair
+    if (!fg) return;
+    // Degree-based radial targets for degreeRadial(): count each node's connections,
+    // then map the busiest → centre (radius 0) and the least-connected → the outer
+    // ring. Ring spacing scales with √(node count) so denser graphs spread wider.
+    const degree = new Map<string, number>();
+    for (const l of links) {
+      const a = linkEndId(l.source);
+      const b = linkEndId(l.target);
+      degree.set(a, (degree.get(a) ?? 0) + 1);
+      degree.set(b, (degree.get(b) ?? 0) + 1);
     }
+    const maxDegree = Math.max(1, ...degree.values());
+    const outerRing = RADIAL_RING * Math.max(1, Math.sqrt(nodes.length));
+    for (const n of nodes) {
+      const d = degree.get(n.id) ?? 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (n as any).__targetR = (1 - d / maxDegree) * outerRing;
+    }
+    assignLinkCurvatures(links); // fan out any parallel edges before painting
+    fg.graphData({ nodes, links });
+    fitPending = true; // visible set changed → auto zoom-to-fit when the relayout settles
+    fg.d3ReheatSimulation?.(); // re-run the sim so the new radial targets take effect
   });
 
   // "Link strength" slider → d3 link-force strength. Reheat so the new stiffness
@@ -539,6 +826,16 @@
     }
   });
 
+  // "Link distance" slider → d3 link-force resting length. Reheat so edges relax
+  // to the new length on the existing layout.
+  $effect(() => {
+    const d = linkDistance; // tracked
+    if (fg) {
+      fg.d3Force('link')?.distance(d);
+      fg.d3ReheatSimulation?.();
+    }
+  });
+
   // "Edge curvature" slider → re-fan the current edges (no reheat; curvature is a
   // render property recomputed from the live link set). Re-setting the accessor
   // nudges force-graph to repaint with the new control points.
@@ -546,14 +843,124 @@
     const amount = curveAmount; // tracked
     void amount;
     if (fg) {
-      assignLinkCurvatures(graph.visibleLinks());
+      assignLinkCurvatures(displayLinks); // same capped set the graph is rendering
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fg.linkCurvature((l: any) => l.__curvature ?? 0);
     }
   });
 
+  // Persist the graph-options sliders to localStorage whenever any of them change
+  // (also runs once on mount, writing the just-loaded values back — harmless).
+  $effect(() => {
+    writeGraphOptions({ linkStrength, linkDistance, curveAmount, maxLinksPerPair, searchFocusMode });
+  });
+
+  // "Reset" in the options panel → restore slider defaults (the $effect above then
+  // re-persists them). Filters have their own "Clear filters" control.
+  function resetGraphOptions(): void {
+    linkStrength = GRAPH_OPTION_DEFAULTS.linkStrength;
+    linkDistance = GRAPH_OPTION_DEFAULTS.linkDistance;
+    curveAmount = GRAPH_OPTION_DEFAULTS.curveAmount;
+    maxLinksPerPair = GRAPH_OPTION_DEFAULTS.maxLinksPerPair;
+    searchFocusMode = GRAPH_OPTION_DEFAULTS.searchFocusMode;
+  }
+
+  // ── Unified search (node/edge text = instant client match; chunk text = backend) ──
+  // The input drives graph.setSearchQuery (instant name/alias + rel_type/fact highlight);
+  // the chunk-TEXT leg is a debounced backend call (point_ids → chunk matches mapped onto
+  // nodes/edges by chunk_ids). Aborted/debounced so fast typing doesn't queue requests.
+  const SEARCH_DEBOUNCE_MS = 250;
+  let searchText = $state('');
+  let searchBusy = $state(false);
+  let searchAbort: AbortController | null = null;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleChunkSearch(term: string): void {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchAbort?.abort(); // a newer keystroke supersedes the in-flight lookup
+    searchAbort = null;
+    if (!term) {
+      searchBusy = false;
+      return;
+    }
+    searchBusy = true;
+    searchTimer = setTimeout(() => {
+      const ctrl = new AbortController();
+      searchAbort = ctrl;
+      // searchGraphChunks THROWS on error/abort — must catch or searchBusy sticks on.
+      void (async () => {
+        try {
+          const res = await searchGraphChunks(term, ctrl.signal);
+          if (ctrl.signal.aborted) return;
+          graph.setMatchedChunkIds(res.data?.point_ids ?? []);
+        } catch (err) {
+          if (ctrl.signal.aborted) return; // expected on a newer keystroke / unmount
+          console.error('graph chunk-text search failed', err);
+          graph.setMatchedChunkIds([]); // fall back to client-only (name/rel) matches
+        } finally {
+          if (!ctrl.signal.aborted) searchBusy = false;
+        }
+      })();
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  function onSearchInput(value: string): void {
+    searchText = value;
+    graph.setSearchQuery(value); // instant client-side name/alias + rel_type/fact highlight
+    scheduleChunkSearch(value.trim());
+  }
+
+  function clearSearch(): void {
+    searchText = '';
+    graph.setSearchQuery('');
+    scheduleChunkSearch('');
+  }
+
+  // Node ids to frame on a search: matched nodes + the endpoints of matched edges, so an
+  // edge-only hit still pans its pair into view. Null when no search is active.
+  const focusNodeIds = $derived.by<Set<string> | null>(() => {
+    if (!searchActive) return null;
+    const ids = new Set<string>(matchedNodeIds);
+    if (matchedEdgeIds.size > 0) {
+      for (const l of displayLinks) {
+        if (matchedEdgeIds.has(l.id)) {
+          ids.add(String(linkEndId(l.source)));
+          ids.add(String(linkEndId(l.target)));
+        }
+      }
+    }
+    return ids;
+  });
+
+  // Repaint when the match set changes so amber rings/edges appear (and clear) even while
+  // the canvas is idle (autoPauseRedraw). Tracks the match sets via the aliases above.
+  $effect(() => {
+    void searchActive; // tracked
+    void matchedNodeIds; // tracked
+    void matchedEdgeIds; // tracked
+    void searchFocusMode; // tracked — repaint when dim/hide/ring mode changes
+    if (fg) keepRedrawing(200);
+  });
+
+  // After matches resolve, pan/zoom to frame just the matched subset (the "bring into
+  // view" the user asked for). Skips when there are no matches so a typo doesn't yank the
+  // camera to an empty frame; clearing the search leaves the view where it is.
+  $effect(() => {
+    const focus = focusNodeIds; // tracked
+    if (!fg || !focus || focus.size === 0) return;
+    // force-graph zoomToFit(durationMs, padding, nodeFilter) — frame only matched nodes.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fg.zoomToFit?.(450, 80, (n: any) => focus.has(n.id));
+  });
+
   onDestroy(() => {
-    disconnect?.();
+    // NOTE: the graph SSE subscription is owned by the page controller, so we do NOT
+    // tear it down here — leaving the Graph tab must not stop live deltas accumulating.
+    chunkAbort?.abort(); // don't leave a chunk-detail request open after unmount
+    searchAbort?.abort(); // ditto for an in-flight chunk-text search
+    if (searchTimer) clearTimeout(searchTimer);
+    themeObserver?.disconnect();
+    if (redrawTimer) clearTimeout(redrawTimer);
     if (fg) {
       fg.pauseAnimation?.();
       fg._destructor?.();
@@ -563,6 +970,104 @@
 
   const node = $derived(graph.selectedNode());
   const edge = $derived(graph.selectedEdge());
+
+  // ── Detail-panel provenance (lazy chunk-text lookup) ────────────────────────
+  // The DTO only carries chunk_ids; when a node/edge is selected we fetch the real
+  // chunk text + owning document titles so the panel can show content (and the
+  // document name) instead of opaque ids. Grouped by document for display.
+  // Map entity type → a Lucide icon (mirrors the canvas disc icons); relations use Spline.
+  const NODE_TYPE_ICON: Record<string, typeof Circle> = {
+    Person: User,
+    Place: MapPin,
+    Event: CalendarDays,
+    Organization: Building2,
+    Object: Package,
+    Entity: Circle
+  };
+  const nodeIcon = (type: string): typeof Circle => NODE_TYPE_ICON[type] ?? Circle;
+
+  const CHUNK_SNIPPET_CHARS = 220;
+  let chunkDetails = $state<GraphChunkDetail[]>([]);
+  let chunksLoading = $state(false);
+  let expandedChunks = $state<Set<string>>(new Set());
+
+  // Chunk event date (episode `valid_at`): the semantic "when this happened" time, not the
+  // ingest time. Shown as an absolute date on each chunk card (full timestamp on hover).
+  const chunkDateFmt = new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+  function formatChunkDate(iso: string | null): { label: string; title: string } | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return { label: chunkDateFmt.format(d), title: d.toLocaleString() };
+  }
+
+  // chunk_ids of the current selection (node provenance is rolled up from its edges).
+  const selectedChunkIds = $derived(node ? node.chunk_ids : edge ? edge.chunk_ids : []);
+  const selectedDocCount = $derived(
+    node ? node.document_ids.length : edge ? edge.document_ids.length : 0
+  );
+
+  function toggleChunk(id: string): void {
+    const next = new Set(expandedChunks);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    expandedChunks = next;
+  }
+
+  // Group fetched chunks by their document title for a "document → chunks" layout.
+  const chunkGroups = $derived.by(() => {
+    const groups = new Map<string, GraphChunkDetail[]>();
+    for (const c of chunkDetails) {
+      const title = c.document_title || c.document_id || 'Unknown document';
+      const list = groups.get(title);
+      if (list) list.push(c);
+      else groups.set(title, [c]);
+    }
+    return [...groups.entries()].map(([title, chunks]) => ({ title, chunks }));
+  });
+
+  // In-flight chunk-detail request; aborted when the selection changes or the
+  // panel unmounts so we never leak/queue same-origin connections (a leaked
+  // request blocks the packaged admin UI — pages + API share one origin and the
+  // browser caps ~6 connections per origin).
+  let chunkAbort: AbortController | null = null;
+
+  // Fetch chunk text whenever the selection (and thus its chunk_ids) changes.
+  $effect(() => {
+    const ids = selectedChunkIds; // tracked
+    expandedChunks = new Set();
+    chunkAbort?.abort(); // cancel a previous selection's still-pending lookup
+    chunkAbort = null;
+    if (ids.length === 0) {
+      chunkDetails = [];
+      chunksLoading = false;
+      return;
+    }
+    const ctrl = new AbortController();
+    chunkAbort = ctrl;
+    chunkDetails = [];
+    chunksLoading = true;
+    // apiRequest THROWS on error/timeout/abort — must catch, or chunksLoading
+    // sticks on "Loading…" forever and the rejection goes unhandled.
+    void (async () => {
+      try {
+        const res = await fetchGraphChunksDetail(ids, ctrl.signal);
+        if (ctrl.signal.aborted) return;
+        chunkDetails = res.data?.chunks ?? [];
+      } catch (err) {
+        if (ctrl.signal.aborted) return; // expected on selection change / unmount
+        console.error('graph chunk-detail lookup failed', err);
+        chunkDetails = []; // panel falls back to "chunk text unavailable"
+      } finally {
+        if (!ctrl.signal.aborted) chunksLoading = false;
+      }
+    })();
+    return () => ctrl.abort();
+  });
 </script>
 
 <svelte:window onresize={resize} />
@@ -635,6 +1140,49 @@
       {/if}
     </div>
     <div class="flex shrink-0 items-center gap-2">
+      {#if graph.nodes().length > 0}
+        <!-- Unified search: highlights matching nodes/edges (by name/alias, relation/fact,
+             or chunk text) with an amber ring and frames them in view — never hides the
+             rest. Theme-aware via the input's border/bg/ring tokens. -->
+        <div class="relative">
+          <Search
+            size={14}
+            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={searchText}
+            oninput={(e) => onSearchInput(e.currentTarget.value)}
+            placeholder="Search graph…"
+            aria-label="Search nodes, edges, and chunk text"
+            class="h-8 w-44 rounded-md border bg-background pl-7 pr-16 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:w-52 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {#if searchActive}
+            <div
+              class="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1.5"
+            >
+              <span
+                class="tabular-nums text-[10px] font-medium {graph.matchCount() > 0
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-muted-foreground'}"
+                title={`${graph.matchCount()} match${graph.matchCount() === 1 ? '' : 'es'}${searchBusy ? ' (searching chunks…)' : ''}`}
+              >
+                {searchBusy ? '…' : graph.matchCount()}
+              </span>
+              <button
+                type="button"
+                onclick={clearSearch}
+                class="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
       <Button
         variant="outline"
         size="sm"
@@ -691,7 +1239,12 @@
         <div class="absolute left-2 top-12 z-10">
           <KnowledgeGraphOptionsPanel
             bind:linkStrength
+            bind:linkDistance
             bind:curveAmount
+            bind:maxLinksPerPair
+            bind:searchFocusMode
+            maxLinksCap={MAX_LINKS_CAP}
+            onReset={resetGraphOptions}
             onClose={() => (optionsOpen = false)}
           />
         </div>
@@ -738,56 +1291,136 @@
 
     <!-- provenance / selection panel -->
     {#if node || edge}
+      {@const isNode = !!node}
+      {@const accent = node ? colorFor(node.type) : 'rgb(100,116,139)'}
+      {@const HeaderIcon = node ? nodeIcon(node.type) : Spline}
       <aside
-        class="absolute right-0 top-0 flex h-full w-72 flex-col gap-2 overflow-auto border-l bg-background/95 p-4 text-sm"
+        class="absolute right-0 top-0 flex h-full w-80 flex-col overflow-hidden border-l bg-background/80 text-sm shadow-lg backdrop-blur"
       >
-        <div class="flex items-start justify-between gap-2">
-          <h3 class="font-medium">{node ? 'Entity' : 'Relation'}</h3>
+        <!-- header: entity/relation icon + type + name, tinted by type colour -->
+        <div
+          class="flex items-start gap-2.5 border-b p-3"
+          style="background-color: color-mix(in srgb, {accent} 14%, transparent);"
+        >
+          <span
+            class="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-md text-white"
+            style="background-color: {accent};"
+          >
+            <HeaderIcon size={16} aria-hidden="true" />
+          </span>
+          <div class="min-w-0 flex-1">
+            <div class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {isNode ? node?.type : 'Relation'}
+            </div>
+            <div class="truncate font-semibold" title={isNode ? node?.name : edge?.rel_type}>
+              {isNode ? node?.name : edge?.rel_type}
+            </div>
+          </div>
           <button
             type="button"
             onclick={() => graph.clearSelection()}
-            class="rounded px-1.5 text-muted-foreground hover:bg-accent"
+            class="-mr-1 rounded px-1.5 text-muted-foreground hover:bg-accent"
             aria-label="Close details">✕</button
           >
         </div>
 
-        {#if node}
-          <div class="text-base font-semibold">{node.name}</div>
-          <div class="text-muted-foreground">{node.type}</div>
-          {#if node.aliases.length}
-            <div><span class="text-muted-foreground">aliases:</span> {node.aliases.join(', ')}</div>
-          {/if}
-          <dl class="mt-1 grid grid-cols-2 gap-1">
-            <dt class="text-muted-foreground">chunks</dt>
-            <dd>{node.chunk_ids.length}</dd>
-            <dt class="text-muted-foreground">documents</dt>
-            <dd>{node.document_ids.length}</dd>
-          </dl>
-          {#if node.chunk_ids.length}
-            <div class="mt-1 break-all text-xs text-muted-foreground">
-              {node.chunk_ids.join(', ')}
+        <!-- body -->
+        <div class="flex flex-1 flex-col gap-2 overflow-auto p-3">
+          {#if node}
+            {#if node.aliases.length}
+              <div class="text-xs">
+                <span class="text-muted-foreground">aliases:</span> {node.aliases.join(', ')}
+              </div>
+            {/if}
+            <!-- #5: Graphiti's generated entity summary (already on the DTO). -->
+            {#if node.summary}
+              <div class="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
+                {node.summary}
+              </div>
+            {/if}
+          {:else if edge}
+            <div class="text-muted-foreground">
+              {graph.nodeName(edge.source)} → {graph.nodeName(edge.target)}
             </div>
+            {#if edge.fact}
+              <div class="rounded-md bg-muted/40 p-2 text-xs italic">“{edge.fact}”</div>
+            {/if}
           {/if}
-        {:else if edge}
-          <div class="text-base font-semibold">{edge.rel_type}</div>
-          <div class="text-muted-foreground">
-            {graph.nodeName(edge.source)} → {graph.nodeName(edge.target)}
+
+          <!-- sources: real chunk text grouped by document (lazy-fetched on select) -->
+          <div class="mt-1 flex items-center justify-between">
+            <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+              >Sources</span
+            >
+            <span class="text-[11px] text-muted-foreground">
+              {selectedChunkIds.length} chunk{selectedChunkIds.length === 1 ? '' : 's'} ·
+              {selectedDocCount} doc{selectedDocCount === 1 ? '' : 's'}
+            </span>
           </div>
-          {#if edge.fact}
-            <div class="mt-1 italic">“{edge.fact}”</div>
-          {/if}
-          <dl class="mt-1 grid grid-cols-2 gap-1">
-            <dt class="text-muted-foreground">chunks</dt>
-            <dd>{edge.chunk_ids.length}</dd>
-            <dt class="text-muted-foreground">documents</dt>
-            <dd>{edge.document_ids.length}</dd>
-          </dl>
-          {#if edge.chunk_ids.length}
-            <div class="mt-1 break-all text-xs text-muted-foreground">
-              {edge.chunk_ids.join(', ')}
+
+          {#if selectedChunkIds.length === 0}
+            <p class="text-xs text-muted-foreground">
+              No source chunks — this entity has no edge-borne provenance (isolated node).
+            </p>
+          {:else if chunksLoading}
+            <p class="text-xs text-muted-foreground">Loading chunk text…</p>
+          {:else if chunkDetails.length === 0}
+            <p class="text-xs text-muted-foreground">
+              Chunk text unavailable (the source document may have been removed).
+            </p>
+          {:else}
+            <div class="space-y-3">
+              {#each chunkGroups as group (group.title)}
+                <div>
+                  <div class="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                    <FileText size={13} class="flex-none text-muted-foreground" aria-hidden="true" />
+                    <span class="truncate" title={group.title}>{group.title}</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    {#each group.chunks as c (c.id)}
+                      {@const expanded = expandedChunks.has(c.id)}
+                      {@const long = c.text.length > CHUNK_SNIPPET_CHARS}
+                      {@const date = formatChunkDate(c.valid_at)}
+                      <div class="rounded-md border bg-muted/40 p-2 text-xs">
+                        <!-- heading path (left, truncates) + event date (right, valid_at). -->
+                        {#if c.heading_path || date}
+                          <div
+                            class="mb-0.5 flex items-center gap-2 text-[10px] text-muted-foreground"
+                          >
+                            <span class="min-w-0 flex-1 truncate" title={c.heading_path ?? ''}>
+                              {c.heading_path ?? ''}
+                            </span>
+                            {#if date}
+                              <span
+                                class="flex flex-none items-center gap-1 tabular-nums"
+                                title={`Event date · ${date.title}`}
+                              >
+                                <CalendarDays size={10} aria-hidden="true" />
+                                {date.label}
+                              </span>
+                            {/if}
+                          </div>
+                        {/if}
+                        <p class="whitespace-pre-wrap break-words text-foreground/90">
+                          {expanded || !long ? c.text : c.text.slice(0, CHUNK_SNIPPET_CHARS) + '…'}
+                        </p>
+                        {#if long}
+                          <button
+                            type="button"
+                            onclick={() => toggleChunk(c.id)}
+                            class="mt-1 text-[11px] font-medium text-primary hover:underline"
+                          >
+                            {expanded ? 'Show less' : 'Show more'}
+                          </button>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
             </div>
           {/if}
-        {/if}
+        </div>
       </aside>
     {/if}
   </div>

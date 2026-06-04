@@ -1,12 +1,11 @@
-import { base } from '$app/paths';
 import type {
   GraphEdgeEvent,
   GraphIngestProgress,
   GraphNodeEvent,
   KnowledgeJobData
 } from '$lib/api/knowledge';
-import { PREF_KEYS } from '$lib/preferences/keys';
 import { knowledgeJobFromEvent } from './knowledge-jobs';
+import { knowledgeEventStream } from './knowledge-event-stream.svelte';
 
 const KNOWLEDGE_JOB_EVENT_TYPES = [
   'knowledge.job.started',
@@ -15,22 +14,14 @@ const KNOWLEDGE_JOB_EVENT_TYPES = [
   'knowledge.job.failed'
 ] as const;
 
-/** Subscribe to knowledge ingest job SSE updates; returns teardown. */
+/** Subscribe to knowledge ingest job SSE updates; returns teardown.
+ *  Rides the shared per-tab stream (one connection for all knowledge features). */
 export function connectKnowledgeJobEvents(onJob: (job: KnowledgeJobData) => void): () => void {
-  const selectedWorkspace =
-    typeof localStorage === 'undefined' ? null : localStorage.getItem(PREF_KEYS.selectedWorkspace);
-  const queryParam = selectedWorkspace ? `?workspace=${encodeURIComponent(selectedWorkspace)}` : '';
-  const source = new EventSource(`${base}/api/knowledge/events${queryParam}`);
-
   const handler = (event: MessageEvent) => {
     const job = knowledgeJobFromEvent(event);
     if (job) onJob(job);
   };
-
-  for (const type of KNOWLEDGE_JOB_EVENT_TYPES) {
-    source.addEventListener(type, handler);
-  }
-  return () => source.close();
+  return knowledgeEventStream.subscribeMany(KNOWLEDGE_JOB_EVENT_TYPES, handler);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,13 +133,9 @@ const KNOWLEDGE_EVAL_EVENT_TYPES = [
   'knowledge.eval.cancelled'
 ] as const;
 
-/** Subscribe to L3 eval batch SSE events; returns teardown. */
+/** Subscribe to L3 eval batch SSE events; returns teardown.
+ *  Rides the shared per-tab stream (one connection for all knowledge features). */
 export function connectKnowledgeEvalEvents(handlers: EvalEventHandlers): () => void {
-  const selectedWorkspace =
-    typeof localStorage === 'undefined' ? null : localStorage.getItem(PREF_KEYS.selectedWorkspace);
-  const queryParam = selectedWorkspace ? `?workspace=${encodeURIComponent(selectedWorkspace)}` : '';
-  const source = new EventSource(`${base}/api/knowledge/events${queryParam}`);
-
   const parse = <T>(event: MessageEvent): T | null => {
     try {
       return JSON.parse(event.data) as T;
@@ -185,10 +172,10 @@ export function connectKnowledgeEvalEvents(handlers: EvalEventHandlers): () => v
     }
   };
 
-  for (const type of KNOWLEDGE_EVAL_EVENT_TYPES) {
-    source.addEventListener(type, dispatch[type]);
-  }
-  return () => source.close();
+  const offs = KNOWLEDGE_EVAL_EVENT_TYPES.map((type) =>
+    knowledgeEventStream.subscribe(type, dispatch[type])
+  );
+  return () => offs.forEach((off) => off());
 }
 
 /** Replay snapshot from ``GET /knowledge/eval/state`` — the server-side run
@@ -228,15 +215,9 @@ const KNOWLEDGE_GRAPH_EVENT_TYPES = [
   'knowledge.graph.ingest_completed'
 ] as const;
 
-/** Subscribe to L3 graph-viz SSE events; returns teardown. */
+/** Subscribe to L3 graph-viz SSE events; returns teardown.
+ *  Rides the shared per-tab stream (one connection for all knowledge features). */
 export function connectKnowledgeGraphEvents(handlers: KnowledgeGraphEventHandlers): () => void {
-  const selectedWorkspace =
-    typeof localStorage === 'undefined' ? null : localStorage.getItem(PREF_KEYS.selectedWorkspace);
-  const queryParam = selectedWorkspace
-    ? `?workspace=${encodeURIComponent(selectedWorkspace)}`
-    : '';
-  const source = new EventSource(`${base}/api/knowledge/events${queryParam}`);
-
   const parse = <T>(event: MessageEvent): T | null => {
     try {
       return JSON.parse(event.data) as T;
@@ -264,8 +245,8 @@ export function connectKnowledgeGraphEvents(handlers: KnowledgeGraphEventHandler
     }
   };
 
-  for (const type of KNOWLEDGE_GRAPH_EVENT_TYPES) {
-    source.addEventListener(type, dispatch[type]);
-  }
-  return () => source.close();
+  const offs = KNOWLEDGE_GRAPH_EVENT_TYPES.map((type) =>
+    knowledgeEventStream.subscribe(type, dispatch[type])
+  );
+  return () => offs.forEach((off) => off());
 }

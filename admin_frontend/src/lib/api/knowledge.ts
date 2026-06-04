@@ -563,6 +563,9 @@ export type GraphNodeDTO = {
   aliases: string[];
   chunk_ids: string[];
   document_ids: string[];
+  // Graphiti's generated entity description (EntityNode.summary). Already serialized by
+  // the backend; surfaced in the node detail pane (#5).
+  summary: string;
 };
 
 export type GraphEdgeDTO = {
@@ -603,5 +606,49 @@ export function exportKnowledgeGraph(
     method: 'POST',
     body: { node_limit: opts.nodeLimit ?? null, edge_limit: opts.edgeLimit ?? null },
     timeoutMs: 60000
+  });
+}
+
+// One provenance chunk for a selected node/edge: the real text + its owning document.
+export type GraphChunkDetail = {
+  id: string;
+  text: string;
+  document_id: string;
+  document_title: string;
+  ord: number;
+  heading_path: string | null;
+  // Episode event time (ISO) — the chunk's semantic `valid_at` (reference/corpus date),
+  // not the Qdrant ingest time. Null when there's no episode or no temporal date.
+  valid_at: string | null;
+};
+
+export type GraphChunksDetailData = { chunks: GraphChunkDetail[] };
+
+/** Resolve a node/edge's chunk_ids → chunk text + document titles (graph detail panel). */
+export function fetchGraphChunksDetail(
+  chunkIds: string[],
+  signal?: AbortSignal
+): Promise<ApiResponse<GraphChunksDetailData>> {
+  return apiRequest<GraphChunksDetailData>('/knowledge/graph/chunks-detail', {
+    method: 'POST',
+    body: { chunk_ids: chunkIds },
+    timeoutMs: 20000,
+    signal
+  });
+}
+
+export type GraphSearchChunksData = { point_ids: string[] };
+
+/** Graph chunk-text search → point_ids (== chunk_ids) of chunks whose text matches.
+ *  The Graph tab maps these onto nodes/edges (via chunk_ids) to highlight matches. */
+export function searchGraphChunks(
+  text: string,
+  signal?: AbortSignal
+): Promise<ApiResponse<GraphSearchChunksData>> {
+  return apiRequest<GraphSearchChunksData>('/knowledge/graph/search-chunks', {
+    method: 'POST',
+    body: { text },
+    timeoutMs: 20000,
+    signal
   });
 }

@@ -19,12 +19,17 @@ construction, ``build_indices_and_constraints``, and teardown only.
 
 from __future__ import annotations
 
+import copy
+import datetime as dt
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
+import kuzu
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.driver.kuzu_driver import KuzuDriver
+from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.graph_queries import get_fulltext_indices
 from graphiti_core.helpers import get_default_group_id
 from hiro_commons.log import Logger
@@ -73,6 +78,14 @@ log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
 # Reranker ``top_n`` for the cross-encoder: rank ALL candidate facts Graphiti hands it
 # (the final cut is Graphiti's ``SearchConfig.limit``). Generous so we never pre-trim.
 _RERANK_CANDIDATE_CAP = 512
+
+# Dedicated read-connection pool size for the Graph-tab snapshot (docs
+# kuzu-shared-database-design.md §8, option b — "1 writer + N readers"). The snapshot
+# reads through its OWN AsyncConnection on the shared kuzu.Database so it never queues
+# behind the writer's pinned pool=1 connection during a build. Read-only ⇒ a larger pool
+# is safe (concurrent reads never open a write txn); only the WRITER driver must stay at 1
+# (§4.4). 4 matches kuzu's AsyncConnection default.
+_SNAPSHOT_READ_POOL = 4
 
 
 async def _ensure_fts_indices(driver: Any) -> None:
@@ -192,12 +205,16 @@ class GraphitiMemoryService:
         search_recipe: str = "rrf",
         k_hop: int = 1,
         reranker_min_score: float = 0.0,
+        sim_min_score: float = 0.3,
     ) -> None:
         self._ledger_detail = ledger_detail
         # Retrieval knobs (admin prefs) threaded into every search_chunk_ids call.
         self._search_recipe = search_recipe
         self._k_hop = k_hop
         self._reranker_min_score = reranker_min_score
+        # Cosine candidate floor (graphiti's EdgeSearchConfig.sim_min_score). See
+        # graphiti_search._build_search_config — lowering this fixes empty fact searches.
+        self._sim_min_score = sim_min_score
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._registry_key = _registry_key(self._db_path)
@@ -312,6 +329,34 @@ class GraphitiMemoryService:
             write_lock=kuzu_registry.write_lock(self._registry_key),
         )
 
+    async def remove_episodes(self, uuids: list[str]) -> int:
+        """Delete the given episodes and the nodes/edges they EXCLUSIVELY own.
+
+        Added for the eval reset path so a rerun can wipe only what a prior eval
+        created — without touching other knowledge. graphiti's ``remove_episode``
+        deletes only edges the episode created (``edge.episodes[0] == uuid``) and
+        nodes mentioned by no other episode (``episode_count == 1``), so shared /
+        real-data nodes survive; removing the whole eval set then cleans up every
+        eval-exclusive node once its last reference drops. Missing ids (first run,
+        or a partial prior run) are skipped — not an error. Serialized under the
+        per-workspace Kuzu write lock (single-writer), like ingest.
+        """
+        await self.initialize()
+        lock = kuzu_registry.write_lock(self._registry_key)
+        removed = 0
+        for episode_uuid in uuids:
+            async with lock:
+                try:
+                    await self._graphiti.remove_episode(episode_uuid)
+                except NodeNotFoundError:
+                    continue  # nothing to delete for this id — skip
+                except Exception:
+                    log.exception("❌ graphiti — remove_episode failed · uuid=%s", episode_uuid)
+                    raise
+            removed += 1
+        log.info("🧹 graphiti — removed eval episodes · count=%d/%d", removed, len(uuids))
+        return removed
+
     async def search_chunk_ids(
         self,
         query: str,
@@ -334,6 +379,7 @@ class GraphitiMemoryService:
             recipe=self._search_recipe,
             k_hop=self._k_hop,
             min_relevance=self._reranker_min_score,
+            sim_min_score=self._sim_min_score,
         )
 
     async def close(self) -> None:
@@ -464,7 +510,43 @@ class GraphitiMemoryService:
             search_recipe=recipe,
             k_hop=graph.k_hop,
             reranker_min_score=reranker_min_score,
+            sim_min_score=graph.sim_min_score,
         )
+
+
+@asynccontextmanager
+async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
+    """Yield a dedicated read connection on the *shared* Kuzu ``Database`` (lock-free reads).
+
+    Shared across every read-only graph access (snapshot export, chunk-detail temporal
+    lookup). Rationale (docs/kuzu-shared-database-design.md §8, option b): a shallow copy of
+    the shared driver reuses its provider/ops/group seed but swaps in our OWN AsyncConnection
+    on the shared Database, so reads run on a separate connection from the writer's pinned
+    pool=1 one — no head-of-line blocking during a build. Safe: a read never opens a write
+    txn (Kuzu = single-writer + concurrent lock-free reads, §3); we only ever touch the
+    shared Database object, never a 2nd open (which is what threw "Could not set lock on
+    file"). No write lock is taken (reads are lock-free, §4.3). The connection is closed
+    BEFORE the refcount is dropped — it's bound to the shared Database and must not outlive
+    our hold; the registry closes the shared driver only if we were the last holder.
+    """
+    key = _registry_key(path)
+    driver = kuzu_registry.acquire(
+        key, lambda: KuzuDriver(str(path), max_concurrent_queries=1)
+    )
+    read_driver = copy.copy(driver)
+    read_driver.client = kuzu.AsyncConnection(
+        driver.db, max_concurrent_queries=_SNAPSHOT_READ_POOL
+    )
+    try:
+        yield read_driver
+    finally:
+        try:
+            read_driver.client.close()
+        except Exception:
+            log.warning(
+                "⚠️ graphiti — snapshot read connection close failed", exc_info=True
+            )
+        kuzu_registry.release(key, _close_kuzu_driver)
 
 
 async def read_graph_snapshot(
@@ -475,12 +557,14 @@ async def read_graph_snapshot(
 ) -> tuple[list[Any], list[Any], dict[str, str]]:
     """Read all entity nodes + RELATES_TO facts for the default group (read-only).
 
-    Opens a Kuzu driver **directly** — a snapshot only touches the graph, so no
-    LLM/embedder (and thus no provider key) is needed. Returns ``([], [], {})`` when
-    the DB file does not exist (nothing graph-ingested yet) — never a side effect.
-    The third element is a ``chunk_id → document_id`` map (episode uuid →
-    ``source_description``) so the viz can fill node/edge ``document_ids`` (§5.6).
-    The load path for the admin Graph tab (docs/knowledge-graphiti-pivot-design.md §5.6).
+    No LLM/embedder (and thus no provider key) is needed — a snapshot only touches the
+    graph. Returns ``([], [], {})`` when the DB file does not exist (nothing
+    graph-ingested yet) — never a side effect. The third element is a
+    ``chunk_id → document_id`` map (episode uuid → ``source_description``) so the viz can
+    fill node/edge ``document_ids`` (§5.6). The load path for the admin Graph tab
+    (docs/knowledge-graphiti-pivot-design.md §5.6). Reads run on a dedicated connection
+    (see :func:`_snapshot_read_driver`) so a Graph-tab load DURING an active build never
+    queues behind the writer.
     """
     from graphiti_core.edges import EntityEdge
     from graphiti_core.errors import GroupsEdgesNotFoundError, GroupsNodesNotFoundError
@@ -489,31 +573,24 @@ async def read_graph_snapshot(
     path = Path(db_path)
     if not path.exists():
         return [], [], {}
-    key = _registry_key(path)
-    # Shared driver (read-only use here): the SAME kuzu.Database a running ingest holds,
-    # so the Graph tab renders DURING a build — Kuzu allows concurrent readers alongside
-    # one writer. Reads take NO write lock. Pinned to pool=1 to match the writer (§4.4).
-    driver = kuzu_registry.acquire(
-        key, lambda: KuzuDriver(str(path), max_concurrent_queries=1)
-    )
     nodes: list[Any] = []
     edges: list[Any] = []
     chunk_to_document: dict[str, str] = {}
-    try:
-        gid = get_default_group_id(driver.provider)
+    async with _snapshot_read_driver(path) as read_driver:
+        gid = get_default_group_id(read_driver.provider)
         # The get_by_group_ids helpers RAISE (not return []) on an empty graph.
         try:
-            nodes = await EntityNode.get_by_group_ids(driver, [gid], limit=node_limit)
+            nodes = await EntityNode.get_by_group_ids(read_driver, [gid], limit=node_limit)
         except GroupsNodesNotFoundError:
             nodes = []
         try:
-            edges = await EntityEdge.get_by_group_ids(driver, [gid], limit=edge_limit)
+            edges = await EntityEdge.get_by_group_ids(read_driver, [gid], limit=edge_limit)
         except GroupsEdgesNotFoundError:
             edges = []
         # Episodes carry document_id in ``source_description`` (set at ingest); map
         # chunk_id (episode uuid) → document_id for node/edge document_ids provenance.
         try:
-            episodes = await EpisodicNode.get_by_group_ids(driver, [gid], limit=node_limit)
+            episodes = await EpisodicNode.get_by_group_ids(read_driver, [gid], limit=node_limit)
         except GroupsNodesNotFoundError:
             episodes = []
         for ep in episodes or []:
@@ -521,11 +598,47 @@ async def read_graph_snapshot(
             doc = getattr(ep, "source_description", "") or ""
             if uuid and doc:
                 chunk_to_document[uuid] = doc
-    finally:
-        # Drop our refcount; the registry closes the shared driver only if we were the
-        # last holder (a concurrent ingest keeps it open).
-        kuzu_registry.release(key, _close_kuzu_driver)
     return list(nodes or []), list(edges or []), chunk_to_document
 
 
-__all__ = ["GraphitiMemoryService", "graphiti_db_path", "read_graph_snapshot"]
+async def read_episode_valid_at(db_path: Path, uuids: list[str]) -> dict[str, str | None]:
+    """Map episode uuid (== Qdrant point_id / chunk_id) → its event time (``valid_at`` ISO).
+
+    The Graph tab's chunk-detail panel shows each chunk's *semantic* event time. ``valid_at``
+    is the episode's ``reference_time`` (the eval/corpus timestamp) — NOT the Qdrant
+    ``ingested_at`` (processing time) — and it lives on the ``EpisodicNode`` in Kuzu, so it
+    needs this graph read. Returns ``{}`` when the DB file doesn't exist or ``uuids`` is
+    empty; ids with no episode are omitted; episodes with a null ``valid_at`` map to ``None``.
+    Read-only on a dedicated connection (lock-free; safe during an active build).
+    """
+    from graphiti_core.nodes import EpisodicNode
+
+    ids = [str(u) for u in uuids if u]
+    path = Path(db_path)
+    if not ids or not path.exists():
+        return {}
+    out: dict[str, str | None] = {}
+    async with _snapshot_read_driver(path) as read_driver:
+        try:
+            episodes = await EpisodicNode.get_by_uuids(read_driver, ids)
+        except Exception:
+            # A temporal-date lookup is best-effort provenance — a graph read hiccup must
+            # not fail the whole chunk-detail panel. Log and return what we have (none).
+            log.warning(
+                "⚠️ graphiti — episode valid_at lookup failed · count=%d", len(ids), exc_info=True
+            )
+            return {}
+    for ep in episodes or []:
+        uuid = getattr(ep, "uuid", "") or ""
+        if uuid:
+            valid_at = getattr(ep, "valid_at", None)
+            out[uuid] = valid_at.isoformat() if isinstance(valid_at, dt.datetime) else None
+    return out
+
+
+__all__ = [
+    "GraphitiMemoryService",
+    "graphiti_db_path",
+    "read_episode_valid_at",
+    "read_graph_snapshot",
+]

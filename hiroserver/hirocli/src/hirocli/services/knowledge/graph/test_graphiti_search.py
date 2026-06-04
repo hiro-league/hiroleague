@@ -161,13 +161,31 @@ async def test_recipe_k_hop_min_relevance_thread_into_config() -> None:
 
     g = _FakeGraphiti([_Edge(["c1"], "f")])
     await search_chunk_ids(
-        g, "q", num_results=7, recipe="cross_encoder", k_hop=3, min_relevance=0.4
+        g,
+        "q",
+        num_results=7,
+        recipe="cross_encoder",
+        k_hop=3,
+        min_relevance=0.4,
+        sim_min_score=0.2,
     )
     config = g.calls[0]["config"]
     assert config.limit == 7  # num_results → SearchConfig.limit
     assert config.reranker_min_score == pytest.approx(0.4)  # min_relevance gate
     assert config.edge_config.bfs_max_depth == 3  # k_hop → bfs depth
     assert config.edge_config.reranker is EdgeReranker.cross_encoder  # recipe selected
+    # sim_min_score → cosine candidate floor (overrides graphiti's strict 0.6 default,
+    # the gap that made trivial fact searches return facts_0/0).
+    assert config.edge_config.sim_min_score == pytest.approx(0.2)
+
+
+@pytest.mark.asyncio
+async def test_sim_min_score_defaults_below_graphiti_strict_floor() -> None:
+    """The cosine candidate floor must default below graphiti's hardcoded 0.6 — that
+    strict default is exactly what made paraphrase-distant fact searches return 0/0."""
+    g = _FakeGraphiti([_Edge(["c1"], "f")])
+    await search_chunk_ids(g, "q")  # no sim_min_score → use the recall-oriented default
+    assert g.calls[0]["config"].edge_config.sim_min_score < 0.6
 
 
 @pytest.mark.asyncio

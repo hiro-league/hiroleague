@@ -26,6 +26,12 @@ import {
 } from '$lib/api/knowledge';
 import { connectKnowledgeGraphEvents } from '../shared/knowledge-events';
 import { KNOWN_NODE_TYPE_ORDER } from '../graph/knowledge-graph-style';
+import { PREF_KEYS } from '$lib/preferences/keys';
+import {
+  readSessionString,
+  removeSessionString,
+  writeSessionString
+} from '$lib/preferences/storage';
 
 export interface KnowledgeGraphModelDeps {
   setError: (msg: string | null) => void;
@@ -41,28 +47,21 @@ const GLOW_MS = 3000;
 // Debounce window for the post-ingest reconciling re-export (ms).
 const RECONCILE_DEBOUNCE_MS = 400;
 
-// URL search-param keys for filter persistence (comma-joined hidden type lists),
-// mirroring useTableFilters' URL-sync approach so a filtered view is shareable
-// and survives reload.
-const URL_HIDE_NODES = 'hideNodes';
-const URL_HIDE_EDGES = 'hideEdges';
+// Filter persistence: each hidden-type set is kept in sessionStorage only — no URL
+// params (filters aren't meant to be shareable links), just remembered for the
+// session. Comma-joined hidden-type lists; empty set clears the key.
+const SESSION_HIDE_NODES = PREF_KEYS.knowledgeGraphHideNodes;
+const SESSION_HIDE_EDGES = PREF_KEYS.knowledgeGraphHideEdges;
 
-function readHiddenFromUrl(key: string): Set<string> {
-  if (typeof window === 'undefined') return new Set();
-  const raw = new URL(window.location.href).searchParams.get(key);
+function readHidden(key: string): Set<string> {
+  const raw = readSessionString(key);
   if (!raw) return new Set();
   return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-function writeHiddenToUrl(key: string, hidden: Set<string>): void {
-  if (typeof window === 'undefined') return;
-  const url = new URL(window.location.href);
-  if (hidden.size > 0) {
-    url.searchParams.set(key, [...hidden].join(','));
-  } else {
-    url.searchParams.delete(key);
-  }
-  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+function writeHidden(key: string, hidden: Set<string>): void {
+  if (hidden.size > 0) writeSessionString(key, [...hidden].join(','));
+  else removeSessionString(key);
 }
 
 // Sort node-type facets: known ontology types first (in canonical order), then
@@ -90,8 +89,8 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   // We store the HIDDEN types so the default (empty set) means "show all".
   // Reassigned with a fresh Set on every change so $state reactivity fires.
   // Seeded from the URL so a filtered view is restored on reload.
-  let hiddenNodeTypes = $state<Set<string>>(readHiddenFromUrl(URL_HIDE_NODES));
-  let hiddenEdgeTypes = $state<Set<string>>(readHiddenFromUrl(URL_HIDE_EDGES));
+  let hiddenNodeTypes = $state<Set<string>>(readHidden(SESSION_HIDE_NODES));
+  let hiddenEdgeTypes = $state<Set<string>>(readHidden(SESSION_HIDE_EDGES));
 
   // Non-reactive O(1) indexes — the dedup source of truth. Values are the same
   // object references held in the reactive arrays (mutated in place on upsert).
@@ -296,12 +295,68 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   const visibleEdgeCount = $derived(visibleLinks.length);
   const hasActiveFilters = $derived(hiddenNodeTypes.size > 0 || hiddenEdgeTypes.size > 0);
 
+  // ── Search highlight (transient view state; not persisted) ──────────────────
+  // One unified query highlights matching nodes/edges WITHOUT hiding the rest:
+  //   • node name/aliases + edge rel_type/fact → matched here (client-side)
+  //   • chunk TEXT → matched via the backend (KnowledgeGraphPanel fetches point_ids
+  //     and pushes them in through setMatchedChunkIds; we map them onto nodes/edges
+  //     by chunk_ids, G6). The two match sources union below.
+  let searchQuery = $state('');
+  // Qdrant point_ids whose chunk text matched the current query (== chunk_ids). Owned
+  // here but populated by the panel's debounced backend lookup; cleared when the query
+  // clears so a stale chunk match never outlives its text.
+  let matchedChunkIds = $state<Set<string>>(new Set());
+
+  function setSearchQuery(q: string): void {
+    searchQuery = q;
+    if (!q.trim()) matchedChunkIds = new Set(); // clearing the box clears chunk matches too
+  }
+  function setMatchedChunkIds(ids: string[]): void {
+    matchedChunkIds = new Set(ids);
+  }
+
+  const searchActive = $derived(searchQuery.trim().length > 0);
+
+  // Nodes matched by the query: name/alias substring, OR any chunk_id in matchedChunkIds.
+  const matchedNodeIds = $derived.by<Set<string>>(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return new Set();
+    const out = new Set<string>();
+    for (const n of nodes) {
+      if (
+        n.name.toLowerCase().includes(q) ||
+        n.aliases.some((a) => a.toLowerCase().includes(q)) ||
+        n.chunk_ids.some((c) => matchedChunkIds.has(c))
+      ) {
+        out.add(n.id);
+      }
+    }
+    return out;
+  });
+  // Edges matched by the query: rel_type/fact substring, OR any chunk_id in matchedChunkIds.
+  const matchedEdgeIds = $derived.by<Set<string>>(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return new Set();
+    const out = new Set<string>();
+    for (const e of links) {
+      if (
+        e.rel_type.toLowerCase().includes(q) ||
+        (e.fact ?? '').toLowerCase().includes(q) ||
+        e.chunk_ids.some((c) => matchedChunkIds.has(c))
+      ) {
+        out.add(e.id);
+      }
+    }
+    return out;
+  });
+  const matchCount = $derived(matchedNodeIds.size + matchedEdgeIds.size);
+
   function toggleNodeType(type: string): void {
     const next = new Set(hiddenNodeTypes);
     if (next.has(type)) next.delete(type);
     else next.add(type);
     hiddenNodeTypes = next;
-    writeHiddenToUrl(URL_HIDE_NODES, next);
+    writeHidden(SESSION_HIDE_NODES, next);
   }
   // Edge types are filtered via the multi-select dropdown, which works in terms
   // of VISIBLE (checked) types: hidden = (all present edge types) − visible.
@@ -312,13 +367,13 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       if (!shown.has(e.rel_type)) next.add(e.rel_type);
     }
     hiddenEdgeTypes = next;
-    writeHiddenToUrl(URL_HIDE_EDGES, next);
+    writeHidden(SESSION_HIDE_EDGES, next);
   }
   function clearFilters(): void {
     hiddenNodeTypes = new Set();
     hiddenEdgeTypes = new Set();
-    writeHiddenToUrl(URL_HIDE_NODES, hiddenNodeTypes);
-    writeHiddenToUrl(URL_HIDE_EDGES, hiddenEdgeTypes);
+    writeHidden(SESSION_HIDE_NODES, hiddenNodeTypes);
+    writeHidden(SESSION_HIDE_EDGES, hiddenEdgeTypes);
   }
 
   return {
@@ -350,7 +405,15 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     hasActiveFilters: () => hasActiveFilters,
     toggleNodeType,
     setVisibleEdgeTypes,
-    clearFilters
+    clearFilters,
+    // ── search highlight ──
+    searchQuery: () => searchQuery,
+    setSearchQuery,
+    setMatchedChunkIds,
+    searchActive: () => searchActive,
+    matchedNodeIds: () => matchedNodeIds,
+    matchedEdgeIds: () => matchedEdgeIds,
+    matchCount: () => matchCount
   };
 }
 

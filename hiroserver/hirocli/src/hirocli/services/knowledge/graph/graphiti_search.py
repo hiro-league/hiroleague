@@ -53,21 +53,32 @@ _EDGE_RECIPES: dict[str, SearchConfig] = {
 
 
 def _build_search_config(
-    recipe: str, *, num_results: int, k_hop: int, min_relevance: float
+    recipe: str, *, num_results: int, k_hop: int, min_relevance: float, sim_min_score: float
 ) -> SearchConfig:
     """Clone the recipe and apply the admin knobs (no hardcoded params, repo rule).
 
     ``num_results`` → ``SearchConfig.limit`` (facts kept), ``k_hop`` →
     ``EdgeSearchConfig.bfs_max_depth`` (graph expansion radius), ``min_relevance`` →
     ``SearchConfig.reranker_min_score`` (drop low-relevance facts; meaningful only for
-    the cross-encoder, whose scores are calibrated). Deep-copied so the shared module
-    recipe constants are never mutated."""
+    the cross-encoder, whose scores are calibrated), ``sim_min_score`` →
+    ``EdgeSearchConfig.sim_min_score`` (cosine *candidate* floor). Deep-copied so the
+    shared module recipe constants are never mutated.
+
+    Why ``sim_min_score`` matters: graphiti hardcodes ``EdgeSearchConfig.sim_min_score``
+    to ``DEFAULT_MIN_SCORE = 0.6``, which is too strict for our embedder. A
+    paraphrase-distant query (asking for a "wife" when the extracted fact says
+    "married to") scores below 0.6, so the cosine leg returns ZERO candidates; if bm25
+    also misses (the discriminating word isn't in the terse fact), the whole fact search
+    comes back empty (facts_0/0) and the leg silently falls back to flat. Driving this
+    from the pref keeps candidate generation recall-oriented; the reranker
+    (``reranker_min_score``) is where precision belongs."""
     base = _EDGE_RECIPES.get(recipe, EDGE_HYBRID_SEARCH_RRF)
     config = base.model_copy(deep=True)
     config.limit = max(1, int(num_results))
     config.reranker_min_score = max(0.0, float(min_relevance))
     if config.edge_config is not None:
         config.edge_config.bfs_max_depth = max(1, int(k_hop))
+        config.edge_config.sim_min_score = max(0.0, min(1.0, float(sim_min_score)))
     return config
 
 
@@ -143,6 +154,7 @@ async def search_chunk_ids(
     recipe: str = "rrf",
     k_hop: int = 1,
     min_relevance: float = 0.0,
+    sim_min_score: float = 0.3,
 ) -> GraphitiExpansion:
     """Run Graphiti fact search → focused chunk_ids (+ fact texts).
 
@@ -160,7 +172,11 @@ async def search_chunk_ids(
     # num_results budget (design §7). None ⇒ Graphiti applies its empty default filter.
     search_filter = _current_only_filter() if temporal == "current" else None
     config = _build_search_config(
-        recipe, num_results=num_results, k_hop=k_hop, min_relevance=min_relevance
+        recipe,
+        num_results=num_results,
+        k_hop=k_hop,
+        min_relevance=min_relevance,
+        sim_min_score=sim_min_score,
     )
     try:
         results = await graphiti.search_(

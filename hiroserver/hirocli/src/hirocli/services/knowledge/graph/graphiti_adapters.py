@@ -213,6 +213,91 @@ def _result_preview(data: Any, *, limit: int = 4) -> str:
         return ""
 
 
+def _as_int(value: Any, default: int = -1) -> int:
+    """Best-effort int coercion for LLM-supplied fields; never raises."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+# Operation names whose result is an entity-dedup decision (docs §12.2.1, #2). Both
+# map to the ``resolve_entities`` ledger node (see ingest_ledger._NODE_FOR_OPERATION).
+_ENTITY_RESOLUTION_OPS = frozenset({"NodeResolutions", "NodeDuplicate"})
+
+
+def _resolution_preview(operation: str, data: Any) -> str:
+    """Decision-oriented preview for the dedup steps (#2 — explain *what was decided*).
+
+    The generic ``_result_preview`` only lists names; for resolution we instead want
+    new-vs-merged (entities) and new/duplicate/supersede (facts) so the
+    ``resolve_entities`` / ``resolve_facts`` Graph-Runs rows say what happened to the
+    freshly-extracted ("unresolved") items. Returns "" for non-dedup ops so the caller
+    falls back to the generic preview. Never raises."""
+    if not isinstance(data, dict):
+        return ""
+    try:
+        if operation in _ENTITY_RESOLUTION_OPS:
+            return _entity_resolution_preview(data)
+        if operation == "EdgeDuplicate":
+            return _edge_resolution_preview(data)
+    except Exception:
+        return ""
+    return ""
+
+
+def _entity_resolution_preview(data: dict[str, Any], *, limit: int = 4) -> str:
+    """``NodeResolutions`` → "resolved N: X new, Y merged · merged: …".
+
+    ``duplicate_candidate_id >= 0`` means the extracted entity was MERGED into an
+    existing node; ``-1`` means it became a NEW node. The single-node ``NodeDuplicate``
+    shape (no ``entity_resolutions`` wrapper) is handled defensively."""
+    resolutions = data.get("entity_resolutions")
+    if not isinstance(resolutions, list):
+        resolutions = [data] if "duplicate_candidate_id" in data else []
+    merged_names: list[str] = []
+    new_count = 0
+    merged_count = 0
+    for item in resolutions:
+        if not isinstance(item, dict):
+            continue
+        if _as_int(item.get("duplicate_candidate_id", -1), -1) >= 0:
+            merged_count += 1
+            name = str(item.get("name") or "").strip()
+            if name:
+                merged_names.append(name)
+        else:
+            new_count += 1
+    total = new_count + merged_count
+    if not total:
+        return ""
+    head = f"resolved {total}: {new_count} new, {merged_count} merged"
+    if merged_names:
+        shown = ", ".join(merged_names[:limit])
+        if len(merged_names) > limit:
+            shown += f" (+{len(merged_names) - limit})"
+        head += f" · merged: {shown}"
+    return head
+
+
+def _edge_resolution_preview(data: dict[str, Any]) -> str:
+    """``EdgeDuplicate`` (one fact) → new / duplicate / supersede decision.
+
+    ``duplicate_facts`` = idxs of existing facts this one duplicates; ``contradicted_facts``
+    = idxs it supersedes (invalidates). Both empty ⇒ a brand-new fact."""
+    dup = data.get("duplicate_facts")
+    con = data.get("contradicted_facts")
+    dup_n = len(dup) if isinstance(dup, list) else 0
+    con_n = len(con) if isinstance(con, list) else 0
+    if dup_n and con_n:
+        return f"duplicate · supersedes {con_n}"
+    if dup_n:
+        return "duplicate of existing fact"
+    if con_n:
+        return f"new · supersedes {con_n}"
+    return "new fact"
+
+
 # ---------------------------------------------------------------------------
 # LLM client adapter
 # ---------------------------------------------------------------------------
@@ -351,8 +436,11 @@ class GraphitiLLMClient(LLMClient):
                     model_size,
                     operation=operation,
                     elapsed_ms=(time.perf_counter() - started) * 1000.0,
-                    # What this step produced — for the Graph-Runs node preview.
-                    preview=_result_preview(parsed_dump),
+                    # What this step produced — for the Graph-Runs node preview. Dedup
+                    # ops get a decision-oriented preview (new/merged/supersede, #2);
+                    # everything else falls back to the generic name-list preview.
+                    preview=_resolution_preview(operation, parsed_dump)
+                    or _result_preview(parsed_dump),
                 )
                 if parsed is None:
                     # Fail loud so the caller (Graphiti node op) surfaces the bad

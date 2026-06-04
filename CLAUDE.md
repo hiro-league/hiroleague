@@ -4,7 +4,7 @@
 
 # Answer Style
 
-**Applies to: Claude Code Models Only.**
+**Applies to: Claude Code Models Only.** This governs **chat answers in the conversation only** — it does NOT apply to authored content such as mintdocs/MDX pages, code, or committed files. (mintdocs in particular has no TL;DR.)
 
 ## Formatting
 

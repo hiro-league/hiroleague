@@ -164,6 +164,11 @@ export function editsForSave(
     draft.knowledge.graph.search_recipe
   );
   add(
+    'knowledge.graph.sim_min_score',
+    baseline.knowledge.graph.sim_min_score,
+    draft.knowledge.graph.sim_min_score
+  );
+  add(
     'knowledge.graph.ledger_detail',
     baseline.knowledge.graph.ledger_detail,
     draft.knowledge.graph.ledger_detail

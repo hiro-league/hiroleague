@@ -94,6 +94,12 @@ def _node_for_operation(operation: str) -> str:
 # individually visible — the **Hybrid** granularity (docs §12.2.1).
 RESOLVE_FACTS_NODE = "resolve_facts"
 
+# Episode input-preview budget (#1 — surface the INGESTED TEXT so the admin can visually
+# validate extraction against source). Rich mode shows a generous slice of the chunk;
+# compact mode keeps the metadata-sized default. Capped so a chunk can't bloat the ledger.
+_EPISODE_TEXT_PREVIEW_MAX_RICH = 1500
+_EPISODE_TEXT_PREVIEW_MAX_COMPACT = 280
+
 
 @dataclass
 class _OpAgg:
@@ -286,11 +292,15 @@ async def ledger_episode(
     document_id: str,
     title: str,
     reference_time: Any,
+    text: str = "",
 ) -> AsyncIterator[EpisodeLedger | None]:
     """Per-episode context: open a parent step + collector; flush nodes on exit.
 
     Yields the :class:`EpisodeLedger` so the caller can record persist counts after
     ``add_episode`` returns. ``None`` when the run has no sink (caller guards).
+
+    ``text`` is the episode body being ingested; it's surfaced in the step's input
+    preview (#1) so the admin can validate extraction against the source passage.
     """
     if run.sink is None:
         yield None
@@ -299,6 +309,12 @@ async def ledger_episode(
     collector = EpisodeLedger()
     entry = run.sink.open_entry(EPISODE_NODE, {}, None, captures=frozenset({"decision"}))
     entry.set_decision("episode", "")
+    # Rich mode shows a generous slice of the source text; compact stays metadata-sized.
+    text_max = (
+        _EPISODE_TEXT_PREVIEW_MAX_COMPACT
+        if run.ledger_detail == "compact"
+        else _EPISODE_TEXT_PREVIEW_MAX_RICH
+    )
     entry.set_input_preview(
         _episode_input_preview(
             episode_index=episode_index,
@@ -306,7 +322,9 @@ async def ledger_episode(
             chunk_id=chunk_id,
             title=title,
             reference_time=reference_time,
-        )
+            text=text,
+        ),
+        max_len=text_max,
     )
     # Buffer graphiti's tracer spans for this episode so we can read the
     # ``add_episode`` rollup (esp. ``edge.invalidated_count`` — the supersession the
@@ -474,7 +492,13 @@ def _flush_resolve_facts(entry: LedgerEntry, collector: EpisodeLedger, *, rich: 
 
 
 def _episode_input_preview(
-    *, episode_index: int, total: int, chunk_id: str, title: str, reference_time: Any
+    *,
+    episode_index: int,
+    total: int,
+    chunk_id: str,
+    title: str,
+    reference_time: Any,
+    text: str = "",
 ) -> str:
     label = (title or "").strip() or "<untitled>"
     cid = chunk_id[:8] if chunk_id else "?"
@@ -484,7 +508,11 @@ def _episode_input_preview(
             ref = f" · t={reference_time.date().isoformat()}"
         except Exception:
             ref = ""
-    return f"episode {episode_index}/{total} · chunk {cid} · '{label}'{ref}"
+    head = f"episode {episode_index}/{total} · chunk {cid} · '{label}'{ref}"
+    # #1 — append the actual ingested text so it's visible in the episode step (the
+    # set_input_preview cap truncates; whitespace is collapsed by the ledger's _preview).
+    body = " ".join((text or "").split())
+    return f"{head} · text: {body}" if body else head
 
 
 def _episode_output_preview(collector: EpisodeLedger) -> str:

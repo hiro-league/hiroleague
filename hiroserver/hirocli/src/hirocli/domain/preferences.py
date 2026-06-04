@@ -491,6 +491,15 @@ class KnowledgeGraphPreferences(BaseModel):
     k_hop: int = Field(default=1, ge=1, le=3)
     # Graphiti search rerank recipe for the fact-search leg.
     search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+    # Cosine *candidate* floor for the fact-search leg (maps to Graphiti
+    # ``EdgeSearchConfig.sim_min_score``). A fact only becomes a search candidate if its
+    # embedding similarity to the query clears this. Graphiti hardcodes 0.6 — too strict
+    # for our embedder: paraphrase-distant facts (asking "wife" when the stored fact says
+    # "married to") fall below it, the cosine leg returns nothing, and the graph search
+    # comes back empty. Keep low for RECALL (the reranker.min_relevance below is where
+    # precision belongs); raise toward 0.6 to tighten candidates. Applies to all recipes
+    # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
+    sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0)
     # Graph Runs ledger verbosity (docs §12.2): ``rich`` = per-node content previews
     # + one row per edge in ``resolve_facts``; ``compact`` = stats only, aggregated.
     ledger_detail: KnowledgeGraphLedgerDetail = "rich"

@@ -19,7 +19,10 @@
 >
 > **Decision:** one **refcounted lazy-singleton `Database` per workspace** that **owns a
 > per-workspace write lock** (serializes all writers) + **lock-free reads**, with a
-> thin **fail-fast** fallback for an external-process lock (A + B).
+> thin **fail-fast** fallback for an external-process lock (A + B). Reader connection:
+> **option (b)** — snapshot reads on a **dedicated `AsyncConnection`** over the shared
+> `Database` (§4.4, §8), so a Graph-tab load mid-build never queues behind the writer's
+> pool=1 connection.
 > **Status:** ✅ **implemented** (2026-06-04). New module
 > [`kuzu_registry.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/kuzu_registry.py)
 > (refcounted shared driver + per-workspace write lock); `graphiti_service.py` opens/closes
@@ -180,11 +183,25 @@ lock. They read concurrently with each other and with the active writer (§3 pro
 returns last-committed data). This is what lets the Graph tab render during a build and
 many chats retrieve at once.
 
-### 4.4 Writer driver stays `max_concurrent_queries=1`
+### 4.4 Writer driver stays `max_concurrent_queries=1`; readers get their own connection
 
-The factory opens the shared driver at **pool=1** (graphiti's default and its
-self-serialization guarantee). The open item (§8) is only *how readers get a non-queuing
-connection* — never bumping the writer pool.
+The factory opens the shared **writer** driver at **pool=1** (graphiti's default and its
+self-serialization guarantee) — never bumped, else graphiti's internal `semaphore_gather`
+writes land on different pool connections and self-collide with Kuzu's single-writer rule
+(§3).
+
+**Resolved (was the §8 open item): readers get a dedicated connection — option (b).**
+`read_graph_snapshot` shallow-copies the shared driver and swaps in its **own**
+`kuzu.AsyncConnection(shared_db, max_concurrent_queries=4)`, so snapshot reads run on a
+separate connection from the writer's pinned one — no head-of-line blocking when the Graph
+tab loads mid-build. This is the textbook **1 writer + N readers** shape, and it's safe
+because a read **never opens a write transaction** (concurrent reads are fine; only the
+*writer* pool must stay at 1). The shared `Database` is untouched — still one `Database`
+per file; we only add a second `Connection` on it. graphiti's Kuzu `get_by_group_ids`
+hits only `driver.execute_query` (→ the swapped client) + `driver.provider`, so a shallow
+copy suffices and the ORM is kept (no hand-maintained Cypher). The dedicated connection is
+closed in the read's `finally`, before the refcount is dropped, so it never outlives the
+shared `Database`. ([graphiti_service.py](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py) `read_graph_snapshot`).
 
 ### 4.5 Option B — thin fail-fast fallback
 
@@ -227,7 +244,7 @@ Detection lives in the registry as `is_kuzu_lock_error(exc)` (one home for the m
 | Risk | Mitigation |
 |------|-----------|
 | Concurrent writers crash the graph | Per-workspace `write_lock` on the singleton serializes **all** writers; **validated** that without it Kuzu errors (§3) |
-| Bumping reader concurrency self-collides graphiti's internal writes | Writer driver pinned to `max_concurrent_queries=1`; reader-connection choice handled separately (§8) |
+| Bumping reader concurrency self-collides graphiti's internal writes | Writer driver pinned to `max_concurrent_queries=1`; readers use a **separate** `AsyncConnection` (§4.4) — read-only, so its pool size can't trip the single-writer rule |
 | Refcount leak (acquire without release on an exception path) | every acquire paired in `close()`/`finally`; unit test asserts registry empties to `{}` |
 | `write_lock` held forever if a writer hangs | writer is `await`ed inside `async with`; a crash releases the lock; episodes are bounded units |
 | `_database` shared-seed on a shared driver | safe today (one group/workspace); flagged as a hazard if multi-group lands (§8) |
@@ -251,12 +268,14 @@ Detection lives in the registry as `is_kuzu_lock_error(exc)` (one home for the m
 
 ## 8. Open items / follow-ups
 
-- **Reader connection (one decision):** to keep reads from queuing behind the writer's
-  pool=1 connection, either (a) readers share the pooled driver (in practice fine — a
-  build is mostly LLM time with short DB write-bursts, so reads slot into the gaps), or
-  (b) readers get their own `Connection` on the shared `Database` (textbook "1 writer + N
-  readers"). Pick during implementation; default to (a) for simplicity, escalate to (b)
-  if snapshot latency during builds is felt.
+- **Reader connection — ✅ RESOLVED (2026-06-04): chose (b).** Shipped (a) initially
+  (readers share the pooled driver), but under real ingest the snapshot read queued behind
+  the writer's pool=1 connection and the Graph-tab export hung past its 60s client timeout
+  → "signal is aborted" / blank graph. Escalated to **(b)**: `read_graph_snapshot` opens
+  its **own** `AsyncConnection` on the shared `Database` (shallow-copied read driver,
+  writer driver untouched) — see §4.4. The originally-considered `.db`/`.client` swap *on
+  the shared driver* stays rejected (§8 last bullet); this is a swap on a per-read **copy**,
+  localized to `graphiti_service.py`, so the G3/G8 boundary holds.
 - **Promote to a held (non-lazy) singleton:** keep the `Database` open for the whole
   workspace session instead of refcount-closing when idle. Cleaner end-state, but needs
   teardown hooks on **workspace switch / graph reset / server stop** (else the lock leaks
@@ -297,6 +316,10 @@ Detection lives in the registry as `is_kuzu_lock_error(exc)` (one home for the m
 - **Keep the writer driver at `max_concurrent_queries=1`** (bumping self-collides
   graphiti's internal writes). Registry stays a **generic** pool — zero graphiti/kuzu
   internals leaked; boundary intact.
+- **Readers use a dedicated connection (option b, shipped):** the Graph-tab snapshot reads
+  on its own `AsyncConnection` over the shared `Database`, so a load mid-build doesn't queue
+  behind the writer's pool=1 connection (fixes the hung/aborted export). Safe — reads never
+  open a write txn.
 - **Option B** shrinks to a thin "DB busy" guard for an external-process lock.
 - **Validated:** read-during-write works; unguarded concurrent writes error — both kept as
   invariant tests.
