@@ -25,6 +25,7 @@ import {
   type GraphNodeEvent
 } from '$lib/api/knowledge';
 import { connectKnowledgeGraphEvents } from '../shared/knowledge-events';
+import { KNOWN_NODE_TYPE_ORDER } from '../graph/knowledge-graph-style';
 
 export interface KnowledgeGraphModelDeps {
   setError: (msg: string | null) => void;
@@ -32,10 +33,47 @@ export interface KnowledgeGraphModelDeps {
 
 export type GraphSelection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
 
+/** One row of the node/edge type filter strip: a type, how many carry it, hidden state. */
+export type GraphTypeFacet = { type: string; count: number; hidden: boolean };
+
 // How long a freshly-created node/edge glows after appearing (ms).
 const GLOW_MS = 3000;
 // Debounce window for the post-ingest reconciling re-export (ms).
 const RECONCILE_DEBOUNCE_MS = 400;
+
+// URL search-param keys for filter persistence (comma-joined hidden type lists),
+// mirroring useTableFilters' URL-sync approach so a filtered view is shareable
+// and survives reload.
+const URL_HIDE_NODES = 'hideNodes';
+const URL_HIDE_EDGES = 'hideEdges';
+
+function readHiddenFromUrl(key: string): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  const raw = new URL(window.location.href).searchParams.get(key);
+  if (!raw) return new Set();
+  return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
+}
+
+function writeHiddenToUrl(key: string, hidden: Set<string>): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (hidden.size > 0) {
+    url.searchParams.set(key, [...hidden].join(','));
+  } else {
+    url.searchParams.delete(key);
+  }
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+// Sort node-type facets: known ontology types first (in canonical order), then
+// any Graphiti-emitted unknown types alphabetically.
+function sortNodeFacets(facets: GraphTypeFacet[]): GraphTypeFacet[] {
+  const rank = (t: string) => {
+    const i = KNOWN_NODE_TYPE_ORDER.indexOf(t);
+    return i === -1 ? KNOWN_NODE_TYPE_ORDER.length : i;
+  };
+  return [...facets].sort((a, b) => rank(a.type) - rank(b.type) || a.type.localeCompare(b.type));
+}
 
 export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let nodes = $state<GraphNodeDTO[]>([]);
@@ -45,11 +83,15 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let live = $state(false);
   let progress = $state<GraphIngestProgress | null>(null);
   let selected = $state<GraphSelection>(null);
-  // Bumped whenever node/edge membership changes — the panel watches this to
-  // push fresh data into the force-graph instance without diffing arrays.
-  let dataVersion = $state(0);
   // id (prefixed n:/e:) -> epoch ms of last "is_new" sighting; drives the glow.
   let recent = $state<Record<string, number>>({});
+
+  // ── View filters (client-side; the full snapshot is already in memory) ──
+  // We store the HIDDEN types so the default (empty set) means "show all".
+  // Reassigned with a fresh Set on every change so $state reactivity fires.
+  // Seeded from the URL so a filtered view is restored on reload.
+  let hiddenNodeTypes = $state<Set<string>>(readHiddenFromUrl(URL_HIDE_NODES));
+  let hiddenEdgeTypes = $state<Set<string>>(readHiddenFromUrl(URL_HIDE_EDGES));
 
   // Non-reactive O(1) indexes — the dedup source of truth. Values are the same
   // object references held in the reactive arrays (mutated in place on upsert).
@@ -69,7 +111,6 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     links = [...edgeById.values()].filter(
       (e) => nodeById.has(e.source) && nodeById.has(e.target)
     );
-    dataVersion += 1;
   }
 
   function upsertNode(dto: GraphNodeDTO): void {
@@ -203,6 +244,83 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     return nodeById.get(id)?.name ?? id;
   }
 
+  // Resolve a link endpoint to its node type. force-graph mutates link.source/
+  // target from id strings into node-object references once the graph is laid
+  // out, so accept either shape.
+  function endpointType(end: unknown): string | undefined {
+    if (end && typeof end === 'object') return (end as GraphNodeDTO).type;
+    return typeof end === 'string' ? nodeById.get(end)?.type : undefined;
+  }
+
+  // An edge is visible only if its relation type is shown AND both endpoints'
+  // node types are shown — hiding a node type also hides edges touching it
+  // ("hide connected edges" semantics).
+  function isEdgeVisible(edge: GraphEdgeDTO): boolean {
+    if (hiddenEdgeTypes.has(edge.rel_type)) return false;
+    const st = endpointType(edge.source);
+    const tt = endpointType(edge.target);
+    if (st && hiddenNodeTypes.has(st)) return false;
+    if (tt && hiddenNodeTypes.has(tt)) return false;
+    return true;
+  }
+  function isNodeVisible(node: GraphNodeDTO): boolean {
+    return !hiddenNodeTypes.has(node.type);
+  }
+
+  // Facets reflect ALL loaded data (not the filtered subset) so hidden types
+  // stay listed and can be toggled back on.
+  const nodeTypeFacets = $derived.by<GraphTypeFacet[]>(() => {
+    const counts = new Map<string, number>();
+    for (const n of nodes) counts.set(n.type, (counts.get(n.type) ?? 0) + 1);
+    return sortNodeFacets(
+      [...counts].map(([type, count]) => ({ type, count, hidden: hiddenNodeTypes.has(type) }))
+    );
+  });
+  const edgeTypeFacets = $derived.by<GraphTypeFacet[]>(() => {
+    const counts = new Map<string, number>();
+    for (const e of links) counts.set(e.rel_type, (counts.get(e.rel_type) ?? 0) + 1);
+    // Busiest relations first, then alphabetical.
+    return [...counts]
+      .map(([type, count]) => ({ type, count, hidden: hiddenEdgeTypes.has(type) }))
+      .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+  });
+
+  // The filtered subsets fed to the force-graph instance. Filtering rebuilds the
+  // graph from these (recreate + re-layout) rather than hiding in place, so the
+  // remaining nodes spread to fill the frame. visibleLinks is derived from the
+  // already-non-dangling `links`, and isEdgeVisible drops any edge whose endpoint
+  // type is hidden, so every visible edge's endpoints are in visibleNodes.
+  const visibleNodes = $derived(nodes.filter(isNodeVisible));
+  const visibleLinks = $derived(links.filter(isEdgeVisible));
+  const visibleNodeCount = $derived(visibleNodes.length);
+  const visibleEdgeCount = $derived(visibleLinks.length);
+  const hasActiveFilters = $derived(hiddenNodeTypes.size > 0 || hiddenEdgeTypes.size > 0);
+
+  function toggleNodeType(type: string): void {
+    const next = new Set(hiddenNodeTypes);
+    if (next.has(type)) next.delete(type);
+    else next.add(type);
+    hiddenNodeTypes = next;
+    writeHiddenToUrl(URL_HIDE_NODES, next);
+  }
+  // Edge types are filtered via the multi-select dropdown, which works in terms
+  // of VISIBLE (checked) types: hidden = (all present edge types) − visible.
+  function setVisibleEdgeTypes(visible: string[]): void {
+    const shown = new Set(visible);
+    const next = new Set<string>();
+    for (const e of links) {
+      if (!shown.has(e.rel_type)) next.add(e.rel_type);
+    }
+    hiddenEdgeTypes = next;
+    writeHiddenToUrl(URL_HIDE_EDGES, next);
+  }
+  function clearFilters(): void {
+    hiddenNodeTypes = new Set();
+    hiddenEdgeTypes = new Set();
+    writeHiddenToUrl(URL_HIDE_NODES, hiddenNodeTypes);
+    writeHiddenToUrl(URL_HIDE_EDGES, hiddenEdgeTypes);
+  }
+
   return {
     nodes: () => nodes,
     links: () => links,
@@ -210,7 +328,6 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     truncated: () => truncated,
     live: () => live,
     progress: () => progress,
-    dataVersion: () => dataVersion,
     recent: () => recent,
     selected: () => selected,
     selectedNode,
@@ -220,7 +337,20 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     selectEdge,
     clearSelection,
     load,
-    connectEvents
+    connectEvents,
+    // ── view filters ──
+    nodeTypeFacets: () => nodeTypeFacets,
+    edgeTypeFacets: () => edgeTypeFacets,
+    hiddenNodeTypes: () => hiddenNodeTypes,
+    hiddenEdgeTypes: () => hiddenEdgeTypes,
+    visibleNodes: () => visibleNodes,
+    visibleLinks: () => visibleLinks,
+    visibleNodeCount: () => visibleNodeCount,
+    visibleEdgeCount: () => visibleEdgeCount,
+    hasActiveFilters: () => hasActiveFilters,
+    toggleNodeType,
+    setVisibleEdgeTypes,
+    clearFilters
   };
 }
 

@@ -72,6 +72,10 @@ export type EvalRow = {
   requires_graph: boolean;
   legs: Record<string, EvalQuestionLeg>;
   delta: string;
+  // Scoring rubric (display-only): what answers are judged against. Empty
+  // expected_fragments = negative-control (abstaining is the correct outcome).
+  expected_fragments: string[];
+  must_not_contain: string[];
 };
 
 function rowFromPayload(p: EvalQuestionPayload): EvalRow {
@@ -84,7 +88,9 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     question: p.question,
     requires_graph: p.requires_graph,
     legs: p.legs ?? {},
-    delta: p.delta
+    delta: p.delta,
+    expected_fragments: p.expected_fragments ?? [],
+    must_not_contain: p.must_not_contain ?? []
   };
 }
 

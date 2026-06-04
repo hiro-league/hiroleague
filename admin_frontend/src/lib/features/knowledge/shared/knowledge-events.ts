@@ -74,6 +74,10 @@ export type EvalQuestionPayload = {
   requires_graph: boolean;
   legs: Record<string, EvalQuestionLeg>;
   delta: string; // best graph leg vs flat
+  // Scoring rubric (display-only): what each answer is judged against. Empty
+  // expected_fragments = negative-control row (abstaining is the correct outcome).
+  expected_fragments?: string[];
+  must_not_contain?: string[];
 };
 
 /** Per-category passing counts, keyed by leg (the per-category results table). */

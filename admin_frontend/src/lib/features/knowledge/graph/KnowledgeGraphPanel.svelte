@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { Maximize2, Minimize2, RefreshCw } from '@lucide/svelte';
+  import { Maximize2, Minimize2, RefreshCw, SlidersHorizontal } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
   import type { KnowledgePageController } from '../state/knowledge-controller.svelte';
+  import KnowledgeGraphFilterBar from './KnowledgeGraphFilterBar.svelte';
+  import KnowledgeGraphOptionsPanel from './KnowledgeGraphOptionsPanel.svelte';
+  import { colorFor } from './knowledge-graph-style';
 
   interface Props {
     ctl: KnowledgePageController;
@@ -19,6 +22,12 @@
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let fg: any = null;
   let disconnect: (() => void) | null = null;
+
+  // Graph options panel (left overlay) + its live layout controls. The panel
+  // edits these; $effects below push them into the force-graph instance.
+  let optionsOpen = $state(false);
+  let linkStrength = $state(0.5); // d3 link-force strength: 0 loose … 1 rigid
+  let curveAmount = $state(0.45); // max bow for fanned parallel edges (0 = straight)
 
   // Expand: fills the content area below the sticky knowledge header/tabs.
   // Uses position:fixed so it escapes the page's padding/max-width wrapper;
@@ -57,17 +66,8 @@
     }
   }
 
-  // Node colour by ontology type (matches the Person/Place/Event/Org/Object/Entity set).
-  const TYPE_COLORS: Record<string, string> = {
-    Person: '#60a5fa',
-    Place: '#34d399',
-    Event: '#fbbf24',
-    Organization: '#f472b6',
-    Object: '#a78bfa',
-    Entity: '#94a3b8'
-  };
-  const colorFor = (type: string): string => TYPE_COLORS[type] ?? TYPE_COLORS.Entity;
-  const LEGEND = Object.entries(TYPE_COLORS);
+  // Node colour by ontology type lives in ./knowledge-graph-style so the filter
+  // strip and this canvas renderer share one palette (colorFor imported above).
 
   // Node visual constants (graph-space units; canvas → screen via globalScale).
   const NODE_RADIUS = 10;
@@ -134,6 +134,35 @@
   const LINK_DISTANCE = 80;
   const CHARGE_STRENGTH = -240;
   const CENTER_STRENGTH = 0.05;
+  // Keeping orphaned / weakly-connected nodes from flying off:
+  //  - GRAVITY pulls every node gently toward the origin (forceX/forceY-style).
+  //    Links + charge dominate locally, so connected clusters keep their shape;
+  //    the weak pull only matters for nodes with nothing else holding them.
+  //  - CHARGE_DISTANCE_MAX caps how far node-node repulsion reaches, so a lone
+  //    node isn't shoved across the canvas by the whole cluster's cumulative
+  //    charge. Together they corral strays near the connected mass.
+  const GRAVITY_STRENGTH = 0.03;
+  const CHARGE_DISTANCE_MAX = 320;
+
+  // A d3-force that pulls every node toward the origin (equivalent to
+  // forceX(0)+forceY(0)) — written inline so we don't add a d3-force import just
+  // for this. d3 calls force(alpha) each tick and force.initialize(nodes) on bind.
+  function radialGravity(strength: number) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let simNodes: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const force: any = (alpha: number) => {
+      for (const n of simNodes) {
+        n.vx -= n.x * strength * alpha;
+        n.vy -= n.y * strength * alpha;
+      }
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    force.initialize = (nodes: any[]) => {
+      simNodes = nodes;
+    };
+    return force;
+  }
 
   // Dark-mode-aware color scheme — read once per canvas callback.
   // This app sets `data-theme="dark"` / `data-theme="light"` on <html>
@@ -323,9 +352,12 @@
     }
   }
 
-  // Draw the relation name at the midpoint of each edge, rotated to follow the
-  // edge angle (kept upright — no upside-down text). 'after' mode = drawn on top
-  // of the default link line.
+  // Draw the relation name on each edge, rotated to follow the edge, kept upright.
+  // 'after' mode = drawn on top of the default link line. For parallel edges
+  // (and self-loops) the line is a bezier arc (see assignLinkCurvatures +
+  // linkCurvature); we place the label at the arc apex so the labels separate
+  // along with the lines. force-graph computes link.__controlPoints just before
+  // this 'after' paint, so we read them directly.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function linkCanvasObject(link: any, ctx: CanvasRenderingContext2D, scale: number): void {
     const fontSize = labelFontSize(
@@ -348,18 +380,86 @@
     if (!text) return;
 
     const s = getScheme();
-    const midX = (sx + tx) / 2;
-    const midY = (sy + ty) / 2;
-    let angle = Math.atan2(ty - sy, tx - sx);
+    // Label anchor = bezier point at t=0.5 (the visual middle of the arc).
+    const cps = link.__controlPoints as number[] | null;
+    let lx: number;
+    let ly: number;
+    let angle: number;
+    if (cps && cps.length === 2) {
+      // Quadratic arc (parallel edges): B(0.5) = ¼S + ½C + ¼E. Tangent at the
+      // midpoint is parallel to S→E, so the straight-line angle still applies.
+      lx = 0.25 * sx + 0.5 * cps[0] + 0.25 * tx;
+      ly = 0.25 * sy + 0.5 * cps[1] + 0.25 * ty;
+      angle = Math.atan2(ty - sy, tx - sx);
+    } else if (cps && cps.length === 4) {
+      // Cubic loop (self-edge): B(0.5) = ⅛S + ⅜C1 + ⅜C2 + ⅛E. Keep label upright.
+      lx = 0.125 * sx + 0.375 * cps[0] + 0.375 * cps[2] + 0.125 * tx;
+      ly = 0.125 * sy + 0.375 * cps[1] + 0.375 * cps[3] + 0.125 * ty;
+      angle = 0;
+    } else {
+      // Straight line.
+      lx = (sx + tx) / 2;
+      ly = (sy + ty) / 2;
+      angle = Math.atan2(ty - sy, tx - sx);
+    }
     // Flip text so it's never upside-down (read left-to-right).
     if (angle > Math.PI / 2) angle -= Math.PI;
     if (angle < -Math.PI / 2) angle += Math.PI;
 
     ctx.save();
-    ctx.translate(midX, midY);
+    ctx.translate(lx, ly);
     ctx.rotate(angle);
     drawTextPill(ctx, text, 0, 0, fontSize, s.edgeText, s.edgePillBg);
     ctx.restore();
+  }
+
+  // ── Parallel-edge & self-loop curvature ──────────────────────────────────
+  // When 2+ edges share the same node pair they'd overlap as one straight line.
+  // We fan them into distinct arcs by assigning each a linkCurvature (read by
+  // force-graph per frame from link.__curvature). Recomputed whenever the visible
+  // link set OR the curvature slider changes. The outer bow is curveAmount (the
+  // "Edge curvature" control); topology-only, so it lives outside the render loop.
+  const SELF_LOOP_BASE = 0.4; // first self-loop curvature; extra loops step out
+  const SELF_LOOP_STEP = 0.3;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linkEndId = (end: any): string => (end && typeof end === 'object' ? end.id : end);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function assignLinkCurvatures(links: any[]): void {
+    // Group by UNORDERED node pair so A→B and B→A fan together.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const groups = new Map<string, any[]>();
+    for (const l of links) {
+      const a = String(linkEndId(l.source));
+      const b = String(linkEndId(l.target));
+      const key = a === b ? `self ${a}` : a < b ? `${a} ${b}` : `${b} ${a}`;
+      const g = groups.get(key);
+      if (g) g.push(l);
+      else groups.set(key, [l]);
+    }
+    for (const [key, group] of groups) {
+      if (key.startsWith('self ')) {
+        // Self-loops: stack increasing loop sizes so multiples don't coincide.
+        group.forEach((l, i) => (l.__curvature = SELF_LOOP_BASE + i * SELF_LOOP_STEP));
+        continue;
+      }
+      if (group.length === 1) {
+        group[0].__curvature = 0; // lone edge stays straight
+        continue;
+      }
+      // Symmetric fan from −curveAmount…+curveAmount (one straight when odd
+      // count); opposite-direction edges flip sign so reciprocals separate.
+      const last = group.length - 1;
+      const refSource = linkEndId(group[last].source);
+      group[last].__curvature = curveAmount;
+      const delta = (2 * curveAmount) / last;
+      for (let i = 0; i < last; i++) {
+        let c = -curveAmount + i * delta;
+        if (linkEndId(group[i].source) !== refSource) c *= -1;
+        group[i].__curvature = c;
+      }
+    }
   }
 
   onMount(async () => {
@@ -381,6 +481,10 @@
       // light/dark theme switches without needing to re-init.
       .linkColor(() => getScheme().linkColor)
       .linkWidth(1.2)
+      // Parallel edges between the same pair fan into arcs (see
+      // assignLinkCurvatures); force-graph reads the per-link value each frame.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .linkCurvature((l: any) => l.__curvature ?? 0)
       .linkDirectionalArrowLength(5)
       .linkDirectionalArrowRelPos(0.92) // pull arrowhead inside the target disc
       .autoPauseRedraw(false)
@@ -396,9 +500,14 @@
     // at the top of this file. Optional-chain the force getters because some
     // forces are only created lazily (older force-graph versions); d3ReheatSimulation
     // kicks the cooled-down sim so the new params take effect on the existing graph.
-    fg.d3Force('link')?.distance(LINK_DISTANCE);
-    fg.d3Force('charge')?.strength(CHARGE_STRENGTH);
+    // strength = the "Link strength" slider (overrides d3's auto value so the
+    // control has a predictable effect); the strength $effect keeps it live.
+    fg.d3Force('link')?.distance(LINK_DISTANCE).strength(linkStrength);
+    // distanceMax caps repulsion range so strays aren't pushed to infinity.
+    fg.d3Force('charge')?.strength(CHARGE_STRENGTH).distanceMax(CHARGE_DISTANCE_MAX);
     fg.d3Force('center')?.strength(CENTER_STRENGTH);
+    // Gravity toward origin corrals orphaned / weakly-linked nodes near the rest.
+    fg.d3Force('gravity', radialGravity(GRAVITY_STRENGTH));
     fg.d3ReheatSimulation?.();
 
     resize();
@@ -406,12 +515,40 @@
     disconnect = graph.connectEvents();
   });
 
-  // Push fresh data into the instance whenever graph membership changes.
+  // Recreate the graph from the visible subset whenever membership OR filters
+  // change. Feeding force-graph only the visible nodes/edges makes it re-layout
+  // them to fill the frame, instead of leaving gaps where hidden nodes were.
+  // Tracks visibleNodes/visibleLinks, which depend on both the data and the
+  // hidden-type sets.
   $effect(() => {
-    const version = graph.dataVersion(); // tracked dependency
-    void version;
+    const nodes = graph.visibleNodes(); // tracked
+    const links = graph.visibleLinks(); // tracked
     if (fg) {
-      fg.graphData({ nodes: graph.nodes(), links: graph.links() });
+      assignLinkCurvatures(links); // fan out any parallel edges before painting
+      fg.graphData({ nodes, links });
+    }
+  });
+
+  // "Link strength" slider → d3 link-force strength. Reheat so the new stiffness
+  // resolves on the existing layout.
+  $effect(() => {
+    const s = linkStrength; // tracked
+    if (fg) {
+      fg.d3Force('link')?.strength(s);
+      fg.d3ReheatSimulation?.();
+    }
+  });
+
+  // "Edge curvature" slider → re-fan the current edges (no reheat; curvature is a
+  // render property recomputed from the live link set). Re-setting the accessor
+  // nudges force-graph to repaint with the new control points.
+  $effect(() => {
+    const amount = curveAmount; // tracked
+    void amount;
+    if (fg) {
+      assignLinkCurvatures(graph.visibleLinks());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fg.linkCurvature((l: any) => l.__curvature ?? 0);
     }
   });
 
@@ -481,32 +618,23 @@
       // covers py-(4|6) top+bottom + AdminPageHeader's section gap-5.
       'min-height: calc(100vh - 4rem - var(--admin-page-header-h, 150px) - 6rem)'}
 >
-  <!-- Toolbar: counts/status on the left, action buttons on the right.
+  <!-- Top control row: filter strip on the left, action buttons (reload /
+       expand) on the right — same line. Node/edge counts and live status live
+       inside the canvas now (bottom-left overlay), not here.
        Expanded → frosted bar with bottom border, like the shell header.
        Collapsed → inline row with no chrome. -->
   <div
     class={cn(
-      'flex flex-wrap items-center justify-between gap-3',
-      expanded && 'border-b bg-background/85 px-4 py-2.5 backdrop-blur'
+      'flex items-center justify-between gap-3',
+      expanded && 'border-b bg-background/85 px-4 py-2 backdrop-blur'
     )}
   >
-    <div class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-      <span>{graph.nodes().length} nodes · {graph.links().length} edges</span>
-      {#if graph.live()}
-        <span class="inline-flex items-center gap-1.5 text-emerald-500">
-          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> live
-        </span>
-      {/if}
-      {#if graph.progress()}
-        <span class="text-xs"
-          >ingesting chunk {graph.progress()?.chunk_index}/{graph.progress()?.chunk_total}…</span
-        >
-      {/if}
-      {#if graph.truncated()}
-        <span class="text-amber-500">showing a capped subset</span>
+    <div class="min-w-0 flex-1">
+      {#if graph.nodes().length > 0}
+        <KnowledgeGraphFilterBar {graph} />
       {/if}
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex shrink-0 items-center gap-2">
       <Button
         variant="outline"
         size="sm"
@@ -544,6 +672,32 @@
   >
     <div bind:this={container} class="absolute inset-0"></div>
 
+    <!-- Graph options: toggle button in the upper-left corner + the left panel. -->
+    {#if graph.nodes().length > 0}
+      <button
+        type="button"
+        onclick={() => (optionsOpen = !optionsOpen)}
+        class={cn(
+          'absolute left-2 top-2 z-10 rounded-md border bg-background/85 p-1.5 shadow-sm backdrop-blur transition-colors hover:bg-accent',
+          optionsOpen ? 'text-foreground' : 'text-muted-foreground'
+        )}
+        aria-label={optionsOpen ? 'Hide graph options' : 'Show graph options'}
+        aria-pressed={optionsOpen}
+        title="Graph options"
+      >
+        <SlidersHorizontal size={16} aria-hidden="true" />
+      </button>
+      {#if optionsOpen}
+        <div class="absolute left-2 top-12 z-10">
+          <KnowledgeGraphOptionsPanel
+            bind:linkStrength
+            bind:curveAmount
+            onClose={() => (optionsOpen = false)}
+          />
+        </div>
+      {/if}
+    {/if}
+
     {#if graph.nodes().length === 0 && !graph.loading()}
       <div class="absolute inset-0 grid place-items-center p-6">
         <InlineEmptyState
@@ -553,17 +707,34 @@
       </div>
     {/if}
 
-    <!-- type legend -->
-    <div
-      class="absolute bottom-2 left-2 flex flex-wrap gap-x-3 gap-y-1 rounded-md bg-background/80 p-2 text-xs"
-    >
-      {#each LEGEND as [type, color] (type)}
-        <span class="inline-flex items-center gap-1">
-          <span class="h-2.5 w-2.5 rounded-full" style:background-color={color}></span>
-          {type}
-        </span>
-      {/each}
-    </div>
+    <!-- Stats overlay (bottom-left, inside the graph view): node/edge counts +
+         live/ingest status. Shows visible/total when a filter is active. Type
+         legend lives in the filter strip above (color dots on node chips). -->
+    {#if graph.nodes().length > 0}
+      <div
+        class="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm"
+      >
+        {#if graph.hasActiveFilters()}
+          <span
+            >{graph.visibleNodeCount()}/{graph.nodes().length} nodes · {graph.visibleEdgeCount()}/{graph.links()
+              .length} edges</span
+          >
+        {:else}
+          <span>{graph.nodes().length} nodes · {graph.links().length} edges</span>
+        {/if}
+        {#if graph.live()}
+          <span class="inline-flex items-center gap-1.5 text-emerald-500">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> live
+          </span>
+        {/if}
+        {#if graph.progress()}
+          <span>ingesting chunk {graph.progress()?.chunk_index}/{graph.progress()?.chunk_total}…</span>
+        {/if}
+        {#if graph.truncated()}
+          <span class="text-amber-500">showing a capped subset</span>
+        {/if}
+      </div>
+    {/if}
 
     <!-- provenance / selection panel -->
     {#if node || edge}

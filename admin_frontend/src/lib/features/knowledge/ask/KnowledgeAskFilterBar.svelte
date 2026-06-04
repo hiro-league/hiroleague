@@ -132,45 +132,33 @@
   </label>
   <!-- L3 (Phase 5d) — Graph retrieval mode. off = flat (today). on = graph_expand focuses
        Qdrant on chunks linked to query entities. compare = both legs side-by-side.
-       Persists across reloads via knowledgeAskGraphMode preference. -->
-  <fieldset
-    class="flex shrink-0 items-center gap-1 self-end pb-2"
-    title="Graph mode: off (flat) · on (graph-augmented) · compare (both side-by-side). Requires Rewrite to extract query entities."
-  >
-    <legend class="sr-only">Graph retrieval mode</legend>
-    <span class="mr-1 text-sm text-muted-foreground">Graph</span>
-    {#each ['off', 'on', 'compare'] as mode (mode)}
-      <button
-        type="button"
-        class="rounded-md border px-2 py-1 font-sans text-xs capitalize transition-colors {ask.graphMode === mode
-          ? 'border-primary bg-primary/10 text-foreground'
-          : 'border-input bg-background text-muted-foreground hover:text-foreground'}"
-        aria-pressed={ask.graphMode === mode}
-        onclick={() => ask.setGraphMode(mode as 'off' | 'on' | 'compare')}
-      >
-        {mode}
-      </button>
-    {/each}
-  </fieldset>
+       Persists across reloads via knowledgeAskGraphMode preference.
+       Changed from a button group to a top-down label + dropdown to match the other filters. -->
+  <AdminFilterBarSelect
+    label="Graph"
+    value={ask.graphMode}
+    class="w-[9rem] shrink-0"
+    onValueChange={(value) => ask.setGraphMode(value as 'off' | 'on' | 'compare')}
+    options={[
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
+      { value: 'compare', label: 'Compare' }
+    ]}
+  />
   <!-- Per-query temporal override (§7): overrides the admin temporal_default for THIS
        query only. Relevant only when the graph leg runs (mode on/compare). -->
   {#if ask.graphMode !== 'off'}
-    <label
-      class="flex shrink-0 items-center gap-1 self-end pb-2"
-      title="Temporal lens for this query: Default (admin pref) · Current (facts valid now) · History (include superseded facts)"
-    >
-      <span class="text-sm text-muted-foreground">Time</span>
-      <select
-        class="rounded-md border border-input bg-background px-2 py-1 font-sans text-xs text-foreground"
-        value={ask.graphTemporal}
-        onchange={(e) =>
-          ask.setGraphTemporal(e.currentTarget.value as 'default' | 'current' | 'all')}
-      >
-        <option value="default">Default</option>
-        <option value="current">Current</option>
-        <option value="all">History</option>
-      </select>
-    </label>
+    <AdminFilterBarSelect
+      label="Time"
+      value={ask.graphTemporal}
+      class="w-[9rem] shrink-0"
+      onValueChange={(value) => ask.setGraphTemporal(value as 'default' | 'current' | 'all')}
+      options={[
+        { value: 'default', label: 'Default' },
+        { value: 'current', label: 'Current' },
+        { value: 'all', label: 'History' }
+      ]}
+    />
   {/if}
   <div class="flex items-end">
     <Button variant="outline" disabled={!ask.hasAskFilters} onclick={() => ask.clearAskFilters()}>

@@ -18,6 +18,8 @@ client (no Kuzu, no network). See docs/knowledge-graphiti-pivot-design.md §6.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime as dt
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -237,6 +239,7 @@ async def ingest_episodes(
     event_sink: GraphEventSink | None = None,
     ledger_sink: LedgerSink | None = None,
     ledger_detail: str = "rich",
+    write_lock: asyncio.Lock | None = None,
 ) -> GraphitiIngestStats:
     """Ingest chunks as Graphiti episodes — sequential, chronological, write-gated.
 
@@ -295,6 +298,10 @@ async def ingest_episodes(
             # on the real path (production always has a driver). Lets the fake-client tests
             # stay Kuzu-free while the live path creates episodes with our point_id.
             driver = getattr(graphiti, "driver", None)
+            # Serialize writers to one episode at a time (Kuzu single-writer + graphiti
+            # sequential dedup); held per-episode and released between (docs §4.2). The
+            # fake-client unit tests pass write_lock=None → a no-op guard.
+            write_guard = write_lock if write_lock is not None else contextlib.nullcontext()
 
             for index, (ep, ref) in enumerate(prepared):
                 async with ledger_episode(
@@ -309,28 +316,33 @@ async def ingest_episodes(
                     source = EpisodeType.message if ep.source == "message" else EpisodeType.text
                     body = _episode_body(ep, source)
                     try:
-                        if driver is not None and ep.chunk_id:
-                            await _preseed_episode_node(
-                                driver,
-                                ep,
-                                body=body,
+                        # One writer at a time: preseed + add_episode are this episode's
+                        # write unit. The lock spans the WHOLE add_episode (not just the
+                        # kuzu write) because graphiti's dedup reads prior graph state to
+                        # merge entities — concurrent episodes would dedup stale (§4.2).
+                        async with write_guard:
+                            if driver is not None and ep.chunk_id:
+                                await _preseed_episode_node(
+                                    driver,
+                                    ep,
+                                    body=body,
+                                    source=source,
+                                    group_id=group_id,
+                                    ref=ref,
+                                    now=_now(),
+                                )
+                            result = await graphiti.add_episode(
+                                name=_episode_name(ep),
+                                episode_body=body,
+                                source_description=ep.document_id,
+                                reference_time=ref,
                                 source=source,
                                 group_id=group_id,
-                                ref=ref,
-                                now=_now(),
+                                uuid=ep.chunk_id or None,
+                                entity_types=entity_types,
+                                edge_types=edge_types,
+                                edge_type_map=edge_type_map,
                             )
-                        result = await graphiti.add_episode(
-                            name=_episode_name(ep),
-                            episode_body=body,
-                            source_description=ep.document_id,
-                            reference_time=ref,
-                            source=source,
-                            group_id=group_id,
-                            uuid=ep.chunk_id or None,
-                            entity_types=entity_types,
-                            edge_types=edge_types,
-                            edge_type_map=edge_type_map,
-                        )
                     except Exception:
                         # External model + DB call — log + re-raise (general-coding-rule).
                         stats.episodes_failed += 1

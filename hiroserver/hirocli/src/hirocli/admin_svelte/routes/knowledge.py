@@ -747,6 +747,17 @@ async def graph_export(
         )
         return _success(payload)
     except Exception as exc:
+        # With the shared driver, in-process opens no longer collide; a lock error here
+        # means an EXTERNAL process holds the file (a 2nd hiro / stale handle). Return a
+        # clean "busy" message instead of a raw stack (docs §4.5).
+        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+
+        if is_kuzu_lock_error(exc):
+            log.warning("⚠️ knowledge graph export — graph DB busy (external lock held)")
+            return envelope_failure(
+                "Graph database is busy (a build may be running in another process) — "
+                "try again shortly."
+            )
         log.error("knowledge graph export failed", error=str(exc), exc_info=True)
         return envelope_failure(str(exc))
 

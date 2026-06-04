@@ -17,9 +17,12 @@ from graphiti_core.prompts.models import Message
 from pydantic import BaseModel
 
 from hirocli.domain.preferences import WorkspacePreferences
+from hirocli.services.knowledge.graph import kuzu_registry
 from hirocli.services.knowledge.graph.graphiti_service import (
     GraphitiMemoryService,
+    _registry_key,
     graphiti_db_path,
+    is_kuzu_lock_error,
     read_graph_snapshot,
 )
 
@@ -96,3 +99,50 @@ async def test_snapshot_empty_graph_against_real_kuzu(tmp_path) -> None:
     nodes, edges, _chunk_to_document = await read_graph_snapshot(db)
     assert nodes == []
     assert edges == []
+
+
+# --- Shared-Database registry: the kuzu_issue.md regression + sharing/refcount ---
+
+
+@pytest.mark.asyncio
+async def test_snapshot_while_service_open_shares_driver(tmp_path) -> None:
+    """Regression for docs/kuzu_issue.md: reading the Graph snapshot WHILE a service
+    holds the graph open used to throw "Could not set lock on file" (a 2nd Database).
+    Now every consumer shares ONE driver, so the snapshot succeeds mid-hold and the
+    registry refcount returns to 1 after it."""
+    db = graphiti_db_path(tmp_path)
+    key = _registry_key(db)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    try:
+        await svc.initialize()
+        assert kuzu_registry._refcount(key) == 1
+        # Service still open (driver held) → snapshot must NOT raise a lock error.
+        nodes, edges, _ = await read_graph_snapshot(db)
+        assert nodes == [] and edges == []
+        # Snapshot reused the shared driver and released it → back to just the service.
+        assert kuzu_registry._refcount(key) == 1
+    finally:
+        await svc.close()
+    assert kuzu_registry._active_keys() == []  # last release freed the file lock
+
+
+@pytest.mark.asyncio
+async def test_two_services_same_path_share_one_driver(tmp_path) -> None:
+    db = graphiti_db_path(tmp_path)
+    key = _registry_key(db)
+    a = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    b = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    try:
+        # ONE shared kuzu.Database → the exact same driver object behind both services.
+        assert a.graphiti.driver is b.graphiti.driver
+        assert kuzu_registry._refcount(key) == 2
+    finally:
+        await a.close()
+        assert kuzu_registry._refcount(key) == 1  # b still holds it → driver alive
+        await b.close()
+    assert kuzu_registry._active_keys() == []
+
+
+def test_is_kuzu_lock_error_predicate() -> None:
+    assert is_kuzu_lock_error(RuntimeError("IO exception: Could not set lock on file X"))
+    assert not is_kuzu_lock_error(RuntimeError("some unrelated failure"))

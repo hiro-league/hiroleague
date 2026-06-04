@@ -60,6 +60,10 @@
     expandedRows = next;
   }
 
+  // Collapse toggle for the Questions checklist card (header click). Body stays
+  // mounted (hidden) so selection state survives a collapse.
+  let questionsCollapsed = $state(false);
+
   // Group the question bank by category for the checklist.
   const groups = $derived.by(() => {
     const map = new Map<string, EvalQuestionItem[]>();
@@ -232,8 +236,27 @@
     <!-- Question checklist (Adam path only). Empty selection = run all. Cap 50. -->
     {#if eval_.corpusSource === 'adam'}
       <div class="rounded-md border">
-        <div class="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-xs">
-          <span class="font-semibold">Questions</span>
+        <div
+          class="flex flex-wrap items-center gap-2 bg-muted/30 px-3 py-1.5 text-xs {questionsCollapsed
+            ? ''
+            : 'border-b'}"
+        >
+          <button
+            type="button"
+            class="flex items-center gap-1.5 font-semibold hover:text-primary"
+            aria-expanded={!questionsCollapsed}
+            aria-controls="knowledge-eval-questions-body"
+            onclick={() => (questionsCollapsed = !questionsCollapsed)}
+          >
+            <ChevronRight
+              size={13}
+              class="shrink-0 text-muted-foreground transition-transform {questionsCollapsed
+                ? ''
+                : 'rotate-90'}"
+              aria-hidden="true"
+            />
+            Questions
+          </button>
           <span class="text-muted-foreground">
             {eval_.selectedCount}/{EVAL_MAX_SELECTED} selected{#if eval_.selectedCount === 0}
               · none = run all{/if}
@@ -260,6 +283,7 @@
             </button>
           </div>
         </div>
+        <div id="knowledge-eval-questions-body" hidden={questionsCollapsed}>
         {#if eval_.questionsError}
           <p class="px-3 py-2 text-xs text-destructive">{eval_.questionsError}</p>
         {:else if eval_.questions.length === 0 && !eval_.questionsLoading}
@@ -308,6 +332,7 @@
             {/each}
           </div>
         {/if}
+        </div>
       </div>
     {/if}
 
@@ -419,6 +444,31 @@
                         <span class="text-xs text-muted-foreground"> · {r.subcategory}</span>
                       {/if}
                     </div>
+                    <!-- Scoring rubric: what each answer is judged against. -->
+                    {#if r.expected_fragments.length > 0 || r.must_not_contain.length > 0}
+                      <div class="flex flex-col gap-1 font-sans text-xs">
+                        {#if r.expected_fragments.length > 0}
+                          <div class="flex flex-wrap items-center gap-1">
+                            <span class="font-semibold text-muted-foreground">Expected:</span>
+                            {#each r.expected_fragments as frag (frag)}
+                              <Badge variant="secondary" class="font-mono font-normal">{frag}</Badge>
+                            {/each}
+                          </div>
+                        {/if}
+                        {#if r.must_not_contain.length > 0}
+                          <div class="flex flex-wrap items-center gap-1">
+                            <span class="font-semibold text-muted-foreground">Must not contain:</span>
+                            {#each r.must_not_contain as frag (frag)}
+                              <Badge variant="warning" class="font-mono font-normal">{frag}</Badge>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    {:else}
+                      <div class="font-sans text-xs text-muted-foreground">
+                        Negative control — abstaining is the expected (correct) outcome.
+                      </div>
+                    {/if}
                     <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {#each legColumns as mode (mode)}
                         {#if r.legs[mode]}

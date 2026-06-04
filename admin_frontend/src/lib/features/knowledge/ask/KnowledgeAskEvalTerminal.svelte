@@ -12,6 +12,7 @@
   the shared table primitives per the admin Svelte conventions.
 -->
 <script lang="ts">
+  import { ChevronRight } from '@lucide/svelte';
   import type {
     EvalQuestionPayload,
     EvalSetupProgressPayload
@@ -129,6 +130,9 @@
   // user scrolls up to read history (re-engage when they return to the bottom).
   let scroller = $state<HTMLDivElement | null>(null);
   let pinned = $state(true);
+  // Collapse toggle for the activity feed (header click). Body stays mounted
+  // (hidden) so scroll position / auto-follow survive a collapse.
+  let collapsed = $state(false);
 
   function onScroll() {
     if (!scroller) return;
@@ -137,17 +141,32 @@
   }
 
   $effect(() => {
-    // Re-run when the line count changes; only follow if the user is pinned.
+    // Re-run when the line count changes (or on re-expand); only follow if the
+    // user is pinned and the feed is visible.
     void lines.length;
-    if (pinned && scroller) scroller.scrollTop = scroller.scrollHeight;
+    void collapsed;
+    if (!collapsed && pinned && scroller) scroller.scrollTop = scroller.scrollHeight;
   });
 </script>
 
 <div class="grid gap-1">
   <div class="flex items-center gap-2 px-0.5 font-sans text-xs text-muted-foreground">
-    <span class="font-semibold uppercase tracking-wide">Activity</span>
+    <button
+      type="button"
+      class="flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-foreground"
+      aria-expanded={!collapsed}
+      aria-controls="knowledge-eval-activity-body"
+      onclick={() => (collapsed = !collapsed)}
+    >
+      <ChevronRight
+        size={13}
+        class="shrink-0 transition-transform {collapsed ? '' : 'rotate-90'}"
+        aria-hidden="true"
+      />
+      Activity
+    </button>
     <span>· {lines.length} lines</span>
-    {#if !pinned}
+    {#if !pinned && !collapsed}
       <button
         type="button"
         class="ml-auto rounded border px-2 py-0.5 hover:bg-muted"
@@ -161,8 +180,10 @@
     {/if}
   </div>
   <div
+    id="knowledge-eval-activity-body"
     bind:this={scroller}
     onscroll={onScroll}
+    hidden={collapsed}
     class="h-56 overflow-y-auto rounded-md border bg-slate-950 px-3 py-2 font-mono text-xs leading-5 text-slate-200"
     role="log"
     aria-live="polite"

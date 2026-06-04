@@ -39,6 +39,7 @@ from hirocli.domain.preferences import (
 )
 from hirocli.services.knowledge.constants import GRAPH_DIR, KNOWLEDGE_DIR, KUZU_DB_FILENAME
 
+from . import kuzu_registry
 from .graphiti_adapters import (
     GraphitiEmbedderClient,
     GraphitiLLMClient,
@@ -98,14 +99,25 @@ async def _ensure_fts_indices(driver: Any) -> None:
             raise
 
 
-def _release_kuzu(driver: Any) -> None:
-    """Explicitly close the underlying kuzu Connection + Database to release the
-    file lock NOW.
+def _registry_key(db_path: Path) -> str:
+    """Stable process-wide key for the shared Kuzu driver of one workspace graph.
+
+    Both the ingest service and the snapshot reader derive the key from the SAME
+    absolute path so they share one ``Database`` via ``kuzu_registry`` (resolve() so
+    differing relative/symlinked spellings of the same file map to one entry)."""
+    return str(Path(db_path).resolve())
+
+
+def _close_kuzu_driver(driver: Any) -> None:
+    """Registry closer — explicitly close the underlying kuzu Connection + Database to
+    release the file lock NOW.
 
     Graphiti's ``KuzuDriver.close()`` is a no-op (it relies on GC), which keeps the
-    Kuzu single-opener file lock held — blocking any subsequent open of the same DB
-    (e.g. a snapshot read right after ingest). Closing the connection then the
-    database releases the lock deterministically."""
+    Kuzu single-opener file lock held — blocking any subsequent open of the same DB.
+    Closing the connection then the database releases the lock deterministically. Called
+    by ``kuzu_registry.release`` only when the LAST consumer of the shared driver lets go
+    (refcount → 0), so a snapshot read never tears down a driver the eval build still
+    holds."""
     if driver is None:
         return
     for attr in ("client", "db"):
@@ -116,6 +128,15 @@ def _release_kuzu(driver: Any) -> None:
                 close()
             except Exception:
                 log.warning("⚠️ graphiti — kuzu %s close failed", attr, exc_info=True)
+
+
+def is_kuzu_lock_error(exc: BaseException) -> bool:
+    """True when ``exc`` is Kuzu's "another process holds the file" lock error.
+
+    With the shared registry, in-process opens can no longer collide; this only fires
+    for an EXTERNAL process holding the lock (a second ``hiro``, a stale handle). The
+    Graph route uses it to return a clean "DB busy" message instead of a raw stack."""
+    return "could not set lock on file" in str(exc).lower()
 
 
 class _RankByInputOrderCrossEncoder(CrossEncoderClient):
@@ -179,9 +200,19 @@ class GraphitiMemoryService:
         self._reranker_min_score = reranker_min_score
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._registry_key = _registry_key(self._db_path)
         log.info("⬇️ graphiti — opening Kuzu graph · path=%s", self._db_path)
         try:
-            driver = KuzuDriver(str(self._db_path))
+            # Shared, refcounted driver: ONE kuzu.Database per workspace for ALL consumers
+            # (ingest / search / snapshot), so they never open a 2nd Database on the same
+            # file → no "Could not set lock on file". Pinned to max_concurrent_queries=1 —
+            # graphiti's default and its write-safety guarantee; bumping it would let
+            # graphiti's internal writes self-collide with Kuzu's single-writer rule
+            # (docs/kuzu-shared-database-design.md §3/§4.4).
+            driver = kuzu_registry.acquire(
+                self._registry_key,
+                lambda: KuzuDriver(str(self._db_path), max_concurrent_queries=1),
+            )
         except Exception:
             log.exception("❌ graphiti — failed to open Kuzu driver · path=%s", self._db_path)
             raise
@@ -273,6 +304,12 @@ class GraphitiMemoryService:
             event_sink=event_sink,
             ledger_sink=ledger_sink,
             ledger_detail=self._ledger_detail,
+            # Per-workspace write lock: serialize every writer (this ingest, a concurrent
+            # eval/graph build, future chat-memory) to one add_episode at a time. Required
+            # by Kuzu (single-writer) AND graphiti (sequential dedup). Held per-episode and
+            # released between episodes (docs §4.2), so a waiting reader/writer isn't
+            # blocked for the whole batch.
+            write_lock=kuzu_registry.write_lock(self._registry_key),
         )
 
     async def search_chunk_ids(
@@ -308,8 +345,10 @@ class GraphitiMemoryService:
             await self._graphiti.close()
         except Exception:
             log.warning("⚠️ graphiti — close encountered an error", exc_info=True)
-        # Graphiti's KuzuDriver.close() is a no-op → release the Kuzu file lock now.
-        _release_kuzu(getattr(self._graphiti, "driver", None))
+        # Shared driver: drop our refcount. The underlying kuzu Database is closed (file
+        # lock freed) by the registry only when the LAST consumer releases (refcount → 0),
+        # so closing one service never tears down a driver another still holds.
+        kuzu_registry.release(self._registry_key, _close_kuzu_driver)
 
     @classmethod
     def from_preferences(
@@ -450,7 +489,13 @@ async def read_graph_snapshot(
     path = Path(db_path)
     if not path.exists():
         return [], [], {}
-    driver = KuzuDriver(str(path))
+    key = _registry_key(path)
+    # Shared driver (read-only use here): the SAME kuzu.Database a running ingest holds,
+    # so the Graph tab renders DURING a build — Kuzu allows concurrent readers alongside
+    # one writer. Reads take NO write lock. Pinned to pool=1 to match the writer (§4.4).
+    driver = kuzu_registry.acquire(
+        key, lambda: KuzuDriver(str(path), max_concurrent_queries=1)
+    )
     nodes: list[Any] = []
     edges: list[Any] = []
     chunk_to_document: dict[str, str] = {}
@@ -477,11 +522,9 @@ async def read_graph_snapshot(
             if uuid and doc:
                 chunk_to_document[uuid] = doc
     finally:
-        try:
-            await driver.close()
-        except Exception:
-            log.warning("⚠️ graphiti — snapshot driver close failed", exc_info=True)
-        _release_kuzu(driver)
+        # Drop our refcount; the registry closes the shared driver only if we were the
+        # last holder (a concurrent ingest keeps it open).
+        kuzu_registry.release(key, _close_kuzu_driver)
     return list(nodes or []), list(edges or []), chunk_to_document
 
 

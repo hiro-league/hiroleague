@@ -131,6 +131,10 @@ class QuestionResult:
     # Δ column. "0" when flat wasn't run or no graph leg beat it.
     delta: str
     subcategory: str = ""
+    # The scoring rubric, surfaced so the panel can show what each answer is judged
+    # against (the substrings score_answer requires / forbids). Display-only.
+    expected_fragments: list[str] = field(default_factory=list)
+    must_not_contain: list[str] = field(default_factory=list)
 
     def to_payload(self, *, index: int, total: int) -> dict[str, Any]:
         """Event payload shape consumed by the Eval Batch UI.
@@ -148,6 +152,10 @@ class QuestionResult:
             "requires_graph": self.requires_graph,
             "legs": {mode: leg.to_payload() for mode, leg in self.legs.items()},
             "delta": self.delta,
+            # Scoring rubric for this question (display-only): what answers are judged
+            # against. Empty expected_fragments = negative-control (abstain is correct).
+            "expected_fragments": self.expected_fragments,
+            "must_not_contain": self.must_not_contain,
         }
 
 
@@ -577,6 +585,8 @@ async def _run_one_question(
         requires_graph=bool(q.get("requires_graph")),
         legs=legs,
         delta=_best_graph_delta(scores),
+        expected_fragments=expected,
+        must_not_contain=must_not,
     )
 
 
