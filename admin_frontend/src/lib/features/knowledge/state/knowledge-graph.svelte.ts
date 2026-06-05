@@ -79,6 +79,11 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let links = $state<GraphEdgeDTO[]>([]);
   let loading = $state(false);
   let truncated = $state(false);
+  // Bumped on every full (re)export so the renderer can tell a structural reload
+  // (initial load / manual reload / reconcile) apart from incremental live deltas.
+  // A reload wants a fresh relayout + zoom-to-fit; live deltas should NOT re-simulate
+  // and reposition the whole graph (see KnowledgeGraphPanel graphData effect).
+  let loadVersion = $state(0);
   let live = $state(false);
   let progress = $state<GraphIngestProgress | null>(null);
   let selected = $state<GraphSelection>(null);
@@ -105,10 +110,16 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
 
   function rebuildArrays(): void {
     nodes = [...nodeById.values()];
-    // force-graph requires both endpoints to exist; drop dangling edges (an edge
-    // delta can in principle arrive before its node delta).
+    // Drop dangling edges (an edge delta can arrive before its node delta) — but FIRST
+    // normalize the endpoint to its id. Bug fix: force-graph rewrites link.source/target
+    // from id strings into the actual node OBJECTS once the graph is laid out, so on every
+    // subsequent delta `nodeById.has(e.source)` was checking has(<object>) → false →
+    // EVERY already-rendered edge was filtered out. That collapsed the link structure each
+    // delta and let charge re-scatter the nodes (the "all existing nodes reset" symptom).
+    const endId = (end: unknown): string =>
+      end && typeof end === 'object' ? (end as GraphNodeDTO).id : (end as string);
     links = [...edgeById.values()].filter(
-      (e) => nodeById.has(e.source) && nodeById.has(e.target)
+      (e) => nodeById.has(endId(e.source)) && nodeById.has(endId(e.target))
     );
   }
 
@@ -186,6 +197,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       truncated = res.data.truncated;
       recent = {};
       rebuildArrays();
+      loadVersion += 1; // signal a structural reload to the renderer (full relayout + fit)
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -380,6 +392,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     nodes: () => nodes,
     links: () => links,
     loading: () => loading,
+    loadVersion: () => loadVersion,
     truncated: () => truncated,
     live: () => live,
     progress: () => progress,

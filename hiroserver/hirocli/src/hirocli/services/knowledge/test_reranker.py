@@ -195,11 +195,12 @@ async def test_rerank_node_falls_back_on_error(tmp_path: Path) -> None:
     assert out == {}  # fallback: keep retrieval order, reranked stays falsy
 
 
-def test_build_context_score_source_without_rerank(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_build_context_score_source_without_rerank(tmp_path: Path) -> None:
     prefs = WorkspacePreferences()  # hybrid default True
     graph = _graph(_FakeService(), prefs, tmp_path)
     state = _state_with_hits([_hit(0, "a", 0.9), _hit(1, "b", 0.1)])
-    out = graph.build_context(state)
+    out = await graph.build_context(state)
     sources = out["sources"]
     assert [s.score_source for s in sources] == ["rrf", "rrf"]
     # min-max within set: top hit 1.0, lowest 0.0
@@ -207,7 +208,8 @@ def test_build_context_score_source_without_rerank(tmp_path: Path) -> None:
     assert sources[1].relevance == 0.0
 
 
-def test_build_context_score_source_when_reranked(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_build_context_score_source_when_reranked(tmp_path: Path) -> None:
     prefs = WorkspacePreferences()
     graph = _graph(_FakeService(), prefs, tmp_path)
     hit = _hit(0, "a", 0.9)
@@ -216,7 +218,7 @@ def test_build_context_score_source_when_reranked(tmp_path: Path) -> None:
 
     hit = replace(hit, rerank_score=2.0, relevance=0.88)
     state = {**_state_with_hits([hit]), "reranked": True}
-    out = graph.build_context(state)
+    out = await graph.build_context(state)
     src = out["sources"][0]
     assert src.score_source == "reranker"
     assert src.relevance == 0.88

@@ -93,6 +93,7 @@ def source_from_hit(
     matched_terms: list[str] | None = None,
     relevance: float | None = None,
     score_source: str = "rrf",
+    valid_at: str | None = None,
 ) -> KnowledgeSource:
     return KnowledgeSource(
         ref=ref,
@@ -116,6 +117,7 @@ def source_from_hit(
         # does not override; score_source is decided by the caller (reranker vs rrf/cosine).
         relevance=relevance if relevance is not None else hit.relevance,
         score_source=score_source,
+        valid_at=valid_at,
     )
 
 

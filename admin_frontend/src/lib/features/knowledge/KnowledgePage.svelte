@@ -60,6 +60,7 @@
   title="Knowledge"
   subtitle="Markdown ingest and vector search"
   sticky
+  forceCompact={tabPrefs.activeTab === 'graph'}
 >
   {#snippet tabs()}
     <AdminTabStrip

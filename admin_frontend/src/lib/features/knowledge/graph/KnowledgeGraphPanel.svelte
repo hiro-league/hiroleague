@@ -10,6 +10,7 @@
     Minimize2,
     Package,
     RefreshCw,
+    Scan,
     Search,
     SlidersHorizontal,
     Spline,
@@ -51,6 +52,148 @@
   // view (see onEngineStop). Plain let — only read inside the force-graph callback.
   let fitPending = false;
 
+  // ── force-graph mirror objects (CRITICAL — see reconcileFgData) ──────────────
+  // force-graph / d3 store live simulation state (x, y, vx, vy, fx, fy, index) directly
+  // on the node/link objects we hand them. Those objects MUST keep a stable identity and
+  // persist across deltas. We CANNOT feed force-graph the model's Svelte $state objects:
+  // every model rebuild (`nodes = [...nodeById.values()]`) makes Svelte create FRESH
+  // proxies, and the $state set-trap stores writes in signals — never on the raw target —
+  // so each fresh proxy reads x/y back as `undefined`, and d3 re-initialises every node to
+  // a spiral position. That was the "the whole graph resets on every update" bug.
+  // Instead we keep our own plain (non-reactive) mirror objects, reconciled by id from the
+  // reactive model on each update: existing ids reuse their mirror (positions preserved),
+  // new ids get a fresh mirror, removed ids are dropped.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fgNodeById = new Map<string, any>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fgLinkById = new Map<string, any>();
+  let prevLoadVersion = -1;
+  let prevHiddenNodes: Set<string> | null = null;
+  let prevHiddenEdges: Set<string> | null = null;
+
+  // Reconcile the durable force-graph mirrors against the current reactive render set.
+  // Returns the arrays to hand force-graph plus the ids of newly-created node mirrors
+  // (so the delta path can seed/target only those). Existing mirrors keep their object
+  // identity — and therefore their simulated positions — while display fields are refreshed.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function reconcileFgData(rNodes: any[], rLinks: any[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fgNodes: any[] = [];
+    const freshNodeIds: string[] = [];
+    const nodeIds = new Set<string>();
+    for (const n of rNodes) {
+      nodeIds.add(n.id);
+      let m = fgNodeById.get(n.id);
+      if (!m) {
+        m = { id: n.id, type: n.type, name: n.name };
+        fgNodeById.set(n.id, m);
+        freshNodeIds.push(n.id);
+      } else {
+        m.type = n.type; // refresh display fields; KEEP x/y/vx/vy/fx/fy/index/__targetR
+        m.name = n.name;
+      }
+      fgNodes.push(m);
+    }
+    for (const id of [...fgNodeById.keys()]) if (!nodeIds.has(id)) fgNodeById.delete(id);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fgLinks: any[] = [];
+    const linkIds = new Set<string>();
+    for (const l of rLinks) {
+      linkIds.add(l.id);
+      let m = fgLinkById.get(l.id);
+      if (!m) {
+        // New mirror: endpoints as ids; force-graph resolves them to the mirror node objects.
+        m = { id: l.id, source: linkEndId(l.source), target: linkEndId(l.target), rel_type: l.rel_type };
+        fgLinkById.set(l.id, m);
+      } else {
+        m.rel_type = l.rel_type; // keep m.source/m.target (force-graph resolved them to nodes)
+      }
+      fgLinks.push(m);
+    }
+    for (const id of [...fgLinkById.keys()]) if (!linkIds.has(id)) fgLinkById.delete(id);
+
+    return { fgNodes, fgLinks, freshNodeIds };
+  }
+
+  // Seed each freshly-arrived node near the centroid of its already-placed neighbours
+  // so it animates in next to where it connects instead of flying from the origin.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function seedNewNodePositions(newNodes: any[], links: any[], placed: Map<string, any>): void {
+    if (newNodes.length === 0) return;
+    const newIds = new Set(newNodes.map((n) => n.id));
+    // newId -> running sum of neighbour coords + count.
+    const acc = new Map<string, { x: number; y: number; n: number }>();
+    const addNeighbour = (newId: string, otherId: string): void => {
+      const other = placed.get(otherId);
+      if (!other || other.x == null || other.y == null) return;
+      const e = acc.get(newId) ?? { x: 0, y: 0, n: 0 };
+      e.x += other.x;
+      e.y += other.y;
+      e.n += 1;
+      acc.set(newId, e);
+    };
+    for (const l of links) {
+      const a = String(linkEndId(l.source));
+      const b = String(linkEndId(l.target));
+      if (newIds.has(a) && !newIds.has(b)) addNeighbour(a, b);
+      if (newIds.has(b) && !newIds.has(a)) addNeighbour(b, a);
+    }
+    for (const n of newNodes) {
+      const e = acc.get(n.id);
+      if (e && e.n > 0) {
+        // Spread co-arriving siblings around the neighbour centroid (≈±35px) so they don't
+        // stack on the same point; physics then separates them the rest of the way.
+        const jitter = () => (Math.random() - 0.5) * 70;
+        n.x = e.x / e.n + jitter();
+        n.y = e.y / e.n + jitter();
+      }
+      // else: no placed neighbour (orphan / first batch) → let force-graph position it.
+    }
+  }
+
+  // ── Camera ownership ────────────────────────────────────────────────────────
+  // Auto zoom-to-fit otherwise fights the user: while physics are still settling
+  // (initial load, live deltas) onEngineStop kept re-firing zoomToFit and snapping
+  // the camera back, so a manual pan/zoom never "stuck" until the sim stopped.
+  // Once the user moves the camera by hand we set this flag and STOP auto-fitting,
+  // so their viewport holds. It's reset on intentional reframes (filter change,
+  // a new search, the Fit button, manual Reload) where re-framing is expected.
+  let userMovedCamera = false;
+  // True only while one of OUR programmatic fits is animating, so the onZoom
+  // handler doesn't mistake an automatic fit for a user gesture. Starts true so
+  // force-graph's initial auto-centring isn't counted as a user move.
+  let programmaticZoom = true;
+  let programmaticZoomTimer: ReturnType<typeof setTimeout> | null = null;
+  const FIT_ANIM_MS = 450; // zoomToFit camera-animation duration
+
+  // Run a programmatic camera fit while suppressing user-move detection for the
+  // duration of its animation (+ a small buffer past the last onZoom tick).
+  function programmaticFit(run: () => void): void {
+    programmaticZoom = true;
+    if (programmaticZoomTimer) clearTimeout(programmaticZoomTimer);
+    run();
+    programmaticZoomTimer = setTimeout(() => {
+      programmaticZoom = false;
+      programmaticZoomTimer = null;
+    }, FIT_ANIM_MS + 150);
+  }
+
+  // Frame the whole graph (or the current search subset) on demand — the toolbar
+  // "Fit to view" button. Clears userMovedCamera so this counts as an intentional
+  // reframe rather than being suppressed by it.
+  function fitToView(): void {
+    if (!fg) return;
+    userMovedCamera = false;
+    const focus = focusNodeIds;
+    if (focus && focus.size > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 80, (n: any) => focus.has(n.id)));
+    } else {
+      programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 60));
+    }
+  }
+
   // Graph options panel (left overlay) + its live layout controls. The panel
   // edits these; $effects below push them into the force-graph instance.
   let optionsOpen = $state(false);
@@ -65,40 +208,25 @@
   // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
   let searchFocusMode = $state(savedOptions.searchFocusMode);
 
-  // Expand: fills the content area below the sticky knowledge header/tabs.
-  // Uses position:fixed so it escapes the page's padding/max-width wrapper;
-  // z-[9] keeps it below the sticky knowledge header (z-10) and shell (z-20)
-  // so the tabs stay reachable. `--admin-page-header-h` is published by
-  // AdminPageHeader's ResizeObserver and is inherited even in fixed children.
-  let expanded = $state(false);
-  // Saved on expand, restored on collapse so the user returns to where they were.
-  let scrollRestore = 0;
+  // Fullscreen: the expand button lifts the panel to a true full-viewport
+  // overlay (position:fixed inset-0, above the shell) so the graph gets the
+  // whole screen. Esc — or the minimize button — returns to the default
+  // in-flow layout. The default (non-fullscreen) view already fills the
+  // content area below the knowledge header, which is forced compact for the
+  // Graph tab (KnowledgePage passes forceCompact) so the canvas has room.
+  let fullscreen = $state(false);
 
-  function toggleExpand(): void {
-    if (!expanded) {
-      // Going into expanded mode.
-      scrollRestore = typeof window === 'undefined' ? 0 : window.scrollY;
-      expanded = true;
-      // Wait for Svelte to render the scroll spacer (added in markup below
-      // when expanded), then scroll past AdminPageHeader's pin threshold so
-      // the knowledge header/tabs collapse to their compact sticky form —
-      // that's the "go up to sticky mode" the user asked for. The spacer
-      // keeps document height past the un-pin hysteresis so the header
-      // STAYS pinned while the panel is position:fixed.
-      requestAnimationFrame(() => {
-        window.scrollTo(0, 600);
-        // One more frame so the pin transition + AdminPageHeader's
-        // ResizeObserver settle (smaller header → updated --admin-page-header-h
-        // → our top calc recomputes) before measuring canvas dimensions.
-        requestAnimationFrame(resize);
-      });
-    } else {
-      // Collapsing: restore the scroll the user had before they expanded.
-      expanded = false;
-      requestAnimationFrame(() => {
-        window.scrollTo(0, scrollRestore);
-        requestAnimationFrame(resize);
-      });
+  function toggleFullscreen(): void {
+    fullscreen = !fullscreen;
+    // Two frames so the layout swap settles before we re-measure the canvas.
+    requestAnimationFrame(() => requestAnimationFrame(resize));
+  }
+
+  // Esc exits fullscreen (the standard "return from full screen" gesture).
+  function onKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape' && fullscreen) {
+      fullscreen = false;
+      requestAnimationFrame(() => requestAnimationFrame(resize));
     }
   }
 
@@ -186,6 +314,19 @@
   const RADIAL_STRENGTH = 0.08;
   const RADIAL_RING = 90; // outer-ring spacing; scaled by √(node count) in the $effect
 
+  // Simulation cooling, switched per update kind (see the graphData $effect). graphData
+  // always restarts the sim at alpha=1 and there's no public way to start gentler, so we
+  // control how much MOTION that energy produces via decay instead:
+  //  - STRUCTURAL (initial load / reload / reconcile / filter): d3 defaults → full energy
+  //    so charge can spread the whole graph out (no cramping).
+  //  - DELTA (live node/edge add): heavy velocity damping + fast alpha decay so the
+  //    established layout only drifts slightly while the new nodes settle in locally,
+  //    instead of re-solving into a whole new arrangement (the "whole graph jumps").
+  const VELOCITY_DECAY_DEFAULT = 0.4; // d3 default
+  const ALPHA_DECAY_DEFAULT = 0.0228; // d3 default (~300 ticks to cool)
+  const VELOCITY_DECAY_DELTA = 0.8; // only 20% of velocity carries → small, gentle steps
+  const ALPHA_DECAY_DELTA = 0.08; // cools in ~70 ticks → brief, local settle
+
   // A d3-force implementing the "most-connected in the middle, others around it"
   // layout the user asked for: each node is pulled toward a ring whose radius encodes
   // its connectivity (``n.__targetR``, assigned per-node in the graphData $effect from
@@ -224,6 +365,10 @@
     linkColor: string;   // edge line color
     linkColorDim: string; // edge line color for non-matches in "dim" search-focus mode
     matchRing: string;   // search-highlight ring/stroke (amber, semi-transparent)
+    // "Just added/updated" flash colors as "r,g,b" (alpha applied per-frame as the glow
+    // fades). Tuned to pop against every node-type disc color in both themes.
+    glowRingRGB: string; // bright ring stroke around fresh nodes + the fresh-edge overlay
+    glowFillRGB: string; // soft filled halo behind fresh nodes
   };
   function computeScheme(): Scheme {
     const dark = typeof document !== 'undefined' &&
@@ -237,7 +382,9 @@
           edgeText:   'rgba(226,232,240,1)',
           linkColor:  'rgba(148,163,184,0.28)',
           linkColorDim: 'rgba(148,163,184,0.07)', // dimmed non-matches
-          matchRing:  'rgba(251,191,36,0.6)' // amber-400, semi-transparent — pops but soft on dark
+          matchRing:  'rgba(251,191,36,0.6)', // amber-400, semi-transparent — pops but soft on dark
+          glowRingRGB: '110,231,183', // emerald-300 — bright on dark
+          glowFillRGB: '52,211,153'   // emerald-400
         }
       : {
           pillBg:     'rgba(255,255,255,0.72)',
@@ -245,7 +392,9 @@
           edgeText:   'rgba(30,41,59,1)',
           linkColor:  'rgba(148,163,184,0.25)',
           linkColorDim: 'rgba(148,163,184,0.08)', // dimmed non-matches
-          matchRing:  'rgba(217,119,6,0.7)' // amber-600, semi-transparent — readable on light
+          matchRing:  'rgba(217,119,6,0.7)', // amber-600, semi-transparent — readable on light
+          glowRingRGB: '5,150,105', // emerald-600 — saturated, reads on white
+          glowFillRGB: '16,185,129' // emerald-500
         };
   }
   // PERF: getScheme() used to run inside every node AND edge draw callback, so it
@@ -445,17 +594,26 @@
       ctx.globalAlpha = 0.12; // faded non-match; restored at the end of this draw
     }
 
-    // 1. Glow halo for fresh nodes (fades over GLOW_MS).
+    // 1. Flash for fresh/updated nodes (fades over GLOW_MS): a soft filled halo plus a
+    //    bright expanding ring so the "just added/updated" pop is clearly visible in both
+    //    light and dark themes (colors come from the theme-aware scheme).
     const ts = graph.recent()[`n:${node.id}`];
     if (ts) {
       const age = Date.now() - ts;
       if (age <= GLOW_MS) {
-        const alpha = 1 - age / GLOW_MS;
-        const haloR = radius + 14 * (1 - alpha);
+        const alpha = 1 - age / GLOW_MS; // 1 → 0 over the glow window
+        const grow = 1 - alpha; // 0 → 1 as it ages (ring expands outward)
+        // Soft filled halo behind the disc.
         ctx.beginPath();
-        ctx.arc(x, y, haloR, 0, 2 * Math.PI);
-        ctx.fillStyle = `rgba(96, 165, 250, ${0.35 * alpha})`;
+        ctx.arc(x, y, radius + 5 + 20 * grow, 0, 2 * Math.PI);
+        ctx.fillStyle = `rgba(${s.glowFillRGB}, ${0.45 * alpha})`;
         ctx.fill();
+        // Bright expanding ring — the part that actually "pops".
+        ctx.beginPath();
+        ctx.arc(x, y, radius + 3 + 16 * grow, 0, 2 * Math.PI);
+        ctx.strokeStyle = `rgba(${s.glowRingRGB}, ${0.95 * alpha})`;
+        ctx.lineWidth = 3 / scale; // ≈3px on-screen regardless of zoom
+        ctx.stroke();
       }
     }
 
@@ -509,6 +667,40 @@
   // this 'after' paint, so we read them directly.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function linkCanvasObject(link: any, ctx: CanvasRenderingContext2D, scale: number): void {
+    // Edge flash for freshly added/updated edges — drawn FIRST (before the zoom-gated
+    // label) so the "pop" is visible even when edge labels are hidden at low zoom. The
+    // bright overlay follows the same straight/curved path the link line uses.
+    const ets = graph.recent()[`e:${link.id}`];
+    if (ets) {
+      const edgeAge = Date.now() - ets;
+      if (edgeAge <= GLOW_MS) {
+        const src = link.source;
+        const tgt = link.target;
+        if (
+          src && tgt && typeof src === 'object' && typeof tgt === 'object' &&
+          src.x != null && src.y != null && tgt.x != null && tgt.y != null
+        ) {
+          const a = 1 - edgeAge / GLOW_MS;
+          const cps = link.__controlPoints as number[] | null;
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          if (cps && cps.length === 2) {
+            ctx.quadraticCurveTo(cps[0], cps[1], tgt.x, tgt.y);
+          } else if (cps && cps.length === 4) {
+            ctx.bezierCurveTo(cps[0], cps[1], cps[2], cps[3], tgt.x, tgt.y);
+          } else {
+            ctx.lineTo(tgt.x, tgt.y);
+          }
+          ctx.strokeStyle = `rgba(${scheme.glowRingRGB}, ${0.85 * a})`;
+          ctx.lineWidth = (3.5 + 3 * (1 - a)) / scale; // thick, fades as it ages
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+
     const fontSize = labelFontSize(
       scale,
       EDGE_ZOOM_MIN,
@@ -752,7 +944,24 @@
     fg.onEngineStop(() => {
       if (!fitPending) return;
       fitPending = false;
-      fg.zoomToFit?.(450, 60);
+      if (userMovedCamera) return; // the user took the camera → don't snap it back
+      // During an active search the search-focus effect owns the frame (it fits the
+      // matched subset). Fitting to ALL here would yank the camera off the matches
+      // every time the sim cooled — the "search keeps resetting my zoom" bug.
+      if (searchActive) {
+        const focus = focusNodeIds;
+        if (focus && focus.size > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 60, (n: any) => focus.has(n.id)));
+        }
+        return;
+      }
+      programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 60));
+    });
+    // Detect a hand-driven pan/zoom so auto-fit yields to it (see userMovedCamera).
+    // onZoom fires for our programmatic fits too, hence the programmaticZoom guard.
+    fg.onZoom(() => {
+      if (!programmaticZoom) userMovedCamera = true;
     });
     fg.d3ReheatSimulation?.();
 
@@ -784,36 +993,103 @@
     if (fg && Object.keys(r).length > 0) keepRedrawing(GLOW_MS + 150);
   });
 
-  // Recreate the graph from the visible subset whenever membership OR filters
-  // change. Feeding force-graph only the visible nodes/edges makes it re-layout
-  // them to fill the frame, instead of leaving gaps where hidden nodes were.
-  // Tracks visibleNodes/visibleLinks, which depend on both the data and the
-  // hidden-type sets.
+  // Recreate the graph from the render subset whenever membership, filters, OR the
+  // search-focus 'hide' subset change. Feeding force-graph only the rendered
+  // nodes/edges makes it re-layout them to fill the frame, instead of leaving gaps
+  // where hidden nodes were. renderNodes/renderLinks track visibleNodes/visibleLinks
+  // (data + hidden-type sets) plus the 'hide' search-focus subset.
   $effect(() => {
-    const nodes = graph.visibleNodes(); // tracked
-    const links = displayLinks; // tracked: visible links capped to maxLinksPerPair
+    const nodes = renderNodes; // tracked
+    const links = renderLinks; // tracked: capped visible links, minus 'hide'-mode non-matches
+    const loadVersion = graph.loadVersion(); // tracked: structural reload signal
+    const hidNodes = graph.hiddenNodeTypes(); // tracked: a filter change is structural
+    const hidEdges = graph.hiddenEdgeTypes(); // tracked
     if (!fg) return;
-    // Degree-based radial targets for degreeRadial(): count each node's connections,
-    // then map the busiest → centre (radius 0) and the least-connected → the outer
-    // ring. Ring spacing scales with √(node count) so denser graphs spread wider.
-    const degree = new Map<string, number>();
-    for (const l of links) {
-      const a = linkEndId(l.source);
-      const b = linkEndId(l.target);
-      degree.set(a, (degree.get(a) ?? 0) + 1);
-      degree.set(b, (degree.get(b) ?? 0) + 1);
-    }
-    const maxDegree = Math.max(1, ...degree.values());
-    const outerRing = RADIAL_RING * Math.max(1, Math.sqrt(nodes.length));
-    for (const n of nodes) {
-      const d = degree.get(n.id) ?? 0;
+
+    // Run the layout work OUTSIDE Svelte tracking (untrack): the only dependencies we want
+    // are the tracked reads above (render set / filters / reload). force-graph mutates the
+    // MIRROR objects (not these $state proxies), but we still untrack defensively so no
+    // stray proxy read can turn a per-tick mutation into a graphData()+reheat loop (the old
+    // "tense and shaky / never settles" bug).
+    untrack(() => {
+      // First paint = no mirrors yet (before this reconcile). Structural reloads / filter
+      // changes also force a full relayout.
+      const structural =
+        loadVersion !== prevLoadVersion ||
+        hidNodes !== prevHiddenNodes ||
+        hidEdges !== prevHiddenEdges ||
+        fgNodeById.size === 0; // first paint
+      prevLoadVersion = loadVersion;
+      prevHiddenNodes = hidNodes;
+      prevHiddenEdges = hidEdges;
+
+      // Reconcile the reactive render set into the durable force-graph mirrors. Existing
+      // node mirrors keep their identity → their simulated x/y persist (THE fix for the
+      // "graph resets every update" bug). `fresh` = mirrors created this pass.
+      const { fgNodes, fgLinks, freshNodeIds } = reconcileFgData(nodes, links);
+
+      // Degree-based radial targets for degreeRadial(): busiest node → centre (radius 0),
+      // least-connected → outer ring, spacing scaled by √(node count). We gate only the
+      // RING TARGETS on structural-vs-delta: recomputing them every delta makes outerRing
+      // (∝ √N) grow each batch and yank the whole graph outward, so on a delta we leave
+      // existing nodes' targets untouched and assign one only to the new arrivals.
+      const degree = new Map<string, number>();
+      for (const l of fgLinks) {
+        const a = linkEndId(l.source);
+        const b = linkEndId(l.target);
+        degree.set(a, (degree.get(a) ?? 0) + 1);
+        degree.set(b, (degree.get(b) ?? 0) + 1);
+      }
+      const maxDegree = Math.max(1, ...degree.values());
+      const outerRing = RADIAL_RING * Math.max(1, Math.sqrt(fgNodes.length));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (n as any).__targetR = (1 - d / maxDegree) * outerRing;
-    }
-    assignLinkCurvatures(links); // fan out any parallel edges before painting
-    fg.graphData({ nodes, links });
-    fitPending = true; // visible set changed → auto zoom-to-fit when the relayout settles
-    fg.d3ReheatSimulation?.(); // re-run the sim so the new radial targets take effect
+      const assignTarget = (n: any): void => {
+        const d = degree.get(n.id) ?? 0;
+        n.__targetR = (1 - d / maxDegree) * outerRing;
+      };
+      assignLinkCurvatures(fgLinks); // fan out any parallel edges before painting
+
+      if (structural) {
+        // Full relayout (reload / filter / first paint): retarget every node, full-energy
+        // cooling so the whole graph spreads.
+        for (const n of fgNodes) assignTarget(n);
+        fg.d3VelocityDecay?.(VELOCITY_DECAY_DEFAULT);
+        fg.d3AlphaDecay?.(ALPHA_DECAY_DEFAULT);
+        fg.graphData({ nodes: fgNodes, links: fgLinks });
+        fitPending = true;
+        fg.d3ReheatSimulation?.();
+        return;
+      }
+
+      // Incremental live delta: existing mirrors already hold their positions, so the layout
+      // stays put. Seed each NEW node near its already-placed neighbours (warm start), target
+      // only the new nodes, then a damped, fast-cooling reheat settles the new region locally
+      // without the established graph jumping. No zoom-to-fit so the camera holds.
+      const fresh = new Set(freshNodeIds);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const placed = new Map<string, any>();
+      for (const n of fgNodes) {
+        if (!fresh.has(n.id) && n.x != null && n.y != null) placed.set(n.id, n);
+      }
+      const newNodes = fgNodes.filter((n) => fresh.has(n.id));
+      for (const n of newNodes) assignTarget(n);
+      seedNewNodePositions(newNodes, fgLinks, placed);
+      fg.d3VelocityDecay?.(VELOCITY_DECAY_DELTA);
+      fg.d3AlphaDecay?.(ALPHA_DECAY_DELTA);
+      fg.graphData({ nodes: fgNodes, links: fgLinks });
+      fitPending = false; // don't snap the camera on live deltas
+      fg.d3ReheatSimulation?.();
+    });
+  });
+
+  // A filter change is an intentional reframe — hand the camera back to auto-fit
+  // (the graphData effect above sets fitPending; onEngineStop then frames the new
+  // set). Without this, a prior manual zoom would suppress the post-filter fit.
+  // Runs once on mount too (sets the initial false — harmless).
+  $effect(() => {
+    graph.hiddenNodeTypes(); // tracked
+    graph.hiddenEdgeTypes(); // tracked
+    userMovedCamera = false;
   });
 
   // "Link strength" slider → d3 link-force strength. Reheat so the new stiffness
@@ -843,7 +1119,9 @@
     const amount = curveAmount; // tracked
     void amount;
     if (fg) {
-      assignLinkCurvatures(displayLinks); // same capped set the graph is rendering
+      // Re-curve the force-graph MIRROR links (the objects actually being rendered), not the
+      // reactive render set — __curvature lives on the mirrors handed to force-graph.
+      assignLinkCurvatures([...fgLinkById.values()]);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fg.linkCurvature((l: any) => l.__curvature ?? 0);
     }
@@ -906,12 +1184,14 @@
 
   function onSearchInput(value: string): void {
     searchText = value;
+    userMovedCamera = false; // a new query is an intentional reframe → re-enable focus fit
     graph.setSearchQuery(value); // instant client-side name/alias + rel_type/fact highlight
     scheduleChunkSearch(value.trim());
   }
 
   function clearSearch(): void {
     searchText = '';
+    userMovedCamera = false; // clearing reframes (full set if 'hide' was relaying out)
     graph.setSearchQuery('');
     scheduleChunkSearch('');
   }
@@ -932,6 +1212,24 @@
     return ids;
   });
 
+  // ── Render subset (search-focus 'hide' relayout) ────────────────────────────
+  // 'highlight'/'dim' keep every visible node in the sim and just ring/fade the
+  // non-matches in the renderer. 'hide' instead REMOVES the off-focus nodes from
+  // the data fed to force-graph, so the matched subset re-lays-out to fill the
+  // frame (a true "recreate", matching how the type filters behave) rather than
+  // leaving the hidden nodes frozen in place. Restores the full set the moment the
+  // search clears or the mode switches away from 'hide'.
+  const hideMode = $derived(searchActive && searchFocusMode === 'hide');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderNodes = $derived.by<any[]>(() => {
+    const base = graph.visibleNodes();
+    return hideMode && focusNodeIds ? base.filter((n) => focusNodeIds.has(n.id)) : base;
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderLinks = $derived.by<any[]>(() =>
+    hideMode ? displayLinks.filter((l) => matchedEdgeIds.has(l.id)) : displayLinks
+  );
+
   // Repaint when the match set changes so amber rings/edges appear (and clear) even while
   // the canvas is idle (autoPauseRedraw). Tracks the match sets via the aliases above.
   $effect(() => {
@@ -944,13 +1242,15 @@
 
   // After matches resolve, pan/zoom to frame just the matched subset (the "bring into
   // view" the user asked for). Skips when there are no matches so a typo doesn't yank the
-  // camera to an empty frame; clearing the search leaves the view where it is.
+  // camera to an empty frame; clearing the search leaves the view where it is. Yields to
+  // a hand-driven camera (userMovedCamera) so a manual zoom after searching isn't undone;
+  // onSearchInput resets that flag so each new query reframes.
   $effect(() => {
     const focus = focusNodeIds; // tracked
-    if (!fg || !focus || focus.size === 0) return;
+    if (!fg || !focus || focus.size === 0 || userMovedCamera) return;
     // force-graph zoomToFit(durationMs, padding, nodeFilter) — frame only matched nodes.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fg.zoomToFit?.(450, 80, (n: any) => focus.has(n.id));
+    programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 80, (n: any) => focus.has(n.id)));
   });
 
   onDestroy(() => {
@@ -959,6 +1259,7 @@
     chunkAbort?.abort(); // don't leave a chunk-detail request open after unmount
     searchAbort?.abort(); // ditto for an in-flight chunk-text search
     if (searchTimer) clearTimeout(searchTimer);
+    if (programmaticZoomTimer) clearTimeout(programmaticZoomTimer);
     themeObserver?.disconnect();
     if (redrawTimer) clearTimeout(redrawTimer);
     if (fg) {
@@ -1070,68 +1371,41 @@
   });
 </script>
 
-<svelte:window onresize={resize} />
+<svelte:window onresize={resize} onkeydown={onKeydown} />
 
 <!--
-  Expanded mode: position:fixed below the sticky knowledge tabs.
-  - top = shell header (4rem/64px) + knowledge page header (--admin-page-header-h)
-  - CSS custom props ARE inherited by fixed children, so the var() resolves.
-  - z-[9] stays below sticky knowledge header (z-10) and shell (z-20).
-  Normal mode: flex column filling the page flow (min-h-[32rem]).
+  Two layouts:
+
+  Default (in-flow): a flex column that fills the content area below the
+    knowledge header. The header is forced compact on the Graph tab
+    (KnowledgePage → forceCompact), publishing a small --admin-page-header-h,
+    so this min-height calc gives the canvas almost the whole viewport without
+    any scroll trickery. The 3rem buffer is tuned to sit the panel just above
+    <main>'s bottom padding — closing the old gap while staying short enough to
+    never introduce a vertical scrollbar.
+
+  Fullscreen (expand button): a true full-viewport overlay — position:fixed
+    inset-0 above the shell (z-50). Covers the sidebar + header so the graph
+    owns the whole screen. Esc or the minimize button returns to the default.
 -->
-<!--
-  Layout strategy — both modes pin to the viewport's real chrome:
-    shell header = 4rem (64px), AdminShell `min-h-16 sticky top-0`
-    knowledge page header height = var(--admin-page-header-h) published by
-      AdminPageHeader's ResizeObserver (≈80px expanded, ≈55px when pinned).
-    sidebar column width = var(--admin-sidebar-w) published by AdminShell
-      (264 / 84 / 0 mobile). CSS custom props inherit through fixed descendants.
-
-  Expanded: position:fixed, RIGHT of the sidebar (left = var) and BELOW the
-    sticky knowledge header (top = 4rem + page-header-h). bottom-0 + right-0
-    fill the rest. z-[9] sits below the knowledge header (z-10) and shell
-    (z-20), so the tabs stay reachable. Toolbar uses the same frosted style
-    as the shell sticky header; canvas fills edge-to-edge.
-
-  Collapsed: in-flow card with the same height calc, so the panel actually
-    fills the content area (default `h-full` resolved to 0 because the
-    AdminPageHeader <section> grid parent has no enforced height).
--->
-<!-- Scroll spacer (expanded mode only): pushes document height past the
-     AdminPageHeader pin threshold (PINNED_ENTER_SCROLL_Y = 80) so that
-     window.scrollTo(0, 600) in toggleExpand can actually move scrollY past
-     80 → header pins to its compact form. Sized at 150vh (well past any
-     viewport's chrome) so the math works even on tall screens. The element
-     is invisible to assistive tech / pointer; it only takes vertical space. -->
-{#if expanded}
-  <div aria-hidden="true" class="pointer-events-none h-[150vh]"></div>
-{/if}
-
 <div
   class={cn(
     'flex flex-col',
-    expanded
-      ? 'fixed bottom-0 right-0 z-[9] overflow-hidden bg-background'
-      : 'gap-3'
+    fullscreen ? 'fixed inset-0 z-50 overflow-hidden bg-background' : 'gap-3'
   )}
-  style={expanded
-    ? // Expanded: header is pinned (~50-60px). Fallback 56px matches that.
-      'top: calc(4rem + var(--admin-page-header-h, 56px)); left: var(--admin-sidebar-w, 0px)'
-    : // Default: header is in its expanded form (~150px). Fallback 150px
-      // matches that so the panel never overflows the viewport (which was
-      // causing the page scrollbar in the previous iteration). 6rem buffer
-      // covers py-(4|6) top+bottom + AdminPageHeader's section gap-5.
-      'min-height: calc(100vh - 4rem - var(--admin-page-header-h, 150px) - 6rem)'}
+  style={fullscreen
+    ? undefined
+    : 'min-height: calc(100vh - 4rem - var(--admin-page-header-h, 150px) - 3rem)'}
 >
   <!-- Top control row: filter strip on the left, action buttons (reload /
        expand) on the right — same line. Node/edge counts and live status live
        inside the canvas now (bottom-left overlay), not here.
-       Expanded → frosted bar with bottom border, like the shell header.
-       Collapsed → inline row with no chrome. -->
+       Fullscreen → frosted bar with bottom border, like the shell header.
+       Default → inline row with no chrome. -->
   <div
     class={cn(
       'flex items-center justify-between gap-3',
-      expanded && 'border-b bg-background/85 px-4 py-2 backdrop-blur'
+      fullscreen && 'border-b bg-background/85 px-4 py-2 backdrop-blur'
     )}
   >
     <div class="min-w-0 flex-1">
@@ -1183,10 +1457,26 @@
           {/if}
         </div>
       {/if}
+      {#if graph.nodes().length > 0}
+        <!-- Fit to view: reframe the whole graph (or the search subset) on demand,
+             now that auto-fit yields to a hand-driven camera. -->
+        <Button
+          variant="outline"
+          size="icon"
+          onclick={fitToView}
+          aria-label="Fit graph to view"
+          title="Fit to view"
+        >
+          <Scan size={16} aria-hidden="true" />
+        </Button>
+      {/if}
       <Button
         variant="outline"
         size="sm"
-        onclick={() => graph.load()}
+        onclick={() => {
+          userMovedCamera = false; // a manual reload should reframe the fresh data
+          void graph.load();
+        }}
         disabled={graph.loading()}
         title="Reload graph"
       >
@@ -1196,11 +1486,11 @@
       <Button
         variant="outline"
         size="icon"
-        onclick={toggleExpand}
-        aria-label={expanded ? 'Collapse graph to page' : 'Expand graph to fill content area'}
-        title={expanded ? 'Collapse graph' : 'Expand graph'}
+        onclick={toggleFullscreen}
+        aria-label={fullscreen ? 'Exit full screen (Esc)' : 'View graph full screen'}
+        title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen'}
       >
-        {#if expanded}
+        {#if fullscreen}
           <Minimize2 size={16} aria-hidden="true" />
         {:else}
           <Maximize2 size={16} aria-hidden="true" />
@@ -1209,13 +1499,13 @@
     </div>
   </div>
 
-  <!-- Canvas surface. In expanded mode it fills the rest of the fixed wrapper
+  <!-- Canvas surface. In fullscreen it fills the rest of the fixed wrapper
        edge-to-edge (no border — the toolbar bar's border-b already separates).
-       In collapsed mode it's a bordered card matching the page's other cards. -->
+       In the default layout it's a bordered card matching the page's other cards. -->
   <div
     class={cn(
       'relative flex-1 overflow-hidden bg-background',
-      !expanded && 'rounded-lg border'
+      !fullscreen && 'rounded-lg border'
     )}
   >
     <div bind:this={container} class="absolute inset-0"></div>
@@ -1253,10 +1543,17 @@
 
     {#if graph.nodes().length === 0 && !graph.loading()}
       <div class="absolute inset-0 grid place-items-center p-6">
-        <InlineEmptyState
-          message="No graph yet — build it from the Add tab (enable “build entity graph”)."
-          hint="New nodes and relations appear here live as the graph builds."
-        />
+        {#if graph.progress()}
+          <InlineEmptyState
+            message="Building knowledge graph…"
+            hint={`Ingesting chunk ${graph.progress()?.chunk_index}/${graph.progress()?.chunk_total} — nodes and relations will appear here as they’re extracted.`}
+          />
+        {:else}
+          <InlineEmptyState
+            message="No graph yet — build it from the Add tab (enable “build entity graph”)."
+            hint="New nodes and relations appear here live as the graph builds."
+          />
+        {/if}
       </div>
     {/if}
 

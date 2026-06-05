@@ -1526,8 +1526,12 @@ def _knowledge_results_rows(items: list[Any], *, limit: int = 3, snippet_len: in
         title = " ".join(str(getattr(item, "title", "") or "").split())[:50] or "<untitled>"
         relevance = _relevance_of(item)
         rel_text = f" {relevance:.2f}" if relevance is not None else ""
+        # Episode event date — only set on build_context sources (graph legs); upstream
+        # hits carry no valid_at, so this renders nothing for vector_search/rerank rows.
+        valid_at = getattr(item, "valid_at", None)
+        date = f" — {valid_at}" if valid_at else ""
         snippet = " ".join(str(getattr(item, "text", "") or "").split())[:snippet_len]
-        rows.append(f"[{ref}]{rel_text} {title} :: {snippet}")
+        rows.append(f"[{ref}]{rel_text} {title}{date} :: {snippet}")
     return " | ".join(rows)
 
 

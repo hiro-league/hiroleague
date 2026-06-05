@@ -60,6 +60,12 @@
     /** Static intro text. Ignored when the `subtitle` snippet is provided. */
     subtitle?: string;
     sticky?: boolean;
+    /**
+     * Force the compact/pinned layout regardless of scroll position. Used when a
+     * tab wants the header out of the way by default (e.g. Knowledge → Graph,
+     * which fills the content area with the canvas). Implies `sticky` styling.
+     */
+    forceCompact?: boolean;
     /** Optional extra classes appended to the wrapping `<section>`. */
     class?: string;
     /**
@@ -94,6 +100,7 @@
     title,
     subtitle,
     sticky = false,
+    forceCompact = false,
     class: className,
     wrapperClass,
     collapseExpanded = true,
@@ -198,7 +205,9 @@
     ariaControls: collapseAriaControls
   });
 
-  const showCompactTitle = $derived(sticky && pinned);
+  // `forceCompact` pins the header without any scrolling (used by Graph tab).
+  const compact = $derived(pinned || forceCompact);
+  const showCompactTitle = $derived(sticky && compact);
 </script>
 
 <section bind:this={wrapperEl} class={cn(wrapperClass ?? ADMIN_PAGE_MAX_W, className)}>
@@ -206,7 +215,7 @@
     bind:this={headerEl}
     class={cn(
       sticky && ADMIN_PAGE_STICKY_HEADER_POSITION,
-      sticky && pinned && ADMIN_PAGE_STICKY_HEADER_PINNED
+      sticky && compact && ADMIN_PAGE_STICKY_HEADER_PINNED
     )}
   >
     <div

@@ -144,6 +144,21 @@ def _iso(value: Any) -> str:
         return str(value)[:10]
 
 
+def _fact_with_date(fact: str, valid_at: str, invalid_at: str) -> str:
+    """Append the fact's temporal validity so the answer LLM can resolve relative
+    dates in the episode body ("today", "next month") to an absolute date (G4).
+
+    Without this the skeleton fact "Adam started a new job at Brightloom" reaches the
+    model dateless and it cannot confirm month/year questions. ``valid_at → invalid_at``
+    is shown when the fact has been superseded (temporal='all'); a current fact shows
+    only its start. No dates ⇒ bare fact (graph never anchored a time)."""
+    if valid_at and invalid_at:
+        return f"{fact} (valid {valid_at} → {invalid_at})"
+    if valid_at:
+        return f"{fact} (as of {valid_at})"
+    return fact
+
+
 async def search_chunk_ids(
     graphiti: Any,
     query: str,
@@ -198,14 +213,18 @@ async def search_chunk_ids(
     for edge in edges:
         superseded = _is_superseded(edge)
         fact = getattr(edge, "fact", "") or ""
+        # Episode event time — resolve once; feeds both the ledger's RankedFact and the
+        # dated answer-skeleton fact below (G4: the body's "today" needs an absolute date).
+        valid_at = _iso(getattr(edge, "valid_at", None))
+        invalid_at = _iso(getattr(edge, "invalid_at", None))
         episodes = [str(ep) for ep in (getattr(edge, "episodes", None) or []) if ep]
         # Ranked list keeps a bounded prefix incl. superseded (marked) for the ledger.
         if fact and len(ranked) < 8:
             ranked.append(
                 RankedFact(
                     fact=fact,
-                    valid_at=_iso(getattr(edge, "valid_at", None)),
-                    invalid_at=_iso(getattr(edge, "invalid_at", None)),
+                    valid_at=valid_at,
+                    invalid_at=invalid_at,
                     chunk_id=episodes[0] if episodes else "",
                     superseded=superseded,
                 )
@@ -218,7 +237,9 @@ async def search_chunk_ids(
         for ep in episodes:
             chunk_ids.add(ep)
         if fact:
-            facts.append(fact)
+            # Carry the date into the skeleton fact so the answer model can ground
+            # relative phrasing in the supporting passage to an absolute date.
+            facts.append(_fact_with_date(fact, valid_at, invalid_at))
 
     log.info(
         "⬇️ graphiti.search — facts=%d/%d chunks=%d temporal=%s",

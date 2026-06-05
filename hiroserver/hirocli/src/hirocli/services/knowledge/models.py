@@ -137,6 +137,10 @@ class KnowledgeSource:
     rerank_score: float | None = None
     relevance: float | None = None
     score_source: str = "rrf"
+    # Episode event date (``valid_at``, YYYY-MM-DD) of the supporting chunk, stamped by the
+    # build_context node on the graph legs (graphiti/mix). Lets the answer model resolve a
+    # passage's relative dates ("today") to an absolute date. None on the flat leg / no graph.
+    valid_at: str | None = None
 
 
 @dataclass(frozen=True)

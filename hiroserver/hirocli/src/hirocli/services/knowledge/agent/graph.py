@@ -797,7 +797,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             )
         return {"hits": reranked, "reranked": True}
 
-    def build_context(self, state: KnowledgeAgentState) -> dict[str, Any]:
+    @graph_logged(captures={"decision"})
+    async def build_context(self, state: KnowledgeAgentState) -> dict[str, Any]:
         from hirocli.services.knowledge.converters import source_from_hit
 
         # matched_terms is a human-eval hint, computed only in opt-in explain mode.
@@ -805,6 +806,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         normalized = state.get("normalized_query")
         query_text = normalized.text if normalized is not None else str(state.get("query", ""))
         hits = state.get("hits") or []
+        # Graph legs only: stamp each passage's episode event date (valid_at) so the answer
+        # model can resolve relative dates in the body ("today") to an absolute date. The flat
+        # leg stays graph-free (its purpose is to isolate the no-graph baseline), so no fetch.
+        valid_at_by_id = await self._chunk_dates(state, hits)
         # Unified score contract: when the rerank node ran, sources carry the reranker's
         # normalized relevance (set on the hits). Otherwise relevance is the retrieval score
         # min-max normalized within this result set (ordinal, not calibrated) — tagged so chat
@@ -829,6 +834,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                     matched_terms=terms,
                     relevance=relevance,
                     score_source=score_source,
+                    valid_at=valid_at_by_id.get(hit.point_id),
                 )
             )
         # Graph legs (mix/graphiti) prepend the fact statements as an answer
@@ -842,11 +848,56 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 f"- {f}" for f in facts
             )
             context = f"{facts_block}\n\n{context}" if context else facts_block
+        no_results = not (sources or facts)
+        if entry := current_entry.get():
+            # Surface the assembled prompt skeleton: dated passages (the valid_at that lets the
+            # model resolve "today") + the fact-skeleton count. This is the only node that holds
+            # per-passage dates, so without it they're invisible in the ledger.
+            entry.set_decision("no_results" if no_results else "ok")
+            dated = sum(1 for s in sources if getattr(s, "valid_at", None))
+            rows = knowledge_results_rows(sources)
+            head = f"context · sources={len(sources)} (dated {dated}) · facts={len(facts)}"
+            entry.set_output_preview(
+                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
+            )
         return {
             "sources": sources,
             "context": context,
-            "no_results": not (sources or facts),
+            "no_results": no_results,
         }
+
+    async def _chunk_dates(
+        self, state: KnowledgeAgentState, hits: list[Any]
+    ) -> dict[str, str]:
+        """Map hit point_id → episode event date (YYYY-MM-DD) for the graph legs.
+
+        ``valid_at`` lives on the Graphiti episode (not the Qdrant payload), so it needs a
+        graph read. Scoped to the graph legs so the flat leg stays a true no-graph baseline;
+        best-effort — any miss (no graph / read error) yields ``{}`` and dateless passages."""
+        if (state.get("graph_mode") or "off") not in ("graphiti", "mix") or not hits:
+            return {}
+        from hirocli.services.knowledge.graph.graphiti_service import (
+            graphiti_db_path,
+            read_episode_valid_at,
+        )
+
+        db_path = graphiti_db_path(self._workspace_path)
+        if not db_path.exists():
+            return {}
+        point_ids = [h.point_id for h in hits if getattr(h, "point_id", "")]
+        try:
+            raw = await read_episode_valid_at(db_path, point_ids)
+        except Exception as exc:
+            # Graph DB read — non-fatal provenance; log and answer without passage dates.
+            log.warning(
+                "⚠️ knowledge — passage valid_at lookup failed · count=%d",
+                len(point_ids),
+                error=str(exc)[:200],
+                exc_info=True,
+            )
+            return {}
+        # read_episode_valid_at returns full ISO (or None); the prompt wants date-only.
+        return {pid: iso[:10] for pid, iso in raw.items() if iso}
 
     @graph_logged(captures={"usage", "decision"})
     async def call_model(

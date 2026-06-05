@@ -563,7 +563,7 @@ async def stream_knowledge_events(
         delivered: dict[str, int] = {}
         client = getattr(request.client, "host", "?")
         _active_sse_streams += 1
-        log.info(
+        log.fineinfo(
             "🔌 SSE connect — knowledge events · active=%d · ws=%s · client=%s",
             _active_sse_streams,
             workspace_path.name,
@@ -587,7 +587,7 @@ async def stream_knowledge_events(
             _active_sse_streams -= 1
             # `delivered` summarizes the whole stream lifetime — graph.* counts here being
             # 0 during a build that ran means no consumer was attached for those deltas.
-            log.info(
+            log.fineinfo(
                 "🔌 SSE disconnect — knowledge events · active=%d · ws=%s · delivered=%s",
                 _active_sse_streams,
                 workspace_path.name,

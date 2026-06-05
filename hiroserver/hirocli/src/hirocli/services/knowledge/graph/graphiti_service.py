@@ -79,6 +79,10 @@ log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
 # (the final cut is Graphiti's ``SearchConfig.limit``). Generous so we never pre-trim.
 _RERANK_CANDIDATE_CAP = 512
 
+# Page size for the scope-based episode wipe (remove_episodes_by_document). Paged via
+# uuid_cursor so an arbitrarily large prior run is fully swept — never tail-truncated.
+_EPISODE_WIPE_PAGE = 500
+
 # Dedicated read-connection pool size for the Graph-tab snapshot (docs
 # kuzu-shared-database-design.md §8, option b — "1 writer + N readers"). The snapshot
 # reads through its OWN AsyncConnection on the shared kuzu.Database so it never queues
@@ -356,6 +360,63 @@ class GraphitiMemoryService:
             removed += 1
         log.info("🧹 graphiti — removed eval episodes · count=%d/%d", removed, len(uuids))
         return removed
+
+    async def remove_episodes_by_document(self, document_id: str) -> int:
+        """Delete every episode in this graph that belongs to ``document_id`` — and
+        the nodes/edges those episodes exclusively own.
+
+        Scope-based counterpart to the per-uuid :meth:`remove_episodes`. A wipe must
+        clear ALL of a document's episodes regardless of what the corpus file
+        currently lists: a previous run may have ingested MORE episodes, and a
+        truncated/renamed file must never strand them in the graph. (Bug fix: the eval
+        reset used to derive the delete set from the current file's ids, so it could
+        only ever remove what the file still named — leaving prior-run episodes
+        behind.) Episodes carry their document_id in ``source_description`` at ingest,
+        so we enumerate the in-graph set by that field, never from the file. Other
+        knowledge (a different ``source_description``) is never matched. Idempotent:
+        a missing document removes 0.
+        """
+        from graphiti_core.errors import GroupsNodesNotFoundError
+        from graphiti_core.nodes import EpisodicNode
+
+        await self.initialize()
+        driver = getattr(self._graphiti, "driver", None)
+        if driver is None:
+            return 0
+
+        # Page through this group's episodes (uuid_cursor — get_by_group_ids orders by
+        # uuid DESC) so a large prior run can't leave a tail behind the page limit.
+        uuids: list[str] = []
+        cursor: str | None = None
+        while True:
+            try:
+                batch = await EpisodicNode.get_by_group_ids(
+                    driver, [self._group_id], limit=_EPISODE_WIPE_PAGE, uuid_cursor=cursor
+                )
+            except GroupsNodesNotFoundError:
+                break  # empty graph / no episodes in this group — nothing to wipe
+            if not batch:
+                break
+            for ep in batch:
+                if (getattr(ep, "source_description", "") or "") == document_id:
+                    uid = getattr(ep, "uuid", "") or ""
+                    if uid:
+                        uuids.append(uid)
+            if len(batch) < _EPISODE_WIPE_PAGE:
+                break
+            cursor = getattr(batch[-1], "uuid", None)
+            if not cursor:
+                break
+
+        if not uuids:
+            log.info("🧹 graphiti — no episodes to remove · document_id=%s", document_id)
+            return 0
+        log.info(
+            "🧹 graphiti — removing document episodes · document_id=%s count=%d",
+            document_id,
+            len(uuids),
+        )
+        return await self.remove_episodes(uuids)
 
     async def search_chunk_ids(
         self,

@@ -61,7 +61,7 @@ def acquire(key: str, factory: Callable[[], Any]) -> Any:
             resource = factory()
             entry = _Entry(resource=resource, refcount=0)
             _REGISTRY[key] = entry
-            log.info("⬇️ kuzu-registry — opened shared graph resource · key=%s", key)
+            log.fineinfo("⬇️ kuzu-registry — opened shared graph resource · key=%s", key)
         entry.refcount += 1
         return entry.resource
 
@@ -87,7 +87,7 @@ def release(key: str, closer: Callable[[Any], None]) -> None:
         except Exception:
             log.warning("⚠️ kuzu-registry — closer failed · key=%s", key, exc_info=True)
         else:
-            log.info("⬆️ kuzu-registry — closed shared graph resource · key=%s", key)
+            log.fineinfo("⬆️ kuzu-registry — closed shared graph resource · key=%s", key)
 
 
 def write_lock(key: str) -> asyncio.Lock:

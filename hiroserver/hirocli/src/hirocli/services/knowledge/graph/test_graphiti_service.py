@@ -181,3 +181,68 @@ async def test_remove_episodes_skips_missing_ids(tmp_path) -> None:
     finally:
         await svc.close()
     assert removed == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_episodes_by_document_scopes_by_source_description(
+    tmp_path, monkeypatch
+) -> None:
+    """Scope-based wipe: filters the group's episodes by ``source_description ==
+    document_id`` (the field ingest stamps), pages through them, and delegates ONLY
+    the matched uuids to ``remove_episodes`` — independent of any corpus file. Guards
+    the eval-reset bug where the graph wipe was keyed off the current file's ids and
+    stranded a prior, larger run's episodes.
+
+    The graph read/delete primitives are stubbed so the filtering/paging/delegation
+    logic is tested without Kuzu writes (raw ``node.save`` in-test segfaults Kuzu's
+    native teardown on Windows; the real read/delete paths run constantly in ingest)."""
+    from types import SimpleNamespace
+
+    from graphiti_core.nodes import EpisodicNode
+
+    from hirocli.services.knowledge.graph import graphiti_service as gsvc_mod
+
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+
+    # Two pages of 2: forces the uuid_cursor paging loop, with docA/docB interleaved
+    # across the page boundary so a single-page read would miss "a3".
+    pages = [
+        [
+            SimpleNamespace(uuid="a1", source_description="docA"),
+            SimpleNamespace(uuid="b1", source_description="docB"),
+        ],
+        [
+            SimpleNamespace(uuid="a3", source_description="docA"),
+        ],
+    ]
+
+    async def _fake_get(cls, driver, group_ids, limit=None, uuid_cursor=None):
+        # First call (no cursor) → full page 0 (len == page → loop continues);
+        # second call (cursor at page-0 tail) → page 1; then empty.
+        if uuid_cursor is None:
+            return list(pages[0])
+        if uuid_cursor == "b1":
+            return list(pages[1])
+        return []
+
+    # Shrink the page to 2 so page-0 fills exactly and the uuid_cursor loop fires.
+    monkeypatch.setattr(gsvc_mod, "_EPISODE_WIPE_PAGE", 2)
+    monkeypatch.setattr(EpisodicNode, "get_by_group_ids", classmethod(_fake_get))
+
+    captured: list[str] = []
+
+    async def _fake_remove(uuids):
+        captured.extend(uuids)
+        return len(uuids)
+
+    monkeypatch.setattr(svc, "remove_episodes", _fake_remove)
+
+    try:
+        removed = await svc.remove_episodes_by_document("docA")
+    finally:
+        await svc.close()
+
+    # Only docA across BOTH pages; docB skipped; cursor paging reached a3.
+    assert captured == ["a1", "a3"]
+    assert removed == 2

@@ -442,7 +442,10 @@ async def ingest_adam_corpus_via_service(
 
     from hirocli.domain.preferences import load_preferences
     from hirocli.runtime.agent_graph.ledger import LedgerSink
-    from hirocli.services.knowledge.constants import KNOWLEDGE_GRAPH_INGEST_PROGRESS
+    from hirocli.services.knowledge.constants import (
+        KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+        KNOWLEDGE_GRAPH_INGEST_PROGRESS,
+    )
     from hirocli.services.knowledge.graph import GraphitiMemoryService
     from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
 
@@ -480,9 +483,26 @@ async def ingest_adam_corpus_via_service(
                 KNOWLEDGE_EVAL_SETUP_PROGRESS,
                 {"run_id": run_id, "phase": "reset_adam", "episode_count": total},
             )
+            # Wipe BOTH stores by DOCUMENT SCOPE, not by the current file's episode
+            # ids. A prior run may have ingested more episodes than the file now lists
+            # (e.g. a truncated corpus for a smaller test run); a per-uuid graph delete
+            # keyed off the file would strand those — leaving the previous run's data
+            # "still there" before re-ingest. Qdrant already scoped by document_id;
+            # the graph now matches via source_description == document_id. (Bug fix.)
             for doc_id in {ep.document_id for ep in episodes}:
                 await asyncio.to_thread(service.vector_store.delete_document, doc_id)
-            await gsvc.remove_episodes([adam_point_id(ep.chunk_id) for ep in episodes])
+                await gsvc.remove_episodes_by_document(doc_id)
+            # Bug fix: the reset wiped this run's prior nodes/edges but emitted no graph
+            # signal, so the live Graph tab kept the stale prior-run graph and layered new
+            # nodes on top (never "starting from zero"). Trigger the reconcile (full
+            # re-export) so the view re-syncs to the cleared ground truth before the build
+            # begins adding nodes.
+            _publish(
+                bus,
+                workspace_path,
+                KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+                {"document_count": 0, "totals": {}, "reason": "reset"},
+            )
 
         # 1) Qdrant double-write — one tagged point per episode, point_id == shared uuid.
         graphiti_eps = []
@@ -522,6 +542,13 @@ async def ingest_adam_corpus_via_service(
         # is the multi-minute part (one LLM extraction per episode), so this is the
         # progress the user most needs to see ticking.
         def _graph_sink(event_type: str, payload: dict[str, Any]) -> None:
+            # Bug fix: forward the raw graph event onto the bus so the admin Graph
+            # tab receives live node/edge/progress deltas during an Adam eval build.
+            # Previously this sink only re-emitted ingest_progress as an eval terminal
+            # line and silently dropped node/edge upserts, so the Graph tab never updated
+            # live (it froze after the one-shot mount export). Mirrors the synthetic
+            # build_graph / ingest_batch paths, which publish via _publish_graph_event.
+            _publish(bus, workspace_path, event_type, payload)
             if event_type != KNOWLEDGE_GRAPH_INGEST_PROGRESS:
                 return
             _publish(
@@ -544,6 +571,16 @@ async def ingest_adam_corpus_via_service(
             source_role="user_document",
             event_sink=_graph_sink,
             ledger_sink=ledger_sink,
+        )
+        # Bug fix: the build burst is over — tell the Graph tab to run one reconciling
+        # full export to heal any deltas dropped under the SSE queue cap (mirrors the
+        # synthetic build_graph / ingest_batch paths). Without this the Adam path never
+        # emitted ingest_completed, so the live view never reconciled.
+        _publish(
+            bus,
+            workspace_path,
+            KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+            {"document_count": len({ep.document_id for ep in episodes}), "totals": {}},
         )
     finally:
         await gsvc.close()

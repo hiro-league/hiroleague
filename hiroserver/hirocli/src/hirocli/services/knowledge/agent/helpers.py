@@ -68,6 +68,7 @@ class ContextSource(Protocol):
     title: str
     heading_path: str | None
     text: str
+    valid_at: str | None
 
 
 @dataclass(frozen=True)
@@ -173,5 +174,9 @@ def build_context(sources: Sequence[ContextSource]) -> str:
     blocks: list[str] = []
     for source in sources:
         heading = f" §{source.heading_path}" if source.heading_path else ""
-        blocks.append(f"[{source.ref}] {source.title}{heading}\n{source.text}")
+        # Surface the chunk's event date so the model can ground relative dates in the
+        # passage ("today") — set on the graph legs only (flat stays graph-free). G4.
+        valid_at = getattr(source, "valid_at", None)
+        date = f" — {valid_at}" if valid_at else ""
+        blocks.append(f"[{source.ref}] {source.title}{heading}{date}\n{source.text}")
     return "\n\n".join(blocks)
