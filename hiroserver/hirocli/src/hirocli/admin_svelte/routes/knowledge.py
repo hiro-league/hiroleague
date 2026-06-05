@@ -192,8 +192,8 @@ class EvalRunBody(BaseModel):
     corpus_source: str = "synthetic"
     # Optional subset (adam path): run only these question ids. None/empty = all.
     question_ids: list[str] | None = None
-    # Legs to compare: any subset of ["flat", "graphiti", "mix"] (one is fine).
-    # None/empty = all three. Normalized server-side (unknown names dropped).
+    # Legs to compare: any subset of ["flat", "graphiti"] (one is fine).
+    # None/empty = both. Normalized server-side (unknown names dropped).
     modes: list[str] | None = None
     run_id: str | None = None
 
@@ -673,10 +673,10 @@ async def answer(
                     workspace_id=workspace_id,
                     explain=body.explain,
                     rewrite=body.rewrite,
-                    # Ask tab keeps its off/on toggle; "on" maps to the fused "mix"
-                    # leg (graph-focused Qdrant). The selectable graphiti/mix split
-                    # lives in the eval batch, not the single-answer Ask path.
-                    graph_mode=("mix" if body.graph_mode == "on" else "off"),
+                    # Ask tab keeps its off/on toggle; "on" maps to the graphiti leg
+                    # (graph facts + their by-id passages). The single-answer Ask path
+                    # has no leg selector — that lives in the eval batch.
+                    graph_mode=("graphiti" if body.graph_mode == "on" else "off"),
                     graph_temporal=body.graph_temporal,
                 )
             )

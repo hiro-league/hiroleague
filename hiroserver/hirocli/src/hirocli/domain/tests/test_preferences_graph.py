@@ -66,6 +66,9 @@ def test_unknown_graph_tuning_profile_rejected() -> None:
 def test_invalid_backend_rejected() -> None:
     with pytest.raises(ValidationError):
         KnowledgeGraphPreferences(backend="nonsense")
+    # "mix" was removed (only "off"/"graphiti" remain) — a stale pref must fail loud.
+    with pytest.raises(ValidationError):
+        KnowledgeGraphPreferences(backend="mix")
 
 
 def test_k_hop_bounds() -> None:

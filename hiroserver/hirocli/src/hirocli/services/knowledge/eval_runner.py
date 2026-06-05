@@ -75,10 +75,9 @@ EVAL_SYNTHETIC_TAG = "_l3_eval_synthetic"
 
 
 # The selectable eval legs (retrieval modes). "flat" = no graph (Qdrant hybrid);
-# "graphiti" = graph facts + their episode chunks by-id (no query hybrid); "mix" =
-# graph facts focus the Qdrant hybrid (fused). Any non-empty subset is runnable,
-# including a single leg. Order here is the canonical column order in the UI.
-ALL_EVAL_MODES: tuple[str, ...] = ("flat", "graphiti", "mix")
+# "graphiti" = graph facts + their episode chunks by-id (no query hybrid). Either
+# leg is runnable on its own. Order here is the canonical column order in the UI.
+ALL_EVAL_MODES: tuple[str, ...] = ("flat", "graphiti")
 DEFAULT_EVAL_MODES: list[str] = list(ALL_EVAL_MODES)
 
 
@@ -98,7 +97,7 @@ def normalize_modes(modes: list[str] | None) -> list[str]:
 class LegResult:
     """One leg's scored outcome for a single question."""
 
-    mode: str          # "flat" | "graphiti" | "mix"
+    mode: str          # "flat" | "graphiti"
     mark: str          # one of MARK_*
     elapsed_ms: int
     answer: str

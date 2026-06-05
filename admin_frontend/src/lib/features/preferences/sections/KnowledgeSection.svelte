@@ -396,7 +396,7 @@
     >
       <FormField
         label="Graph backend"
-        hint="Master switch. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from graph facts. Mix = graph facts focus the Qdrant passage search and the two fuse (recommended — best relational + grounding balance)."
+        hint="Master switch. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts and their supporting passages (recommended for relational + temporal questions)."
         class="max-w-md"
       >
         <select
@@ -405,8 +405,7 @@
           onchange={ctrl.markDirty}
         >
           <option value="off">Off — flat Qdrant only</option>
-          <option value="graphiti">Graphiti — graph facts</option>
-          <option value="mix">Mix — graph focuses Qdrant passages (recommended)</option>
+          <option value="graphiti">Graphiti — graph facts (recommended)</option>
         </select>
       </FormField>
 

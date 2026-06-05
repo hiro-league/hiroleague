@@ -1,6 +1,11 @@
 ## Question
 can you review the implementation of @knowledge-graphiti-pivot-design.md  and give me feedback only for the gaps (skip successful compliance). sort/group them by priority plz
 
+> **⚠️ Superseded (2026-06-05):** the items below that call for **adding a `mix` leg**
+> (e.g. "eval is 2-way, design mandates 3-way") are no longer valid — `mix` was
+> **removed**, retrieval is two-way (`flat`/`graphiti`). See
+> [`knowledge-remove-mix-mode-plan.md`](knowledge-remove-mix-mode-plan.md).
+
 ## Feedback
 
 

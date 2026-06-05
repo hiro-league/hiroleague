@@ -369,8 +369,8 @@ export type EvalRunRequest = {
   corpus_source?: 'synthetic' | 'adam';
   // Adam path: run only this subset of question ids (empty/undefined = all).
   question_ids?: string[];
-  // Legs to compare: any subset of ['flat','graphiti','mix'] (one is fine).
-  // Empty/undefined = all three.
+  // Legs to compare: any subset of ['flat','graphiti'] (one is fine).
+  // Empty/undefined = both.
   modes?: string[];
   run_id?: string;
 };

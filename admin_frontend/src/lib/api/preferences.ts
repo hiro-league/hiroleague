@@ -80,7 +80,7 @@ export type KnowledgePreferences = {
   };
   // Graphiti temporal knowledge graph (pivot). backend off = flat Qdrant only.
   graph: {
-    backend: 'off' | 'graphiti' | 'mix';
+    backend: 'off' | 'graphiti';
     extraction_model: string | null;
     extraction_tuning_profile: string;
     small_model: string | null;

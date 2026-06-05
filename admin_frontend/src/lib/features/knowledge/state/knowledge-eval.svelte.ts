@@ -41,13 +41,12 @@ import {
 export const EVAL_MAX_SELECTED = 50;
 
 /** All selectable legs, in canonical column order. */
-export const EVAL_ALL_LEGS: EvalLeg[] = ['flat', 'graphiti', 'mix'];
+export const EVAL_ALL_LEGS: EvalLeg[] = ['flat', 'graphiti'];
 
 /** Human label for a leg (column header / chip). */
 export const EVAL_LEG_LABEL: Record<string, string> = {
   flat: 'Flat',
-  graphiti: 'Graphiti',
-  mix: 'Mix'
+  graphiti: 'Graphiti'
 };
 import { PREF_KEYS } from '$lib/preferences/keys';
 import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
@@ -111,9 +110,9 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   // every mutation so Svelte 5 tracks it. Empty = run ALL questions.
   let selected = $state<Set<string>>(new Set());
 
-  // Selected legs to compare (flat/graphiti/mix). Default = all three. At least
-  // one must stay selected; toggling the last one off is ignored. Stored as an
-  // ordered array (canonical order) so the table columns are stable.
+  // Selected legs to compare (flat/graphiti). Default = both. At least one must
+  // stay selected; toggling the last one off is ignored. Stored as an ordered
+  // array (canonical order) so the table columns are stable.
   let selectedModes = $state<EvalLeg[]>([...EVAL_ALL_LEGS]);
   // The legs the CURRENT run actually used (from the started/state event) — drives
   // the live table/summary columns, independent of the next run's selection.

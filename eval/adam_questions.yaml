@@ -8,7 +8,7 @@
 #   and EITHER expected_fragments (the lowercase substrings the scorer looks for)
 #   OR expected_kind: abstain (negative control — declining is the correct outcome).
 #   must_not_contain   — superseded-fact / contradiction guard (forces fail on leak).
-#   requires           — lens where graph/mix should win (graph | temporal | world);
+#   requires           — lens where the graph leg should win (graph | temporal | world);
 #                        any of these flips requires_graph=True for the gate subset.
 # See docs/knowledge-graphiti-pivot-design.md §8.4–8.6.
 #

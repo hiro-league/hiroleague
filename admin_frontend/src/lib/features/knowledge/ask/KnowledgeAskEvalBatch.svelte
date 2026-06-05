@@ -177,7 +177,7 @@
           <span>Build graph</span>
         </label>
       {/if}
-      <!-- Leg selector — compare any subset of flat/graphiti/mix (one is fine). -->
+      <!-- Leg selector — compare any subset of flat/graphiti (one is fine). -->
       <div class="flex items-center gap-2 font-sans text-sm">
         <span class="text-muted-foreground">Legs</span>
         <div class="flex gap-1" role="group" aria-label="Legs to compare">
@@ -191,9 +191,7 @@
               disabled={isBusy}
               title={mode === 'graphiti'
                 ? 'Graph facts only (by-id passages, no query hybrid)'
-                : mode === 'mix'
-                  ? 'Graph facts focus the Qdrant hybrid (fused)'
-                  : 'No graph — flat Qdrant hybrid'}
+                : 'No graph — flat Qdrant hybrid'}
               onclick={() => eval_.toggleMode(mode)}
             >
               {legLabel(mode)}
@@ -575,13 +573,13 @@
       <p class="rounded-md border border-dashed px-3 py-6 text-center font-sans text-xs text-muted-foreground">
         {#if eval_.corpusSource === 'adam'}
           Ingests the 35-episode Adam corpus (Qdrant + Graphiti) and runs the selected questions
-          across the chosen legs. Pick the legs to compare (flat / graphiti / mix — any subset, one
-          is fine) and the questions (or leave all unselected to run every one), check "Ingest corpus"
+          across the chosen legs. Pick the legs to compare (flat / graphiti — either or both)
+          and the questions (or leave all unselected to run every one), check "Ingest corpus"
           on the first run, then Run. Results stream live with a per-category breakdown and a
           PROCEED/PIVOT verdict (when flat + a graph leg are both selected).
         {:else}
           Runs the synthetic questions from <code class="font-mono">eval/l3_questions.yaml</code>
-          across the chosen legs (flat / graphiti / mix). First run: check both setup boxes.
+          across the chosen legs (flat / graphiti). First run: check both setup boxes.
           Subsequent runs: leave them off (graph and corpus stay in the workspace).
         {/if}
       </p>

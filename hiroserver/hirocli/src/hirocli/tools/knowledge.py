@@ -341,8 +341,8 @@ class KnowledgeAnswerTool(Tool):
                 filters=filters,
                 workspace_id=workspace,
                 rewrite=rewrite,
-                # "on" → the fused "mix" leg (graph-focused Qdrant).
-                graph_mode=("mix" if mode == GRAPH_MODE_ON else "off"),
+                # "on" → the graphiti leg (graph facts + by-id passages).
+                graph_mode=("graphiti" if mode == GRAPH_MODE_ON else "off"),
                 graph_temporal=temporal or None,
             )
         finally:

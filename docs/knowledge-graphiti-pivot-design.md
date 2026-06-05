@@ -18,6 +18,15 @@
 >
 > **Status:** design only — nothing implemented. Tick checkboxes as phases land.
 
+> **⚠️ Superseded (2026-06-05): the `mix` leg/backend was removed.** Retrieval is now
+> two-way only — **`flat`** (`graph_mode="off"`) and **`graphiti`** (`graph_mode="graphiti"`).
+> The eval is **2 legs** (`flat`/`graphiti`); the backend pref is `Literal["off","graphiti"]`;
+> the Ask-tab `"on"` toggle and `compare` map to `graphiti`. Rationale: `mix` restricted the
+> Qdrant hybrid to the graph's own `chunk_ids`, which can only *drop* graph-chosen chunks —
+> it never broadened recall over `graphiti`. **All `mix` / "3-way" / "recommended = mix"
+> references below are historical.** See
+> [`knowledge-remove-mix-mode-plan.md`](knowledge-remove-mix-mode-plan.md).
+
 ---
 
 ## 1. Goals
@@ -524,7 +533,7 @@ are per-request or per-eval-run inputs and persist nothing).
 
 | Pref key (UI label) | Type / values | Default | Must set? | Description |
 |---|---|---|---|---|
-| `backend`<br/>*(Graph backend)* | `off` \| `graphiti` \| `mix` | `off` | **Yes, to enable** | Master switch for the whole graph path. `off` = today's flat Qdrant retrieval, graph untouched. `graphiti` = answer from graph facts. `mix` = graph facts **focus** the Qdrant passage search and the two fuse (recommended — best relational+grounding balance, decision G4). |
+| `backend`<br/>*(Graph backend)* | `off` \| `graphiti` | `off` | **Yes, to enable** | Master switch for the whole graph path. `off` = today's flat Qdrant retrieval, graph untouched. `graphiti` = answer from the graph's facts + their supporting episode passages (fetched by-id). *(`mix` removed — see callout at top.)* |
 | `extraction_model`<br/>*(Graph extraction model)* | model id \| `null` | `null` | Optional | The "heavy" LLM Graphiti uses to read each chunk and pull out entities + facts. Must be **structured-output-capable** (small models fail the schema, vendor-confirmed). `null` → falls back to the knowledge **answering** model, then to `llm.default_chat`. |
 | `extraction_tuning_profile`<br/>*(Graph extraction profile)* | profile id | `graphiti_extraction` | No (has default) | Tuning profile (temperature / max-tokens / thinking) applied to the extraction model. Ships deterministic (low temp) so extraction is repeatable. |
 | `small_model`<br/>*(Graph small-step model)* | model id \| `null` | `null` | Optional | A cheaper LLM for Graphiti's mechanical sub-steps (entity dedupe, summaries, timestamp parsing). `null` → falls back to `extraction_model`. Set this to cut cost when extraction runs a pricey model. |
@@ -556,7 +565,7 @@ inputs, not values stored in `preferences.json`.
 | **Use-graph at query** | `bool` / per-request | Ask tab + `knowledge_answer` tool param | Runtime A/B override of `backend` for a single question (forces graph on/off without changing the saved pref). |
 | **Eval: corpus source** | enum `synthetic` \| `adam` | Eval panel | Which corpus to ingest + ask against. |
 | **Eval: question selection** | multi-select checklist, **cap 50** | Eval panel | Questions to run; grouped by category, per-category select-all, live counter. |
-| **Eval: modes** | multi `flat` \| `graphiti` \| `mix` | Eval panel | Which retrievers to compare in the 3-way table. |
+| **Eval: modes** | multi `flat` \| `graphiti` | Eval panel | Which retrievers to compare in the side-by-side table. |
 | **Eval: model/profile** | reuse knowledge models | Eval panel | The answering model/profile under test (reuses the knowledge model pickers). |
 
 - **Rule:** no knob ships hardcoded; each durable knob lands with its preference key + UI
@@ -569,7 +578,7 @@ Knowledge Graph (Graphiti)**, then drive the rest from the Eval panel:
 
 | Setting | Suggested value | Why |
 |---|---|---|
-| `backend` | **`mix`** | The recommended fused path, and the configuration you actually want to validate. (The Eval panel still runs `flat`/`graphiti`/`mix` side-by-side regardless — this just sets the live default.) |
+| `backend` | **`graphiti`** | The graph path you want to validate. (The Eval panel still runs `flat`/`graphiti` side-by-side regardless — this just sets the live default.) |
 | `extraction_model` | a **medium, structured-output-capable** chat model | Extraction quality is the single biggest driver of graph quality; a weak model here corrupts every downstream answer. Leave `null` only if your default chat model is already strong + structured-output-capable. |
 | `extraction_tuning_profile` | `graphiti_extraction` (default) | Deterministic profile → repeatable extraction across eval runs. |
 | `small_model` | a **cheap** chat model | Keeps dedupe/summary sub-steps inexpensive over 35 sequential episodes. `null` is fine but reuses the (pricier) extraction model. |
@@ -597,13 +606,13 @@ expose a `*_resolved` property that walks the fallback chain.
 
 ```python
 # module-level enum aliases
-KnowledgeGraphBackend         = Literal["off", "graphiti", "mix"]
+KnowledgeGraphBackend         = Literal["off", "graphiti"]
 KnowledgeGraphTemporalDefault = Literal["current", "all"]
 KnowledgeGraphSearchRecipe    = Literal["rrf", "mmr", "cross_encoder"]
 KnowledgeGraphLedgerDetail    = Literal["compact", "rich"]
 
 class KnowledgeGraphPreferences(BaseModel):
-    # master switch — off = flat Qdrant only; graphiti = graph facts; mix = fuse (G4)
+    # master switch — off = flat Qdrant only; graphiti = graph facts + by-id passages
     backend: KnowledgeGraphBackend = "off"
     # heavy extraction LLM; null → knowledge answering model → llm.default_chat
     extraction_model: str | None = None
@@ -632,7 +641,7 @@ class KnowledgeGraphPreferences(BaseModel):
 
 | Field | Type | Default | Required? |
 |---|---|---|---|
-| `backend` | enum `off/graphiti/mix` | `off` | flip to enable |
+| `backend` | enum `off/graphiti` | `off` | flip to enable |
 | `extraction_model` | `str \| None` | `None` | optional (fallback chain) |
 | `extraction_tuning_profile` | `str` | `graphiti_extraction` | no (default) |
 | `small_model` | `str \| None` | `None` | optional (fallback chain) |

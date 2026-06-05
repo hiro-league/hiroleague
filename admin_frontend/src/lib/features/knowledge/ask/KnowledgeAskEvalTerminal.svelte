@@ -73,7 +73,7 @@
   }
 
   function questionLines(r: EvalRow): Line[] {
-    // Compact per-leg marks, e.g. "flat:✗ graphiti:✓ mix:✓"; only the run's legs.
+    // Compact per-leg marks, e.g. "flat:✗ graphiti:✓"; only the run's legs.
     const modes = Object.keys(r.legs);
     const marks = modes.map((m) => `${m}:${r.legs[m].mark}`).join(' ');
     const delta = r.delta && r.delta !== '0' ? ` Δ${r.delta}` : '';
@@ -83,9 +83,8 @@
       tone: won ? 'success' : lost ? 'warn' : 'muted',
       text: `Q ${r.index + 1}/${r.total} [${marks}${delta}]${r.requires_graph ? ' ▲' : ''} ${r.question}`
     };
-    // Prefer a graph leg's preview (mix → graphiti), else flat, else any leg.
+    // Prefer the graph leg's preview (graphiti), else flat, else any leg.
     const ans =
-      r.legs.mix?.answer_preview ||
       r.legs.graphiti?.answer_preview ||
       r.legs.flat?.answer_preview ||
       (modes.length ? r.legs[modes[0]].answer_preview : '');

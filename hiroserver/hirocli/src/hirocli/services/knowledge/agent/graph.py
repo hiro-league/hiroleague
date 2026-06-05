@@ -84,17 +84,14 @@ class KnowledgeAgentState(TypedDict, total=False):
     rewrite: bool
     # Retrieval mode for the graph layer (eval "legs"):
     #   "off"      → flat Qdrant hybrid over all chunks (graph_expand no-ops)
-    #   "mix"      → graph facts focus Qdrant hybrid on the supporting chunk_ids
-    #                AND inject the facts as an answer skeleton (G4 fusion)
     #   "graphiti" → graph facts ARE the source: facts as skeleton + the verbatim
-    #                episode chunks fetched by-id (no query hybrid). The control
-    #                leg that isolates the graph's own contribution vs "mix".
-    # Defaults to "off" so any caller that hasn't opted in stays flat. The graph
-    # legs require the knowledge.graph backend enabled (graphiti/mix) + a built graph.
+    #                episode chunks fetched by-id (no query hybrid).
+    # Defaults to "off" so any caller that hasn't opted in stays flat. The graphiti
+    # leg requires the knowledge.graph backend enabled + a built graph.
     graph_mode: str
     # Facts (statements) returned by ``graph_expand`` for the query. Injected into
-    # the answer context for the graph legs ("graphiti"/"mix") as the skeleton;
-    # empty on the flat leg. Carries the temporal supersession the LLM reasons over.
+    # the answer context for the graphiti leg as the skeleton; empty on the flat
+    # leg. Carries the temporal supersession the LLM reasons over.
     graph_facts: list[str]
     # Temporal lens for graph_expand: "current" (drop superseded facts) or "all".
     # Absent → falls back to knowledge.graph.temporal_default.
@@ -219,9 +216,9 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # internally when ``graph_mode=off`` (the default) or there's no query/graph.
         # Cost when off = ~zero. See ``graph_expand`` impl.
         #
-        # Routing after expand splits the three eval legs:
+        # Routing after expand splits the two eval legs:
         #   - "graphiti" WITH chunk_ids → graph_fetch (by-id passages, no hybrid)
-        #   - everything else (flat, mix, or graphiti soft-fallback) → the hybrid path
+        #   - flat, or graphiti soft-fallback (no chunk_ids) → the hybrid path
         # graphiti with no chunk_ids falls through to the hybrid path = full flat
         # search (the design's soft-fallback when the graph has nothing for the query).
         graph.add_conditional_edges(
@@ -481,13 +478,13 @@ class KnowledgeAgentGraph(BaseAgentGraph):
 
     @graph_logged(captures={"decision"})
     async def graph_expand(self, state: KnowledgeAgentState) -> dict[str, Any]:
-        # L3 — entity resolution + 1-hop expansion in the LadybugDB graph. The
-        # output ``graph_chunk_ids`` becomes a HasIdCondition filter in
-        # ``build_filters``, focusing the existing Qdrant hybrid + rerank on the
-        # graph-relevant slice. SOFT FALLBACK: empty result → no filter added →
-        # caller gets normal flat search (graph silently did nothing).
+        # L3 — Graphiti fact search → episode→chunk_id resolution. The output
+        # ``graph_chunk_ids`` drives ``graph_fetch`` (by-id passages for the graphiti
+        # leg) and ``graph_facts`` become the answer skeleton. SOFT FALLBACK: empty
+        # result → no chunk_ids → routing falls through to the hybrid path = normal
+        # flat search (graph silently did nothing).
         entry = current_entry.get()
-        if (state.get("graph_mode") or "off") not in ("graphiti", "mix"):
+        if (state.get("graph_mode") or "off") != "graphiti":
             if entry:
                 entry.set_decision("skipped", "graph_mode_off")
                 entry.set_output_preview("graph_mode=off · no expansion")
@@ -501,10 +498,9 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 entry.set_output_preview("no query · no expansion")
             return {}
 
-        # Graphiti fact-search → episodes→chunk_ids. The result becomes a
-        # HasIdCondition in ``build_filters`` (unchanged wiring), focusing the
-        # existing hybrid+rerank on the graph-relevant slice. SOFT FALLBACK: any
-        # miss/error → empty result → no filter → normal flat search.
+        # Graphiti fact-search → episodes→chunk_ids. The chunk_ids drive the by-id
+        # passage fetch (``graph_fetch``) for the graphiti leg. SOFT FALLBACK: any
+        # miss/error → empty result → routing falls through to normal flat search.
         from hirocli.services.knowledge.graph import GraphitiMemoryService, graphiti_db_path
 
         db_path = graphiti_db_path(self._workspace_path)
@@ -578,8 +574,8 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 temporal=temporal,
                 ledger_detail=self._prefs.knowledge.graph.ledger_detail,
             )
-        # graph_facts feed the answer skeleton for BOTH graph legs (mix + graphiti);
-        # graph_chunk_ids focus Qdrant (mix) or drive the by-id fetch (graphiti).
+        # graph_facts feed the answer skeleton for the graphiti leg; graph_chunk_ids
+        # drive the by-id passage fetch (graph_fetch).
         return {
             "graph_chunk_ids": list(expansion.chunk_ids),
             "graph_facts": list(expansion.facts),
@@ -622,12 +618,11 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         return {"hits": hits, "reranked": False}
 
     def build_filters(self, state: KnowledgeAgentState) -> dict[str, Any]:
-        # L3 — fold the graph_expand result into the Qdrant filter so the same
-        # hybrid+rerank step focuses on graph-relevant chunks (no rerank changes).
+        # The hybrid path only runs for the flat leg (and the graphiti soft-fallback
+        # when the graph found no chunk_ids); neither carries graph_chunk_ids, so
+        # there is nothing graph-specific to fold in. (The removed "mix" leg was the
+        # only path that restricted the hybrid to the graph's chunk_ids.)
         merged = dict(state.get("filters") or {})
-        graph_chunk_ids = state.get("graph_chunk_ids") or []
-        if graph_chunk_ids:
-            merged["chunk_ids"] = list(graph_chunk_ids)
         return {"qdrant_filter": build_qdrant_filter(merged)}
 
     @graph_logged(captures={"usage", "decision"})
@@ -874,7 +869,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         ``valid_at`` lives on the Graphiti episode (not the Qdrant payload), so it needs a
         graph read. Scoped to the graph legs so the flat leg stays a true no-graph baseline;
         best-effort — any miss (no graph / read error) yields ``{}`` and dateless passages."""
-        if (state.get("graph_mode") or "off") not in ("graphiti", "mix") or not hits:
+        if (state.get("graph_mode") or "off") != "graphiti" or not hits:
             return {}
         from hirocli.services.knowledge.graph.graphiti_service import (
             graphiti_db_path,

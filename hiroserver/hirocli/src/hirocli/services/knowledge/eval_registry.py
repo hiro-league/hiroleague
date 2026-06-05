@@ -63,7 +63,7 @@ class EvalRunState:
     corpus_source: str = ""
     status: str = "starting"  # starting | running | completed | failed | cancelled
     total_questions: int = 0
-    # Selected legs for this run (subset of flat/graphiti/mix) — drives the UI's
+    # Selected legs for this run (subset of flat/graphiti) — drives the UI's
     # dynamic columns. Set at begin_run and confirmed by the ``started`` event.
     modes: list[str] = field(default_factory=list)
     filters: dict[str, Any] = field(default_factory=dict)

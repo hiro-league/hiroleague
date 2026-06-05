@@ -30,7 +30,7 @@ export function connectKnowledgeJobEvents(onJob: (job: KnowledgeJobData) => void
 // ---------------------------------------------------------------------------
 
 /** The selectable eval legs (retrieval modes). */
-export type EvalLeg = 'flat' | 'graphiti' | 'mix';
+export type EvalLeg = 'flat' | 'graphiti';
 
 /** Payload shape of ``knowledge.eval.started`` events. */
 export type EvalStartedPayload = {
@@ -52,8 +52,8 @@ export type EvalQuestionLeg = {
 };
 
 /** Payload shape of ``knowledge.eval.question_completed`` events.
- *  ``legs`` is keyed by leg name (flat/graphiti/mix) — only the run's selected
- *  legs are present, so 1–3 entries. */
+ *  ``legs`` is keyed by leg name (flat/graphiti) — only the run's selected
+ *  legs are present, so 1–2 entries. */
 export type EvalQuestionPayload = {
   run_id?: string;
   index: number;

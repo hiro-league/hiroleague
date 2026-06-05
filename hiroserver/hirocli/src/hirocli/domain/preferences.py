@@ -439,7 +439,7 @@ class KnowledgeRewritePreferences(BaseModel):
     default_on: bool = False
 
 
-KnowledgeGraphBackend = Literal["off", "graphiti", "mix"]
+KnowledgeGraphBackend = Literal["off", "graphiti"]
 KnowledgeGraphTemporalDefault = Literal["current", "all"]
 KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
 # Graph Runs ledger verbosity for graph ingest + retrieval (docs §12.2).

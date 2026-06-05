@@ -60,7 +60,7 @@ class FakeService:
         self.answer_calls.append({"query": query, **kwargs})
         if self._sleep:
             await asyncio.sleep(self._sleep)
-        graph_on = kwargs.get("graph_mode") in ("graphiti", "mix")
+        graph_on = kwargs.get("graph_mode") == "graphiti"
         return KnowledgeAnswerResult(
             query=query,
             answer=f"{'graph' if graph_on else 'flat'} answer for {query!r}",
@@ -74,7 +74,7 @@ class FakeService:
         t0 = time.perf_counter()
         flat, graph = await asyncio.gather(
             self.answer(query, **{**kwargs, "graph_mode": "off"}),
-            self.answer(query, **{**kwargs, "graph_mode": "mix"}),
+            self.answer(query, **{**kwargs, "graph_mode": "graphiti"}),
         )
         return KnowledgeAnswerComparison(
             query=query,
@@ -118,7 +118,7 @@ async def test_compare_returns_both_legs_in_comparison_shape() -> None:
     # answer() was invoked twice — once per leg
     assert len(fake.answer_calls) == 2
     graph_modes = sorted(call["graph_mode"] for call in fake.answer_calls)
-    assert graph_modes == ["mix", "off"]
+    assert graph_modes == ["graphiti", "off"]
 
 
 @pytest.mark.asyncio
@@ -184,8 +184,8 @@ async def test_tool_graph_mode_on_calls_answer_with_use_graph_true(
     result = await tool.execute_async(query="q", rewrite=True, graph_mode=GRAPH_MODE_ON)
     assert isinstance(result, KnowledgeAnswerResult)
     assert len(fake.answer_calls) == 1
-    # Ask tab's "on" maps to the fused "mix" leg.
-    assert fake.answer_calls[0]["graph_mode"] == "mix"
+    # Ask tab's "on" maps to the graphiti leg.
+    assert fake.answer_calls[0]["graph_mode"] == "graphiti"
 
 
 @pytest.mark.asyncio

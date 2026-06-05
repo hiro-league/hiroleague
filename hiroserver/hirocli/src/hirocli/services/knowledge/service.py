@@ -616,10 +616,10 @@ class KnowledgeService:
             workspace_id=workspace_id,
         )
         graph = graph_builder.build()
-        # graph_mode in ("graphiti", "mix") turns on the graph_expand node. Useful
-        # only when rewrite=True too (rewrite extracts query entities for the graph);
-        # a graph mode with rewrite=False is a no-op + a warning.
-        if graph_mode in ("graphiti", "mix") and not rewrite:
+        # graph_mode == "graphiti" turns on the graph_expand node. Useful only when
+        # rewrite=True too (rewrite extracts query entities for the graph); a graph
+        # mode with rewrite=False is a no-op + a warning.
+        if graph_mode == "graphiti" and not rewrite:
             log.warning(
                 "⚠️ knowledge.answer — graph_mode=%s without rewrite=True · "
                 "graph_expand needs entities from rewrite_query · effectively off",
@@ -761,7 +761,7 @@ class KnowledgeService:
                 workspace_id=workspace_id,
                 explain=explain,
                 rewrite=rewrite,
-                graph_mode="mix",
+                graph_mode="graphiti",
                 graph_temporal=graph_temporal,
             ),
         )
@@ -773,9 +773,9 @@ class KnowledgeService:
         )
 
     # Eval leg name → agent graph_mode. "flat" is the no-graph baseline (graph_mode
-    # "off"); "graphiti"/"mix" map straight through. Keeps the eval's user-facing
-    # leg vocabulary (flat/graphiti/mix) decoupled from the graph's internal mode.
-    _LEG_TO_GRAPH_MODE = {"flat": "off", "graphiti": "graphiti", "mix": "mix"}
+    # "off"); "graphiti" maps straight through. Keeps the eval's user-facing leg
+    # vocabulary (flat/graphiti) decoupled from the graph's internal mode.
+    _LEG_TO_GRAPH_MODE = {"flat": "off", "graphiti": "graphiti"}
 
     async def answer_legs(
         self,
@@ -792,7 +792,7 @@ class KnowledgeService:
     ) -> dict[str, KnowledgeAnswerResult]:
         """Run :meth:`answer` once per selected leg, concurrently, keyed by leg name.
 
-        Generalizes :meth:`compare` to an arbitrary subset of {flat, graphiti, mix}
+        Generalizes :meth:`compare` to an arbitrary subset of {flat, graphiti}
         (one leg is fine). Same query/filters/tuning across legs — only ``graph_mode``
         differs. Used by the eval batch so the per-question table can show any chosen
         set of legs side by side. Wall-clock ≈ slowest leg (``asyncio.gather``).

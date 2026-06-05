@@ -33,7 +33,7 @@ def _ev(etype: str, ws: Path, payload: dict) -> DomainEvent:
 async def test_folds_full_run_into_state(tmp_path: Path) -> None:
     reg = EvalRunRegistry()
     fake_task = asyncio.create_task(asyncio.sleep(0))
-    reg.begin_run(tmp_path, "rid-1", corpus_source="adam", modes=["flat","graphiti","mix"], task=fake_task)
+    reg.begin_run(tmp_path, "rid-1", corpus_source="adam", modes=["flat","graphiti"], task=fake_task)
     await fake_task  # let the no-op task finish; the slot keeps the (done) handle
 
     await reg._on_event(
@@ -70,7 +70,7 @@ async def test_folds_full_run_into_state(tmp_path: Path) -> None:
 async def test_question_rows_upsert_by_index(tmp_path: Path) -> None:
     reg = EvalRunRegistry()
     t = asyncio.create_task(asyncio.sleep(0))
-    reg.begin_run(tmp_path, "rid", corpus_source="adam", modes=["flat","graphiti","mix"], task=t)
+    reg.begin_run(tmp_path, "rid", corpus_source="adam", modes=["flat","graphiti"], task=t)
     await t
     await reg._on_event(_ev(KNOWLEDGE_EVAL_STARTED, tmp_path, {"run_id": "rid", "total_questions": 1}))
     base = {"run_id": "rid", "index": 0, "total": 1, "flat": {}, "graph": {}}
@@ -85,7 +85,7 @@ async def test_question_rows_upsert_by_index(tmp_path: Path) -> None:
 async def test_stale_run_events_ignored(tmp_path: Path) -> None:
     reg = EvalRunRegistry()
     t = asyncio.create_task(asyncio.sleep(0))
-    reg.begin_run(tmp_path, "rid-new", corpus_source="adam", modes=["flat","graphiti","mix"], task=t)
+    reg.begin_run(tmp_path, "rid-new", corpus_source="adam", modes=["flat","graphiti"], task=t)
     await t
     # Event from a previous run must not mutate the current slot.
     await reg._on_event(_ev(KNOWLEDGE_EVAL_FAILED, tmp_path, {"run_id": "rid-old", "error": "boom"}))
@@ -97,7 +97,7 @@ async def test_stale_run_events_ignored(tmp_path: Path) -> None:
 async def test_request_cancel_cancels_live_task(tmp_path: Path) -> None:
     reg = EvalRunRegistry()
     task = asyncio.create_task(asyncio.sleep(30))
-    reg.begin_run(tmp_path, "rid", corpus_source="adam", modes=["flat","graphiti","mix"], task=task)
+    reg.begin_run(tmp_path, "rid", corpus_source="adam", modes=["flat","graphiti"], task=task)
 
     # Wrong run_id → no cancel.
     assert reg.request_cancel(tmp_path, "other") is False
@@ -114,7 +114,7 @@ async def test_request_cancel_cancels_live_task(tmp_path: Path) -> None:
 async def test_cancel_after_terminal_is_noop(tmp_path: Path) -> None:
     reg = EvalRunRegistry()
     t = asyncio.create_task(asyncio.sleep(0))
-    reg.begin_run(tmp_path, "rid", corpus_source="adam", modes=["flat","graphiti","mix"], task=t)
+    reg.begin_run(tmp_path, "rid", corpus_source="adam", modes=["flat","graphiti"], task=t)
     await t
     await reg._on_event(_ev(KNOWLEDGE_EVAL_CANCELLED, tmp_path, {"run_id": "rid"}))
     assert reg.get_run(tmp_path).status == "cancelled"

@@ -154,10 +154,10 @@ class FakeService:
     so each scenario maps cleanly to a row in the scoring table.
 
     The script is ``query → (flat_answer, graph_answer)``; the graph answer is used
-    for BOTH the "graphiti" and "mix" legs (the runner scores whatever legs the run
-    selected). Per-leg elapsed differs so the payload's per-leg timings are testable."""
+    for the "graphiti" leg (the runner scores whatever legs the run selected).
+    Per-leg elapsed differs so the payload's per-leg timings are testable."""
 
-    _LEG_ELAPSED = {"flat": 10, "graphiti": 15, "mix": 20}
+    _LEG_ELAPSED = {"flat": 10, "graphiti": 15}
 
     def __init__(self, *, script: dict[str, tuple[str, str]]):
         # qid → (flat_answer, graph_answer)
@@ -172,7 +172,7 @@ class FakeService:
             "rewrite": rewrite, "top_k": top_k, "min_score": min_score,
         })
         flat_ans, graph_ans = self._script.get(query, ("", ""))
-        ans_for = {"flat": flat_ans, "graphiti": graph_ans, "mix": graph_ans}
+        ans_for = {"flat": flat_ans, "graphiti": graph_ans}
         out: dict[str, FakeAnswerResult] = {}
         for mode in modes:
             text = ans_for.get(mode, "")
@@ -253,20 +253,19 @@ async def test_run_eval_publishes_started_per_question_and_completed_in_order(
     # Started payload — carries the selected legs so the UI renders columns up front.
     assert event_capture[0].payload["run_id"] == "rid-1"
     assert event_capture[0].payload["total_questions"] == 2
-    assert event_capture[0].payload["modes"] == ["flat", "graphiti", "mix"]
+    assert event_capture[0].payload["modes"] == ["flat", "graphiti"]
     # Question events carry index/total + per-leg marks under ``legs``.
     qc1 = event_capture[1].payload
     assert qc1["index"] == 0 and qc1["total"] == 2 and qc1["id"] == "a"
     assert qc1["legs"]["flat"]["mark"] == MARK_FAIL
     assert qc1["legs"]["graphiti"]["mark"] == MARK_PASS
-    assert qc1["legs"]["mix"]["mark"] == MARK_PASS
     assert qc1["delta"] == "+3"  # best graph leg vs flat
     # Summary payload matches what run_eval returned
     completed_payload = event_capture[-1].payload
     assert completed_payload["run_id"] == "rid-1"
-    assert completed_payload["modes"] == ["flat", "graphiti", "mix"]
-    # Q1 graph legs pass + Q2 all pass → graphiti/mix each pass 2, flat passes 1.
-    assert completed_payload["passing"] == {"flat": 1, "graphiti": 2, "mix": 2}
+    assert completed_payload["modes"] == ["flat", "graphiti"]
+    # Q1 graphiti passes + Q2 all pass → graphiti passes 2, flat passes 1.
+    assert completed_payload["passing"] == {"flat": 1, "graphiti": 2}
     assert summary.gate == "proceed"
 
 
@@ -310,7 +309,7 @@ async def test_gate_pivots_when_graph_does_not_beat_flat_on_required_subset(
     })
     summary = await run_eval(fake, tmp_path, questions=questions)
     assert summary.gate == "pivot"
-    assert summary.requires_graph_passing["mix"] == summary.requires_graph_passing["flat"]
+    assert summary.requires_graph_passing["graphiti"] == summary.requires_graph_passing["flat"]
 
 
 @pytest.mark.asyncio
@@ -329,7 +328,6 @@ async def test_gate_proceeds_when_graph_strictly_beats_flat_on_required_subset(
     })
     summary = await run_eval(fake, tmp_path, questions=questions)
     assert summary.gate == "proceed"
-    assert summary.requires_graph_passing["mix"] == 2
     assert summary.requires_graph_passing["graphiti"] == 2
     assert summary.requires_graph_passing["flat"] == 1
 
@@ -374,8 +372,7 @@ def test_question_result_to_payload_shape() -> None:
         id="x", category="c", question="q?", requires_graph=True,
         legs={
             "flat": LegResult("flat", MARK_FAIL, 10, "flat", "knowledge-flat-abc"),
-            "graphiti": LegResult("graphiti", MARK_PARTIAL, 15, "gx", "knowledge-gx"),
-            "mix": LegResult("mix", MARK_PASS, 20, "graph", "knowledge-graph-xyz"),
+            "graphiti": LegResult("graphiti", MARK_PASS, 20, "graph", "knowledge-graph-xyz"),
         },
         delta="+3",
     )
@@ -383,14 +380,14 @@ def test_question_result_to_payload_shape() -> None:
     assert p["index"] == 0 and p["total"] == 5
     # legs is keyed by leg name; each leg carries the compact preview (terminal
     # line) AND the full answer (expandable row) + per-leg run_id for drill-in.
-    assert set(p["legs"].keys()) == {"flat", "graphiti", "mix"}
+    assert set(p["legs"].keys()) == {"flat", "graphiti"}
     assert set(p["legs"]["flat"].keys()) == {
         "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id"
     }
     assert p["legs"]["flat"]["answer"] == "flat"
-    assert p["legs"]["mix"]["answer"] == "graph"
+    assert p["legs"]["graphiti"]["answer"] == "graph"
     assert p["legs"]["flat"]["run_id"] == "knowledge-flat-abc"
-    assert p["legs"]["mix"]["run_id"] == "knowledge-graph-xyz"
+    assert p["legs"]["graphiti"]["run_id"] == "knowledge-graph-xyz"
     assert p["delta"] == "+3"
 
 
@@ -402,13 +399,13 @@ def test_question_result_to_payload_run_id_may_be_null() -> None:
         id="x", category="c", question="q?", requires_graph=False,
         legs={
             "flat": LegResult("flat", MARK_PASS, 5, "a", None),
-            "mix": LegResult("mix", MARK_PASS, 5, "a", None),
+            "graphiti": LegResult("graphiti", MARK_PASS, 5, "a", None),
         },
         delta="0",
     )
     p = r.to_payload(index=0, total=1)
     assert p["legs"]["flat"]["run_id"] is None
-    assert p["legs"]["mix"]["run_id"] is None
+    assert p["legs"]["graphiti"]["run_id"] is None
 
 
 @pytest.mark.asyncio
@@ -417,11 +414,11 @@ async def test_run_eval_single_leg_runs_only_that_leg(event_capture, tmp_path) -
     flat-vs-graph comparison possible)."""
     fake = FakeService(script={"Q?": ("flat ok", "graph ok")})
     summary = await run_eval(
-        fake, tmp_path, questions=[_q("x", "Q?", expected=["ok"])], modes=["mix"]
+        fake, tmp_path, questions=[_q("x", "Q?", expected=["ok"])], modes=["graphiti"]
     )
-    assert summary.modes == ["mix"]
-    assert fake.legs_calls[0]["modes"] == ["mix"]
-    assert set(summary.passing.keys()) == {"mix"}
+    assert summary.modes == ["graphiti"]
+    assert fake.legs_calls[0]["modes"] == ["graphiti"]
+    assert set(summary.passing.keys()) == {"graphiti"}
     assert summary.gate == "n/a"
 
 
@@ -436,9 +433,9 @@ async def test_question_result_answer_preview_truncated_full_answer_intact(
     await run_eval(fake, tmp_path, questions=[_q("x", "Q?", expected=["a"])])
     qc = next(e for e in event_capture if e.type == KNOWLEDGE_EVAL_QUESTION_COMPLETED)
     assert len(qc.payload["legs"]["flat"]["answer_preview"]) <= 200
-    assert len(qc.payload["legs"]["mix"]["answer_preview"]) <= 200
+    assert len(qc.payload["legs"]["graphiti"]["answer_preview"]) <= 200
     # Full answer is preserved (the panel reads the whole thing on row expand).
     assert qc.payload["legs"]["flat"]["answer"] == long_answer
-    assert qc.payload["legs"]["mix"]["answer"] == long_answer
+    assert qc.payload["legs"]["graphiti"]["answer"] == long_answer
     # run_id rides on the question event too (registry correlation).
     assert qc.payload["run_id"]
