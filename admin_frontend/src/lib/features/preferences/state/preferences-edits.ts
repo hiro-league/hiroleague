@@ -22,22 +22,18 @@ export function editsForSave(
     baseline.llm.default_tuning_profile,
     draft.llm.default_tuning_profile
   );
-  add('memory.default_llm', baseline.memory.default_llm, draft.memory.default_llm || null);
-  add(
-    'memory.default_embedding_model',
-    baseline.memory.default_embedding_model,
-    draft.memory.default_embedding_model || null
-  );
-  add(
-    'memory.enabled',
-    baseline.memory.enabled,
-    Boolean(draft.memory.default_llm && draft.memory.default_embedding_model)
-  );
+  // Memory rides the shared Graphiti engine now (mem0 → Graphiti), so `enabled` is a real
+  // toggle — no longer derived from the legacy mem0 model fields (which forced it off in the
+  // UI and blocked enabling Graphiti memory).
+  add('memory.enabled', baseline.memory.enabled, draft.memory.enabled);
   add(
     'memory.default_tuning_profile',
     baseline.memory.default_tuning_profile,
     draft.memory.default_tuning_profile
   );
+  // A1: user's name (Graphiti speaker anchor). Must be listed here or Save silently drops it —
+  // editsForSave only sends paths it enumerates, so a new field is otherwise lost on save.
+  add('memory.user_name', baseline.memory.user_name, draft.memory.user_name);
   for (const key of modalityKeys) {
     add(`media.input.${key}`, baseline.media.input[key], draft.media.input[key]);
     add(`media.output.${key}`, baseline.media.output[key], draft.media.output[key]);
@@ -45,12 +41,6 @@ export function editsForSave(
   add('memory.search.enabled', baseline.memory.search.enabled, draft.memory.search.enabled);
   add('memory.extraction.enabled', baseline.memory.extraction.enabled, draft.memory.extraction.enabled);
   add('memory.search.top_k', baseline.memory.search.top_k, draft.memory.search.top_k);
-  add('memory.search.threshold', baseline.memory.search.threshold, draft.memory.search.threshold);
-  add('memory.search.rerank', baseline.memory.search.rerank, draft.memory.search.rerank);
-  add('memory.reranker.enabled', baseline.memory.reranker.enabled, draft.memory.reranker.enabled);
-  add('memory.reranker.model', baseline.memory.reranker.model, draft.memory.reranker.model);
-  add('memory.reranker.device', baseline.memory.reranker.device, draft.memory.reranker.device);
-  add('memory.reranker.batch_size', baseline.memory.reranker.batch_size, draft.memory.reranker.batch_size);
   add(
     'knowledge.default_embedding_model',
     baseline.knowledge.default_embedding_model,
@@ -126,67 +116,75 @@ export function editsForSave(
   add('knowledge.rewrite.default_on', baseline.knowledge.rewrite.default_on, draft.knowledge.rewrite.default_on);
   // Knowledge Graph (Graphiti) prefs were missing here, so backend/model/etc. edits were
   // silently dropped from the save payload (UI showed "saved" but the value snapped back).
-  add('knowledge.graph.backend', baseline.knowledge.graph.backend, draft.knowledge.graph.backend);
+  add('graph.backend', baseline.graph.backend, draft.graph.backend);
   add(
-    'knowledge.graph.extraction_model',
-    baseline.knowledge.graph.extraction_model,
-    draft.knowledge.graph.extraction_model || null
+    'graph.extraction_model',
+    baseline.graph.extraction_model,
+    draft.graph.extraction_model || null
   );
   add(
-    'knowledge.graph.extraction_tuning_profile',
-    baseline.knowledge.graph.extraction_tuning_profile,
-    draft.knowledge.graph.extraction_tuning_profile
+    'graph.extraction_tuning_profile',
+    baseline.graph.extraction_tuning_profile,
+    draft.graph.extraction_tuning_profile
   );
   add(
-    'knowledge.graph.small_model',
-    baseline.knowledge.graph.small_model,
-    draft.knowledge.graph.small_model || null
+    'graph.small_model',
+    baseline.graph.small_model,
+    draft.graph.small_model || null
   );
   add(
-    'knowledge.graph.small_tuning_profile',
-    baseline.knowledge.graph.small_tuning_profile,
-    draft.knowledge.graph.small_tuning_profile
+    'graph.small_tuning_profile',
+    baseline.graph.small_tuning_profile,
+    draft.graph.small_tuning_profile
   );
   add(
-    'knowledge.graph.embedder_model',
-    baseline.knowledge.graph.embedder_model,
-    draft.knowledge.graph.embedder_model || null
+    'graph.embedder_model',
+    baseline.graph.embedder_model,
+    draft.graph.embedder_model || null
   );
   add(
-    'knowledge.graph.temporal_default',
-    baseline.knowledge.graph.temporal_default,
-    draft.knowledge.graph.temporal_default
+    'graph.temporal_default',
+    baseline.graph.temporal_default,
+    draft.graph.temporal_default
   );
-  add('knowledge.graph.k_hop', baseline.knowledge.graph.k_hop, draft.knowledge.graph.k_hop);
+  add('graph.k_hop', baseline.graph.k_hop, draft.graph.k_hop);
   add(
-    'knowledge.graph.search_recipe',
-    baseline.knowledge.graph.search_recipe,
-    draft.knowledge.graph.search_recipe
+    'graph.search_recipe',
+    baseline.graph.search_recipe,
+    draft.graph.search_recipe
   );
+  // Orthogonal to search_recipe: which legs (edges / +nodes / +nodes+episodes) participate
+  // in recall. Backend rejects mmr+episodes via a cross-field validator; the UI greys the
+  // illegal combo to make that visible.
   add(
-    'knowledge.graph.sim_min_score',
-    baseline.knowledge.graph.sim_min_score,
-    draft.knowledge.graph.sim_min_score
-  );
-  add(
-    'knowledge.graph.ledger_detail',
-    baseline.knowledge.graph.ledger_detail,
-    draft.knowledge.graph.ledger_detail
+    'graph.search_scope',
+    baseline.graph.search_scope,
+    draft.graph.search_scope
   );
   add(
-    'knowledge.graph.reranker.model_id',
-    baseline.knowledge.graph.reranker.model_id,
-    draft.knowledge.graph.reranker.model_id || null
+    'graph.sim_min_score',
+    baseline.graph.sim_min_score,
+    draft.graph.sim_min_score
   );
   add(
-    'knowledge.graph.reranker.min_relevance',
-    baseline.knowledge.graph.reranker.min_relevance,
-    draft.knowledge.graph.reranker.min_relevance
+    'graph.ledger_detail',
+    baseline.graph.ledger_detail,
+    draft.graph.ledger_detail
   );
   add(
-    'knowledge.graph.reranker.device',
-    baseline.knowledge.graph.reranker.device,
-    draft.knowledge.graph.reranker.device || null
+    'graph.reranker.model_id',
+    baseline.graph.reranker.model_id,
+    draft.graph.reranker.model_id || null
+  );
+  add(
+    'graph.reranker.min_relevance',
+    baseline.graph.reranker.min_relevance,
+    draft.graph.reranker.min_relevance
+  );
+  add(
+    'graph.reranker.device',
+    baseline.graph.reranker.device,
+    draft.graph.reranker.device || null
   );
   add('chat.instructions', baseline.chat.instructions, draft.chat.instructions);
   add('chat.max_messages', baseline.chat.max_messages, draft.chat.max_messages);

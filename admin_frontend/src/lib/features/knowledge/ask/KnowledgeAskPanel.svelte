@@ -5,7 +5,6 @@
   import Badge from '$lib/components/ui/badge.svelte';
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
   import KnowledgeAskCompareView from '$lib/features/knowledge/ask/KnowledgeAskCompareView.svelte';
-  import KnowledgeAskEvalBatch from '$lib/features/knowledge/ask/KnowledgeAskEvalBatch.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
@@ -347,8 +346,4 @@
       </div>
     </KnowledgeCollapsibleSectionCard>
   {/if}
-
-  <!-- L3 (Phase 5e) — Eval Batch lives at the bottom of the Ask tab. Self-contained:
-       owns its own state + SSE subscription; the Ask page just passes its error sink. -->
-  <KnowledgeAskEvalBatch setError={(msg) => ctl.setError(msg)} />
 </section>

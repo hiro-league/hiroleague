@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MessageSquare } from '@lucide/svelte';
+  import { ArrowDown, ArrowUp, ArrowUpDown, MessageSquare } from '@lucide/svelte';
   import { createCoreRowModel, createTable, type ColumnDef } from '@tanstack/svelte-table';
   import type { LogRow } from '$lib/api/logs';
   import { cn } from '$lib/utils';
@@ -12,6 +12,8 @@
   import {
     logRowSourceLabel,
     trafficClassChipClass,
+    type LogSortColumn,
+    type LogSortDir,
     type RenderLogRow
   } from './shared/logs-ui';
 
@@ -19,6 +21,11 @@
     ctrl: LogsPageController;
     /** When true, the Extra column is hidden (detail panel shows full extra payload). */
     detailPanelOpen: boolean;
+    /** CSS `top` for the page-sticky table head (clears the header + filter toolbar). */
+    stickyHeadTop: string;
+    sortColumn: LogSortColumn;
+    sortDir: LogSortDir;
+    onToggleSort: (col: LogSortColumn) => void;
     scroller?: HTMLDivElement | null;
     onSelectRow: (row: RenderLogRow) => void;
     onOpenRowDetails: (row: RenderLogRow) => void;
@@ -29,12 +36,28 @@
   let {
     ctrl,
     detailPanelOpen,
+    stickyHeadTop,
+    sortColumn,
+    sortDir,
+    onToggleSort,
     scroller = $bindable(null),
     onSelectRow,
     onOpenRowDetails,
     onTableKeydown,
     onFilterToMessage
   }: Props = $props();
+
+  /** Header id → sort key (Date & Time both sort chronologically). Others unsortable. */
+  const SORTABLE: Record<string, LogSortColumn | undefined> = {
+    date_display: 'time',
+    timestamp_display: 'time',
+    level: 'level',
+    source: 'source',
+    module: 'module',
+    class: 'class',
+    subclass: 'subclass',
+    message: 'message'
+  };
 
   const columnDefs: ColumnDef<any, LogRow, unknown>[] = [
     { id: '_msg_scope', accessorKey: '_msg_scope', header: '' },
@@ -61,15 +84,17 @@
   } as any);
 </script>
 
-<div class="min-h-0 min-w-0 flex-1 overflow-hidden rounded-md border bg-card/70">
+<!-- Document-scroll layout: no overflow ancestor here so the table head can use
+     page-level sticky (pinned beneath the sticky header + filter toolbar). -->
+<div class="min-w-0 rounded-md border bg-card/70">
   {#if ctrl.loading}
-    <div class="grid h-full min-h-80 place-items-center">
+    <div class="grid min-h-80 place-items-center">
       <InlineLoading label="Loading logs…" />
     </div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
-      class="h-full overflow-auto outline-none"
+      class="outline-none"
       tabindex="0"
       role="application"
       aria-label="Log rows"
@@ -83,11 +108,19 @@
         )}
       >
         <thead
-          class="sticky top-0 z-10 border-b border-border/60 bg-muted/85 text-left text-foreground shadow-sm"
+          class="sticky z-10 border-b border-border/60 bg-muted/85 text-left text-foreground shadow-sm"
+          style:top={stickyHeadTop}
         >
           {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
             <tr>
               {#each headerGroup.headers as header (header.id)}
+                {@const sortKey = SORTABLE[header.id]}
+                {@const label = String(header.column.columnDef.header ?? header.id)}
+                {@const isActive = sortKey != null && sortColumn === sortKey}
+                {@const centered =
+                  header.id === 'date_display' ||
+                  header.id === 'timestamp_display' ||
+                  header.id === 'level'}
                 <th
                   class={cn(
                     'px-2 py-2.5 text-[0.68rem] font-bold tracking-wide',
@@ -102,8 +135,41 @@
                     header.id === 'message' && 'w-[380px]',
                     header.id === 'extra' && 'w-auto'
                   )}
+                  aria-sort={sortKey
+                    ? isActive
+                      ? sortDir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                    : undefined}
                 >
-                  {String(header.column.columnDef.header ?? header.id)}
+                  {#if sortKey}
+                    <button
+                      type="button"
+                      class={cn(
+                        'group inline-flex w-full max-w-full items-center gap-0.5 outline-none',
+                        centered ? 'justify-center' : 'justify-start'
+                      )}
+                      title={`Sort by ${label || header.id}`}
+                      onclick={() => onToggleSort(sortKey)}
+                    >
+                      <span class="truncate">{label}</span>
+                      {#if isActive}
+                        {#if sortDir === 'asc'}
+                          <ArrowUp size={11} class="shrink-0 text-primary" />
+                        {:else}
+                          <ArrowDown size={11} class="shrink-0 text-primary" />
+                        {/if}
+                      {:else}
+                        <ArrowUpDown
+                          size={10}
+                          class="shrink-0 opacity-0 transition-opacity group-hover:opacity-40"
+                        />
+                      {/if}
+                    </button>
+                  {:else}
+                    {label}
+                  {/if}
                 </th>
               {/each}
             </tr>

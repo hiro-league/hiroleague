@@ -33,7 +33,10 @@ from ..services.knowledge.graph import (
 )
 from ..services.knowledge.graph.graphiti_ingest import GraphEventSink
 from ..services.knowledge.graph.graphiti_serialize import build_graph_dtos
-from ..services.knowledge.graph.graphiti_service import read_graph_snapshot
+from ..services.knowledge.graph.graphiti_service import (
+    read_graph_group_ids,
+    read_graph_snapshot,
+)
 from .base import Tool, ToolParam
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
@@ -91,18 +94,23 @@ async def graph_snapshot_payload(
     *,
     node_limit: int | None = None,
     edge_limit: int | None = None,
+    group_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Whole-graph export for the admin Graph tab (Graphiti → wire DTO).
 
     Read-only: reads every entity node + RELATES_TO fact from Kuzu (no models),
-    maps to the viz DTO (entities + relations + temporal windows). Returns an empty
-    graph when none is built yet — never an ingest side effect. ``truncated`` flags
-    a safety-cap hit.
+    maps to the viz DTO (entities + relations + temporal windows). ``group_ids`` selects the
+    partition — default knowledge group, or a ``mem_{user}_{character}`` conversation-memory
+    group. Returns an empty graph when none is built yet — never an ingest side effect.
+    ``truncated`` flags a safety-cap hit.
     """
     node_limit = node_limit or _DEFAULT_NODE_LIMIT
     edge_limit = edge_limit or _DEFAULT_EDGE_LIMIT
     nodes, edges, chunk_to_document = await read_graph_snapshot(
-        graphiti_db_path(workspace_path), node_limit=node_limit, edge_limit=edge_limit
+        graphiti_db_path(workspace_path),
+        node_limit=node_limit,
+        edge_limit=edge_limit,
+        group_ids=group_ids,
     )
     truncated = len(nodes) >= node_limit or len(edges) >= edge_limit
     dtos = build_graph_dtos(nodes, edges, chunk_to_document=chunk_to_document)
@@ -112,6 +120,31 @@ async def graph_snapshot_payload(
         "truncated": truncated,
         "counts": {"nodes": len(nodes), "edges": len(edges)},
     }
+
+
+def _label_graph_group(group_id: str) -> dict[str, str]:
+    """One Graph-tab selector entry: ``{id, label, kind}``. Both the **logical label** and the
+    **kind** come from the firm group-ID policy (group_scope) so naming is defined in one place
+    (docs/graph-group-policy-design.md §4) — knowledge/memory/eval render as logical names, not
+    raw ids; legacy/unknown ids fall back to the raw id so they stay selectable/removable."""
+    from hirocli.services.knowledge.graph.group_scope import classify_group, group_label
+
+    return {"id": group_id, "label": group_label(group_id), "kind": classify_group(group_id)}
+
+
+async def graph_groups_payload(workspace_path: Path) -> dict[str, Any]:
+    """List the graph's partitions for the admin Graph tab's group selector.
+
+    Returns ``{"default_group_id", "groups": [{id, label, kind}]}`` — "Knowledge" first,
+    then conversation-memory groups, then any others. Empty when no graph is built yet.
+    """
+    group_ids, default_gid = await read_graph_group_ids(graphiti_db_path(workspace_path))
+    labeled = [_label_graph_group(g) for g in group_ids]
+    # Stable, friendly order: knowledge first, then memory, then eval, then other — each
+    # alphabetical.
+    kind_rank = {"knowledge": 0, "memory": 1, "eval": 2, "other": 3}
+    labeled.sort(key=lambda g: (kind_rank.get(g["kind"], 9), g["label"].lower()))
+    return {"default_group_id": default_gid, "groups": labeled}
 
 
 async def _gather_episodes(
@@ -258,6 +291,65 @@ async def _run_graph_ingest_for_documents(
         "documents": per_doc,
         "totals": totals,
     }
+
+
+def _open_graph_service_for_teardown(workspace_path: Path) -> GraphitiMemoryService:
+    """Build the graph service for a delete/clear op (no retrieval-backend gate).
+
+    Teardown still needs the full service (Kuzu driver + graphiti client) to page
+    episodes and remove their nodes/edges. ``require_backend=False`` so a wipe works
+    even when the retrieval toggle is off. Raises a clear error when no extraction model
+    is configured (a graph can't exist without one having built it)."""
+    prefs = load_preferences(workspace_path)
+    svc = GraphitiMemoryService.from_preferences(
+        prefs, workspace_path, require_backend=False
+    )
+    if svc is None:
+        raise RuntimeError(
+            "knowledge graph teardown: no extraction model configured. Set "
+            "knowledge.graph.extraction_model or knowledge.answering.model (or "
+            "llm.default_chat) and ensure the provider key is configured."
+        )
+    return svc
+
+
+async def clear_knowledge_graph(workspace_path: Path) -> int:
+    """Delete the ENTIRE knowledge graph (all entities + facts) for this workspace.
+
+    Wipes every episode in the knowledge default group; Qdrant chunks/documents are
+    untouched so the graph can be rebuilt from them. Idempotent — an empty graph
+    removes 0. Backs the admin Graph tab's "Clear graph" action."""
+    svc = _open_graph_service_for_teardown(workspace_path)
+    try:
+        await svc.initialize()
+        group_id = svc.group_id
+        if not group_id:
+            return 0
+        removed = await svc.clear_group(group_id)
+        log.info("🧹 knowledge graph cleared · group=%s episodes=%d", group_id, removed)
+        return removed
+    finally:
+        await svc.close()
+
+
+async def remove_document_from_graph(workspace_path: Path, document_id: str) -> int:
+    """Delete one document's episodes (+ the entities/facts they exclusively own) from
+    the knowledge graph, keeping its Qdrant chunks. Idempotent — a missing/blank
+    document removes 0. Closes the orphan-on-document-delete gap and backs the Browse
+    tab's per-document "Remove from graph" action."""
+    did = (document_id or "").strip()
+    if not did:
+        return 0
+    svc = _open_graph_service_for_teardown(workspace_path)
+    try:
+        await svc.initialize()
+        removed = await svc.remove_episodes_by_document(did)
+        log.info(
+            "🧹 knowledge graph — document removed · doc_id=%s episodes=%d", did, removed
+        )
+        return removed
+    finally:
+        await svc.close()
 
 
 class KnowledgeGraphIngestTool(Tool):

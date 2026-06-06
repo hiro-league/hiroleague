@@ -27,7 +27,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from graphiti_core.search.search_config import SearchConfig
+from graphiti_core.search.search_config import (
+    EpisodeReranker,
+    EpisodeSearchConfig,
+    EpisodeSearchMethod,
+    NodeReranker,
+    NodeSearchConfig,
+    NodeSearchMethod,
+    SearchConfig,
+)
 from graphiti_core.search.search_config_recipes import (
     EDGE_HYBRID_SEARCH_CROSS_ENCODER,
     EDGE_HYBRID_SEARCH_MMR,
@@ -52,8 +60,30 @@ _EDGE_RECIPES: dict[str, SearchConfig] = {
 }
 
 
+# Map the user-facing recipe choice onto the Node/Episode reranker enums.
+#   - Nodes support {rrf, mmr, cross_encoder} → identity-ish (same names exist).
+#   - Episodes are BM25-only with only {rrf, cross_encoder}. ``mmr`` is rejected up-front
+#     by ``GraphPreferences._validate_search_scope_recipe``; this map only handles the legal
+#     combos that reach here.
+_NODE_RERANKER = {
+    "rrf": NodeReranker.rrf,
+    "mmr": NodeReranker.mmr,
+    "cross_encoder": NodeReranker.cross_encoder,
+}
+_EPISODE_RERANKER = {
+    "rrf": EpisodeReranker.rrf,
+    "cross_encoder": EpisodeReranker.cross_encoder,
+}
+
+
 def _build_search_config(
-    recipe: str, *, num_results: int, k_hop: int, min_relevance: float, sim_min_score: float
+    recipe: str,
+    *,
+    num_results: int,
+    k_hop: int,
+    min_relevance: float,
+    sim_min_score: float,
+    scope: str = "edges",
 ) -> SearchConfig:
     """Clone the recipe and apply the admin knobs (no hardcoded params, repo rule).
 
@@ -79,6 +109,23 @@ def _build_search_config(
     if config.edge_config is not None:
         config.edge_config.bfs_max_depth = max(1, int(k_hop))
         config.edge_config.sim_min_score = max(0.0, min(1.0, float(sim_min_score)))
+    # Mount additional legs per scope. We keep the same recipe choice across legs so the
+    # within-leg ranking is consistent — orthogonal axes (decision: search_scope × search_recipe
+    # compose). Limits are shared via SearchConfig.limit; rerankers are per-leg.
+    if scope in ("edges_and_nodes", "edges_nodes_episodes"):
+        config.node_config = NodeSearchConfig(
+            search_methods=[NodeSearchMethod.bm25, NodeSearchMethod.cosine_similarity],
+            reranker=_NODE_RERANKER.get(recipe, NodeReranker.rrf),
+            sim_min_score=max(0.0, min(1.0, float(sim_min_score))),
+            bfs_max_depth=max(1, int(k_hop)),
+        )
+    if scope == "edges_nodes_episodes":
+        # Episodes leg is BM25-only (graphiti-core). The MMR×episodes combo is rejected at
+        # pref-validation; reaching here, ``recipe`` is rrf or cross_encoder → both safe.
+        config.episode_config = EpisodeSearchConfig(
+            search_methods=[EpisodeSearchMethod.bm25],
+            reranker=_EPISODE_RERANKER.get(recipe, EpisodeReranker.rrf),
+        )
     return config
 
 
@@ -111,19 +158,27 @@ class RankedFact:
 
 @dataclass(frozen=True)
 class GraphitiExpansion:
-    """Result of a Graphiti fact search, reduced to the retrieval focus set.
+    """Result of a Graphiti search, reduced to the retrieval focus set.
 
     ``chunk_ids`` is the union of supporting episode uuids (== Qdrant point_ids)
     across the kept facts — the focus set for hybrid+rerank. Empty ⇒ the graph
     couldn't anchor this query and the caller falls back to flat search.
     ``facts`` are the fact texts (for the ledger / future answer skeleton).
-    ``ranked`` is the ordered fact list (incl. superseded, marked) for the ledger."""
+    ``ranked`` is the ordered fact list (incl. superseded, marked) for the ledger.
+
+    ``node_memories`` / ``episode_memories`` are populated only when ``search_scope`` is
+    widened beyond ``edges`` (decision: extends D3). Each is a short text the answer model
+    can read as additional memory: node summaries are per-entity *attribute* memories (e.g.
+    ``"About Misho: turned 50 years old in June 2026"``); episode memories are raw turn
+    bodies recalled via BM25 — useful as last-resort recall, noisier than facts."""
 
     chunk_ids: tuple[str, ...]
     facts: tuple[str, ...]
     facts_total: int  # facts returned by search
     facts_used: int   # facts kept after the temporal filter
     ranked: tuple[RankedFact, ...] = ()
+    node_memories: tuple[str, ...] = ()
+    episode_memories: tuple[str, ...] = ()
 
 
 def _is_superseded(edge: Any) -> bool:
@@ -170,6 +225,7 @@ async def search_chunk_ids(
     k_hop: int = 1,
     min_relevance: float = 0.0,
     sim_min_score: float = 0.3,
+    scope: str = "edges",
 ) -> GraphitiExpansion:
     """Run Graphiti fact search → focused chunk_ids (+ fact texts).
 
@@ -183,6 +239,16 @@ async def search_chunk_ids(
     if not q:
         return GraphitiExpansion((), (), 0, 0)
 
+    # Firm scoping (docs/graph-group-policy-design.md §6): a scoped read MUST name a
+    # partition. Previously a falsy group_id became ``group_ids=None``, which tells graphiti
+    # to search EVERY group — so knowledge search (whose group resolved to the empty default)
+    # leaked conversation-memory facts from other users. There is no "search all" here: a
+    # missing group fails SAFE to an empty expansion (caller soft-falls-back to flat search),
+    # never to a cross-vertical scan.
+    if not group_id:
+        log.warning("⚠️ graphiti.search — missing group_id · returning empty (no all-groups scan)")
+        return GraphitiExpansion((), (), 0, 0)
+
     # Push the current-only lens down to the query so superseded facts don't eat the
     # num_results budget (design §7). None ⇒ Graphiti applies its empty default filter.
     search_filter = _current_only_filter() if temporal == "current" else None
@@ -192,12 +258,13 @@ async def search_chunk_ids(
         k_hop=k_hop,
         min_relevance=min_relevance,
         sim_min_score=sim_min_score,
+        scope=scope,
     )
     try:
         results = await graphiti.search_(
             q,
             config=config,
-            group_ids=[group_id] if group_id else None,
+            group_ids=[group_id],  # always scoped — never None/all-groups (see guard above)
             search_filter=search_filter,
         )
     except Exception:
@@ -241,11 +308,31 @@ async def search_chunk_ids(
             # relative phrasing in the supporting passage to an absolute date.
             facts.append(_fact_with_date(fact, valid_at, invalid_at))
 
+    # Scope-widened legs — only populated when the recipe mounted them. ``SearchResults``
+    # always has the fields (defaulted to ``[]``), so unmounted legs naturally return empty.
+    node_memories: list[str] = []
+    for node in getattr(results, "nodes", None) or []:
+        summary = (getattr(node, "summary", "") or "").strip()
+        if not summary:
+            continue
+        name = (getattr(node, "name", "") or "").strip()
+        # Attribute-style memory: prefix with the entity name so the answer model can
+        # attribute the statement back to its subject ("About Misho: …").
+        node_memories.append(f"About {name}: {summary}" if name else summary)
+    episode_memories: list[str] = []
+    for ep in getattr(results, "episodes", None) or []:
+        content = (getattr(ep, "content", "") or "").strip()
+        if content:
+            episode_memories.append(content)
+
     log.info(
-        "⬇️ graphiti.search — facts=%d/%d chunks=%d temporal=%s",
+        "⬇️ graphiti.search — facts=%d/%d nodes=%d episodes=%d chunks=%d scope=%s temporal=%s",
         used,
         len(edges),
+        len(node_memories),
+        len(episode_memories),
         len(chunk_ids),
+        scope,
         temporal,
     )
     return GraphitiExpansion(
@@ -254,6 +341,8 @@ async def search_chunk_ids(
         facts_total=len(edges),
         facts_used=used,
         ranked=tuple(ranked),
+        node_memories=tuple(node_memories),
+        episode_memories=tuple(episode_memories),
     )
 
 

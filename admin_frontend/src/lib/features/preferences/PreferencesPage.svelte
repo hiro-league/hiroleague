@@ -14,9 +14,9 @@
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import Button from '$lib/components/ui/button.svelte';
   import AgentSection from '$lib/features/preferences/sections/AgentSection.svelte';
+  import GraphEngineSection from '$lib/features/preferences/sections/GraphEngineSection.svelte';
   import KnowledgeSection from '$lib/features/preferences/sections/KnowledgeSection.svelte';
   import MediaSection from '$lib/features/preferences/sections/MediaSection.svelte';
-  import MemorySection from '$lib/features/preferences/sections/MemorySection.svelte';
   import ModelsSection from '$lib/features/preferences/sections/ModelsSection.svelte';
   import TuningProfilesSection from '$lib/features/preferences/sections/TuningProfilesSection.svelte';
   import {
@@ -175,10 +175,10 @@
       <ModelsSection {ctrl} />
     {:else if tabPrefs.activeTab === 'media'}
       <MediaSection {ctrl} />
-    {:else if tabPrefs.activeTab === 'memory'}
-      <MemorySection {ctrl} />
     {:else if tabPrefs.activeTab === 'knowledge'}
       <KnowledgeSection {ctrl} />
+    {:else if tabPrefs.activeTab === 'graph-engine'}
+      <GraphEngineSection {ctrl} />
     {:else if tabPrefs.activeTab === 'agent'}
       <AgentSection {ctrl} />
     {:else}

@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/stop-hiro-dev-processes.sh
 source "$SCRIPT_DIR/scripts/stop-hiro-dev-processes.sh"
 
-# Mem0 hybrid deps (fastembed → py-rust-stemmers) have cp312 wheels; 3.14 forces a Rust source build on Windows.
+# Knowledge hybrid deps (fastembed → py-rust-stemmers) have cp312 wheels; 3.14 forces a Rust source build on Windows.
 HIRO_UV_PYTHON="${HIRO_UV_PYTHON:-3.12}"
 
 export HIRO_ENV="${HIRO_ENV:-dev}"

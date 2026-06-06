@@ -590,23 +590,74 @@ export type KnowledgeGraphExportData = {
   counts: { nodes: number; edges: number };
 };
 
-// Live SSE payloads (knowledge.graph.*).
-export type GraphNodeEvent = { node: GraphNodeDTO; is_new: boolean; document_id: string };
-export type GraphEdgeEvent = { edge: GraphEdgeDTO; is_new: boolean; document_id: string };
+// Live SSE payloads (knowledge.graph.*). `group_id` tags the partition (knowledge default
+// vs a mem_{user}_{character} conversation-memory group) so the Graph tab routes the delta
+// to the group it's currently viewing. Older events may omit it (treated as knowledge).
+export type GraphNodeEvent = {
+  node: GraphNodeDTO;
+  is_new: boolean;
+  document_id: string;
+  group_id?: string | null;
+};
+export type GraphEdgeEvent = {
+  edge: GraphEdgeDTO;
+  is_new: boolean;
+  document_id: string;
+  group_id?: string | null;
+};
 export type GraphIngestProgress = {
   document_id: string;
   chunk_index: number;
   chunk_total: number;
+  group_id?: string | null;
 };
 
 export function exportKnowledgeGraph(
-  opts: { nodeLimit?: number; edgeLimit?: number } = {}
+  opts: { nodeLimit?: number; edgeLimit?: number; groupIds?: string[] } = {}
 ): Promise<ApiResponse<KnowledgeGraphExportData>> {
   return apiRequest<KnowledgeGraphExportData>('/knowledge/graph/export', {
     method: 'POST',
-    body: { node_limit: opts.nodeLimit ?? null, edge_limit: opts.edgeLimit ?? null },
+    body: {
+      node_limit: opts.nodeLimit ?? null,
+      edge_limit: opts.edgeLimit ?? null,
+      group_ids: opts.groupIds ?? null
+    },
     timeoutMs: 60000
   });
+}
+
+// Graph partitions for the Graph tab's group selector.
+export type GraphGroupKind = 'knowledge' | 'memory' | 'eval' | 'other';
+export type GraphGroup = { id: string; label: string; kind: GraphGroupKind };
+export type KnowledgeGraphGroupsData = {
+  default_group_id: string | null;
+  groups: GraphGroup[];
+};
+
+/** List the graph's partitions (Knowledge + each conversation-memory group). */
+export function listKnowledgeGraphGroups(): Promise<ApiResponse<KnowledgeGraphGroupsData>> {
+  return apiRequest<KnowledgeGraphGroupsData>('/knowledge/graph/groups', { timeoutMs: 30000 });
+}
+
+/** Delete the ENTIRE knowledge graph (all entities + facts); Qdrant chunks are kept so
+ *  it can be rebuilt. Backs the Graph tab "Clear graph" action. */
+export function clearKnowledgeGraph(): Promise<ApiResponse<{ removed_episodes: number }>> {
+  return apiRequest<{ removed_episodes: number }>('/knowledge/graph/clear', {
+    method: 'POST',
+    body: {},
+    timeoutMs: 120000
+  });
+}
+
+/** Delete one document's episodes/entities/facts from the knowledge graph, keeping its
+ *  Qdrant chunks. Backs the Browse tab per-document "Remove from graph" action. */
+export function removeDocumentFromKnowledgeGraph(
+  documentId: string
+): Promise<ApiResponse<{ document_id: string; removed_episodes: number }>> {
+  return apiRequest<{ document_id: string; removed_episodes: number }>(
+    '/knowledge/graph/remove-document',
+    { method: 'POST', body: { document_id: documentId }, timeoutMs: 120000 }
+  );
 }
 
 // One provenance chunk for a selected node/edge: the real text + its owning document.

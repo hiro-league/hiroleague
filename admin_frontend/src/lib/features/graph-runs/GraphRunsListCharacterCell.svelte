@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** Shared avatar + name column for ledger and Mem0 tables (GraphRuns step #2 extraction). */
+  /** Shared avatar + name column for ledger and Memories tables (GraphRuns step #2 extraction). */
   let { photo, name }: { photo: string | null; name: string } = $props();
 </script>
 

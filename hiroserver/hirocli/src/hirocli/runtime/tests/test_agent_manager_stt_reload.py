@@ -250,13 +250,7 @@ async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
             "hirocli.services.memory.create_memory_service",
             side_effect=fake_create_memory_service,
         ):
-            mgr._ctx.preferences.update_many(
-                {
-                    "memory.default_llm": "openai:gpt-test",
-                    "memory.default_embedding_model": "openai:text-embedding-3-small",
-                    "memory.enabled": True,
-                }
-            )
+            mgr._ctx.preferences.update_many({"memory.enabled": True})
             await asyncio.sleep(0.1)
 
         assert rebuilds == [(tmp_path, None)]
@@ -267,9 +261,11 @@ async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
 
 
 @pytest.mark.asyncio
-async def test_memory_tuning_profile_preference_reloads_memory(
+async def test_graph_engine_change_reloads_memory(
     tmp_path: Path,
 ) -> None:
+    # Memory rides the shared Graphiti engine, so a top-level ``graph.*`` change must rebuild
+    # the memory service (mem0 → Graphiti, Phase 5) — the engine config is baked in at build.
     mgr = _make_agent_manager(tmp_path)
     reactor: PreferenceReactor = mgr._ctx.preference_reactor
 
@@ -282,9 +278,9 @@ async def test_memory_tuning_profile_preference_reloads_memory(
 
     try:
         reactor.on_change(
-            "memory",
+            "graph",
             mgr._reload_memory_on_change,
-            key="agent.memory",
+            key="agent.graph-memory",
             debounce_ms=10,
         )
 
@@ -293,8 +289,8 @@ async def test_memory_tuning_profile_preference_reloads_memory(
             side_effect=fake_create_memory_service,
         ):
             mgr._ctx.preferences.update(
-                "memory.default_tuning_profile",
-                "balanced_chat",
+                "graph.search_recipe",
+                "mmr",
             )
             await asyncio.sleep(0.1)
 

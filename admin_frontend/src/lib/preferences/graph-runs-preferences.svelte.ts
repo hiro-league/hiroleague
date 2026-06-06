@@ -1,36 +1,25 @@
 /**
- * Graph Runs page preferences:
- *  - Primary tab (`runs` vs `memories`) — URL `?tab=` + session, via the shared
- *    `createTabPreferences` factory (plan §2.2 / Phase 2 exit criterion 4a).
- *  - `runDetailCardsExpanded` — localStorage-backed run-detail layout toggle
- *    (unchanged; not a page-level tab pref).
+ * Graph Runs UI preference: `runDetailCardsExpanded` — a localStorage-backed
+ * run-detail layout toggle (expanded vs collapsed metric/ledger cards).
  *
- * The dynamic per-record subtab strip (open run inspectors) stays feature-local
- * and is keyed by `?run=<id>` on the controller, not by this module.
+ * The page-level primary tab pill moved to the Logs page (Graph runs is now its
+ * second tab) — see `logs-tab-preferences.svelte.ts`. The dynamic per-record
+ * subtab strip (open run inspectors) stays feature-local, keyed by `?run=<id>`
+ * on the controller.
  */
-import { PREF_KEYS, type GraphRunsPrimaryTabPreference } from './keys';
-import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
+import { PREF_KEYS } from './keys';
 import { readLocalBoolean, writeLocalBoolean } from './storage';
 
-const ALLOWED: readonly GraphRunsPrimaryTabPreference[] = ['runs', 'memories'] as const;
-
-export type GraphRunsPreferences = TabPreferences<GraphRunsPrimaryTabPreference> & {
+export type GraphRunsPreferences = {
   readonly runDetailCardsExpanded: boolean;
+  initialize: () => void;
   toggleRunDetailCards: () => void;
 };
 
 export function createGraphRunsPreferences(): GraphRunsPreferences {
-  const tabs = createTabPreferences<GraphRunsPrimaryTabPreference>({
-    storageKey: PREF_KEYS.graphRunsActiveTab,
-    defaultTab: 'runs',
-    allowed: ALLOWED,
-    omitDefaultFromUrl: true
-  });
-
   let runDetailCardsExpanded = $state(true);
 
   function initialize() {
-    tabs.initialize();
     runDetailCardsExpanded = readLocalBoolean(PREF_KEYS.graphRunsRunDetailCardsExpanded, true);
   }
 
@@ -40,11 +29,6 @@ export function createGraphRunsPreferences(): GraphRunsPreferences {
   }
 
   return {
-    get activeTab() {
-      return tabs.activeTab;
-    },
-    setActiveTab: tabs.setActiveTab,
-    syncActiveTabFromUrl: tabs.syncActiveTabFromUrl,
     get runDetailCardsExpanded() {
       return runDetailCardsExpanded;
     },

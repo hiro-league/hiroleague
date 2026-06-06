@@ -1,24 +1,29 @@
 import {
   isTrafficClass,
   LOG_LEVELS,
+  TRAFFIC_CLASSES,
   type LogLevel,
-  type LogSortOrder,
   type LogSourceFilter,
   type LogTimeRange,
   type TrafficClass
 } from '$lib/api/logs';
 import {
   isLogLevel,
+  isLogSortColumn,
   isLogSourceFilter,
   isLogTimeRange,
   LOGS_PREF_SESSION_KEY,
+  type LogSortColumn,
+  type LogSortDir,
   type LogsPrefsSnapshot
 } from '$lib/features/logs/shared/logs-ui';
 
 /** Session-backed logs UI preferences (filters, layout toggles). */
 export function createLogsPreferences() {
   let paused = $state(false);
-  let sortOrder = $state<LogSortOrder>('newest');
+  // Table column sort (replaces the old newest/oldest toggle). Default newest-first.
+  let sortColumn = $state<LogSortColumn>('time');
+  let sortDir = $state<LogSortDir>('desc');
   let activeSources = $state<LogSourceFilter[]>([]);
   let activeChannel = $state('');
   let levelFilter = $state<LogLevel[]>([...LOG_LEVELS]);
@@ -26,7 +31,9 @@ export function createLogsPreferences() {
   let scopeDeviceId = $state('');
   let scopeMsgId = $state('');
   let scopeMethod = $state('');
-  let trafficClassFilter = $state<TrafficClass[]>([]);
+  // Traffic facet defaults to all classes selected (= show everything); clearing
+  // hides classed rows. See rowPassesFilters.
+  let trafficClassFilter = $state<TrafficClass[]>([...TRAFFIC_CLASSES]);
   let detailPanelOpen = $state(false);
   let controlsCollapsed = $state(false);
   /** When true, initial tail starts at latest Hiro Server startup line (time range ignored on server). */
@@ -39,7 +46,8 @@ export function createLogsPreferences() {
     try {
       const prefs = JSON.parse(raw) as LogsPrefsSnapshot;
       paused = Boolean(prefs.paused);
-      sortOrder = prefs.sortOrder === 'oldest' ? 'oldest' : 'newest';
+      sortColumn = isLogSortColumn(prefs.sortColumn) ? prefs.sortColumn : 'time';
+      sortDir = prefs.sortDir === 'asc' ? 'asc' : 'desc';
       activeSources = (prefs.activeSources ?? []).filter(isLogSourceFilter);
       activeChannel =
         typeof prefs.activeChannel === 'string'
@@ -52,7 +60,9 @@ export function createLogsPreferences() {
       scopeDeviceId = String(prefs.scopeDeviceId ?? '');
       scopeMsgId = String(prefs.scopeMsgId ?? '');
       scopeMethod = String(prefs.scopeMethod ?? '');
-      trafficClassFilter = (prefs.trafficClassFilter ?? []).filter(isTrafficClass);
+      trafficClassFilter = Array.isArray(prefs.trafficClassFilter)
+        ? prefs.trafficClassFilter.filter(isTrafficClass)
+        : [...TRAFFIC_CLASSES];
       detailPanelOpen = Boolean(prefs.detailPanelOpen);
       controlsCollapsed = Boolean(prefs.controlsCollapsed);
       lastSessionOnly =
@@ -67,7 +77,8 @@ export function createLogsPreferences() {
   function persistToSession() {
     const snapshot: LogsPrefsSnapshot = {
       paused,
-      sortOrder,
+      sortColumn,
+      sortDir,
       activeSources,
       activeChannel,
       levelFilter,
@@ -114,8 +125,15 @@ export function createLogsPreferences() {
       : [...trafficClassFilter, tc];
   }
 
-  function toggleSort() {
-    sortOrder = sortOrder === 'newest' ? 'oldest' : 'newest';
+  /** Click a column header: same column flips direction, new column starts at a
+   * sensible default (time descending = newest first, text columns ascending). */
+  function toggleSortColumn(col: LogSortColumn) {
+    if (sortColumn === col) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortColumn = col;
+      sortDir = col === 'time' ? 'desc' : 'asc';
+    }
   }
 
   function togglePause() {
@@ -133,11 +151,17 @@ export function createLogsPreferences() {
     set paused(v: boolean) {
       paused = v;
     },
-    get sortOrder() {
-      return sortOrder;
+    get sortColumn() {
+      return sortColumn;
     },
-    set sortOrder(v: LogSortOrder) {
-      sortOrder = v;
+    set sortColumn(v: LogSortColumn) {
+      sortColumn = v;
+    },
+    get sortDir() {
+      return sortDir;
+    },
+    set sortDir(v: LogSortDir) {
+      sortDir = v;
     },
     get activeSources() {
       return activeSources;
@@ -219,7 +243,7 @@ export function createLogsPreferences() {
     toggleSource,
     toggleLevel,
     toggleTrafficClass,
-    toggleSort,
+    toggleSortColumn,
     togglePause,
     toggleControlsCollapsed
   };

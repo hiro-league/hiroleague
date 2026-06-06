@@ -578,7 +578,7 @@ class BaseAgentGraph:
 
     @graph_logged(captures={"usage", "decision"})
     async def memory_search_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
-        """Bring recent conversation memory (mem0) into the turn. Runs after ``trim_history``."""
+        """Bring recent conversation memory (Graphiti) into the turn. Runs after ``trim_history``."""
         text = state.get("user_text") or ""
         if entry := current_entry.get():
             entry.set_input_preview(f"q: {text[:160]}" if text.strip() else "q: <empty>")
@@ -603,21 +603,11 @@ class BaseAgentGraph:
                 entry.set_output_preview("results: 0; search disabled")
             return {}
 
-        # Record the mem0 embedding model + the retrieval knobs that actually ran, and an estimated
-        # query-token cost (input-only; local embedders price $0). Mirrors knowledge ``embed_query``.
+        # Graphiti memory recall uses only top_k — the shared graph engine owns the rest
+        # (sim_min_score / reranker) and bears the query-embedding + search cost.
         search_prefs = memory_prefs.search
-        embed_model = str(getattr(memory_prefs, "default_embedding_model", "") or "")
         if entry := current_entry.get():
-            if embed_model:
-                provider = embed_model.split(":", 1)[0] if ":" in embed_model else ""
-                entry.add_usage(
-                    provider=provider, model=embed_model, input_tokens=_estimate_text_tokens(text)
-                )
-            entry.set_input_preview(
-                f"q: {text[:120]} · top_k={search_prefs.top_k} "
-                f"threshold={search_prefs.threshold:.2f} "
-                f"rerank={'on' if search_prefs.rerank else 'off'}"
-            )
+            entry.set_input_preview(f"q: {text[:120]} · top_k={search_prefs.top_k}")
 
         t0 = time.perf_counter()
         memory_user_id = resolve_memory_user_id(
@@ -1083,17 +1073,38 @@ class BaseAgentGraph:
             workspace_path=self._workspace_path,
         )
         memory_run_id = str(state.get("chat_channel_id") or state.get("thread_id") or "")
+        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_out``
+        # step (e.g. ``8.1``, ``8.2`` …) instead of letting them restart their own counter —
+        # the same ``current_substep`` trick ``knowledge_retrieve_node`` uses. The ingest
+        # ledger auto-attaches to the chat run via ``current_run``; passing ``self._ledger_sink``
+        # is what turns those rows on. Token cost is priced on those sub-rows (graphiti's
+        # default usage sink), so this node's own row carries NO usage — folding it here too
+        # would double-count the extraction tokens in the turn total.
+        entry = current_entry.get()
+        substep_token = current_substep.set(entry.step_index) if entry is not None else None
         try:
             result = await self._memory.add(
-                f"User: {state.get('user_text') or ''}\nAssistant: {reply_text}",
+                # User turn ONLY — the assistant reply (``reply_text``) is intentionally
+                # never ingested (decision D2 / F7 ``conversation`` gate), so the memory
+                # graph can't become a stale echo of its own output.
+                state.get("user_text") or "",
                 user_id=memory_user_id,
                 run_id=memory_run_id,
                 character_id=state.get("character_id", ""),
                 metadata={
+                    # Episode uuid == the inbound message id → provenance back to the exact
+                    # turn the fact was learned from (decision D5).
+                    "message_id": state.get("inbound_id", ""),
                     "thread_id": state.get("thread_id", ""),
                     "channel_id": state.get("chat_channel_id", 0),
                     "source": "conversation",
+                    # A1 fix: anchor the user's facts to their real name. Graphiti extracts the
+                    # speaker (token before ":") as the anchor entity, so this turns the generic
+                    # "User" hub into a clean named Person. Empty ⇒ graphiti_conversation falls
+                    # back to "User" (prior behavior). Configured via memory.user_name.
+                    "speaker": (getattr(memory_prefs, "user_name", "") or "").strip(),
                 },
+                ledger_sink=self._ledger_sink,
             )
         except Exception as exc:
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -1107,27 +1118,18 @@ class BaseAgentGraph:
                 exc_info=True,
             )
             return
+        finally:
+            if substep_token is not None:
+                current_substep.reset(substep_token)
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        usage = result.usage
         stored_count = result.stored_count
-        # Detect mem0 silently dropping the response (e.g. extraction LLM
-        # produced output but mem0's parser failed) so the ledger row reflects
-        # reality instead of always claiming "stored". An LLM was clearly
-        # invoked but nothing landed in the vector store.
-        extraction_dropped = stored_count == 0 and usage is not None and usage.call_count > 0
-        # Attribute mem0's internal LLM calls to this node's ledger row. The
-        # ``RunAccumulator`` keeps headline ``model`` from ``call_model`` only,
-        # so recording a different provider/model here does not pollute the
-        # run summary; row-level ``_with_cost`` prices it independently.
+        # ``stored_count == 0`` is a NORMAL outcome — the turn simply had no extractable facts
+        # (e.g. "ok thanks") — not a failure. Graphiti raises on real errors, which the
+        # try/except above records as ``memory_store_failed``. The extraction token cost shows
+        # on the nested Graphiti ingest sub-rows (see above), not on this parent row.
         if entry := current_entry.get():
-            if extraction_dropped:
-                # output_preview is set to the stored summary just below; record decision + code here.
-                entry.fail("memory_extraction_dropped", decision="failed")
-            elif stored_count == 0:
-                entry.set_decision("stored", "no_new_facts")
-            else:
-                entry.set_decision("stored", "ok")
+            entry.set_decision("stored", "ok" if stored_count else "no_new_facts")
             entry.set_output_preview(
                 _memory_results_preview(
                     "stored",
@@ -1135,34 +1137,12 @@ class BaseAgentGraph:
                     stored_count,
                 )
             )
-            if usage is not None:
-                entry.add_usage(
-                    provider=usage.provider,
-                    model=usage.model,
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                    cached_input_tokens=usage.cached_input_tokens,
-                    reasoning_tokens=usage.reasoning_tokens,
-                )
-        if extraction_dropped:
-            log.warning(
-                "⚠️ memory_out — extraction dropped · %s · %dms",
-                state.get("inbound_id", "?"),
-                elapsed_ms,
-                input_tokens=getattr(usage, "input_tokens", 0),
-                output_tokens=getattr(usage, "output_tokens", 0),
-                llm_calls=getattr(usage, "call_count", 0),
-            )
-        else:
-            log.info(
-                "✅ memory_out — stored · %s · %dms",
-                state.get("inbound_id", "?"),
-                elapsed_ms,
-                stored=stored_count,
-                input_tokens=getattr(usage, "input_tokens", 0),
-                output_tokens=getattr(usage, "output_tokens", 0),
-                llm_calls=getattr(usage, "call_count", 0),
-            )
+        log.info(
+            "✅ memory_out — stored · %s · %dms",
+            state.get("inbound_id", "?"),
+            elapsed_ms,
+            stored=stored_count,
+        )
         self._emit(
             writer,
             GRAPH_MEMORY_STORED,

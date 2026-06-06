@@ -77,7 +77,7 @@ async def test_temporal_current_drops_superseded() -> None:
             _Edge(["c2"], "Adam lives in Boston", invalid_at=_past()),
         ]
     )
-    exp = await search_chunk_ids(g, "where does adam live now", temporal="current")
+    exp = await search_chunk_ids(g, "where does adam live now", group_id="kb_main", temporal="current")
     assert exp.chunk_ids == ("c1",)
     assert exp.facts_used == 1
     assert exp.facts_total == 2
@@ -91,7 +91,7 @@ async def test_temporal_all_keeps_superseded() -> None:
             _Edge(["c2"], "old", invalid_at=_past()),
         ]
     )
-    exp = await search_chunk_ids(g, "history", temporal="all")
+    exp = await search_chunk_ids(g, "history", group_id="kb_main", temporal="all")
     assert set(exp.chunk_ids) == {"c1", "c2"}
     assert exp.facts_used == 2
 
@@ -103,7 +103,7 @@ async def test_current_pushes_down_searchfilters() -> None:
     from graphiti_core.search.search_filters import ComparisonOperator
 
     g = _FakeGraphiti([_Edge(["c1"], "Adam lives in Cambridge")])
-    await search_chunk_ids(g, "where does adam live now", temporal="current")
+    await search_chunk_ids(g, "where does adam live now", group_id="kb_main", temporal="current")
     sf = g.calls[0]["search_filter"]
     assert sf is not None, "current must push down a SearchFilters"
     # Both temporal bounds filtered as IS NULL ⇒ only non-superseded facts returned.
@@ -115,14 +115,14 @@ async def test_current_pushes_down_searchfilters() -> None:
 async def test_all_passes_no_searchfilters() -> None:
     """temporal=all must NOT constrain time — search_filter stays None (history kept)."""
     g = _FakeGraphiti([_Edge(["c1"], "f")])
-    await search_chunk_ids(g, "history", temporal="all")
+    await search_chunk_ids(g, "history", group_id="kb_main", temporal="all")
     assert g.calls[0]["search_filter"] is None
 
 
 @pytest.mark.asyncio
 async def test_expired_at_is_superseded() -> None:
     g = _FakeGraphiti([_Edge(["c1"], "expired fact", expired_at=_past())])
-    exp = await search_chunk_ids(g, "q", temporal="current")
+    exp = await search_chunk_ids(g, "q", group_id="kb_main", temporal="current")
     assert exp.chunk_ids == ()
     assert exp.facts_used == 0
     assert exp.facts_total == 1
@@ -137,10 +137,15 @@ async def test_blank_query_is_noop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_group_id_passes_none() -> None:
+async def test_missing_group_id_is_safe_noop() -> None:
+    """Firm group-ID policy (docs/graph-group-policy-design.md §6): a scoped read MUST name a
+    partition. A missing group_id no longer becomes ``group_ids=None`` (an all-groups scan that
+    leaked conversation memory into knowledge) — it fails SAFE to an empty expansion, and the
+    search is never even issued."""
     g = _FakeGraphiti([_Edge(["c1"], "f")])
-    await search_chunk_ids(g, "q")
-    assert g.calls[0]["group_ids"] is None
+    exp = await search_chunk_ids(g, "q")
+    assert exp.chunk_ids == ()
+    assert g.calls == []  # never scanned all groups
 
 
 @pytest.mark.asyncio
@@ -150,7 +155,7 @@ async def test_search_error_propagates() -> None:
             raise RuntimeError("kuzu down")
 
     with pytest.raises(RuntimeError, match="kuzu down"):
-        await search_chunk_ids(_Boom(), "q")
+        await search_chunk_ids(_Boom(), "q", group_id="kb_main")
 
 
 @pytest.mark.asyncio
@@ -163,6 +168,7 @@ async def test_recipe_k_hop_min_relevance_thread_into_config() -> None:
     await search_chunk_ids(
         g,
         "q",
+        group_id="kb_main",
         num_results=7,
         recipe="cross_encoder",
         k_hop=3,
@@ -184,7 +190,7 @@ async def test_sim_min_score_defaults_below_graphiti_strict_floor() -> None:
     """The cosine candidate floor must default below graphiti's hardcoded 0.6 — that
     strict default is exactly what made paraphrase-distant fact searches return 0/0."""
     g = _FakeGraphiti([_Edge(["c1"], "f")])
-    await search_chunk_ids(g, "q")  # no sim_min_score → use the recall-oriented default
+    await search_chunk_ids(g, "q", group_id="kb_main")  # no sim_min_score → recall-oriented default
     assert g.calls[0]["config"].edge_config.sim_min_score < 0.6
 
 
@@ -193,8 +199,31 @@ async def test_unknown_recipe_falls_back_to_rrf() -> None:
     from graphiti_core.search.search_config import EdgeReranker
 
     g = _FakeGraphiti([_Edge(["c1"], "f")])
-    await search_chunk_ids(g, "q", recipe="bogus")
+    await search_chunk_ids(g, "q", group_id="kb_main", recipe="bogus")
     assert g.calls[0]["config"].edge_config.reranker is EdgeReranker.rrf
+
+
+@pytest.mark.asyncio
+async def test_service_search_chunk_ids_group_override() -> None:
+    """memory Phase 1: GraphitiMemoryService.search_chunk_ids(group_id=...) overrides the
+    service's default (knowledge) group, so memory recall searches its own
+    per-(user,character) partition and threads the admin search knobs through."""
+    from hirocli.services.knowledge.graph.graphiti_service import GraphitiMemoryService
+
+    svc = object.__new__(GraphitiMemoryService)
+    fake = _FakeGraphiti([_Edge(["c1"], "User lives in Tokyo")])
+    svc._graphiti = fake  # type: ignore[attr-defined]
+    svc._group_id = "kb_main"  # type: ignore[attr-defined]  # service default (named knowledge group)
+    svc._search_recipe = "rrf"  # type: ignore[attr-defined]
+    svc._search_scope = "edges"  # type: ignore[attr-defined]
+    svc._k_hop = 1  # type: ignore[attr-defined]
+    svc._reranker_min_score = 0.0  # type: ignore[attr-defined]
+    svc._sim_min_score = 0.3  # type: ignore[attr-defined]
+
+    exp = await svc.search_chunk_ids("where does the user live", group_id="mem_42_aria")
+
+    assert fake.calls[0]["group_ids"] == ["mem_42_aria"]  # override, not the default
+    assert exp.facts_used == 1
 
 
 @pytest.mark.asyncio
@@ -204,5 +233,5 @@ async def test_recipe_constant_not_mutated() -> None:
 
     before = EDGE_HYBRID_SEARCH_RRF.limit
     g = _FakeGraphiti([_Edge(["c1"], "f")])
-    await search_chunk_ids(g, "q", num_results=99)
+    await search_chunk_ids(g, "q", group_id="kb_main", num_results=99)
     assert EDGE_HYBRID_SEARCH_RRF.limit == before  # untouched

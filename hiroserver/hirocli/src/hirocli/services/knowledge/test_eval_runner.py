@@ -439,3 +439,56 @@ async def test_question_result_answer_preview_truncated_full_answer_intact(
     assert qc.payload["legs"]["graphiti"]["answer"] == long_answer
     # run_id rides on the question event too (registry correlation).
     assert qc.payload["run_id"]
+
+
+# ===========================================================================
+# clear_eval_data — eval deletion (graph group-ID policy Phase A)
+# ===========================================================================
+
+
+class _FakeDoc:
+    def __init__(self, doc_id: str) -> None:
+        self.id = doc_id
+
+
+class _FakeDocsResult:
+    def __init__(self, docs: list) -> None:
+        self.documents = docs
+
+
+class _FakeEvalClearService:
+    """Minimal KnowledgeService stand-in: tag→docs listing + document delete."""
+
+    def __init__(self, by_tag: dict[str, list[str]]) -> None:
+        self._by_tag = by_tag
+        self.deleted: list[str] = []
+
+    async def list_documents(self, *, tag: str, limit: int = 500):  # noqa: ARG002
+        return _FakeDocsResult([_FakeDoc(d) for d in self._by_tag.get(tag, [])])
+
+    async def delete_document(self, document_id: str) -> dict:
+        self.deleted.append(document_id)
+        return {"document_id": document_id, "deleted": True}
+
+
+@pytest.mark.asyncio
+async def test_clear_eval_data_deletes_both_corpora_deduped() -> None:
+    """Deletes every eval-tagged doc (synthetic + Adam), deduped across tags, via the
+    service's per-document delete (which purges catalog + Qdrant + graph episodes)."""
+    from hirocli.services.knowledge.eval_runner import ADAM_EVAL_TAG, clear_eval_data
+
+    svc = _FakeEvalClearService(
+        {EVAL_SYNTHETIC_TAG: ["s1", "s2", "shared"], ADAM_EVAL_TAG: ["a1", "shared"]}
+    )
+    removed = await clear_eval_data(svc)
+    assert removed == 4  # s1, s2, shared, a1 — "shared" counted once
+    assert sorted(svc.deleted) == ["a1", "s1", "s2", "shared"]
+
+
+@pytest.mark.asyncio
+async def test_clear_eval_data_noop_when_empty() -> None:
+    from hirocli.services.knowledge.eval_runner import clear_eval_data
+
+    svc = _FakeEvalClearService({})
+    assert await clear_eval_data(svc) == 0
+    assert svc.deleted == []

@@ -22,7 +22,6 @@ from hirocli.domain.preferences import (
     load_preferences,
     preferences_file,
     resolve_knowledge_answering_llm,
-    resolve_memory_llm,
     resolve_llm,
     save_preferences,
 )
@@ -118,15 +117,14 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.tuning_profiles[DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID].locked is True
 
 
-def test_memory_preferences_null_model_disables_memory() -> None:
+def test_memory_preferences_enabled_independent_of_legacy_models() -> None:
+    # Memory now rides the shared Graphiti engine, so enabling it no longer requires the
+    # mem0-legacy model fields (Phase 3 removed the auto-disable validator). Engine
+    # availability is enforced later by create_memory_service, not by this model.
     prefs = WorkspacePreferences(
-        memory=MemoryPreferences(
-            enabled=True,
-            default_llm="openai:gpt-test",
-            default_embedding_model=None,
-        )
+        memory=MemoryPreferences(enabled=True, default_embedding_model=None)
     )
-    assert prefs.memory.enabled is False
+    assert prefs.memory.enabled is True
 
 
 def test_preference_sections_are_first_level_only() -> None:
@@ -135,6 +133,7 @@ def test_preference_sections_are_first_level_only() -> None:
         "media",
         "memory",
         "knowledge",
+        "graph",
         "chat",
     ]
 
@@ -178,39 +177,6 @@ def test_resolve_llm_with_default_and_credentials(
     assert r.temperature == 0.5
     assert r.max_tokens == 512
     assert r.thinking == "low"
-
-
-def test_resolve_memory_llm_uses_memory_profile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _fixture_workspace(tmp_path, monkeypatch)
-    _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        memory=MemoryPreferences(
-            enabled=True,
-            default_llm="openai:gpt-test",
-            default_embedding_model="openai:text-embedding-3-small",
-        ),
-        tuning_profiles={
-            "memory_extraction": TuningProfile(
-                label="Memory extraction",
-                locked=True,
-                temperature=0,
-                max_tokens=4096,
-                thinking="minimal",
-            ),
-        },
-    )
-
-    r = resolve_memory_llm(prefs, tmp_path)
-
-    assert r is not None
-    assert r.model_id == "openai:gpt-test"
-    assert r.temperature == 0
-    assert r.max_tokens == 4096
-    assert r.thinking == "minimal"
 
 
 def test_resolve_knowledge_answering_llm_inherits_default_chat(

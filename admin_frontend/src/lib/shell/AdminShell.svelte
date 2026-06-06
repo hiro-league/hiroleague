@@ -3,6 +3,7 @@
   import {
     Activity,
     BookOpen,
+    Brain,
     Cpu,
     Database,
     ExternalLink,
@@ -30,6 +31,11 @@
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { navItems } from './nav';
+  import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
+  import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
+  import GlobalChatOverlay from '$lib/features/chat-channels/overlay/GlobalChatOverlay.svelte';
+  import ChatChannelClearMessagesModal from '$lib/features/chat-channels/modals/ChatChannelClearMessagesModal.svelte';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
 
   let {
     activePath = 'dashboard',
@@ -37,10 +43,12 @@
     children
   }: { activePath?: string; mainClass?: string; children?: Snippet } = $props();
   const prefs = createShellPreferences();
+  // Create the shared chat engine here, in the always-mounted shell, so it owns the
+  // controller's $effect/$derived for the whole session. The /chats page and the
+  // global overlay both reuse this exact instance via getChatEngine().
+  const chatEngine = getChatEngine();
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
-  /** Chat channels page, Messages tab — header shortcut. */
-  const chatMessagesHref = `${base}/chats/?tab=messages`;
   const headerWorkspaceName = $derived(adminConfig.workspace_name ?? 'unknown');
   const headerStatus = $derived(liveStatus.payload?.workspace_status ?? 'stopped');
   const headerStatusLabel = $derived(
@@ -57,6 +65,7 @@
   const iconMap = {
     activity: Activity,
     book: BookOpen,
+    brain: Brain,
     cpu: Cpu,
     database: Database,
     grid: Grid2X2,
@@ -228,14 +237,28 @@
         aria-label={headerStatusLabel}
       ></span>
       <div class="ml-auto flex items-center gap-2">
-        <a
-          class="inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border border-primary/50 bg-primary/15 px-3 text-primary shadow-md shadow-primary/20 ring-1 ring-primary/25 transition-colors hover:bg-primary/25 hover:text-primary hover:ring-primary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          href={chatMessagesHref}
-          aria-label="Open Chat channels — Messages tab"
-          title="Chat channels — Messages"
+        <button
+          type="button"
+          class={cn(
+            'relative inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border px-3 shadow-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            chatOverlay.open
+              ? 'border-primary bg-primary text-primary-foreground shadow-primary/30'
+              : 'border-primary/50 bg-primary/15 text-primary shadow-primary/20 ring-1 ring-primary/25 hover:bg-primary/25 hover:text-primary hover:ring-primary/35'
+          )}
+          aria-pressed={chatOverlay.open}
+          aria-label={chatOverlay.open ? 'Close chat overlay' : 'Open chat overlay'}
+          title="Chat"
+          onclick={() => chatOverlay.toggle()}
         >
           <MessagesSquare size={22} strokeWidth={2.25} aria-hidden="true" />
-        </a>
+          <!-- Pulse when the agent is replying and the overlay is closed (unread affordance). -->
+          {#if chatEngine.agentTyping && !chatOverlay.open}
+            <span
+              class="absolute -right-0.5 -top-0.5 size-2.5 animate-pulse rounded-full bg-emerald-500 ring-2 ring-background"
+              aria-hidden="true"
+            ></span>
+          {/if}
+        </button>
         <a
           class="inline-flex h-9 w-11 shrink-0 items-center justify-center gap-1 rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
           href={adminDocsUrl}
@@ -268,3 +291,17 @@
     </main>
   </div>
 </div>
+
+<!-- Global chat: floating overlay + the shared engine's toast/clear-messages modal.
+     These live in the shell (not the /chats page) so they work over any page. -->
+<GlobalChatOverlay />
+
+<ToastHost toast={chatEngine.toast} />
+
+<ChatChannelClearMessagesModal
+  open={chatEngine.clearMessagesConfirmOpen}
+  channelName={chatEngine.clearMessagesChannelDisplayName}
+  busy={chatEngine.busy}
+  onClose={() => chatEngine.closeClearMessagesModal()}
+  onConfirm={() => void chatEngine.submitClearMessages()}
+/>

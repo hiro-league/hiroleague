@@ -1,6 +1,6 @@
 """GraphitiMemoryService — bootstrap + lifecycle for the Graphiti temporal graph.
 
-Mirrors how ``Mem0MemoryService`` sits behind a single service boundary: nothing
+Mirrors how the prior mem0 service sits behind a single service boundary: nothing
 outside this module imports ``graphiti_core`` directly, so the brain stays
 rip-out-able (decision G3/G8, docs/knowledge-graphiti-pivot-design.md §4).
 
@@ -31,7 +31,6 @@ from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.driver.kuzu_driver import KuzuDriver
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.graph_queries import get_fulltext_indices
-from graphiti_core.helpers import get_default_group_id
 from hiro_commons.log import Logger
 
 from hirocli.domain.preferences import (
@@ -59,13 +58,18 @@ from .graphiti_ingest import (
     ingest_episodes,
 )
 from .graphiti_ontology import GRAPHITI_ENTITY_TYPES
+from .group_scope import (
+    KNOWLEDGE_GROUP_ID,
+    is_memory_group_id,
+    validate_group_id,
+)
 from .graphiti_search import GraphitiExpansion
 from .graphiti_search import search_chunk_ids as _search_chunk_ids
 from .ingest_ledger import record_episode_embed, record_episode_llm_usage
 from .ledger_tracer import LedgerTracer
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from graphiti_core.embedder.client import EmbedderClient
     from graphiti_core.llm_client.client import LLMClient
@@ -187,6 +191,85 @@ def graphiti_db_path(workspace_path: Path) -> Path:
     return workspace_path / KNOWLEDGE_DIR / GRAPH_DIR / KUZU_DB_FILENAME
 
 
+def _edge_to_memory(edge: Any) -> dict[str, Any]:
+    """One Graphiti fact edge → a plain memory dict (facts-as-memory, decision D3).
+
+    Reduces an ``EntityEdge`` to ``{memory, created_at, invalid_at, id, chunk_ids}`` so
+    the conversation-memory facade can render/list facts WITHOUT importing graphiti_core
+    (the brain stays inside this module, decision G3/G8). ``id`` is the edge uuid (the
+    deletable unit); ``chunk_ids`` are the supporting episode uuids (== message ids)."""
+    valid_at = getattr(edge, "valid_at", None)
+    invalid_at = getattr(edge, "invalid_at", None)
+    episodes = [str(ep) for ep in (getattr(edge, "episodes", None) or []) if ep]
+    return {
+        "kind": "relation",
+        "memory": getattr(edge, "fact", "") or "",
+        "created_at": valid_at.isoformat() if isinstance(valid_at, dt.datetime) else None,
+        "invalid_at": invalid_at.isoformat() if isinstance(invalid_at, dt.datetime) else None,
+        "id": getattr(edge, "uuid", "") or "",
+        # The partition the fact lives in — the conversation facade parses the
+        # ``(user, character)`` out of it to attribute the row in the admin view.
+        "group_id": getattr(edge, "group_id", "") or "",
+        "chunk_ids": episodes,
+    }
+
+
+def _node_to_memory(node: Any) -> dict[str, Any] | None:
+    """One Graphiti entity node's summary → a plain memory dict (attribute-style memory).
+
+    Graphiti stores two complementary memory shapes: relational facts on ``EntityEdge``
+    (already surfaced by :func:`_edge_to_memory`) and per-entity attribute summaries on
+    ``EntityNode.summary`` (e.g. "Misho turned 50 years old in June 2026"). Decision D3
+    originally counted only edges, but that hides attribute facts — the user sees them
+    on the Graph panel yet not in the Memories tab. We now emit them as ``kind="summary"``
+    rows alongside relation rows so the tab honestly reflects what's remembered.
+
+    Returns ``None`` for nodes with an empty summary (Graphiti only writes one once
+    ``summarize_entities`` runs) — they have nothing useful to show.
+
+    ``chunk_ids`` are NOT carried for summary rows: a node summary is the *accumulated*
+    state across every episode that mentioned the entity (so its provenance isn't a
+    single chunk like a relation has — the chunk-detail panel correctly hides for these).
+    """
+    summary = (getattr(node, "summary", "") or "").strip()
+    if not summary:
+        return None
+    created_at = getattr(node, "created_at", None)
+    return {
+        "kind": "summary",
+        "memory": summary,
+        "created_at": created_at.isoformat() if isinstance(created_at, dt.datetime) else None,
+        "invalid_at": None,
+        "id": getattr(node, "uuid", "") or "",
+        "group_id": getattr(node, "group_id", "") or "",
+        # Empty by design — see docstring. The Graph viz still resolves provenance via
+        # the entity's own chunk_ids on the node itself.
+        "chunk_ids": [],
+    }
+
+
+def _distinct_group_ids(rows: Any) -> list[str]:
+    """Flatten a Kuzu ``execute_query`` result into a deduped list of ``group_id`` values.
+
+    ``execute_query`` returns ``list[dict]`` (single statement) or ``list[list[dict]]``
+    (multi) — flatten both. Order-preserving + deduped so the caller gets a stable group
+    list."""
+    out: list[str] = []
+    seen: set[str] = set()
+    flat: list[Any] = []
+    for row in rows or []:
+        if isinstance(row, list):
+            flat.extend(row)
+        else:
+            flat.append(row)
+    for row in flat:
+        gid = row.get("group_id") if isinstance(row, dict) else None
+        if gid and gid not in seen:
+            seen.add(gid)
+            out.append(str(gid))
+    return out
+
+
 class GraphitiMemoryService:
     """Owns the Graphiti client + its embedded Kuzu driver for one workspace.
 
@@ -207,6 +290,7 @@ class GraphitiMemoryService:
         max_coroutines: int | None = None,
         ledger_detail: str = "rich",
         search_recipe: str = "rrf",
+        search_scope: str = "edges",
         k_hop: int = 1,
         reranker_min_score: float = 0.0,
         sim_min_score: float = 0.3,
@@ -214,6 +298,11 @@ class GraphitiMemoryService:
         self._ledger_detail = ledger_detail
         # Retrieval knobs (admin prefs) threaded into every search_chunk_ids call.
         self._search_recipe = search_recipe
+        # Which legs the search reads from (edges / +nodes / +nodes+episodes). Orthogonal
+        # to ``search_recipe``: each leg ranks with its own variant of the chosen recipe.
+        # Validated against ``search_recipe`` upstream in ``GraphPreferences`` so we never
+        # see the invalid mmr×episodes combo here.
+        self._search_scope = search_scope
         self._k_hop = k_hop
         self._reranker_min_score = reranker_min_score
         # Cosine candidate floor (graphiti's EdgeSearchConfig.sim_min_score). See
@@ -260,8 +349,12 @@ class GraphitiMemoryService:
             # Observability must never break the graph itself.
             log.warning("⚠️ graphiti — ledger tracer injection failed", exc_info=True)
         # Resolve ONE concrete group_id shared by ingest / search / snapshot
-        # (snapshot's get_by_group_ids needs a concrete list).
-        self._group_id = group_id or get_default_group_id(driver.provider)
+        # (snapshot's get_by_group_ids needs a concrete list). Knowledge uses the NAMED
+        # ``kb_main`` partition — NOT graphiti's empty default (which on Kuzu is ""), because
+        # an empty group is falsy → reads fell through to "all groups" and leaked conversation
+        # memory into knowledge search (docs/graph-group-policy-design.md §2). A caller may
+        # still pass an explicit named group (a kb space, an eval set).
+        self._group_id = group_id or KNOWLEDGE_GROUP_ID
         # graphiti-core 0.29.1's KuzuDriver never initializes `_database` (the base
         # GraphDriver only declares the annotation, no default). add_episode() with an
         # explicit group_id does `group_id != self.driver._database`, which raises
@@ -300,11 +393,20 @@ class GraphitiMemoryService:
         self._initialized = True
         log.info("✅ graphiti — graph ready · path=%s", self._db_path)
 
+    @property
+    def ledger_detail(self) -> str:
+        """Graph-Runs ledger verbosity (``rich``/``compact``) from the shared graph prefs.
+
+        Exposed so the conversation-memory recall path can render its fact-search sub-steps
+        at the same detail level as ingest (which reads ``self._ledger_detail`` directly)."""
+        return self._ledger_detail
+
     async def ingest_chunks(
         self,
         episodes: "Sequence[GraphitiEpisodeInput]",
         *,
         source_role: str,
+        group_id: str | None = None,
         event_sink: GraphEventSink | None = None,
         ledger_sink: "LedgerSink | None" = None,
     ) -> GraphitiIngestStats:
@@ -313,14 +415,28 @@ class GraphitiMemoryService:
         Auto-initializes the graph on first use. Uses the pinned entity ontology;
         edge-type vocabulary is left free-form for now (see graphiti_ontology).
 
+        ``group_id`` selects the graph partition to write into; ``None`` ⇒ this
+        service's default group (knowledge, ``kb_main``). Conversation memory passes a
+        per-``(user, character)`` group so its facts dedup/supersede in isolation
+        (decision D1); eval passes an ``eval_{set}`` group. The per-episode
+        ``driver._database`` re-point in ``ingest_episodes`` makes multi-group writes
+        safe on Kuzu.
+
+        The resolved group is validated against the firm partition policy (write
+        boundary, docs/graph-group-policy-design.md §6) — an empty or non-namespaced
+        group raises, so a write can never land in graphiti's empty catch-all.
+
         ``ledger_sink`` records a ``graph_ingest`` run (per-episode step + per-operation
         sub-step nodes) in Graph Runs; ``None`` = no ledger (tests/CLI)."""
         await self.initialize()
+        # Mint-or-default, then validate: bans the empty/unknown group that leaked
+        # conversation memory into knowledge search (docs §2).
+        target_group = validate_group_id(group_id or self._group_id)
         return await ingest_episodes(
             self._graphiti,
             episodes,
             source_role=source_role,
-            group_id=self._group_id,
+            group_id=target_group,
             entity_types=GRAPHITI_ENTITY_TYPES,
             event_sink=event_sink,
             ledger_sink=ledger_sink,
@@ -376,38 +492,11 @@ class GraphitiMemoryService:
         knowledge (a different ``source_description``) is never matched. Idempotent:
         a missing document removes 0.
         """
-        from graphiti_core.errors import GroupsNodesNotFoundError
-        from graphiti_core.nodes import EpisodicNode
-
         await self.initialize()
-        driver = getattr(self._graphiti, "driver", None)
-        if driver is None:
-            return 0
-
-        # Page through this group's episodes (uuid_cursor — get_by_group_ids orders by
-        # uuid DESC) so a large prior run can't leave a tail behind the page limit.
-        uuids: list[str] = []
-        cursor: str | None = None
-        while True:
-            try:
-                batch = await EpisodicNode.get_by_group_ids(
-                    driver, [self._group_id], limit=_EPISODE_WIPE_PAGE, uuid_cursor=cursor
-                )
-            except GroupsNodesNotFoundError:
-                break  # empty graph / no episodes in this group — nothing to wipe
-            if not batch:
-                break
-            for ep in batch:
-                if (getattr(ep, "source_description", "") or "") == document_id:
-                    uid = getattr(ep, "uuid", "") or ""
-                    if uid:
-                        uuids.append(uid)
-            if len(batch) < _EPISODE_WIPE_PAGE:
-                break
-            cursor = getattr(batch[-1], "uuid", None)
-            if not cursor:
-                break
-
+        uuids = await self._episode_uuids_in_group(
+            self._group_id,
+            match=lambda ep: (getattr(ep, "source_description", "") or "") == document_id,
+        )
         if not uuids:
             log.info("🧹 graphiti — no episodes to remove · document_id=%s", document_id)
             return 0
@@ -418,14 +507,217 @@ class GraphitiMemoryService:
         )
         return await self.remove_episodes(uuids)
 
+    async def _episode_uuids_in_group(
+        self, group_id: str, *, match: "Callable[[Any], bool] | None" = None
+    ) -> list[str]:
+        """Page through ``group_id``'s episodes (uuid_cursor) → their uuids, optionally
+        filtered by ``match(ep)``.
+
+        Shared by the per-document wipe (filter by ``source_description``) and the
+        whole-group memory clear (no filter, memory Phase 2). Pages via uuid_cursor —
+        ``get_by_group_ids`` orders by uuid DESC — so a large group can't leave a tail
+        behind the page limit. Returns ``[]`` when the client has no driver (test fakes)
+        or the group has no episodes."""
+        from graphiti_core.errors import GroupsNodesNotFoundError
+        from graphiti_core.nodes import EpisodicNode
+
+        driver = getattr(self._graphiti, "driver", None)
+        if driver is None:
+            return []
+        uuids: list[str] = []
+        cursor: str | None = None
+        while True:
+            try:
+                batch = await EpisodicNode.get_by_group_ids(
+                    driver, [group_id], limit=_EPISODE_WIPE_PAGE, uuid_cursor=cursor
+                )
+            except GroupsNodesNotFoundError:
+                break  # empty graph / no episodes in this group — nothing to collect
+            if not batch:
+                break
+            for ep in batch:
+                if match is None or match(ep):
+                    uid = getattr(ep, "uuid", "") or ""
+                    if uid:
+                        uuids.append(uid)
+            if len(batch) < _EPISODE_WIPE_PAGE:
+                break
+            cursor = getattr(batch[-1], "uuid", None)
+            if not cursor:
+                break
+        return uuids
+
+    async def clear_group(self, group_id: str) -> int:
+        """Delete every episode in ``group_id`` (and the nodes/edges it exclusively owns).
+
+        Conversation-memory wipe (memory Phase 2, decision D1): clearing a per-
+        ``(user, character)`` memory group removes all of that pairing's remembered turns
+        and the facts/entities derived from them. Groups are isolated partitions, so
+        nothing in the group is shared with another — removing all its episodes removes
+        all its facts. Returns the number of episodes removed; serialized under the
+        per-workspace write lock by :meth:`remove_episodes`.
+
+        Final orphan sweep: graphiti's ``remove_episode`` only deletes an entity when
+        the MENTIONS count equals 1 at delete time — so an entity mentioned by two
+        episodes can survive both deletions and leave an orphan in the group. Since a
+        memory group is an isolated partition, any ``Entity`` still in it after the
+        episode wipe is by definition orphan, so we DETACH DELETE the remainder.
+        """
+        await self.initialize()
+        uuids = await self._episode_uuids_in_group(group_id)
+        if not uuids:
+            log.info("🧹 graphiti — no memory episodes to clear · group=%s", group_id)
+            removed = 0
+        else:
+            log.info("🧹 graphiti — clearing memory group · group=%s count=%d", group_id, len(uuids))
+            removed = await self.remove_episodes(uuids)
+        await self._sweep_orphan_entities(group_id)
+        return removed
+
+    async def _sweep_orphan_entities(self, group_id: str) -> None:
+        """DETACH DELETE every ``Entity`` still in ``group_id`` (orphan cleanup for
+        :meth:`clear_group`). Best-effort + logged: a sweep failure must not bubble up
+        and undo the user-visible "cleared N memories" outcome."""
+        if not group_id:
+            return
+        lock = kuzu_registry.write_lock(self._registry_key)
+        async with lock:
+            try:
+                driver = self._graphiti.driver
+                count_rows, _, _ = await driver.execute_query(
+                    "MATCH (n:Entity) WHERE n.group_id = $g RETURN count(n) AS c",
+                    g=group_id,
+                )
+                rows = count_rows or []
+                count = int(rows[0].get("c", 0)) if rows else 0
+                if count <= 0:
+                    return
+                log.info(
+                    "🧹 graphiti — sweeping %d orphan entities · group=%s", count, group_id
+                )
+                await driver.execute_query(
+                    "MATCH (n:Entity) WHERE n.group_id = $g DETACH DELETE n",
+                    g=group_id,
+                )
+            except Exception:
+                log.warning(
+                    "⚠️ graphiti — orphan-entity sweep failed · group=%s", group_id, exc_info=True
+                )
+
+    async def list_facts(
+        self, group_ids: list[str], *, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Read the remembered facts in ``group_ids`` → plain memory dicts.
+
+        Two memory shapes are merged (decision D3 extended):
+          - **relational facts** on ``EntityEdge`` (``kind="relation"``) — e.g.
+            "Misho's first child is Mark"
+          - **attribute summaries** on ``EntityNode.summary`` (``kind="summary"``) —
+            e.g. "Misho turned 50 years old in June 2026" — for facts that don't fit
+            a two-entity triple. Before this fix the tab missed every attribute memory
+            even though the graph panel showed it on the node.
+
+        Read-only on a dedicated connection (lock-free; safe during an active build),
+        like the snapshot. Returns ``[]`` when the DB file doesn't exist or both reads
+        find nothing. Maps via :func:`_edge_to_memory`/:func:`_node_to_memory` so
+        graphiti types never leave this module."""
+        from graphiti_core.edges import EntityEdge
+        from graphiti_core.errors import GroupsEdgesNotFoundError, GroupsNodesNotFoundError
+        from graphiti_core.nodes import EntityNode
+
+        if not group_ids or not self._db_path.exists():
+            return []
+        async with _snapshot_read_driver(self._db_path) as read_driver:
+            try:
+                edges = await EntityEdge.get_by_group_ids(read_driver, group_ids, limit=limit)
+            except GroupsEdgesNotFoundError:
+                edges = []
+            except Exception:
+                log.warning(
+                    "⚠️ graphiti — list_facts (edges) failed · groups=%s",
+                    group_ids,
+                    exc_info=True,
+                )
+                raise
+            try:
+                nodes = await EntityNode.get_by_group_ids(read_driver, group_ids, limit=limit)
+            except GroupsNodesNotFoundError:
+                nodes = []
+            except Exception:
+                log.warning(
+                    "⚠️ graphiti — list_facts (node summaries) failed · groups=%s",
+                    group_ids,
+                    exc_info=True,
+                )
+                raise
+        rows: list[dict[str, Any]] = [_edge_to_memory(edge) for edge in (edges or [])]
+        for node in nodes or []:
+            row = _node_to_memory(node)
+            if row is not None:
+                rows.append(row)
+        return rows
+
+    async def list_group_ids(self, prefix: str) -> list[str]:
+        """Distinct ``group_id``s whose name starts with ``prefix`` (read-only).
+
+        Enables the conversation facade's cross-character reads (decision L2.6): all of a
+        user's memory groups = ``list_group_ids("mem_{user}_")``, then read/clear each.
+        Naming-agnostic — this module knows nothing of the ``mem_`` convention; it just
+        runs a DISTINCT-with-prefix over the ``Episodic`` node table. Returns ``[]`` when
+        the DB file doesn't exist."""
+        if not prefix or not self._db_path.exists():
+            return []
+        query = (
+            "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $prefix "
+            "RETURN DISTINCT e.group_id AS group_id"
+        )
+        async with _snapshot_read_driver(self._db_path) as read_driver:
+            try:
+                rows, _, _ = await read_driver.execute_query(query, prefix=prefix)
+            except Exception:
+                log.warning(
+                    "⚠️ graphiti — list_group_ids failed · prefix=%s", prefix, exc_info=True
+                )
+                raise
+        return _distinct_group_ids(rows)
+
+    async def delete_facts(self, uuids: list[str]) -> int:
+        """Delete specific fact edges (memories) by uuid → count requested.
+
+        The conversation facade's ``forget`` (facts-as-memory: a "memory" is an
+        ``EntityEdge``, decision D3). Serialized under the per-workspace write lock
+        (single-writer). Missing ids are a no-op; empty input returns 0."""
+        from graphiti_core.edges import EntityEdge
+
+        ids = [str(u) for u in uuids if u]
+        if not ids:
+            return 0
+        await self.initialize()
+        lock = kuzu_registry.write_lock(self._registry_key)
+        async with lock:
+            try:
+                await EntityEdge.delete_by_uuids(self._graphiti.driver, ids)
+            except Exception:
+                log.exception("❌ graphiti — delete_facts failed · count=%d", len(ids))
+                raise
+        log.info("🧹 graphiti — deleted memory facts · count=%d", len(ids))
+        return len(ids)
+
     async def search_chunk_ids(
         self,
         query: str,
         *,
+        group_id: str | None = None,
         num_results: int = 20,
         temporal: str = "current",
     ) -> GraphitiExpansion:
         """Graphiti fact search → focused Qdrant chunk_ids (+ fact texts).
+
+        ``group_id`` selects the graph partition to search; ``None`` ⇒ this service's
+        default group (knowledge). Conversation memory recall passes a per-
+        ``(user, character)`` group (memory Phase 1, decision D1). Reads pass
+        ``group_ids`` explicitly to the search, so the multi-group ``driver._database``
+        write-path concern does not apply here.
 
         Read-only; does not require :meth:`initialize` (the graph was built at
         ingest). Returns an empty expansion on a blank query — the caller folds
@@ -434,13 +726,14 @@ class GraphitiMemoryService:
         return await _search_chunk_ids(
             self._graphiti,
             query,
-            group_id=self._group_id,
+            group_id=group_id or self._group_id,
             num_results=num_results,
             temporal=temporal,
             recipe=self._search_recipe,
             k_hop=self._k_hop,
             min_relevance=self._reranker_min_score,
             sim_min_score=self._sim_min_score,
+            scope=self._search_scope,
         )
 
     async def close(self) -> None:
@@ -473,10 +766,10 @@ class GraphitiMemoryService:
         Returns ``None`` (no error) when ``knowledge.graph.backend`` is ``off``
         (unless ``require_backend=False`` — explicit build-graph/ingest actions still
         run with the backend toggle off) or no extraction model is configured. Same
-        enable-gating shape as ``Mem0MemoryService``. Resolves both model tiers via
+        enable-gating shape as the prior mem0 service. Resolves both model tiers via
         tuning profiles and the shared knowledge embedder (G8).
         """
-        if require_backend and prefs.knowledge.graph.backend == "off":
+        if require_backend and prefs.graph.backend == "off":
             log.info("⬇️ graphiti — backend=off · service not created")
             return None
 
@@ -524,7 +817,7 @@ class GraphitiMemoryService:
         # as Graphiti's CrossEncoderClient. If it can't resolve (unconfigured / local
         # model not downloaded), degrade the recipe to RRF rather than ship a no-op that
         # masquerades as reranking.
-        graph = prefs.knowledge.graph
+        graph = prefs.graph
         recipe = graph.search_recipe
         cross_encoder: CrossEncoderClient | None = None
         reranker_min_score = 0.0
@@ -569,6 +862,10 @@ class GraphitiMemoryService:
             cross_encoder=cross_encoder,
             ledger_detail=graph.ledger_detail,
             search_recipe=recipe,
+            # Which graph elements participate in recall. Validated against ``search_recipe``
+            # at pref load (mmr × episodes is rejected up-front), so any value reaching here
+            # is a legal combo.
+            search_scope=graph.search_scope,
             k_hop=graph.k_hop,
             reranker_min_score=reranker_min_score,
             sim_min_score=graph.sim_min_score,
@@ -615,15 +912,19 @@ async def read_graph_snapshot(
     *,
     node_limit: int | None = None,
     edge_limit: int | None = None,
+    group_ids: list[str] | None = None,
 ) -> tuple[list[Any], list[Any], dict[str, str]]:
-    """Read all entity nodes + RELATES_TO facts for the default group (read-only).
+    """Read all entity nodes + RELATES_TO facts for ``group_ids`` (read-only).
+
+    ``group_ids`` defaults to the **knowledge** default group; pass a
+    ``mem_{user}_{character}`` group (or any group id) to snapshot a conversation-memory
+    graph instead — this is what the admin Graph tab's group filter selects.
 
     No LLM/embedder (and thus no provider key) is needed — a snapshot only touches the
     graph. Returns ``([], [], {})`` when the DB file does not exist (nothing
     graph-ingested yet) — never a side effect. The third element is a
     ``chunk_id → document_id`` map (episode uuid → ``source_description``) so the viz can
-    fill node/edge ``document_ids`` (§5.6). The load path for the admin Graph tab
-    (docs/knowledge-graphiti-pivot-design.md §5.6). Reads run on a dedicated connection
+    fill node/edge ``document_ids`` (§5.6). Reads run on a dedicated connection
     (see :func:`_snapshot_read_driver`) so a Graph-tab load DURING an active build never
     queues behind the writer.
     """
@@ -638,20 +939,22 @@ async def read_graph_snapshot(
     edges: list[Any] = []
     chunk_to_document: dict[str, str] = {}
     async with _snapshot_read_driver(path) as read_driver:
-        gid = get_default_group_id(read_driver.provider)
+        # Default to the named knowledge group (kb_main) when no explicit selection is made
+        # (docs/graph-group-policy-design.md §7) — never graphiti's empty default group.
+        gids = [g for g in (group_ids or []) if g] or [KNOWLEDGE_GROUP_ID]
         # The get_by_group_ids helpers RAISE (not return []) on an empty graph.
         try:
-            nodes = await EntityNode.get_by_group_ids(read_driver, [gid], limit=node_limit)
+            nodes = await EntityNode.get_by_group_ids(read_driver, gids, limit=node_limit)
         except GroupsNodesNotFoundError:
             nodes = []
         try:
-            edges = await EntityEdge.get_by_group_ids(read_driver, [gid], limit=edge_limit)
+            edges = await EntityEdge.get_by_group_ids(read_driver, gids, limit=edge_limit)
         except GroupsEdgesNotFoundError:
             edges = []
         # Episodes carry document_id in ``source_description`` (set at ingest); map
         # chunk_id (episode uuid) → document_id for node/edge document_ids provenance.
         try:
-            episodes = await EpisodicNode.get_by_group_ids(read_driver, [gid], limit=node_limit)
+            episodes = await EpisodicNode.get_by_group_ids(read_driver, gids, limit=node_limit)
         except GroupsNodesNotFoundError:
             episodes = []
         for ep in episodes or []:
@@ -660,6 +963,29 @@ async def read_graph_snapshot(
             if uuid and doc:
                 chunk_to_document[uuid] = doc
     return list(nodes or []), list(edges or []), chunk_to_document
+
+
+async def read_graph_group_ids(db_path: Path) -> tuple[list[str], str | None]:
+    """Distinct group_ids present in the graph + the knowledge default group id (read-only).
+
+    Backs the admin Graph tab's group selector: the knowledge group (``kb_main``) is labeled
+    "Knowledge", ``mem_{user}_{character}`` are conversation-memory graphs, ``eval_{set}`` are
+    eval corpora (docs/graph-group-policy-design.md §7). Returns ``([], None)`` when the DB
+    file does not exist.
+    """
+    path = Path(db_path)
+    if not path.exists():
+        return [], None
+    # The knowledge partition is the NAMED kb_main group, not graphiti's empty default.
+    default_gid = KNOWLEDGE_GROUP_ID
+    async with _snapshot_read_driver(path) as read_driver:
+        query = "MATCH (e:Episodic) RETURN DISTINCT e.group_id AS group_id"
+        try:
+            rows, _, _ = await read_driver.execute_query(query)
+        except Exception:
+            log.warning("⚠️ graphiti — read_graph_group_ids failed", exc_info=True)
+            return [], default_gid
+    return _distinct_group_ids(rows), default_gid
 
 
 async def read_episode_valid_at(db_path: Path, uuids: list[str]) -> dict[str, str | None]:
@@ -697,9 +1023,62 @@ async def read_episode_valid_at(db_path: Path, uuids: list[str]) -> dict[str, st
     return out
 
 
+async def read_episode_chunks(db_path: Path, uuids: list[str]) -> dict[str, dict[str, Any]]:
+    """Map episode uuid → ``{text, group_id, source_description, valid_at}`` from Kuzu.
+
+    Authoritative chunk-text source for **memory** chunks: conversation episodes are
+    written to Graphiti/Kuzu only and never to Qdrant, so the Graph viz panel's
+    chunk-detail resolver must read their text from ``EpisodicNode.content`` here. The
+    same call also returns ``group_id`` so the caller can tell memory from knowledge
+    episodes, plus ``source_description`` (the conversation thread / document id) and
+    ``valid_at`` (semantic event time) to populate the panel's "doc title" + "when"
+    fields without a second read.
+
+    Returns ``{}`` when the DB file does not exist or ``uuids`` is empty; ids with no
+    matching episode are omitted. Read-only on a dedicated connection (lock-free; safe
+    during an active build) — same pattern as :func:`read_episode_valid_at`.
+    """
+    from graphiti_core.nodes import EpisodicNode
+
+    ids = [str(u) for u in uuids if u]
+    path = Path(db_path)
+    if not ids or not path.exists():
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    async with _snapshot_read_driver(path) as read_driver:
+        try:
+            episodes = await EpisodicNode.get_by_uuids(read_driver, ids)
+        except Exception:
+            # Chunk-text resolution is best-effort provenance — a graph read hiccup
+            # must not fail the whole chunk-detail panel. Log and return what we have.
+            log.warning(
+                "⚠️ graphiti — episode chunk lookup failed · count=%d", len(ids), exc_info=True
+            )
+            return {}
+    for ep in episodes or []:
+        uuid = getattr(ep, "uuid", "") or ""
+        if not uuid:
+            continue
+        valid_at = getattr(ep, "valid_at", None)
+        out[uuid] = {
+            "text": getattr(ep, "content", "") or "",
+            "group_id": getattr(ep, "group_id", "") or "",
+            "source_description": getattr(ep, "source_description", "") or "",
+            "valid_at": valid_at.isoformat() if isinstance(valid_at, dt.datetime) else None,
+        }
+    return out
+
+
+# ``is_memory_group_id`` now lives in the shared group-ID policy module (group_scope) and is
+# imported above; re-exported here so existing ``from ...graphiti_service import is_memory_group_id``
+# callers keep working (docs/graph-group-policy-design.md).
+
+
 __all__ = [
     "GraphitiMemoryService",
     "graphiti_db_path",
+    "is_memory_group_id",
+    "read_episode_chunks",
     "read_episode_valid_at",
     "read_graph_snapshot",
 ]

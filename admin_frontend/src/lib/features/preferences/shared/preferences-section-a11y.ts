@@ -7,17 +7,16 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   mediaOutput: 'preferences-section-media-output',
   agentChatSettings: 'preferences-section-agent-chat-settings',
   agentChatInstructions: 'preferences-section-agent-chat-instructions',
-  memoryLlm: 'preferences-section-memory-llm',
-  memoryEmbedding: 'preferences-section-memory-embedding',
-  memoryReranker: 'preferences-section-memory-reranker',
+  // "Agent memory" card, now on the Agent tab (was the removed Agent Memory tab).
   memoryRetrieval: 'preferences-section-memory-retrieval',
   knowledgeEmbedding: 'preferences-section-knowledge-embedding',
   knowledgeRetrieval: 'preferences-section-knowledge-retrieval',
   knowledgeReranker: 'preferences-section-knowledge-reranker',
   knowledgeAnsweringModel: 'preferences-section-knowledge-answering-model',
   knowledgeRewrite: 'preferences-section-knowledge-rewrite',
-  knowledgeGraph: 'preferences-section-knowledge-graph',
-  knowledgeGraphReranker: 'preferences-section-knowledge-graph-reranker'
+  knowledgeGraphBackend: 'preferences-section-knowledge-graph-backend',
+  graphEngine: 'preferences-section-graph-engine',
+  graphEngineReranker: 'preferences-section-graph-engine-reranker'
 } as const;
 
 export function tuningProfileSectionBodyId(profileId: string): string {

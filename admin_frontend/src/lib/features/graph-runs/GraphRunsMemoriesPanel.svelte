@@ -6,25 +6,22 @@
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import FormField from '$lib/components/ui/form-field.svelte';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { cn } from '$lib/utils';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import type { CharacterRow } from '$lib/api/characters';
   import GraphRunsListCharacterCell from './GraphRunsListCharacterCell.svelte';
-  import {
-    graphRunsMemoriesTableShellClass,
-    graphRunsNameCellClass
-  } from './shared/graph-runs-table-ui';
+  import { graphRunsMemoriesTableShellClass } from './shared/graph-runs-table-ui';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import {
-    memoryChannelName,
     memoryCharacter,
     memoryCreatedRaw,
     memoryDateDisplay,
     memoryId,
     memoryPrimaryText,
-    memorySharedLabel,
     memorySourceLabel,
     memoryStableKey,
-    memoryUpdatedRaw,
     GRAPH_RUNS_PANEL_IDS,
     GRAPH_RUNS_PRIMARY_TAB_IDS
   } from './graph-runs-pure';
@@ -32,8 +29,9 @@
   let {
     memorySearch = $bindable(''),
     memoryFilterCharacterId = $bindable(''),
-    memoryFilterChannelId = $bindable(''),
     memoryFilterSource = $bindable(''),
+    memoryFilterDateFrom = $bindable(''),
+    memoryFilterDateTo = $bindable(''),
     hidden,
     memoriesError,
     memoriesLoading,
@@ -41,7 +39,6 @@
     memoriesTotalCount,
     visibleMemoriesRows,
     charactersForFilterDropdown,
-    channelsForMemoryFilterDropdown,
     sourcesForMemoryFilterDropdown,
     characterMap,
     channelById,
@@ -53,8 +50,9 @@
   }: {
     memorySearch?: string;
     memoryFilterCharacterId?: string;
-    memoryFilterChannelId?: string;
     memoryFilterSource?: string;
+    memoryFilterDateFrom?: string;
+    memoryFilterDateTo?: string;
     hidden: boolean;
     memoriesError: string;
     memoriesLoading: boolean;
@@ -62,7 +60,6 @@
     memoriesTotalCount: number;
     visibleMemoriesRows: Record<string, unknown>[];
     charactersForFilterDropdown: CharacterRow[];
-    channelsForMemoryFilterDropdown: ChatChannelRow[];
     sourcesForMemoryFilterDropdown: { value: string; label: string }[];
     characterMap: Record<string, CharacterRow>;
     channelById: Map<number, ChatChannelRow>;
@@ -75,13 +72,6 @@
 
   const characterOptions = $derived(
     charactersForFilterDropdown.map((c) => ({ value: c.id, label: c.name || c.id }))
-  );
-
-  const channelOptions = $derived(
-    channelsForMemoryFilterDropdown.map((ch) => ({
-      value: String(ch.id),
-      label: ch.name || `Channel ${ch.id}`
-    }))
   );
 </script>
 
@@ -118,19 +108,18 @@
               options={characterOptions}
             />
             <AdminFilterBarSelect
-              label="Channel"
-              bind:value={memoryFilterChannelId}
-              placeholder="All channels"
-              class="min-w-[10rem]"
-              options={channelOptions}
-            />
-            <AdminFilterBarSelect
               label="Source"
               bind:value={memoryFilterSource}
               placeholder="All sources"
               class="min-w-[10rem]"
               options={sourcesForMemoryFilterDropdown}
             />
+            <FormField label="From" class="min-w-[9rem]">
+              <input type="date" class={cn(ADMIN_INPUT, 'w-full')} bind:value={memoryFilterDateFrom} />
+            </FormField>
+            <FormField label="To" class="min-w-[9rem]">
+              <input type="date" class={cn(ADMIN_INPUT, 'w-full')} bind:value={memoryFilterDateTo} />
+            </FormField>
             <AdminFilterBarSearch
               label="Search"
               bind:value={memorySearch}
@@ -139,16 +128,18 @@
             />
           </AdminFilterBar>
           <div class="memories-actions">
-            {#if memoriesTotalCount > 0}
+            {#if visibleMemoriesRows.length > 0}
               <Button
                 type="button"
                 variant="destructive"
                 size="sm"
                 disabled={memoryActionBusy || memoriesLoading}
                 onclick={onRequestClearAll}
+                title="Delete the memories matching the current filters"
               >
                 <Trash2 size={14} aria-hidden="true" />
-                Clear all memories
+                Clear {visibleMemoriesRows.length}
+                {visibleMemoriesRows.length === 1 ? 'memory' : 'memories'}
               </Button>
             {/if}
             <Button
@@ -181,12 +172,9 @@
         <AdminTableShell density="dense" stickyHead class={graphRunsMemoriesTableShellClass}>
           <thead>
             <tr>
-              <th>Updated</th>
               <th>Created</th>
               <th>Character</th>
-              <th>Channel</th>
               <th>Memory</th>
-              <th>Shared</th>
               <th>Source</th>
               <th>Id</th>
               <th>Payload</th>
@@ -195,22 +183,15 @@
           </thead>
           <tbody>
             {#each visibleMemoriesRows as row, idx (memoryStableKey(row, idx))}
-              {@const updated = memoryDateDisplay(memoryUpdatedRaw(row))}
               {@const created = memoryDateDisplay(memoryCreatedRaw(row))}
               {@const memCharacter = memoryCharacter(row, characterMap, channelById)}
               <tr>
-                <td class="memories-date-cell" title={updated.title}>
-                  <span>{updated.date}</span>
-                  <span>{updated.time}</span>
-                </td>
                 <td class="memories-date-cell" title={created.title}>
                   <span>{created.date}</span>
                   <span>{created.time}</span>
                 </td>
                 <GraphRunsListCharacterCell photo={memCharacter.photo} name={memCharacter.name} />
-                <td class={graphRunsNameCellClass}>{memoryChannelName(row, channelById)}</td>
                 <td class="memories-text-cell">{memoryPrimaryText(row)}</td>
-                <td>{memorySharedLabel(row)}</td>
                 <td>{memorySourceLabel(row)}</td>
                 <td class="font-mono memories-id-cell">{memoryId(row) || '—'}</td>
                 <td class="memories-payload-cell">
@@ -314,6 +295,6 @@
 
   :global(.admin-table-shell-dense.memories-table-wrap) :global(table) {
     white-space: normal;
-    min-width: 1120px;
+    min-width: 820px;
   }
 </style>

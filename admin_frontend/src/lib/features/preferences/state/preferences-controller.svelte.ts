@@ -50,7 +50,6 @@ export function createPreferencesController(notify: Notify) {
   let chatOptions = $state<CatalogModelRow[]>([]);
   let sttOptions = $state<CatalogModelRow[]>([]);
   let ttsOptions = $state<CatalogModelRow[]>([]);
-  let memoryLlmOptions = $state<CatalogModelRow[]>([]);
   let embeddingOptions = $state<CatalogModelRow[]>([]);
   // Knowledge reranker: cloud models come from the catalog; local in-process models from the
   // local-models source (provider "local"). rerankPickerOptions merges both for SingleModelPicker;
@@ -84,8 +83,6 @@ export function createPreferencesController(notify: Notify) {
     )
   );
 
-  const memoryRerankerEnabled = $derived(Boolean(draft?.memory.reranker.enabled));
-
   const unsaved = createUnsavedGuard(
     () => dirty,
     () => true,
@@ -113,40 +110,9 @@ export function createPreferencesController(notify: Notify) {
     forceClean = false;
   }
 
-  function rerankerDeviceValue(device: string | null | undefined): string {
-    if (!device) return 'auto';
-    return device;
-  }
-
-  function setRerankerDevice(value: string) {
-    if (!draft) return;
-    draft.memory.reranker.device = value === 'auto' ? null : value;
-    markDirty();
-  }
-
-  function setRerankerEnabled(enabled: boolean) {
-    if (!draft) return;
-    draft.memory.reranker.enabled = enabled;
-    if (!enabled) draft.memory.search.rerank = false;
-    markDirty();
-  }
-
-  function setRerankerModel(modelId: string) {
-    if (!draft) return;
-    draft.memory.reranker.model = modelId;
-    markDirty();
-  }
-
   function setDefaultModel(path: 'default_chat' | 'default_stt' | 'default_tts', id: string | null) {
     if (!draft) return;
     draft.llm[path] = id;
-    markDirty();
-  }
-
-  function setMemoryModel(path: 'default_llm' | 'default_embedding_model', id: string | null) {
-    if (!draft) return;
-    draft.memory[path] = id;
-    draft.memory.enabled = Boolean(draft.memory.default_llm && draft.memory.default_embedding_model);
     markDirty();
   }
 
@@ -176,25 +142,25 @@ export function createPreferencesController(notify: Notify) {
 
   function setKnowledgeGraphExtractionModel(id: string | null) {
     if (!draft) return;
-    draft.knowledge.graph.extraction_model = id;
+    draft.graph.extraction_model = id;
     markDirty();
   }
 
   function setKnowledgeGraphSmallModel(id: string | null) {
     if (!draft) return;
-    draft.knowledge.graph.small_model = id;
+    draft.graph.small_model = id;
     markDirty();
   }
 
   function setKnowledgeGraphEmbedderModel(id: string | null) {
     if (!draft) return;
-    draft.knowledge.graph.embedder_model = id;
+    draft.graph.embedder_model = id;
     markDirty();
   }
 
   function setKnowledgeGraphRerankerModel(id: string | null) {
     if (!draft) return;
-    draft.knowledge.graph.reranker.model_id = id;
+    draft.graph.reranker.model_id = id;
     markDirty();
   }
 
@@ -386,16 +352,7 @@ export function createPreferencesController(notify: Notify) {
       ttsOptions = prefs.llm.default_tts
         ? includeUnknownModel(ttsPayload.data.models, prefs.llm.default_tts, 'tts')
         : ttsPayload.data.models;
-      memoryLlmOptions = prefs.memory.default_llm
-        ? includeUnknownModel(chatPayload.data.models, prefs.memory.default_llm, 'chat')
-        : chatPayload.data.models;
-      embeddingOptions = prefs.memory.default_embedding_model
-        ? includeUnknownModel(
-            embeddingPayload.data.models,
-            prefs.memory.default_embedding_model,
-            'embedding'
-          )
-        : embeddingPayload.data.models;
+      embeddingOptions = embeddingPayload.data.models;
       catalogAllProviders = providersPayload.data;
       await activeProvidersStore.load({ silent: true });
       resumeRerankerPolling();
@@ -413,7 +370,6 @@ export function createPreferencesController(notify: Notify) {
       chatOptions = result.modelsByKind.chat ?? [];
       sttOptions = result.modelsByKind.stt ?? [];
       ttsOptions = result.modelsByKind.tts ?? [];
-      memoryLlmOptions = result.modelsByKind.chat ?? [];
       embeddingOptions = result.modelsByKind.embedding ?? [];
       rerankCatalogOptions = result.modelsByKind.rerank ?? [];
       rerankLocalOptions = await listLocalCatalogModels('rerank');
@@ -481,9 +437,6 @@ export function createPreferencesController(notify: Notify) {
     get profileEntries(): [string, TuningProfile][] {
       return profileEntries;
     },
-    get memoryRerankerEnabled() {
-      return memoryRerankerEnabled;
-    },
     get chatOptions() {
       return chatOptions;
     },
@@ -492,9 +445,6 @@ export function createPreferencesController(notify: Notify) {
     },
     get ttsOptions() {
       return ttsOptions;
-    },
-    get memoryLlmOptions() {
-      return memoryLlmOptions;
     },
     get embeddingOptions() {
       return embeddingOptions;
@@ -526,12 +476,7 @@ export function createPreferencesController(notify: Notify) {
     sectionLabel,
     sectionDescription,
     markDirty,
-    rerankerDeviceValue,
-    setRerankerDevice,
-    setRerankerEnabled,
-    setRerankerModel,
     setDefaultModel,
-    setMemoryModel,
     setKnowledgeEmbeddingModel,
     setKnowledgeAnswerModel,
     setKnowledgeRerankerEnabled,

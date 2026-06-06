@@ -899,43 +899,84 @@ class KnowledgeService:
     async def get_chunk_details(self, point_ids: list[str]) -> list[dict[str, Any]]:
         """Resolve chunk point_ids → text + document title for the graph viz panel.
 
-        Lazy provenance lookup: the Graph tab passes a selected node/edge's
-        ``chunk_ids`` and gets back the real chunk text + owning document name so the
-        panel can show content instead of opaque ids. Result order follows
-        ``point_ids``; ids missing from Qdrant are dropped."""
-        hits = await asyncio.to_thread(self.vector_store.hits_from_point_ids, point_ids)
-        by_id = {hit.point_id: hit for hit in hits}
-        # Trace the graph-viz "Chunk text unavailable" case: when a selected node/edge's
-        # chunk_ids (== Graphiti episode uuids == Qdrant point_ids, G6) are NOT in the
-        # current collection, they're silently dropped below. Surface which/how many missed
-        # so we can tell a real provenance gap (graph built from episodes whose Qdrant
-        # points were rebuilt/reset away) from an empty selection. WARNING because a graph
-        # node with provenance that no longer resolves is an inconsistency worth noticing.
-        missing = [pid for pid in point_ids if pid not in by_id]
-        if missing:
-            log.warning(
-                "⚠️ knowledge.graph — %d/%d chunk id(s) not found in Qdrant (collection=%s) · "
-                "graph provenance may predate a collection rebuild/reset · sample=%s",
-                len(missing),
-                len(point_ids),
-                self.vector_store.collection_name,
-                missing[:5],
-            )
-        # Each chunk's SEMANTIC event date (``valid_at``) lives on its Graphiti episode
-        # (uuid == point_id, G6), not in the Qdrant payload — fetch it so the viz panel can
-        # show "when this happened" instead of the ingest/processing time. Best-effort: an
-        # empty map (graph off / never built) just omits dates.
+        Two ingest paths write chunks to two stores, so this resolver routes by origin:
+          - **Knowledge** ingest writes chunk text to Qdrant (payload.text) AND a graph
+            episode to Kuzu. Resolve from Qdrant; Kuzu only supplies ``valid_at``.
+          - **Memory** ingest writes ONLY a Graphiti episode to Kuzu (group_id starts
+            with ``mem_``). ``EpisodicNode.content`` is the authoritative text — Qdrant
+            never saw these ids. Resolve from Kuzu; skip the Qdrant call entirely.
+
+        Routing is determined by reading the episode's ``group_id`` once from Kuzu
+        (cheap; we already needed ``valid_at`` from there). The bug this replaces:
+        the resolver used to query Qdrant for every id, silently dropping all memory
+        chunks → the Graph panel showed "Chunk text unavailable" even though the text
+        was right there in ``EpisodicNode.content``.
+        """
         from hirocli.services.knowledge.graph.graphiti_service import (
             graphiti_db_path,
-            read_episode_valid_at,
+            is_memory_group_id,
+            read_episode_chunks,
         )
 
-        valid_at_by_id = await read_episode_valid_at(
-            graphiti_db_path(self.workspace_path), point_ids
+        ids = [str(p) for p in (point_ids or []) if p]
+        if not ids:
+            return []
+        # One Kuzu read covers BOTH legs: text+group_id+valid_at for memory chunks,
+        # group_id+valid_at for knowledge chunks (their text still comes from Qdrant).
+        episode_by_id = await read_episode_chunks(
+            graphiti_db_path(self.workspace_path), ids
         )
+        knowledge_ids = [
+            pid
+            for pid in ids
+            if not is_memory_group_id(episode_by_id.get(pid, {}).get("group_id", ""))
+        ]
+        # Only hit Qdrant for ids that aren't memory chunks — saves the round-trip and
+        # the misleading "not found in Qdrant" warning for memory ids that were never
+        # written there.
+        hits_by_id: dict[str, Any] = {}
+        if knowledge_ids:
+            hits = await asyncio.to_thread(
+                self.vector_store.hits_from_point_ids, knowledge_ids
+            )
+            hits_by_id = {hit.point_id: hit for hit in hits}
+            missing = [pid for pid in knowledge_ids if pid not in hits_by_id]
+            if missing:
+                # Real provenance gap (knowledge chunks the resolver expected but didn't
+                # find in Qdrant — e.g. the collection was rebuilt). NOT a memory chunk.
+                log.warning(
+                    "⚠️ knowledge.graph — %d/%d knowledge chunk id(s) not found in Qdrant "
+                    "(collection=%s) · graph provenance may predate a rebuild/reset · sample=%s",
+                    len(missing),
+                    len(knowledge_ids),
+                    self.vector_store.collection_name,
+                    missing[:5],
+                )
         details: list[dict[str, Any]] = []
-        for pid in point_ids:
-            hit = by_id.get(pid)
+        for pid in ids:
+            episode = episode_by_id.get(pid, {})
+            group_id = str(episode.get("group_id", "") or "")
+            valid_at = episode.get("valid_at")
+            if is_memory_group_id(group_id):
+                text = str(episode.get("text", "") or "")
+                if not text:
+                    continue  # episode exists but has no body — skip
+                details.append(
+                    {
+                        "id": pid,
+                        "text": text,
+                        # Conversation memory has no Qdrant doc; surface the thread id
+                        # (set as ``source_description`` at ingest: "conv:{run_id}") so
+                        # the panel can still group + label memory chunks coherently.
+                        "document_id": episode.get("source_description") or group_id,
+                        "document_title": "Conversation",
+                        "ord": None,
+                        "heading_path": None,
+                        "valid_at": valid_at,
+                    }
+                )
+                continue
+            hit = hits_by_id.get(pid)
             if hit is None:
                 continue
             details.append(
@@ -947,7 +988,7 @@ class KnowledgeService:
                     "ord": hit.ord,
                     "heading_path": hit.heading_path,
                     # Episode event time (ISO) — null when no episode / no temporal date.
-                    "valid_at": valid_at_by_id.get(pid),
+                    "valid_at": valid_at,
                 }
             )
         return details
@@ -977,8 +1018,33 @@ class KnowledgeService:
     async def delete_document(self, document_id: str) -> dict[str, Any]:
         deleted = await asyncio.to_thread(self._delete_document_sync, document_id)
         if deleted:
+            # A document delete must also purge its Graphiti episodes — the catalog row
+            # + Qdrant chunks alone leave orphaned entities/facts in the knowledge graph.
+            # Best-effort/isolated: a graph failure (graph off, never built, DB lock) must
+            # NOT undo the already-committed catalog/Qdrant delete, so we log and move on.
+            await self._purge_document_graph(document_id)
             self._publish(KNOWLEDGE_DELETED, {"document_id": document_id})
         return {"document_id": document_id, "deleted": deleted}
+
+    async def _purge_document_graph(self, document_id: str) -> int:
+        """Remove a deleted document's episodes from the knowledge graph (best-effort).
+
+        Isolated from the caller: any failure is logged and swallowed so it can't roll
+        back the catalog/Qdrant delete that already succeeded. Returns the episode count
+        removed (0 when the graph is off, never built, or on error)."""
+        # Local import avoids a service ↔ tools import cycle (tools imports this module).
+        from hirocli.tools.knowledge_graph import remove_document_from_graph
+
+        try:
+            return await remove_document_from_graph(self.workspace_path, document_id)
+        except Exception as exc:
+            log.warning(
+                "⚠️ knowledge graph — document delete left graph untouched · doc_id=%s · %s",
+                document_id,
+                str(exc)[:200],
+                exc_info=True,
+            )
+            return 0
 
     async def reingest_document(self, document_id: str) -> KnowledgeJobResult:
         row = await asyncio.to_thread(self.catalog.document_row_by_id, document_id)

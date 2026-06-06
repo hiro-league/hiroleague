@@ -1,4 +1,4 @@
-"""Admin routes for long-term (Mem0) memory inspection and deletion."""
+"""Admin routes for long-term (Graphiti) memory inspection and deletion."""
 
 from __future__ import annotations
 
@@ -140,13 +140,35 @@ async def clear_workspace_memories(
         return envelope_failure(str(exc))
 
 
+@memory_router.post("/memory/delete")
+async def delete_workspace_memories(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Delete several long-term memories (Graphiti fact edges) by id — backs the admin
+    "Clear shown" action over the displayed/filtered rows. Idempotent for missing ids."""
+    try:
+        body = await request.json()
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list):
+            return envelope_failure("'ids' must be a list of memory ids.")
+        service, _ = await _resolve_memory_service(request, workspace_id)
+        if service is None:
+            return _service_unavailable()
+        deleted = await service.delete_many([str(i) for i in ids if str(i).strip()])
+        return _success({"deleted_count": deleted})
+    except Exception as exc:
+        log.error("delete memories (batch) - admin failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
 @memory_router.delete("/memory/{memory_id}")
 async def delete_workspace_memory(
     memory_id: str,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
 ) -> dict[str, Any]:
-    """Delete one long-term memory by Mem0 memory id."""
+    """Delete one long-term memory (Graphiti fact edge) by id."""
     try:
         service, _ = await _resolve_memory_service(request, workspace_id)
         if service is None:

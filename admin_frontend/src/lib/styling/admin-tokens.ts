@@ -135,27 +135,43 @@ export const ADMIN_FIELD_LABEL = 'grid gap-1 font-sans text-sm';
 
 export const ADMIN_FIELD_LABEL_TEXT = 'font-medium';
 
-export const ADMIN_INPUT =
-  'h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
+// Focus ring is drawn `ring-inset` (inside the element's own box) so it is never
+// clipped on the bottom/left when an input sits flush against an `overflow-hidden`
+// ancestor; `border-ring` keeps it reading as a single clean blue outline.
+const ADMIN_FOCUS_RING =
+  'focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
-export const ADMIN_INPUT_LG =
-  'h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
+export const ADMIN_INPUT = cn(
+  'h-9 rounded-md border border-input bg-background px-3 text-sm outline-none',
+  ADMIN_FOCUS_RING
+);
+
+export const ADMIN_INPUT_LG = cn(
+  'h-10 rounded-md border border-input bg-background px-3 text-sm outline-none',
+  ADMIN_FOCUS_RING
+);
 
 export const ADMIN_SELECT = ADMIN_INPUT;
 
 export const ADMIN_SELECT_LG = ADMIN_INPUT_LG;
 
 /** Compact filter selects (Logs filter toolbar). */
-export const ADMIN_SELECT_SM =
-  'h-8 min-w-0 rounded-md border border-input bg-background px-2 font-sans text-sm text-foreground shadow-xs outline-none focus:ring-2 focus:ring-ring';
+export const ADMIN_SELECT_SM = cn(
+  'h-8 min-w-0 rounded-md border border-input bg-background px-2 font-sans text-sm text-foreground shadow-xs outline-none',
+  'focus:border-ring focus:ring-2 focus:ring-inset focus:ring-ring'
+);
 
 /** Multi-line message / notes fields. */
-export const ADMIN_TEXTAREA =
-  'min-h-11 w-full resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-snug outline-none focus-visible:ring-2 focus-visible:ring-ring';
+export const ADMIN_TEXTAREA = cn(
+  'min-h-11 w-full resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-snug outline-none',
+  ADMIN_FOCUS_RING
+);
 
 /** Search field shell with embedded transparent input (Logs header). */
-export const ADMIN_SEARCH_FIELD =
-  'flex h-9 min-w-72 items-center gap-2 rounded-md border border-input bg-background px-3 font-sans text-sm shadow-xs focus-within:ring-2 focus-within:ring-ring';
+export const ADMIN_SEARCH_FIELD = cn(
+  'flex h-9 min-w-72 items-center gap-2 rounded-md border border-input bg-background px-3 font-sans text-sm shadow-xs',
+  'focus-within:border-ring focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring'
+);
 
 // ── table chrome (primitives implemented in Phase 4.5; tokens shipped now
 // so feature-local copies can be retired without two rounds of churn) ──────

@@ -2,7 +2,7 @@ import { apiRequest, type ApiResponse } from './client';
 
 export type MemoryListData = {
   memory_enabled: boolean;
-  /** Normalized Mem0 rows (shape may evolve with mem0ai). */
+  /** Normalized memory rows (Graphiti facts-as-memory: memory text + created_at + id + character/source). */
   memories: Record<string, unknown>[];
 };
 
@@ -20,6 +20,11 @@ export async function listWorkspaceMemories(): Promise<ApiResponse<MemoryListDat
 
 export async function clearWorkspaceMemories(): Promise<ApiResponse<MemoryClearData>> {
   return apiRequest<MemoryClearData>('/memory/clear', { method: 'POST' });
+}
+
+/** Delete several memories (Graphiti fact edges) by id — backs the "Clear shown" action. */
+export async function deleteWorkspaceMemories(ids: string[]): Promise<ApiResponse<MemoryClearData>> {
+  return apiRequest<MemoryClearData>('/memory/delete', { method: 'POST', body: { ids } });
 }
 
 export async function deleteWorkspaceMemory(memoryId: string): Promise<ApiResponse<MemoryDeleteData>> {

@@ -1,6 +1,11 @@
-import { clearWorkspaceMemories, deleteWorkspaceMemory, listWorkspaceMemories } from '$lib/api/memory';
+import {
+  clearWorkspaceMemories,
+  deleteWorkspaceMemories,
+  deleteWorkspaceMemory,
+  listWorkspaceMemories
+} from '$lib/api/memory';
 
-/** List Mem0 workspace memories; mirrors prior controller try/catch (api throws on HTTP / payload errors). */
+/** List workspace long-term memories (Graphiti); mirrors prior controller try/catch (api throws on HTTP / payload errors). */
 export async function graphRunsLoadMemoriesList(): Promise<{
   memoryEnabled: boolean | null;
   memories: Record<string, unknown>[];
@@ -28,4 +33,10 @@ export async function graphRunsClearAllMemories(): Promise<void> {
 
 export async function graphRunsDeleteMemory(memoryId: string): Promise<void> {
   await deleteWorkspaceMemory(memoryId);
+}
+
+/** Delete several memories at once (the filtered "Clear shown" set). No-op on empty input. */
+export async function graphRunsDeleteMemories(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await deleteWorkspaceMemories(ids);
 }

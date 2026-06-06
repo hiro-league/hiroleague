@@ -7,15 +7,21 @@ export const PREF_KEYS = {
   chatChannelsActiveTab: 'hiro.admin.chatChannels.activeTab',
   /** "Ask for voice reply" checkbox on Messages tab (local UX preference). */
   chatChannelsVoiceReply: 'hiro.admin.chatChannels.voiceReply',
-  /** Show agent tool stack + token counts on Messages tab (default on). */
+  /** Show agent token/cost stats on Messages bubbles (default on). */
   chatChannelsShowAgentTelemetry: 'hiro.admin.chatChannels.showAgentTelemetry',
+  /** Show agent tool stack on Messages bubbles (default on). */
+  chatChannelsShowAgentTools: 'hiro.admin.chatChannels.showAgentTools',
   /** "Use knowledge" per-message toggle on Messages tab (default on). */
   chatChannelsUseKnowledge: 'hiro.admin.chatChannels.useKnowledge',
+  /** Global chat overlay: last open/closed state (Facebook-style pop-anywhere chat). */
+  chatOverlayOpen: 'hiro.admin.chatOverlay.open',
+  /** Global chat overlay: window mode — full | partial | minimized. */
+  chatOverlayMode: 'hiro.admin.chatOverlay.mode',
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab',
   knowledgeActiveTab: 'hiro.admin.knowledge.activeTab',
-  /** Primary pill on Graph Runs page: workspace runs ledger vs Mem0 memories pane. */
-  graphRunsActiveTab: 'hiro.admin.graphRuns.activeTab',
+  /** Primary tab on the Logs page: live log feed vs the Graph runs ledger. */
+  logsPrimaryActiveTab: 'hiro.admin.logs.activeTab',
   preferencesActiveTab: 'hiro.admin.preferences.activeTab',
   /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
   graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
@@ -44,21 +50,24 @@ export const PREF_KEYS = {
   /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */
   knowledgeGraphHideNodes: 'hiro.admin.knowledge.graphHideNodes',
   /** Graph tab: hidden edge types (CSV) — sessionStorage; no URL param (not shareable). */
-  knowledgeGraphHideEdges: 'hiro.admin.knowledge.graphHideEdges'
+  knowledgeGraphHideEdges: 'hiro.admin.knowledge.graphHideEdges',
+  /** Graph tab: last-viewed partition group_id — sessionStorage; restored on next open. */
+  knowledgeGraphActiveGroup: 'hiro.admin.knowledge.graphActiveGroup'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';
 export type ServerTabPreference = 'workspaces' | 'gateways' | 'metrics';
 export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
+export type ChatOverlayMode = 'full' | 'partial';
 export type CatalogTabPreference = 'active-providers' | 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
-export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask' | 'graph';
-export type GraphRunsPrimaryTabPreference = 'runs' | 'memories';
+export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask' | 'graph' | 'eval';
+export type LogsPrimaryTabPreference = 'logs' | 'runs';
 export type PreferencesTabPreference =
   | 'models'
   | 'media'
-  | 'memory'
   | 'knowledge'
+  | 'graph-engine'
   | 'agent'
   | 'tuning-profiles';

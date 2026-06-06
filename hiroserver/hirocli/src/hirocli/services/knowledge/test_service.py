@@ -122,6 +122,67 @@ async def test_markdown_ingest_search_and_detail(tmp_path: Path) -> None:
         await service.close()
 
 
+async def _ingest_one_document(service: KnowledgeService, tmp_path: Path) -> str:
+    """Ingest a single markdown note and return its document id."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    note = docs / "note.md"
+    note.write_text("# Alpha\n\nHiro knowledge stores markdown chunks.", encoding="utf-8")
+    job = await service.ingest_and_wait([str(note)])
+    assert job.status == "completed"
+    documents = await service.list_documents()
+    return documents.documents[0].id
+
+
+@pytest.mark.asyncio
+async def test_delete_document_purges_graph_episodes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting a document must also purge its Graphiti episodes (orphan-cleanup gap)."""
+    import hirocli.tools.knowledge_graph as knowledge_graph_tool
+
+    workspace = tmp_path / "workspace"
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
+    calls: list[tuple[Path, str]] = []
+
+    async def fake_remove(workspace_path: Path, document_id: str) -> int:
+        calls.append((workspace_path, document_id))
+        return 3
+
+    monkeypatch.setattr(knowledge_graph_tool, "remove_document_from_graph", fake_remove)
+    try:
+        document_id = await _ingest_one_document(service, tmp_path)
+        deleted = await service.delete_document(document_id)
+        assert deleted["deleted"] is True
+        assert calls == [(service.workspace_path, document_id)]
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_document_graph_failure_does_not_block_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A graph teardown failure must not roll back the committed catalog/Qdrant delete."""
+    import hirocli.tools.knowledge_graph as knowledge_graph_tool
+
+    workspace = tmp_path / "workspace"
+    service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
+
+    async def boom(workspace_path: Path, document_id: str) -> int:
+        raise RuntimeError("graph DB busy")
+
+    monkeypatch.setattr(knowledge_graph_tool, "remove_document_from_graph", boom)
+    try:
+        document_id = await _ingest_one_document(service, tmp_path)
+        deleted = await service.delete_document(document_id)
+        # The Qdrant/catalog delete is still reported as successful despite the graph error.
+        assert deleted["deleted"] is True
+        assert (await service.list_documents()).total == 0
+    finally:
+        await service.close()
+
+
 def test_knowledge_crash_recovery_marks_running_jobs_failed(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())

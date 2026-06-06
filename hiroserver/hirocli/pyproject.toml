@@ -44,18 +44,12 @@ dependencies = [
     "langchain-google-genai>=4.2",
     "langchain-ollama>=1.0.1",
     "langchain-community>=0.3",
-    "mem0ai==2.0.2",
+    # Qdrant: vector store for the knowledge passage layer (dense + BM25 hybrid).
     "qdrant-client>=1.18.0",
-    # Mem0 v3 hybrid search (Qdrant): entity extraction + BM25 lemmatization.
-    # Mirrors mem0ai[nlp]; we pin directly to avoid mem0ai[extras] (old LangChain, etc.).
-    "spacy>=3.8,<4",
-    # Mem0 loads ``en_core_web_sm``; pin the wheel so sync/tool install ship the model.
-    "en-core-web-sm",
-    # Qdrant sparse vectors for BM25 keyword search (mem0ai[extras] also lists this).
+    # Qdrant sparse vectors for BM25 keyword search (knowledge hybrid retrieval).
     "fastembed>=0.8.0",
-    # Local cross-encoder reranker (mem0 sentence_transformer provider). Pulls
-    # torch + huggingface-hub transitively; ~100MB on first install. Required
-    # because mem0ai lists sentence-transformers under its ``[extras]`` group.
+    # Local cross-encoder reranker for knowledge retrieval. Pulls torch +
+    # huggingface-hub transitively; ~100MB on first install.
     "sentence-transformers>=5.4",
     # Knowledge reranker — cloud providers (catalog) + local FlashRank starter loader.
     # Cohere/Voyage are LangChain BaseDocumentCompressor impls; flashrank is a small ONNX

@@ -1,71 +1,69 @@
 <script lang="ts">
   import { X } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import { LOG_LEVELS, TRAFFIC_CLASSES } from '$lib/api/logs';
+  import { isTrafficClass, TRAFFIC_CLASSES } from '$lib/api/logs';
   import { cn } from '$lib/utils';
+  import MultiSelectFilter, {
+    type MultiSelectOption
+  } from '$lib/components/ui/multi-select-filter.svelte';
   import { ADMIN_SELECT_SM } from '$lib/styling/admin-tokens';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
-  import { logLevelFilterChipClass, logSourceFilterChipClass } from './shared/logs-classes';
-  import LogLevelIcon from './shared/LogLevelIcon.svelte';
-  import LogSourceIcon from './shared/LogSourceIcon.svelte';
   import {
     SOURCE_LABELS,
     TRAFFIC_CLASS_LABELS,
-    msgIdFilterPreview,
-    trafficClassChipClass
+    isLogSourceFilter,
+    msgIdFilterPreview
   } from './shared/logs-ui';
 
   type Props = {
     prefs: LogsPreferences;
     ctrl: LogsPageController;
-    regionId: string;
-    regionHidden: boolean;
   };
 
-  let { prefs, ctrl, regionId, regionHidden }: Props = $props();
+  // Collapse region/id owned by the parent sticky toolbar (LogsPage) so the whole
+  // controls line — toolbar buttons + these filters — collapses together. Level now
+  // lives on the search/toolbar line (LogsPage); the rest of the filters live here.
+  let { prefs, ctrl }: Props = $props();
 
   /** Icon-only clears for selects: reserved width so layout doesn’t shift when empty. */
   const filterClearIconBtnClass =
     'size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive';
+
+  // Source + Traffic both use the searchable multi-select (graph-tab "Edges" widget).
+  // Both store the explicit set of SHOWN values, so Select-all / Clear map 1:1.
+  const sourceOptions = $derived<MultiSelectOption[]>(
+    ctrl.availableSources.map((s) => ({ value: s, label: SOURCE_LABELS[s] }))
+  );
+  function onSourceSelectedChange(values: string[]) {
+    prefs.activeSources = values.filter(isLogSourceFilter);
+  }
+
+  const trafficOptions: MultiSelectOption[] = TRAFFIC_CLASSES.map((tc) => ({
+    value: tc,
+    label: TRAFFIC_CLASS_LABELS[tc]
+  }));
+  function onTrafficSelectedChange(values: string[]) {
+    prefs.trafficClassFilter = values.filter(isTrafficClass);
+  }
 </script>
 
-<div
-  id={regionId}
-  class="grid min-w-0 gap-3"
-  role="region"
-  aria-label="Log filters"
-  hidden={regionHidden}
->
+<div class="grid min-w-0 gap-3">
   <div class="min-w-0 overflow-x-auto pb-0.5">
-    <!-- Rows: Source | Scope / Level | Message / Traffic-class chips spanning both columns. -->
-    <div
-      class="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-3"
-    >
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <span class="font-sans text-sm font-semibold text-muted-foreground">Source:</span>
-        {#each ctrl.availableSources as source (source)}
-          <Button
-            size="sm"
-            variant={prefs.sourceIsActive(source) ? 'secondary' : 'ghost'}
-            class={cn(logSourceFilterChipClass(prefs.sourceIsActive(source)), 'shadow-none')}
-            onclick={() => prefs.toggleSource(source)}
-          >
-            <LogSourceIcon
-              source={source}
-              size={11}
-              class="shrink-0 opacity-80"
-            />
-            {SOURCE_LABELS[source]}
-          </Button>
-        {/each}
+    <div class="flex flex-col gap-3">
+      <!-- Line 1: Source · Channel · device · request types · Traffic -->
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+        <MultiSelectFilter
+          label="Source"
+          options={sourceOptions}
+          selected={prefs.activeSources}
+          searchPlaceholder="Search sources…"
+          onSelectedChange={onSourceSelectedChange}
+        />
+
         {#if ctrl.channelsVisible && ctrl.layout && ctrl.layout.available_channels.length}
-          <span class="ml-2 font-sans text-sm font-semibold text-muted-foreground">Channel:</span>
           <div class="flex items-center gap-0.5">
-            <select
-              class={cn(ADMIN_SELECT_SM, 'min-w-44')}
-              bind:value={prefs.activeChannel}
-            >
+            <select class={cn(ADMIN_SELECT_SM, 'min-w-44')} bind:value={prefs.activeChannel}>
               <option value="">All channels</option>
               {#each ctrl.layout.available_channels as channel (channel)}
                 <option value={channel}>{channel}</option>
@@ -89,9 +87,7 @@
             </div>
           </div>
         {/if}
-      </div>
 
-      <div class="flex min-w-0 flex-nowrap items-center gap-3">
         <div class="flex items-center gap-0.5">
           <select
             class={cn(ADMIN_SELECT_SM, 'min-w-48')}
@@ -124,6 +120,7 @@
             {/if}
           </div>
         </div>
+
         <div class="flex items-center gap-0.5">
           <select
             class={cn(ADMIN_SELECT_SM, 'min-w-44 font-mono')}
@@ -151,56 +148,19 @@
             {/if}
           </div>
         </div>
+
+        <MultiSelectFilter
+          label="Traffic"
+          options={trafficOptions}
+          selected={prefs.trafficClassFilter}
+          searchPlaceholder="Search traffic classes…"
+          onSelectedChange={onTrafficSelectedChange}
+        />
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="font-sans text-sm font-semibold text-muted-foreground">Level:</span>
-        {#each LOG_LEVELS as level (level)}
-          <Button
-            size="sm"
-            variant={prefs.levelIsActive(level) ? 'secondary' : 'ghost'}
-            class={cn(logLevelFilterChipClass(prefs.levelIsActive(level), level), 'shadow-none')}
-            onclick={() => prefs.toggleLevel(level)}
-          >
-            <LogLevelIcon level={level} size={11} class="shrink-0" />
-            {level}
-          </Button>
-        {/each}
-      </div>
-
-      <div class="col-span-2 flex flex-wrap items-center gap-2">
-        <span class="font-sans text-sm font-semibold text-muted-foreground">Traffic:</span>
-        {#each TRAFFIC_CLASSES as tc (tc)}
-          {@const active = prefs.trafficClassIsActive(tc)}
-          <Button
-            size="sm"
-            variant={active ? 'secondary' : 'ghost'}
-            class={cn(
-              'h-7 rounded-full border px-2.5 text-[0.7rem] font-medium shadow-none transition-colors',
-              active ? trafficClassChipClass(tc) : 'border-transparent text-muted-foreground hover:bg-secondary'
-            )}
-            onclick={() => prefs.toggleTrafficClass(tc)}
-            title={tc}
-          >
-            {TRAFFIC_CLASS_LABELS[tc]}
-          </Button>
-        {/each}
-        {#if prefs.trafficClassFilter.length > 0}
-          <Button
-            variant="ghost"
-            size="icon"
-            class={filterClearIconBtnClass}
-            onclick={() => ctrl.clearTrafficClassFilter()}
-            title="Clear traffic filter"
-            aria-label="Clear traffic filter"
-          >
-            <X size={15} strokeWidth={2} />
-          </Button>
-        {/if}
-      </div>
-
-      <div class="min-w-0">
-        {#if prefs.scopeMsgId.trim()}
+      <!-- Line 2: Message (only when a message filter is set) -->
+      {#if prefs.scopeMsgId.trim()}
+        <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <div class="flex min-w-0 items-center gap-2">
             <span class="shrink-0 font-sans text-sm font-semibold text-muted-foreground">
               Message:
@@ -224,8 +184,8 @@
               </Button>
             </div>
           </div>
-        {/if}
-      </div>
+        </div>
+      {/if}
     </div>
   </div>
 </div>

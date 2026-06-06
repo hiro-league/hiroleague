@@ -10,6 +10,7 @@ exercises ``GraphitiMemoryService.ingest_chunks`` without constructing real Kuzu
 from __future__ import annotations
 
 import datetime as dt
+from types import SimpleNamespace
 
 import pytest
 from graphiti_core.nodes import EpisodeType
@@ -68,6 +69,44 @@ async def test_write_gate_rejects_non_user_document() -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_gate_allows_conversation() -> None:
+    """memory Phase 1: the 'conversation' role (user chat turn → long-term memory)
+    passes the F7 gate, exactly like 'user_document'. The assistant half is never
+    tagged this way (caller enforces user-turn-only, decision D2)."""
+    g = _FakeGraphiti()
+    eps = [GraphitiEpisodeInput(chunk_id="m1", document_id="conv:7", text="I moved to Tokyo")]
+    stats = await ingest_episodes(g, eps, source_role="conversation", group_id="mem_42_aria")
+    assert len(g.calls) == 1
+    assert stats.episodes_processed == 1
+    assert stats.episodes_rejected == 0
+    assert g.calls[0]["group_id"] == "mem_42_aria"
+
+
+@pytest.mark.asyncio
+async def test_multi_group_repoints_driver_database(monkeypatch) -> None:
+    """memory Phase 1 must-fix: before each add_episode the driver's ``_database`` is
+    re-pointed (inside the write lock) to the episode's group_id, so graphiti-core's
+    ``group_id != driver._database`` comparison stays False and never takes the
+    Neo4j-only "clone to a per-group database" branch that breaks on Kuzu. Without this,
+    every memory write (a fresh per-user×character group) would re-trip the bug the
+    construction-time seed only papered over for the single knowledge group."""
+
+    async def _fake_save(self, driver) -> None:  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(EpisodicNode, "save", _fake_save)
+
+    g = _FakeGraphiti()
+    g.driver = SimpleNamespace(_database="kb_main")  # seeded to the named knowledge group
+    eps = [
+        GraphitiEpisodeInput(chunk_id="m1", document_id="conv:7", text="hi", reference_time=_ts(1))
+    ]
+    await ingest_episodes(g, eps, source_role="conversation", group_id="mem_42_aria")
+    # _database now points at the memory group, not the seeded knowledge default.
+    assert g.driver._database == "mem_42_aria"
+
+
+@pytest.mark.asyncio
 async def test_maps_episode_params() -> None:
     g = _FakeGraphiti(nodes=3, edges=2)
     ts = dt.datetime(2024, 1, 15, 9, 0, 0, tzinfo=dt.UTC)
@@ -106,7 +145,7 @@ async def test_sorted_chronologically() -> None:
         GraphitiEpisodeInput(chunk_id="aug", document_id="d", text="Aug", reference_time=_ts(8)),
         GraphitiEpisodeInput(chunk_id="jan", document_id="d", text="Jan", reference_time=_ts(1)),
     ]
-    await ingest_episodes(g, eps, source_role="user_document")
+    await ingest_episodes(g, eps, source_role="user_document", group_id="kb_main")
     assert [c["uuid"] for c in g.calls] == ["jan", "may", "aug"]
 
 
@@ -123,7 +162,10 @@ async def test_preseeds_episode_node_with_chunk_uuid(monkeypatch) -> None:
     monkeypatch.setattr(EpisodicNode, "save", _fake_save)
 
     g = _FakeGraphiti()
-    g.driver = object()  # presence of a driver triggers the real-path pre-seed
+    # Presence of a driver triggers the real-path pre-seed. SimpleNamespace (not a bare
+    # object()) so the multi-group ``driver._database = group_id`` re-point can set the
+    # attribute — the real Kuzu driver always carries ``_database`` (seeded at construction).
+    g.driver = SimpleNamespace()
     eps = [
         GraphitiEpisodeInput(
             chunk_id="pt-1", document_id="d1", text="hello", reference_time=_ts(1)
@@ -149,7 +191,7 @@ async def test_message_source_prefixes_speaker() -> None:
             speaker="Adam",
         )
     ]
-    await ingest_episodes(g, eps, source_role="user_document")
+    await ingest_episodes(g, eps, source_role="user_document", group_id="kb_main")
     call = g.calls[0]
     assert call["source"] == EpisodeType.message
     assert call["episode_body"] == "Adam: I left Brightloom!"
@@ -164,11 +206,20 @@ async def test_progress_events_emitted() -> None:
         for i in range(3)
     ]
     await ingest_episodes(
-        g, eps, source_role="user_document", event_sink=lambda t, p: events.append((t, p))
+        g,
+        eps,
+        source_role="user_document",
+        group_id="grp",  # group_id is tagged onto every event for the Graph-tab filter
+        event_sink=lambda t, p: events.append((t, p)),
     )
     progress = [p for (t, p) in events if t == KNOWLEDGE_GRAPH_INGEST_PROGRESS]
     assert len(progress) == 3
-    assert progress[-1] == {"document_id": "d", "chunk_index": 3, "chunk_total": 3}
+    assert progress[-1] == {
+        "document_id": "d",
+        "chunk_index": 3,
+        "chunk_total": 3,
+        "group_id": "grp",
+    }
 
 
 @pytest.mark.asyncio
@@ -177,7 +228,11 @@ async def test_node_edge_events_emitted() -> None:
     events: list[tuple[str, dict]] = []
     eps = [GraphitiEpisodeInput(chunk_id="c1", document_id="d", text="hi")]
     await ingest_episodes(
-        g, eps, source_role="user_document", event_sink=lambda t, p: events.append((t, p))
+        g,
+        eps,
+        source_role="user_document",
+        group_id="mem_42_aria",
+        event_sink=lambda t, p: events.append((t, p)),
     )
     node_events = [p for (t, p) in events if t == KNOWLEDGE_GRAPH_NODE_UPSERTED]
     edge_events = [p for (t, p) in events if t == KNOWLEDGE_GRAPH_EDGE_UPSERTED]
@@ -185,6 +240,9 @@ async def test_node_edge_events_emitted() -> None:
     assert len(edge_events) == 1
     assert node_events[0]["is_new"] is True
     assert node_events[0]["document_id"] == "d"
+    # group_id rides every delta so the Graph tab can route it to the viewed partition.
+    assert node_events[0]["group_id"] == "mem_42_aria"
+    assert edge_events[0]["group_id"] == "mem_42_aria"
     assert "node" in node_events[0]
     assert "edge" in edge_events[0]
 
@@ -206,7 +264,7 @@ async def test_service_ingest_chunks_delegates_and_inits() -> None:
     svc = object.__new__(GraphitiMemoryService)
     fake = _FakeGraphiti()
     svc._graphiti = fake  # type: ignore[attr-defined]
-    svc._group_id = "grp"  # type: ignore[attr-defined]
+    svc._group_id = "kb_main"  # type: ignore[attr-defined]  # named knowledge group (policy)
     svc._initialized = False  # type: ignore[attr-defined]
     svc._closed = False  # type: ignore[attr-defined]
     svc._db_path = "test.db"  # type: ignore[attr-defined]  # only used in a log line
@@ -220,7 +278,31 @@ async def test_service_ingest_chunks_delegates_and_inits() -> None:
 
     assert fake.indices_built == 1  # auto-initialized
     assert len(fake.calls) == 1
-    assert fake.calls[0]["group_id"] == "grp"
+    assert fake.calls[0]["group_id"] == "kb_main"
     assert fake.calls[0]["entity_types"] is not None  # pinned ontology passed
     assert "Person" in fake.calls[0]["entity_types"]
     assert stats.episodes_processed == 1
+
+
+@pytest.mark.asyncio
+async def test_service_ingest_chunks_group_override() -> None:
+    """memory Phase 1: ingest_chunks(group_id=...) overrides the service's default
+    (knowledge) group, so a conversation write lands in its own per-(user,character)
+    partition rather than the knowledge graph."""
+    svc = object.__new__(GraphitiMemoryService)
+    fake = _FakeGraphiti()
+    svc._graphiti = fake  # type: ignore[attr-defined]
+    svc._group_id = "kb_main"  # type: ignore[attr-defined]  # service default (named knowledge group)
+    svc._initialized = True  # type: ignore[attr-defined]  # skip build in this delegation test
+    svc._closed = False  # type: ignore[attr-defined]
+    svc._db_path = "test.db"  # type: ignore[attr-defined]
+    svc._registry_key = "test-key"  # type: ignore[attr-defined]
+    svc._ledger_detail = "rich"  # type: ignore[attr-defined]
+
+    await svc.ingest_chunks(
+        [GraphitiEpisodeInput(chunk_id="m1", document_id="conv:7", text="hi")],
+        source_role="conversation",
+        group_id="mem_42_aria",
+    )
+
+    assert fake.calls[0]["group_id"] == "mem_42_aria"  # override, not the default

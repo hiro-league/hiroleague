@@ -10,7 +10,7 @@ export const graphRunsPreviewCellClass =
 export const graphRunsNameCellClass =
   'max-w-40 overflow-hidden text-ellipsis';
 
-/** Compact date + time stack (Graph runs list, Mem0 date columns). */
+/** Compact date + time stack (Graph runs list, Memories date columns). */
 export const graphRunsDateCellClass =
   'min-w-[86px] whitespace-nowrap font-sans text-muted-foreground [&>span]:block [&>span]:leading-[1.35]';
 

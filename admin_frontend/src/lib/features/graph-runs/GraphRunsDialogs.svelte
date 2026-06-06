@@ -43,15 +43,16 @@
 <Dialog.Root open={clearMemoriesConfirmOpen} onOpenChange={(next) => { if (!next) onCloseClearMemories(); }}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Clear all memories?</Dialog.Title>
+      <Dialog.Title>Delete these memories?</Dialog.Title>
     </Dialog.Header>
     <p class="font-sans text-sm text-muted-foreground">
-      This deletes every long-term memory for the default user in this workspace.
+      This permanently deletes the long-term memories currently shown (matching your filters)
+      for the default user. With no filters active, this clears all of them. This can't be undone.
     </p>
     <Dialog.Footer>
       <Button variant="outline" disabled={memoryActionBusy} onclick={onCloseClearMemories}>Cancel</Button>
       <Button variant="destructive" disabled={memoryActionBusy} onclick={onConfirmClearMemories}>
-        Clear all
+        Delete
       </Button>
     </Dialog.Footer>
   </Dialog.Content>

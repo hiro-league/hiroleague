@@ -1,4 +1,5 @@
 import type { KnowledgeDocument, KnowledgeScannedFile } from '$lib/api/knowledge';
+import { removeDocumentFromKnowledgeGraph } from '$lib/api/knowledge';
 import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
 import { documentToPreviewFile } from '$lib/features/knowledge/shared/knowledge-pure';
 import type { ToastKind } from '$lib/ui/toast-types';
@@ -19,6 +20,9 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
   let editTargets = $state<KnowledgeDocument[]>([]);
   let reingestOpen = $state(false);
   let reingestTargets = $state<KnowledgeDocument[]>([]);
+  let removeGraphOpen = $state(false);
+  let removeGraphTargets = $state<KnowledgeDocument[]>([]);
+  let removingGraph = $state(false);
   let chunksOpen = $state(false);
 
   const hasSelection = $derived(deps.ctl.browse.selectedDocumentCount > 0);
@@ -47,6 +51,11 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
     reingestOpen = true;
   }
 
+  function openRemoveGraphDialog() {
+    removeGraphTargets = snapshotSelectedDocuments();
+    removeGraphOpen = true;
+  }
+
   function openDocumentPreview(doc: (typeof deps.ctl.browse.sortedDocuments)[number]) {
     previewFile = documentToPreviewFile(doc);
     previewOpen = true;
@@ -71,6 +80,35 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
     }
   }
 
+  async function confirmRemoveFromGraph() {
+    if (removeGraphTargets.length === 0) return;
+    removingGraph = true;
+    // Per-document isolation (matches the graph-ingest pattern): a failed doc doesn't
+    // abort the rest. We call the per-document graph delete for each selected doc.
+    let removedEpisodes = 0;
+    let failed = 0;
+    for (const document of removeGraphTargets) {
+      const res = await removeDocumentFromKnowledgeGraph(document.id);
+      if (res.ok && res.data) removedEpisodes += res.data.removed_episodes;
+      else failed += 1;
+    }
+    removingGraph = false;
+    const docCount = removeGraphTargets.length;
+    if (failed === 0) {
+      removeGraphOpen = false;
+      deps.notify(
+        'success',
+        `Removed ${docCount} document${docCount === 1 ? '' : 's'} from the knowledge graph` +
+          ` (${removedEpisodes} episode${removedEpisodes === 1 ? '' : 's'}).`
+      );
+    } else {
+      deps.notify(
+        'error',
+        `Removed ${docCount - failed}/${docCount} from the graph — ${failed} failed.`
+      );
+    }
+  }
+
   function handleMetadataSaved(result: { saved: number; failed: number }) {
     deps.notify('success', knowledgeMetadataSavedMessage(result.saved, result.failed));
   }
@@ -90,6 +128,10 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
 
   $effect(() => {
     if (!reingestOpen) reingestTargets = [];
+  });
+
+  $effect(() => {
+    if (!removeGraphOpen) removeGraphTargets = [];
   });
 
   return {
@@ -132,6 +174,18 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
     get reingestTargets() {
       return reingestTargets;
     },
+    get removeGraphOpen() {
+      return removeGraphOpen;
+    },
+    set removeGraphOpen(value: boolean) {
+      removeGraphOpen = value;
+    },
+    get removeGraphTargets() {
+      return removeGraphTargets;
+    },
+    get removingGraph() {
+      return removingGraph;
+    },
     get chunksOpen() {
       return chunksOpen;
     },
@@ -147,9 +201,11 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
     openDeleteDialog,
     openEditDialog,
     openReingestDialog,
+    openRemoveGraphDialog,
     openDocumentPreview,
     openChunksDialog,
     confirmDeleteDocuments,
+    confirmRemoveFromGraph,
     handleMetadataSaved,
     handleAskForDocument
   };

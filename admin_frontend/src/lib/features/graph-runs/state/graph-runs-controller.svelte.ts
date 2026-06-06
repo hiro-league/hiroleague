@@ -1,6 +1,15 @@
 /**
- * Orchestration for Graph Runs admin UI: ledger tail polling, inspect tabs, filters, memories, dialogs.
- * Follows getters for `$derived` consumers (avoid returning shorthand `$derived` from factory — stale capture).
+ * Orchestration for the Graph Runs ledger UI: ledger tail polling, inspect tabs,
+ * filters, dialogs.
+ *
+ * Graph runs now renders as the *second tab of the Logs page* (it no longer has
+ * its own route). The host Logs page owns the primary `?tab=logs|runs` pill, so
+ * this controller no longer tracks a primary tab — `activePane` is purely the
+ * opened-run inspector state (`activeRunId ?? RUNS_TAB`). Memories moved to its
+ * own page (`features/memories`); none of that state lives here anymore.
+ *
+ * Follows getters for `$derived` consumers (avoid returning shorthand `$derived`
+ * from factory — stale capture).
  */
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow } from '$lib/api/characters';
@@ -19,11 +28,6 @@ import {
 } from '$lib/features/chat-channels/messages/agent-message-meta';
 import { createGraphRunsPreferences } from '$lib/preferences/graph-runs-preferences.svelte';
 import {
-  MEMORIES_TAB,
-  memoryField,
-  memoryId,
-  memoryRowPassesFilters,
-  memorySortSeconds,
   RUN_ID_FIRST_CARD_CHARS,
   RUNS_TAB,
   trimRunIdForList,
@@ -35,25 +39,14 @@ import {
   type GraphRunKindFilter,
 } from '../graph-runs-pure';
 import { graphRunsFetchInitialLedger, graphRunsLoadMoreLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
-import {
-  graphRunsClearAllMemories,
-  graphRunsDeleteMemory,
-  graphRunsLoadMemoriesList
-} from './graph-runs-memory-service';
 
 export function createGraphRunsPageController() {
   const uiPrefs = createGraphRunsPreferences();
   let rows = $state<GraphLedgerRow[]>([]);
   let openRunIds = $state<string[]>([]);
-  /**
-   * Active opened-run inspector id. Independent of the primary `?tab=` pref
-   * (a run can be open while the user is on the Memories pane). The derived
-   * `activePane` below collapses both into the legacy single value.
-   */
+  /** Active opened-run inspector id (null → the ledger list). */
   let activeRunId = $state<string | null>(null);
-  const activePane = $derived<ActivePane>(
-    uiPrefs.activeTab === MEMORIES_TAB ? MEMORIES_TAB : (activeRunId ?? RUNS_TAB)
-  );
+  const activePane = $derived<ActivePane>(activeRunId ?? RUNS_TAB);
 
   let timelineByRun = $state<Record<string, GraphLedgerRow[]>>({});
   let langsmithUrlByRun = $state<Record<string, string | undefined>>({});
@@ -63,14 +56,6 @@ export function createGraphRunsPageController() {
   let titleCharacter = $state<CharacterDetail | null>(null);
 
   let error = $state('');
-  let memoriesError = $state('');
-  let memoriesLoading = $state(false);
-  let memoryEnabled = $state<boolean | null>(null);
-  let memoriesRows = $state<Record<string, unknown>[]>([]);
-  let memoryActionBusy = $state(false);
-  let memoryJsonRow = $state<Record<string, unknown> | null>(null);
-  let clearMemoriesConfirmOpen = $state(false);
-  let deleteMemoryTarget = $state<Record<string, unknown> | null>(null);
 
   let offsets: Record<string, number> = {};
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -87,13 +72,7 @@ export function createGraphRunsPageController() {
   let filterStatus = $state('');
   let filterRunKind = $state<GraphRunKindFilter>('');
 
-  let memorySearch = $state('');
-  let memoryFilterCharacterId = $state('');
-  let memoryFilterChannelId = $state('');
-  let memoryFilterSource = $state('');
-
   const previewSearchNeedle = $derived(previewSearch.trim().toLowerCase());
-  const memorySearchNeedle = $derived(memorySearch.trim().toLowerCase());
 
   const characterMap = $derived.by((): Record<string, CharacterRow> => {
     const m: Record<string, CharacterRow> = {};
@@ -106,45 +85,6 @@ export function createGraphRunsPageController() {
     for (const c of chatChannels) m.set(c.id, c);
     return m;
   });
-
-  const sortedMemoriesRows = $derived.by(() =>
-    [...memoriesRows].sort((a, b) => memorySortSeconds(b) - memorySortSeconds(a))
-  );
-
-  const channelsForMemoryFilterDropdown = $derived.by(() => {
-    const cid = memoryFilterCharacterId.trim();
-    const base = cid ? chatChannels.filter((c) => c.character_id === cid) : [...chatChannels];
-    return base.sort((a, b) => a.name.localeCompare(b.name));
-  });
-
-  const sourcesForMemoryFilterDropdown = $derived.by((): { value: string; label: string }[] => {
-    const raw = new Set<string>();
-    let anyEmpty = false;
-    for (const row of memoriesRows) {
-      const s = String(memoryField(row, 'source') ?? '').trim();
-      if (s === '') anyEmpty = true;
-      else raw.add(s);
-    }
-    const out: { value: string; label: string }[] = [];
-    if (anyEmpty) out.push({ value: '__empty__', label: '(no source)' });
-    for (const s of [...raw].sort((a, b) => a.localeCompare(b))) {
-      out.push({ value: s, label: s });
-    }
-    return out;
-  });
-
-  const visibleMemoriesRows = $derived.by(() =>
-    sortedMemoriesRows.filter((row) =>
-      memoryRowPassesFilters(row, {
-        characterId: memoryFilterCharacterId,
-        channelId: memoryFilterChannelId,
-        sourceFilter: memoryFilterSource,
-        searchNeedle: memorySearchNeedle,
-        characterMap,
-        channelById
-      })
-    )
-  );
 
   const charactersForFilterDropdown = $derived.by(() =>
     [...characters].sort((a, b) => a.name.localeCompare(b.name))
@@ -209,12 +149,10 @@ export function createGraphRunsPageController() {
     return filtered.slice(0, 500);
   });
 
-  const timeline = $derived(
-    activePane === RUNS_TAB || activePane === MEMORIES_TAB ? [] : (timelineByRun[activePane] ?? [])
-  );
+  const timeline = $derived(activePane === RUNS_TAB ? [] : (timelineByRun[activePane] ?? []));
 
   const activeRunAggregate = $derived.by(() => {
-    if (activePane === RUNS_TAB || activePane === MEMORIES_TAB) return null;
+    if (activePane === RUNS_TAB) return null;
     const rid = activePane;
     const fromInspect = aggregateByRun[rid];
     if (fromInspect) return fromInspect;
@@ -222,11 +160,11 @@ export function createGraphRunsPageController() {
   });
 
   const langsmithUrlForActive = $derived(
-    activePane === RUNS_TAB || activePane === MEMORIES_TAB ? null : (langsmithUrlByRun[activePane] ?? null)
+    activePane === RUNS_TAB ? null : (langsmithUrlByRun[activePane] ?? null)
   );
 
   const runIdentitySource = $derived.by((): GraphLedgerRow | null => {
-    if (activePane === RUNS_TAB || activePane === MEMORIES_TAB) return null;
+    if (activePane === RUNS_TAB) return null;
     const agg = activeRunAggregate;
     if (agg) return agg;
     const tl = timelineByRun[activePane] ?? [];
@@ -243,7 +181,7 @@ export function createGraphRunsPageController() {
   });
 
   const runTitlePrimary = $derived.by(() => {
-    if (activePane !== RUNS_TAB && activePane !== MEMORIES_TAB) {
+    if (activePane !== RUNS_TAB) {
       if (isGraphIngestRun(activePane)) return 'Graph ingest';
       if (isKnowledgeStandaloneRun(activePane)) return 'Knowledge query';
     }
@@ -255,7 +193,7 @@ export function createGraphRunsPageController() {
   });
 
   const runTitleSubtitle = $derived.by(() => {
-    if (activePane !== RUNS_TAB && activePane !== MEMORIES_TAB) {
+    if (activePane !== RUNS_TAB) {
       const kind = graphRunKindLabel(activePane);
       const parts: string[] = [kind];
       const ch = activeChannelLabel;
@@ -275,7 +213,7 @@ export function createGraphRunsPageController() {
   });
 
   const runIdFirstCardDisplay = $derived.by(() => {
-    if (activePane === RUNS_TAB || activePane === MEMORIES_TAB) return '';
+    if (activePane === RUNS_TAB) return '';
     const s = String(activePane).trim();
     return s.slice(0, RUN_ID_FIRST_CARD_CHARS);
   });
@@ -321,20 +259,8 @@ export function createGraphRunsPageController() {
   });
 
   $effect(() => {
-    const cid = memoryFilterCharacterId.trim();
-    const chSel = memoryFilterChannelId.trim();
-    if (!chSel) return;
-    const num = Number(chSel);
-    if (!Number.isFinite(num)) return;
-    const chan = channelById.get(num);
-    if (cid && chan && chan.character_id !== cid) {
-      memoryFilterChannelId = '';
-    }
-  });
-
-  $effect(() => {
     void timeline;
-    if (activePane === RUNS_TAB || activePane === MEMORIES_TAB) return;
+    if (activePane === RUNS_TAB) return;
     const sid = selectedNodeRowId;
     if (sid !== null && !timeline.some((r) => r.id === sid)) {
       selectedNodeRowId = null;
@@ -346,7 +272,7 @@ export function createGraphRunsPageController() {
   });
 
   $effect(() => {
-    if (activePane === RUNS_TAB || activePane === MEMORIES_TAB) {
+    if (activePane === RUNS_TAB) {
       titleCharacter = null;
       return;
     }
@@ -465,10 +391,6 @@ export function createGraphRunsPageController() {
     activeRunId = runId;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
-    // Opening a run inspector implies the runs primary tab.
-    if (uiPrefs.activeTab !== RUNS_TAB) {
-      void uiPrefs.setActiveTab(RUNS_TAB);
-    }
     if (!alreadyOpen) {
       await loadRunDetail(runId);
     }
@@ -493,113 +415,10 @@ export function createGraphRunsPageController() {
     activeRunId = null;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
-    if (uiPrefs.activeTab !== RUNS_TAB) {
-      void uiPrefs.setActiveTab(RUNS_TAB);
-    }
-  }
-
-  /** Primary “Graph runs” pill: leaves Memories without clearing an opened inspector (# two-tier tabs). */
-  function activateGraphRunsPrimaryTab() {
-    if (uiPrefs.activeTab === MEMORIES_TAB) {
-      void uiPrefs.setActiveTab(RUNS_TAB);
-      selectedNodeRowId = null;
-      nodeDetailRowId = null;
-    }
-  }
-
-  function showMemories() {
-    selectedNodeRowId = null;
-    nodeDetailRowId = null;
-    void uiPrefs.setActiveTab(MEMORIES_TAB);
-    void loadMemories();
-  }
-
-  /** Wire-friendly setter for `<AdminTabStrip onSelect>`; dispatches to the
-   * right action so side-effects (load memories, preserve open inspector) are
-   * preserved. */
-  function setPrimaryTab(id: 'runs' | 'memories') {
-    if (id === MEMORIES_TAB) {
-      showMemories();
-    } else {
-      activateGraphRunsPrimaryTab();
-    }
-  }
-
-  function closeMemoryJsonDialog() {
-    memoryJsonRow = null;
-  }
-
-  function openDeleteMemoryDialog(row: Record<string, unknown>) {
-    if (!memoryId(row)) return;
-    deleteMemoryTarget = row;
-  }
-
-  function closeDeleteMemoryDialog() {
-    if (!memoryActionBusy) deleteMemoryTarget = null;
-  }
-
-  function closeClearMemoriesDialog() {
-    if (!memoryActionBusy) clearMemoriesConfirmOpen = false;
-  }
-
-  function requestClearMemoriesConfirm() {
-    clearMemoriesConfirmOpen = true;
-  }
-
-  function showMemoryJsonRow(row: Record<string, unknown>) {
-    memoryJsonRow = row;
-  }
-
-  async function confirmClearMemories() {
-    memoryActionBusy = true;
-    memoriesError = '';
-    try {
-      await graphRunsClearAllMemories();
-      clearMemoriesConfirmOpen = false;
-      await loadMemories();
-    } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to clear memories.';
-    } finally {
-      memoryActionBusy = false;
-    }
-  }
-
-  async function confirmDeleteMemory() {
-    const target = deleteMemoryTarget;
-    const id = target ? memoryId(target) : '';
-    if (!id) return;
-    memoryActionBusy = true;
-    memoriesError = '';
-    try {
-      await graphRunsDeleteMemory(id);
-      deleteMemoryTarget = null;
-      memoriesRows = memoriesRows.filter((row) => memoryId(row) !== id);
-    } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to delete memory.';
-    } finally {
-      memoryActionBusy = false;
-    }
-  }
-
-  async function loadMemories() {
-    memoriesError = '';
-    memoriesLoading = true;
-    try {
-      const r = await graphRunsLoadMemoriesList();
-      memoryEnabled = r.memoryEnabled;
-      memoriesRows = r.memories;
-      memoriesError = r.error;
-    } finally {
-      memoriesLoading = false;
-    }
   }
 
   function refreshMain() {
-    if (activePane === MEMORIES_TAB) {
-      void loadMemories();
-    } else {
-      void loadInitial();
-    }
+    void loadInitial();
   }
 
   function toggleNodeRowSelection(compositeRowId: string) {
@@ -651,7 +470,7 @@ export function createGraphRunsPageController() {
 
   function onEscapeKey(ev: KeyboardEvent) {
     if (ev.key !== 'Escape') return;
-    if (activePane === RUNS_TAB || activePane === MEMORIES_TAB) return;
+    if (activePane === RUNS_TAB) return;
     const focus = ev.target instanceof HTMLElement ? ev.target : null;
     if (focus?.closest('input, textarea, select, [contenteditable="true"]')) return;
     ev.preventDefault();
@@ -691,17 +510,11 @@ export function createGraphRunsPageController() {
     get activePane() {
       return activePane;
     },
-    get primaryTab() {
-      return uiPrefs.activeTab;
-    },
     get openRunIds() {
       return openRunIds;
     },
     get runDetailCardsExpanded() {
       return uiPrefs.runDetailCardsExpanded;
-    },
-    get memoriesLoading() {
-      return memoriesLoading;
     },
     get filterCharacterId() {
       return filterCharacterId;
@@ -769,64 +582,6 @@ export function createGraphRunsPageController() {
     get channelById() {
       return channelById;
     },
-    get memoriesError() {
-      return memoriesError;
-    },
-    get memoryEnabled() {
-      return memoryEnabled;
-    },
-    get sortedMemoriesRows() {
-      return sortedMemoriesRows;
-    },
-    get visibleMemoriesRows() {
-      return visibleMemoriesRows;
-    },
-    get channelsForMemoryFilterDropdown() {
-      return channelsForMemoryFilterDropdown;
-    },
-    get sourcesForMemoryFilterDropdown() {
-      return sourcesForMemoryFilterDropdown;
-    },
-    get memorySearch() {
-      return memorySearch;
-    },
-    set memorySearch(v: string) {
-      memorySearch = v;
-      preserveStickyAnchorAround();
-    },
-    get memoryFilterCharacterId() {
-      return memoryFilterCharacterId;
-    },
-    set memoryFilterCharacterId(v: string) {
-      memoryFilterCharacterId = v;
-      preserveStickyAnchorAround();
-    },
-    get memoryFilterChannelId() {
-      return memoryFilterChannelId;
-    },
-    set memoryFilterChannelId(v: string) {
-      memoryFilterChannelId = v;
-      preserveStickyAnchorAround();
-    },
-    get memoryFilterSource() {
-      return memoryFilterSource;
-    },
-    set memoryFilterSource(v: string) {
-      memoryFilterSource = v;
-      preserveStickyAnchorAround();
-    },
-    get memoryActionBusy() {
-      return memoryActionBusy;
-    },
-    get memoryJsonRow() {
-      return memoryJsonRow;
-    },
-    get clearMemoriesConfirmOpen() {
-      return clearMemoriesConfirmOpen;
-    },
-    get deleteMemoryTarget() {
-      return deleteMemoryTarget;
-    },
     get activeRunAggregate() {
       return activeRunAggregate;
     },
@@ -876,13 +631,9 @@ export function createGraphRunsPageController() {
       return nodeDetailRow;
     },
     RUNS_TAB,
-    MEMORIES_TAB,
     mount,
     dispose,
     showRunsOnly,
-    activateGraphRunsPrimaryTab,
-    showMemories,
-    setPrimaryTab,
     openRunTab,
     closeRunTab,
     refreshMain,
@@ -892,15 +643,7 @@ export function createGraphRunsPageController() {
     openNodeDetails,
     closeNodeDetails,
     runTabDisplayLabel,
-    runTabTooltip,
-    closeMemoryJsonDialog,
-    openDeleteMemoryDialog,
-    closeDeleteMemoryDialog,
-    closeClearMemoriesDialog,
-    requestClearMemoriesConfirm,
-    showMemoryJsonRow,
-    confirmClearMemories,
-    confirmDeleteMemory
+    runTabTooltip
   };
 }
 

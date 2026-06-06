@@ -1,16 +1,13 @@
 import type { LogsPageController } from '../state/logs-controller.svelte';
 import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 
-/**
- * Applied to ``document.documentElement`` while the logs page is mounted so the app shell
- * does not scroll behind the full-height log workspace. Keep in sync with the ``:global``
- * rule in ``LogsPage.svelte``.
- */
-export const LOGS_NO_DOCUMENT_SCROLL_CLASS = 'admin-logs-no-document-scroll';
-
 export const LOGS_POLL_INTERVAL_MS = 500;
 
-/** Document scroll lock, session hydrate, initial load, polling interval, and teardown. */
+/**
+ * Session hydrate, initial load, polling interval, and teardown. The logs page now
+ * scrolls with the document (sticky header + sticky filter toolbar like other pages),
+ * so the former document-scroll lock was removed.
+ */
 export function setupLogsPageRuntime(opts: {
   prefs: LogsPreferences;
   ctrl: LogsPageController;
@@ -19,7 +16,6 @@ export function setupLogsPageRuntime(opts: {
 }) {
   const { prefs, ctrl, urlMsgId } = opts;
 
-  document.documentElement.classList.add(LOGS_NO_DOCUMENT_SCROLL_CLASS);
   prefs.hydrateFromSession();
   const fromUrl = (urlMsgId ?? '').trim();
   if (fromUrl) {
@@ -39,7 +35,6 @@ export function setupLogsPageRuntime(opts: {
 
   return () => {
     window.removeEventListener('keydown', onDocumentKeydown);
-    document.documentElement.classList.remove(LOGS_NO_DOCUMENT_SCROLL_CLASS);
     window.clearInterval(interval);
     ctrl.dispose();
   };

@@ -23,6 +23,7 @@ from hirocli.admin_svelte.workspace_ctx import _selected_workspace_id
 from hirocli.domain.character import list_characters_detailed
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.domain.events import DomainEvent, get_domain_event_bus
+from hirocli.services.knowledge.graph.graph_events import publish_graph_event
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.services.knowledge import KnowledgeService, create_knowledge_service
 from hirocli.services.knowledge.constants import (
@@ -67,10 +68,9 @@ def _publish_graph_event(
 ) -> None:
     """Publish a graph-viz Domain Event (workspace-scoped). Module-level so the
     ingest ``event_sink`` can be ``functools.partial(_publish_graph_event, ws)``
-    — no nested closure. The bus drops with a warning if no loop is attached."""
-    get_domain_event_bus().publish(
-        DomainEvent(type=event_type, workspace_path=workspace_path, payload=payload)
-    )
+    — no nested closure. Delegates to the shared publisher so knowledge ingest and the
+    conversation-memory facade emit live deltas through one path."""
+    publish_graph_event(workspace_path, event_type, payload)
 
 
 def _live_knowledge_service(request: Request, workspace_path: Path) -> tuple[bool, KnowledgeService | None]:
@@ -746,12 +746,15 @@ async def graph_ingest_batch(
 
 class GraphExportBody(BaseModel):
     """Graph export request. ``node_types`` / ``document_id`` are reserved for
-    the Phase 2 filters and ignored in the MVP; the limits are safety caps."""
+    the Phase 2 filters and ignored in the MVP; the limits are safety caps.
+    ``group_ids`` selects the partition (default knowledge group, or a
+    ``mem_{user}_{character}`` conversation-memory group)."""
 
     node_types: list[str] | None = None
     document_id: str | None = None
     node_limit: int | None = None
     edge_limit: int | None = None
+    group_ids: list[str] | None = None
 
 
 class GraphChunksDetailBody(BaseModel):
@@ -779,15 +782,31 @@ async def graph_export(
     all entity nodes + RELATES_TO facts from the Graphiti (Kuzu) graph. Empty graph
     when none built yet.
     """
+    from hirocli.services.knowledge.graph.group_scope import GroupPolicyError, validate_group_id
     from hirocli.tools.knowledge_graph import graph_snapshot_payload
 
     try:
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path).resolve()
+        # API-boundary scope guard (docs/graph-group-policy-design.md §6): never trust a raw
+        # client group_id. Re-validate each against the firm grammar so a crafted/empty group
+        # can't trigger an all-groups scan or read a non-namespaced partition. This is the
+        # admin Graph tab (admin-scoped), so viewing any *named* partition is intentional;
+        # validation rejects only malformed/empty/unknown-namespace ids.
+        if body.group_ids:
+            try:
+                validated_groups: list[str] | None = [
+                    validate_group_id(g) for g in body.group_ids
+                ]
+            except GroupPolicyError as exc:
+                return envelope_failure(f"Invalid graph group: {exc}")
+        else:
+            validated_groups = None
         payload = await graph_snapshot_payload(
             workspace_path,
             node_limit=body.node_limit,
             edge_limit=body.edge_limit,
+            group_ids=validated_groups,
         )
         return _success(payload)
     except Exception as exc:
@@ -803,6 +822,102 @@ async def graph_export(
                 "try again shortly."
             )
         log.error("knowledge graph export failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/graph/groups")
+async def graph_groups(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """List the graph's partitions for the Graph tab's group selector — "Knowledge" plus
+    each ``mem_{user}_{character}`` conversation-memory graph. Read-only; empty when no
+    graph is built yet."""
+    from hirocli.tools.knowledge_graph import graph_groups_payload
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path).resolve()
+        payload = await graph_groups_payload(workspace_path)
+        return _success(payload)
+    except Exception as exc:
+        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+
+        if is_kuzu_lock_error(exc):
+            log.warning("⚠️ knowledge graph groups — graph DB busy (external lock held)")
+            return envelope_failure(
+                "Graph database is busy (a build may be running in another process) — "
+                "try again shortly."
+            )
+        log.error("knowledge graph groups failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+class GraphRemoveDocumentBody(BaseModel):
+    """Per-document graph delete — drops one document's episodes/entities/facts."""
+
+    document_id: str
+
+
+@knowledge_router.post("/knowledge/graph/clear")
+async def graph_clear(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Delete the ENTIRE knowledge graph (all entities + facts) for the workspace.
+
+    Qdrant chunks/documents are untouched, so the graph can be rebuilt from them.
+    Backs the Graph tab's "Clear graph" action.
+    """
+    from hirocli.tools.knowledge_graph import clear_knowledge_graph
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path).resolve()
+        removed = await clear_knowledge_graph(workspace_path)
+        return _success({"removed_episodes": removed})
+    except Exception as exc:
+        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+
+        if is_kuzu_lock_error(exc):
+            log.warning("⚠️ knowledge graph clear — graph DB busy (external lock held)")
+            return envelope_failure(
+                "Graph database is busy (a build may be running in another process) — "
+                "try again shortly."
+            )
+        log.error("knowledge graph clear failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/graph/remove-document")
+async def graph_remove_document(
+    body: GraphRemoveDocumentBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Delete one document's episodes (+ exclusively-owned entities/facts) from the
+    knowledge graph, keeping its Qdrant chunks. Closes the orphan-on-document-delete gap;
+    backs the Browse tab's per-document "Remove from graph" action.
+    """
+    from hirocli.tools.knowledge_graph import remove_document_from_graph
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path).resolve()
+        removed = await remove_document_from_graph(workspace_path, body.document_id)
+        return _success({"document_id": body.document_id, "removed_episodes": removed})
+    except Exception as exc:
+        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+
+        if is_kuzu_lock_error(exc):
+            log.warning(
+                "⚠️ knowledge graph remove-document — graph DB busy (external lock held)"
+            )
+            return envelope_failure(
+                "Graph database is busy (a build may be running in another process) — "
+                "try again shortly."
+            )
+        log.error("knowledge graph remove-document failed", error=str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 
@@ -1092,6 +1207,31 @@ async def eval_cancel(
     except Exception as exc:
         log.error("knowledge eval cancel failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/eval/clear")
+async def eval_clear(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Delete ALL eval data (synthetic + Adam corpora) from the workspace — catalog rows,
+    Qdrant chunks, and knowledge-graph episodes.
+
+    Graph group-ID policy Phase A (docs/graph-group-policy-design.md §8): eval currently
+    shares the knowledge graph group, so deletion is document-scoped over the eval-tagged
+    docs (``clear_eval_data``). Backs the Eval panel's "Clear eval data" action.
+    """
+    from hirocli.services.knowledge.eval_runner import clear_eval_data
+
+    service, owned = await _resolve_service(request, workspace_id)
+    try:
+        removed = await clear_eval_data(service)
+        return _success({"removed_documents": removed})
+    except Exception as exc:
+        log.error("knowledge eval clear failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+    finally:
+        await _close_if_owned(service, owned)
 
 
 @knowledge_router.get("/knowledge/eval/questions")

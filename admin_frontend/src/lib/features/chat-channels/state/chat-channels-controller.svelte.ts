@@ -50,6 +50,9 @@ import {
   characterResolvedVoiceReplyControlHint
 } from '$lib/features/characters/character-resolved-voice';
 
+/** Shared chat conversation engine — backs both the /chats Messages tab and the global overlay. */
+export type ChatChannelsPageController = ReturnType<typeof createChatChannelsPageController>;
+
 /** Chat channels Messages tab orchestration — URL prefs, REST, mic capture, modal wiring. Derived fields use getters per Svelte POJO-controller pattern. */
 export function createChatChannelsPageController() {
   const toasts = createToastNotifier();
@@ -75,8 +78,10 @@ export function createChatChannelsPageController() {
   let requestVoiceReplyUi = $state(false);
   /** Per-message "use knowledge" toggle (default on); persisted like the voice-reply pref. */
   let useKnowledgeUi = $state(true);
-  /** Tools + token counters on Messages bubbles; persisted like voice-reply pref. */
-  let showAgentToolsTokensUi = $state(true);
+  /** Token/cost stats on Messages bubbles; persisted like voice-reply pref. */
+  let showAgentTokensUi = $state(true);
+  /** Agent tool stack on Messages bubbles; persisted independently of stats. */
+  let showAgentToolsUi = $state(true);
   let draftMessage = $state('');
   let recordingStartedAt = $state<number | null>(null);
   let composingBusy = $state(false);
@@ -90,6 +95,15 @@ export function createChatChannelsPageController() {
   let optimisticMessagePk = -1;
   let agentTyping = $state(false);
   let agentVoicePendingSince = $state<string | null>(null);
+
+  // Shared-singleton plumbing: this controller now backs BOTH the /chats Messages
+  // tab and the global chat overlay. Polling is leased by whichever surface is
+  // actually on screen (a persisted tab pref must NOT keep polling alive in the
+  // background once you navigate away), so eligibility is OR-ed across surfaces.
+  let pageMessagesActive = $state(false);
+  let overlayActive = $state(false);
+  /** Idempotent boot guard so the shared engine starts (load channels/chars) exactly once. */
+  let started = false;
 
   /** ``GET /characters/:id/resolved`` for the selected channel’s character — same basis as the Characters page voice block. */
   let characterResolvedForMessages = $state<CharacterResolvedPayload | null>(null);
@@ -159,7 +173,7 @@ export function createChatChannelsPageController() {
   });
 
   const liveUpdatesEligible = $derived(
-    nav.activeTab === 'messages' &&
+    (pageMessagesActive || overlayActive) &&
       selectedChannelId !== null &&
       documentVisible &&
       messagesSectionMounted
@@ -367,7 +381,11 @@ export function createChatChannelsPageController() {
   /** Restore tab/channel from `createChatChannelsPreferences().initialize()`. */
   function initializeNavigation() {
     nav.initialize();
-    selectedChannelId = nav.readChannelIdFromLocation();
+    // Only override the channel when the URL pins one. Otherwise keep whatever the
+    // shared engine already has (e.g. the overlay picked a channel before /chats was
+    // ever visited) and let `ensureSelectedChannel()` fall back to the first channel.
+    const fromUrl = nav.readChannelIdFromLocation();
+    if (fromUrl) selectedChannelId = fromUrl;
   }
 
   async function syncUrl() {
@@ -811,7 +829,14 @@ export function createChatChannelsPageController() {
     await stopMediaRecorderAndDetach(mr);
   }
 
-  async function mount() {
+  /**
+   * One-time boot for the shared engine: visibility listener, persisted UI prefs,
+   * and the initial channel/character load. Safe to call from both surfaces (page
+   * Messages tab and global overlay) — runs its body exactly once.
+   */
+  async function ensureStarted() {
+    if (started) return;
+    started = true;
     messagesSectionMounted = true;
     if (browser) {
       documentVisible = document.visibilityState === 'visible';
@@ -824,20 +849,61 @@ export function createChatChannelsPageController() {
       const rawKnowledge = localStorage.getItem(PREF_KEYS.chatChannelsUseKnowledge);
       if (rawKnowledge === '1') useKnowledgeUi = true;
       if (rawKnowledge === '0') useKnowledgeUi = false;
-      const rawTelemetry = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTelemetry);
-      if (rawTelemetry === '0') showAgentToolsTokensUi = false;
-      if (rawTelemetry === '1') showAgentToolsTokensUi = true;
+      const rawTokens = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTelemetry);
+      if (rawTokens === '0') showAgentTokensUi = false;
+      if (rawTokens === '1') showAgentTokensUi = true;
+      const rawTools = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTools);
+      if (rawTools === '0') showAgentToolsUi = false;
+      if (rawTools === '1') showAgentToolsUi = true;
     } catch {
       /* ignore quota / private mode */
     }
-    initializeNavigation();
     await loadCharacters();
     await loadChannels();
+  }
+
+  /** /chats Messages tab entry — URL-driven channel restore. */
+  async function mount() {
+    await ensureStarted();
+    initializeNavigation();
     if (nav.activeTab === 'messages') {
       ensureSelectedChannel();
       await syncUrl();
       await loadMessages();
     }
+  }
+
+  /**
+   * Global overlay entry — no URL writes (it floats over arbitrary pages). Ensures
+   * a channel is selected and its messages are loaded once when the overlay opens.
+   */
+  async function ensureConversationLoaded() {
+    await ensureStarted();
+    ensureSelectedChannel();
+    if (selectedChannelId && messages.length === 0 && !messagesLoading) {
+      await loadMessages();
+    }
+  }
+
+  /** Overlay channel switch / manual reload — same as the page minus URL sync. */
+  async function reloadMessages() {
+    await loadMessages();
+  }
+
+  /** Overlay refresh button — reload channels + messages without touching the URL. */
+  async function refreshConversation() {
+    resetPollErrors();
+    await loadChannels();
+    ensureSelectedChannel();
+    await loadMessages();
+  }
+
+  function setPageMessagesActive(active: boolean) {
+    pageMessagesActive = active;
+  }
+
+  function setOverlayActive(active: boolean) {
+    overlayActive = active;
   }
 
   function dispose() {
@@ -851,6 +917,13 @@ export function createChatChannelsPageController() {
   return {
     mount,
     dispose,
+
+    // Shared-singleton surface (global overlay + page lease coordination).
+    ensureConversationLoaded,
+    reloadMessages,
+    refreshConversation,
+    setPageMessagesActive,
+    setOverlayActive,
 
     loadChannels,
     refreshCurrent,
@@ -927,13 +1000,24 @@ export function createChatChannelsPageController() {
         /* ignore */
       }
     },
-    get showAgentToolsTokensUi() {
-      return showAgentToolsTokensUi;
+    get showAgentTokensUi() {
+      return showAgentTokensUi;
     },
-    set showAgentToolsTokensUi(v: boolean) {
-      showAgentToolsTokensUi = v;
+    set showAgentTokensUi(v: boolean) {
+      showAgentTokensUi = v;
       try {
         localStorage.setItem(PREF_KEYS.chatChannelsShowAgentTelemetry, v ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+    get showAgentToolsUi() {
+      return showAgentToolsUi;
+    },
+    set showAgentToolsUi(v: boolean) {
+      showAgentToolsUi = v;
+      try {
+        localStorage.setItem(PREF_KEYS.chatChannelsShowAgentTools, v ? '1' : '0');
       } catch {
         /* ignore */
       }

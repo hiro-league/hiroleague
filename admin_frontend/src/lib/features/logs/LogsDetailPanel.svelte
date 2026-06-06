@@ -18,9 +18,13 @@
     activeRow: RenderLogRow | null;
     onClose: () => void;
     onNotify: Notify;
+    /** Extra classes (page uses this to make the panel sticky under page chrome). */
+    class?: string;
+    /** Inline style (page sets sticky `top` + `max-height` from chrome height vars). */
+    style?: string;
   };
 
-  let { activeRow, onClose, onNotify }: Props = $props();
+  let { activeRow, onClose, onNotify, class: className, style }: Props = $props();
 
   async function copyLogDetailsToClipboard() {
     const row = activeRow;
@@ -39,7 +43,8 @@
 
 <aside
   id={LOGS_DETAIL_PANEL_ID}
-  class="flex min-h-0 flex-col overflow-hidden rounded-md border bg-card/80"
+  class={cn('flex min-h-0 flex-col overflow-hidden rounded-md border bg-card', className)}
+  {style}
   aria-label="Log line details"
 >
   <div

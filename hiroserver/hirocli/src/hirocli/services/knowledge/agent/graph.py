@@ -526,7 +526,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                     entry.set_output_preview("graph backend off / no model · flat search")
                 return {}
             temporal = (
-                state.get("graph_temporal") or self._prefs.knowledge.graph.temporal_default
+                state.get("graph_temporal") or self._prefs.graph.temporal_default
             )
             num_results = max(1, int(self._prefs.knowledge.retrieval.top_k))
             # Buffer graphiti's ``search.*`` tracer spans so graph_expand can render
@@ -572,7 +572,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 spans,
                 expansion,
                 temporal=temporal,
-                ledger_detail=self._prefs.knowledge.graph.ledger_detail,
+                ledger_detail=self._prefs.graph.ledger_detail,
             )
         # graph_facts feed the answer skeleton for the graphiti leg; graph_chunk_ids
         # drive the by-id passage fetch (graph_fetch).

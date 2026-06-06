@@ -188,7 +188,7 @@ def citation_block(*, has_sources: bool, cite_enabled: bool) -> ContextBlock | N
 
 
 def _get(item: Any, key: str) -> Any:
-    """Read ``key`` from a dict or an object (KnowledgeSource / mem0 hit)."""
+    """Read ``key`` from a dict or an object (KnowledgeSource / memory hit)."""
     if isinstance(item, dict):
         return item.get(key)
     return getattr(item, key, None)

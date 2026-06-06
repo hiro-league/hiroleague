@@ -467,7 +467,7 @@ async def ingest_adam_corpus_via_service(
     if gsvc is None:
         raise RuntimeError(
             "Adam eval: no extraction model configured for the Graphiti graph build. "
-            "Set knowledge.graph.extraction_model or knowledge.answering.model (+ provider key)."
+            "Set graph.extraction_model or knowledge.answering.model (+ provider key)."
         )
     ledger_sink = LedgerSink(workspace_path)
     try:
@@ -754,6 +754,53 @@ async def collect_synthetic_doc_ids(service: Any) -> list[str]:
     return [d.id for d in docs_result.documents]
 
 
+async def collect_eval_doc_ids(service: Any) -> list[str]:
+    """Return doc_ids of every eval document — synthetic (``_l3_eval_synthetic``) AND Adam
+    (``_adam_eval``). The two corpora are tagged at ingest, so the eval footprint is
+    enumerable by tag (deduped; a doc could carry both tags)."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for tag in (EVAL_SYNTHETIC_TAG, ADAM_EVAL_TAG):
+        docs_result = await service.list_documents(tag=tag, limit=500)
+        for doc in docs_result.documents:
+            if doc.id not in seen:
+                seen.add(doc.id)
+                ids.append(doc.id)
+    return ids
+
+
+async def clear_eval_data(service: Any) -> int:
+    """Delete ALL eval data (synthetic + Adam) from the workspace — catalog rows, Qdrant
+    chunks, and graph episodes — and return the document count removed.
+
+    Phase A of the graph group-ID policy (docs/graph-group-policy-design.md §8): eval
+    currently shares the knowledge graph group (``kb_main``), so there is no group-scoped
+    eval clear yet — deletion is **document-scoped** over the eval-tagged docs.
+    ``service.delete_document`` already purges all three stores per document (catalog +
+    Qdrant + graph episodes via ``remove_document_from_graph``), so this is a thin loop over
+    the eval footprint. Idempotent: a workspace with no eval docs removes 0.
+    """
+    doc_ids = await collect_eval_doc_ids(service)
+    if not doc_ids:
+        log.info("🧹 knowledge.eval — no eval documents to clear")
+        return 0
+    removed = 0
+    for doc_id in doc_ids:
+        try:
+            result = await service.delete_document(doc_id)
+        except Exception:
+            # External stores (catalog/Qdrant/Kuzu) — log + continue so one stuck doc
+            # doesn't strand the rest of the eval wipe.
+            log.warning(
+                "⚠️ knowledge.eval — failed to delete eval doc · doc_id=%s", doc_id, exc_info=True
+            )
+            continue
+        if result.get("deleted"):
+            removed += 1
+    log.info("🧹 knowledge.eval — cleared eval data · documents=%d/%d", removed, len(doc_ids))
+    return removed
+
+
 __all__ = [
     "ADAM_CORPUS_FILE",
     "ADAM_EVAL_TAG",
@@ -768,6 +815,8 @@ __all__ = [
     "QuestionResult",
     "adam_point_id",
     "category_breakdown",
+    "clear_eval_data",
+    "collect_eval_doc_ids",
     "collect_synthetic_doc_ids",
     "ingest_adam_corpus_via_service",
     "ingest_synthetic_corpus_via_service",

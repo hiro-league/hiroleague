@@ -112,7 +112,7 @@ def _nodes(tmp_path: Path) -> dict[str, dict[str, str]]:
 @pytest.mark.asyncio
 async def test_rich_renders_per_edge_resolve_facts_and_previews(tmp_path: Path) -> None:
     await ingest_episodes(
-        _FakeGraphiti(), [_ep()], source_role="user_document",
+        _FakeGraphiti(), [_ep()], source_role="user_document", group_id="kb_main",
         ledger_sink=LedgerSink(tmp_path), ledger_detail="rich",
     )
     by_node = _nodes(tmp_path)
@@ -138,7 +138,7 @@ async def test_rich_renders_per_edge_resolve_facts_and_previews(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_compact_aggregates_resolve_facts_and_drops_previews(tmp_path: Path) -> None:
     await ingest_episodes(
-        _FakeGraphiti(), [_ep()], source_role="user_document",
+        _FakeGraphiti(), [_ep()], source_role="user_document", group_id="kb_main",
         ledger_sink=LedgerSink(tmp_path), ledger_detail="compact",
     )
     by_node = _nodes(tmp_path)

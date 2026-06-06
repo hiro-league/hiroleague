@@ -54,6 +54,11 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
         description="Workspace-local RAG ingest, retrieval, and answering settings.",
     ),
     PreferenceSection(
+        key="graph",
+        label="Graph Engine",
+        description="Shared Graphiti temporal-graph engine (models, embedder, search) used by knowledge and agent memory.",
+    ),
+    PreferenceSection(
         key="chat",
         label="Agent",
         description="How the character answers in chat — general instructions and citation behavior.",
@@ -287,23 +292,15 @@ class MediaPreferences(BaseModel):
 DEFAULT_MAX_HISTORY_MESSAGES = 6
 
 DEFAULT_MEMORY_SEARCH_TOP_K = 8
-DEFAULT_MEMORY_SEARCH_THRESHOLD = 0.1
-DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
 class MemorySearchPreferences(BaseModel):
     """Retrieval-time tuning for ``MemoryService.search``."""
 
     # When false, ``memory_search`` is skipped — no long-term memory is injected before the reply
-    # (independent of extraction). No-op unless ``memory.enabled`` (models configured).
+    # (independent of extraction). No-op unless ``memory.enabled``.
     enabled: bool = True
     top_k: int = Field(default=DEFAULT_MEMORY_SEARCH_TOP_K, ge=1, le=100)
-    # Mem0 fused score in [0, 1] (semantic + BM25 + entity boost). Rows below
-    # this score are dropped pre-rerank; 0.0 disables the gate.
-    threshold: float = Field(default=DEFAULT_MEMORY_SEARCH_THRESHOLD, ge=0.0, le=1.0)
-    # Per-call default for the rerank pass. Effective only when
-    # ``reranker.enabled`` is true; otherwise mem0 has no reranker to call.
-    rerank: bool = False
 
 
 class MemoryExtractionPreferences(BaseModel):
@@ -314,36 +311,25 @@ class MemoryExtractionPreferences(BaseModel):
     enabled: bool = True
 
 
-class MemoryRerankerPreferences(BaseModel):
-    """Local cross-encoder reranker (mem0 ``sentence_transformer`` provider).
-
-    Disabled by default — enabling requires ``sentence-transformers`` and pulls
-    the cross-encoder weights on first use.
-    """
-
-    enabled: bool = False
-    model: str = Field(default=DEFAULT_RERANKER_MODEL, min_length=1)
-    # ``None`` lets sentence-transformers pick (CUDA if available, else CPU).
-    device: str | None = None
-    batch_size: int = Field(default=32, ge=1, le=512)
-
-
 class MemoryPreferences(BaseModel):
-    """Agent memory settings."""
+    """Agent memory settings — a thin feature layer over the shared Graphiti graph engine.
+
+    Gated purely by ``enabled``; the engine (extraction model, embedder, search) comes from
+    the top-level ``graph`` preferences, and ``create_memory_service`` degrades to ``None``
+    when that engine can't be built. The mem0-legacy model / embedder / reranker fields are
+    gone (mem0 → Graphiti, Phase 5)."""
 
     enabled: bool = False
-    default_llm: str | None = None
-    default_embedding_model: str | None = None
     default_tuning_profile: str = DEFAULT_MEMORY_TUNING_PROFILE_ID
+    # A1 fix: the human's name, used as the Graphiti *speaker label* when ingesting the user's
+    # turns. Graphiti extracts the speaker (the token before the ":") as the anchor entity, so a
+    # real name produces a clean `Misho` Person hub instead of a generic `User` node, and every
+    # fact the user states attaches to it. Empty ⇒ falls back to "User" (prior behavior).
+    # IMPORTANT: keep this STABLE. Graphiti never auto-renames nodes, so changing it mid-history
+    # forks a SECOND hub and fragments the user's memory — set it once, early.
+    user_name: str = Field(default="", max_length=120)
     search: MemorySearchPreferences = Field(default_factory=MemorySearchPreferences)
     extraction: MemoryExtractionPreferences = Field(default_factory=MemoryExtractionPreferences)
-    reranker: MemoryRerankerPreferences = Field(default_factory=MemoryRerankerPreferences)
-
-    @model_validator(mode="after")
-    def _disable_without_models(self) -> "MemoryPreferences":
-        if not self.default_llm or not self.default_embedding_model:
-            self.enabled = False
-        return self
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +428,12 @@ class KnowledgeRewritePreferences(BaseModel):
 KnowledgeGraphBackend = Literal["off", "graphiti"]
 KnowledgeGraphTemporalDefault = Literal["current", "all"]
 KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
+# Which graphiti search legs participate in fact recall (decision: extends D3 → attribute
+# memory + raw-turn fallback). Orthogonal to ``search_recipe`` (which ranks WITHIN each leg).
+#   "edges"                 → EntityEdge facts only (today's behavior; precise, no attribute recall)
+#   "edges_and_nodes"       → + EntityNode.summary  (closes the "Misho turned 50" gap)
+#   "edges_nodes_episodes"  → + EpisodicNode bodies (last-resort BM25 recall over raw turn text)
+KnowledgeGraphSearchScope = Literal["edges", "edges_and_nodes", "edges_nodes_episodes"]
 # Graph Runs ledger verbosity for graph ingest + retrieval (docs §12.2).
 KnowledgeGraphLedgerDetail = Literal["compact", "rich"]
 
@@ -449,7 +441,7 @@ KnowledgeGraphLedgerDetail = Literal["compact", "rich"]
 class KnowledgeGraphRerankerPreferences(BaseModel):
     """Cross-encoder reranker for the graph fact-search leg.
 
-    Only takes effect when ``KnowledgeGraphPreferences.search_recipe == 'cross_encoder'``
+    Only takes effect when ``GraphPreferences.search_recipe == 'cross_encoder'``
     (the admin UI greys this whole group out otherwise). Every field is resolved by the
     SAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and
     local (FlashRank/FastEmbed/sentence-transformers) models are both available — and a
@@ -468,7 +460,7 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     device: str | None = None
 
 
-class KnowledgeGraphPreferences(BaseModel):
+class GraphPreferences(BaseModel):
     """Graphiti-backed temporal knowledge graph (the pivot from the L3 Ladybug slice).
 
     ``backend`` is the master switch: ``off`` = flat Qdrant only (today); ``graphiti``
@@ -491,6 +483,13 @@ class KnowledgeGraphPreferences(BaseModel):
     k_hop: int = Field(default=1, ge=1, le=3)
     # Graphiti search rerank recipe for the fact-search leg.
     search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+    # Which graph elements the fact-search reads from (decision: extends D3). Default keeps
+    # today's behavior; lift to ``edges_and_nodes`` to recall attribute memories that live on
+    # ``EntityNode.summary`` (e.g. "Misho turned 50…"). ``edges_nodes_episodes`` also matches
+    # raw conversation text via BM25 — useful as a last-resort recall when structured layers
+    # miss; precision suffers. See :meth:`_validate_search_scope_recipe` for the MMR×episodes
+    # incompatibility (graphiti-core's ``EpisodeReranker`` has no MMR).
+    search_scope: KnowledgeGraphSearchScope = "edges"
     # Cosine *candidate* floor for the fact-search leg (maps to Graphiti
     # ``EdgeSearchConfig.sim_min_score``). A fact only becomes a search candidate if its
     # embedding similarity to the query clears this. Graphiti hardcodes 0.6 — too strict
@@ -512,6 +511,23 @@ class KnowledgeGraphPreferences(BaseModel):
     def embedder_model_resolved(self) -> str | None:
         return (self.embedder_model or "").strip() or None
 
+    @model_validator(mode="after")
+    def _validate_search_scope_recipe(self) -> "GraphPreferences":
+        """Reject ``search_recipe='mmr'`` together with an episodes-inclusive scope.
+
+        Rationale (verified in ``graphiti_core.search.search_config``): the episodes leg is
+        ``bm25``-only and ``EpisodeReranker`` exposes ``{rrf, cross_encoder}`` — MMR is not a
+        valid choice there. We surface this as a validation error (caught by the PATCH route
+        and shown in the UI) rather than silently downgrading the episodes leg, so a technical
+        user understands why the combo isn't allowed."""
+        if self.search_scope == "edges_nodes_episodes" and self.search_recipe == "mmr":
+            raise ValueError(
+                "graph.search_recipe='mmr' is not supported when search_scope includes "
+                "episodes (graphiti's episode leg is BM25-only and EpisodeReranker has no "
+                "MMR). Choose 'rrf' or 'cross_encoder', or drop episodes from search_scope."
+            )
+        return self
+
 
 class KnowledgePreferences(BaseModel):
     default_embedding_model: str | None = None
@@ -520,7 +536,6 @@ class KnowledgePreferences(BaseModel):
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
     answering: KnowledgeAnsweringPreferences = Field(default_factory=KnowledgeAnsweringPreferences)
     rewrite: KnowledgeRewritePreferences = Field(default_factory=KnowledgeRewritePreferences)
-    graph: KnowledgeGraphPreferences = Field(default_factory=KnowledgeGraphPreferences)
 
     @property
     def default_embedding_model_resolved(self) -> str:
@@ -572,6 +587,10 @@ class WorkspacePreferences(BaseModel):
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
     knowledge: KnowledgePreferences = Field(default_factory=KnowledgePreferences)
+    # Shared Graphiti graph engine — used by BOTH knowledge retrieval and agent memory
+    # (mem0 → Graphiti, Phase 3b-2). Promoted from ``knowledge.graph`` to top level so it
+    # reads as shared, not owned by knowledge. Qdrant knowledge prefs stay under ``knowledge``.
+    graph: GraphPreferences = Field(default_factory=GraphPreferences)
     chat: ChatPreferences = Field(default_factory=ChatPreferences)
     tuning_profiles: dict[str, TuningProfile] = Field(default_factory=default_tuning_profiles)
 
@@ -599,12 +618,12 @@ class WorkspacePreferences(BaseModel):
                 f"Unknown knowledge.default_tuning_profile: {self.knowledge.default_tuning_profile}"
             )
         for graph_profile_id in (
-            self.knowledge.graph.extraction_tuning_profile,
-            self.knowledge.graph.small_tuning_profile,
+            self.graph.extraction_tuning_profile,
+            self.graph.small_tuning_profile,
         ):
             if graph_profile_id not in self.tuning_profiles:
                 raise ValueError(
-                    f"Unknown knowledge.graph tuning profile: {graph_profile_id}"
+                    f"Unknown graph tuning profile: {graph_profile_id}"
                 )
         return self
 
@@ -769,49 +788,6 @@ def resolve_llm(
         return None
 
     tuning = _profile_tuning(prefs, prefs.llm.default_tuning_profile)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-    )
-
-
-def resolve_memory_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Return the configured memory extraction chat model with memory defaults."""
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    model_id = prefs.memory.default_llm
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind("chat"):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_memory_llm: workspace path not in registry — %s", workspace_path)
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, prefs.memory.default_tuning_profile)
     return ResolvedModel(
         model_id=model_id,
         temperature=tuning.temperature,
@@ -1023,8 +999,8 @@ def resolve_graphiti_extraction_model(
     return _resolve_graphiti_model(
         prefs,
         workspace_path,
-        explicit_model=prefs.knowledge.graph.extraction_model,
-        tuning_profile_id=prefs.knowledge.graph.extraction_tuning_profile,
+        explicit_model=prefs.graph.extraction_model,
+        tuning_profile_id=prefs.graph.extraction_tuning_profile,
         workspace_id=workspace_id,
         credential_store=credential_store,
     )
@@ -1042,12 +1018,12 @@ def resolve_graphiti_small_model(
     Falls back to the extraction model id when ``small_model`` is unset, so a single
     configured model still drives both tiers (with their separate tuning profiles).
     """
-    explicit = prefs.knowledge.graph.small_model or prefs.knowledge.graph.extraction_model
+    explicit = prefs.graph.small_model or prefs.graph.extraction_model
     return _resolve_graphiti_model(
         prefs,
         workspace_path,
         explicit_model=explicit,
-        tuning_profile_id=prefs.knowledge.graph.small_tuning_profile,
+        tuning_profile_id=prefs.graph.small_tuning_profile,
         workspace_id=workspace_id,
         credential_store=credential_store,
     )
@@ -1060,7 +1036,7 @@ def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str:
     embedder (decision G8). Pure preference read — no availability check (the
     embedder is resolved by ``create_embedding_model`` at bootstrap)."""
     return (
-        prefs.knowledge.graph.embedder_model_resolved
+        prefs.graph.embedder_model_resolved
         or prefs.knowledge.default_embedding_model_resolved
     )
 

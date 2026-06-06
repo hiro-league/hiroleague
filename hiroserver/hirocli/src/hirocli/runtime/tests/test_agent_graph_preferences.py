@@ -8,7 +8,7 @@ from hirocli.runtime.agent_graph.base import BaseAgentGraph, _llm_usage_payload
 from hirocli.runtime.agent_graph.events import GRAPH_MEMORY_RETRIEVED, GRAPH_MEMORY_STORED
 from hirocli.runtime.agent_graph.ledger import LedgerEntry, LedgerSink, current_entry
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
-from hirocli.services.memory.usage_capture import MemoryAddResult, MemoryUsage
+from hirocli.domain.memory import MemoryAddResult, MemoryUsage
 
 
 class _MemoryService:
@@ -30,6 +30,7 @@ class _MemoryService:
         run_id: str,
         character_id: str,
         metadata: dict | None = None,
+        ledger_sink=None,
     ) -> MemoryAddResult:
         self.added.append(
             {
@@ -38,6 +39,7 @@ class _MemoryService:
                 "run_id": run_id,
                 "character_id": character_id,
                 "metadata": metadata or {},
+                "ledger_sink": ledger_sink,
             }
         )
         stored_items = tuple(
@@ -71,13 +73,7 @@ class _MemoryService:
 
 
 def _enable_memory(runtime: WorkspacePreferencesRuntime) -> None:
-    runtime.update_many(
-        {
-            "memory.default_llm": "openai:gpt-test",
-            "memory.default_embedding_model": "openai:text-embedding-3-small",
-            "memory.enabled": True,
-        }
-    )
+    runtime.update_many({"memory.enabled": True})
 
 
 @pytest.mark.asyncio
@@ -213,9 +209,10 @@ async def test_memory_search_records_search_and_result_previews(tmp_path) -> Non
     finally:
         current_entry.reset(token)
 
-    # Input now carries the query + the retrieval knobs that ran; output uses the ` · ` separator.
+    # Input carries the query + top_k (the only knob Graphiti recall uses; F4 dropped
+    # threshold/rerank from the preview); output uses the ` · ` separator.
     assert entry.input_preview.startswith("q: tea preference?")
-    assert "top_k=" in entry.input_preview and "rerank=off" in entry.input_preview
+    assert "top_k=" in entry.input_preview
     assert entry.output_preview == "results: 1 · User prefers concise replies"
 
 
@@ -250,11 +247,13 @@ async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
 
     assert result["reply_text"] == "Noted."
     assert events[-1]["event"] == GRAPH_MEMORY_STORED
-    assert memory.added[0]["content"] == "User: remember that I like tea\nAssistant: Noted."
+    # User turn ONLY — the assistant reply is intentionally not ingested (decision D2).
+    assert memory.added[0]["content"] == "remember that I like tea"
     assert memory.added[0]["user_id"] == get_default_user_id(tmp_path)
     assert memory.added[0]["run_id"] == "12"
     assert memory.added[0]["character_id"] == "hiro"
     assert memory.added[0]["metadata"] == {
+        "message_id": "in-1",  # episode uuid → provenance back to the turn (decision D5)
         "thread_id": "thread-1",
         "channel_id": 12,
         "source": "conversation",
@@ -262,18 +261,12 @@ async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_store_turn_memory_records_returned_usage(tmp_path) -> None:
-    """When the memory service returns usage, ``memory_out`` records it on the ledger entry."""
-    usage = MemoryUsage(
-        provider="openai",
-        model="openai:gpt-4o-mini",
-        input_tokens=120,
-        output_tokens=40,
-        cached_input_tokens=10,
-        reasoning_tokens=0,
-        call_count=2,
-    )
-    memory = _MemoryService(usage=usage)
+async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(tmp_path) -> None:
+    """``memory_out`` forwards the turn's ledger_sink to the memory write (so Graphiti's
+    ingest steps nest under this node in Graph Runs) and records decision + preview — but
+    NOT usage: the extraction cost is priced on those nested sub-rows, so folding it onto the
+    parent row too would double-count it in the turn total."""
+    memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     graph = BaseAgentGraph(
@@ -311,30 +304,24 @@ async def test_store_turn_memory_records_returned_usage(tmp_path) -> None:
     finally:
         current_entry.reset(token)
 
-    assert entry.provider == "openai"
-    assert entry.model == "openai:gpt-4o-mini"
-    assert entry.input_tokens == 120
-    assert entry.output_tokens == 40
-    assert entry.cached_input_tokens == 10
+    # The write is ledgered through the chat turn's own sink.
+    assert memory.added[0]["ledger_sink"] is graph._ledger_sink
+    # Parent row: decision + preview, but no usage folded on (cost is on the nested sub-rows).
     assert entry.decision_kind == "stored"
+    assert entry.decision_detail == "ok"
     assert entry.output_preview == "stored: 1 · stored memory 1"
+    assert entry.provider == ""
+    assert entry.model == ""
+    assert entry.input_tokens == ""
+    assert entry.output_tokens == ""
 
 
 @pytest.mark.asyncio
-async def test_store_turn_memory_flags_dropped_extraction(tmp_path) -> None:
-    """Mem0 silently dropping the extraction (e.g. parser failure) must
-    surface as a failure on the ledger row, not as a successful store.
-    """
-    usage = MemoryUsage(
-        provider="google",
-        model="google:gemini-3-flash-preview",
-        input_tokens=200,
-        output_tokens=80,
-        cached_input_tokens=0,
-        reasoning_tokens=0,
-        call_count=1,
-    )
-    memory = _MemoryService(usage=usage, stored_count=0)
+async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None:
+    """A turn whose extraction ran but yielded no facts (``stored_count == 0``) is a NORMAL
+    ``no_new_facts`` store, not a failure — Graphiti has no mem0-style silent-drop failure
+    mode."""
+    memory = _MemoryService(stored_count=0)
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     graph = BaseAgentGraph(
@@ -373,9 +360,8 @@ async def test_store_turn_memory_flags_dropped_extraction(tmp_path) -> None:
     finally:
         current_entry.reset(token)
 
-    assert entry.decision_kind == "failed"
-    # fail() ties decision_detail to the error code now (one consistent failure record).
-    assert entry.decision_detail == "memory_extraction_dropped"
-    assert entry.error_code == "memory_extraction_dropped"
+    assert entry.decision_kind == "stored"
+    assert entry.decision_detail == "no_new_facts"
+    assert entry.error_code == ""  # not a failure
     assert events[-1]["event"] == GRAPH_MEMORY_STORED
     assert events[-1]["payload"]["count"] == 0

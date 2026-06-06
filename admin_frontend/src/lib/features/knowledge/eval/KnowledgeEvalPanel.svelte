@@ -1,7 +1,7 @@
 <!--
-  L3 prototype (Phase 5e) — Eval Batch section.
+  L3 prototype (Phase 5e) — Eval Batch tab.
 
-  Lives at the bottom of the Ask tab (collapsible). Three phases of UI:
+  Its own Knowledge tab (moved out of the Ask tab). Three phases of UI:
 
     1. idle  → setup checkboxes (ingest synthetic / build graph) + Run button
     2. running → live progress table; rows append/update as
@@ -14,11 +14,13 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { ChevronRight, ExternalLink, LoaderCircle, Play, Square, Trash2 } from '@lucide/svelte';
+  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
-  import KnowledgeAskEvalTerminal from '$lib/features/knowledge/ask/KnowledgeAskEvalTerminal.svelte';
+  import KnowledgeEvalTerminal from '$lib/features/knowledge/eval/KnowledgeEvalTerminal.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
+  import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
   import type { EvalQuestionItem } from '$lib/api/knowledge';
   import {
     createKnowledgeEvalModel,
@@ -29,16 +31,16 @@
   } from '$lib/features/knowledge/state/knowledge-eval.svelte';
 
   interface Props {
-    /** Pass-through error sink (the Ask page already owns the error display). */
-    setError: (message: string | null) => void;
+    ctl: KnowledgePageController;
   }
 
-  let { setError }: Props = $props();
+  let { ctl }: Props = $props();
   // Wrap in a closure so the controller captures the *live* reference (Svelte 5
   // ``state_referenced_locally`` rule — bare ``{ setError }`` would snapshot the
-  // initial prop value at controller-construction time).
+  // initial value at controller-construction time). The Knowledge page owns the
+  // shared error display.
   const eval_: KnowledgeEvalModel = createKnowledgeEvalModel({
-    setError: (msg) => setError(msg)
+    setError: (msg) => ctl.setError(msg)
   });
 
   onDestroy(() => eval_.teardown());
@@ -59,10 +61,6 @@
     else next.add(index);
     expandedRows = next;
   }
-
-  // Collapse toggle for the Questions checklist card (header click). Body stays
-  // mounted (hidden) so selection state survives a collapse.
-  let questionsCollapsed = $state(false);
 
   // Group the question bank by category for the checklist.
   const groups = $derived.by(() => {
@@ -106,6 +104,24 @@
     }
   });
 
+  // Questions-card header summary: selection count + the "run all" hint.
+  const questionsSummary = $derived(
+    `${eval_.selectedCount}/${EVAL_MAX_SELECTED} selected${
+      eval_.selectedCount === 0 ? ' · none = run all' : ''
+    }`
+  );
+
+  // Results-card header summary: the gate verdict once complete, otherwise live progress.
+  const resultsSummary = $derived.by(() => {
+    if (eval_.summary) {
+      const g = eval_.summary.gate;
+      const label = g === 'proceed' ? '✅ PROCEED' : g === 'pivot' ? '❌ PIVOT' : 'Done';
+      return `${label} · ${eval_.summary.elapsed_ms}ms`;
+    }
+    if (eval_.rows.length > 0) return `${eval_.rows.length}/${eval_.totalQuestions}`;
+    return '';
+  });
+
   const canRun = $derived(
     eval_.status === 'idle' ||
       eval_.status === 'completed' ||
@@ -140,16 +156,12 @@
 
 </script>
 
-<KnowledgeCollapsibleSectionCard
-  title="L3 Eval Batch"
-  bodyId="knowledge-ask-eval-batch"
-  defaultExpanded={false}
-  summary={headerSummary}
->
-  <!-- Setup row — only visible/editable when idle/completed/failed.
-       Disabled while a run is in flight. -->
-  <div class="grid gap-3">
-    <div class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
+<section class="grid gap-4">
+  <!-- Setup / run controls — sticky at the top like the other Knowledge tabs'
+       filter bars. Inputs disable while a run is in flight; Run/Cancel/Clear
+       sit on the right. -->
+  <AdminPageStickyToolbar>
+    <div class="flex flex-wrap items-center gap-3">
       <label class="flex select-none items-center gap-2 font-sans text-sm">
         <span class="text-muted-foreground">Corpus</span>
         <select
@@ -230,121 +242,105 @@
         </Button>
       </div>
     </div>
+  </AdminPageStickyToolbar>
 
-    <!-- Question checklist (Adam path only). Empty selection = run all. Cap 50. -->
-    {#if eval_.corpusSource === 'adam'}
-      <div class="rounded-md border">
-        <div
-          class="flex flex-wrap items-center gap-2 bg-muted/30 px-3 py-1.5 text-xs {questionsCollapsed
-            ? ''
-            : 'border-b'}"
-        >
-          <button
-            type="button"
-            class="flex items-center gap-1.5 font-semibold hover:text-primary"
-            aria-expanded={!questionsCollapsed}
-            aria-controls="knowledge-eval-questions-body"
-            onclick={() => (questionsCollapsed = !questionsCollapsed)}
-          >
-            <ChevronRight
-              size={13}
-              class="shrink-0 text-muted-foreground transition-transform {questionsCollapsed
-                ? ''
-                : 'rotate-90'}"
-              aria-hidden="true"
-            />
-            Questions
-          </button>
-          <span class="text-muted-foreground">
-            {eval_.selectedCount}/{EVAL_MAX_SELECTED} selected{#if eval_.selectedCount === 0}
-              · none = run all{/if}
-          </span>
-          {#if eval_.questionsLoading}
-            <LoaderCircle size={12} class="animate-spin" aria-hidden="true" />
-          {/if}
-          <div class="ml-auto flex gap-2">
-            <button
-              type="button"
-              class="rounded border px-2 py-0.5 hover:bg-muted disabled:opacity-50"
-              disabled={eval_.selectedCount === 0 || isBusy}
-              onclick={eval_.clearSelection}
-            >
-              Clear selection
-            </button>
-            <button
-              type="button"
-              class="rounded border px-2 py-0.5 hover:bg-muted disabled:opacity-50"
-              disabled={isBusy}
-              onclick={() => void eval_.loadQuestions()}
-            >
-              Reload
-            </button>
-          </div>
-        </div>
-        <div id="knowledge-eval-questions-body" hidden={questionsCollapsed}>
-        {#if eval_.questionsError}
-          <p class="px-3 py-2 text-xs text-destructive">{eval_.questionsError}</p>
-        {:else if eval_.questions.length === 0 && !eval_.questionsLoading}
-          <p class="px-3 py-2 text-xs text-muted-foreground">No questions loaded.</p>
-        {:else}
-          <div class="max-h-72 overflow-y-auto px-3 py-2">
-            {#each groups as [category, items] (category)}
-              <div class="mb-2">
-                <label
-                  class="flex select-none items-center gap-2 py-1 font-sans text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  <input
-                    type="checkbox"
-                    class="size-3.5"
-                    checked={categoryAllSelected(items)}
-                    disabled={isBusy}
-                    onchange={(e) =>
-                      eval_.setCategorySelected(
-                        items.map((q) => q.id),
-                        e.currentTarget.checked
-                      )}
-                  />
-                  {category}
-                  <span class="font-normal normal-case">({items.length})</span>
-                </label>
-                <div class="grid gap-0.5 pl-5">
-                  {#each items as q (q.id)}
-                    <label class="flex cursor-pointer select-none items-start gap-2 py-0.5 font-sans text-sm">
-                      <input
-                        type="checkbox"
-                        class="mt-0.5 size-3.5"
-                        checked={eval_.isSelected(q.id)}
-                        disabled={isBusy}
-                        onchange={() => eval_.toggleQuestion(q.id)}
-                      />
-                      <span class="min-w-0">
-                        {q.question}
-                        {#if q.subcategory}
-                          <span class="text-xs text-muted-foreground"> · {q.subcategory}</span>
-                        {/if}
-                      </span>
-                    </label>
-                  {/each}
-                </div>
-              </div>
-            {/each}
-          </div>
+  <!-- Failure banner (transport / setup). Per-question failures show as ✗ in the table. -->
+  {#if eval_.status === 'failed' && eval_.failureMessage}
+    <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive">
+      Eval run failed: {eval_.failureMessage}
+    </div>
+  {/if}
+
+  <!-- Questions section (Adam path only). Empty selection = run all. Cap 50. -->
+  {#if eval_.corpusSource === 'adam'}
+    <KnowledgeCollapsibleSectionCard
+      title="Questions"
+      bodyId="knowledge-eval-questions"
+      defaultExpanded={true}
+      summary={questionsSummary}
+    >
+      {#snippet headerActions()}
+        {#if eval_.questionsLoading}
+          <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
         {/if}
+        <button
+          type="button"
+          class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
+          disabled={eval_.selectedCount === 0 || isBusy}
+          onclick={eval_.clearSelection}
+        >
+          Clear selection
+        </button>
+        <button
+          type="button"
+          class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
+          disabled={isBusy}
+          onclick={() => void eval_.loadQuestions()}
+        >
+          Reload
+        </button>
+      {/snippet}
+      {#if eval_.questionsError}
+        <p class="text-xs text-destructive">{eval_.questionsError}</p>
+      {:else if eval_.questions.length === 0 && !eval_.questionsLoading}
+        <p class="text-xs text-muted-foreground">No questions loaded.</p>
+      {:else}
+        <div class="max-h-96 overflow-y-auto rounded-md border px-3 py-2">
+          {#each groups as [category, items] (category)}
+            <div class="mb-2">
+              <label
+                class="flex select-none items-center gap-2 py-1 font-sans text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                <input
+                  type="checkbox"
+                  class="size-3.5"
+                  checked={categoryAllSelected(items)}
+                  disabled={isBusy}
+                  onchange={(e) =>
+                    eval_.setCategorySelected(
+                      items.map((q) => q.id),
+                      e.currentTarget.checked
+                    )}
+                />
+                {category}
+                <span class="font-normal normal-case">({items.length})</span>
+              </label>
+              <div class="grid gap-0.5 pl-5">
+                {#each items as q (q.id)}
+                  <label class="flex cursor-pointer select-none items-start gap-2 py-0.5 font-sans text-sm">
+                    <input
+                      type="checkbox"
+                      class="mt-0.5 size-3.5"
+                      checked={eval_.isSelected(q.id)}
+                      disabled={isBusy}
+                      onchange={() => eval_.toggleQuestion(q.id)}
+                    />
+                    <span class="min-w-0">
+                      {q.question}
+                      {#if q.subcategory}
+                        <span class="text-xs text-muted-foreground"> · {q.subcategory}</span>
+                      {/if}
+                    </span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+          {/each}
         </div>
-      </div>
-    {/if}
+      {/if}
+    </KnowledgeCollapsibleSectionCard>
+  {/if}
 
-    <!-- Failure banner (transport / setup). Per-question failures show as ✗ in the table. -->
-    {#if eval_.status === 'failed' && eval_.failureMessage}
-      <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive">
-        Eval run failed: {eval_.failureMessage}
-      </div>
-    {/if}
-
-    <!-- Live activity terminal — fine-grained setup + per-question progress.
-         Shown whenever there's any activity; persists after the run completes. -->
+  <!-- Activity section — live setup + per-question progress terminal. Persists
+       after the run completes; placeholder shown when there's nothing yet. -->
+  <KnowledgeCollapsibleSectionCard
+    title="Activity"
+    bodyId="knowledge-eval-activity"
+    defaultExpanded={true}
+    summary={headerSummary}
+  >
     {#if isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0}
-      <KnowledgeAskEvalTerminal
+      <KnowledgeEvalTerminal
         setupEvents={eval_.setupEvents}
         rows={eval_.rows}
         status={eval_.status}
@@ -353,8 +349,20 @@
         summaryElapsedMs={eval_.summary?.elapsed_ms ?? null}
         failureMessage={eval_.failureMessage}
       />
+    {:else}
+      <p class="rounded-md border border-dashed px-3 py-6 text-center font-sans text-xs text-muted-foreground">
+        No activity yet — run an eval to see live setup and per-question progress here.
+      </p>
     {/if}
+  </KnowledgeCollapsibleSectionCard>
 
+  <!-- Results section — live table, gate verdict, and per-category breakdown. -->
+  <KnowledgeCollapsibleSectionCard
+    title="Results"
+    bodyId="knowledge-eval-results"
+    defaultExpanded={true}
+    summary={resultsSummary}
+  >
     <!-- Live table (always visible once rows arrive — even after completion). -->
     {#if eval_.rows.length > 0 || eval_.status === 'running'}
       <div class="overflow-x-auto rounded-md border">
@@ -584,8 +592,8 @@
         {/if}
       </p>
     {/if}
-  </div>
-</KnowledgeCollapsibleSectionCard>
+  </KnowledgeCollapsibleSectionCard>
+</section>
 
 <!-- Full-answer cell for an expanded table row. Answers render as plain
      pre-wrapped text (matching the compare view) — no markdown pipeline, so no

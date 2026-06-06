@@ -21,19 +21,10 @@ export type TuningProfile = ModelTuning & {
 export type MemorySearchPreferences = {
   enabled: boolean;
   top_k: number;
-  threshold: number;
-  rerank: boolean;
 };
 
 export type MemoryExtractionPreferences = {
   enabled: boolean;
-};
-
-export type MemoryRerankerPreferences = {
-  enabled: boolean;
-  model: string;
-  device: string | null;
-  batch_size: number;
 };
 
 export type KnowledgeRerankerPreferences = {
@@ -78,28 +69,34 @@ export type KnowledgePreferences = {
     prompt: string;
     default_on: boolean;
   };
-  // Graphiti temporal knowledge graph (pivot). backend off = flat Qdrant only.
-  graph: {
-    backend: 'off' | 'graphiti';
-    extraction_model: string | null;
-    extraction_tuning_profile: string;
-    small_model: string | null;
-    small_tuning_profile: string;
-    embedder_model: string | null;
-    temporal_default: 'current' | 'all';
-    k_hop: number;
-    search_recipe: 'rrf' | 'mmr' | 'cross_encoder';
-    // Cosine candidate floor for the fact-search leg (Graphiti EdgeSearchConfig.sim_min_score).
-    // Low = recall (default); raise toward 0.6 for tighter candidates. See KnowledgeSection hint.
-    sim_min_score: number;
-    ledger_detail: 'compact' | 'rich';
-    // Cross-encoder reranker for the fact-search leg (only active when
-    // search_recipe === 'cross_encoder'). model_id null = reuse knowledge reranker.
-    reranker: {
-      model_id: string | null;
-      min_relevance: number;
-      device: string | null;
-    };
+};
+
+// Shared Graphiti graph engine — used by BOTH knowledge retrieval and agent memory
+// (promoted from knowledge.graph). `backend` off = flat Qdrant only for knowledge.
+export type GraphPreferences = {
+  backend: 'off' | 'graphiti';
+  extraction_model: string | null;
+  extraction_tuning_profile: string;
+  small_model: string | null;
+  small_tuning_profile: string;
+  embedder_model: string | null;
+  temporal_default: 'current' | 'all';
+  k_hop: number;
+  search_recipe: 'rrf' | 'mmr' | 'cross_encoder';
+  // Which graph elements participate in fact recall. Orthogonal to search_recipe (which
+  // ranks WITHIN each leg). Default 'edges' = today's behavior; 'edges_and_nodes' adds
+  // EntityNode.summary recall (attribute-style memories); 'edges_nodes_episodes' also adds
+  // raw conversation text via BM25 — last-resort recall, noisier. mmr × episodes is rejected
+  // by the backend cross-field validator.
+  search_scope: 'edges' | 'edges_and_nodes' | 'edges_nodes_episodes';
+  // Cosine candidate floor (Graphiti EdgeSearchConfig.sim_min_score). Low = recall.
+  sim_min_score: number;
+  ledger_detail: 'compact' | 'rich';
+  // Cross-encoder reranker for the fact-search leg (only when search_recipe === 'cross_encoder').
+  reranker: {
+    model_id: string | null;
+    min_relevance: number;
+    device: string | null;
   };
 };
 
@@ -124,34 +121,26 @@ export type WorkspacePreferences = {
   };
   memory: {
     enabled: boolean;
-    default_llm: string | null;
-    default_embedding_model: string | null;
     default_tuning_profile: string;
+    // A1: the user's name, used as the Graphiti speaker label so their memory facts anchor to a
+    // clean named Person hub instead of a generic "User" node. Empty ⇒ falls back to "User".
+    user_name: string;
     search: MemorySearchPreferences;
     extraction: MemoryExtractionPreferences;
-    reranker: MemoryRerankerPreferences;
   };
   knowledge: KnowledgePreferences;
+  graph: GraphPreferences;
   chat: ChatPreferences;
   tuning_profiles: Record<string, TuningProfile>;
 };
 
 export const DEFAULT_MEMORY_SEARCH: MemorySearchPreferences = {
   enabled: true,
-  top_k: 8,
-  threshold: 0.1,
-  rerank: false
+  top_k: 8
 };
 
 export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionPreferences = {
   enabled: true
-};
-
-export const DEFAULT_MEMORY_RERANKER: MemoryRerankerPreferences = {
-  enabled: false,
-  model: 'cross-encoder/ms-marco-MiniLM-L-6-v2',
-  device: null,
-  batch_size: 32
 };
 
 export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
@@ -187,24 +176,26 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
   rewrite: {
     prompt: '',
     default_on: false
-  },
-  graph: {
-    backend: 'off',
-    extraction_model: null,
-    extraction_tuning_profile: 'graphiti_extraction',
-    small_model: null,
-    small_tuning_profile: 'graphiti_small',
-    embedder_model: null,
-    temporal_default: 'current',
-    k_hop: 1,
-    search_recipe: 'rrf',
-    sim_min_score: 0.3,
-    ledger_detail: 'rich',
-    reranker: {
-      model_id: null,
-      min_relevance: 0.0,
-      device: null
-    }
+  }
+};
+
+export const DEFAULT_GRAPH: GraphPreferences = {
+  backend: 'off',
+  extraction_model: null,
+  extraction_tuning_profile: 'graphiti_extraction',
+  small_model: null,
+  small_tuning_profile: 'graphiti_small',
+  embedder_model: null,
+  temporal_default: 'current',
+  k_hop: 1,
+  search_recipe: 'rrf',
+  search_scope: 'edges',
+  sim_min_score: 0.3,
+  ledger_detail: 'rich',
+  reranker: {
+    model_id: null,
+    min_relevance: 0.0,
+    device: null
   }
 };
 
@@ -222,9 +213,10 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
     chat: { ...DEFAULT_CHAT, ...(prefs.chat ?? {}) },
     memory: {
       ...prefs.memory,
+      // Older payloads predate the A1 speaker-anchor field — default to "" (⇒ "User" fallback).
+      user_name: prefs.memory.user_name ?? '',
       search: { ...DEFAULT_MEMORY_SEARCH, ...(prefs.memory.search ?? {}) },
-      extraction: { ...DEFAULT_MEMORY_EXTRACTION, ...(prefs.memory.extraction ?? {}) },
-      reranker: { ...DEFAULT_MEMORY_RERANKER, ...(prefs.memory.reranker ?? {}) }
+      extraction: { ...DEFAULT_MEMORY_EXTRACTION, ...(prefs.memory.extraction ?? {}) }
     },
     knowledge: {
       ...DEFAULT_KNOWLEDGE,
@@ -247,16 +239,16 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       },
       answering: { ...DEFAULT_KNOWLEDGE.answering, ...(prefs.knowledge?.answering ?? {}) },
       rewrite: { ...DEFAULT_KNOWLEDGE.rewrite, ...(prefs.knowledge?.rewrite ?? {}) },
-      graph: {
-        ...DEFAULT_KNOWLEDGE.graph,
-        ...(prefs.knowledge?.graph ?? {}),
-        reranker: {
-          ...DEFAULT_KNOWLEDGE.graph.reranker,
-          ...(prefs.knowledge?.graph?.reranker ?? {})
-        }
-      },
       default_tuning_profile:
         prefs.knowledge?.default_tuning_profile ?? DEFAULT_KNOWLEDGE.default_tuning_profile
+    },
+    graph: {
+      ...DEFAULT_GRAPH,
+      ...(prefs.graph ?? {}),
+      reranker: {
+        ...DEFAULT_GRAPH.reranker,
+        ...(prefs.graph?.reranker ?? {})
+      }
     }
   };
 }

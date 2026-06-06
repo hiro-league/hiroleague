@@ -6,7 +6,6 @@
   import ChatChannelsBrowse from '$lib/features/chat-channels/browse/ChatChannelsBrowse.svelte';
   import ChatChannelEditorModal from '$lib/features/chat-channels/edit/ChatChannelEditorModal.svelte';
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
-  import ChatChannelClearMessagesModal from '$lib/features/chat-channels/modals/ChatChannelClearMessagesModal.svelte';
   import ChatChannelDeleteModal from '$lib/features/chat-channels/modals/ChatChannelDeleteModal.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
@@ -15,24 +14,30 @@
     formatChatAudioSpeedLabel,
     chatAudioPlaybackRate
   } from '$lib/features/chat-channels/chat-audio-coordinator';
-  import { createChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
+  import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import {
     CHAT_CHANNELS_PANEL_IDS,
     CHAT_CHANNELS_TAB_IDS,
     CHAT_CHANNELS_TABLIST_LABEL
   } from '$lib/features/chat-channels/shared/chat-channels-a11y';
   import type { ChatChannelsTabPreference } from '$lib/preferences/keys';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
 
-  const ctrl = createChatChannelsPageController();
+  // Shared engine — the same instance the global overlay binds. The page does NOT
+  // own its lifecycle: it leases polling while the Messages tab is on screen and
+  // releases the lease on unmount, but never disposes the shared engine.
+  const ctrl = getChatEngine();
 
   /** Boot restores tab/channel via `createChatChannelsPreferences()`. */
   onMount(() => {
     void ctrl.mount();
     return () => {
-      ctrl.dispose();
-      void ctrl.disposeActiveRecording();
+      ctrl.setPageMessagesActive(false);
     };
+  });
+
+  /** Lease live updates to the page only while the Messages tab is actually shown. */
+  $effect(() => {
+    ctrl.setPageMessagesActive(ctrl.activeTab === 'messages');
   });
 
   const tabDescriptors: readonly AdminTabDescriptor<ChatChannelsTabPreference>[] = [
@@ -96,7 +101,8 @@
       bind:selectedChannelId={ctrl.selectedChannelId}
       bind:requestVoiceReplyUi={ctrl.requestVoiceReplyUi}
       bind:useKnowledgeUi={ctrl.useKnowledgeUi}
-      bind:showAgentToolsTokensUi={ctrl.showAgentToolsTokensUi}
+      bind:showAgentTokensUi={ctrl.showAgentTokensUi}
+      bind:showAgentToolsUi={ctrl.showAgentToolsUi}
       bind:draftMessage={ctrl.draftMessage}
       channels={ctrl.channels}
       channelsLoading={ctrl.channelsLoading}
@@ -131,15 +137,8 @@
   </div>
 </AdminPageHeader>
 
-<ToastHost toast={ctrl.toast} />
-
-<ChatChannelClearMessagesModal
-  open={ctrl.clearMessagesConfirmOpen}
-  channelName={ctrl.clearMessagesChannelDisplayName}
-  busy={ctrl.busy}
-  onClose={() => ctrl.closeClearMessagesModal()}
-  onConfirm={() => void ctrl.submitClearMessages()}
-/>
+<!-- Toast host + clear-messages modal moved to AdminShell so they serve the global
+     overlay too (single shared engine). Channel CRUD modals stay here (page-only). -->
 
 <ChatChannelEditorModal
   open={ctrl.formOpen}

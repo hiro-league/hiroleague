@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Edit, FilterX, RefreshCw, Repeat2, Trash2 } from '@lucide/svelte';
+  import { Edit, FilterX, Network, RefreshCw, Repeat2, Trash2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { KnowledgeDocument } from '$lib/api/knowledge';
   import KnowledgeBrowseDocumentsTable from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentsTable.svelte';
@@ -17,6 +17,7 @@
     onUpdateMetadata: () => void;
     onReingest: () => void;
     onDelete: () => void;
+    onRemoveFromGraph: () => void;
     onPreview: (doc: KnowledgeDocument) => void;
     onOpenChunks: (doc: KnowledgeDocument) => void;
   };
@@ -29,6 +30,7 @@
     onUpdateMetadata,
     onReingest,
     onDelete,
+    onRemoveFromGraph,
     onPreview,
     onOpenChunks
   }: Props = $props();
@@ -54,6 +56,15 @@
       <Button variant="outline" disabled={!hasSelection} onclick={onReingest}>
         <Repeat2 size={16} />
         Re-ingest
+      </Button>
+      <Button
+        variant="outline"
+        disabled={!hasSelection}
+        onclick={onRemoveFromGraph}
+        title="Delete these documents' entities/relations from the knowledge graph (keeps the documents)"
+      >
+        <Network size={16} />
+        Remove from graph
       </Button>
       <Button variant="outline" disabled={!hasSelection} onclick={onDelete}>
         <Trash2 size={16} />

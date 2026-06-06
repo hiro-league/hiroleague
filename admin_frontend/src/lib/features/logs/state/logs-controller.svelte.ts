@@ -7,6 +7,7 @@ import {
   logTimeRangeSeconds,
   searchLogs,
   tailLogs,
+  TRAFFIC_CLASSES,
   type LogRow,
   type LogSourceFilter,
   type LogsLayout
@@ -15,6 +16,7 @@ import { openWorkspaceFolder } from '$lib/api/server';
 import type { Notify } from '$lib/features/server/types';
 import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 import {
+  compareLogRows,
   logIdFromRowKey,
   rowPassesFilters,
   sourcesForLayout,
@@ -102,8 +104,9 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   const visibleRows = $derived.by(() => {
     const ctx = filterCtx;
     const filtered = rows.filter((row) => rowPassesFilters(row, ctx));
-    const direction = prefs.sortOrder === 'newest' ? -1 : 1;
-    return [...filtered].sort((a, b) => (a.timestamp - b.timestamp) * direction);
+    const col = prefs.sortColumn;
+    const direction = prefs.sortDir === 'desc' ? -1 : 1;
+    return [...filtered].sort((a, b) => compareLogRows(a, b, col) * direction);
   });
 
   const activeRow = $derived(
@@ -307,13 +310,13 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     searchBusy = true;
     error = null;
     try {
+      // Traffic is applied client-side (rowPassesFilters facet) for both live and
+      // search results, so it is intentionally not sent to the server here.
       const payload = await searchLogs({
         query: trimmed || undefined,
         deviceId: prefs.scopeDeviceId.trim() || undefined,
         msgId: prefs.scopeMsgId.trim() || undefined,
-        method: prefs.scopeMethod.trim() || undefined,
-        trafficClasses:
-          prefs.trafficClassFilter.length > 0 ? [...prefs.trafficClassFilter] : undefined
+        method: prefs.scopeMethod.trim() || undefined
       });
       if (myGen !== searchFetchGeneration) return;
       rows = withRenderKeys(payload.data.rows);
@@ -410,7 +413,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     prefs.scopeDeviceId = '';
     prefs.scopeMsgId = '';
     prefs.scopeMethod = '';
-    prefs.trafficClassFilter = [];
+    prefs.trafficClassFilter = [...TRAFFIC_CLASSES];
     if (searchTimer) {
       window.clearTimeout(searchTimer);
       searchTimer = null;

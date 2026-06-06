@@ -47,65 +47,6 @@ def _delete_agent_thread(workspace_path: Path, channel_id: int) -> None:
         )
 
 
-def _delete_mem0_session_messages(
-    workspace_path: Path,
-    *,
-    data_user_id: int,
-    character_id: str | None,
-    run_id: str,
-) -> None:
-    """Wipe mem0's last-k message buffer for the given channel's session scope.
-
-    Mem0 caches the last 10 raw turns per session in
-    ``workspace/memory/history.db::messages``, keyed by ``session_scope``
-    which sorts the entity IDs we passed to ``memory.add``:
-    ``agent_id=<character>&run_id=<channel id>&user_id=<data.db user id>``.
-    It feeds those rows back into every ``Memory.add`` extraction prompt as
-    ``last_k_messages`` — so without this clear, the extraction LLM keeps
-    "remembering" turns from before Clear Channel even after Hiro's data.db
-    and the LangGraph checkpoint are empty (see Mem0MemoryService for the
-    workspace-local path).
-
-    Scope is per channel/thread. Long-term facts in Qdrant are intentionally
-    untouched: they're cleared via the separate ``memory_clear`` tool when
-    (and only when) the user wants to forget what the agent has learned.
-
-    Best-effort: a missing DB or absent ``messages`` table is a no-op (mem0
-    has not been used yet for this workspace); other failures must not
-    prevent the message-store clear that already committed.
-    """
-    from .memory import mem0_history_db_path, mem0_session_scope
-
-    db_file = mem0_history_db_path(workspace_path)
-    if not db_file.exists():
-        return
-    scope = mem0_session_scope(
-        user_id=str(data_user_id),
-        agent_id=character_id,
-        run_id=run_id,
-    )
-    try:
-        with sqlite3.connect(str(db_file)) as conn:
-            conn.execute(
-                "DELETE FROM messages WHERE session_scope = ?",
-                (scope,),
-            )
-            conn.commit()
-    except sqlite3.OperationalError:
-        # Mem0's messages table only exists after the first add() materializes
-        # the schema; absent is the expected first-clear-for-workspace case.
-        logger.debug(
-            "Mem0 messages table absent — skipping session-messages clear (scope=%s)",
-            scope,
-        )
-    except Exception:
-        logger.warning(
-            "⚠️ Mem0 session-messages clear failed — run_id=%s",
-            run_id,
-            exc_info=True,
-        )
-
-
 def _notify_channel_changed(workspace_path: Path, channel_id: int) -> None:
     """Publish a channel mutation (create/update/delete or thumbnail change)."""
     get_domain_event_bus().publish(
@@ -461,16 +402,8 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
     # Reset LangGraph agent memory for this channel so the LLM doesn't keep
     # replaying the just-deleted conversation history on the next turn.
     _delete_agent_thread(workspace_path, channel_id)
-    # Mem0 caches its own last-k turn buffer (workspace/memory/history.db) keyed
-    # by channel run_id; without this, the next memory_out extraction LLM call
-    # still sees turns from before the clear. Long-term Qdrant memories are kept
-    # by design — only the rolling extraction context is reset.
-    _delete_mem0_session_messages(
-        workspace_path,
-        data_user_id=int(channel.user_id),
-        character_id=channel.character_id or None,
-        run_id=str(channel_id),
-    )
+    # Long-term agent memory (Graphiti facts) is intentionally NOT cleared here — it
+    # persists across channel clears and is forgotten only via the ``memory_clear`` tool.
 
     logger.info(
         "✅ Clear channel messages — conversation channel · bulk-complete (channel_id=%s last_deleted=%s)",

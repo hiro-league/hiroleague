@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import KnowledgeBrowseDeleteDialog from '$lib/features/knowledge/browse/KnowledgeBrowseDeleteDialog.svelte';
+  import KnowledgeBrowseRemoveGraphDialog from '$lib/features/knowledge/browse/KnowledgeBrowseRemoveGraphDialog.svelte';
   import KnowledgeBrowseDocumentListSection from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentListSection.svelte';
   import KnowledgeBrowseFilterBar from '$lib/features/knowledge/browse/KnowledgeBrowseFilterBar.svelte';
   import { createKnowledgeBrowsePanelUi } from '$lib/features/knowledge/browse/knowledge-browse-panel.svelte';
@@ -36,6 +37,7 @@
     onUpdateMetadata={ui.openEditDialog}
     onReingest={ui.openReingestDialog}
     onDelete={ui.openDeleteDialog}
+    onRemoveFromGraph={ui.openRemoveGraphDialog}
     onPreview={ui.openDocumentPreview}
     onOpenChunks={ui.openChunksDialog}
   />
@@ -65,6 +67,13 @@
   documents={ui.deleteTargets}
   deleting={ui.deleting}
   onConfirm={ui.confirmDeleteDocuments}
+/>
+
+<KnowledgeBrowseRemoveGraphDialog
+  bind:open={ui.removeGraphOpen}
+  documents={ui.removeGraphTargets}
+  removing={ui.removingGraph}
+  onConfirm={ui.confirmRemoveFromGraph}
 />
 
 <ToastHost toast={toasts.toast} />

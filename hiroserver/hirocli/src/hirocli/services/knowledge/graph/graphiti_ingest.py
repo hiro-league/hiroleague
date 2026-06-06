@@ -37,6 +37,7 @@ from ..constants import (
     KNOWLEDGE_GRAPH_NODE_UPSERTED,
 )
 from .graphiti_serialize import edge_to_dto, node_to_dto
+from .group_scope import GroupPolicyError
 from .ingest_ledger import (
     apply_episode_span_rollup,
     finalize_graph_ingest_run,
@@ -52,7 +53,13 @@ GraphEventSink = Callable[[str, dict[str, Any]], None]
 # F7 — source-role allow-list (supersedes the Ladybug ingest's gate). Allow-list,
 # not deny-list: a future ingest path that forgets to tag its role is REJECTED by
 # default. Add roles here explicitly as new ingest sources are wired up.
-ALLOWED_SOURCE_ROLES: frozenset[str] = frozenset({"user_document"})
+#   - "user_document": user-added knowledge documents (the L3 knowledge path).
+#   - "conversation":  the USER half of a chat turn, ingested as long-term agent
+#     memory (mem0→Graphiti replacement, Phase 1). Only the user message is allowed
+#     in — never the assistant reply — so the memory graph can't become a stale echo
+#     of its own output (#4573 anti-echo, design decision D2). The caller is what
+#     enforces "user turn only"; the gate just admits the role.
+ALLOWED_SOURCE_ROLES: frozenset[str] = frozenset({"user_document", "conversation"})
 
 
 def _now() -> dt.datetime:
@@ -187,23 +194,41 @@ def _result_names(result: Any) -> tuple[list[str], list[str]]:
 
 
 def _emit_progress(
-    event_sink: GraphEventSink | None, *, document_id: str, index: int, total: int
+    event_sink: GraphEventSink | None,
+    *,
+    document_id: str,
+    index: int,
+    total: int,
+    group_id: str | None = None,
 ) -> None:
     _safe_emit(
         event_sink,
         KNOWLEDGE_GRAPH_INGEST_PROGRESS,
-        {"document_id": document_id, "chunk_index": index, "chunk_total": total},
+        {
+            "document_id": document_id,
+            "chunk_index": index,
+            "chunk_total": total,
+            "group_id": group_id,
+        },
     )
 
 
 def _emit_graph_elements(
-    event_sink: GraphEventSink | None, result: Any, *, document_id: str
+    event_sink: GraphEventSink | None,
+    result: Any,
+    *,
+    document_id: str,
+    group_id: str | None = None,
 ) -> None:
     """Emit a node/edge upserted event per element add_episode touched (live viz).
 
     ``is_new=True`` is best-effort: ``AddEpisodeResults`` doesn't distinguish
     created-vs-merged, so every touched element 'pops'; the reconcile-on-completed
     full export heals the final state. See docs/knowledge-graph-viz-design.md §4.1.
+
+    ``group_id`` tags every event with its partition (knowledge default vs a
+    ``mem_{user}_{character}`` conversation-memory group) so the admin Graph tab can route
+    live deltas to the group it's currently viewing — the same SSE stream now carries both.
     """
     if event_sink is None:
         return
@@ -216,14 +241,14 @@ def _emit_graph_elements(
             event_sink,
             KNOWLEDGE_GRAPH_NODE_UPSERTED,
             {"node": node_to_dto(node, document_ids=doc_ids), "is_new": True,
-             "document_id": document_id},
+             "document_id": document_id, "group_id": group_id},
         )
     for edge in getattr(result, "edges", None) or []:
         _safe_emit(
             event_sink,
             KNOWLEDGE_GRAPH_EDGE_UPSERTED,
             {"edge": edge_to_dto(edge, document_ids=doc_ids), "is_new": True,
-             "document_id": document_id},
+             "document_id": document_id, "group_id": group_id},
         )
 
 
@@ -287,6 +312,18 @@ async def ingest_episodes(
             if not episodes:
                 return stats
 
+            # Anti-catch-all guard (defense-in-depth, docs/graph-group-policy-design.md §6):
+            # an actual write MUST name a non-empty partition. The empty group_id is
+            # graphiti's catch-all on Kuzu — exactly what let knowledge search leak
+            # conversation memory — so never write into it. Callers mint a namespaced group
+            # (kb_/mem_/eval_) via group_scope; the service boundary additionally validates the
+            # namespace. Here we only forbid the empty group so this primitive stays generic.
+            # Placed AFTER the role gate + empty-episode check so legit no-ops need no group.
+            if not group_id:
+                raise GroupPolicyError(
+                    "ingest_episodes requires a non-empty group_id (no catch-all writes)"
+                )
+
             # Stamp + sort by reference_time so a later fact supersedes an earlier one.
             prepared = sorted(
                 ((ep, ep.reference_time or _now()) for ep in episodes),
@@ -324,6 +361,16 @@ async def ingest_episodes(
                         # kuzu write) because graphiti's dedup reads prior graph state to
                         # merge entities — concurrent episodes would dedup stale (§4.2).
                         async with write_guard:
+                            # Multi-group fix (memory Phase 1): graphiti-core's add_episode
+                            # compares ``group_id != driver._database`` and, on a mismatch,
+                            # takes a Neo4j-only "clone to a per-group database" branch that
+                            # breaks on Kuzu. Conversation memory writes MANY groups (one per
+                            # user×character) to the SAME shared Kuzu driver, so we re-point
+                            # ``_database`` to THIS episode's group inside the single-writer
+                            # lock (no race) before add_episode. Knowledge (one fixed group)
+                            # just re-sets the value it was seeded with → a no-op there.
+                            if driver is not None and group_id:
+                                driver._database = group_id
                             if driver is not None and ep.chunk_id:
                                 await _preseed_episode_node(
                                     driver,
@@ -371,9 +418,15 @@ async def ingest_episodes(
                         stats.facts_invalidated += episode.invalidated_count
                         stats.tokens_input += episode.total_input_tokens
                         stats.tokens_output += episode.total_output_tokens
-                    _emit_graph_elements(event_sink, result, document_id=ep.document_id)
+                    _emit_graph_elements(
+                        event_sink, result, document_id=ep.document_id, group_id=group_id
+                    )
                     _emit_progress(
-                        event_sink, document_id=ep.document_id, index=index + 1, total=total
+                        event_sink,
+                        document_id=ep.document_id,
+                        index=index + 1,
+                        total=total,
+                        group_id=group_id,
                     )
 
             log.info(

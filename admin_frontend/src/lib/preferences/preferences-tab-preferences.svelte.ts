@@ -6,8 +6,8 @@ import { createTabPreferences, type TabPreferences } from './create-tab-preferen
 const ALLOWED: readonly PreferencesTabPreference[] = [
   'models',
   'media',
-  'memory',
   'knowledge',
+  'graph-engine',
   'agent',
   'tuning-profiles'
 ] as const;

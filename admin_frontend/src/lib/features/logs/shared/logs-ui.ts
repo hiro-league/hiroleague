@@ -11,10 +11,60 @@ import {
 } from '$lib/api/logs';
 import type { DeviceRow } from '$lib/api/channels-devices';
 
+/** Sortable table columns (Date/Time both map to the chronological `time` key). */
+export type LogSortColumn = 'time' | 'level' | 'source' | 'module' | 'class' | 'subclass' | 'message';
+export type LogSortDir = 'asc' | 'desc';
+
+const LOG_SORT_COLUMNS: readonly LogSortColumn[] = [
+  'time',
+  'level',
+  'source',
+  'module',
+  'class',
+  'subclass',
+  'message'
+];
+
+export function isLogSortColumn(value: unknown): value is LogSortColumn {
+  return typeof value === 'string' && (LOG_SORT_COLUMNS as readonly string[]).includes(value);
+}
+
+/** Ascending comparator for the given column; callers apply the sort direction. */
+export function compareLogRows(a: LogRow, b: LogRow, col: LogSortColumn): number {
+  let primary = 0;
+  switch (col) {
+    case 'time':
+      primary = a.timestamp - b.timestamp;
+      break;
+    case 'level':
+      primary =
+        LOG_LEVELS.indexOf(a.level as LogLevel) - LOG_LEVELS.indexOf(b.level as LogLevel);
+      break;
+    case 'source':
+      primary = logRowSourceLabel(a.source).localeCompare(logRowSourceLabel(b.source));
+      break;
+    case 'module':
+      primary = (a.module ?? '').localeCompare(b.module ?? '');
+      break;
+    case 'class':
+      primary = (a.scope_traffic_class ?? '').localeCompare(b.scope_traffic_class ?? '');
+      break;
+    case 'subclass':
+      primary = (a.scope_traffic_subclass ?? '').localeCompare(b.scope_traffic_subclass ?? '');
+      break;
+    case 'message':
+      primary = (a.message ?? '').localeCompare(b.message ?? '');
+      break;
+  }
+  // Stable chronological tiebreak so equal keys keep a predictable order.
+  return primary !== 0 ? primary : a.timestamp - b.timestamp;
+}
+
 /** Session-backed shape for logs UI (persisted fields only). */
 export type LogsPrefsSnapshot = {
   paused?: boolean;
-  sortOrder?: 'newest' | 'oldest';
+  sortColumn?: LogSortColumn;
+  sortDir?: LogSortDir;
   activeSources?: LogSourceFilter[];
   activeChannels?: string[];
   activeChannel?: string;
@@ -161,9 +211,12 @@ export function rowPassesFilters(row: LogRow, ctx: RowFilterContext): boolean {
     if (ctx.activeChannel && ctx.activeChannel !== channel) return false;
   }
   if (ctx.levelFilter.length > 0 && !ctx.levelFilter.includes(row.level as LogLevel)) return false;
-  if (ctx.trafficClassFilter.length > 0) {
+  // Traffic is a facet over rows that HAVE a class (default: all classes selected).
+  // Rows without a class are never hidden by it; clearing the set hides all classed
+  // rows. This makes the dropdown's Select-all / Clear behave intuitively.
+  {
     const rowTc = (row.scope_traffic_class ?? '').trim();
-    if (!rowTc || !ctx.trafficClassFilter.includes(rowTc as TrafficClass)) return false;
+    if (rowTc && !ctx.trafficClassFilter.includes(rowTc as TrafficClass)) return false;
   }
   return true;
 }

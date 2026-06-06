@@ -3,15 +3,15 @@
   import { fly } from 'svelte/transition';
   import {
     ArrowDown,
-    Eye,
-    EyeOff,
+    BarChart3,
     FileX2,
     ImageIcon,
     Mic,
     RefreshCw,
     Send,
     Square,
-    Volume2
+    Volume2,
+    Wrench
   } from '@lucide/svelte';
   import {
     historyMessageFirstAudio,
@@ -92,7 +92,17 @@
     draftMessage: string;
     voiceReplyCheckboxDisabled: boolean;
     voiceReplyCheckboxHint: string;
-    showAgentToolsTokensUi?: boolean;
+    /** Toggle agent token/cost stats on bubbles. */
+    showAgentTokensUi?: boolean;
+    /** Toggle agent tool stack on bubbles. */
+    showAgentToolsUi?: boolean;
+    /** Compact overlay: hide the identity + toolbar header row (default shown on /chats). */
+    showHeader?: boolean;
+    /** Compact overlay: collapse composer extras (checkboxes + quick prompts) behind an arrow. */
+    compactComposer?: boolean;
+    /** Frameless/thin chrome for the floating overlay (drops the panel's own border, rounding,
+     *  shadow and fat padding since the overlay window already provides the frame). */
+    dense?: boolean;
   };
 
   let {
@@ -126,10 +136,14 @@
     onDiscardRecording,
     requestVoiceReplyUi = $bindable(),
     useKnowledgeUi = $bindable(true),
-    showAgentToolsTokensUi = $bindable(true),
+    showAgentTokensUi = $bindable(true),
+    showAgentToolsUi = $bindable(true),
     draftMessage = $bindable(),
     voiceReplyCheckboxDisabled,
-    voiceReplyCheckboxHint
+    voiceReplyCheckboxHint,
+    showHeader = true,
+    compactComposer = false,
+    dense = false
   }: Props = $props();
 
   let messagesScroller = $state<HTMLDivElement | null>(null);
@@ -278,9 +292,73 @@
 </script>
 
 <section
-  class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden rounded-lg border bg-card p-5 shadow-sm"
+  class={cn(
+    'flex h-full min-h-0 flex-1 flex-col overflow-hidden',
+    dense ? 'gap-2 p-2' : 'gap-4 rounded-lg border bg-card p-5 shadow-sm'
+  )}
 >
+  <!-- Composer options (voice/knowledge toggles + sample prompts). Rendered at the top
+       beside the channel selector in the compact overlay, or above the input on /chats. -->
+  {#snippet composerExtras()}
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <label
+          class={cn(
+            'flex items-center gap-2 text-xs text-muted-foreground',
+            voiceReplyCheckboxDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
+          )}
+          title={voiceReplyCheckboxHint ||
+            'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
+        >
+          <input
+            type="checkbox"
+            bind:checked={requestVoiceReplyUi}
+            disabled={voiceReplyCheckboxDisabled}
+            class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
+          />
+          Get voice reply
+        </label>
+        <label
+          class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+          title="Augment this message's reply with relevant workspace knowledge (sent per-message)."
+        >
+          <input
+            type="checkbox"
+            bind:checked={useKnowledgeUi}
+            class="accent-primary h-4 w-4 shrink-0"
+          />
+          Use knowledge
+        </label>
+      </div>
+      <div
+        class="flex shrink-0 items-center gap-1"
+        role="group"
+        aria-label="Fill message box with a sample prompt"
+      >
+        {#each QUICK_PROMPT_TEMPLATES as prompt, i (i)}
+          <button
+            type="button"
+            class="grid size-8 place-items-center rounded border border-input bg-background font-sans text-xs font-semibold tabular-nums text-muted-foreground shadow-xs transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            title={prompt}
+            aria-label={`Sample prompt ${i + 1}: ${prompt}`}
+            disabled={composingBusy}
+            onclick={() => applyQuickPromptTemplate(i)}
+          >
+            {i + 1}
+          </button>
+        {/each}
+      </div>
+    </div>
+    {#if voiceReplyCheckboxDisabled && voiceReplyCheckboxHint}
+      <p class="max-w-prose text-[11px] leading-snug text-muted-foreground">
+        {voiceReplyCheckboxHint}
+      </p>
+    {/if}
+  {/snippet}
+
+  {#if showHeader}
   <div class="flex shrink-0 min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    {#if !dense}
     <div class="flex min-w-0 items-center gap-3">
       {#if headerPhotoSrc}
         <img
@@ -315,10 +393,11 @@
         {/if}
       </div>
     </div>
-    <div class="flex shrink-0 flex-wrap items-center gap-2">
+    {/if}
+    <div class={cn('flex flex-wrap items-center gap-2', dense ? 'w-full' : 'shrink-0')}>
       {#if channels.length > 0}
         <select
-          class={cn(ADMIN_SELECT, 'min-w-56')}
+          class={cn(ADMIN_SELECT, dense ? 'w-full' : 'min-w-56')}
           bind:value={selectedChannelId}
           onchange={() => onChannelChange()}
           aria-label="Message channel"
@@ -331,12 +410,14 @@
       {/if}
       <Button
         variant="outline"
+        size="icon"
         class="border-destructive/60 text-destructive hover:bg-destructive/10"
         disabled={busy || !selectedChannelId || channelsLoading}
         onclick={onClearMessages}
+        aria-label="Clear channel"
         title="Remove all messages in this channel"
       >
-        <FileX2 size={15} /> Clear Channel
+        <FileX2 size={15} />
       </Button>
       <Button variant="outline" onclick={onCycleAudioSpeed} title="Cycle playback speed (applies to all clips)">
         {audioSpeedLabel}
@@ -344,18 +425,28 @@
       <Button
         variant="outline"
         size="icon"
-        aria-label={showAgentToolsTokensUi ? 'Hide tools and token stats' : 'Show tools and token stats'}
-        aria-pressed={showAgentToolsTokensUi}
-        title={showAgentToolsTokensUi ? 'Hide tools and token stats' : 'Show tools and token stats'}
+        class={cn(!showAgentTokensUi && 'opacity-50')}
+        aria-label={showAgentTokensUi ? 'Hide message stats' : 'Show message stats'}
+        aria-pressed={showAgentTokensUi}
+        title={showAgentTokensUi ? 'Hide token & cost stats' : 'Show token & cost stats'}
         onclick={() => {
-          showAgentToolsTokensUi = !showAgentToolsTokensUi;
+          showAgentTokensUi = !showAgentTokensUi;
         }}
       >
-        {#if showAgentToolsTokensUi}
-          <Eye size={15} />
-        {:else}
-          <EyeOff size={15} />
-        {/if}
+        <BarChart3 size={15} />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        class={cn(!showAgentToolsUi && 'opacity-50')}
+        aria-label={showAgentToolsUi ? 'Hide message tools' : 'Show message tools'}
+        aria-pressed={showAgentToolsUi}
+        title={showAgentToolsUi ? 'Hide tool stack' : 'Show tool stack'}
+        onclick={() => {
+          showAgentToolsUi = !showAgentToolsUi;
+        }}
+      >
+        <Wrench size={15} />
       </Button>
       <Button
         variant="outline"
@@ -368,8 +459,16 @@
       </Button>
     </div>
   </div>
+  {#if compactComposer && selectedChannelId}
+    <!-- Compact overlay: surface the composer options here (just under the channel
+         selector / toolbar) instead of behind an arrow above the input. -->
+    <div class="shrink-0 space-y-1.5 border-border border-t pt-2">
+      {@render composerExtras()}
+    </div>
+  {/if}
+  {/if}
 
-  <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+  <div class={cn('flex min-h-0 flex-1 flex-col overflow-hidden', dense ? 'gap-2' : 'gap-4')}>
     {#if channelsLoading}
       <InlineLoading label="Loading chat channels…" class="shrink-0" />
     {:else if channelsError}
@@ -398,7 +497,10 @@
           <div class="relative min-h-0 min-w-0 flex-1">
             <div
               bind:this={messagesScroller}
-              class="h-full min-h-0 min-w-0 overflow-y-auto rounded-md border bg-background/45 p-4"
+              class={cn(
+                'h-full min-h-0 min-w-0 overflow-y-auto rounded-md bg-background/45',
+                dense ? 'p-2' : 'border p-4'
+              )}
               onscroll={handleMessagesScroll}
             >
               <div class="grid max-w-3xl gap-3">
@@ -416,9 +518,9 @@
                   {@const costLabel = showAgentMeta ? agentCostLabel(agentMeta) : ''}
                   {@const elapsedLabel = showAgentMeta ? agentElapsedLabel(agentMeta) : ''}
                   {@const tokenTooltip = telemetryBreakdownTitle(agentMeta?.usage_total)}
-                  {@const showToolsUi = showAgentToolsTokensUi && toolCalls.length > 0}
+                  {@const showToolsUi = showAgentToolsUi && toolCalls.length > 0}
                   {@const showTokensUi =
-                    showAgentToolsTokensUi &&
+                    showAgentTokensUi &&
                     (outputTokens > 0 || inputTokensIncl > 0 || costLabel || elapsedLabel)}
                   <div
                     class={cn('flex w-full', isUser ? 'justify-end' : 'justify-start')}
@@ -461,7 +563,14 @@
                         />
                       {/if}
                       {#if showTokensUi || message.created_at}
-                        <div class="flex min-w-0 items-center justify-between gap-3 pt-0.5">
+                        <!-- Stack telemetry + timestamp on their own lines so the stats
+                             never wrap awkwardly inside narrow bubbles (e.g. the overlay). -->
+                        <div
+                          class={cn(
+                            'flex min-w-0 flex-col gap-0.5 pt-0.5',
+                            isUser ? 'items-end' : 'items-start'
+                          )}
+                        >
                           {#if showTokensUi}
                             <AgentTokenCounter
                               inputValue={inputTokensIncl}
@@ -477,14 +586,13 @@
                                   : 'font-semibold text-violet-600 dark:text-violet-400'
                               }
                             />
-                          {:else}
-                            <span></span>
                           {/if}
                           {#if message.created_at}
                           <span
                             class={cn(
                               'shrink-0 tabular-nums font-sans text-[10px] leading-none opacity-40',
-                              isUser && 'opacity-50'
+                              // Right-align the agent's timestamp (token stats stay left).
+                              isUser ? 'opacity-50' : 'self-end'
                             )}
                           >
                             {formatChatTimestamp(message.created_at)}
@@ -529,61 +637,15 @@
           </div>
         {/if}
         {#if selectedChannelId && channels.length > 0 && !channelsError}
-          <div class="shrink-0 space-y-2 border-border border-t pt-3 font-sans text-sm">
+          <div
+            class={cn(
+              'shrink-0 font-sans text-sm',
+              dense ? 'space-y-1.5' : 'space-y-2 border-border border-t pt-3'
+            )}
+          >
             <ServerStartingBanner />
-            <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-              <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <label
-                  class={cn(
-                    'flex items-center gap-2 text-xs text-muted-foreground',
-                    voiceReplyCheckboxDisabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
-                  )}
-                  title={voiceReplyCheckboxHint ||
-                    'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
-                >
-                  <input
-                    type="checkbox"
-                    bind:checked={requestVoiceReplyUi}
-                    disabled={voiceReplyCheckboxDisabled}
-                    class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
-                  />
-                  Get voice reply
-                </label>
-                <label
-                  class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
-                  title="Augment this message's reply with relevant workspace knowledge (sent per-message)."
-                >
-                  <input
-                    type="checkbox"
-                    bind:checked={useKnowledgeUi}
-                    class="accent-primary h-4 w-4 shrink-0"
-                  />
-                  Use knowledge
-                </label>
-              </div>
-              <div
-                class="flex shrink-0 items-center gap-1"
-                role="group"
-                aria-label="Fill message box with a sample prompt"
-              >
-                {#each QUICK_PROMPT_TEMPLATES as prompt, i (i)}
-                  <button
-                    type="button"
-                    class="grid size-8 place-items-center rounded border border-input bg-background font-sans text-xs font-semibold tabular-nums text-muted-foreground shadow-xs transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                    title={prompt}
-                    aria-label={`Sample prompt ${i + 1}: ${prompt}`}
-                    disabled={composingBusy}
-                    onclick={() => applyQuickPromptTemplate(i)}
-                  >
-                    {i + 1}
-                  </button>
-                {/each}
-              </div>
-            </div>
-            {#if voiceReplyCheckboxDisabled && voiceReplyCheckboxHint}
-              <p class="max-w-prose text-[11px] leading-snug text-muted-foreground">
-                {voiceReplyCheckboxHint}
-              </p>
+            {#if !compactComposer}
+              {@render composerExtras()}
             {/if}
             {#if recordingStartedAt !== null}
               <div class="flex flex-wrap items-center gap-3">
@@ -603,12 +665,16 @@
                 </Button>
               </div>
             {:else}
-              <div class="flex flex-wrap items-stretch gap-2">
+              <div class={cn('flex gap-2', dense ? 'items-end' : 'items-stretch')}>
                 <textarea
                   bind:this={draftTextareaEl}
-                  class={cn(ADMIN_TEXTAREA, 'flex-1 md:min-w-[16rem]')}
-                  placeholder="Send as workspace owner… (Enter to send, Shift+Enter for new line)"
-                  rows="2"
+                  class={cn(
+                    ADMIN_TEXTAREA,
+                    'min-w-0 flex-1 placeholder:text-muted-foreground/40',
+                    !dense && 'md:min-w-[16rem]'
+                  )}
+                  placeholder="Ask Hiro Anything"
+                  rows={dense ? 4 : 2}
                   bind:value={draftMessage}
                   onkeydown={(ev) => {
                     if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {

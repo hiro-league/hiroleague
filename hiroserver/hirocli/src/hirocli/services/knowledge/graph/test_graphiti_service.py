@@ -8,6 +8,7 @@ never called during bootstrap/init — only the driver should be touched.
 from __future__ import annotations
 
 import typing
+from types import SimpleNamespace
 
 import pytest
 from graphiti_core.embedder.client import EmbedderClient
@@ -69,7 +70,7 @@ def test_from_preferences_none_when_backend_off(tmp_path) -> None:
 
 def test_from_preferences_none_when_no_model(tmp_path) -> None:
     prefs = WorkspacePreferences()
-    prefs.knowledge.graph.backend = "graphiti"
+    prefs.graph.backend = "graphiti"
     # No llm.default_chat and no knowledge.answering.model → extraction resolves
     # None (before any catalog/credential lookup) → service not created.
     assert GraphitiMemoryService.from_preferences(prefs, tmp_path, workspace_id="w") is None
@@ -246,3 +247,105 @@ async def test_remove_episodes_by_document_scopes_by_source_description(
     # Only docA across BOTH pages; docB skipped; cursor paging reached a3.
     assert captured == ["a1", "a3"]
     assert removed == 2
+
+
+# --- memory Phase 2: group-scoped read/write primitives ---
+
+
+@pytest.mark.asyncio
+async def test_list_facts_and_group_ids_empty_graph(tmp_path) -> None:
+    """On a freshly-built (schema-only) graph the memory read primitives return empty,
+    not raise: ``list_facts`` (no edges → GroupsEdgesNotFoundError → []) and
+    ``list_group_ids`` (DISTINCT over an empty Episodic table → []). Validates the real
+    Kuzu read path on a dedicated connection."""
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    try:
+        await svc.initialize()
+        assert await svc.list_facts(["mem_1_aria"]) == []
+        assert await svc.list_group_ids("mem_1_") == []
+    finally:
+        await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_list_facts_no_db_file_is_empty(tmp_path) -> None:
+    """No graph built → ``list_facts`` returns [] without creating the DB (read must have
+    no side effects, like the snapshot)."""
+    db = graphiti_db_path(tmp_path)
+    svc = object.__new__(GraphitiMemoryService)
+    svc._db_path = db  # type: ignore[attr-defined]
+    assert await svc.list_facts(["mem_1_aria"]) == []
+    assert await svc.list_group_ids("mem_1_") == []
+    assert not db.exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_group_enumerates_all_episodes_and_removes(tmp_path, monkeypatch) -> None:
+    """``clear_group`` collects EVERY episode in the group (no source_description filter,
+    unlike the per-document wipe), paging via uuid_cursor, then delegates the full set to
+    ``remove_episodes``. Graph reads/deletes stubbed (no Kuzu writes — the read/delete
+    paths run constantly in ingest)."""
+    from graphiti_core.nodes import EpisodicNode
+
+    from hirocli.services.knowledge.graph import graphiti_service as gsvc_mod
+
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+
+    pages = [
+        [SimpleNamespace(uuid="m1"), SimpleNamespace(uuid="m2")],
+        [SimpleNamespace(uuid="m3")],
+    ]
+
+    async def _fake_get(cls, driver, group_ids, limit=None, uuid_cursor=None):
+        if uuid_cursor is None:
+            return list(pages[0])
+        if uuid_cursor == "m2":
+            return list(pages[1])
+        return []
+
+    monkeypatch.setattr(gsvc_mod, "_EPISODE_WIPE_PAGE", 2)
+    monkeypatch.setattr(EpisodicNode, "get_by_group_ids", classmethod(_fake_get))
+
+    captured: list[str] = []
+
+    async def _fake_remove(uuids):
+        captured.extend(uuids)
+        return len(uuids)
+
+    monkeypatch.setattr(svc, "remove_episodes", _fake_remove)
+
+    try:
+        removed = await svc.clear_group("mem_42_aria")
+    finally:
+        await svc.close()
+
+    assert captured == ["m1", "m2", "m3"]  # every episode in the group, across both pages
+    assert removed == 3
+
+
+@pytest.mark.asyncio
+async def test_delete_facts_filters_blanks_and_delegates(tmp_path, monkeypatch) -> None:
+    """``delete_facts`` drops blank ids and delegates the rest to
+    ``EntityEdge.delete_by_uuids`` under the write lock. Empty input is a no-op."""
+    from graphiti_core.edges import EntityEdge
+
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+
+    captured: dict[str, list[str]] = {}
+
+    async def _fake_delete(cls, driver, uuids):
+        captured["uuids"] = list(uuids)
+
+    monkeypatch.setattr(EntityEdge, "delete_by_uuids", classmethod(_fake_delete))
+
+    try:
+        assert await svc.delete_facts([]) == 0  # no-op
+        n = await svc.delete_facts(["e1", "e2", ""])
+    finally:
+        await svc.close()
+
+    assert captured["uuids"] == ["e1", "e2"]  # blank filtered out
+    assert n == 2

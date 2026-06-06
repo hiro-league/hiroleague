@@ -17,14 +17,20 @@
  */
 
 import {
+  clearKnowledgeGraph,
   exportKnowledgeGraph,
+  listKnowledgeGraphGroups,
+  searchGraphChunks,
   type GraphEdgeDTO,
   type GraphEdgeEvent,
+  type GraphGroup,
   type GraphIngestProgress,
   type GraphNodeDTO,
   type GraphNodeEvent
 } from '$lib/api/knowledge';
 import { connectKnowledgeGraphEvents } from '../shared/knowledge-events';
+import { GLOW_MS } from '../graph/engine/graph-config';
+import { linkEndId } from '../graph/engine/graph-types';
 import { KNOWN_NODE_TYPE_ORDER } from '../graph/knowledge-graph-style';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import {
@@ -42,16 +48,21 @@ export type GraphSelection = { kind: 'node'; id: string } | { kind: 'edge'; id: 
 /** One row of the node/edge type filter strip: a type, how many carry it, hidden state. */
 export type GraphTypeFacet = { type: string; count: number; hidden: boolean };
 
-// How long a freshly-created node/edge glows after appearing (ms).
-const GLOW_MS = 3000;
+// GLOW_MS (how long a freshly-created node/edge glows after appearing) is shared with the
+// canvas engine via engine/graph-config so the recent[] prune window and the fade window agree.
 // Debounce window for the post-ingest reconciling re-export (ms).
 const RECONCILE_DEBOUNCE_MS = 400;
+// Debounce window for the backend chunk-text search leg (ms).
+const SEARCH_DEBOUNCE_MS = 250;
 
 // Filter persistence: each hidden-type set is kept in sessionStorage only — no URL
 // params (filters aren't meant to be shareable links), just remembered for the
 // session. Comma-joined hidden-type lists; empty set clears the key.
 const SESSION_HIDE_NODES = PREF_KEYS.knowledgeGraphHideNodes;
 const SESSION_HIDE_EDGES = PREF_KEYS.knowledgeGraphHideEdges;
+// Last-viewed partition group_id — remembered across opens (design: default = first in list,
+// remember last). Restored in loadGroups() iff the group still exists.
+const SESSION_ACTIVE_GROUP = PREF_KEYS.knowledgeGraphActiveGroup;
 
 function readHidden(key: string): Set<string> {
   const raw = readSessionString(key);
@@ -87,6 +98,13 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let live = $state(false);
   let progress = $state<GraphIngestProgress | null>(null);
   let selected = $state<GraphSelection>(null);
+  // Group filter: the partitions present in the graph + which one is shown. We simply list
+  // whatever groups exist (no privileged "knowledge is home" default) and show the selected
+  // one — default = first in the list, last selection remembered (resolved in loadGroups).
+  // `null` only before groups have loaded or when the graph is empty. Drives the export scope
+  // and the live-event filter.
+  let groups = $state<GraphGroup[]>([]);
+  let activeGroupId = $state<string | null>(null);
   // id (prefixed n:/e:) -> epoch ms of last "is_new" sighting; drives the glow.
   let recent = $state<Record<string, number>>({});
 
@@ -111,15 +129,14 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   function rebuildArrays(): void {
     nodes = [...nodeById.values()];
     // Drop dangling edges (an edge delta can arrive before its node delta) — but FIRST
-    // normalize the endpoint to its id. Bug fix: force-graph rewrites link.source/target
-    // from id strings into the actual node OBJECTS once the graph is laid out, so on every
-    // subsequent delta `nodeById.has(e.source)` was checking has(<object>) → false →
-    // EVERY already-rendered edge was filtered out. That collapsed the link structure each
-    // delta and let charge re-scatter the nodes (the "all existing nodes reset" symptom).
-    const endId = (end: unknown): string =>
-      end && typeof end === 'object' ? (end as GraphNodeDTO).id : (end as string);
+    // normalize the endpoint to its id via the shared `linkEndId`. Historically the canvas
+    // fed force-graph the model's edge objects, which force-graph rewrote source/target from
+    // id strings into node OBJECTS; a naive `nodeById.has(e.source)` then checked has(<object>)
+    // → false → every rendered edge was filtered out, collapsing the link structure and
+    // re-scattering the nodes. The engine now uses its own mirror links so the model's edges
+    // keep string endpoints, but linkEndId stays as cheap insurance against either shape.
     links = [...edgeById.values()].filter(
-      (e) => nodeById.has(endId(e.source)) && nodeById.has(endId(e.target))
+      (e) => nodeById.has(linkEndId(e.source)) && nodeById.has(linkEndId(e.target))
     );
   }
 
@@ -185,7 +202,11 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     loading = true;
     deps.setError(null);
     try {
-      const res = await exportKnowledgeGraph();
+      // Scope to the selected partition. null only when no group exists yet (empty graph) —
+      // then the backend default applies and the canvas is simply empty.
+      const res = await exportKnowledgeGraph(
+        activeGroupId ? { groupIds: [activeGroupId] } : {}
+      );
       if (!res.ok || !res.data) {
         deps.setError(res.error ?? 'Failed to load graph');
         return;
@@ -205,22 +226,79 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     }
   }
 
+  /** Wipe the entire knowledge graph (server clears the knowledge group). Returns true
+   *  on success — the panel then reloads so the canvas reflects the now-empty graph. */
+  async function clearGraph(): Promise<boolean> {
+    loading = true;
+    deps.setError(null);
+    try {
+      const res = await clearKnowledgeGraph();
+      if (!res.ok) {
+        deps.setError(res.error ?? 'Failed to clear graph');
+        return false;
+      }
+      return true;
+    } catch (err) {
+      deps.setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      loading = false;
+    }
+  }
+
+  /** Fetch the partitions present in the graph and resolve which one to show.
+   *  We list whatever groups exist (the backend enumerates DISTINCT group_ids) and pick the
+   *  active one: keep the current selection if it still exists, else restore the remembered
+   *  one, else default to the FIRST group in the list. `null` only when the graph is empty. */
+  async function loadGroups(): Promise<void> {
+    const res = await listKnowledgeGraphGroups();
+    if (!res.ok || !res.data) return;
+    groups = res.data.groups;
+    const ids = new Set(groups.map((g) => g.id));
+    if (activeGroupId && ids.has(activeGroupId)) return; // keep an explicit current selection
+    const remembered = readSessionString(SESSION_ACTIVE_GROUP);
+    activeGroupId = remembered && ids.has(remembered) ? remembered : (groups[0]?.id ?? null);
+  }
+
+  /** Switch the viewed partition (remembered across opens) and reload (relayout + fit). */
+  async function selectGroup(id: string | null): Promise<void> {
+    if (id === activeGroupId) return;
+    activeGroupId = id;
+    if (id) writeSessionString(SESSION_ACTIVE_GROUP, id);
+    else removeSessionString(SESSION_ACTIVE_GROUP);
+    await load();
+  }
+
+  // Does a live delta belong to the partition we're currently showing? Exact match on the
+  // selected group_id — no privileged-default special-casing. When nothing is selected yet
+  // (empty graph), deltas wait for the post-ingest reconcile (which re-lists groups).
+  function eventMatchesActiveGroup(gid: string | null | undefined): boolean {
+    if (activeGroupId === null) return false;
+    return (gid ?? '') === activeGroupId;
+  }
+
   function connectEvents(): () => void {
     live = true;
     const disconnect = connectKnowledgeGraphEvents({
       onNode: (e) => {
+        if (!eventMatchesActiveGroup(e.group_id)) return;
         pendingNodes.push(e);
         scheduleFlush();
       },
       onEdge: (e) => {
+        if (!eventMatchesActiveGroup(e.group_id)) return;
         pendingEdges.push(e);
         scheduleFlush();
       },
       onProgress: (e) => {
+        if (!eventMatchesActiveGroup(e.group_id)) return;
         progress = e;
       },
       onCompleted: () => {
         progress = null;
+        // Refresh the partition list too: a first ingest into an empty graph creates a new
+        // group that should appear in the selector (and get auto-selected if none was).
+        void loadGroups();
         scheduleReconcile();
       }
     });
@@ -231,6 +309,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
         clearTimeout(reconcileTimer);
         reconcileTimer = null;
       }
+      teardownSearch(); // cancel any pending/in-flight chunk-text search
       disconnect();
     };
   }
@@ -309,22 +388,67 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
 
   // ── Search highlight (transient view state; not persisted) ──────────────────
   // One unified query highlights matching nodes/edges WITHOUT hiding the rest:
-  //   • node name/aliases + edge rel_type/fact → matched here (client-side)
-  //   • chunk TEXT → matched via the backend (KnowledgeGraphPanel fetches point_ids
-  //     and pushes them in through setMatchedChunkIds; we map them onto nodes/edges
-  //     by chunk_ids, G6). The two match sources union below.
+  //   • node name/aliases + edge rel_type/fact → matched here (client-side, instant)
+  //   • chunk TEXT → matched via a debounced backend lookup (searchGraphChunks returns
+  //     point_ids == chunk_ids); we map them onto nodes/edges by chunk_ids. Union below.
+  // The query IS the input value (the Graph toolbar binds to searchQuery()), so search
+  // state survives a tab switch — there's no panel-local copy to fall out of sync.
   let searchQuery = $state('');
-  // Qdrant point_ids whose chunk text matched the current query (== chunk_ids). Owned
-  // here but populated by the panel's debounced backend lookup; cleared when the query
-  // clears so a stale chunk match never outlives its text.
+  // Qdrant point_ids whose chunk text matched the current query (== chunk_ids); cleared
+  // when the query clears so a stale chunk match never outlives its text.
   let matchedChunkIds = $state<Set<string>>(new Set());
+  // True while the debounced backend chunk-text leg is in flight (drives the spinner).
+  let searchBusy = $state(false);
+  let searchAbort: AbortController | null = null;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function setSearchQuery(q: string): void {
-    searchQuery = q;
-    if (!q.trim()) matchedChunkIds = new Set(); // clearing the box clears chunk matches too
+  // Debounced backend chunk-TEXT search. searchGraphChunks THROWS on error/abort, so the
+  // rejection must be caught or searchBusy sticks on. Aborted on a newer keystroke / clear.
+  function scheduleChunkSearch(term: string): void {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchAbort?.abort(); // a newer keystroke supersedes the in-flight lookup
+    searchAbort = null;
+    if (!term) {
+      searchBusy = false;
+      return;
+    }
+    searchBusy = true;
+    searchTimer = setTimeout(() => {
+      const ctrl = new AbortController();
+      searchAbort = ctrl;
+      void (async () => {
+        try {
+          const res = await searchGraphChunks(term, ctrl.signal);
+          if (ctrl.signal.aborted) return;
+          matchedChunkIds = new Set(res.data?.point_ids ?? []);
+        } catch (err) {
+          if (ctrl.signal.aborted) return; // expected on a newer keystroke / teardown
+          console.error('graph chunk-text search failed', err);
+          matchedChunkIds = new Set(); // fall back to client-only (name/rel) matches
+        } finally {
+          if (!ctrl.signal.aborted) searchBusy = false;
+        }
+      })();
+    }, SEARCH_DEBOUNCE_MS);
   }
-  function setMatchedChunkIds(ids: string[]): void {
-    matchedChunkIds = new Set(ids);
+
+  // Drive the unified search: instant client-side name/alias + rel_type/fact highlight
+  // (via searchQuery), plus the debounced backend chunk-text leg.
+  function search(query: string): void {
+    searchQuery = query;
+    if (!query.trim()) matchedChunkIds = new Set(); // clearing the box clears chunk matches too
+    scheduleChunkSearch(query.trim());
+  }
+  function clearSearch(): void {
+    search('');
+  }
+  // Cancel any pending/in-flight chunk search (called on page teardown).
+  function teardownSearch(): void {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = null;
+    searchAbort?.abort();
+    searchAbort = null;
+    searchBusy = false;
   }
 
   const searchActive = $derived(searchQuery.trim().length > 0);
@@ -405,7 +529,13 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     selectEdge,
     clearSelection,
     load,
+    clearGraph,
     connectEvents,
+    // ── group filter ──
+    groups: () => groups,
+    activeGroupId: () => activeGroupId,
+    loadGroups,
+    selectGroup,
     // ── view filters ──
     nodeTypeFacets: () => nodeTypeFacets,
     edgeTypeFacets: () => edgeTypeFacets,
@@ -421,8 +551,9 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     clearFilters,
     // ── search highlight ──
     searchQuery: () => searchQuery,
-    setSearchQuery,
-    setMatchedChunkIds,
+    searchBusy: () => searchBusy,
+    search,
+    clearSearch,
     searchActive: () => searchActive,
     matchedNodeIds: () => matchedNodeIds,
     matchedEdgeIds: () => matchedEdgeIds,

@@ -2,8 +2,8 @@
 export type PreferenceTabId =
   | 'models'
   | 'media'
-  | 'memory'
   | 'knowledge'
+  | 'graph-engine'
   | 'agent'
   | 'tuning-profiles';
 
@@ -14,8 +14,8 @@ export const PREFERENCE_TABLIST_LABEL = 'Preference sections';
 export const PREFERENCE_TAB_IDS: Record<PreferenceTabId, string> = {
   models: 'preferences-tab-models',
   media: 'preferences-tab-media',
-  memory: 'preferences-tab-memory',
   knowledge: 'preferences-tab-knowledge',
+  'graph-engine': 'preferences-tab-graph-engine',
   agent: 'preferences-tab-agent',
   'tuning-profiles': 'preferences-tab-tuning-profiles'
 };
@@ -23,8 +23,8 @@ export const PREFERENCE_TAB_IDS: Record<PreferenceTabId, string> = {
 export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
   models: 'preferences-panel-models',
   media: 'preferences-panel-media',
-  memory: 'preferences-panel-memory',
   knowledge: 'preferences-panel-knowledge',
+  'graph-engine': 'preferences-panel-graph-engine',
   agent: 'preferences-panel-agent',
   'tuning-profiles': 'preferences-panel-tuning-profiles'
 };
@@ -32,8 +32,8 @@ export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
 export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
   { id: 'models', label: 'Models' },
   { id: 'agent', label: 'Agent' },
-  { id: 'memory', label: 'Agent Memory' },
   { id: 'knowledge', label: 'Knowledge' },
+  { id: 'graph-engine', label: 'Graph Engine' },
   { id: 'tuning-profiles', label: 'Model Profiles' },
   { id: 'media', label: 'Media' }
 ];
@@ -42,8 +42,10 @@ export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
 export const LEGACY_PREFERENCE_HASH_TO_TAB: Record<string, PreferenceTabId> = {
   'preferences-models': 'models',
   'preferences-media': 'media',
-  'preferences-memory': 'memory',
+  // Agent Memory tab was merged into the Agent tab; keep the legacy anchor working.
+  'preferences-memory': 'agent',
   'preferences-knowledge': 'knowledge',
+  'preferences-graph-engine': 'graph-engine',
   'preferences-agent': 'agent',
   'preferences-tuning-profiles': 'tuning-profiles'
 };

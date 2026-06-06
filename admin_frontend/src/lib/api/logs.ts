@@ -50,7 +50,6 @@ export function logTimeRangeSeconds(range: LogTimeRange): number | null {
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 export type LogSourceFilter = 'server' | 'channels' | 'gateway' | 'cli';
-export type LogSortOrder = 'newest' | 'oldest';
 
 export type LogExtraSegment = {
   key: string | null;

@@ -1,6 +1,6 @@
 /**
- * Side-effect-free helpers for Graph Runs admin UI (ledger list, run detail, Mem0 pane).
- * Kept separate from GraphRunsPage.svelte so formatting and parsing stay unit-testable.
+ * Side-effect-free helpers for Graph Runs admin UI (ledger list, run detail, Memories pane).
+ * Kept separate from the Svelte components so formatting and parsing stay unit-testable.
  */
 import { base } from '$app/paths';
 import type { ChatChannelRow } from '$lib/api/chat-channels';
@@ -81,7 +81,7 @@ export function isGraphNodeSubstep(nodeName: string): boolean {
   return node.startsWith('tools/') || node.startsWith('knowledge/');
 }
 
-/** A11y — primary pills: workspace (graph runs subtree) vs Mem0 pane. */
+/** A11y — primary pills: workspace (graph runs subtree) vs Memories pane. */
 export const GRAPH_RUNS_PRIMARY_TAB_IDS = {
   runsWorkspace: 'graph-runs-tab-primary-runs',
   memories: 'graph-runs-tab-primary-memories'
@@ -112,14 +112,14 @@ export function graphRunTabId(runId: string): string {
   return `graph-runs-tab-open-${runId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 }
 
-/** Deep-link into Graph Runs with a specific run tab open. */
+/** Deep-link into Graph runs (now the Logs page's second tab) with a run open. */
 export function graphRunPageUrl(runId: string): string {
   const trimmed = String(runId ?? '').trim();
-  if (!trimmed) return '/graph-runs/';
-  return `/graph-runs/?run=${encodeURIComponent(trimmed)}`;
+  if (!trimmed) return '/logs/?tab=runs';
+  return `/logs/?tab=runs&run=${encodeURIComponent(trimmed)}`;
 }
 
-/** Run-detail tabs only — not the ledger list or Mem0 pane. */
+/** Run-detail tabs only — not the ledger list or Memories pane. */
 export function isRunDetailPane(pane: ActivePane): boolean {
   return pane !== RUNS_TAB && pane !== MEMORIES_TAB;
 }
@@ -470,9 +470,11 @@ export function memoryRowMatchesSearchNeedle(
 
 export type MemoryRowFilterOpts = {
   characterId: string;
-  channelId: string;
   sourceFilter: string;
   searchNeedle: string;
+  // Date-range scope (ms epoch, NaN when unset) — also defines a delete scope on the pane.
+  dateFromMs: number;
+  dateToMs: number;
   characterMap: Record<string, CharacterRow>;
   channelById: Map<number, ChatChannelRow>;
 };
@@ -481,10 +483,13 @@ export function memoryRowPassesFilters(row: Record<string, unknown>, opts: Memor
   const charF = opts.characterId.trim();
   if (charF && memoryAgentId(row) !== charF) return false;
 
-  const chanF = opts.channelId.trim();
-  if (chanF) {
-    const n = Number(chanF);
-    if (!Number.isFinite(n) || memoryChannelId(row) !== n) return false;
+  // Date-range filter by the memory's effective timestamp (valid_at / created). Undated
+  // rows fall outside any explicit range so a date scope never silently deletes them.
+  if (Number.isFinite(opts.dateFromMs) || Number.isFinite(opts.dateToMs)) {
+    const ts = memorySortSeconds(row);
+    if (ts === 0) return false;
+    if (Number.isFinite(opts.dateFromMs) && ts < opts.dateFromMs) return false;
+    if (Number.isFinite(opts.dateToMs) && ts > opts.dateToMs) return false;
   }
 
   const srcF = opts.sourceFilter;

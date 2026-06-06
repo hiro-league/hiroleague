@@ -2,51 +2,37 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from hirocli.services.memory.usage_capture import MemoryAddResult
+from typing import Any, Protocol
 
 
-def mem0_history_db_path(workspace_path: Path) -> Path:
-    """Path to mem0's SQLite history DB (workspace-local).
+@dataclass(frozen=True)
+class MemoryUsage:
+    """Aggregated LLM usage for one memory write operation."""
 
-    Mem0 keeps two tables in this file:
-    - ``messages``: rolling last-10 raw turns per session, fed back into the
-      extraction LLM as ``last_k_messages`` on every ``Memory.add`` call.
-    - ``history``: per-memory ADD/UPDATE/DELETE change log (audit only).
-
-    Pointing this into the workspace (instead of mem0's default ``~/.mem0``)
-    is what lets ``clear_channel_messages`` wipe the buffer deterministically
-    without leaking state across workspaces.
-    """
-    return Path(workspace_path) / "memory" / "history.db"
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int
+    reasoning_tokens: int
+    call_count: int
 
 
-def mem0_session_scope(
-    *,
-    user_id: str,
-    agent_id: str | None = None,
-    run_id: str | None = None,
-) -> str:
-    """Replicate mem0's ``session_scope`` key for rows Hiro writes.
+@dataclass(frozen=True)
+class MemoryAddResult:
+    """Outcome of a single :meth:`MemoryService.add` call.
 
-    Mirrors ``mem0/memory/main.py::_build_session_scope`` (sorted keys joined
-    by ``&``). The trio matches what we pass to ``memory.add``:
+    ``stored_count`` is how many memories the backend actually stored this turn
+    (mem0: vector rows written; Graphiti: facts learned). ``usage`` may be ``None``
+    when token accounting is owned elsewhere (e.g. the Graph-Runs ledger for the
+    Graphiti backend). These types are the *contract's* result types, so they live in
+    the domain layer — every backend (mem0, Graphiti) returns them."""
 
-    - ``user_id`` — real end-user (data.db user)
-    - ``agent_id`` — character slug (mem0's "agent personality" slot)
-    - ``run_id`` — conversation thread (channel id); isolates the
-      ``messages`` last-k buffer the extraction prompt reads from.
-    """
-    parts: list[str] = []
-    for key, val in sorted(
-        [("user_id", user_id), ("agent_id", agent_id), ("run_id", run_id)]
-    ):
-        if val:
-            parts.append(f"{key}={val}")
-    return "&".join(parts)
+    usage: MemoryUsage | None
+    stored_count: int
+    stored_items: tuple[dict[str, Any], ...] = ()
 
 
 def resolve_memory_user_id(*, data_user_id: int | None, workspace_path: Path) -> int:
@@ -67,8 +53,12 @@ class MemoryService(Protocol):
         run_id: str,
         character_id: str,
         metadata: dict[str, Any] | None = None,
+        ledger_sink: Any | None = None,
     ) -> "MemoryAddResult":
-        """Store a turn; return LLM usage and the count of memories actually stored."""
+        """Store a turn; return the count of memories actually stored.
+
+        ``ledger_sink`` (the chat turn's Graph-Runs sink) makes the backend's write steps
+        observable in Graph Runs; ``None`` = no ledger (CLI/tools/tests)."""
         ...
 
     async def search(

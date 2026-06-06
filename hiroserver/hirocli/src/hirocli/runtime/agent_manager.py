@@ -232,6 +232,21 @@ class AgentManager:
                 self._reload_knowledge_on_change,
                 key="agent.knowledge",
             )
+            # The Graphiti graph engine (top-level ``graph.*``) is SHARED by knowledge
+            # retrieval and agent memory (mem0 → Graphiti). It used to live under
+            # ``knowledge.graph`` (caught by the knowledge reactor above); now that it's a
+            # top-level section, rebuild BOTH consumers when it changes, or an engine edit
+            # (extraction model / embedder / search recipe…) would silently not take effect.
+            self._ctx.preference_reactor.on_change(
+                "graph",
+                self._reload_knowledge_on_change,
+                key="agent.graph-knowledge",
+            )
+            self._ctx.preference_reactor.on_change(
+                "graph",
+                self._reload_memory_on_change,
+                key="agent.graph-memory",
+            )
             # Providers/admin mutations write ``providers.json`` via another
             # ``CredentialStore`` instance — keep graph caches and media services in sync.
             bus = get_domain_event_bus()
@@ -854,13 +869,11 @@ class AgentManager:
         changes: dict[str, tuple[Any, Any]],
     ) -> None:
         """Rebuild long-term memory after memory-related preferences change."""
-        relevant_paths = {
-            "memory.enabled",
-            "memory.default_llm",
-            "memory.default_embedding_model",
-            "memory.default_tuning_profile",
-        }
-        relevant_prefixes = ("memory.search.", "memory.reranker.")
+        # Memory rides the shared Graphiti engine (mem0 → Graphiti, Phase 5): rebuild on its
+        # feature toggle + recall knobs AND on any graph-engine pref change (models / embedder /
+        # search). ``memory.extraction.*`` is read at runtime, so it needs no rebuild.
+        relevant_paths = {"memory.enabled"}
+        relevant_prefixes = ("memory.search.", "graph.")
         if not any(path in relevant_paths for path in changes) and not any(
             path.startswith(relevant_prefixes) for path in changes
         ):

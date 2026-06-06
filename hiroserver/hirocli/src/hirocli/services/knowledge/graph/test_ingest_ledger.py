@@ -108,7 +108,7 @@ async def test_ingest_writes_run_and_per_operation_nodes(tmp_path: Path) -> None
         )
     ]
     stats = await ingest_episodes(
-        g, eps, source_role="user_document", ledger_sink=LedgerSink(tmp_path)
+        g, eps, source_role="user_document", group_id="kb_main", ledger_sink=LedgerSink(tmp_path)
     )
     assert stats.episodes_processed == 1
 
@@ -193,6 +193,6 @@ async def test_no_ledger_sink_is_silent(tmp_path: Path) -> None:
     """Without a sink the ingest still runs but writes no graph.log (tests/CLI path)."""
     g = _FakeGraphiti()
     eps = [GraphitiEpisodeInput(chunk_id="c1", document_id="d", text="hi")]
-    stats = await ingest_episodes(g, eps, source_role="user_document")
+    stats = await ingest_episodes(g, eps, source_role="user_document", group_id="kb_main")
     assert stats.episodes_processed == 1
     assert not (tmp_path / "logs" / "graph.log").exists()

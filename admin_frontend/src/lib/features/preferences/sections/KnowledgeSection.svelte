@@ -389,241 +389,30 @@
     </SectionCardMuted>
 
     <SectionCardMuted
-      title="Knowledge Graph (Graphiti)"
-      description="Temporal entity/fact graph over the workspace knowledge. When on, retrieval focuses on graph-relevant chunks (and temporal facts). Build the graph from a document on the Add tab first. Off = flat Qdrant retrieval only."
+      title="Knowledge graph retrieval"
+      description="Whether knowledge answering uses the temporal graph. Off = flat Qdrant retrieval only. Graphiti = answer from the graph's facts and their supporting passages (recommended for relational + temporal questions). Build the graph from a document on the Add tab first."
       collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraph}
+      bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraphBackend}
     >
       <FormField
         label="Graph backend"
-        hint="Master switch. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts and their supporting passages (recommended for relational + temporal questions)."
+        hint="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts."
         class="max-w-md"
       >
         <select
           class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.knowledge.graph.backend}
+          bind:value={ctrl.draft.graph.backend}
           onchange={ctrl.markDirty}
         >
           <option value="off">Off — flat Qdrant only</option>
           <option value="graphiti">Graphiti — graph facts (recommended)</option>
         </select>
       </FormField>
-
-      <SingleModelPicker
-        embedded
-        labelled
-        label="Graph extraction model"
-        hint="The heavy LLM Graphiti uses to read each chunk and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat."
-        selectedId={ctrl.draft.knowledge.graph.extraction_model}
-        catalogModels={ctrl.chatOptions}
-        catalogAllProviders={ctrl.catalogAllProviders}
-        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-        workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
-        busy={ctrl.busy}
-        emptyProviders="No chat providers in catalog."
-        emptyModelsForProvider="No chat models for this provider."
-        onSelect={ctrl.setKnowledgeGraphExtractionModel}
-        onChange={ctrl.markDirty}
-      />
-      <FormField
-        label="Graph extraction profile"
-        hint="Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs."
-        class="max-w-md"
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.knowledge.graph.extraction_tuning_profile}
-          onchange={ctrl.markDirty}
-        >
-          {#each ctrl.profileEntries as [id, profile] (id)}
-            <option value={id}>{profile.label}</option>
-          {/each}
-        </select>
-      </FormField>
-
-      <SingleModelPicker
-        embedded
-        labelled
-        label="Graph small-step model"
-        hint="Cheaper model for dedupe / summaries / timestamps. Null falls back to the extraction model."
-        selectedId={ctrl.draft.knowledge.graph.small_model}
-        catalogModels={ctrl.chatOptions}
-        catalogAllProviders={ctrl.catalogAllProviders}
-        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-        workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
-        busy={ctrl.busy}
-        emptyProviders="No chat providers in catalog."
-        emptyModelsForProvider="No chat models for this provider."
-        onSelect={ctrl.setKnowledgeGraphSmallModel}
-        onChange={ctrl.markDirty}
-      />
-      <FormField
-        label="Graph small-step profile"
-        hint="Tuning profile for the cheaper small-step model (dedupe / summaries / timestamps)."
-        class="max-w-md"
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.knowledge.graph.small_tuning_profile}
-          onchange={ctrl.markDirty}
-        >
-          {#each ctrl.profileEntries as [id, profile] (id)}
-            <option value={id}>{profile.label}</option>
-          {/each}
-        </select>
-      </FormField>
-
-      <SingleModelPicker
-        embedded
-        labelled
-        label="Graph embedder"
-        hint="Embeds entity names + facts into the graph. Null shares the knowledge embedding model above."
-        selectedId={ctrl.draft.knowledge.graph.embedder_model}
-        catalogModels={ctrl.embeddingOptions}
-        catalogAllProviders={ctrl.catalogAllProviders}
-        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-        workspaceActiveProviderIds={ctrl.activeProvidersStore.embeddingActiveProviderIds}
-        busy={ctrl.busy}
-        emptyProviders="No embedding providers in catalog."
-        emptyModelsForProvider="No embedding models for this provider."
-        onSelect={ctrl.setKnowledgeGraphEmbedderModel}
-        onChange={ctrl.markDirty}
-      />
-
-      <div class="grid gap-3 md:grid-cols-2">
-        <FormField
-          label="Temporal lens (default)"
-          hint="Default time lens at retrieval. Current = only facts valid now (superseded facts hidden). Include historical = also surface invalidated facts. Overridable per query."
-        >
-          <select
-            class={ADMIN_SELECT_LG}
-            bind:value={ctrl.draft.knowledge.graph.temporal_default}
-            onchange={ctrl.markDirty}
-          >
-            <option value="current">Current facts only</option>
-            <option value="all">Include historical</option>
-          </select>
-        </FormField>
-        <FormField
-          label="Expansion hops (k)"
-          hint="Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost."
-        >
-          <input
-            type="number"
-            min="1"
-            max="3"
-            class={ADMIN_SELECT_LG}
-            bind:value={ctrl.draft.knowledge.graph.k_hop}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
-      </div>
-      <div class="grid gap-4 md:grid-cols-2">
-        <FormField
-          label="Search recipe"
-          hint="How fact-search candidates are ranked/fused. RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly."
-        >
-          <select
-            class={ADMIN_SELECT_LG}
-            bind:value={ctrl.draft.knowledge.graph.search_recipe}
-            onchange={ctrl.markDirty}
-          >
-            <option value="rrf">RRF</option>
-            <option value="mmr">MMR</option>
-            <option value="cross_encoder">Cross-encoder</option>
-          </select>
-        </FormField>
-        <FormField
-          label="Candidate similarity floor"
-          hint="Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep low (≈0.3) for recall — too high and paraphrased questions (e.g. asking 'wife' when the stored fact says 'married to') return no facts at all. Graphiti's own default is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here."
-        >
-          <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            class={ADMIN_SELECT_LG}
-            bind:value={ctrl.draft.knowledge.graph.sim_min_score}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
-      </div>
-      <FormField
-        label="Graph Runs detail"
-        hint="Verbosity of the Graph Runs ledger for graph ingest + retrieval. Rich = per-node content previews (extracted entities, resolution/invalidation decisions, ranked facts) and one row per edge in resolve_facts. Compact = stats only. Lower to Compact for noisy bulk/series ingests."
-        class="max-w-md"
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.knowledge.graph.ledger_detail}
-          onchange={ctrl.markDirty}
-        >
-          <option value="rich">Rich (content previews)</option>
-          <option value="compact">Compact (stats only)</option>
-        </select>
-      </FormField>
-    </SectionCardMuted>
-
-    <SectionCardMuted
-      title="Graphiti Reranker (Cross-encoder)"
-      description="Reranks graph fact-search candidates with a real cross-encoder. Only active when the graph Search recipe above is set to Cross-encoder — otherwise these settings are disabled. Reuses the same reranker models as the flat path (cloud or local)."
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraphReranker}
-    >
-      {#if ctrl.draft.knowledge.graph.search_recipe !== 'cross_encoder'}
-        <p class="rounded-md border border-border/50 bg-card/45 px-3 py-2 font-sans text-xs text-muted-foreground">
-          Set <span class="font-medium">Search recipe → Cross-encoder</span> in the Knowledge Graph
-          section above to enable these settings.
-        </p>
-      {/if}
-      <fieldset
-        disabled={ctrl.draft.knowledge.graph.search_recipe !== 'cross_encoder'}
-        class="grid gap-4 border-0 p-0 disabled:opacity-50"
-      >
-        <SingleModelPicker
-          embedded
-          label="Reranker model"
-          hint="Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model above (one model to manage). Local models must be downloaded first."
-          selectedId={ctrl.draft.knowledge.graph.reranker.model_id}
-          catalogModels={ctrl.rerankPickerOptions}
-          catalogAllProviders={ctrl.catalogAllProviders}
-          workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-          workspaceActiveProviderIds={ctrl.activeProvidersStore.rerankActiveProviderIds}
-          busy={ctrl.busy}
-          emptyProviders="No reranker providers."
-          emptyModelsForProvider="No reranker models for this provider."
-          onSelect={ctrl.setKnowledgeGraphRerankerModel}
-          onChange={ctrl.markDirty}
-        />
-        <div class="grid gap-3 md:grid-cols-2">
-          <FormField
-            label="Min relevance"
-            hint="Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR."
-          >
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              class={ADMIN_SELECT_LG}
-              bind:value={ctrl.draft.knowledge.graph.reranker.min_relevance}
-              oninput={ctrl.markDirty}
-            />
-          </FormField>
-          <FormField
-            label="Device (local only)"
-            hint="Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models."
-          >
-            <input
-              type="text"
-              placeholder="auto"
-              class={ADMIN_SELECT_LG}
-              bind:value={ctrl.draft.knowledge.graph.reranker.device}
-              oninput={ctrl.markDirty}
-            />
-          </FormField>
-        </div>
-      </fieldset>
+      <p class="text-xs text-muted-foreground">
+        The graph engine itself — extraction/small models, embedder, search recipe, and reranker —
+        is shared with Agent Memory and configured in the <span class="font-medium">Graph Engine</span>
+        tab.
+      </p>
     </SectionCardMuted>
   {/if}
 </div>
