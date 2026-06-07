@@ -215,9 +215,13 @@ literal. **No KB-space UI.**
 > graph-isolation to its own phase (Phase A-bis), where the group is threaded through ingest +
 > retrieval together.
 
-**Phase A-bis — eval graph-isolation (later):** thread an optional group through production
-knowledge ingest + `answer`/`answer_legs`/`graph_expand` so synthetic + Adam eval live in
-`eval_{set}`; then the Graph selector grows the **eval kind** and group-scoped eval clear.
+**Phase A-bis — eval restructure → [`eval-corpus-tracks-design.md`](eval-corpus-tracks-design.md)
+(superseded).** The original "thread a group through the knowledge path to isolate eval" was
+**replaced** by a corpus-shape-driven plan: chunk corpora test the **knowledge** engine, turn
+corpora test the **conversation-memory** engine (`remember`/`recall`) under a dedicated eval
+user/character — which isolates the memory eval **for free** (no hot-path threading). The
+group-threading idea now only applies to the *deferred* knowledge-eval isolation (its Phase 2).
+See that doc for the full plan.
 
 **Phase B — KB spaces as a feature (only if a real multi-knowledge-base need appears):**
 ingestion picks/creates a space; space dropdown for clear; spaces appear in the same Graph

@@ -11,9 +11,11 @@
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import { cn } from '$lib/utils';
-  import { LOG_TIME_RANGES } from '$lib/api/logs';
+  import { LOG_LEVELS, LOG_TIME_RANGES } from '$lib/api/logs';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
+  import { logLevelAccentClass } from './shared/logs-classes';
+  import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogsDetailPanel from './LogsDetailPanel.svelte';
   import LogsFiltersPanel from './LogsFiltersPanel.svelte';
   import LogsTablePanel from './LogsTablePanel.svelte';
@@ -158,6 +160,27 @@
     class={cn(prefs.controlsCollapsed ? 'hidden' : 'flex flex-col gap-3')}
   >
     <div class="flex min-w-0 flex-wrap items-center gap-2">
+      <div class="flex items-center gap-1" role="group" aria-label="Filter log levels">
+        <span class="font-sans text-sm font-semibold text-muted-foreground">Level:</span>
+        {#each LOG_LEVELS as level (level)}
+          {@const active = prefs.levelIsActive(level)}
+          <Button
+            size="icon"
+            variant={active ? 'secondary' : 'ghost'}
+            class="size-7 shrink-0 shadow-none"
+            title={level}
+            aria-label={`${active ? 'Hide' : 'Show'} ${level} logs`}
+            aria-pressed={active}
+            onclick={() => prefs.toggleLevel(level)}
+          >
+            <LogLevelIcon
+              level={level}
+              size={14}
+              class={cn('shrink-0', active ? logLevelAccentClass(level) : 'opacity-40')}
+            />
+          </Button>
+        {/each}
+      </div>
       <label class={ADMIN_SEARCH_FIELD}>
         <Search size={15} class="text-muted-foreground" />
         <input

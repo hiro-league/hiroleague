@@ -62,6 +62,7 @@
         />
 
         {#if ctrl.channelsVisible && ctrl.layout && ctrl.layout.available_channels.length}
+          <span class="font-sans text-sm font-semibold text-muted-foreground">Channel:</span>
           <div class="flex items-center gap-0.5">
             <select class={cn(ADMIN_SELECT_SM, 'min-w-44')} bind:value={prefs.activeChannel}>
               <option value="">All channels</option>
