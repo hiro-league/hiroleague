@@ -740,7 +740,7 @@ class KnowledgeService:
         t0 = time.perf_counter()
         # asyncio.gather preserves order. Both legs use independent agent graphs
         # (each call creates its own KnowledgeAgentGraph in answer()), so there's
-        # no shared LangGraph state contention. Qdrant/Ladybug reads are safe to
+        # no shared LangGraph state contention. Qdrant/graph reads are safe to
         # interleave (MVCC under the hood for both).
         flat_result, graph_result = await asyncio.gather(
             self.answer(

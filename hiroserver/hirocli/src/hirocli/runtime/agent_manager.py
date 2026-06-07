@@ -43,6 +43,7 @@ from .comm_log import (
     comm_kind,
     comm_peer_label,
     routing_requests_voice_reply,
+    routing_tools_enabled,
     routing_uses_knowledge,
 )
 
@@ -340,6 +341,12 @@ class AgentManager:
         request_voice_reply = routing_requests_voice_reply(msg.routing.metadata)
         # Per-message knowledge toggle (default on); the fan-out edge skips retrieval when off.
         knowledge_enabled = routing_uses_knowledge(msg.routing.metadata)
+        # Tools kill-switch: global preference AND the per-chat opt-out. Either off => no tools bound
+        # this turn. call_model invokes the un-bound model when disabled, so should_continue routes
+        # straight to memory_out (no tools node hop).
+        tools_enabled = bool(prefs.chat.tools_enabled) and routing_tools_enabled(
+            msg.routing.metadata
+        )
 
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
@@ -393,6 +400,7 @@ class AgentManager:
             "request_voice_reply": request_voice_reply,
             "voice_input_allowed": voice_input_allowed,
             "knowledge_enabled": knowledge_enabled,
+            "tools_enabled": tools_enabled,
             "routing_metadata": dict(msg.routing.metadata or {}),
             "inbound_envelope": msg.model_dump(mode="json"),
             "transcripts": [],
@@ -584,7 +592,8 @@ class AgentManager:
             thinking=getattr(llm_entry, "thinking", None),
             credential_store=self._credentials,
         )
-        # temporarily disable tools, do not remove this code
+        # Tools are bound into the compiled graph once and memoized; per-turn enable/disable is a
+        # runtime decision (state["tools_enabled"]) handled in call_model, not a recompile.
         if self._lc_agent_tools is None:
             self._lc_agent_tools = self._langchain_tools_for_agent()
         compiled = self._graph.build(

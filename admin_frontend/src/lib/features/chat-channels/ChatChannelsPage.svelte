@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
@@ -33,6 +34,13 @@
     return () => {
       ctrl.setPageMessagesActive(false);
     };
+  });
+
+  // Same-route deep links (e.g. the overlay's "open full page" → ?tab=messages
+  // while already on /chats) only change the URL; onMount won't re-run, so pick
+  // up the new tab/channel here. Mirrors LogsPage/KnowledgePage/MemoriesPage.
+  afterNavigate(() => {
+    ctrl.syncNavFromUrl();
   });
 
   /** Lease live updates to the page only while the Messages tab is actually shown. */
@@ -101,6 +109,7 @@
       bind:selectedChannelId={ctrl.selectedChannelId}
       bind:requestVoiceReplyUi={ctrl.requestVoiceReplyUi}
       bind:useKnowledgeUi={ctrl.useKnowledgeUi}
+      bind:disableToolsUi={ctrl.disableToolsUi}
       bind:showAgentTokensUi={ctrl.showAgentTokensUi}
       bind:showAgentToolsUi={ctrl.showAgentToolsUi}
       bind:draftMessage={ctrl.draftMessage}

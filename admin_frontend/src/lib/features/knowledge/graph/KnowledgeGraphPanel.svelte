@@ -5,7 +5,8 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
-  import type { KnowledgePageController } from '../state/knowledge-controller.svelte';
+  import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
+  import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import KnowledgeGraphDetailPanel from './KnowledgeGraphDetailPanel.svelte';
   import KnowledgeGraphOptionsPanel from './KnowledgeGraphOptionsPanel.svelte';
   import KnowledgeGraphToolbar from './KnowledgeGraphToolbar.svelte';
@@ -16,14 +17,15 @@
     GRAPH_OPTION_DEFAULTS,
     MAX_LINKS_CAP,
     readGraphOptions,
-    writeGraphOptions
+    readGraphPanelSide,
+    writeGraphOptions,
+    writeGraphPanelSide
   } from './knowledge-graph-prefs';
 
   interface Props {
-    ctl: KnowledgePageController;
+    graph: KnowledgeGraphModel;
   }
-  let { ctl }: Props = $props();
-  const graph = untrack(() => ctl.graph);
+  let { graph }: Props = $props();
 
   // Node mount point for force-graph (it appends its own <canvas>).
   let container = $state<HTMLDivElement | null>(null);
@@ -42,6 +44,30 @@
   // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
   let searchFocusMode = $state(savedOptions.searchFocusMode);
   let optionsOpen = $state(false);
+
+  // Which side the selection/detail aside docks on. 'auto' (default) follows the chat
+  // overlay so the panel is never hidden behind it (chat docks right): left while chat is
+  // open, right otherwise. 'left'/'right' pin it explicitly (set via the flip button in the
+  // panel header). Persisted to localStorage by the $effect below.
+  let panelSide = $state(readGraphPanelSide());
+  const detailSide = $derived(
+    panelSide === 'auto' ? (chatOverlay.open ? 'left' : 'right') : panelSide
+  );
+  // The graph-options button/dropdown and the stats overlay always sit on the side OPPOSITE
+  // the detail aside, so the full-height aside can never cover them (req: options stay
+  // reachable when the panel is on the left).
+  const controlsSide = $derived(detailSide === 'left' ? 'right' : 'left');
+
+  // The flip button in the detail header pins the panel to the opposite of where it
+  // currently shows (an explicit choice that overrides 'auto').
+  function flipPanelSide(): void {
+    panelSide = detailSide === 'left' ? 'right' : 'left';
+  }
+
+  // Persist the dock-side preference whenever it changes (also runs once on mount).
+  $effect(() => {
+    writeGraphPanelSide(panelSide);
+  });
 
   // "Clear graph" confirm — wipes ALL entities/facts (documents/chunks are kept).
   let clearConfirmOpen = $state(false);
@@ -287,13 +313,15 @@
   >
     <div bind:this={container} class="absolute inset-0"></div>
 
-    <!-- Graph options: toggle button in the upper-left corner + the left panel. -->
+    <!-- Graph options: toggle button + dropdown. Anchored to the side OPPOSITE the detail
+         aside (controlsSide) so the full-height aside never covers them. -->
     {#if graph.nodes().length > 0}
       <button
         type="button"
         onclick={() => (optionsOpen = !optionsOpen)}
         class={cn(
-          'absolute left-2 top-2 z-10 rounded-md border bg-background/85 p-1.5 shadow-sm backdrop-blur transition-colors hover:bg-accent',
+          'absolute top-2 z-10 rounded-md border bg-background/85 p-1.5 shadow-sm backdrop-blur transition-colors hover:bg-accent',
+          controlsSide === 'left' ? 'left-2' : 'right-2',
           optionsOpen ? 'text-foreground' : 'text-muted-foreground'
         )}
         aria-label={optionsOpen ? 'Hide graph options' : 'Show graph options'}
@@ -303,7 +331,7 @@
         <SlidersHorizontal size={16} aria-hidden="true" />
       </button>
       {#if optionsOpen}
-        <div class="absolute left-2 top-12 z-10">
+        <div class={cn('absolute top-12 z-10', controlsSide === 'left' ? 'left-2' : 'right-2')}>
           <KnowledgeGraphOptionsPanel
             bind:linkStrength
             bind:linkDistance
@@ -339,7 +367,10 @@
          filter strip above (color dots on node chips). -->
     {#if graph.nodes().length > 0}
       <div
-        class="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm"
+        class={cn(
+          'pointer-events-none absolute bottom-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm',
+          controlsSide === 'left' ? 'left-2' : 'right-2'
+        )}
       >
         {#if graph.hasActiveFilters()}
           <span
@@ -363,8 +394,8 @@
       </div>
     {/if}
 
-    <!-- Selection / provenance detail panel (right-hand aside). -->
-    <KnowledgeGraphDetailPanel {node} {edge} {graph} />
+    <!-- Selection / provenance detail panel (docks left or right; flip button in its header). -->
+    <KnowledgeGraphDetailPanel {node} {edge} {graph} side={detailSide} onFlipSide={flipPanelSide} />
   </div>
 </div>
 

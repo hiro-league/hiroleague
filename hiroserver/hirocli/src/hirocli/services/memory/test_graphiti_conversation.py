@@ -90,6 +90,28 @@ def test_group_id_format() -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_override_targets_eval_drawer() -> None:
+    """An eval-scoped instance (group_override) routes EVERY add/search/clear to its own
+    drawer instead of deriving mem_{user}_{character} — the §6 scoped-service-object that
+    isolates the memory eval into eval_mem_{set} without touching the runtime memory path."""
+    g = _FakeGraph(edges_total=1, groups=["eval_mem_adam"])
+    mem = GraphitiConversationMemory(g, group_override="eval_mem_adam")
+
+    # add → the override drawer, regardless of the (user, character) passed.
+    await mem.add("I work at Brightloom", user_id=999, run_id="r", character_id="whatever")
+    assert g.ingest_calls[0]["group_id"] == "eval_mem_adam"
+
+    # search → the override drawer too.
+    await mem.search("where do I work?", user_id=999, character_id="whatever")
+    assert g.search_calls[0]["group_id"] == "eval_mem_adam"
+
+    # clear_all → only the override drawer (no per-user enumeration).
+    await mem.clear_all(user_id=999, character_id="whatever")
+    assert g.clear_calls == ["eval_mem_adam"]
+    assert g.list_group_calls == []  # never enumerated mem_{user}_ groups
+
+
+@pytest.mark.asyncio
 async def test_add_ingests_user_turn_as_message_episode() -> None:
     g = _FakeGraph(edges_total=3)
     mem = GraphitiConversationMemory(g)

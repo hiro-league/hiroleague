@@ -363,14 +363,20 @@ export function searchKnowledge(
 /** L3 (Phase 5e) — kick the synthetic eval batch. Returns the run_id
  *  immediately; progress streams on /api/knowledge/events. */
 export type EvalRunRequest = {
+  // Eval track: 'knowledge' (document/chunk corpus → flat vs graphiti) or
+  // 'memory' (turn corpus → conversation remember/recall, single recall leg).
+  track?: 'knowledge' | 'memory';
+  // Chosen corpus (from the picker). id doubles as the eval drawer suffix.
+  corpus_id?: string;
+  corpus_path?: string;
+  questions_path?: string;
+  // knowledge: ingest the doc corpus first. memory: remember the turn corpus first.
   ingest_synthetic?: boolean;
-  build_graph?: boolean;
-  // 'synthetic' (default .md L3 corpus) | 'adam' (temporal JSONL episode corpus).
-  corpus_source?: 'synthetic' | 'adam';
-  // Adam path: run only this subset of question ids (empty/undefined = all).
+  build_graph?: boolean; // knowledge only
+  judge?: boolean; // run the optional LLM judge (grade answers vs the ideal)
+  // REQUIRED, non-empty — the UI forces an explicit question selection (no "run all").
   question_ids?: string[];
-  // Legs to compare: any subset of ['flat','graphiti'] (one is fine).
-  // Empty/undefined = both.
+  // Knowledge only — legs to compare, subset of ['flat','graphiti']. Empty/undefined = both.
   modes?: string[];
   run_id?: string;
 };
@@ -405,6 +411,29 @@ export function cancelKnowledgeEval(
   });
 }
 
+/** One discovered corpus in the picker (a turn corpus file, or a doc-corpus folder). */
+export type EvalCorpus = {
+  id: string;
+  name: string;
+  corpus_path: string;
+  questions_path: string;
+  question_count: number;
+  item_count: number; // episodes (memory) or .md docs (knowledge)
+};
+
+/** List the corpuses found in a folder for a track (the corpus-picker dropdown source). */
+export function listEvalCorpuses(
+  track: 'memory' | 'knowledge',
+  folder = ''
+): Promise<ApiResponse<{ track: string; folder: string; corpuses: EvalCorpus[] }>> {
+  const qs = new URLSearchParams({ track });
+  if (folder) qs.set('folder', folder);
+  return apiRequest<{ track: string; folder: string; corpuses: EvalCorpus[] }>(
+    `/knowledge/eval/corpuses?${qs.toString()}`,
+    { method: 'GET', timeoutMs: 15000 }
+  );
+}
+
 /** One row in the eval question bank (for the checklist). */
 export type EvalQuestionItem = {
   id: string;
@@ -412,14 +441,15 @@ export type EvalQuestionItem = {
   subcategory: string;
   question: string;
   requires_graph: boolean;
+  expected_answer?: string;
 };
 
-/** List the eval question bank for a corpus (the checklist's source). */
+/** List a corpus's question bank by its <id>.questions.yaml path (the checklist source). */
 export function listEvalQuestions(
-  corpus: 'synthetic' | 'adam' = 'adam'
-): Promise<ApiResponse<{ corpus: string; questions: EvalQuestionItem[] }>> {
-  return apiRequest<{ corpus: string; questions: EvalQuestionItem[] }>(
-    `/knowledge/eval/questions?corpus=${encodeURIComponent(corpus)}`,
+  path: string
+): Promise<ApiResponse<{ path: string; questions: EvalQuestionItem[] }>> {
+  return apiRequest<{ path: string; questions: EvalQuestionItem[] }>(
+    `/knowledge/eval/questions?path=${encodeURIComponent(path)}`,
     { method: 'GET', timeoutMs: 15000 }
   );
 }

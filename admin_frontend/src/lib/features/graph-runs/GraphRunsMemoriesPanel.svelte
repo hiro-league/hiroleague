@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { Eye, RefreshCw, Trash2 } from '@lucide/svelte';
+  import { Eye, MessagesSquare, RefreshCw, Trash2 } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
@@ -16,18 +17,24 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import {
     memoryCharacter,
+    memoryChunkIds,
     memoryCreatedRaw,
     memoryDateDisplay,
+    memoryEntities,
+    memoryGroupId,
     memoryId,
+    memoryKind,
+    memoryKindLabel,
     memoryPrimaryText,
-    memorySourceLabel,
     memoryStableKey,
+    memoryValidity,
     GRAPH_RUNS_PANEL_IDS,
     GRAPH_RUNS_PRIMARY_TAB_IDS
   } from './graph-runs-pure';
 
   let {
     memorySearch = $bindable(''),
+    memoryFilterGroupId = $bindable(''),
     memoryFilterCharacterId = $bindable(''),
     memoryFilterSource = $bindable(''),
     memoryFilterDateFrom = $bindable(''),
@@ -39,16 +46,20 @@
     memoriesTotalCount,
     visibleMemoriesRows,
     charactersForFilterDropdown,
+    groupsForMemoryFilterDropdown = [],
     sourcesForMemoryFilterDropdown,
     characterMap,
     channelById,
+    groupLabelById,
     memoryActionBusy,
     onRequestClearAll,
     onRefreshMemories,
     onViewJson,
+    onViewProvenance,
     onDeleteRow
   }: {
     memorySearch?: string;
+    memoryFilterGroupId?: string;
     memoryFilterCharacterId?: string;
     memoryFilterSource?: string;
     memoryFilterDateFrom?: string;
@@ -60,13 +71,18 @@
     memoriesTotalCount: number;
     visibleMemoriesRows: Record<string, unknown>[];
     charactersForFilterDropdown: CharacterRow[];
+    /** Graph partitions for the Group selector (memory / knowledge / eval), like the Graph tab. */
+    groupsForMemoryFilterDropdown?: { value: string; label: string }[];
     sourcesForMemoryFilterDropdown: { value: string; label: string }[];
     characterMap: Record<string, CharacterRow>;
     channelById: Map<number, ChatChannelRow>;
+    /** group_id → logical label (Knowledge / Memory · char / Eval · …) for the Group column. */
+    groupLabelById: Map<string, string>;
     memoryActionBusy: boolean;
     onRequestClearAll: () => void;
     onRefreshMemories: () => void;
     onViewJson: (row: Record<string, unknown>) => void;
+    onViewProvenance: (row: Record<string, unknown>) => void;
     onDeleteRow: (row: Record<string, unknown>) => void;
   } = $props();
 
@@ -91,7 +107,7 @@
       <InlineLoading label="Loading memories…" class="m-0" />
     {:else if memoryEnabled === false}
       <p class="memories-hint">
-        Long-term memory is disabled or not configured for this workspace (preferences or missing models).
+        Long-term memory is disabled or not configured for this workspace (settings or missing models).
       </p>
     {:else if memoriesError}
       <!-- Error banner above -->
@@ -100,6 +116,15 @@
         <AdminPageStickyToolbar>
           <div class="memories-controls">
           <AdminFilterBar class="min-w-0 flex-1 items-end">
+            {#if groupsForMemoryFilterDropdown.length > 0}
+              <AdminFilterBarSelect
+                label="Group"
+                bind:value={memoryFilterGroupId}
+                placeholder="All memory"
+                class="min-w-[12rem]"
+                options={groupsForMemoryFilterDropdown}
+              />
+            {/if}
             <AdminFilterBarSelect
               label="Character"
               bind:value={memoryFilterCharacterId}
@@ -172,10 +197,14 @@
         <AdminTableShell density="dense" stickyHead class={graphRunsMemoriesTableShellClass}>
           <thead>
             <tr>
+              <th>Kind</th>
               <th>Created</th>
+              <th>Validity</th>
               <th>Character</th>
               <th>Memory</th>
-              <th>Source</th>
+              <th>Entities</th>
+              <th>Group</th>
+              <th>Origin</th>
               <th>Id</th>
               <th>Payload</th>
               <th>Actions</th>
@@ -183,16 +212,79 @@
           </thead>
           <tbody>
             {#each visibleMemoriesRows as row, idx (memoryStableKey(row, idx))}
+              {@const kind = memoryKind(row)}
               {@const created = memoryDateDisplay(memoryCreatedRaw(row))}
+              {@const validity = memoryValidity(row)}
+              {@const invalidDisp = memoryDateDisplay(validity.invalidAt)}
+              {@const entities = memoryEntities(row)}
+              {@const groupLabel = groupLabelById.get(memoryGroupId(row)) || memoryGroupId(row)}
+              {@const chunkCount = memoryChunkIds(row).length}
               {@const memCharacter = memoryCharacter(row, characterMap, channelById)}
               <tr>
+                <td>
+                  {#if kind}
+                    <Badge variant={kind === 'relation' ? 'secondary' : 'outline'}>
+                      {memoryKindLabel(row)}
+                    </Badge>
+                  {:else}
+                    —
+                  {/if}
+                </td>
                 <td class="memories-date-cell" title={created.title}>
                   <span>{created.date}</span>
                   <span>{created.time}</span>
                 </td>
+                <td>
+                  {#if validity.expired}
+                    <Badge
+                      variant="warning"
+                      title={`Stopped being true on ${invalidDisp.title || invalidDisp.date}`}
+                    >
+                      Expired{invalidDisp.date !== '—' ? ` ${invalidDisp.date}` : ''}
+                    </Badge>
+                  {:else}
+                    <Badge variant="success">Current</Badge>
+                  {/if}
+                </td>
                 <GraphRunsListCharacterCell photo={memCharacter.photo} name={memCharacter.name} />
                 <td class="memories-text-cell">{memoryPrimaryText(row)}</td>
-                <td>{memorySourceLabel(row)}</td>
+                <td class="memories-entities-cell">
+                  {#if entities && entities.kind === 'relation'}
+                    <span class="memories-entity">{entities.source}</span>
+                    {#if entities.relation}
+                      <span class="memories-rel">—[{entities.relation}]→</span>
+                    {:else}
+                      <span class="memories-rel">→</span>
+                    {/if}
+                    <span class="memories-entity">{entities.target}</span>
+                  {:else if entities && entities.kind === 'summary'}
+                    <span class="memories-entity">{entities.entity || '—'}</span>
+                    {#if entities.type}
+                      <span class="memories-rel">({entities.type})</span>
+                    {/if}
+                  {:else}
+                    —
+                  {/if}
+                </td>
+                <td class="memories-group-cell" title={groupLabel}>{groupLabel || '—'}</td>
+                <td class="memories-origin-cell">
+                  {#if chunkCount > 0}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      class="h-7 gap-1 px-2 text-xs shadow-none"
+                      title="View the conversation turn(s) this fact came from"
+                      onclick={() => onViewProvenance(row)}
+                    >
+                      <MessagesSquare size={14} aria-hidden="true" />
+                      {chunkCount}
+                      {chunkCount === 1 ? 'turn' : 'turns'}
+                    </Button>
+                  {:else}
+                    —
+                  {/if}
+                </td>
                 <td class="font-mono memories-id-cell">{memoryId(row) || '—'}</td>
                 <td class="memories-payload-cell">
                   <Button
@@ -283,6 +375,37 @@
     text-overflow: ellipsis;
   }
 
+  .memories-entities-cell {
+    max-width: 260px;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+
+  .memories-entity {
+    font-weight: 600;
+  }
+
+  .memories-rel {
+    margin: 0 4px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 11px;
+    color: var(--muted-foreground, #64748b);
+  }
+
+  .memories-group-cell {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted-foreground, #64748b);
+  }
+
+  .memories-origin-cell {
+    min-width: 90px;
+    white-space: nowrap;
+  }
+
   .memories-payload-cell {
     vertical-align: top;
     min-width: 100px;
@@ -295,6 +418,6 @@
 
   :global(.admin-table-shell-dense.memories-table-wrap) :global(table) {
     white-space: normal;
-    min-width: 820px;
+    min-width: 1180px;
   }
 </style>

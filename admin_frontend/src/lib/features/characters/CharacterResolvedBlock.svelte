@@ -264,7 +264,7 @@
         {@render llmAppliedPanel(resolved!.llm_applied)}
       {:else}
         <p class="text-sm text-destructive">
-          No chat model resolved. Check catalog, credentials, and default chat in preferences.
+          No chat model resolved. Check catalog, credentials, and default chat in settings.
         </p>
       {/if}
     </div>
@@ -274,7 +274,7 @@
     <div class="grid max-w-lg gap-2">
       {#if resolved!.voice_disabled}
         <p class="text-sm text-muted-foreground">
-          Voice replies are disabled in workspace preferences — TTS is not used for agent replies.
+          Voice replies are disabled in workspace settings — TTS is not used for agent replies.
         </p>
       {:else if resolved!.voice_rows.length === 0}
         <p class="text-sm text-muted-foreground">No preferred TTS ids — workspace default TTS applies.</p>
@@ -313,7 +313,7 @@
           {@render voiceAppliedPanel(resolved!.voice_applied)}
         {:else}
           <p class="text-sm text-destructive">
-            No TTS model resolved. Set default TTS in preferences and configure a TTS provider.
+            No TTS model resolved. Set default TTS in settings and configure a TTS provider.
           </p>
         {/if}
       {/if}
@@ -428,7 +428,7 @@
             {@render llmAppliedPanel(resolved.llm_applied)}
           {:else}
             <p class="max-w-lg text-sm text-destructive">
-              No chat model resolved. Check catalog, credentials, and default chat in preferences.
+              No chat model resolved. Check catalog, credentials, and default chat in settings.
             </p>
           {/if}
         </div>
@@ -437,7 +437,7 @@
           <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Voice (TTS)</span>
           {#if resolved.voice_disabled}
             <p class="max-w-lg text-sm text-muted-foreground">
-              Voice replies are disabled in workspace preferences — TTS is not used for agent replies.
+              Voice replies are disabled in workspace settings — TTS is not used for agent replies.
             </p>
           {:else if resolved.voice_rows.length === 0}
             <p class="max-w-lg text-sm text-muted-foreground">
@@ -478,7 +478,7 @@
               {@render voiceAppliedPanel(resolved.voice_applied)}
             {:else}
               <p class="max-w-lg text-sm text-destructive">
-                No TTS model resolved. Set default TTS in preferences and configure a TTS provider.
+                No TTS model resolved. Set default TTS in settings and configure a TTS provider.
               </p>
             {/if}
           {/if}

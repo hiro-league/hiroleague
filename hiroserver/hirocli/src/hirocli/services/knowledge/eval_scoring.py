@@ -1,10 +1,8 @@
-"""L3 eval — pure scoring + delta math, shared by the standalone harness
-(``eval/l3_synthetic_eval.py``) and the in-process runner
-(``services/knowledge/eval_runner.py``).
+"""Eval — pure scoring + delta math for the knowledge track, used by the in-process
+runner (``services/knowledge/eval_runner.py``).
 
-Kept dependency-free (no DB, no LangChain, no service imports) so the
-standalone harness and the package runner can both import it without dragging
-each other's surface area along.
+Kept dependency-free (no DB, no LangChain, no service imports) so the runner and the
+pure-logic tests can import it without dragging service surface area along.
 """
 
 from __future__ import annotations

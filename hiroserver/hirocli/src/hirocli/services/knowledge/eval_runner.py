@@ -1,14 +1,10 @@
-"""L3 eval runner — in-process orchestrator that publishes per-question events.
+"""Eval runner — in-process orchestrator that publishes per-question events.
 
-Mirrors ``eval/l3_synthetic_eval.py``'s logic (load corpus, ingest, build graph,
-run each question via compare, score, summarize) but as an **awaitable function
-that publishes Domain Events as it goes** — so the admin Eval Batch UI can
-update the table live via the existing ``/knowledge/events`` SSE stream
-(Phase 5c).
-
-The standalone CLI harness still works for terminal use (it imports the shared
-:mod:`eval_scoring` for its own scoring path). The runner here is the in-server
-path; both arrive at the same numbers because they share the scorer.
+Loads a corpus, ingests/remembers it, runs each question, scores (knowledge) or
+collects recalled facts (memory), and summarizes — as an **awaitable function that
+publishes Domain Events as it goes**, so the admin Eval Batch UI updates the table
+live via the existing ``/knowledge/events`` SSE stream. This in-process runner is the
+only eval entry point (the old standalone CLI harness was retired).
 
 Event types published (see ``constants.py``):
 
@@ -34,6 +30,10 @@ import yaml
 from hiro_commons.log import Logger
 
 from hirocli.domain.events import DomainEvent, get_domain_event_bus
+from hirocli.services.knowledge.graph.group_scope import (
+    eval_memory_group_id,
+    slug_group_part,
+)
 from hirocli.services.knowledge.constants import (
     KNOWLEDGE_EVAL_COMPLETED,
     KNOWLEDGE_EVAL_FAILED,
@@ -45,7 +45,6 @@ from hirocli.services.knowledge.eval_scoring import (
     MARK_ABSTAIN,
     MARK_PASS,
     MARK_RANK,
-    score_answer,
 )
 
 # A row "passes" for aggregate counting when it's correct (pass) or correctly
@@ -60,7 +59,12 @@ log = Logger.get("SVC.KNOWLEDGE.EVAL")
 # Tool defaults to these paths when the caller doesn't override.
 _REPO_ROOT = Path(__file__).resolve().parents[6]  # services/knowledge → … → hiroleague repo
 DEFAULT_CORPUS_DIR = _REPO_ROOT / "eval" / "l3_synthetic"
-DEFAULT_QUESTIONS_FILE = _REPO_ROOT / "eval" / "l3_questions.yaml"
+DEFAULT_QUESTIONS_FILE = _REPO_ROOT / "eval" / "l3_synthetic.questions.yaml"
+# The repo's bundled corpora live here; the admin corpus picker defaults to it but any
+# folder can be scanned (docs/eval-corpus-tracks-design.md §12). Stem convention:
+#   memory:    <name>.episodes.jsonl   ↔  <name>.questions.yaml
+#   knowledge: <name>/ (a folder of .md) ↔ <name>.questions.yaml (sibling)
+DEFAULT_EVAL_FOLDER = _REPO_ROOT / "eval"
 
 
 # Tag auto-applied to ingested eval docs so flat/graph retrieval can be scoped
@@ -95,17 +99,21 @@ def normalize_modes(modes: list[str] | None) -> list[str]:
 
 @dataclass(frozen=True)
 class LegResult:
-    """One leg's scored outcome for a single question."""
+    """One leg's outcome for a single question (unified across tracks).
 
-    mode: str          # "flat" | "graphiti"
-    mark: str          # one of MARK_*
+    ``mode`` is the leg name: ``flat``/``graphiti`` (knowledge) or ``recall`` (memory).
+    ``mark`` is the LLM-judge verdict glyph (``""`` when the judge was off — answers only).
+    ``recalled`` carries the memory engine's facts (empty for knowledge legs)."""
+
+    mode: str
+    mark: str          # one of MARK_* (or "" when not judged)
     elapsed_ms: int
-    answer: str
+    answer: str        # the model's answer
     run_id: str | None
+    reason: str = ""   # judge's one-line justification
+    recalled: tuple[str, ...] = ()  # memory: the recalled facts (for the fold/detail)
 
     def to_payload(self) -> dict[str, Any]:
-        # Compact ``answer_preview`` for the live terminal line + the FULL ``answer``
-        # for the expandable row; ``run_id`` for the per-leg "Open in Graph Runs" link.
         return {
             "mode": self.mode,
             "mark": self.mark,
@@ -113,6 +121,8 @@ class LegResult:
             "answer_preview": _preview(self.answer, 200),
             "answer": self.answer,
             "run_id": self.run_id,
+            "reason": self.reason,
+            "recalled": list(self.recalled),
         }
 
 
@@ -124,23 +134,19 @@ class QuestionResult:
     category: str
     question: str
     requires_graph: bool
-    # Leg name → that leg's scored result. Keyed by the modes the run selected.
+    # Leg name → that leg's result. ``flat``/``graphiti`` (knowledge) or ``recall`` (memory).
     legs: dict[str, LegResult]
-    # Best graph leg (graphiti/mix) vs flat, as a signed rank delta for the table's
-    # Δ column. "0" when flat wasn't run or no graph leg beat it.
+    # Best graph leg vs flat, as a signed rank delta (knowledge Δ column). "0" otherwise.
     delta: str
     subcategory: str = ""
-    # The scoring rubric, surfaced so the panel can show what each answer is judged
-    # against (the substrings score_answer requires / forbids). Display-only.
-    expected_fragments: list[str] = field(default_factory=list)
+    track: str = "knowledge"
+    # The ideal answer the judge graded against (shown as "Ideal" in results).
+    gold: str = ""
     must_not_contain: list[str] = field(default_factory=list)
 
     def to_payload(self, *, index: int, total: int) -> dict[str, Any]:
-        """Event payload shape consumed by the Eval Batch UI.
-
-        ``legs`` is keyed by leg name so the panel renders one column per selected
-        leg (1–3). For a ≤50-question eval the full-answer bytes are negligible and
-        let the panel show full answers live without a second round-trip."""
+        """Event payload shape consumed by the Eval Batch UI. ``legs`` is keyed by leg name
+        so the panel renders one column/section per leg; full answers are inlined (small)."""
         return {
             "index": index,
             "total": total,
@@ -149,11 +155,10 @@ class QuestionResult:
             "subcategory": self.subcategory,
             "question": self.question,
             "requires_graph": self.requires_graph,
+            "track": self.track,
+            "gold": self.gold,
             "legs": {mode: leg.to_payload() for mode, leg in self.legs.items()},
             "delta": self.delta,
-            # Scoring rubric for this question (display-only): what answers are judged
-            # against. Empty expected_fragments = negative-control (abstain is correct).
-            "expected_fragments": self.expected_fragments,
             "must_not_contain": self.must_not_contain,
         }
 
@@ -172,6 +177,9 @@ class EvalSummary:
     requires_graph_passing: dict[str, int]
     gate: str  # "proceed" | "pivot" | "n/a"
     elapsed_ms: int
+    # Whether the LLM judge ran (marks present). When false, the table shows answers only.
+    judged: bool = True
+    track: str = "knowledge"
     questions: list[QuestionResult] = field(default_factory=list)
     # category → {total, pass: {leg: count}} — the per-category × N-leg table.
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -179,12 +187,14 @@ class EvalSummary:
     def to_payload(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
+            "track": self.track,
             "total_questions": self.total_questions,
             "modes": self.modes,
             "passing": self.passing,
             "requires_graph_total": self.requires_graph_total,
             "requires_graph_passing": self.requires_graph_passing,
             "gate": self.gate,
+            "judged": self.judged,
             "elapsed_ms": self.elapsed_ms,
             "by_category": self.by_category,
         }
@@ -198,9 +208,11 @@ class EvalSummary:
 def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
     """Load + validate the eval questions YAML.
 
-    Each row must have ``id``, ``question``, ``expected_fragments`` (list, may
-    be empty for negative-control rows). Extra keys (category, requires_graph,
-    notes) are passed through but optional."""
+    Each row needs ``id`` + ``question`` and a grading reference — **either** an
+    ``expected_answer`` (the ideal answer the LLM judge grades against) **or**
+    ``expected_kind: abstain`` (negative control). ``expected_fragments`` is now optional
+    (substring scoring was dropped in favor of the judge) but still parsed when present.
+    Extra keys (category, requires, notes) pass through."""
     target = path or DEFAULT_QUESTIONS_FILE
     if not target.exists():
         raise FileNotFoundError(f"L3 eval questions not found: {target}")
@@ -215,17 +227,23 @@ def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
         qtext = str(row.get("question") or "").strip()
         if not qid or not qtext:
             raise ValueError(f"{target}: row {i} missing id or question")
-        # ``expected_kind: abstain`` is shorthand for the negative-control (empty
-        # expected_fragments) — abstain is the correct outcome, a confident answer fails.
+        # ``expected_kind: abstain`` = negative control (abstaining is the correct outcome).
         expected_kind = str(row.get("expected_kind") or "").strip().lower()
+        has_fragments_key = "expected_fragments" in row
         expected = row.get("expected_fragments")
-        if expected_kind == "abstain":
-            expected = expected if isinstance(expected, list) else []
-        elif expected is None or not isinstance(expected, list):
+        expected = expected if isinstance(expected, list) else []
+        gold = str(row.get("expected_answer") or "").strip()
+        # A negative control: explicit abstain, or an explicit empty fragments list with no gold
+        # (the legacy "[] = abstain is correct" shorthand).
+        negative = expected_kind == "abstain" or (has_fragments_key and not expected and not gold)
+        # Grading reference required: a gold answer, a negative control, or legacy fragments.
+        if not gold and not expected and not negative:
             raise ValueError(
-                f"{target}: row {i} ({qid}): expected_fragments must be a list "
-                f"(use [] or expected_kind: abstain for negative-control rows)"
+                f"{target}: row {i} ({qid}): needs an `expected_answer` (judge reference), "
+                f"`expected_kind: abstain`, or `expected_fragments`"
             )
+        if negative:
+            expected_kind = "abstain"
         must_not = row.get("must_not_contain") or []
         if not isinstance(must_not, list):
             raise ValueError(f"{target}: row {i} ({qid}): must_not_contain must be a list")
@@ -245,9 +263,117 @@ def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
                 "expected_fragments": [str(f) for f in expected],
                 "must_not_contain": [str(f) for f in must_not],
                 "requires_graph": requires_graph,
+                # The ideal answer the LLM judge grades against (shown as "Ideal" in results).
+                "expected_answer": gold,
+                # "abstain" ⇒ negative control: abstaining is the correct outcome.
+                "expected_kind": expected_kind,
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Corpus discovery — scan a folder, pair corpuses with their question banks
+# ---------------------------------------------------------------------------
+#
+# A corpus is identified by (track, folder, id). Stem convention (docs §12):
+#   memory:    <id>.episodes.jsonl    ↔ <id>.questions.yaml
+#   knowledge: <id>/ (folder of .md)  ↔ <id>.questions.yaml (sibling of the folder)
+# id doubles as the eval drawer suffix → eval_mem_<id> / eval_kb_<id>.
+
+
+def _safe_question_count(questions_path: Path) -> int:
+    """Best-effort question count for the picker; 0 when the bank is missing/unreadable."""
+    if not questions_path.exists():
+        return 0
+    try:
+        return len(load_questions(questions_path))
+    except Exception:
+        # A malformed bank shouldn't break corpus discovery — surface 0 and let the run
+        # fail loud later if the user picks it.
+        log.warning("⚠️ knowledge.eval — unreadable question bank · path=%s", questions_path, exc_info=True)
+        return 0
+
+
+def discover_corpuses(folder: Path | str, track: str) -> list[dict[str, Any]]:
+    """List the corpuses in ``folder`` for ``track`` (``memory`` | ``knowledge``).
+
+    Each entry: ``{id, name, corpus_path, questions_path, question_count, item_count}``
+    where ``item_count`` is episodes (memory) or ``.md`` docs (knowledge). Returns ``[]``
+    for a missing/empty folder (the picker shows a hint, not an error)."""
+    base = Path(folder)
+    if not base.exists() or not base.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    if track == "memory":
+        for f in sorted(base.glob("*.episodes.jsonl")):
+            if "bak" in f.stem.lower():  # skip *.episodes_bak backups
+                continue
+            stem = f.name[: -len(".episodes.jsonl")]
+            qpath = base / f"{stem}.questions.yaml"
+            episodes = 0
+            try:
+                from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+
+                episodes = len(load_episodes_file(f))
+            except Exception:
+                log.warning("⚠️ knowledge.eval — unreadable corpus · path=%s", f, exc_info=True)
+            out.append(
+                {
+                    "id": stem,
+                    "name": stem,
+                    "corpus_path": str(f),
+                    "questions_path": str(qpath) if qpath.exists() else "",
+                    "question_count": _safe_question_count(qpath),
+                    "item_count": episodes,
+                }
+            )
+    else:  # knowledge — a corpus is a subfolder of .md docs
+        for d in sorted(p for p in base.iterdir() if p.is_dir()):
+            md = list(d.glob("*.md"))
+            if not md:
+                continue
+            qpath = base / f"{d.name}.questions.yaml"
+            out.append(
+                {
+                    "id": d.name,
+                    "name": d.name,
+                    "corpus_path": str(d),
+                    "questions_path": str(qpath) if qpath.exists() else "",
+                    "question_count": _safe_question_count(qpath),
+                    "item_count": len(md),
+                }
+            )
+    return out
+
+
+def build_answer_model(workspace_path: Path) -> tuple[Any | None, str]:
+    """Resolve + build the workspace **answering model** for the eval answer/judge steps
+    (reused, not a separate eval model). Returns ``(model, model_id)`` or ``(None, "")`` when
+    no answering model is configured — callers then skip answer/judge gracefully."""
+    try:
+        from hirocli.domain.model_factory import create_chat_model
+        from hirocli.domain.preferences import (
+            load_preferences,
+            resolve_knowledge_answering_llm,
+        )
+
+        prefs = load_preferences(workspace_path)
+        spec = resolve_knowledge_answering_llm(prefs, workspace_path)
+        if spec is None:
+            log.warning("⚠️ knowledge.eval — no answering model configured; skipping answer/judge")
+            return None, ""
+        model = create_chat_model(
+            spec.model_id,
+            workspace_path=workspace_path,
+            temperature=spec.temperature,
+            max_tokens=spec.max_tokens,
+            thinking=spec.thinking,
+        )
+        return model, spec.model_id
+    except Exception:
+        log.warning("⚠️ knowledge.eval — answering model unavailable for answer/judge", exc_info=True)
+        return None, ""
 
 
 async def run_eval(
@@ -260,6 +386,7 @@ async def run_eval(
     top_k: int | None = None,
     min_score: float | None = None,
     modes: list[str] | None = None,
+    judge: bool = False,
 ) -> EvalSummary:
     """Run the question loop against ``service`` — emitting events as it goes.
 
@@ -285,6 +412,17 @@ async def run_eval(
     eval_filters: dict[str, Any] = dict(filters or {})
     eval_filters.setdefault("tags", [EVAL_SYNTHETIC_TAG])
 
+    # Optional LLM judge: build the answering model + a ledger sink (so judge calls show as
+    # priced Graph Runs). When the judge is off — or no model is configured — legs carry the
+    # answer but no mark, and the gate is n/a.
+    model, model_id = (build_answer_model(workspace_path) if judge else (None, ""))
+    sink = None
+    if model is not None:
+        from hirocli.runtime.agent_graph.ledger import LedgerSink
+
+        sink = LedgerSink(workspace_path)
+    judged = model is not None
+
     _publish(
         bus,
         workspace_path,
@@ -292,10 +430,12 @@ async def run_eval(
         {
             "run_id": rid,
             "total_questions": total,
+            "track": "knowledge",
             "filters": eval_filters,
             # Selected legs — the UI needs these up front to render the right
             # columns before the first question row arrives.
             "modes": run_modes,
+            "judged": judged,
         },
     )
 
@@ -309,6 +449,11 @@ async def run_eval(
                 filters=eval_filters,
                 top_k=top_k,
                 min_score=min_score,
+                model=model,
+                model_id=model_id,
+                judge=judged,
+                sink=sink,
+                run_id=rid,
             )
             rows.append(result)
             # run_id on every event so the per-workspace registry can attribute
@@ -335,7 +480,7 @@ async def run_eval(
         )
         raise
 
-    summary = _summarize(rid, rows, started_at, run_modes)
+    summary = _summarize(rid, rows, started_at, run_modes, judged=judged)
     _publish(
         bus,
         workspace_path,
@@ -396,20 +541,27 @@ async def ingest_synthetic_corpus_via_service(
 
 
 # ---------------------------------------------------------------------------
-# Adam JSONL episode corpus — the temporal-aware eval (Graphiti pivot)
+# Memory eval track — turn corpus → conversation remember/recall (Phase 1)
+#
+# docs/eval-corpus-tracks-design.md §8. The Adam turn corpus now feeds the
+# CONVERSATION-MEMORY engine (remember/recall), not the knowledge pipeline — a
+# routing correction (Adam is turn-shaped data; turns belong in chat). Data lands
+# in a dedicated ``eval_mem_{set}`` drawer via an eval-scoped GraphitiConversationMemory
+# (the scoped-service-object), never a real ``mem_{user}_{character}`` group.
+#
+# We are in initial development → no backward compatibility: the prior
+# Adam-through-knowledge path (Qdrant + kb_main double-write) is retired, not wrapped.
 # ---------------------------------------------------------------------------
 
 ADAM_CORPUS_FILE = _REPO_ROOT / "eval" / "adam_year.episodes.jsonl"
-ADAM_QUESTIONS_FILE = _REPO_ROOT / "eval" / "adam_questions.yaml"
-ADAM_EVAL_TAG = "_adam_eval"
-# Stable namespace: episode id → the uuid used as BOTH the Qdrant point_id AND the
-# Graphiti episode uuid, so a graph fact's ``episodes`` joins straight to the passage.
-_ADAM_NS = uuid.uuid5(uuid.NAMESPACE_URL, "hiro.eval.adam")
+ADAM_QUESTIONS_FILE = _REPO_ROOT / "eval" / "adam_year.questions.yaml"
 
-
-def adam_point_id(episode_id: str) -> str:
-    """Deterministic uuid for an episode id (Qdrant requires uuid/int ids)."""
-    return str(uuid.uuid5(_ADAM_NS, episode_id))
+# Default memory-eval set id (the bundled Adam corpus stem) → the ``eval_mem_adam_year`` drawer.
+DEFAULT_MEMORY_EVAL_SET = "adam_year"
+# Nominal user id for the eval-scoped memory facade. The drawer is minted by the scope
+# override (eval_mem_{set}), so this id never reaches a group_id (decision E-a, moot) — a
+# negative sentinel keeps it from ever colliding with a real (positive) data.db user id.
+MEMORY_EVAL_USER_ID = -1
 
 
 def load_adam_questions(path: Path | None = None) -> list[dict[str, Any]]:
@@ -417,173 +569,354 @@ def load_adam_questions(path: Path | None = None) -> list[dict[str, Any]]:
     return load_questions(path or ADAM_QUESTIONS_FILE)
 
 
-async def ingest_adam_corpus_via_service(
-    service: Any,
-    workspace_path: Path,
+async def _remember_episodes(
+    memory: Any,
+    episodes: "list[Any]",
     *,
-    corpus_path: Path | None = None,
-    tag: str = ADAM_EVAL_TAG,
-    run_id: str | None = None,
-    reset_first: bool = True,
+    workspace_path: Path,
+    run_id: str,
+    user_id: int,
+    character_id: str,
+    ledger_sink: Any | None = None,
 ) -> int:
-    """Ingest the Adam JSONL episode corpus into BOTH Qdrant and the Graphiti graph.
+    """Replay each episode through the ``remember`` path (one turn at a time, in
+    chronological order so supersession resolves correctly). Emits a per-episode
+    ``setup_progress`` line so the admin terminal ticks during the (LLM-bound) build.
 
-    Per episode: derive a shared uuid (``adam_point_id``) used as the Qdrant
-    point_id **and** the Graphiti episode uuid. Qdrant gets one tagged point per
-    episode (flat/mix passages); Graphiti gets the episodes sequentially in
-    chronological order (temporal supersession). Requires a configured extraction
-    model for the graph build.
-
-    Emits a ``setup_progress`` event **per episode** for both the Qdrant write
-    and the (slow, LLM-bound) graph extraction, so the admin terminal shows live
-    progress instead of freezing for minutes on the coarse two-phase view."""
-    from dataclasses import replace
-
-    from hirocli.domain.preferences import load_preferences
-    from hirocli.runtime.agent_graph.ledger import LedgerSink
-    from hirocli.services.knowledge.constants import (
-        KNOWLEDGE_GRAPH_INGEST_COMPLETED,
-        KNOWLEDGE_GRAPH_INGEST_PROGRESS,
-    )
-    from hirocli.services.knowledge.graph import GraphitiMemoryService
-    from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
-
-    episodes = load_episodes_file(corpus_path or ADAM_CORPUS_FILE)
+    ``ledger_sink`` makes each turn's Graphiti extraction observable in **Graph Runs**:
+    the caller opens one parent run (``current_run``) and passes its sink here, so every
+    turn's per-episode/per-operation rows NEST under that single run (priced sub-rows fold
+    into its aggregate). ``None`` ⇒ no ledger. Returns the facts learned across all turns."""
     bus = get_domain_event_bus()
     total = len(episodes)
     _publish(
         bus,
         workspace_path,
         KNOWLEDGE_EVAL_SETUP_PROGRESS,
-        {"run_id": run_id, "phase": "ingest_adam", "episode_count": total},
+        {"run_id": run_id, "phase": "remember", "episode_count": total},
     )
-
-    # The graph service is built up-front because it's needed BOTH for the optional
-    # pre-run reset and the graph build below. Kuzu driver is shared/refcounted, so one
-    # instance — closed once in the finally — is enough (require_backend=False so an
-    # explicit eval build works even with the retrieval backend toggle off).
-    prefs = load_preferences(workspace_path)
-    gsvc = GraphitiMemoryService.from_preferences(prefs, workspace_path, require_backend=False)
-    if gsvc is None:
-        raise RuntimeError(
-            "Adam eval: no extraction model configured for the Graphiti graph build. "
-            "Set graph.extraction_model or knowledge.answering.model (+ provider key)."
+    learned = 0
+    for index, ep in enumerate(episodes, start=1):
+        ref = getattr(ep, "reference_time", None)
+        meta = {
+            "timestamp": ref.isoformat() if ref is not None else "",
+            "speaker": getattr(ep, "speaker", "") or "User",
+            "message_id": getattr(ep, "chunk_id", "") or "",
+        }
+        result = await memory.add(
+            ep.text,
+            user_id=user_id,
+            run_id=f"eval:{run_id}",
+            character_id=character_id,
+            metadata=meta,
+            ledger_sink=ledger_sink,
         )
-    ledger_sink = LedgerSink(workspace_path)
-    try:
-        # 0) Pre-run reset — keep the eval deterministic run-to-run by deleting ONLY what a
-        #    previous eval created (its Qdrant points by document_id + its graph episodes and
-        #    the nodes/edges those episodes exclusively own) before re-ingesting. Targeted so
-        #    other knowledge data is never touched; idempotent (a first run finds nothing).
-        if reset_first:
-            _publish(
-                bus,
-                workspace_path,
-                KNOWLEDGE_EVAL_SETUP_PROGRESS,
-                {"run_id": run_id, "phase": "reset_adam", "episode_count": total},
-            )
-            # Wipe BOTH stores by DOCUMENT SCOPE, not by the current file's episode
-            # ids. A prior run may have ingested more episodes than the file now lists
-            # (e.g. a truncated corpus for a smaller test run); a per-uuid graph delete
-            # keyed off the file would strand those — leaving the previous run's data
-            # "still there" before re-ingest. Qdrant already scoped by document_id;
-            # the graph now matches via source_description == document_id. (Bug fix.)
-            for doc_id in {ep.document_id for ep in episodes}:
-                await asyncio.to_thread(service.vector_store.delete_document, doc_id)
-                await gsvc.remove_episodes_by_document(doc_id)
-            # Bug fix: the reset wiped this run's prior nodes/edges but emitted no graph
-            # signal, so the live Graph tab kept the stale prior-run graph and layered new
-            # nodes on top (never "starting from zero"). Trigger the reconcile (full
-            # re-export) so the view re-syncs to the cleared ground truth before the build
-            # begins adding nodes.
-            _publish(
-                bus,
-                workspace_path,
-                KNOWLEDGE_GRAPH_INGEST_COMPLETED,
-                {"document_count": 0, "totals": {}, "reason": "reset"},
-            )
-
-        # 1) Qdrant double-write — one tagged point per episode, point_id == shared uuid.
-        graphiti_eps = []
-        for ep in episodes:
-            qid = adam_point_id(ep.chunk_id)
-            await service.ingest_text_chunk(
-                point_id=qid,
-                text=ep.text,
-                document_id=ep.document_id,
-                title=ep.document_title,
-                tags=[tag],
-            )
-            graphiti_eps.append(replace(ep, chunk_id=qid))
-            _publish(
-                bus,
-                workspace_path,
-                KNOWLEDGE_EVAL_SETUP_PROGRESS,
-                {
-                    "run_id": run_id,
-                    "phase": "ingest_adam",
-                    "index": len(graphiti_eps),
-                    "total": total,
-                    "title": ep.document_title,
-                    "snippet": _preview(ep.text, 90),
-                },
-            )
-
-        # 2) Graphiti graph build — sequential + chronological.
+        learned += int(getattr(result, "stored_count", 0) or 0)
         _publish(
             bus,
             workspace_path,
             KNOWLEDGE_EVAL_SETUP_PROGRESS,
-            {"run_id": run_id, "phase": "build_graph", "episode_count": len(graphiti_eps)},
+            {
+                "run_id": run_id,
+                "phase": "remember",
+                "index": index,
+                "total": total,
+                "snippet": _preview(ep.text, 90),
+            },
         )
+    return learned
 
-        # Bridge Graphiti's per-episode progress into eval terminal lines. The build
-        # is the multi-minute part (one LLM extraction per episode), so this is the
-        # progress the user most needs to see ticking.
-        def _graph_sink(event_type: str, payload: dict[str, Any]) -> None:
-            # Bug fix: forward the raw graph event onto the bus so the admin Graph
-            # tab receives live node/edge/progress deltas during an Adam eval build.
-            # Previously this sink only re-emitted ingest_progress as an eval terminal
-            # line and silently dropped node/edge upserts, so the Graph tab never updated
-            # live (it froze after the one-shot mount export). Mirrors the synthetic
-            # build_graph / ingest_batch paths, which publish via _publish_graph_event.
-            _publish(bus, workspace_path, event_type, payload)
-            if event_type != KNOWLEDGE_GRAPH_INGEST_PROGRESS:
-                return
+
+async def _memory_question(
+    memory: Any,
+    q: dict[str, Any],
+    *,
+    user_id: int,
+    character_id: str,
+    sink: Any | None = None,
+    run_id: str = "",
+    set_id: str = "",
+    model: Any | None = None,
+    model_id: str = "",
+    judge: bool = False,
+) -> dict[str, Any]:
+    """One memory question, all in ONE Graph Run: **recall** (graph search) → **answer**
+    (grounded only in the recalled facts) → optional **judge** (vs the ideal answer).
+
+    The run holds a ``memory_recall`` node (graph-search spans), an ``eval_answer`` node, and an
+    ``eval_judge`` node — all priced. Returns the unified row (``legs={'recall': {...}}`` with the
+    model answer + verdict mark + recalled facts, plus ``gold`` and the ``stale_hit`` guard)."""
+    from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_entry, current_run
+    from hirocli.services.knowledge.eval_judge import answer_from_context, judge_answer
+    from hirocli.services.knowledge.ledger_runner import preview_answer, preview_query
+
+    must_not = q.get("must_not_contain") or []
+    gold = q.get("expected_answer", "")
+    is_control = str(q.get("expected_kind") or "") == "abstain"
+
+    acc = None
+    run_token = None
+    if sink is not None:
+        acc = RunAccumulator(
+            sink=sink,
+            run_id=f"memory_eval_q-{slug_group_part(set_id)}-{run_id}-{slug_group_part(str(q.get('id') or ''))}",
+            inbound_id=eval_memory_group_id(set_id),
+            character_id=set_id,
+        )
+        run_token = current_run.set(acc)
+
+    facts: list[str] = []
+    answer, mark, reason = "", "", ""
+    t0 = time.perf_counter()
+    try:
+        # 1) recall (graph search) — ledgered as a memory_recall node when a sink is present.
+        if sink is not None:
+            entry = sink.open_entry("memory_recall", {}, None)
+            entry_token = current_entry.set(entry)
+            try:
+                hits = await memory.search(
+                    q["question"], user_id=user_id, character_id=character_id
+                )
+                facts = [
+                    str(h.get("memory") or "") for h in hits if str(h.get("memory") or "").strip()
+                ]
+                entry.input_preview = preview_query(q["question"])
+                entry.output_preview = preview_answer(" | ".join(facts) or "(nothing recalled)")
+            finally:
+                entry.finish("ok")
+                sink.write_rows(entry.rows(include_parent=True))
+                current_entry.reset(entry_token)
+        else:
+            hits = await memory.search(q["question"], user_id=user_id, character_id=character_id)
+            facts = [
+                str(h.get("memory") or "") for h in hits if str(h.get("memory") or "").strip()
+            ]
+        # 2) answer — grounded ONLY in the recalled facts (eval integrity).
+        if model is not None:
+            answer = await answer_from_context(
+                model, model_id, question=q["question"], context=facts, sink=sink
+            )
+        # 3) judge — vs the ideal answer (optional step).
+        if judge and model is not None:
+            verdict = await judge_answer(
+                model,
+                model_id,
+                question=q["question"],
+                answer=answer,
+                expected_answer=gold,
+                must_not_contain=must_not,
+                is_negative_control=is_control,
+                sink=sink,
+            )
+            mark, reason = verdict.mark, verdict.reason
+        if sink is not None and acc is not None:
+            sink.write_run_row(
+                acc,
+                status="completed",
+                decision_kind="completed",
+                decision_detail="memory_eval_question",
+                input_preview=f"q: {q['question'][:160]}",
+                output_preview=(answer or " | ".join(facts))[:200],
+            )
+    finally:
+        if run_token is not None and acc is not None:
+            sink.evict_run(acc.run_id)
+            current_run.reset(run_token)
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    blob = "\n".join(facts).lower()
+    stale_hit = any(f.lower() in blob for f in must_not if f)
+    return {
+        "id": q["id"],
+        "category": q.get("category", ""),
+        "subcategory": q.get("subcategory", ""),
+        "question": q["question"],
+        "requires_graph": bool(q.get("requires_graph")),
+        "track": "memory",
+        "gold": gold,
+        "must_not_contain": must_not,
+        "stale_hit": stale_hit,
+        "delta": "0",
+        "legs": {
+            "recall": {
+                "mode": "recall",
+                "mark": mark,
+                "reason": reason,
+                "elapsed_ms": elapsed_ms,
+                "answer": answer,
+                "answer_preview": _preview(answer, 200),
+                "run_id": (acc.run_id if acc is not None else None),
+                "recalled": facts,
+            }
+        },
+    }
+
+
+async def run_memory_eval(
+    memory: Any,
+    workspace_path: Path,
+    *,
+    set_id: str = DEFAULT_MEMORY_EVAL_SET,
+    questions: list[dict[str, Any]] | None = None,
+    episodes: "list[Any] | None" = None,
+    corpus_path: Path | None = None,
+    run_id: str | None = None,
+    remember: bool = True,
+    judge: bool = False,
+    eval_user_id: int = MEMORY_EVAL_USER_ID,
+) -> dict[str, Any]:
+    """Run the memory-eval track: remember a turn corpus, then recall per question.
+
+    Single engine (recall), no flat/graph comparison, no PROCEED/PIVOT gate (docs §8).
+    Emits the shared ``knowledge.eval.*`` events with a ``track="memory"`` discriminator
+    so the existing registry/SSE/replay infra carries it unchanged. ``memory`` must be an
+    **eval-scoped** facade (its writes/reads target ``eval_mem_{set}``); the caller owns
+    its lifecycle (build + close).
+
+    Returns the summary payload (also published as ``knowledge.eval.completed``)."""
+    from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+
+    bus = get_domain_event_bus()
+    rid = run_id or f"memeval-{uuid.uuid4()}"
+    questions = questions if questions is not None else load_adam_questions()
+    total = len(questions)
+    # character_id is cosmetic for an eval-scoped facade (the override mints the drawer),
+    # but the MemoryService API requires one; the set id is the natural label.
+    character_id = set_id
+    started_at = time.perf_counter()
+
+    # One ledger sink for the whole eval → the remember/build shows as ONE Graph Run and each
+    # recall shows as its own retrieve run, mirroring the knowledge track (ingest run + per-question
+    # answer runs). Lazy import keeps the ledger off this module's base import path.
+    from hirocli.runtime.agent_graph.ledger import LedgerSink, RunAccumulator, current_run
+
+    sink = LedgerSink(workspace_path)
+    # Answer step uses the workspace answering model (reused). The judge (optional) grades it.
+    model, model_id = build_answer_model(workspace_path)
+    judged = judge and model is not None
+
+    _publish(
+        bus,
+        workspace_path,
+        KNOWLEDGE_EVAL_STARTED,
+        {
+            "run_id": rid,
+            "total_questions": total,
+            "track": "memory",
+            "modes": ["recall"],
+            "judged": judged,
+            "filters": {"set": set_id},
+        },
+    )
+
+    rows: list[dict[str, Any]] = []
+    try:
+        remembered = 0
+        if remember:
+            eps = episodes if episodes is not None else load_episodes_file(
+                corpus_path or ADAM_CORPUS_FILE
+            )
+            # Open ONE parent run so every turn's Graphiti extraction nests under it (priced
+            # sub-rows fold into the aggregate) — the memory "ingest" Graph Run.
+            ledger_run_id = f"memory_eval-{slug_group_part(set_id)}-{rid}"
+            accumulator = RunAccumulator(
+                sink=sink,
+                run_id=ledger_run_id,
+                inbound_id=eval_memory_group_id(set_id),
+                character_id=set_id,
+            )
+            token = current_run.set(accumulator)
+            try:
+                remembered = await _remember_episodes(
+                    memory,
+                    eps,
+                    workspace_path=workspace_path,
+                    run_id=rid,
+                    user_id=eval_user_id,
+                    character_id=character_id,
+                    ledger_sink=sink,
+                )
+                sink.write_run_row(
+                    accumulator,
+                    status="completed",
+                    decision_kind="completed",
+                    decision_detail="memory_eval_remember",
+                    input_preview=f"corpus: {set_id} ({len(eps)} turns)",
+                    output_preview=f"remembered {len(eps)} turns · learned {remembered} facts",
+                )
+            finally:
+                sink.evict_run(ledger_run_id)
+                current_run.reset(token)
+        for index, q in enumerate(questions):
+            # Each question is its own Graph Run: recall → answer → (judge).
+            row = await _memory_question(
+                memory,
+                q,
+                user_id=eval_user_id,
+                character_id=character_id,
+                sink=sink,
+                run_id=rid,
+                set_id=set_id,
+                model=model,
+                model_id=model_id,
+                judge=judged,
+            )
+            rows.append(row)
             _publish(
                 bus,
                 workspace_path,
-                KNOWLEDGE_EVAL_SETUP_PROGRESS,
-                {
-                    "run_id": run_id,
-                    "phase": "build_graph",
-                    "index": int(payload.get("chunk_index") or 0),
-                    "total": int(payload.get("chunk_total") or len(graphiti_eps)),
-                },
+                KNOWLEDGE_EVAL_QUESTION_COMPLETED,
+                {"run_id": rid, "index": index, "total": total, **row},
             )
-
-        # Record the Adam-corpus graph build as a ``graph_ingest`` run (per-episode +
-        # per-operation nodes) so the ingestion is visible in Graph Runs — previously
-        # this path bypassed the ledger entirely (only the answers showed up).
-        await gsvc.ingest_chunks(
-            graphiti_eps,
-            source_role="user_document",
-            event_sink=_graph_sink,
-            ledger_sink=ledger_sink,
+    except Exception as exc:
+        # CancelledError is a BaseException (not Exception) → it propagates past this
+        # handler to the route's cancel path, exactly as run_eval relies on.
+        log.error(
+            "❌ knowledge.eval — memory run aborted",
+            run_id=rid,
+            error=str(exc),
+            exc_info=True,
         )
-        # Bug fix: the build burst is over — tell the Graph tab to run one reconciling
-        # full export to heal any deltas dropped under the SSE queue cap (mirrors the
-        # synthetic build_graph / ingest_batch paths). Without this the Adam path never
-        # emitted ingest_completed, so the live view never reconciled.
         _publish(
             bus,
             workspace_path,
-            KNOWLEDGE_GRAPH_INGEST_COMPLETED,
-            {"document_count": len({ep.document_id for ep in episodes}), "totals": {}},
+            KNOWLEDGE_EVAL_FAILED,
+            {"run_id": rid, "error": f"{type(exc).__name__}: {str(exc)[:200]}"},
         )
-    finally:
-        await gsvc.close()
-    return len(episodes)
+        raise
+
+    def _recall_leg(r: dict[str, Any]) -> dict[str, Any]:
+        return (r.get("legs") or {}).get("recall") or {}
+
+    passing_recall = sum(1 for r in rows if _recall_leg(r).get("mark") in _PASSING_MARKS)
+    summary = {
+        "run_id": rid,
+        "track": "memory",
+        "total_questions": total,
+        "modes": ["recall"],
+        "judged": judged,
+        "remembered_turns": remembered,
+        "recalled_for": sum(1 for r in rows if _recall_leg(r).get("recalled")),
+        "stale_hits": sum(1 for r in rows if r.get("stale_hit")),
+        # Judge pass-count for the single recall leg (0 when the judge was off).
+        "passing": {"recall": passing_recall},
+        # No flat/graph legs → the PROCEED/PIVOT gate is undefined for the memory track.
+        "gate": "n/a",
+        "by_category": category_breakdown_rows(rows, ["recall"]),
+        "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+    }
+    _publish(bus, workspace_path, KNOWLEDGE_EVAL_COMPLETED, summary)
+    log.info(
+        "✅ knowledge.eval — memory run complete · remembered=%d · recalled_for=%d/%d · "
+        "judged=%s · pass=%d · set=%s",
+        summary["remembered_turns"],
+        summary["recalled_for"],
+        total,
+        judged,
+        passing_recall,
+        set_id,
+    )
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -599,8 +932,20 @@ async def _run_one_question(
     filters: dict[str, Any],
     top_k: int | None,
     min_score: float | None,
+    model: Any | None = None,
+    model_id: str = "",
+    judge: bool = False,
+    sink: Any | None = None,
+    run_id: str = "",
 ) -> QuestionResult:
-    """One question → one N-leg fan-out → per-leg scores → one row."""
+    """One knowledge question → N-leg fan-out (answer per leg) → optional LLM judge → one row.
+
+    ``answer_legs`` already ledgers each leg's answer as its own Graph Run. When ``judge`` is on,
+    the leg's answer is graded by the LLM judge (vs the ideal ``expected_answer``) inside a
+    per-question ``knowledge_eval_judge`` run, so the verdict's grading call shows in Graph Runs
+    too. With ``judge`` off, legs carry the answer but no mark (answers-only)."""
+    from hirocli.services.knowledge.eval_judge import judge_answer
+
     results = await service.answer_legs(
         q["question"],
         modes=modes,
@@ -609,29 +954,67 @@ async def _run_one_question(
         filters=filters,
         rewrite=True,
     )
-    expected = q["expected_fragments"]
+    gold = q.get("expected_answer", "")
     must_not = q.get("must_not_contain") or []
+    is_control = str(q.get("expected_kind") or "") == "abstain"
     legs: dict[str, LegResult] = {}
-    scores: dict[str, Any] = {}
-    # Preserve the requested column order even though gather returns a dict.
-    for mode in modes:
-        res = results.get(mode)
-        if res is None:
-            continue
-        score = score_answer(
-            res.answer,
-            expected,
-            no_results=bool(res.no_results),
-            must_not_contain=must_not,
+    marks: dict[str, str] = {}
+
+    # Optional judge: one run per question holding a judge node per leg (priced in Graph Runs).
+    judging = judge and model is not None and sink is not None
+    run_token = None
+    if judging:
+        from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_run
+
+        acc = RunAccumulator(
+            sink=sink,
+            run_id=f"knowledge_eval_judge-{run_id}-{slug_group_part(str(q.get('id') or ''))}",
+            inbound_id=str(q.get("id") or ""),
         )
-        scores[mode] = score
-        legs[mode] = LegResult(
-            mode=mode,
-            mark=score.mark,
-            elapsed_ms=int(res.elapsed_ms or 0),
-            answer=res.answer or "",
-            run_id=getattr(res, "run_id", None),
-        )
+        run_token = current_run.set(acc)
+    try:
+        for mode in modes:  # preserve requested column order
+            res = results.get(mode)
+            if res is None:
+                continue
+            answer = res.answer or ""
+            mark, reason = "", ""
+            if judging:
+                verdict = await judge_answer(
+                    model,
+                    model_id,
+                    question=q["question"],
+                    answer=answer,
+                    expected_answer=gold,
+                    must_not_contain=must_not,
+                    is_negative_control=is_control,
+                    sink=sink,
+                )
+                mark, reason = verdict.mark, verdict.reason
+            marks[mode] = mark
+            legs[mode] = LegResult(
+                mode=mode,
+                mark=mark,
+                elapsed_ms=int(res.elapsed_ms or 0),
+                answer=answer,
+                run_id=getattr(res, "run_id", None),
+                reason=reason,
+            )
+        if judging:
+            sink.write_run_row(
+                acc,
+                status="completed",
+                decision_kind="completed",
+                decision_detail="knowledge_eval_judge",
+                input_preview=f"q: {q['question'][:160]}",
+                output_preview=" ".join(f"{m}:{mk or '—'}" for m, mk in marks.items()),
+            )
+    finally:
+        if run_token is not None:
+            from hirocli.runtime.agent_graph.ledger import current_run as _cr
+
+            sink.evict_run(acc.run_id)
+            _cr.reset(run_token)
     return QuestionResult(
         id=q["id"],
         category=q.get("category", ""),
@@ -639,23 +1022,24 @@ async def _run_one_question(
         question=q["question"],
         requires_graph=bool(q.get("requires_graph")),
         legs=legs,
-        delta=_best_graph_delta(scores),
-        expected_fragments=expected,
+        delta=_best_graph_delta_marks(marks),
+        track="knowledge",
+        gold=gold,
         must_not_contain=must_not,
     )
 
 
-def _best_graph_delta(scores: dict[str, Any]) -> str:
-    """Signed rank delta of the BEST graph leg vs flat — the table's Δ column.
+def _best_graph_delta_marks(marks: dict[str, str]) -> str:
+    """Signed rank delta of the BEST graph leg's mark vs flat's — the table's Δ column.
 
-    "+N" when a graph leg (graphiti/mix) beats flat, "-N" when the best graph leg
-    still trails flat, "0" on tie or when flat / all graph legs are absent."""
-    flat = scores.get("flat")
-    graph_marks = [s.mark for m, s in scores.items() if m != "flat"]
+    "+N" when a graph leg beats flat, "-N" when it trails, "0" on tie / when flat or all
+    graph legs are absent / unjudged (empty marks rank 0, so an unjudged run shows Δ 0)."""
+    flat = marks.get("flat")
+    graph_marks = [mk for m, mk in marks.items() if m != "flat"]
     if flat is None or not graph_marks:
         return "0"
     best_graph = max(MARK_RANK.get(mk, 0) for mk in graph_marks)
-    diff = best_graph - MARK_RANK.get(flat.mark, 0)
+    diff = best_graph - MARK_RANK.get(flat, 0)
     if diff > 0:
         return f"+{diff}"
     if diff < 0:
@@ -668,8 +1052,8 @@ def category_breakdown(
 ) -> dict[str, dict[str, Any]]:
     """Per-category × N-leg passing counts — the per-category results table.
 
-    Shape: ``{category: {"total": int, "pass": {leg: count}}}``. Pure so the
-    standalone harness + tests can reuse it. ``category`` empty → ``"uncategorized"``."""
+    Shape: ``{category: {"total": int, "pass": {leg: count}}}``. Pure so tests can
+    reuse it. ``category`` empty → ``"uncategorized"``."""
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
         cat = r.category or "uncategorized"
@@ -682,8 +1066,33 @@ def category_breakdown(
     return out
 
 
+def category_breakdown_rows(
+    rows: list[dict[str, Any]], modes: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Per-category × leg passing counts over **dict** rows (the memory track's payloads).
+
+    Mirrors :func:`category_breakdown` but reads ``row['legs'][mode]['mark']`` from the dict
+    shape the memory runner emits. ``category`` empty → ``"uncategorized"``."""
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        cat = str(r.get("category") or "") or "uncategorized"
+        bucket = out.setdefault(cat, {"total": 0, "pass": {m: 0 for m in modes}})
+        bucket["total"] += 1
+        legs = r.get("legs") or {}
+        for mode in modes:
+            leg = legs.get(mode) or {}
+            if leg.get("mark") in _PASSING_MARKS:
+                bucket["pass"][mode] += 1
+    return out
+
+
 def _summarize(
-    run_id: str, rows: list[QuestionResult], started_at: float, modes: list[str]
+    run_id: str,
+    rows: list[QuestionResult],
+    started_at: float,
+    modes: list[str],
+    *,
+    judged: bool = True,
 ) -> EvalSummary:
     """Compute the gate + per-leg aggregate counts the UI/CLI surfaces."""
 
@@ -700,11 +1109,10 @@ def _summarize(
     requires = [r for r in rows if r.requires_graph]
     passing = _passing(rows)
     req_passing = _passing(requires)
-    # Gate: a graph leg must MEASURABLY beat flat on the requires_graph subset.
-    # Needs flat AND at least one graph leg in the run; otherwise the comparison is
-    # undefined → "n/a" (e.g. the user ran a single leg).
+    # Gate: a graph leg must MEASURABLY beat flat on the requires_graph subset. Needs the
+    # judge on (marks exist) AND flat + a graph leg; otherwise undefined → "n/a".
     graph_modes = [m for m in modes if m != "flat"]
-    if "flat" in modes and graph_modes:
+    if judged and "flat" in modes and graph_modes:
         best_graph_req = max(req_passing[m] for m in graph_modes)
         gate = "proceed" if best_graph_req > req_passing["flat"] else "pivot"
     else:
@@ -717,6 +1125,7 @@ def _summarize(
         requires_graph_total=len(requires),
         requires_graph_passing=req_passing,
         gate=gate,
+        judged=judged,
         elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         questions=list(rows),
         by_category=category_breakdown(rows, modes),
@@ -755,30 +1164,23 @@ async def collect_synthetic_doc_ids(service: Any) -> list[str]:
 
 
 async def collect_eval_doc_ids(service: Any) -> list[str]:
-    """Return doc_ids of every eval document — synthetic (``_l3_eval_synthetic``) AND Adam
-    (``_adam_eval``). The two corpora are tagged at ingest, so the eval footprint is
-    enumerable by tag (deduped; a doc could carry both tags)."""
-    ids: list[str] = []
-    seen: set[str] = set()
-    for tag in (EVAL_SYNTHETIC_TAG, ADAM_EVAL_TAG):
-        docs_result = await service.list_documents(tag=tag, limit=500)
-        for doc in docs_result.documents:
-            if doc.id not in seen:
-                seen.add(doc.id)
-                ids.append(doc.id)
-    return ids
+    """Return doc_ids of every KNOWLEDGE-track eval document (tag ``_l3_eval_synthetic``).
+
+    The memory track no longer writes knowledge documents (its data lives in the
+    ``eval_mem_{set}`` graph drawer, cleared by group — not by document), so the knowledge
+    eval footprint is exactly the synthetic-tagged docs."""
+    docs_result = await service.list_documents(tag=EVAL_SYNTHETIC_TAG, limit=500)
+    return [doc.id for doc in docs_result.documents]
 
 
 async def clear_eval_data(service: Any) -> int:
-    """Delete ALL eval data (synthetic + Adam) from the workspace — catalog rows, Qdrant
+    """Delete the KNOWLEDGE-track eval data (synthetic corpus) — catalog rows, Qdrant
     chunks, and graph episodes — and return the document count removed.
 
-    Phase A of the graph group-ID policy (docs/graph-group-policy-design.md §8): eval
-    currently shares the knowledge graph group (``kb_main``), so there is no group-scoped
-    eval clear yet — deletion is **document-scoped** over the eval-tagged docs.
-    ``service.delete_document`` already purges all three stores per document (catalog +
-    Qdrant + graph episodes via ``remove_document_from_graph``), so this is a thin loop over
-    the eval footprint. Idempotent: a workspace with no eval docs removes 0.
+    Document-scoped over the eval-tagged docs: ``service.delete_document`` purges all three
+    stores per document (catalog + Qdrant + graph episodes). Idempotent: a workspace with no
+    eval docs removes 0. (The MEMORY track clears separately by graph group — ``clear_all`` /
+    ``clear_group("eval_mem_{set}")``.)
     """
     doc_ids = await collect_eval_doc_ids(service)
     if not doc_ids:
@@ -803,25 +1205,27 @@ async def clear_eval_data(service: Any) -> int:
 
 __all__ = [
     "ADAM_CORPUS_FILE",
-    "ADAM_EVAL_TAG",
     "ADAM_QUESTIONS_FILE",
     "ALL_EVAL_MODES",
     "DEFAULT_CORPUS_DIR",
+    "DEFAULT_EVAL_FOLDER",
     "DEFAULT_EVAL_MODES",
+    "DEFAULT_MEMORY_EVAL_SET",
     "DEFAULT_QUESTIONS_FILE",
     "EVAL_SYNTHETIC_TAG",
+    "MEMORY_EVAL_USER_ID",
+    "discover_corpuses",
     "EvalSummary",
     "LegResult",
     "QuestionResult",
-    "adam_point_id",
     "category_breakdown",
     "clear_eval_data",
     "collect_eval_doc_ids",
     "collect_synthetic_doc_ids",
-    "ingest_adam_corpus_via_service",
     "ingest_synthetic_corpus_via_service",
     "load_adam_questions",
     "load_questions",
     "normalize_modes",
     "run_eval",
+    "run_memory_eval",
 ]

@@ -93,6 +93,10 @@ class GraphState(TypedDict, total=False):
     model_id: str
     request_voice_reply: bool
     voice_input_allowed: bool
+    # Tools kill-switch (default on): chat.tools_enabled preference AND the per-chat disable_tools
+    # opt-out, combined in AgentManager. When off, call_model invokes the un-bound model so the
+    # agent emits no tool calls this turn.
+    tools_enabled: bool
 
     # Per-turn fan-out inputs (cleared after gather; never long-lived)
     audio_items: list[AudioItem]

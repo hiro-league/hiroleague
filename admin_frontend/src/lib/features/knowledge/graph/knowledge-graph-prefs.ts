@@ -6,7 +6,7 @@
  * Filters keep their own URL+localStorage handling in knowledge-graph.svelte.ts
  * (URL stays shareable); these helpers cover only the options sliders.
  */
-import { PREF_KEYS } from '$lib/preferences/keys';
+import { PREF_KEYS, type GraphPanelSidePreference } from '$lib/preferences/keys';
 import { readLocalString, writeLocalString } from '$lib/preferences/storage';
 
 /** Cap on parallel edges per node pair that means "show all" — also the slider max. */
@@ -72,4 +72,21 @@ export function readGraphOptions(): GraphOptions {
 
 export function writeGraphOptions(opts: GraphOptions): void {
   writeLocalString(PREF_KEYS.knowledgeGraphOptions, JSON.stringify(opts));
+}
+
+// ── Detail-panel dock side ─────────────────────────────────────────────────
+// Which side the selection/detail aside docks on. 'auto' follows the chat overlay
+// (left while chat is open so the panel isn't covered, right otherwise); 'left'/'right'
+// pin it. Default 'auto'.
+const PANEL_SIDES: readonly GraphPanelSidePreference[] = ['auto', 'left', 'right'];
+
+export function readGraphPanelSide(): GraphPanelSidePreference {
+  const raw = readLocalString(PREF_KEYS.knowledgeGraphPanelSide);
+  return PANEL_SIDES.includes(raw as GraphPanelSidePreference)
+    ? (raw as GraphPanelSidePreference)
+    : 'auto';
+}
+
+export function writeGraphPanelSide(side: GraphPanelSidePreference): void {
+  writeLocalString(PREF_KEYS.knowledgeGraphPanelSide, side);
 }

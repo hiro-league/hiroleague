@@ -14,8 +14,15 @@ export type MemoryDeleteData = {
   memory_id: string;
 };
 
-export async function listWorkspaceMemories(): Promise<ApiResponse<MemoryListData>> {
-  return apiRequest<MemoryListData>('/memory/list');
+/**
+ * List workspace memories. Without `groupId`: all of the default user's conversation-memory
+ * groups (the page default). With `groupId`: that one partition's facts — backs the Memories
+ * group selector, which can target any graph group (memory / knowledge / eval), like the Graph tab.
+ */
+export async function listWorkspaceMemories(groupId?: string): Promise<ApiResponse<MemoryListData>> {
+  const gid = (groupId ?? '').trim();
+  const path = gid ? `/memory/list?group_id=${encodeURIComponent(gid)}` : '/memory/list';
+  return apiRequest<MemoryListData>(path);
 }
 
 export async function clearWorkspaceMemories(): Promise<ApiResponse<MemoryClearData>> {

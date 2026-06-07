@@ -16,9 +16,12 @@
     FileText,
     MapPin,
     Package,
+    PanelLeft,
+    PanelRight,
     Spline,
     User
   } from '@lucide/svelte';
+  import { cn } from '$lib/utils';
   import {
     fetchGraphChunksDetail,
     type GraphChunkDetail,
@@ -33,8 +36,12 @@
     edge: GraphEdgeDTO | null;
     /** Model — used for nodeName (edge endpoints) + clearSelection (close button). */
     graph: KnowledgeGraphModel;
+    /** Which edge of the canvas this aside docks against. */
+    side: 'left' | 'right';
+    /** Flip the aside to the other side (pins an explicit left/right preference). */
+    onFlipSide: () => void;
   }
-  let { node, edge, graph }: Props = $props();
+  let { node, edge, graph, side, onFlipSide }: Props = $props();
 
   // Map entity type → a Lucide icon (mirrors the canvas disc icons); relations use Spline.
   const NODE_TYPE_ICON: Record<string, typeof Circle> = {
@@ -136,7 +143,10 @@
   {@const accent = node ? colorFor(node.type) : 'rgb(100,116,139)'}
   {@const HeaderIcon = node ? nodeIcon(node.type) : Spline}
   <aside
-    class="absolute right-0 top-0 flex h-full w-80 flex-col overflow-hidden border-l bg-background/80 text-sm shadow-lg backdrop-blur"
+    class={cn(
+      'absolute top-0 flex h-full w-80 flex-col overflow-hidden bg-background/80 text-sm shadow-lg backdrop-blur',
+      side === 'left' ? 'left-0 border-r' : 'right-0 border-l'
+    )}
   >
     <!-- header: entity/relation icon + type + name, tinted by type colour -->
     <div
@@ -157,6 +167,20 @@
           {isNode ? node?.name : edge?.rel_type}
         </div>
       </div>
+      <!-- Flip the aside to the other side. Icon points the way it will move. -->
+      <button
+        type="button"
+        onclick={onFlipSide}
+        class="rounded px-1 text-muted-foreground hover:bg-accent"
+        aria-label={side === 'left' ? 'Move panel to the right' : 'Move panel to the left'}
+        title={side === 'left' ? 'Move panel right' : 'Move panel left'}
+      >
+        {#if side === 'left'}
+          <PanelRight size={15} aria-hidden="true" />
+        {:else}
+          <PanelLeft size={15} aria-hidden="true" />
+        {/if}
+      </button>
       <button
         type="button"
         onclick={() => graph.clearSelection()}
@@ -185,6 +209,31 @@
         </div>
         {#if edge.fact}
           <div class="rounded-md bg-muted/40 p-2 text-xs italic">“{edge.fact}”</div>
+        {/if}
+        <!-- Temporal validity of the FACT (Graphiti edge), not of the chunks: valid_at =
+             when it became true · invalid_at = when it stopped · expired_at = when the system
+             learned it was superseded (a retired fact). Chunks themselves only carry an event
+             date (shown per-chunk below). Only rendered when at least one date is present. -->
+        {#if edge.valid_at || edge.invalid_at || edge.expired_at}
+          {@const validFrom = formatChunkDate(edge.valid_at)}
+          {@const validUntil = formatChunkDate(edge.invalid_at)}
+          {@const retired = formatChunkDate(edge.expired_at)}
+          <div class="flex flex-col gap-1 rounded-md border bg-muted/30 p-2">
+            <span
+              class="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+            >
+              <CalendarDays size={11} aria-hidden="true" /> Validity
+            </span>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground/80">
+              <span title={validFrom?.title}>From: {validFrom ? validFrom.label : '—'}</span>
+              {#if validUntil}<span title={validUntil.title}>Until: {validUntil.label}</span>{/if}
+              {#if retired}
+                <span class="text-amber-500" title={`Superseded · ${retired.title}`}>
+                  Retired: {retired.label}
+                </span>
+              {/if}
+            </div>
+          </div>
         {/if}
       {/if}
 

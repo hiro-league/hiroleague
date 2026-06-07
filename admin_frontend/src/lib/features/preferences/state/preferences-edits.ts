@@ -189,6 +189,7 @@ export function editsForSave(
   add('chat.instructions', baseline.chat.instructions, draft.chat.instructions);
   add('chat.max_messages', baseline.chat.max_messages, draft.chat.max_messages);
   add('chat.cite_sources', baseline.chat.cite_sources, draft.chat.cite_sources);
+  add('chat.tools_enabled', baseline.chat.tools_enabled, draft.chat.tools_enabled);
   add('tuning_profiles', baseline.tuning_profiles, draft.tuning_profiles);
   return edits;
 }

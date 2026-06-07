@@ -490,7 +490,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 entry.set_output_preview("graph_mode=off · no expansion")
             return {}
         # Graphiti searches on the full query (hybrid over the graph) — no separate
-        # entity list required (unlike the old Ladybug name-resolution path).
+        # entity list required (unlike the old name-resolution path).
         query = (state.get("rewritten_query") or state.get("query") or "").strip()
         if not query:
             if entry:

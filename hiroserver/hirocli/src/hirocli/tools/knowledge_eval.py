@@ -20,16 +20,16 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from ..services.knowledge.eval_runner import (
-    ADAM_EVAL_TAG,
     DEFAULT_CORPUS_DIR,
+    DEFAULT_MEMORY_EVAL_SET,
     DEFAULT_QUESTIONS_FILE,
     EVAL_SYNTHETIC_TAG,
     collect_synthetic_doc_ids,
-    ingest_adam_corpus_via_service,
     ingest_synthetic_corpus_via_service,
     load_adam_questions,
     load_questions,
     run_eval,
+    run_memory_eval,
 )
 from .knowledge import _close_if_owned, _resolve_service
 from .knowledge_graph import _run_graph_ingest_for_documents
@@ -69,33 +69,42 @@ class KnowledgeL3EvalRunTool(Tool):
         "events on the knowledge event stream for live UI updates."
     )
     params = {
+        "track": ToolParam(
+            str,
+            "Eval track: 'knowledge' (default — document/chunk corpus → ingest+retrieval, "
+            "flat vs graphiti) or 'memory' (turn corpus → conversation remember/recall, "
+            "single recall leg, no gate; data lands in the eval_mem_{set} drawer).",
+            required=False,
+        ),
         "ingest_synthetic": ToolParam(
             bool,
-            "Ingest eval/l3_synthetic/*.md into the workspace (auto-tagged "
-            "_l3_eval_synthetic). Skip if already ingested. Default false.",
+            "knowledge: ingest eval/l3_synthetic/*.md (auto-tagged _l3_eval_synthetic). "
+            "memory: remember the turn corpus into eval_mem_{set} first. "
+            "Skip if already populated. Default false.",
             required=False,
         ),
         "build_graph": ToolParam(
             bool,
-            "Graph-ingest the synthetic docs after standard ingest. Skip if "
-            "graph already built. Default false.",
-            required=False,
-        ),
-        "corpus_source": ToolParam(
-            str,
-            "'synthetic' (default, the .md L3 corpus) or 'adam' (the temporal JSONL "
-            "episode corpus). For 'adam', ingest_synthetic doubles as 'ingest the corpus'.",
+            "knowledge only: graph-ingest the synthetic docs after standard ingest. "
+            "Skip if graph already built. Default false.",
             required=False,
         ),
         "question_ids": ToolParam(
             list[str],
-            "Adam path only: run just these question ids (empty = all).",
+            "Run just these question ids (empty = all). Applies to the memory track "
+            "and the knowledge Adam-less bank.",
             required=False,
         ),
         "modes": ToolParam(
             list[str],
-            "Legs to compare: any subset of ['flat','graphiti','mix'] (one is fine). "
-            "Empty = all three. Unknown names are dropped.",
+            "knowledge only — legs to compare: any subset of ['flat','graphiti'] (one is "
+            "fine). Empty = all. Ignored on the memory track (single recall leg).",
+            required=False,
+        ),
+        "judge": ToolParam(
+            bool,
+            "Run the optional LLM judge (grades the model's answer vs the ideal answer, "
+            "reusing the answering model). Off = answers only, no marks. Default false.",
             required=False,
         ),
         "run_id": ToolParam(
@@ -113,21 +122,23 @@ class KnowledgeL3EvalRunTool(Tool):
 
     def execute(
         self,
+        track: str = "knowledge",
         ingest_synthetic: bool = False,
         build_graph: bool = False,
-        corpus_source: str = "synthetic",
         question_ids: list[str] | None = None,
         modes: list[str] | None = None,
+        judge: bool = False,
         run_id: str = "",
         workspace: str | None = None,
     ) -> dict[str, Any]:
         return asyncio.run(
             self.execute_async(
+                track=track,
                 ingest_synthetic=ingest_synthetic,
                 build_graph=build_graph,
-                corpus_source=corpus_source,
                 question_ids=question_ids,
                 modes=modes,
+                judge=judge,
                 run_id=run_id,
                 workspace=workspace,
             )
@@ -135,11 +146,12 @@ class KnowledgeL3EvalRunTool(Tool):
 
     async def execute_async(
         self,
+        track: str = "knowledge",
         ingest_synthetic: bool = False,
         build_graph: bool = False,
-        corpus_source: str = "synthetic",
         question_ids: list[str] | None = None,
         modes: list[str] | None = None,
+        judge: bool = False,
         run_id: str = "",
         workspace: str | None = None,
     ) -> dict[str, Any]:
@@ -147,35 +159,34 @@ class KnowledgeL3EvalRunTool(Tool):
         runtime = getattr(self, "_runtime", None)
         service, workspace_path, owned = _resolve_service(runtime, workspace)
         try:
-            # Adam temporal corpus path. ``ingest_synthetic`` doubles as "ingest the
-            # corpus" so subsets can re-run without re-ingesting; ``question_ids``
-            # narrows the run to a selected subset.
-            if corpus_source == "adam":
-                episodes = 0
-                if ingest_synthetic:
-                    episodes = await ingest_adam_corpus_via_service(service, workspace_path)
-                questions = load_adam_questions()
-                if question_ids:
-                    wanted = set(question_ids)
-                    questions = [q for q in questions if q["id"] in wanted]
-                summary = await run_eval(
-                    service,
-                    workspace_path,
-                    questions=questions,
-                    run_id=rid,
-                    filters={"tags": [ADAM_EVAL_TAG]},
-                    modes=modes,
+            # Memory track: turn corpus → conversation remember/recall in the eval_mem_{set}
+            # drawer (an eval-scoped memory facade — independent of memory.enabled). ``ingest_synthetic``
+            # doubles as "remember the corpus" so question subsets re-run without re-remembering.
+            if track == "memory":
+                from ..domain.preferences import load_preferences
+                from ..services.memory import create_eval_memory_service
+
+                prefs = load_preferences(workspace_path)
+                memory = create_eval_memory_service(
+                    workspace_path, prefs, set_id=DEFAULT_MEMORY_EVAL_SET
                 )
-                return {
-                    "run_id": rid,
-                    "summary": summary.to_payload(),
-                    "questions": [
-                        q.to_payload(index=i, total=len(summary.questions))
-                        for i, q in enumerate(summary.questions)
-                    ],
-                    "corpus_source": "adam",
-                    "episodes_ingested": episodes,
-                }
+                try:
+                    questions = load_adam_questions()
+                    if question_ids:
+                        wanted = set(question_ids)
+                        questions = [q for q in questions if q["id"] in wanted]
+                    summary = await run_memory_eval(
+                        memory,
+                        workspace_path,
+                        set_id=DEFAULT_MEMORY_EVAL_SET,
+                        questions=questions,
+                        run_id=rid,
+                        remember=ingest_synthetic,
+                        judge=judge,
+                    )
+                finally:
+                    await memory.close()
+                return {"run_id": rid, "track": "memory", "summary": summary}
 
             ingested_ids: list[str] = []
             if ingest_synthetic:
@@ -211,7 +222,9 @@ class KnowledgeL3EvalRunTool(Tool):
                 DEFAULT_CORPUS_DIR,
                 DEFAULT_QUESTIONS_FILE,
             )
-            summary = await run_eval(service, workspace_path, run_id=rid, modes=modes)
+            summary = await run_eval(
+                service, workspace_path, run_id=rid, modes=modes, judge=judge
+            )
             return {
                 "run_id": rid,
                 "summary": summary.to_payload(),

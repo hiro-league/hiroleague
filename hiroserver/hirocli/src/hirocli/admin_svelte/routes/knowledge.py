@@ -186,14 +186,26 @@ class EvalRunBody(BaseModel):
     The eval runs in the background; the response returns the ``run_id``
     immediately, and progress events stream out on ``/knowledge/events``."""
 
+    # Eval track (docs/eval-corpus-tracks-design.md): "knowledge" (document/chunk corpus →
+    # ingest+retrieval) or "memory" (turn corpus → conversation remember/recall, eval_mem_{set}).
+    track: str = "knowledge"
+    # Chosen corpus (from the corpus picker): the id doubles as the eval drawer suffix
+    # (eval_mem_{id} / eval_kb_{id}); corpus_path is the .episodes.jsonl file (memory) or the
+    # folder of .md docs (knowledge); questions_path is the paired <id>.questions.yaml.
+    corpus_id: str = ""
+    corpus_path: str = ""
+    questions_path: str = ""
+    # Remember the turn corpus (memory) / ingest the doc corpus (knowledge) before running.
     ingest_synthetic: bool = False
-    build_graph: bool = False
-    # "synthetic" (default, .md L3 corpus) or "adam" (temporal JSONL episode corpus).
-    corpus_source: str = "synthetic"
-    # Optional subset (adam path): run only these question ids. None/empty = all.
+    build_graph: bool = False  # knowledge only
+    # Optional LLM judge step: grade the model's answer against the ideal answer. When off, the
+    # eval generates answers but assigns no marks (and no PROCEED/PIVOT gate).
+    judge: bool = False
+    # Selected question ids — REQUIRED and non-empty (the UI forces an explicit selection;
+    # there is no implicit "run all").
     question_ids: list[str] | None = None
-    # Legs to compare: any subset of ["flat", "graphiti"] (one is fine).
-    # None/empty = both. Normalized server-side (unknown names dropped).
+    # Knowledge track only — legs to compare, subset of ["flat", "graphiti"] (one is fine).
+    # None/empty = both. Normalized server-side. Ignored on the memory track (single recall leg).
     modes: list[str] | None = None
     run_id: str | None = None
 
@@ -697,7 +709,7 @@ async def graph_ingest_batch(
 
     Used by Tab 1's "Also build entity graph (L3)" checkbox: after a regular
     ingest job completes, the frontend POSTs the freshly-ingested doc_ids here
-    to extract entities/relations into the LadybugDB graph. Per-document failure
+    to extract entities/relations into the knowledge graph. Per-document failure
     isolation; aggregated totals returned.
     """
     from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
@@ -993,13 +1005,11 @@ async def eval_run(
     # Local imports keep the module's top-level deps thin — eval is a niche path.
     from hirocli.services.knowledge.eval_registry import get_eval_registry
     from hirocli.services.knowledge.eval_runner import (
-        ADAM_EVAL_TAG,
-        collect_synthetic_doc_ids,
-        ingest_adam_corpus_via_service,
         ingest_synthetic_corpus_via_service,
-        load_adam_questions,
+        load_questions,
         normalize_modes,
         run_eval,
+        run_memory_eval,
     )
     from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
 
@@ -1007,7 +1017,30 @@ async def eval_run(
         service, owned = await _resolve_service(request, workspace_id)
         run_id = (body.run_id or "").strip() or f"l3eval-{uuid.uuid4()}"
         workspace_path = service.workspace_path
-        run_modes = normalize_modes(body.modes)
+        # Memory track runs a single recall leg (no flat/graphiti); knowledge keeps the leg set.
+        run_modes = ["recall"] if body.track == "memory" else normalize_modes(body.modes)
+
+        # Resolve + validate the chosen corpus and question selection up front, so a bad
+        # request fails the HTTP call directly (not as a silent background crash). The UI
+        # forces an explicit, non-empty selection — there is no implicit "run all".
+        corpus_id = (body.corpus_id or "").strip()
+        corpus_path = (body.corpus_path or "").strip()
+        questions_path = (body.questions_path or "").strip()
+        selected_ids = [q for q in (body.question_ids or []) if q]
+        if not corpus_id or not corpus_path:
+            return envelope_failure("Pick a corpus before running the eval.")
+        if not questions_path or not Path(questions_path).exists():
+            return envelope_failure(
+                f"No question bank found for corpus '{corpus_id}' "
+                f"(expected {corpus_id}.questions.yaml beside the corpus)."
+            )
+        if not selected_ids:
+            return envelope_failure("Select at least one question to run.")
+        # Load + filter the bank to the explicit selection (preserving bank order).
+        wanted = set(selected_ids)
+        questions = [q for q in load_questions(Path(questions_path)) if q["id"] in wanted]
+        if not questions:
+            return envelope_failure("None of the selected question ids exist in the bank.")
         # Subscribe the per-workspace run registry BEFORE the task starts so it
         # captures the full event trail for mid-run replay / cross-origin reads.
         registry = get_eval_registry()
@@ -1021,44 +1054,63 @@ async def eval_run(
             # already does on its own exceptions; setup-phase exceptions are
             # handled explicitly here).
             try:
-                # Adam temporal corpus: ingest episodes (Qdrant + Graphiti) and run the
-                # Adam question bank scoped to its tag. Self-contained — synthetic flags
-                # are ignored on this path.
-                if body.corpus_source == "adam":
-                    # ``ingest_synthetic`` doubles as "ingest the corpus" here — set it
-                    # once, then re-run question subsets without re-ingesting.
-                    if body.ingest_synthetic:
+                # Memory track: remember the chosen turn corpus into its eval_mem_{corpus_id}
+                # drawer via an eval-scoped memory facade, then recall per question. Single recall
+                # leg, no gate (docs §8). ``ingest_synthetic`` doubles as "remember the corpus" so
+                # question subsets re-run without re-remembering. Independent of memory.enabled.
+                if body.track == "memory":
+                    from hirocli.domain.preferences import load_preferences
+                    from hirocli.services.memory import create_eval_memory_service
+
+                    prefs = load_preferences(workspace_path)
+                    memory = create_eval_memory_service(
+                        workspace_path, prefs, set_id=corpus_id
+                    )
+                    try:
                         log.info(
-                            "⬇️ knowledge.eval — ingesting Adam episode corpus · run_id=%s",
+                            "⬇️ knowledge.eval — memory track · corpus=%s · remember=%s · run_id=%s",
+                            corpus_id,
+                            body.ingest_synthetic,
                             run_id,
                         )
-                        await ingest_adam_corpus_via_service(
-                            service, workspace_path, run_id=run_id
+                        await run_memory_eval(
+                            memory,
+                            workspace_path,
+                            set_id=corpus_id,
+                            corpus_path=Path(corpus_path),
+                            questions=questions,
+                            run_id=run_id,
+                            remember=body.ingest_synthetic,
+                            judge=body.judge,
                         )
-                    questions = load_adam_questions()
-                    if body.question_ids:
-                        wanted = set(body.question_ids)
-                        questions = [q for q in questions if q["id"] in wanted]
-                    await run_eval(
-                        service,
-                        workspace_path,
-                        questions=questions,
-                        run_id=run_id,
-                        filters={"tags": [ADAM_EVAL_TAG]},
-                        modes=run_modes,
-                    )
+                    finally:
+                        await memory.close()
                     return
+
+                # Knowledge track: ingest the chosen .md corpus folder (tagged per corpus so
+                # retrieval scopes to it), optionally build the graph, then run flat/graphiti.
+                eval_tag = f"_eval_kb_{corpus_id}"
                 ingested_ids: list[str] = []
                 if body.ingest_synthetic:
                     log.info(
-                        "⬇️ knowledge.eval — ingesting synthetic corpus · run_id=%s",
+                        "⬇️ knowledge.eval — ingesting corpus '%s' · run_id=%s",
+                        corpus_id,
                         run_id,
                     )
                     ingested_ids = await ingest_synthetic_corpus_via_service(
-                        service, workspace_path, run_id=run_id
+                        service,
+                        workspace_path,
+                        corpus_dir=Path(corpus_path),
+                        tag=eval_tag,
+                        run_id=run_id,
                     )
                 if body.build_graph:
-                    doc_ids = ingested_ids or await collect_synthetic_doc_ids(service)
+                    # When ingest was skipped, find this corpus's docs by its eval tag.
+                    if ingested_ids:
+                        doc_ids = ingested_ids
+                    else:
+                        docs = await service.list_documents(tag=eval_tag, limit=500)
+                        doc_ids = [d.id for d in docs.documents]
                     if doc_ids:
                         log.info(
                             "⬇️ knowledge.eval — graph-ingesting %d doc(s) · run_id=%s",
@@ -1091,8 +1143,16 @@ async def eval_run(
                             run_id,
                         )
                 # run_eval emits started / question_completed / completed / failed
-                # events on its own — no need for us to wrap those.
-                await run_eval(service, workspace_path, run_id=run_id, modes=run_modes)
+                # events on its own — scoped to this corpus's docs + selected questions.
+                await run_eval(
+                    service,
+                    workspace_path,
+                    questions=questions,
+                    run_id=run_id,
+                    filters={"tags": [eval_tag]},
+                    modes=run_modes,
+                    judge=body.judge,
+                )
             except asyncio.CancelledError:
                 # User pressed Cancel (the cancel route called task.cancel(), which
                 # raises here at the next await). Emit the neutral terminal CANCELLED
@@ -1141,9 +1201,10 @@ async def eval_run(
         registry.begin_run(
             workspace_path,
             run_id,
-            corpus_source=body.corpus_source,
+            corpus_source=corpus_id,
             modes=run_modes,
             task=task,
+            track=body.track,
         )
         return _success({"run_id": run_id})
     except Exception as exc:
@@ -1213,14 +1274,40 @@ async def eval_cancel(
 async def eval_clear(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
+    track: str = "knowledge",
+    corpus_id: str = "",
 ) -> dict[str, Any]:
-    """Delete ALL eval data (synthetic + Adam corpora) from the workspace — catalog rows,
-    Qdrant chunks, and knowledge-graph episodes.
+    """Delete a track's eval data from the workspace. Backs the Eval panel's "Clear eval data".
 
-    Graph group-ID policy Phase A (docs/graph-group-policy-design.md §8): eval currently
-    shares the knowledge graph group, so deletion is document-scoped over the eval-tagged
-    docs (``clear_eval_data``). Backs the Eval panel's "Clear eval data" action.
+    - **knowledge** (default): document-scoped wipe of the synthetic eval-tagged docs (catalog +
+      Qdrant + knowledge-graph episodes) via ``clear_eval_data``.
+    - **memory**: group-scoped wipe of the chosen ``eval_mem_{corpus_id}`` drawer via the
+      eval-scoped memory facade's ``clear_all`` (docs/eval-corpus-tracks-design.md §8.5).
     """
+    if track == "memory":
+        from hirocli.domain.preferences import load_preferences
+        from hirocli.services.knowledge.eval_runner import MEMORY_EVAL_USER_ID
+        from hirocli.services.memory import create_eval_memory_service
+
+        set_id = (corpus_id or "").strip()
+        if not set_id:
+            return envelope_failure("corpus_id is required to clear a memory eval drawer.")
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        try:
+            prefs = load_preferences(workspace_path)
+            memory = create_eval_memory_service(workspace_path, prefs, set_id=set_id)
+            try:
+                removed = await memory.clear_all(
+                    user_id=MEMORY_EVAL_USER_ID, character_id=set_id
+                )
+            finally:
+                await memory.close()
+            return _success({"removed_facts": removed})
+        except Exception as exc:
+            log.error("knowledge eval clear (memory) failed · %s", str(exc), exc_info=True)
+            return envelope_failure(str(exc))
+
     from hirocli.services.knowledge.eval_runner import clear_eval_data
 
     service, owned = await _resolve_service(request, workspace_id)
@@ -1234,15 +1321,36 @@ async def eval_clear(
         await _close_if_owned(service, owned)
 
 
-@knowledge_router.get("/knowledge/eval/questions")
-async def eval_questions(corpus: str = "adam") -> dict[str, Any]:
-    """List the eval question bank for the checklist (id/category/subcategory/text).
+@knowledge_router.get("/knowledge/eval/corpuses")
+async def eval_corpuses(track: str = "memory", folder: str = "") -> dict[str, Any]:
+    """List the corpuses in ``folder`` for ``track`` (the corpus-picker source).
 
-    Workspace-independent — the bank lives in the repo ``eval/`` dir."""
-    from hirocli.services.knowledge.eval_runner import load_adam_questions, load_questions
+    ``folder`` defaults to the repo ``eval/`` dir. Each corpus pairs with its
+    ``<id>.questions.yaml`` bank by the stem convention (docs §12). Workspace-independent."""
+    from hirocli.services.knowledge.eval_runner import DEFAULT_EVAL_FOLDER, discover_corpuses
 
     try:
-        rows = load_adam_questions() if corpus == "adam" else load_questions()
+        base = Path(folder.strip()) if folder.strip() else DEFAULT_EVAL_FOLDER
+        corpuses = discover_corpuses(base, track)
+        return _success({"track": track, "folder": str(base), "corpuses": corpuses})
+    except Exception as exc:
+        log.error("knowledge eval corpuses list failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/eval/questions")
+async def eval_questions(path: str = "") -> dict[str, Any]:
+    """List a corpus's question bank for the checklist (id/category/subcategory/text/gold).
+
+    ``path`` is the ``<id>.questions.yaml`` for the chosen corpus (from the corpuses list).
+    Workspace-independent — banks live beside their corpora."""
+    from hirocli.services.knowledge.eval_runner import load_questions
+
+    try:
+        qpath = Path(path.strip())
+        if not path.strip() or not qpath.exists():
+            return envelope_failure(f"Question bank not found: {path or '(none given)'}")
+        rows = load_questions(qpath)
         questions = [
             {
                 "id": q["id"],
@@ -1250,10 +1358,11 @@ async def eval_questions(corpus: str = "adam") -> dict[str, Any]:
                 "subcategory": q.get("subcategory", ""),
                 "question": q["question"],
                 "requires_graph": bool(q.get("requires_graph")),
+                "expected_answer": q.get("expected_answer", ""),
             }
             for q in rows
         ]
-        return _success({"corpus": corpus, "questions": questions})
+        return _success({"path": str(qpath), "questions": questions})
     except Exception as exc:
         log.error("knowledge eval questions list failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))

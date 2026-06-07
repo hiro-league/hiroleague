@@ -17,7 +17,8 @@ from hirocli.services.knowledge.graph.group_scope import (
     GroupPolicyError,
     character_from_group,
     classify_group,
-    eval_group_id,
+    eval_knowledge_group_id,
+    eval_memory_group_id,
     group_label,
     is_eval_group_id,
     is_knowledge_group_id,
@@ -48,8 +49,15 @@ def test_memory_group_grammar_and_slug() -> None:
 
 
 def test_eval_group_grammar() -> None:
-    assert eval_group_id("adam") == "eval_adam"
-    assert eval_group_id("set:1").startswith(EVAL_PREFIX)
+    # One `eval_` roof, two per-track sub-namespaces (docs/eval-corpus-tracks-design.md §4).
+    assert eval_memory_group_id("adam") == "eval_mem_adam"
+    assert eval_knowledge_group_id("adam") == "eval_kb_adam"
+    # Both live under the shared eval prefix (so all eval wipes by one prefix) ...
+    assert eval_memory_group_id("set:1").startswith(EVAL_PREFIX)
+    assert eval_knowledge_group_id("set:1").startswith(EVAL_PREFIX)
+    # ... yet are disjoint from real mem_/kb_ (an eval_mem_ group never matches the mem_ prefix).
+    assert not eval_memory_group_id("adam").startswith(MEMORY_PREFIX)
+    assert not eval_knowledge_group_id("adam").startswith(KNOWLEDGE_PREFIX)
 
 
 def test_prefixes_are_disjoint() -> None:
@@ -63,7 +71,8 @@ def test_prefixes_are_disjoint() -> None:
         ("kb_main", "knowledge"),
         ("kb_research", "knowledge"),
         ("mem_42_aria", "memory"),
-        ("eval_adam", "eval"),
+        ("eval_mem_adam", "eval"),
+        ("eval_kb_adam", "eval"),
         ("legacy", "other"),
         ("", "other"),
     ],
@@ -78,7 +87,8 @@ def test_classify_group(group_id: str, kind: str) -> None:
         ("kb_main", "Knowledge"),
         ("kb_research", "Knowledge · research"),
         ("mem_42_aria", "Memory · aria (user 42)"),
-        ("eval_adam", "Eval · adam"),
+        ("eval_mem_adam", "Eval · Memory · adam"),
+        ("eval_kb_adam", "Eval · Knowledge · adam"),
         ("legacy", "legacy"),  # unknown/legacy → raw id (still selectable/removable)
         ("mem:1:hiro", "mem:1:hiro"),  # legacy colon id → raw (not a valid namespace)
     ],
@@ -101,7 +111,7 @@ def test_character_from_group() -> None:
 
 
 def test_validate_accepts_each_namespace() -> None:
-    for gid in ("kb_main", "mem_42_aria", "eval_adam"):
+    for gid in ("kb_main", "mem_42_aria", "eval_mem_adam", "eval_kb_adam"):
         assert validate_group_id(gid) == gid
 
 

@@ -13,7 +13,18 @@
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { ChevronRight, ExternalLink, LoaderCircle, Play, Square, Trash2 } from '@lucide/svelte';
+  import { base } from '$app/paths';
+  import {
+    ChevronRight,
+    ExternalLink,
+    FolderSearch,
+    LoaderCircle,
+    Play,
+    RefreshCw,
+    Settings2,
+    Square,
+    Trash2
+  } from '@lucide/svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -22,11 +33,13 @@
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
   import type { EvalQuestionItem } from '$lib/api/knowledge';
+  import type { EvalCompletedPayload } from '$lib/features/knowledge/shared/knowledge-events';
+  import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import {
     createKnowledgeEvalModel,
     EVAL_ALL_LEGS,
     EVAL_LEG_LABEL,
-    EVAL_MAX_SELECTED,
+    type EvalTrack,
     type KnowledgeEvalModel
   } from '$lib/features/knowledge/state/knowledge-eval.svelte';
 
@@ -43,14 +56,31 @@
     setError: (msg) => ctl.setError(msg)
   });
 
+  // Engine preferences shown at the top (read-only) so the user sees exactly which
+  // settings drive this run, with a link to change them. Loaded once on mount.
+  let prefs = $state<WorkspacePreferences | null>(null);
+  async function loadPrefs() {
+    try {
+      const res = await getPreferences();
+      prefs = res.data.preferences;
+    } catch {
+      prefs = null; // non-fatal — the panel still works without the params strip
+    }
+  }
+
   onDestroy(() => eval_.teardown());
   onMount(() => {
     // Subscribe to live events + replay the server-side run state (survives
-    // navigation mid-run; consistent across the Vite/packaged origins).
+    // navigation mid-run; consistent across the Vite/packaged origins); init() also
+    // scans the corpus picker for the current track.
     void eval_.init();
-    // Load the question bank for the checklist (Adam path).
-    if (eval_.corpusSource === 'adam') void eval_.loadQuestions();
+    void loadPrefs();
   });
+
+  const TRACK_TABS: { id: EvalTrack; label: string }[] = [
+    { id: 'memory', label: 'Memory' },
+    { id: 'knowledge', label: 'Knowledge' }
+  ];
 
   // Per-row expansion (full answers). Keyed by question index; reassigned on
   // mutation so Svelte 5 tracks the Set.
@@ -83,6 +113,7 @@
       case 'idle':
         return '';
       case 'starting':
+        if (eval_.setupPhase?.phase === 'remember') return 'Remembering turns…';
         if (eval_.setupPhase?.phase === 'ingest_synthetic')
           return `Ingesting synthetic corpus${
             eval_.setupPhase.file_count ? ` · ${eval_.setupPhase.file_count} files` : ''
@@ -93,6 +124,8 @@
         return `Running ${eval_.rows.length} / ${eval_.totalQuestions}`;
       case 'completed': {
         if (!eval_.summary) return 'Done';
+        if (eval_.summary.track === 'memory')
+          return `Recalled ${eval_.summary.recalled_for ?? 0}/${eval_.summary.total_questions} · ${eval_.summary.elapsed_ms}ms`;
         const g = eval_.summary.gate;
         const label = g === 'proceed' ? '✅ PROCEED' : g === 'pivot' ? '❌ PIVOT' : 'ℹ️ Done';
         return `${label} · ${eval_.summary.elapsed_ms}ms`;
@@ -104,16 +137,47 @@
     }
   });
 
-  // Questions-card header summary: selection count + the "run all" hint.
+  // Questions-card header summary: selection count out of the corpus total (no cap;
+  // a non-empty selection is required to run).
   const questionsSummary = $derived(
-    `${eval_.selectedCount}/${EVAL_MAX_SELECTED} selected${
-      eval_.selectedCount === 0 ? ' · none = run all' : ''
+    `${eval_.selectedCount}/${eval_.questions.length} selected${
+      eval_.selectedCount === 0 ? ' · select at least one' : ''
     }`
   );
+
+  // Engine params strip — the preference values that actually drive this run, per track.
+  type Param = { label: string; value: string };
+  const engineParams = $derived.by<Param[]>(() => {
+    if (!prefs) return [];
+    const g = prefs.graph;
+    const dash = (v: string | null | undefined) => (v && String(v).trim() ? String(v) : '—');
+    const common: Param[] = [
+      { label: 'Graph backend', value: g.backend },
+      { label: 'Extraction model', value: dash(g.extraction_model) },
+      { label: 'Embedder', value: dash(g.embedder_model) }
+    ];
+    if (isMemory) {
+      return [
+        ...common,
+        { label: 'Recall top-k', value: String(prefs.memory.search.top_k) },
+        { label: 'Temporal lens', value: 'current' },
+        { label: 'Sim floor', value: String(g.sim_min_score) },
+        { label: 'Search scope', value: g.search_scope }
+      ];
+    }
+    return [
+      ...common,
+      { label: 'Retrieval top-k', value: String(prefs.knowledge.retrieval.top_k) },
+      { label: 'Search recipe', value: g.search_recipe },
+      { label: 'Sim floor', value: String(g.sim_min_score) }
+    ];
+  });
 
   // Results-card header summary: the gate verdict once complete, otherwise live progress.
   const resultsSummary = $derived.by(() => {
     if (eval_.summary) {
+      if (eval_.summary.track === 'memory')
+        return `recalled ${eval_.summary.recalled_for ?? 0}/${eval_.summary.total_questions} · ${eval_.summary.elapsed_ms}ms`;
       const g = eval_.summary.gate;
       const label = g === 'proceed' ? '✅ PROCEED' : g === 'pivot' ? '❌ PIVOT' : 'Done';
       return `${label} · ${eval_.summary.elapsed_ms}ms`;
@@ -121,6 +185,9 @@
     if (eval_.rows.length > 0) return `${eval_.rows.length}/${eval_.totalQuestions}`;
     return '';
   });
+
+  // The memory track is a single recall leg: no flat/graphiti legs, no Δ, no gate.
+  const isMemory = $derived(eval_.track === 'memory');
 
   const canRun = $derived(
     eval_.status === 'idle' ||
@@ -145,72 +212,167 @@
   }
 
   function legLabel(mode: string): string {
-    return EVAL_LEG_LABEL[mode] ?? mode;
+    return EVAL_LEG_LABEL[mode] ?? mode.charAt(0).toUpperCase() + mode.slice(1);
   }
 
-  // Columns for the live table = the legs the current run used (1–3).
+  // Columns for the results table = the legs the current run used (memory = ['recall']).
   const legColumns = $derived(eval_.runModes);
-  // Total table column count for full-width rows (spinner / spacer):
-  // ▲, #, Question, Category, <N legs>, Δ, Links.
-  const tableColspan = $derived(4 + legColumns.length + 2);
+  // Δ (best graph leg vs flat) only makes sense on the knowledge track (multi-leg compare).
+  const showDelta = $derived(!isMemory);
+  // Full-width row colspan: ▲, #, Question, Ideal, <N legs>, [Δ], Links.
+  const resultsColspan = $derived(4 + legColumns.length + (showDelta ? 1 : 0) + 1);
 
 </script>
 
 <section class="grid gap-4">
-  <!-- Setup / run controls — sticky at the top like the other Knowledge tabs'
-       filter bars. Inputs disable while a run is in flight; Run/Cancel/Clear
-       sit on the right. -->
+  <!-- Track sub-tabs — Memory vs Knowledge select the whole panel's shape. -->
+  <div
+    role="tablist"
+    aria-label="Eval track"
+    class="flex w-fit gap-1 rounded-lg border bg-muted/30 p-1 font-sans text-sm"
+  >
+    {#each TRACK_TABS as t (t.id)}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={eval_.track === t.id}
+        disabled={isBusy}
+        class="rounded-md px-3 py-1.5 transition-colors disabled:opacity-50 {eval_.track === t.id
+          ? 'bg-background font-semibold text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'}"
+        onclick={() => eval_.setTrack(t.id)}
+      >
+        {t.label}
+      </button>
+    {/each}
+  </div>
+
+  <!-- Engine parameters that drive this run (read-only) + a link to change them. -->
+  {#if engineParams.length > 0}
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
+      <span class="font-semibold uppercase tracking-wide text-muted-foreground">Engine</span>
+      {#each engineParams as p (p.label)}
+        <span class="text-muted-foreground">
+          {p.label}: <span class="font-mono text-foreground">{p.value}</span>
+        </span>
+      {/each}
+      <a
+        href="{base}/preferences"
+        class="ml-auto inline-flex items-center gap-1 rounded border px-2 py-0.5 text-primary hover:bg-primary/5"
+        title="Change these in workspace settings"
+      >
+        <Settings2 size={12} aria-hidden="true" /> Settings
+      </a>
+    </div>
+  {/if}
+
+  <!-- Corpus picker + run controls. Inputs disable while a run is in flight. -->
   <AdminPageStickyToolbar>
     <div class="flex flex-wrap items-center gap-3">
+      <!-- Folder: text input + native pick (like Knowledge Add) + rescan. -->
+      <div class="flex items-center gap-1.5 font-sans text-sm">
+        <span class="text-muted-foreground">Folder</span>
+        <input
+          class="h-8 w-64 rounded-md border bg-background px-2 text-sm"
+          placeholder="Folder to scan for corpuses"
+          value={eval_.folder}
+          oninput={(e) => eval_.setFolder(e.currentTarget.value)}
+          onchange={() => void eval_.scanCorpuses()}
+          disabled={isBusy}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          class="h-8"
+          onclick={() => void eval_.browseFolder()}
+          disabled={isBusy || eval_.pickingFolder}
+          title="Pick a folder"
+        >
+          {#if eval_.pickingFolder}
+            <LoaderCircle size={14} class="animate-spin" />
+          {:else}
+            <FolderSearch size={14} />
+          {/if}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          class="h-8"
+          onclick={() => void eval_.scanCorpuses()}
+          disabled={isBusy || eval_.corpusesLoading}
+          title="Rescan folder"
+        >
+          <RefreshCw size={14} class={eval_.corpusesLoading ? 'animate-spin' : ''} />
+        </Button>
+      </div>
+
+      <!-- Corpus dropdown — the corpuses found in the folder for this track. -->
       <label class="flex select-none items-center gap-2 font-sans text-sm">
         <span class="text-muted-foreground">Corpus</span>
         <select
-          class="h-8 rounded-md border bg-background px-2 text-sm"
-          value={eval_.corpusSource}
-          onchange={(e) =>
-            eval_.setCorpusSource(e.currentTarget.value as 'synthetic' | 'adam')}
-          disabled={isBusy}
+          class="h-8 min-w-48 rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+          value={eval_.selectedCorpusId}
+          onchange={(e) => eval_.selectCorpus(e.currentTarget.value)}
+          disabled={isBusy || eval_.corpuses.length === 0}
         >
-          <option value="adam">Adam (temporal · 35 episodes)</option>
-          <option value="synthetic">Synthetic L3 (.md)</option>
+          {#if eval_.corpuses.length === 0}
+            <option value="">No corpuses found</option>
+          {:else}
+            {#each eval_.corpuses as c (c.id)}
+              <option value={c.id}>
+                {c.name} ({c.item_count} {isMemory ? 'episodes' : 'docs'} · {c.question_count} Qs)
+              </option>
+            {/each}
+          {/if}
         </select>
       </label>
+
       <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
         <input type="checkbox" class="size-4" bind:checked={eval_.ingestSynthetic} disabled={isBusy} />
-        <span>
-          {eval_.corpusSource === 'adam'
-            ? 'Ingest corpus (episodes → Qdrant + graph)'
-            : 'Ingest synthetic corpus'}
-        </span>
+        <span>{isMemory ? 'Remember turns first' : 'Ingest corpus first'}</span>
       </label>
-      {#if eval_.corpusSource === 'synthetic'}
+      {#if !isMemory}
         <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
           <input type="checkbox" class="size-4" bind:checked={eval_.buildGraph} disabled={isBusy} />
           <span>Build graph</span>
         </label>
-      {/if}
-      <!-- Leg selector — compare any subset of flat/graphiti (one is fine). -->
-      <div class="flex items-center gap-2 font-sans text-sm">
-        <span class="text-muted-foreground">Legs</span>
-        <div class="flex gap-1" role="group" aria-label="Legs to compare">
-          {#each EVAL_ALL_LEGS as mode (mode)}
-            <button
-              type="button"
-              class="rounded-md border px-2 py-1 text-xs {eval_.isModeSelected(mode)
-                ? 'border-primary bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-muted'}"
-              aria-pressed={eval_.isModeSelected(mode)}
-              disabled={isBusy}
-              title={mode === 'graphiti'
-                ? 'Graph facts only (by-id passages, no query hybrid)'
-                : 'No graph — flat Qdrant hybrid'}
-              onclick={() => eval_.toggleMode(mode)}
-            >
-              {legLabel(mode)}
-            </button>
-          {/each}
+        <div class="flex items-center gap-2 font-sans text-sm">
+          <span class="text-muted-foreground">Legs</span>
+          <div class="flex gap-1" role="group" aria-label="Legs to compare">
+            {#each EVAL_ALL_LEGS as mode (mode)}
+              <button
+                type="button"
+                class="rounded-md border px-2 py-1 text-xs {eval_.isModeSelected(mode)
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-muted'}"
+                aria-pressed={eval_.isModeSelected(mode)}
+                disabled={isBusy}
+                title={mode === 'graphiti'
+                  ? 'Graph facts only (by-id passages, no query hybrid)'
+                  : 'No graph — flat Qdrant hybrid'}
+                onclick={() => eval_.toggleMode(mode)}
+              >
+                {legLabel(mode)}
+              </button>
+            {/each}
+          </div>
         </div>
-      </div>
+      {:else}
+        <span
+          class="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/5 px-2 py-1 font-sans text-xs text-primary"
+          title="Conversation memory recall — the single engine the memory track exercises"
+        >
+          <span class="size-1.5 rounded-full bg-primary"></span> Recall
+        </span>
+      {/if}
+      <!-- Optional LLM judge — grades each answer vs the ideal (reuses the answering model). -->
+      <label
+        class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
+        title="Grade the model's answer against the ideal answer (extra LLM call per question). Off = answers only, no marks."
+      >
+        <input type="checkbox" class="size-4" bind:checked={eval_.judge} disabled={isBusy} />
+        <span>Judge answers</span>
+      </label>
       <div class="ml-auto flex gap-2">
         {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage}
           <Button variant="outline" disabled={isBusy} onclick={eval_.clear} title="Clear the last run's results">
@@ -232,7 +394,11 @@
             {eval_.cancelling ? 'Cancelling…' : 'Cancel'}
           </Button>
         {/if}
-        <Button disabled={!canRun} onclick={() => void eval_.start()}>
+        <Button
+          disabled={!canRun || !eval_.selectedCorpus || eval_.selectedCount === 0}
+          onclick={() => void eval_.start()}
+          title={eval_.selectedCount === 0 ? 'Select at least one question' : 'Run the eval'}
+        >
           {#if isBusy}
             <LoaderCircle size={14} class="animate-spin" />
           {:else}
@@ -251,8 +417,15 @@
     </div>
   {/if}
 
-  <!-- Questions section (Adam path only). Empty selection = run all. Cap 50. -->
-  {#if eval_.corpusSource === 'adam'}
+  <!-- Corpus / questions errors (scan + bank). -->
+  {#if eval_.corpusesError}
+    <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive">
+      {eval_.corpusesError}
+    </div>
+  {/if}
+
+  <!-- Questions section — pick the questions to run (required; no implicit "run all"). -->
+  {#if eval_.selectedCorpus}
     <KnowledgeCollapsibleSectionCard
       title="Questions"
       bodyId="knowledge-eval-questions"
@@ -331,15 +504,15 @@
     </KnowledgeCollapsibleSectionCard>
   {/if}
 
-  <!-- Activity section — live setup + per-question progress terminal. Persists
-       after the run completes; placeholder shown when there's nothing yet. -->
-  <KnowledgeCollapsibleSectionCard
-    title="Activity"
-    bodyId="knowledge-eval-activity"
-    defaultExpanded={true}
-    summary={headerSummary}
-  >
-    {#if isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0}
+  <!-- Activity section — only once processing starts (or has data to replay). Persists
+       across navigation via the server-side run registry (GET /knowledge/eval/state). -->
+  {#if isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0}
+    <KnowledgeCollapsibleSectionCard
+      title="Activity"
+      bodyId="knowledge-eval-activity"
+      defaultExpanded={true}
+      summary={headerSummary}
+    >
       <KnowledgeEvalTerminal
         setupEvents={eval_.setupEvents}
         rows={eval_.rows}
@@ -349,279 +522,255 @@
         summaryElapsedMs={eval_.summary?.elapsed_ms ?? null}
         failureMessage={eval_.failureMessage}
       />
-    {:else}
-      <p class="rounded-md border border-dashed px-3 py-6 text-center font-sans text-xs text-muted-foreground">
-        No activity yet — run an eval to see live setup and per-question progress here.
-      </p>
-    {/if}
-  </KnowledgeCollapsibleSectionCard>
+    </KnowledgeCollapsibleSectionCard>
+  {/if}
 
-  <!-- Results section — live table, gate verdict, and per-category breakdown. -->
-  <KnowledgeCollapsibleSectionCard
-    title="Results"
-    bodyId="knowledge-eval-results"
-    defaultExpanded={true}
-    summary={resultsSummary}
-  >
-    <!-- Live table (always visible once rows arrive — even after completion). -->
-    {#if eval_.rows.length > 0 || eval_.status === 'running'}
-      <div class="overflow-x-auto rounded-md border">
-        <table class="w-full border-collapse font-sans text-sm">
-          <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th class="px-2 py-1.5 text-left" title="▲ = requires graph (the L3 thesis test on this row)">▲</th>
-              <th class="px-2 py-1.5 text-left">#</th>
-              <th class="px-2 py-1.5 text-left">Question</th>
-              <th class="px-2 py-1.5 text-left">Category</th>
-              {#each legColumns as mode (mode)}
-                <th class="px-2 py-1.5 text-center">{legLabel(mode)}</th>
-              {/each}
-              <th class="px-2 py-1.5 text-center" title="best graph leg vs flat">Δ</th>
-              <th class="px-2 py-1.5 text-right">Links</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each eval_.rows as r (r.id)}
-              <tr class="border-t">
-                <td class="px-2 py-1.5 text-center">{r.requires_graph ? '▲' : ''}</td>
-                <td class="px-2 py-1.5 font-mono tabular-nums text-xs text-muted-foreground">
-                  {r.index + 1}/{r.total}
-                </td>
-                <td class="px-2 py-1.5">
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-1.5 text-left hover:text-primary"
-                    onclick={() => toggleRow(r.index)}
-                    aria-expanded={expandedRows.has(r.index)}
-                    title="Show full answers"
-                  >
-                    <ChevronRight
-                      size={13}
-                      class="shrink-0 text-muted-foreground transition-transform {expandedRows.has(
-                        r.index
-                      )
-                        ? 'rotate-90'
-                        : ''}"
-                      aria-hidden="true"
-                    />
-                    <span class="line-clamp-1">{r.question}</span>
-                  </button>
-                </td>
-                <td class="px-2 py-1.5 text-xs text-muted-foreground">{r.category}</td>
-                {#each legColumns as mode (mode)}
-                  <td class="px-2 py-1.5 text-center">
-                    {#if r.legs[mode]}
-                      <Badge variant={markVariant(r.legs[mode].mark)} class="font-mono">{r.legs[mode].mark}</Badge>
-                      <span class="ml-1 font-mono text-xs tabular-nums text-muted-foreground">{r.legs[mode].elapsed_ms}ms</span>
-                    {:else}
-                      <span class="text-xs text-muted-foreground">—</span>
-                    {/if}
-                  </td>
-                {/each}
-                <td class="px-2 py-1.5 text-center">
-                  <Badge variant={deltaVariant(r.delta)} class="font-mono">{r.delta}</Badge>
-                </td>
-                <td class="px-2 py-1.5 text-right">
-                  <div class="inline-flex gap-1">
-                    {#each legColumns as mode (mode)}
-                      {#if r.legs[mode]?.run_id}
-                        <a
-                          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
-                          href={graphRunPageUrl(r.legs[mode].run_id!)}
-                          title="{legLabel(mode)} leg Graph Run"
-                        >
-                          <ExternalLink size={10} aria-hidden="true" />{mode}
-                        </a>
-                      {/if}
-                    {/each}
-                  </div>
-                </td>
-              </tr>
-              <!-- Detail row: full question + full per-leg answers. Kept in the
-                   DOM (hidden) when collapsed so the toggle's aria-expanded target
-                   stays stable. -->
-              <tr class="border-t bg-muted/10" hidden={!expandedRows.has(r.index)}>
-                <td colspan={tableColspan} class="px-3 py-3">
-                  <div class="grid gap-3">
-                    <div class="font-sans text-sm">
-                      <span class="font-semibold">Q:</span>
-                      {r.question}
-                      {#if r.subcategory}
-                        <span class="text-xs text-muted-foreground"> · {r.subcategory}</span>
-                      {/if}
-                    </div>
-                    <!-- Scoring rubric: what each answer is judged against. -->
-                    {#if r.expected_fragments.length > 0 || r.must_not_contain.length > 0}
-                      <div class="flex flex-col gap-1 font-sans text-xs">
-                        {#if r.expected_fragments.length > 0}
-                          <div class="flex flex-wrap items-center gap-1">
-                            <span class="font-semibold text-muted-foreground">Expected:</span>
-                            {#each r.expected_fragments as frag (frag)}
-                              <Badge variant="secondary" class="font-mono font-normal">{frag}</Badge>
-                            {/each}
-                          </div>
-                        {/if}
-                        {#if r.must_not_contain.length > 0}
-                          <div class="flex flex-wrap items-center gap-1">
-                            <span class="font-semibold text-muted-foreground">Must not contain:</span>
-                            {#each r.must_not_contain as frag (frag)}
-                              <Badge variant="warning" class="font-mono font-normal">{frag}</Badge>
-                            {/each}
-                          </div>
-                        {/if}
-                      </div>
-                    {:else}
-                      <div class="font-sans text-xs text-muted-foreground">
-                        Negative control — abstaining is the expected (correct) outcome.
-                      </div>
-                    {/if}
-                    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      {#each legColumns as mode (mode)}
-                        {#if r.legs[mode]}
-                          {@render answerCell(
-                            legLabel(mode),
-                            r.legs[mode].mark,
-                            r.legs[mode].elapsed_ms,
-                            r.legs[mode].answer,
-                            r.legs[mode].run_id
-                          )}
-                        {/if}
-                      {/each}
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            {/each}
-            {#if eval_.status === 'running' && eval_.totalQuestions > eval_.rows.length}
-              <tr class="border-t bg-muted/10">
-                <td colspan={tableColspan} class="px-2 py-2 text-center font-sans text-xs text-muted-foreground">
-                  <LoaderCircle size={12} class="mr-1 inline animate-spin" aria-hidden="true" />
-                  {eval_.rows.length} / {eval_.totalQuestions} done · waiting for next…
-                </td>
-              </tr>
-            {/if}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-
-    <!-- Summary / gate verdict. Per-leg passing on the requires_graph subset is
-         what determines proceed/pivot; the gate is 'n/a' when the run can't
-         compare (e.g. a single leg, or no flat baseline). -->
-    {#if eval_.summary}
-      {@const s = eval_.summary}
-      <div
-        class="grid gap-2 rounded-md border px-3 py-3 font-sans text-sm {s.gate === 'proceed'
-          ? 'border-emerald-500/40 bg-emerald-500/5'
-          : s.gate === 'pivot'
-            ? 'border-amber-500/40 bg-amber-500/5'
-            : 'border-border bg-muted/20'}"
-      >
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-base font-semibold">
-            {s.gate === 'proceed' ? '✅ PROCEED' : s.gate === 'pivot' ? '❌ PIVOT' : 'ℹ️ Results'}
-          </span>
-          <span class="text-xs text-muted-foreground">legs: {s.modes.map(legLabel).join(' · ')}</span>
-          <Badge variant="outline" class="font-mono">{s.elapsed_ms}ms</Badge>
-        </div>
-        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            Passing (all {s.total_questions}):
-            {#each s.modes as mode (mode)}
-              <span class="ml-1 font-mono">{legLabel(mode)}={s.passing?.[mode] ?? 0}</span>
-            {/each}
-          </span>
-          <span>
-            On <code class="font-mono">requires_graph</code> ({s.requires_graph_total}):
-            {#each s.modes as mode (mode)}
-              <span class="ml-1 font-mono">{legLabel(mode)}={s.requires_graph_passing?.[mode] ?? 0}</span>
-            {/each}
-          </span>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Per-category × N-leg breakdown (where each leg helps). -->
-    {#if eval_.summary?.by_category && Object.keys(eval_.summary.by_category).length > 0}
-      {@const bc = eval_.summary.by_category}
-      {@const cols = eval_.summary.modes}
-      <div class="overflow-x-auto rounded-md border">
-        <table class="w-full border-collapse font-sans text-sm">
-          <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th class="px-2 py-1.5 text-left">Category</th>
-              {#each cols as mode (mode)}
-                <th class="px-2 py-1.5 text-center">{legLabel(mode)}</th>
-              {/each}
-            </tr>
-          </thead>
-          <tbody>
-            {#each Object.entries(bc) as [cat, st] (cat)}
-              {@const flatPass = st.pass?.flat ?? 0}
-              <tr class="border-t">
-                <td class="px-2 py-1.5">{cat}</td>
-                {#each cols as mode (mode)}
-                  <td
-                    class="px-2 py-1.5 text-center font-mono tabular-nums {mode !== 'flat' &&
-                    (st.pass?.[mode] ?? 0) > flatPass
-                      ? 'font-semibold text-emerald-600'
-                      : 'text-muted-foreground'}"
-                  >
-                    {st.pass?.[mode] ?? 0}/{st.total}
-                  </td>
-                {/each}
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-
-    {#if eval_.status === 'idle' && eval_.rows.length === 0 && !eval_.failureMessage}
-      <p class="rounded-md border border-dashed px-3 py-6 text-center font-sans text-xs text-muted-foreground">
-        {#if eval_.corpusSource === 'adam'}
-          Ingests the 35-episode Adam corpus (Qdrant + Graphiti) and runs the selected questions
-          across the chosen legs. Pick the legs to compare (flat / graphiti — either or both)
-          and the questions (or leave all unselected to run every one), check "Ingest corpus"
-          on the first run, then Run. Results stream live with a per-category breakdown and a
-          PROCEED/PIVOT verdict (when flat + a graph leg are both selected).
-        {:else}
-          Runs the synthetic questions from <code class="font-mono">eval/l3_questions.yaml</code>
-          across the chosen legs (flat / graphiti). First run: check both setup boxes.
-          Subsequent runs: leave them off (graph and corpus stay in the workspace).
-        {/if}
-      </p>
-    {/if}
-  </KnowledgeCollapsibleSectionCard>
+  <!-- Results — unified across tracks: Question, Ideal, Model answer(s) at a glance;
+       fold for recalled facts / judge reason / full answers / run links. -->
+  {#if eval_.rows.length > 0 || eval_.summary}
+    <KnowledgeCollapsibleSectionCard
+      title="Results"
+      bodyId="knowledge-eval-results"
+      defaultExpanded={true}
+      summary={resultsSummary}
+    >
+      {#if eval_.rows.length > 0 || eval_.status === 'running'}
+        {@render resultsTable()}
+      {/if}
+      {#if eval_.summary}
+        {@render summaryCard(eval_.summary)}
+      {/if}
+      {#if eval_.summary?.by_category && Object.keys(eval_.summary.by_category).length > 0}
+        {@render categoryBreakdown(eval_.summary.by_category, eval_.summary.modes)}
+      {/if}
+    </KnowledgeCollapsibleSectionCard>
+  {/if}
 </section>
 
-<!-- Full-answer cell for an expanded table row. Answers render as plain
-     pre-wrapped text (matching the compare view) — no markdown pipeline, so no
-     {@html} / sanitizer boundary to maintain. -->
-{#snippet answerCell(
-  title: string,
-  mark: string,
-  ms: number,
-  answer: string,
-  runId: string | null
-)}
-  <div class="grid content-start gap-1 rounded-md border bg-background p-2.5">
-    <div class="flex items-center gap-2">
-      <span class="font-sans text-xs font-semibold">{title}</span>
-      <Badge variant={markVariant(mark)} class="font-mono">{mark}</Badge>
-      <span class="font-mono text-xs tabular-nums text-muted-foreground">{ms}ms</span>
-      {#if runId}
-        <a
-          class="ml-auto inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
-          href={graphRunPageUrl(runId)}
-          title={runId}
-        >
-          <ExternalLink size={10} aria-hidden="true" /> run
-        </a>
+<!-- Unified results table: Question, Ideal, per-leg [mark + model answer]; fold for details. -->
+{#snippet resultsTable()}
+  <div class="overflow-x-auto rounded-md border">
+    <table class="w-full border-collapse font-sans text-sm">
+      <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+        <tr>
+          <th class="px-2 py-1.5 text-left" title="requires graph/temporal reasoning">&#9650;</th>
+          <th class="px-2 py-1.5 text-left">#</th>
+          <th class="px-2 py-1.5 text-left">Question</th>
+          <th class="px-2 py-1.5 text-left">Ideal</th>
+          {#each legColumns as mode (mode)}
+            <th class="px-2 py-1.5 text-left">{legLabel(mode)} answer</th>
+          {/each}
+          {#if showDelta}<th class="px-2 py-1.5 text-center" title="best graph leg vs flat">&#916;</th>{/if}
+          <th class="px-2 py-1.5 text-right">Links</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each eval_.rows as r (r.id)}
+          <tr class="border-t align-top">
+            <td class="px-2 py-1.5 text-center">
+              {r.requires_graph ? '▲' : ''}{#if r.stale_hit}<span class="ml-0.5 text-amber-600" title="possible superseded-fact leak">&#9888;</span>{/if}
+            </td>
+            <td class="px-2 py-1.5 font-mono tabular-nums text-xs text-muted-foreground">{r.index + 1}/{r.total}</td>
+            <td class="max-w-[22rem] px-2 py-1.5">
+              <button
+                type="button"
+                class="flex w-full items-start gap-1.5 text-left hover:text-primary"
+                onclick={() => toggleRow(r.index)}
+                aria-expanded={expandedRows.has(r.index)}
+                title="Show details"
+              >
+                <ChevronRight
+                  size={13}
+                  class="mt-0.5 shrink-0 text-muted-foreground transition-transform {expandedRows.has(r.index) ? 'rotate-90' : ''}"
+                  aria-hidden="true"
+                />
+                <span class="line-clamp-2">{r.question}</span>
+              </button>
+            </td>
+            <td class="max-w-[16rem] px-2 py-1.5 text-xs text-muted-foreground">
+              <span class="line-clamp-2">{r.gold || '—'}</span>
+            </td>
+            {#each legColumns as mode (mode)}
+              <td class="max-w-[20rem] px-2 py-1.5">
+                {#if r.legs[mode]}
+                  {@const leg = r.legs[mode]}
+                  <div class="flex items-start gap-1.5">
+                    <Badge variant={markVariant(leg.mark)} class="mt-0.5 font-mono">{leg.mark || '—'}</Badge>
+                    <span class="line-clamp-2 text-sm">{leg.answer || '— (no answer)'}</span>
+                  </div>
+                {:else}
+                  <span class="text-xs text-muted-foreground">—</span>
+                {/if}
+              </td>
+            {/each}
+            {#if showDelta}
+              <td class="px-2 py-1.5 text-center">
+                <Badge variant={deltaVariant(r.delta)} class="font-mono">{r.delta}</Badge>
+              </td>
+            {/if}
+            <td class="px-2 py-1.5 text-right">
+              <div class="inline-flex gap-1">
+                {#each legColumns as mode (mode)}
+                  {#if r.legs[mode]?.run_id}
+                    <a
+                      class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
+                      href={graphRunPageUrl(r.legs[mode].run_id!)}
+                      title="{legLabel(mode)} Graph Run"
+                    >
+                      <ExternalLink size={10} aria-hidden="true" />{mode}
+                    </a>
+                  {/if}
+                {/each}
+              </div>
+            </td>
+          </tr>
+          <!-- Fold: full question + ideal + per-leg answer/judge/recalled facts. -->
+          <tr class="border-t bg-muted/10" hidden={!expandedRows.has(r.index)}>
+            <td colspan={resultsColspan} class="px-3 py-3">
+              <div class="grid gap-3">
+                <div class="font-sans text-sm">
+                  <span class="font-semibold">Q:</span>
+                  {r.question}
+                  {#if r.subcategory}<span class="text-xs text-muted-foreground"> &middot; {r.subcategory}</span>{/if}
+                </div>
+                <div class="flex flex-wrap items-center gap-2 font-sans text-xs">
+                  <span class="font-semibold text-muted-foreground">Ideal:</span>
+                  <span>{r.gold || '—'}</span>
+                  {#if r.must_not_contain.length > 0}
+                    <span class="font-semibold text-muted-foreground">Must not contain:</span>
+                    {#each r.must_not_contain as frag (frag)}
+                      <Badge variant="warning" class="font-mono font-normal">{frag}</Badge>
+                    {/each}
+                  {/if}
+                </div>
+                {#if r.stale_hit}
+                  <div class="rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1 font-sans text-xs text-amber-700">
+                    &#9888; a recalled fact contains a must-not-surface value &mdash; possible superseded-fact leak
+                  </div>
+                {/if}
+                <div class="grid gap-3 md:grid-cols-2">
+                  {#each legColumns as mode (mode)}
+                    {#if r.legs[mode]}
+                      {@const leg = r.legs[mode]}
+                      <div class="grid content-start gap-1 rounded-md border bg-background p-2.5">
+                        <div class="flex items-center gap-2">
+                          <span class="font-sans text-xs font-semibold">{legLabel(mode)}</span>
+                          <Badge variant={markVariant(leg.mark)} class="font-mono">{leg.mark || '—'}</Badge>
+                          <span class="font-mono text-xs tabular-nums text-muted-foreground">{leg.elapsed_ms}ms</span>
+                          {#if leg.run_id}
+                            <a
+                              class="ml-auto inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
+                              href={graphRunPageUrl(leg.run_id)}
+                              title="Graph Run"
+                            >
+                              <ExternalLink size={10} aria-hidden="true" /> run
+                            </a>
+                          {/if}
+                        </div>
+                        <p class="max-h-60 overflow-y-auto whitespace-pre-wrap font-sans text-sm leading-6">
+                          {leg.answer || '— (no answer)'}
+                        </p>
+                        {#if leg.reason}
+                          <p class="text-xs text-muted-foreground"><span class="font-semibold">Judge:</span> {leg.reason}</p>
+                        {/if}
+                        {#if (leg.recalled ?? []).length > 0}
+                          <details class="text-xs">
+                            <summary class="cursor-pointer text-muted-foreground">Recalled facts ({(leg.recalled ?? []).length})</summary>
+                            <ul class="ml-4 mt-1 list-disc leading-6">
+                              {#each leg.recalled ?? [] as f, i (i)}<li>{f}</li>{/each}
+                            </ul>
+                          </details>
+                        {/if}
+                      </div>
+                    {/if}
+                  {/each}
+                </div>
+              </div>
+            </td>
+          </tr>
+        {/each}
+        {#if eval_.status === 'running' && eval_.totalQuestions > eval_.rows.length}
+          <tr class="border-t bg-muted/10">
+            <td colspan={resultsColspan} class="px-2 py-2 text-center font-sans text-xs text-muted-foreground">
+              <LoaderCircle size={12} class="mr-1 inline animate-spin" aria-hidden="true" />
+              {eval_.rows.length} / {eval_.totalQuestions} done &middot; waiting for next&hellip;
+            </td>
+          </tr>
+        {/if}
+      </tbody>
+    </table>
+  </div>
+{/snippet}
+
+<!-- Summary: knowledge PROCEED/PIVOT gate or memory recall counts; both note when judge is off. -->
+{#snippet summaryCard(s: EvalCompletedPayload)}
+  {@const judged = s.judged ?? true}
+  <div
+    class="grid gap-2 rounded-md border px-3 py-3 font-sans text-sm {s.gate === 'proceed'
+      ? 'border-emerald-500/40 bg-emerald-500/5'
+      : s.gate === 'pivot'
+        ? 'border-amber-500/40 bg-amber-500/5'
+        : 'border-border bg-muted/20'}"
+  >
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-base font-semibold">
+        {s.gate === 'proceed' ? '✅ PROCEED' : s.gate === 'pivot' ? '❌ PIVOT' : s.track === 'memory' ? '\U0001F9E0 Recall results' : 'ℹ️ Results'}
+      </span>
+      <span class="text-xs text-muted-foreground">legs: {s.modes.map(legLabel).join(' · ')}</span>
+      <Badge variant="outline" class="font-mono">{s.elapsed_ms}ms</Badge>
+      {#if !judged}<Badge variant="secondary">answers only &middot; judge off</Badge>{/if}
+    </div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {#if s.track === 'memory'}
+        <span>Remembered turns: <span class="font-mono">{s.remembered_turns ?? 0}</span></span>
+        <span>Recalled for: <span class="font-mono">{s.recalled_for ?? 0}/{s.total_questions}</span></span>
+        <span>Possible stale leaks: <span class="font-mono {(s.stale_hits ?? 0) > 0 ? 'text-amber-600' : ''}">{s.stale_hits ?? 0}</span></span>
+      {/if}
+      {#if judged}
+        <span>
+          Passing (all {s.total_questions}):
+          {#each s.modes as mode (mode)}<span class="ml-1 font-mono">{legLabel(mode)}={s.passing?.[mode] ?? 0}</span>{/each}
+        </span>
+        {#if s.track !== 'memory'}
+          <span>
+            On <code class="font-mono">requires_graph</code> ({s.requires_graph_total ?? 0}):
+            {#each s.modes as mode (mode)}<span class="ml-1 font-mono">{legLabel(mode)}={s.requires_graph_passing?.[mode] ?? 0}</span>{/each}
+          </span>
+        {/if}
       {/if}
     </div>
-    <p class="max-h-80 overflow-y-auto whitespace-pre-wrap font-sans text-sm leading-6">
-      {answer || '— (no answer)'}
-    </p>
+    {#if !judged}
+      <p class="text-xs text-muted-foreground">
+        Judge was off &mdash; answers shown without marks. Enable &ldquo;Judge answers&rdquo; to grade
+        each answer against the ideal answer.
+      </p>
+    {/if}
+  </div>
+{/snippet}
+
+<!-- Per-category x leg passing counts (judge marks). -->
+{#snippet categoryBreakdown(bc: Record<string, { total: number; pass: Record<string, number> }>, cols: string[])}
+  <div class="overflow-x-auto rounded-md border">
+    <table class="w-full border-collapse font-sans text-sm">
+      <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+        <tr>
+          <th class="px-2 py-1.5 text-left">Category</th>
+          {#each cols as mode (mode)}<th class="px-2 py-1.5 text-center">{legLabel(mode)}</th>{/each}
+        </tr>
+      </thead>
+      <tbody>
+        {#each Object.entries(bc) as [cat, st] (cat)}
+          {@const flatPass = st.pass?.flat ?? 0}
+          <tr class="border-t">
+            <td class="px-2 py-1.5">{cat}</td>
+            {#each cols as mode (mode)}
+              <td class="px-2 py-1.5 text-center font-mono tabular-nums {mode !== 'flat' && (st.pass?.[mode] ?? 0) > flatPass ? 'font-semibold text-emerald-600' : 'text-muted-foreground'}">
+                {st.pass?.[mode] ?? 0}/{st.total}
+              </td>
+            {/each}
+          </tr>
+        {/each}
+      </tbody>
+    </table>
   </div>
 {/snippet}

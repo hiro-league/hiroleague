@@ -36,6 +36,12 @@ NS_EVAL = "eval"
 MEMORY_PREFIX = f"{NS_MEMORY}{_GROUP_SEP}"  # "mem_"
 KNOWLEDGE_PREFIX = f"{NS_KNOWLEDGE}{_GROUP_SEP}"  # "kb_"
 EVAL_PREFIX = f"{NS_EVAL}{_GROUP_SEP}"  # "eval_"
+# Eval is one `eval_` roof with a per-track token, so all eval data wipes by the `eval_` prefix
+# yet stays structurally separate from real `mem_`/`kb_` (docs/eval-corpus-tracks-design.md §4):
+#   eval_mem_{set}   memory-eval corpora    (Phase 1)
+#   eval_kb_{set}    knowledge-eval corpora (Phase 3)
+EVAL_MEMORY_PREFIX = f"{EVAL_PREFIX}{NS_MEMORY}{_GROUP_SEP}"  # "eval_mem_"
+EVAL_KNOWLEDGE_PREFIX = f"{EVAL_PREFIX}{NS_KNOWLEDGE}{_GROUP_SEP}"  # "eval_kb_"
 _KNOWN_PREFIXES = (MEMORY_PREFIX, KNOWLEDGE_PREFIX, EVAL_PREFIX)
 
 # Knowledge is one NAMED space today (not graphiti's empty default — that was the leak,
@@ -74,9 +80,18 @@ def knowledge_group_id(space: str = KNOWLEDGE_DEFAULT_SPACE) -> str:
     return f"{NS_KNOWLEDGE}{_GROUP_SEP}{slug_group_part(space)}"
 
 
-def eval_group_id(set_id: str) -> str:
-    """Eval-corpus partition, isolated per eval set so eval never pollutes knowledge."""
-    return f"{NS_EVAL}{_GROUP_SEP}{slug_group_part(set_id)}"
+def eval_memory_group_id(set_id: str) -> str:
+    """Memory-eval partition — one ``eval_mem_{set}`` drawer per eval set (docs §4).
+
+    Reached by an eval-scoped :class:`GraphitiConversationMemory` (the §6 scoped-service-object),
+    so the memory engine's ``remember``/``recall`` are exercised for real while their data lands in
+    a dedicated eval drawer — never in a real ``mem_{user}_{character}`` group."""
+    return f"{EVAL_MEMORY_PREFIX}{slug_group_part(set_id)}"
+
+
+def eval_knowledge_group_id(set_id: str) -> str:
+    """Knowledge-eval partition — one ``eval_kb_{set}`` drawer per eval set (Phase 3)."""
+    return f"{EVAL_KNOWLEDGE_PREFIX}{slug_group_part(set_id)}"
 
 
 def character_from_group(group_id: str) -> str:
@@ -133,6 +148,11 @@ def group_label(group_id: str) -> str:
         character = character_from_group(group_id) or "?"
         return f"Memory · {character} (user {user})" if user else f"Memory · {character}"
     if is_eval_group_id(group_id):
+        # Distinguish the two eval tracks (eval_mem_ / eval_kb_) under the shared eval roof.
+        if group_id.startswith(EVAL_MEMORY_PREFIX):
+            return f"Eval · Memory · {group_id[len(EVAL_MEMORY_PREFIX):]}"
+        if group_id.startswith(EVAL_KNOWLEDGE_PREFIX):
+            return f"Eval · Knowledge · {group_id[len(EVAL_KNOWLEDGE_PREFIX):]}"
         return f"Eval · {group_id[len(EVAL_PREFIX):]}"
     return group_id
 
@@ -166,6 +186,8 @@ __all__ = [
     "MEMORY_PREFIX",
     "KNOWLEDGE_PREFIX",
     "EVAL_PREFIX",
+    "EVAL_MEMORY_PREFIX",
+    "EVAL_KNOWLEDGE_PREFIX",
     "NS_MEMORY",
     "NS_KNOWLEDGE",
     "NS_EVAL",
@@ -173,7 +195,8 @@ __all__ = [
     "memory_group_id",
     "memory_user_prefix",
     "knowledge_group_id",
-    "eval_group_id",
+    "eval_memory_group_id",
+    "eval_knowledge_group_id",
     "character_from_group",
     "group_label",
     "is_memory_group_id",

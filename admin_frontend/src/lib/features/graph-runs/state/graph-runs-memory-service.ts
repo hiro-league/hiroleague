@@ -5,14 +5,15 @@ import {
   listWorkspaceMemories
 } from '$lib/api/memory';
 
-/** List workspace long-term memories (Graphiti); mirrors prior controller try/catch (api throws on HTTP / payload errors). */
-export async function graphRunsLoadMemoriesList(): Promise<{
+/** List workspace long-term memories (Graphiti); mirrors prior controller try/catch (api throws on HTTP / payload errors).
+ *  `groupId` (optional) scopes the list to one graph partition — backs the Memories group selector. */
+export async function graphRunsLoadMemoriesList(groupId?: string): Promise<{
   memoryEnabled: boolean | null;
   memories: Record<string, unknown>[];
   error: string;
 }> {
   try {
-    const res = await listWorkspaceMemories();
+    const res = await listWorkspaceMemories(groupId);
     return {
       memoryEnabled: res.data.memory_enabled,
       memories: res.data.memories ?? [],

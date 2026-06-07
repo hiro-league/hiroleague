@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { BookOpen, RefreshCw, Settings2 } from '@lucide/svelte';
+  import { BookOpen, RefreshCw, Settings } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import CharacterResolvedBlock from '$lib/features/characters/CharacterResolvedBlock.svelte';
@@ -144,11 +144,11 @@
           size="icon"
           class="size-10 shrink-0"
           disabled={busy}
-          title="Open workspace preferences and scroll to tuning profiles"
-          aria-label="Edit tuning profiles in workspace preferences"
+          title="Open workspace settings and scroll to tuning profiles"
+          aria-label="Edit tuning profiles in workspace settings"
           onclick={() => void goto(preferencesTuningProfilesHref)}
         >
-          <Settings2 size={16} />
+          <Settings size={16} />
         </Button>
       </div>
       {#if selectedTuningProfile}

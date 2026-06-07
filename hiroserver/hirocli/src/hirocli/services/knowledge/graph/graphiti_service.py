@@ -191,21 +191,46 @@ def graphiti_db_path(workspace_path: Path) -> Path:
     return workspace_path / KNOWLEDGE_DIR / GRAPH_DIR / KUZU_DB_FILENAME
 
 
+# Graphiti tags every entity with this base label in addition to its ontology type
+# (mirrors graphiti_serialize._BASE_LABEL) — the first non-base label IS the entity type.
+_BASE_ENTITY_LABEL = "Entity"
+
+
+def _node_entity_type(node: Any) -> str:
+    """First non-base ontology label is the entity's type (e.g. ``Person``); else ``Entity``."""
+    for label in getattr(node, "labels", None) or []:
+        if label and label != _BASE_ENTITY_LABEL:
+            return str(label)
+    return _BASE_ENTITY_LABEL
+
+
 def _edge_to_memory(edge: Any) -> dict[str, Any]:
     """One Graphiti fact edge → a plain memory dict (facts-as-memory, decision D3).
 
-    Reduces an ``EntityEdge`` to ``{memory, created_at, invalid_at, id, chunk_ids}`` so
-    the conversation-memory facade can render/list facts WITHOUT importing graphiti_core
-    (the brain stays inside this module, decision G3/G8). ``id`` is the edge uuid (the
-    deletable unit); ``chunk_ids`` are the supporting episode uuids (== message ids)."""
+    Reduces an ``EntityEdge`` to a render-ready dict so the conversation-memory facade can
+    list facts WITHOUT importing graphiti_core (the brain stays inside this module, decision
+    G3/G8). ``id`` is the edge uuid (the deletable unit); ``chunk_ids`` are the supporting
+    episode uuids (== message ids).
+
+    Structure fields make the admin Memories table read as a *graph* rather than prose:
+    ``relation`` is the predicate (``PARENT_OF``); ``source_id``/``target_id`` are the
+    endpoint entity uuids (their names are joined in :meth:`list_facts`, which already has the
+    nodes in hand). Temporal fields expose the bi-temporal model: ``created_at`` (``valid_at``
+    — became true), ``invalid_at`` (stopped being true), ``expired_at`` (when the system
+    learned it was superseded)."""
     valid_at = getattr(edge, "valid_at", None)
     invalid_at = getattr(edge, "invalid_at", None)
+    expired_at = getattr(edge, "expired_at", None)
     episodes = [str(ep) for ep in (getattr(edge, "episodes", None) or []) if ep]
     return {
         "kind": "relation",
         "memory": getattr(edge, "fact", "") or "",
+        "relation": getattr(edge, "name", "") or "",
+        "source_id": getattr(edge, "source_node_uuid", "") or "",
+        "target_id": getattr(edge, "target_node_uuid", "") or "",
         "created_at": valid_at.isoformat() if isinstance(valid_at, dt.datetime) else None,
         "invalid_at": invalid_at.isoformat() if isinstance(invalid_at, dt.datetime) else None,
+        "expired_at": expired_at.isoformat() if isinstance(expired_at, dt.datetime) else None,
         "id": getattr(edge, "uuid", "") or "",
         # The partition the fact lives in — the conversation facade parses the
         # ``(user, character)`` out of it to attribute the row in the admin view.
@@ -238,8 +263,13 @@ def _node_to_memory(node: Any) -> dict[str, Any] | None:
     return {
         "kind": "summary",
         "memory": summary,
+        # The entity this summary is *about* + its ontology type — lets the admin table show
+        # "Misho (Person)" beside the prose so a summary reads as a graph node, not a sentence.
+        "entity_name": getattr(node, "name", "") or "",
+        "entity_type": _node_entity_type(node),
         "created_at": created_at.isoformat() if isinstance(created_at, dt.datetime) else None,
         "invalid_at": None,
+        "expired_at": None,
         "id": getattr(node, "uuid", "") or "",
         "group_id": getattr(node, "group_id", "") or "",
         # Empty by design — see docstring. The Graph viz still resolves provenance via
@@ -650,7 +680,18 @@ class GraphitiMemoryService:
                     exc_info=True,
                 )
                 raise
-        rows: list[dict[str, Any]] = [_edge_to_memory(edge) for edge in (edges or [])]
+        # Resolve relation endpoints to entity names. The nodes are already loaded for the
+        # summary rows below, so this join is free (no extra read) — it turns each relation
+        # row into "Source —[REL]→ Target" instead of two opaque uuids.
+        name_by_uuid = {
+            (getattr(n, "uuid", "") or ""): (getattr(n, "name", "") or "") for n in (nodes or [])
+        }
+        rows: list[dict[str, Any]] = []
+        for edge in edges or []:
+            row = _edge_to_memory(edge)
+            row["source_name"] = name_by_uuid.get(row["source_id"], "")
+            row["target_name"] = name_by_uuid.get(row["target_id"], "")
+            rows.append(row)
         for node in nodes or []:
             row = _node_to_memory(node)
             if row is not None:

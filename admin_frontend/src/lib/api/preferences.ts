@@ -104,6 +104,7 @@ export type ChatPreferences = {
   instructions: string;
   max_messages: number;
   cite_sources: boolean;
+  tools_enabled: boolean;
   preferred_answering_language: string;
 };
 
@@ -203,6 +204,7 @@ export const DEFAULT_CHAT: ChatPreferences = {
   instructions: '',
   max_messages: 6,
   cite_sources: false,
+  tools_enabled: true,
   preferred_answering_language: 'en'
 };
 

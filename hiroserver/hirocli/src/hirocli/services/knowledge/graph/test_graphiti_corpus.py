@@ -108,7 +108,7 @@ def test_adam_corpus_parses_35_episodes() -> None:
 
 
 def test_adam_questions_load_and_cover_categories() -> None:
-    qs = load_questions(_EVAL_DIR / "adam_questions.yaml")
+    qs = load_questions(_EVAL_DIR / "adam_year.questions.yaml")
     assert len(qs) >= 25
     cats = {q["category"] for q in qs}
     for required in (
@@ -133,6 +133,6 @@ def test_must_not_contain_facts_exist_in_corpus() -> None:
     # the must_not_contain checks would be vacuous.
     eps = load_episodes_file(_EVAL_DIR / "adam_year.episodes.jsonl")
     corpus = " ".join(e.text.lower() for e in eps)
-    for q in load_questions(_EVAL_DIR / "adam_questions.yaml"):
+    for q in load_questions(_EVAL_DIR / "adam_year.questions.yaml"):
         for forbidden in q.get("must_not_contain", []):
             assert forbidden.lower() in corpus, f"{q['id']}: forbidden {forbidden!r} not in corpus"

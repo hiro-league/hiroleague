@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
-  import { ChevronDown, ChevronUp, FolderOpen, List, Workflow } from '@lucide/svelte';
+  import { FolderOpen, List, Workflow } from '@lucide/svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import Button from '$lib/components/ui/button.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import type { LogsPrimaryTabPreference } from '$lib/preferences/keys';
   import { ADMIN_HEADER_INTRO, ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
@@ -14,7 +13,6 @@
   import { createLogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import { createLogsTabPreferences } from '$lib/preferences/logs-tab-preferences.svelte';
   import { createLogsPageController } from './state/logs-controller.svelte';
-  import { LOGS_FILTER_REGION_ID } from './shared/logs-a11y';
   import LogsPanel from './LogsPanel.svelte';
   // Graph runs is the Logs page's second tab — its panels/subnav are reused here
   // and driven by their own (runs-only) controller. Memories moved to its own page.
@@ -68,9 +66,6 @@
   kicker="Operations"
   title={pageTitle}
   wrapperClass={ADMIN_PAGE_MAX_W_WIDE}
-  collapseExpanded={!prefs.controlsCollapsed}
-  onToggleCollapse={() => prefs.toggleControlsCollapsed()}
-  collapseAriaControls={LOGS_FILTER_REGION_ID}
 >
   {#snippet titleAdornment()}
     {#if !isRunsTab}
@@ -134,27 +129,6 @@
         onToggleRunDetailCards={runsCtrl.toggleRunDetailCards}
         onRefresh={runsCtrl.refreshMain}
       />
-    {/if}
-  {/snippet}
-
-  {#snippet actionsCollapse({ expanded, toggle, ariaControls })}
-    {#if !isRunsTab}
-      <Button
-        variant="outline"
-        size="icon"
-        class="size-8"
-        aria-expanded={expanded}
-        aria-controls={ariaControls}
-        aria-label={expanded ? 'Collapse log controls' : 'Expand log controls'}
-        title={expanded ? 'Collapse log controls' : 'Expand log controls'}
-        onclick={toggle}
-      >
-        {#if expanded}
-          <ChevronUp size={16} />
-        {:else}
-          <ChevronDown size={16} />
-        {/if}
-      </Button>
     {/if}
   {/snippet}
 

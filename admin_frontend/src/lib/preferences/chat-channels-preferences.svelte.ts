@@ -17,6 +17,8 @@ export type ChatChannelsPreferences = {
   readChannelIdFromLocation: () => string | null;
   setActiveTab: (tab: ChatChannelsTabPreference, channelId?: string | null) => Promise<void>;
   syncNav: (channelId: string | null) => Promise<void>;
+  /** Apply `?tab=` from the current URL without navigating (same-route deep links). */
+  syncActiveTabFromUrl: () => void;
 };
 
 export function createChatChannelsPreferences(): ChatChannelsPreferences {
@@ -58,6 +60,7 @@ export function createChatChannelsPreferences(): ChatChannelsPreferences {
     initialize: tabs.initialize,
     setActiveTab,
     syncNav,
-    readChannelIdFromLocation
+    readChannelIdFromLocation,
+    syncActiveTabFromUrl: tabs.syncActiveTabFromUrl
   };
 }

@@ -41,19 +41,25 @@ export type EvalStartedPayload = {
   modes: string[];
 };
 
-/** Per-leg result inside a ``knowledge.eval.question_completed`` event. */
+/** Per-leg result inside a ``knowledge.eval.question_completed`` event (unified across tracks).
+ *  ``mode`` is ``flat``/``graphiti`` (knowledge) or ``recall`` (memory). ``mark`` is the LLM-judge
+ *  verdict glyph, or ``""`` when the judge was off (answers only). ``recalled`` carries the memory
+ *  engine's facts (empty for knowledge legs). */
 export type EvalQuestionLeg = {
   mode?: string;
-  mark: string;            // ✓ / ◐ / ✗ / 🛇
+  mark: string; // ✓ / ◐ / ✗ / 🛇 — or "" when not judged
   elapsed_ms: number;
-  answer_preview: string;  // compact teaser for the live terminal line
-  answer: string;          // FULL answer for the expandable table row
-  run_id: string | null;   // per-leg knowledge_answer ledger run for drill-in
+  answer_preview: string;
+  answer: string; // the model's answer
+  run_id: string | null; // ledger run for drill-in
+  reason?: string; // judge's one-line justification
+  recalled?: string[]; // memory: the recalled facts (for the fold/detail)
 };
 
-/** Payload shape of ``knowledge.eval.question_completed`` events.
- *  ``legs`` is keyed by leg name (flat/graphiti) — only the run's selected
- *  legs are present, so 1–2 entries. */
+/** Payload shape of ``knowledge.eval.question_completed`` events (unified).
+ *  Both tracks carry ``legs`` (memory has a single ``recall`` leg), the ideal answer (``gold``)
+ *  the judge grades against, and ``delta`` (knowledge Δ). ``stale_hit`` flags a recalled fact
+ *  that contained a ``must_not_contain`` value (possible superseded leak). */
 export type EvalQuestionPayload = {
   run_id?: string;
   index: number;
@@ -63,30 +69,37 @@ export type EvalQuestionPayload = {
   subcategory?: string;
   question: string;
   requires_graph: boolean;
-  legs: Record<string, EvalQuestionLeg>;
-  delta: string; // best graph leg vs flat
-  // Scoring rubric (display-only): what each answer is judged against. Empty
-  // expected_fragments = negative-control row (abstaining is the correct outcome).
-  expected_fragments?: string[];
+  track?: 'knowledge' | 'memory';
+  legs?: Record<string, EvalQuestionLeg>;
+  delta?: string; // best graph leg vs flat (knowledge)
+  gold?: string; // the ideal answer (judge reference / display)
+  stale_hit?: boolean; // memory: a recalled fact contained a must_not_contain value
   must_not_contain?: string[];
 };
 
 /** Per-category passing counts, keyed by leg (the per-category results table). */
 export type EvalCategoryStat = { total: number; pass: Record<string, number> };
 
-/** Payload shape of ``knowledge.eval.completed`` events (aggregate summary). */
+/** Payload shape of ``knowledge.eval.completed`` events (aggregate summary).
+ *  Knowledge fields (passing/by_category/gate) and memory fields
+ *  (remembered_turns/recalled_for/stale_hits) are mutually exclusive by ``track``. */
 export type EvalCompletedPayload = {
   run_id: string;
+  track?: 'knowledge' | 'memory';
   total_questions: number;
   modes: string[];
-  // leg → number of passing rows.
-  passing: Record<string, number>;
-  requires_graph_total: number;
-  // leg → passing rows within the requires_graph subset.
-  requires_graph_passing: Record<string, number>;
   gate: 'proceed' | 'pivot' | 'n/a';
+  judged?: boolean; // whether the LLM judge ran (marks present)
   elapsed_ms: number;
+  // Knowledge track.
+  passing?: Record<string, number>;
+  requires_graph_total?: number;
+  requires_graph_passing?: Record<string, number>;
   by_category?: Record<string, EvalCategoryStat>;
+  // Memory track.
+  remembered_turns?: number;
+  recalled_for?: number;
+  stale_hits?: number;
 };
 
 /** Payload shape of ``knowledge.eval.failed`` events. */
@@ -105,7 +118,7 @@ export type EvalCancelledPayload = {
  *  events) so the live terminal can show fine-grained ingest/graph-build progress. */
 export type EvalSetupProgressPayload = {
   run_id?: string;
-  phase: 'ingest_synthetic' | 'graph_build' | 'ingest_adam' | 'build_graph';
+  phase: 'ingest_synthetic' | 'graph_build' | 'build_graph' | 'remember';
   file_count?: number;
   episode_count?: number;
   // Per-episode granularity (absent on the coarse phase-start events).
@@ -184,6 +197,7 @@ export function connectKnowledgeEvalEvents(handlers: EvalEventHandlers): () => v
 export type EvalRunStateData = {
   run_id: string;
   corpus_source: string;
+  track?: 'knowledge' | 'memory';
   status: 'starting' | 'running' | 'completed' | 'failed' | 'cancelled';
   total_questions: number;
   modes: string[];

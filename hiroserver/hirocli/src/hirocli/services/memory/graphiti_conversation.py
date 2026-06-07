@@ -31,6 +31,7 @@ from hirocli.domain.memory import MemoryAddResult
 # Re-exporting ``memory_group_id`` here keeps the existing import path for memory callers/tests.
 from hirocli.services.knowledge.graph.group_scope import (
     character_from_group as _character_from_group,
+    classify_group as _classify_group,
     memory_group_id,
     memory_user_prefix as _user_groups_prefix,
 )
@@ -52,15 +53,21 @@ log = Logger.get("SVC.MEMORY.GRAPHITI")
 # buckets tokens into the active episode ledger). See docs §L2.5 / §13b.
 
 
-def _memory_row(fact: dict[str, Any]) -> dict[str, Any]:
-    """Enrich a raw graph fact with the fields the admin memory view attributes on —
-    ``character_id`` (parsed from the fact's ``group_id``) and ``source`` (always
-    ``conversation`` for memory facts)."""
+def _admin_fact_row(fact: dict[str, Any]) -> dict[str, Any]:
+    """Enrich a raw graph fact with the fields the admin Memories view attributes on —
+    ``character_id`` (parsed from the fact's ``group_id``) and ``source`` derived from the
+    group's namespace: ``conversation`` for a ``mem_`` group, else the namespace kind
+    (``knowledge`` / ``eval`` / ``other``).
+
+    Generalized from the former ``_memory_row`` (which hard-coded ``conversation``) so the
+    same enrichment serves BOTH the conversation list (always ``mem_`` groups) and the admin
+    group selector, which can point at any partition (``list_facts_in_groups``)."""
     group_id = str(fact.get("group_id", "") or "")
+    kind = _classify_group(group_id)
     return {
         **fact,
         "character_id": _character_from_group(group_id),
-        "source": "conversation",
+        "source": "conversation" if kind == "memory" else kind,
     }
 
 
@@ -85,12 +92,24 @@ class GraphitiConversationMemory:
         *,
         default_top_k: int = 8,
         event_sink: "GraphEventSink | None" = None,
+        group_override: str | None = None,
     ) -> None:
         self._graph = graph_service
         self._default_top_k = int(default_top_k)
         # Optional live-viz sink: when set, each remembered turn streams its new nodes/edges
         # (tagged with the mem_ group) to the admin Graph tab via the DomainEventBus.
         self._event_sink = event_sink
+        # Eval-scoped instance (docs/eval-corpus-tracks-design.md §5/§6 — the scoped-service-object):
+        # when set, every add/search/clear targets THIS drawer (e.g. ``eval_mem_adam``) instead of
+        # deriving ``mem_{user}_{character}`` from the call args. The runtime keeps constructing the
+        # unscoped instance (override=None) unchanged, so this is additive — a single binding that
+        # redirects the memory eval's data without touching the hot path.
+        self._group_override = group_override
+
+    def _group_for(self, user_id: int, character_id: str) -> str:
+        """The drawer this call writes/reads: the eval override when scoped, else the per-
+        ``(user, character)`` memory group."""
+        return self._group_override or memory_group_id(user_id, character_id)
 
     async def add(
         self,
@@ -115,7 +134,7 @@ class GraphitiConversationMemory:
         if not text:
             return MemoryAddResult(usage=None, stored_count=0)
         meta = dict(metadata or {})
-        group = memory_group_id(user_id, character_id)
+        group = self._group_for(user_id, character_id)
         # Episode uuid == message id ⇒ free provenance back to the stored turn (decision
         # D5). Fall back to inbound_id; empty ⇒ ingest mints no provenance link (still
         # works, just unciteable).
@@ -169,7 +188,7 @@ class GraphitiConversationMemory:
         q = str(query or "").strip()
         if not q:
             return []
-        group = memory_group_id(user_id, character_id)
+        group = self._group_for(user_id, character_id)
         top_k = self._default_top_k if limit is None else int(limit)
         # Ledger Graphiti's fact search as sub-steps of the active ``memory_search`` node
         # (embed_query / candidate_gen / bfs_expand / rrf_fuse / rerank + temporal_filter),
@@ -234,7 +253,19 @@ class GraphitiConversationMemory:
         if not groups:
             return []
         facts = await self._graph.list_facts(groups)
-        return [_memory_row(fact) for fact in facts]
+        return [_admin_fact_row(fact) for fact in facts]
+
+    async def list_facts_in_groups(self, group_ids: list[str]) -> list[dict[str, Any]]:
+        """List facts for explicit partitions — backs the admin Memories group selector,
+        which can point at ANY group (memory / knowledge / eval), not just this user's
+        conversation groups. Read-only; each row is enriched with ``character_id`` + a
+        namespace-derived ``source`` so the admin view can attribute it. Blank ids dropped;
+        empty input returns ``[]`` (never an all-groups scan)."""
+        groups = [str(g).strip() for g in (group_ids or []) if str(g).strip()]
+        if not groups:
+            return []
+        facts = await self._graph.list_facts(groups)
+        return [_admin_fact_row(fact) for fact in facts]
 
     async def clear_all(
         self,
@@ -275,6 +306,9 @@ class GraphitiConversationMemory:
         await self._graph.close()
 
     async def _resolve_groups(self, user_id: int, character_id: str | None) -> list[str]:
+        # Eval-scoped instance: every list/clear targets the single override drawer.
+        if self._group_override:
+            return [self._group_override]
         if character_id:
             return [memory_group_id(user_id, character_id)]
         # All characters for this user → enumerate the user's memory groups (L2.6).

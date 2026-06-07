@@ -1,24 +1,36 @@
 <script lang="ts">
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { memoryId, memoryPrimaryText } from './graph-runs-pure';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import type { GraphChunkDetail } from '$lib/api/knowledge';
+  import { memoryDateDisplay, memoryId, memoryPrimaryText } from './graph-runs-pure';
 
   let {
     memoryJsonRow,
+    memoryProvenanceRow,
+    memoryProvenanceChunks,
+    memoryProvenanceLoading,
+    memoryProvenanceError,
     clearMemoriesConfirmOpen,
     deleteMemoryTarget,
     memoryActionBusy,
     onCloseMemoryJson,
+    onCloseProvenance,
     onCloseClearMemories,
     onConfirmClearMemories,
     onCloseDeleteMemory,
     onConfirmDeleteMemory
   }: {
     memoryJsonRow: Record<string, unknown> | null;
+    memoryProvenanceRow: Record<string, unknown> | null;
+    memoryProvenanceChunks: GraphChunkDetail[];
+    memoryProvenanceLoading: boolean;
+    memoryProvenanceError: string;
     clearMemoriesConfirmOpen: boolean;
     deleteMemoryTarget: Record<string, unknown> | null;
     memoryActionBusy: boolean;
     onCloseMemoryJson: () => void;
+    onCloseProvenance: () => void;
     onCloseClearMemories: () => void;
     onConfirmClearMemories: () => void;
     onCloseDeleteMemory: () => void;
@@ -36,6 +48,44 @@
     {/if}
     <Dialog.Footer>
       <Button variant="outline" onclick={onCloseMemoryJson}>Close</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={memoryProvenanceRow !== null} onOpenChange={(next) => { if (!next) onCloseProvenance(); }}>
+  <Dialog.Content class="sm:max-w-2xl">
+    <Dialog.Header>
+      <Dialog.Title>Source turns</Dialog.Title>
+      <Dialog.Description>The conversation turn(s) this fact was extracted from.</Dialog.Description>
+    </Dialog.Header>
+    {#if memoryProvenanceRow}
+      <p class="memories-provenance-fact">{memoryPrimaryText(memoryProvenanceRow)}</p>
+    {/if}
+    {#if memoryProvenanceLoading}
+      <InlineLoading label="Loading source turns…" class="m-0" />
+    {:else if memoryProvenanceError}
+      <p class="font-sans text-sm text-destructive" role="alert">{memoryProvenanceError}</p>
+    {:else if memoryProvenanceChunks.length === 0}
+      <p class="font-sans text-sm text-muted-foreground">
+        No source turn available — this is an entity summary (accumulated across turns) or the
+        originating episode is no longer present.
+      </p>
+    {:else}
+      <ul class="memories-provenance-list">
+        {#each memoryProvenanceChunks as chunk (chunk.id)}
+          {@const when = memoryDateDisplay(chunk.valid_at)}
+          <li class="memories-provenance-item">
+            <div class="memories-provenance-meta">
+              <span>{chunk.document_title || 'Conversation'}</span>
+              {#if when.date !== '—'}<span title={when.title}>{when.date} {when.time}</span>{/if}
+            </div>
+            <p class="memories-provenance-text">{chunk.text}</p>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <Dialog.Footer>
+      <Button variant="outline" onclick={onCloseProvenance}>Close</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
@@ -89,5 +139,48 @@
     border-radius: 6px;
     background: color-mix(in srgb, var(--muted-foreground, #64748b) 8%, transparent);
     white-space: pre;
+  }
+
+  .memories-provenance-fact {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .memories-provenance-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: min(56vh, 560px);
+    overflow: auto;
+  }
+
+  .memories-provenance-item {
+    border-radius: 6px;
+    padding: 10px;
+    background: color-mix(in srgb, var(--muted-foreground, #64748b) 8%, transparent);
+  }
+
+  .memories-provenance-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--muted-foreground, #64748b);
+  }
+
+  .memories-provenance-text {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 </style>

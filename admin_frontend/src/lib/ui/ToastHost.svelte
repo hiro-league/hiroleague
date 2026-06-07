@@ -1,12 +1,19 @@
 <script lang="ts">
   import { cn } from '$lib/utils';
+  import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import type { ToastMessage } from './toast-types';
 
   let { toast }: { toast: ToastMessage } = $props();
+
+  // The chat overlay docks bottom-right; when it's open, flip the toast to the
+  // left so it doesn't block the chat box (see GlobalChatOverlay shellClass).
+  const sideClass = $derived(
+    chatOverlay.open ? 'justify-start sm:inset-x-auto sm:left-4' : 'justify-end sm:inset-x-auto sm:right-4'
+  );
 </script>
 
 {#if toast}
-  <div class="pointer-events-none fixed inset-x-4 bottom-4 z-[80] flex justify-end sm:inset-x-auto sm:right-4">
+  <div class={cn('pointer-events-none fixed inset-x-4 bottom-4 z-[80] flex', sideClass)}>
     <div
       class={cn(
         'pointer-events-auto max-w-[min(28rem,calc(100vw-2rem))] rounded-md border bg-popover px-4 py-3 font-sans text-sm font-semibold text-popover-foreground shadow-2xl',

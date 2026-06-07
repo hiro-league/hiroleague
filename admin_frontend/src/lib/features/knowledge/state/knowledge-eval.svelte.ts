@@ -29,16 +29,19 @@ import {
   type EvalSetupProgressPayload,
   type EvalStartedPayload
 } from '$lib/features/knowledge/shared/knowledge-events';
+
+/** Eval track — knowledge (document corpus) or memory (turn corpus). */
+export type EvalTrack = 'knowledge' | 'memory';
 import {
   cancelKnowledgeEval,
   getKnowledgeEvalState,
+  listEvalCorpuses,
   listEvalQuestions,
+  pickKnowledgeFolder,
   runKnowledgeEval,
+  type EvalCorpus,
   type EvalQuestionItem
 } from '$lib/api/knowledge';
-
-/** Max questions selectable in the checklist (cap, per the design). */
-export const EVAL_MAX_SELECTED = 50;
 
 /** All selectable legs, in canonical column order. */
 export const EVAL_ALL_LEGS: EvalLeg[] = ['flat', 'graphiti'];
@@ -59,8 +62,9 @@ export type EvalStatus =
   | 'failed' // failed event received OR transport error
   | 'cancelled'; // user cancelled the run
 
-/** What we render per question — ``legs`` keyed by leg name (only the run's
- *  selected legs), full answers included for the expandable row. */
+/** What we render per question (unified across tracks). ``legs`` is keyed by leg name —
+ *  flat/graphiti (knowledge) or a single ``recall`` (memory); each leg has the model answer,
+ *  the judge mark (or ""), the judge reason, and (memory) the recalled facts. */
 export type EvalRow = {
   index: number;
   total: number;
@@ -69,11 +73,11 @@ export type EvalRow = {
   subcategory: string;
   question: string;
   requires_graph: boolean;
+  track: EvalTrack;
   legs: Record<string, EvalQuestionLeg>;
   delta: string;
-  // Scoring rubric (display-only): what answers are judged against. Empty
-  // expected_fragments = negative-control (abstaining is the correct outcome).
-  expected_fragments: string[];
+  gold: string; // the ideal answer (shown as "Ideal")
+  stale_hit: boolean; // memory: a recalled fact leaked a must_not_contain value
   must_not_contain: string[];
 };
 
@@ -86,9 +90,11 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     subcategory: p.subcategory ?? '',
     question: p.question,
     requires_graph: p.requires_graph,
+    track: p.track ?? 'knowledge',
     legs: p.legs ?? {},
-    delta: p.delta,
-    expected_fragments: p.expected_fragments ?? [],
+    delta: p.delta ?? '0',
+    gold: p.gold ?? '',
+    stale_hit: p.stale_hit ?? false,
     must_not_contain: p.must_not_contain ?? []
   };
 }
@@ -98,25 +104,36 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   // reloads via localStorage (mirrors the ingest tab's buildGraphAfter pattern).
   let ingestSynthetic = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalIngest, false));
   let buildGraph = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false));
+  // Optional LLM judge step (grades the model's answer vs the ideal). Off = answers only.
+  let judge = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeEvalJudge, false));
 
-  // Corpus + checklist state. Default to the Adam temporal corpus (the new path);
-  // 'synthetic' keeps the legacy .md L3 eval. The checklist + per-category results
-  // only apply on the Adam path.
-  let corpusSource = $state<'synthetic' | 'adam'>('adam');
+  // Eval track. Default to the memory track (the new capability). 'knowledge' is the
+  // document/chunk eval. Each track scans its own corpuses from the chosen folder.
+  let track = $state<EvalTrack>('memory');
+
+  // Corpus picker — a folder (text + native pick, like Knowledge Add), a scanned corpus
+  // list, and the chosen corpus. Folder persists across reloads.
+  let folder = $state<string>(localStorage.getItem(PREF_KEYS.knowledgeEvalFolder) ?? '');
+  let corpuses = $state<EvalCorpus[]>([]);
+  let corpusesLoading = $state(false);
+  let corpusesError = $state<string | null>(null);
+  let pickingFolder = $state(false);
+  let selectedCorpusId = $state<string>('');
+
+  // Question bank of the chosen corpus.
   let questions = $state<EvalQuestionItem[]>([]);
   let questionsLoading = $state(false);
   let questionsError = $state<string | null>(null);
-  // Selected question ids (capped at EVAL_MAX_SELECTED). Reassigned (new Set) on
-  // every mutation so Svelte 5 tracks it. Empty = run ALL questions.
+  // Selected question ids — explicit; NO cap, and an empty set blocks the run.
   let selected = $state<Set<string>>(new Set());
 
-  // Selected legs to compare (flat/graphiti). Default = both. At least one must
-  // stay selected; toggling the last one off is ignored. Stored as an ordered
-  // array (canonical order) so the table columns are stable.
+  // Selected legs to compare (flat/graphiti, knowledge only). Default = both; one must stay.
   let selectedModes = $state<EvalLeg[]>([...EVAL_ALL_LEGS]);
-  // The legs the CURRENT run actually used (from the started/state event) — drives
-  // the live table/summary columns, independent of the next run's selection.
+  // The legs the CURRENT run actually used (started/state event) — drives table columns.
   let runModes = $state<string[]>([...EVAL_ALL_LEGS]);
+
+  const selectedCorpus = (): EvalCorpus | null =>
+    corpuses.find((c) => c.id === selectedCorpusId) ?? null;
 
   function isModeSelected(mode: EvalLeg): boolean {
     return selectedModes.includes(mode);
@@ -127,20 +144,68 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       if (selectedModes.length === 1) return; // keep at least one leg
       selectedModes = selectedModes.filter((m) => m !== mode);
     } else {
-      // Re-insert in canonical order so columns don't reorder by click order.
       selectedModes = EVAL_ALL_LEGS.filter((m) => m === mode || selectedModes.includes(m));
     }
   }
 
-  async function loadQuestions() {
-    if (corpusSource !== 'adam') {
+  /** Scan the chosen folder for this track's corpuses; auto-select the first. */
+  async function scanCorpuses() {
+    corpusesLoading = true;
+    corpusesError = null;
+    try {
+      const res = await listEvalCorpuses(track, folder.trim());
+      corpuses = res.data.corpuses ?? [];
+      // Keep the folder the server resolved (so the default eval/ path shows in the field).
+      if (!folder.trim() && res.data.folder) folder = res.data.folder;
+      const keep = corpuses.find((c) => c.id === selectedCorpusId);
+      selectedCorpusId = keep ? keep.id : (corpuses[0]?.id ?? '');
+      await loadQuestions();
+    } catch (err) {
+      corpusesError = err instanceof Error ? err.message : 'Failed to scan corpuses.';
+      corpuses = [];
+      selectedCorpusId = '';
       questions = [];
+    } finally {
+      corpusesLoading = false;
+    }
+  }
+
+  async function browseFolder() {
+    pickingFolder = true;
+    deps.setError(null);
+    try {
+      const res = await pickKnowledgeFolder(folder.trim() || undefined);
+      if (res.data.folder) {
+        setFolder(res.data.folder);
+        await scanCorpuses();
+      }
+    } catch (err) {
+      deps.setError(err instanceof Error ? err.message : 'Folder picker failed.');
+    } finally {
+      pickingFolder = false;
+    }
+  }
+
+  function setFolder(v: string) {
+    folder = v;
+    localStorage.setItem(PREF_KEYS.knowledgeEvalFolder, v);
+  }
+
+  /** Load the chosen corpus's question bank; clears the prior selection. */
+  async function loadQuestions() {
+    selected = new Set();
+    const corpus = selectedCorpus();
+    if (!corpus || !corpus.questions_path) {
+      questions = [];
+      questionsError = corpus && !corpus.questions_path
+        ? `No question bank (${corpus.id}.questions.yaml) found beside this corpus.`
+        : null;
       return;
     }
     questionsLoading = true;
     questionsError = null;
     try {
-      const res = await listEvalQuestions('adam');
+      const res = await listEvalQuestions(corpus.questions_path);
       questions = res.data.questions ?? [];
     } catch (err) {
       questionsError = err instanceof Error ? err.message : 'Failed to load questions.';
@@ -150,35 +215,34 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     }
   }
 
-  function setCorpusSource(v: 'synthetic' | 'adam') {
-    if (corpusSource === v) return;
-    corpusSource = v;
+  function selectCorpus(id: string) {
+    if (selectedCorpusId === id) return;
+    selectedCorpusId = id;
+    void loadQuestions();
+  }
+
+  function setTrack(v: EvalTrack) {
+    if (track === v) return;
+    track = v;
+    selectedCorpusId = '';
     selected = new Set();
-    if (v === 'adam') void loadQuestions();
-    else questions = [];
+    questions = [];
+    void scanCorpuses();
   }
 
   function toggleQuestion(id: string) {
     const next = new Set(selected);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      if (next.size >= EVAL_MAX_SELECTED) return; // cap reached — ignore
-      next.add(id);
-    }
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     selected = next;
   }
 
-  /** Select/deselect a whole category's ids (respecting the cap on select). */
+  /** Select/deselect a whole category's ids (no cap). */
   function setCategorySelected(ids: string[], on: boolean) {
     const next = new Set(selected);
-    if (on) {
-      for (const id of ids) {
-        if (next.size >= EVAL_MAX_SELECTED) break;
-        next.add(id);
-      }
-    } else {
-      for (const id of ids) next.delete(id);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
     }
     selected = next;
   }
@@ -223,6 +287,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   async function init() {
     ensureSubscribed();
     await hydrateFromServer();
+    // Populate the corpus picker for the current track (cheap; independent of any run).
+    await scanCorpuses();
   }
 
   async function hydrateFromServer() {
@@ -247,6 +313,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     runId = state.run_id;
     status = state.status;
     totalQuestions = state.total_questions;
+    if (state.track) track = state.track;
     if (state.modes?.length) runModes = state.modes;
     setupEvents = state.setup_events ?? [];
     setupPhase = setupEvents.length > 0 ? setupEvents[setupEvents.length - 1] : null;
@@ -333,6 +400,16 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
 
   async function start() {
     if (status === 'starting' || status === 'running') return;
+    const corpus = selectedCorpus();
+    // Guard: explicit corpus + explicit, non-empty question selection (no "run all").
+    if (!corpus) {
+      deps.setError('Pick a corpus before running the eval.');
+      return;
+    }
+    if (selected.size === 0) {
+      deps.setError('Select at least one question to run.');
+      return;
+    }
     // Fresh slate every run — last run's table doesn't bleed into this one.
     rows = [];
     summary = null;
@@ -343,22 +420,25 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     runId = null;
     totalQuestions = 0;
     status = 'starting';
-    // Lock the table columns to this run's selection immediately (before the
-    // started event echoes it back) so the live table renders the right columns.
-    runModes = [...selectedModes];
+    // Lock the table columns to this run's selection immediately (before the started
+    // event echoes it back). Memory = a single recall leg; knowledge = the picked legs.
+    runModes = track === 'memory' ? ['recall'] : [...selectedModes];
     deps.setError(null);
     ensureSubscribed();
 
     try {
       const req: import('$lib/api/knowledge').EvalRunRequest = {
+        track,
+        corpus_id: corpus.id,
+        corpus_path: corpus.corpus_path,
+        questions_path: corpus.questions_path,
         ingest_synthetic: ingestSynthetic,
-        build_graph: buildGraph,
-        corpus_source: corpusSource,
-        modes: [...selectedModes]
+        judge,
+        question_ids: [...selected]
       };
-      // Empty selection on the Adam path = run ALL questions.
-      if (corpusSource === 'adam' && selected.size > 0) {
-        req.question_ids = [...selected];
+      if (track === 'knowledge') {
+        req.build_graph = buildGraph;
+        req.modes = [...selectedModes];
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
@@ -402,6 +482,13 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       buildGraph = v;
       writeLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, v);
     },
+    get judge() {
+      return judge;
+    },
+    set judge(v: boolean) {
+      judge = v;
+      writeLocalBoolean(PREF_KEYS.knowledgeEvalJudge, v);
+    },
     get status() {
       return status;
     },
@@ -429,11 +516,38 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     get cancelling() {
       return cancelling;
     },
-    // Corpus + checklist surface.
-    get corpusSource() {
-      return corpusSource;
+    // Track surface.
+    get track() {
+      return track;
     },
-    setCorpusSource,
+    setTrack,
+    // Corpus picker surface.
+    get folder() {
+      return folder;
+    },
+    setFolder,
+    browseFolder,
+    scanCorpuses,
+    get pickingFolder() {
+      return pickingFolder;
+    },
+    get corpuses() {
+      return corpuses;
+    },
+    get corpusesLoading() {
+      return corpusesLoading;
+    },
+    get corpusesError() {
+      return corpusesError;
+    },
+    get selectedCorpusId() {
+      return selectedCorpusId;
+    },
+    get selectedCorpus() {
+      return selectedCorpus();
+    },
+    selectCorpus,
+    // Checklist surface.
     get questions() {
       return questions;
     },

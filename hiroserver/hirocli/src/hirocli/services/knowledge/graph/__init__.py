@@ -1,6 +1,6 @@
 """Graphiti-backed temporal knowledge graph over the workspace knowledge corpus.
 
-The pivot from the L3 Ladybug slice (see docs/knowledge-graphiti-pivot-design.md).
+The pivot from the earlier L3 graph slice (see docs/knowledge-graphiti-pivot-design.md).
 Graphiti owns the ingest + retrieval pipeline; this package holds the thin seams
 the rest of the system talks to:
 

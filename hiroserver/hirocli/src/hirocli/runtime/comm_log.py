@@ -86,6 +86,17 @@ def routing_uses_knowledge(metadata: dict[str, Any] | None) -> bool:
     return (metadata or {}).get("use_knowledge") is not False
 
 
+def routing_tools_enabled(metadata: dict[str, Any] | None) -> bool:
+    """True unless routing.metadata.disable_tools is explicitly True (per-message opt-out, default ON).
+
+    Mirrors ``use_knowledge``: agent tools are bound for a chat turn unless the client opted out for
+    this message. This is the per-chat half of the tools kill-switch; the global half is the
+    ``chat.tools_enabled`` preference. Absent metadata (older clients) keeps tools enabled.
+    """
+
+    return (metadata or {}).get("disable_tools") is not True
+
+
 def _snippet_text(body: str, max_len: int = _TEXT_SNIPPET_MAX) -> str:
     t = " ".join(body.split())
     if len(t) <= max_len:

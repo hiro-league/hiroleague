@@ -108,7 +108,7 @@
 </script>
 
 <svelte:head>
-  <title>Preferences - Hiro Admin</title>
+  <title>Settings - Hiro Admin</title>
 </svelte:head>
 
 <ToastHost toast={toasts.toast} />
@@ -116,8 +116,8 @@
 <AdminPageHeader
   sticky
   kicker="Workspace"
-  title="Preferences"
-  subtitle="Runtime preferences are held in memory and persisted to preferences.json when saved."
+  title="Settings"
+  subtitle="Runtime settings are held in memory and persisted to preferences.json when saved."
 >
   {#if !ctrl.error}
     <AdminPageStickyToolbar>

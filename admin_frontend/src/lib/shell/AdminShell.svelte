@@ -17,7 +17,7 @@
     PanelLeftClose,
     PanelLeftOpen,
     Server,
-    Settings2,
+    Settings,
     Sun,
     User,
     Workflow
@@ -73,7 +73,7 @@
     list: List,
     message: MessageSquare,
     server: Server,
-    settings: Settings2,
+    settings: Settings,
     user: User,
     workflow: Workflow
   };
@@ -259,6 +259,15 @@
             ></span>
           {/if}
         </button>
+        <!-- Quick access to workspace Settings, mirroring the sidebar entry. Icon-only. -->
+        <a
+          class="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+          href={navHref('/preferences/')}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Settings size={17} />
+        </a>
         <a
           class="inline-flex h-9 w-11 shrink-0 items-center justify-center gap-1 rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
           href={adminDocsUrl}

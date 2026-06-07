@@ -461,7 +461,7 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
 
 
 class GraphPreferences(BaseModel):
-    """Graphiti-backed temporal knowledge graph (the pivot from the L3 Ladybug slice).
+    """Graphiti-backed temporal knowledge graph (the pivot from the earlier L3 graph slice).
 
     ``backend`` is the master switch: ``off`` = flat Qdrant only (today); ``graphiti``
     = answer from graph facts; ``mix`` = fuse graph facts with Qdrant passages (the
@@ -569,6 +569,10 @@ class ChatPreferences(BaseModel):
     # When on, chat instructs the model to cite knowledge inline as [n] AND surfaces the source list
     # to the client (citation bridge on graph.reply.completed). Moved here from knowledge.chat.
     cite_sources: bool = False
+    # Global tools kill-switch for the chat agent. When off, no tools are bound to the chat model on
+    # any turn (the chat page's per-message "disable tools" toggle can additionally opt out a single
+    # turn). Gated at runtime in call_model; default on.
+    tools_enabled: bool = True
     # Placeholder until a real per-character/per-chat language setting exists; chat retrieval does
     # not constrain answer language today (the persona decides). Kept so it can be threaded later.
     preferred_answering_language: str = "en"

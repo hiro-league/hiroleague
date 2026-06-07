@@ -1,10 +1,8 @@
-"""Phase 5c — tests for the in-process eval runner + scoring module.
+"""Tests for the in-process eval runner + scoring module.
 
 Two halves:
 
-1. **eval_scoring** — pure-logic checks (mirror the tests in
-   ``eval/test_l3_synthetic_eval.py`` so this package-side module is locked
-   down independently of the standalone harness).
+1. **eval_scoring** — pure-logic checks (substring scoring, marks, delta math).
 2. **eval_runner** — the orchestrator, with a fake service so we don't need a
    real LLM or workspace. Verifies it publishes the right events in order,
    computes the right summary, and that the gate fires correctly.
@@ -119,13 +117,13 @@ def test_load_questions_custom_path_rejects_missing(tmp_path: Path) -> None:
         load_questions(tmp_path / "nope.yaml")
 
 
-def test_load_questions_rejects_missing_fragments_key(tmp_path: Path) -> None:
+def test_load_questions_rejects_missing_grading_reference(tmp_path: Path) -> None:
     p = tmp_path / "q.yaml"
     p.write_text(
-        yaml.safe_dump([{"id": "x", "question": "hi"}]),  # missing expected_fragments
+        yaml.safe_dump([{"id": "x", "question": "hi"}]),  # no gold / fragments / abstain
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="expected_fragments"):
+    with pytest.raises(ValueError, match="expected_answer"):
         load_questions(p)
 
 
@@ -201,6 +199,26 @@ def bus_with_loop():
 
 
 @pytest.fixture
+def judge_on(monkeypatch):
+    """Enable a FAKE LLM judge (no real model): mark = pass when the answer is non-empty,
+    else fail — reproducing the old 'no_results ⇒ fail' behavior so the gate tests still
+    express 'a non-empty leg answer passes'. Patches the model builder (so a sink is created)
+    and the judge call."""
+    import hirocli.services.knowledge.eval_judge as ej
+    import hirocli.services.knowledge.eval_runner as er
+    from hirocli.services.knowledge.eval_scoring import MARK_FAIL, MARK_PASS
+
+    monkeypatch.setattr(er, "build_answer_model", lambda ws: (object(), "fake:model"))
+
+    async def _fake_judge(model, model_id, *, question, answer, expected_answer,
+                          must_not_contain, is_negative_control=False, sink=None):
+        return ej.JudgeVerdict(mark=(MARK_PASS if str(answer).strip() else MARK_FAIL), reason="fake")
+
+    monkeypatch.setattr(ej, "judge_answer", _fake_judge)
+    return True
+
+
+@pytest.fixture
 def event_capture(monkeypatch):
     """Capture events synchronously by intercepting bus.publish — simpler than
     going through the async dispatch path (which schedules via call_soon)."""
@@ -228,7 +246,7 @@ def _q(id_: str, q: str, *, expected: list[str], requires_graph: bool = False) -
 
 @pytest.mark.asyncio
 async def test_run_eval_publishes_started_per_question_and_completed_in_order(
-    event_capture, tmp_path
+    event_capture, judge_on, tmp_path
 ) -> None:
     """The Eval Batch UI relies on a deterministic event sequence:
     1 started · N×question_completed · 1 completed."""
@@ -241,7 +259,7 @@ async def test_run_eval_publishes_started_per_question_and_completed_in_order(
         "Q2?": ("bar yes", "bar yes"), # both pass — tie
     })
 
-    summary = await run_eval(fake, tmp_path, questions=questions, run_id="rid-1")
+    summary = await run_eval(fake, tmp_path, questions=questions, run_id="rid-1", judge=True)
 
     types = [e.type for e in event_capture]
     assert types == [
@@ -295,7 +313,7 @@ async def test_run_eval_passes_through_caller_filters(event_capture, tmp_path) -
 
 @pytest.mark.asyncio
 async def test_gate_pivots_when_graph_does_not_beat_flat_on_required_subset(
-    event_capture, tmp_path
+    event_capture, judge_on, tmp_path
 ) -> None:
     """Strict gate: parity counts as PIVOT, not PROCEED. Locks in the
     "graph must measurably win" rule."""
@@ -307,14 +325,14 @@ async def test_gate_pivots_when_graph_does_not_beat_flat_on_required_subset(
         "Q1?": ("a yes", "a yes"),  # tie
         "Q2?": ("b yes", "b yes"),  # tie
     })
-    summary = await run_eval(fake, tmp_path, questions=questions)
+    summary = await run_eval(fake, tmp_path, questions=questions, judge=True)
     assert summary.gate == "pivot"
     assert summary.requires_graph_passing["graphiti"] == summary.requires_graph_passing["flat"]
 
 
 @pytest.mark.asyncio
 async def test_gate_proceeds_when_graph_strictly_beats_flat_on_required_subset(
-    event_capture, tmp_path
+    event_capture, judge_on, tmp_path
 ) -> None:
     questions = [
         _q("r1", "Q1?", expected=["a"], requires_graph=True),
@@ -326,7 +344,7 @@ async def test_gate_proceeds_when_graph_strictly_beats_flat_on_required_subset(
         "Q2?": ("b yes", "b yes"),  # tie
         "Q3?": ("c yes", "c yes"),  # baseline; doesn't affect gate
     })
-    summary = await run_eval(fake, tmp_path, questions=questions)
+    summary = await run_eval(fake, tmp_path, questions=questions, judge=True)
     assert summary.gate == "proceed"
     assert summary.requires_graph_passing["graphiti"] == 2
     assert summary.requires_graph_passing["flat"] == 1
@@ -382,7 +400,7 @@ def test_question_result_to_payload_shape() -> None:
     # line) AND the full answer (expandable row) + per-leg run_id for drill-in.
     assert set(p["legs"].keys()) == {"flat", "graphiti"}
     assert set(p["legs"]["flat"].keys()) == {
-        "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id"
+        "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id", "reason", "recalled"
     }
     assert p["legs"]["flat"]["answer"] == "flat"
     assert p["legs"]["graphiti"]["answer"] == "graph"
@@ -472,17 +490,16 @@ class _FakeEvalClearService:
 
 
 @pytest.mark.asyncio
-async def test_clear_eval_data_deletes_both_corpora_deduped() -> None:
-    """Deletes every eval-tagged doc (synthetic + Adam), deduped across tags, via the
-    service's per-document delete (which purges catalog + Qdrant + graph episodes)."""
-    from hirocli.services.knowledge.eval_runner import ADAM_EVAL_TAG, clear_eval_data
+async def test_clear_eval_data_deletes_synthetic_corpus() -> None:
+    """Deletes the KNOWLEDGE-track eval docs (synthetic tag) via the service's per-document
+    delete (which purges catalog + Qdrant + graph episodes). The memory track clears
+    separately by graph group (eval_mem_{set}), so it is NOT part of this sweep."""
+    from hirocli.services.knowledge.eval_runner import clear_eval_data
 
-    svc = _FakeEvalClearService(
-        {EVAL_SYNTHETIC_TAG: ["s1", "s2", "shared"], ADAM_EVAL_TAG: ["a1", "shared"]}
-    )
+    svc = _FakeEvalClearService({EVAL_SYNTHETIC_TAG: ["s1", "s2", "s3"]})
     removed = await clear_eval_data(svc)
-    assert removed == 4  # s1, s2, shared, a1 — "shared" counted once
-    assert sorted(svc.deleted) == ["a1", "s1", "s2", "shared"]
+    assert removed == 3
+    assert sorted(svc.deleted) == ["s1", "s2", "s3"]
 
 
 @pytest.mark.asyncio

@@ -50,7 +50,7 @@ log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI.INGEST")
 # Live-viz event sink: ``(event_type, payload) -> None``. None = no-op (CLI/tests).
 GraphEventSink = Callable[[str, dict[str, Any]], None]
 
-# F7 — source-role allow-list (supersedes the Ladybug ingest's gate). Allow-list,
+# F7 — source-role allow-list (supersedes the earlier ingest's gate). Allow-list,
 # not deny-list: a future ingest path that forgets to tag its role is REJECTED by
 # default. Add roles here explicitly as new ingest sources are wired up.
 #   - "user_document": user-added knowledge documents (the L3 knowledge path).

@@ -74,6 +74,16 @@
         />
         <span class="font-sans text-sm font-medium">Cite knowledge sources in chat replies</span>
       </label>
+
+      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
+        <input
+          type="checkbox"
+          bind:checked={ctrl.draft.chat.tools_enabled}
+          disabled={ctrl.busy}
+          onchange={ctrl.markDirty}
+        />
+        <span class="font-sans text-sm font-medium">Enable agent tools in chat</span>
+      </label>
     </SectionCardMuted>
 
     <!-- Consolidated here from the removed "Agent Memory" tab — these toggles bound to the same

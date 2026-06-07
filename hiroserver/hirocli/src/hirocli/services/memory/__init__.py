@@ -74,3 +74,49 @@ def create_memory_service(
     event_sink = graph_event_bus_sink(workspace_path)
     log.info("✅ memory — Graphiti conversation memory ready")
     return GraphitiConversationMemory(graph_service, default_top_k=top_k, event_sink=event_sink)
+
+
+def create_eval_memory_service(
+    workspace_path: Path,
+    prefs: "WorkspacePreferences",
+    *,
+    set_id: str,
+    credential_store: "CredentialStore | None" = None,
+) -> MemoryService:
+    """Build an **eval-scoped** conversation-memory service bound to ``eval_mem_{set}``.
+
+    The memory-eval track (docs/eval-corpus-tracks-design.md §6/§8) exercises the *real*
+    ``remember``/``recall`` engine, but lands its data in a dedicated ``eval_mem_{set}`` drawer
+    via the scoped-service-object override — so it never touches a real ``mem_{user}_{character}``
+    group. Unlike :func:`create_memory_service` this is **independent of ``memory.enabled``** (eval
+    must run even when the runtime memory toggle is off) and **fails loud** (raises) when the
+    Graphiti engine can't be built, rather than returning ``None`` — a silent eval is worse than a
+    clear error.
+    """
+    from hirocli.services.knowledge.graph.graphiti_service import GraphitiMemoryService
+    from hirocli.services.knowledge.graph.group_scope import eval_memory_group_id
+
+    from .graphiti_conversation import GraphitiConversationMemory
+
+    # require_backend=False: the eval builds even when knowledge-graph *retrieval* is toggled off
+    # (it only needs the extraction model + embedder), mirroring create_memory_service.
+    graph_service = GraphitiMemoryService.from_preferences(
+        prefs, workspace_path, credential_store=credential_store, require_backend=False
+    )
+    if graph_service is None:
+        raise RuntimeError(
+            "Memory eval: the Graphiti engine is unavailable — configure the graph extraction "
+            "model + embedder (graph.extraction_model or knowledge.answering.model + provider key)."
+        )
+
+    from hirocli.services.knowledge.graph.graph_events import graph_event_bus_sink
+
+    group = eval_memory_group_id(set_id)
+    top_k = int(getattr(getattr(getattr(prefs, "memory", None), "search", None), "top_k", 8))
+    log.info("✅ memory — eval-scoped conversation memory ready · group=%s", group)
+    return GraphitiConversationMemory(
+        graph_service,
+        default_top_k=top_k,
+        event_sink=graph_event_bus_sink(workspace_path),
+        group_override=group,
+    )

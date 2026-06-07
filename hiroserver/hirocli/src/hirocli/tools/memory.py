@@ -76,6 +76,9 @@ class MemoryClearResult:
 
 class MemoryListTool(Tool):
     runtime = True
+    # Memory/knowledge tools are not exposed to the chat agent; they ran from chat
+    # graphs because they only have a value here. Keep off the agent surface.
+    agent_default = False
     name = "memory_list"
     description = "List long-term memories for the current user, optionally scoped to a character"
     params = {

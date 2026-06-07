@@ -257,6 +257,8 @@ async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
         "thread_id": "thread-1",
         "channel_id": 12,
         "source": "conversation",
+        "speaker": "",  # no user_name configured → graphiti_conversation falls back to "User"
+        "timestamp": None,  # no inbound_envelope here → ingest stamps 'now'
     }
 
 
@@ -365,3 +367,72 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None
     assert entry.error_code == ""  # not a failure
     assert events[-1]["event"] == GRAPH_MEMORY_STORED
     assert events[-1]["payload"]["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_store_turn_memory_threads_message_timestamp(tmp_path) -> None:
+    """The episode is anchored to the REAL turn time: ``routing.timestamp`` from the inbound
+    envelope is threaded into ``metadata['timestamp']`` (→ episode reference_time), so temporal
+    ordering/supersession stays honest even if ingest is later detached from the turn (D4)."""
+    memory = _MemoryService()
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+    _enable_memory(runtime)
+    graph = BaseAgentGraph(
+        workspace_path=tmp_path,
+        stt_service=None,
+        vision_service=None,
+        tts_service=None,
+        credential_store=None,
+        checkpointer=None,
+        memory_service=memory,
+        preferences=runtime,
+    )
+
+    await graph._store_turn_memory(
+        {
+            "user_text": "remember that I moved to Tokyo",
+            "inbound_id": "in-1",
+            "chat_channel_id": 12,
+            "character_id": "hiro",
+            "thread_id": "thread-1",
+            # Serialized UnifiedMessage shape (model_dump(mode="json")) → ISO timestamp.
+            "inbound_envelope": {"routing": {"timestamp": "2026-06-07T10:30:00+00:00"}},
+        },
+        lambda _event: None,
+        "Noted.",
+    )
+
+    assert memory.added[0]["metadata"]["timestamp"] == "2026-06-07T10:30:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_store_turn_memory_missing_envelope_timestamp_is_none(tmp_path) -> None:
+    """No envelope (or no routing timestamp) ⇒ ``metadata['timestamp']`` is None, so ingest
+    falls back to stamping 'now' — never an error."""
+    memory = _MemoryService()
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+    _enable_memory(runtime)
+    graph = BaseAgentGraph(
+        workspace_path=tmp_path,
+        stt_service=None,
+        vision_service=None,
+        tts_service=None,
+        credential_store=None,
+        checkpointer=None,
+        memory_service=memory,
+        preferences=runtime,
+    )
+
+    await graph._store_turn_memory(
+        {
+            "user_text": "remember my name",
+            "inbound_id": "in-1",
+            "chat_channel_id": 12,
+            "character_id": "hiro",
+            "thread_id": "thread-1",
+        },
+        lambda _event: None,
+        "Noted.",
+    )
+
+    assert memory.added[0]["metadata"]["timestamp"] is None

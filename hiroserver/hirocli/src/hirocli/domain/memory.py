@@ -80,6 +80,14 @@ class MemoryService(Protocol):
         character_id: str | None = None,
     ) -> list[dict[str, Any]]: ...
 
+    async def list_facts_in_groups(
+        self,
+        group_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """List facts for explicit graph partitions (any namespace) — backs the admin
+        Memories group selector, which can point at memory / knowledge / eval groups."""
+        ...
+
     async def clear_all(
         self,
         *,

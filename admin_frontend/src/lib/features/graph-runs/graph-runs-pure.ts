@@ -446,6 +446,89 @@ export function memorySourceLabel(row: Record<string, unknown>): string {
   return source || '—';
 }
 
+// ── Graph-structure accessors (Memories table columns) ──────────────────────
+// These expose the graph shape behind each remembered fact: its kind (relation edge vs
+// entity attribute summary), bi-temporal validity, the entities/relation it encodes, the
+// partition it lives in, and its provenance chunk_ids. All read fields the backend now
+// enriches onto each row (see graphiti_service._edge_to_memory/_node_to_memory).
+
+export type MemoryKind = 'relation' | 'summary' | '';
+
+/** 'relation' = a fact edge between two entities; 'summary' = an entity attribute summary. */
+export function memoryKind(row: Record<string, unknown>): MemoryKind {
+  const k = String(row.kind ?? '').trim().toLowerCase();
+  return k === 'relation' || k === 'summary' ? k : '';
+}
+
+export function memoryKindLabel(row: Record<string, unknown>): string {
+  const k = memoryKind(row);
+  if (k === 'relation') return 'Relation';
+  if (k === 'summary') return 'Summary';
+  return '—';
+}
+
+export type MemoryValidity = {
+  /** A fact is no longer current once it has an invalid_at (stopped being true) or expired_at. */
+  expired: boolean;
+  invalidAt: unknown;
+  expiredAt: unknown;
+  validAt: unknown;
+};
+
+/** Bi-temporal status of a fact. Summaries are always current (no invalid_at). */
+export function memoryValidity(row: Record<string, unknown>): MemoryValidity {
+  const invalidAt = memoryField(row, 'invalid_at', 'invalidAt');
+  const expiredAt = memoryField(row, 'expired_at', 'expiredAt');
+  const validAt = memoryCreatedRaw(row); // created_at IS the edge's valid_at
+  return { expired: invalidAt != null || expiredAt != null, invalidAt, expiredAt, validAt };
+}
+
+/** Truncate a node/edge uuid for display when an entity name is missing. */
+export function shortGraphId(id: string): string {
+  const s = String(id ?? '').trim();
+  return s.length > 8 ? `${s.slice(0, 8)}…` : s;
+}
+
+export type MemoryEntities =
+  | { kind: 'relation'; source: string; relation: string; target: string }
+  | { kind: 'summary'; entity: string; type: string }
+  | null;
+
+/** The structured entities/relation a fact encodes: `Source —[REL]→ Target` for relations,
+ *  `Entity (Type)` for summaries. Endpoint names fall back to a short uuid when unresolved. */
+export function memoryEntities(row: Record<string, unknown>): MemoryEntities {
+  const k = memoryKind(row);
+  if (k === 'relation') {
+    const source =
+      String(memoryField(row, 'source_name') ?? '').trim() ||
+      shortGraphId(String(row.source_id ?? ''));
+    const target =
+      String(memoryField(row, 'target_name') ?? '').trim() ||
+      shortGraphId(String(row.target_id ?? ''));
+    const relation = String(memoryField(row, 'relation') ?? '').trim();
+    if (!source && !target && !relation) return null;
+    return { kind: 'relation', source, relation, target };
+  }
+  if (k === 'summary') {
+    const entity = String(memoryField(row, 'entity_name') ?? '').trim();
+    const type = String(memoryField(row, 'entity_type') ?? '').trim();
+    if (!entity && !type) return null;
+    return { kind: 'summary', entity, type };
+  }
+  return null;
+}
+
+export function memoryGroupId(row: Record<string, unknown>): string {
+  return String(memoryField(row, 'group_id', 'groupId') ?? '').trim();
+}
+
+/** Supporting episode/message ids (provenance) — the turns a fact was extracted from. */
+export function memoryChunkIds(row: Record<string, unknown>): string[] {
+  const raw = row.chunk_ids;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((c) => String(c ?? '').trim()).filter(Boolean);
+}
+
 /** Case-insensitive substring match across common memory row fields (Memories tab search). */
 export function memoryRowMatchesSearchNeedle(
   row: Record<string, unknown>,

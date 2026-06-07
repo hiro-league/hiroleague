@@ -48,6 +48,10 @@
       if (e.phase === 'build_graph' || e.phase === 'graph_build') {
         return { tone: 'info', text: `  graph extraction ${e.index}/${e.total}…` };
       }
+      if (e.phase === 'remember') {
+        const snip = e.snippet ? ` — ${e.snippet}` : '';
+        return { tone: 'muted', text: `  remembered ${e.index}/${e.total}${snip}` };
+      }
       const head = `  episode ${e.index}/${e.total} → Qdrant`;
       const title = e.title ? ` · ${e.title}` : '';
       const snippet = e.snippet ? ` — ${e.snippet}` : '';
@@ -59,10 +63,10 @@
         tone: 'info',
         text: `▶ ingesting synthetic corpus${e.file_count ? ` (${e.file_count} files)` : ''}…`
       };
-    if (e.phase === 'ingest_adam')
+    if (e.phase === 'remember')
       return {
         tone: 'info',
-        text: `▶ ingesting Adam corpus${e.episode_count ? ` (${e.episode_count} episodes)` : ''}…`
+        text: `▶ remembering turns${e.episode_count ? ` (${e.episode_count} episodes)` : ''}…`
       };
     if (e.phase === 'build_graph' || e.phase === 'graph_build')
       return {
@@ -73,6 +77,21 @@
   }
 
   function questionLines(r: EvalRow): Line[] {
+    // Memory track: single recall leg — show the mark (if judged) / recall count + the answer.
+    if (r.track === 'memory') {
+      const leg = r.legs.recall;
+      const recalled = leg?.recalled ?? [];
+      const stale = r.stale_hit ? ' ⚠' : '';
+      const tag = leg?.mark ? leg.mark : `recalled ${recalled.length}`;
+      const head: Line = {
+        tone: leg?.mark === '✗' ? 'warn' : recalled.length > 0 ? 'muted' : 'warn',
+        text: `Q ${r.index + 1}/${r.total} [${tag}${stale}]${r.requires_graph ? ' ▲' : ''} ${r.question}`
+      };
+      const out = [head];
+      const top = leg?.answer || recalled[0];
+      if (top) out.push({ tone: 'muted', text: `    ↳ ${top}` });
+      return out;
+    }
     // Compact per-leg marks, e.g. "flat:✗ graphiti:✓"; only the run's legs.
     const modes = Object.keys(r.legs);
     const marks = modes.map((m) => `${m}:${r.legs[m].mark}`).join(' ');

@@ -108,15 +108,35 @@ async def _resolve_memory_service(
 async def list_workspace_memories(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
+    group_id: str | None = None,
 ) -> dict[str, Any]:
-    """List all memories for the workspace default user (global scope)."""
+    """List memories. Default (no ``group_id``): all of the workspace default user's
+    conversation-memory groups. With ``group_id``: that one partition's facts — lets the
+    Memories group selector show ANY group (memory / knowledge / eval), mirroring the Graph
+    tab. The client-supplied scope is re-validated at this API boundary (firm group policy,
+    docs/graph-group-policy-design.md §6) so a crafted/empty id can't trigger an all-groups
+    scan."""
     try:
         service, workspace_path = await _resolve_memory_service(request, workspace_id)
         if service is None:
             return _success({"memory_enabled": False, "memories": []})
-        memories = _sort_memories(
-            await service.list_all(user_id=get_default_user_id(workspace_path))
-        )
+        gid = (group_id or "").strip()
+        if gid:
+            # Group filter: re-mint the untrusted client scope against the closed grammar.
+            from hirocli.services.knowledge.graph.group_scope import (
+                GroupPolicyError,
+                validate_group_id,
+            )
+
+            try:
+                gid = validate_group_id(gid)
+            except GroupPolicyError as exc:
+                return envelope_failure(f"Invalid memory group: {exc}")
+            memories = _sort_memories(await service.list_facts_in_groups([gid]))
+        else:
+            memories = _sort_memories(
+                await service.list_all(user_id=get_default_user_id(workspace_path))
+            )
         return _success({"memory_enabled": True, "memories": memories})
     except Exception as exc:
         log.error("list memories - admin failed", error=str(exc), exc_info=True)

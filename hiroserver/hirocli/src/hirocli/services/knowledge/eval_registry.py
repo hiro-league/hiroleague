@@ -61,6 +61,9 @@ class EvalRunState:
 
     run_id: str
     corpus_source: str = ""
+    # Eval track — "knowledge" or "memory" (docs/eval-corpus-tracks-design.md). Drives the
+    # panel's shape (memory = single recall leg, no gate, recall-inspector rows).
+    track: str = "knowledge"
     status: str = "starting"  # starting | running | completed | failed | cancelled
     total_questions: int = 0
     # Selected legs for this run (subset of flat/graphiti) — drives the UI's
@@ -82,6 +85,7 @@ class EvalRunState:
         return {
             "run_id": self.run_id,
             "corpus_source": self.corpus_source,
+            "track": self.track,
             "status": self.status,
             "total_questions": self.total_questions,
             "modes": self.modes,
@@ -150,6 +154,7 @@ class EvalRunRegistry:
         corpus_source: str,
         modes: list[str],
         task: asyncio.Task[Any],
+        track: str = "knowledge",
     ) -> EvalRunState:
         """Open a fresh run slot and stash its task handle (for cancel).
 
@@ -157,7 +162,11 @@ class EvalRunRegistry:
         spawned, so a cancel that arrives before the first ``started`` event still
         finds a handle. The async ``started`` handler later fills in totals."""
         state = EvalRunState(
-            run_id=run_id, corpus_source=corpus_source, modes=list(modes), task=task
+            run_id=run_id,
+            corpus_source=corpus_source,
+            track=track,
+            modes=list(modes),
+            task=task,
         )
         self._runs[self._key(workspace_path)] = state
         return state
@@ -211,6 +220,8 @@ class EvalRunRegistry:
             # Confirm the leg set from the runner (authoritative over begin_run).
             if payload.get("modes"):
                 state.modes = list(payload["modes"])
+            if payload.get("track"):
+                state.track = str(payload["track"])
         elif etype == KNOWLEDGE_EVAL_SETUP_PROGRESS:
             state.setup_events.append(dict(payload))
             if len(state.setup_events) > _MAX_SETUP_EVENTS:

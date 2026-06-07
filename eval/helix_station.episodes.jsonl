@@ -1,0 +1,15 @@
+# Helix Station — a FICTIONAL temporal memory corpus (10 dated turns). Invented proper nouns
+# (people, rover, drone) so a model has NO prior knowledge to lean on — the only way to answer
+# is to reason over what was remembered, when. Pairs with helix_station.questions.yaml. Fed in
+# timestamp order so a later fact supersedes an earlier one. Four properties change over time:
+# station commander, greenhouse lead, the research rover, and the mascot drone.
+{"id": "hx_01", "timestamp": "2211-03-02T08:00:00Z", "type": "text", "body": "Commander Vael Toryn currently leads Helix Station. The station's research rover is Strider-7."}
+{"id": "hx_02", "timestamp": "2211-08-15T08:00:00Z", "type": "text", "body": "Dr. Mara Hassel is the lead botanist of the greenhouse module."}
+{"id": "hx_03", "timestamp": "2212-01-10T08:00:00Z", "type": "text", "body": "Strider-7 was crushed in a surface dust storm and is beyond repair."}
+{"id": "hx_04", "timestamp": "2212-02-01T08:00:00Z", "type": "text", "body": "A replacement rover, Strider-9, has been commissioned and is now Helix Station's active rover."}
+{"id": "hx_05", "timestamp": "2212-06-20T08:00:00Z", "type": "text", "body": "Command of Helix Station has passed to Commander Iola Brask."}
+{"id": "hx_06", "timestamp": "2212-09-05T08:00:00Z", "type": "text", "body": "The station's mascot is a small maintenance drone nicknamed Pip."}
+{"id": "hx_07", "timestamp": "2213-04-12T08:00:00Z", "type": "text", "body": "Dr. Yune Petrov has taken over as lead botanist of the greenhouse module."}
+{"id": "hx_08", "timestamp": "2213-11-30T08:00:00Z", "type": "text", "body": "Pip the drone was decommissioned after a power fault; a new mascot drone named Otto now roams the station."}
+{"id": "hx_09", "timestamp": "2214-05-18T08:00:00Z", "type": "text", "body": "Commander Renn Solari has assumed command of Helix Station."}
+{"id": "hx_10", "timestamp": "2214-09-01T08:00:00Z", "type": "text", "body": "All systems nominal: the greenhouse, the active rover, and the mascot drone are operating normally under the current commander."}

@@ -99,13 +99,16 @@ adding a row, not sprinkling string literals.
 |---|---|---|---|---|
 | **Conversation** | `mem_{user_id}_{character}` | per `(user, character)` | yes (a user's chars) | dedup/supersession isolated per relationship. **Exists today.** |
 | **Knowledge** | `kb_{space}` (default `kb_main`) | per **corpus/space** (one today) | no (Phase A) | the graph's value *is* cross-document fact merging — never silo per-document. Doc-level ops stay at the episode layer (`source_description == document_id`). |
-| **Eval** | `eval_{set}` (`+_{run}` optional, later) | per **eval set** | yes (clear-all) | reset/rebuild unit is the set; isolation from prod knowledge is the goal. **Graph-isolation deferred** — see §8 note. |
+| **Eval** | `eval_mem_{set}` / `eval_kb_{set}` (`+_{run}` optional, later) | per **eval set × track** | yes (clear-all, by `eval_` prefix) | one `eval_` roof over both tracks (memory + knowledge), structurally separate from real `mem_`/`kb_`; wipes by prefix. Routing → [`eval-corpus-tracks-design.md`](eval-corpus-tracks-design.md). |
 
 ```
 group_id   := namespace "_" part ("_" part)*
-namespace  := "mem" | "kb" | "eval"      # closed set; fixed leading token
+namespace  := "mem" | "kb" | "eval_mem" | "eval_kb"   # closed set; fixed leading token(s)
 part       := slug( value )              # coerced to graphiti's [A-Za-z0-9_-]; "_"-joined
 ```
+
+Eval is one `eval_` roof with a per-track token (`eval_mem_`, `eval_kb_`). Both begin with `eval_`,
+so they are disjoint from real `mem_`/`kb_` — an `eval_mem_…` group never matches the `mem_` prefix.
 
 **Disjointness invariant:** the leading tokens (`mem_`, `kb_`, `eval_`) never overlap, so
 every group belongs to **exactly one** vertical. A character literally named "eval" still
@@ -126,7 +129,8 @@ everywhere:
 | `kb_main` | **Knowledge** |
 | `kb_{space}` | **Knowledge · {space}** |
 | `mem_{user}_{character}` | **Memory · {character} (user {user})** |
-| `eval_{set}` | **Eval · {set}** |
+| `eval_mem_{set}` | **Eval · Memory · {set}** |
+| `eval_kb_{set}` | **Eval · Knowledge · {set}** |
 | anything else (legacy / unknown, e.g. `mem:1:hiro`) | the **raw id** (still selectable/removable) |
 
 **Enumeration is by presence, not a registry** (§7 lean): a partition appears in the selector
@@ -144,7 +148,8 @@ the selected one (**default = first in the list; last selection remembered**) �
 GraphScope (sealed)
  ├ Memory(user_id, character_id)        → "mem_42_aria"
  ├ Knowledge(space = "main")            → "kb_main"
- └ Eval(set_id)                         → "eval_adam"
+ ├ EvalMemory(set_id)                   → "eval_mem_adam"
+ └ EvalKnowledge(set_id)                → "eval_kb_adam"
 
   .group_id            → validated string (WRITE target — always exactly one)
   .read_targets()      → list[str]      (READ targets — one, or enumerated)
@@ -218,10 +223,10 @@ literal. **No KB-space UI.**
 **Phase A-bis — eval restructure → [`eval-corpus-tracks-design.md`](eval-corpus-tracks-design.md)
 (superseded).** The original "thread a group through the knowledge path to isolate eval" was
 **replaced** by a corpus-shape-driven plan: chunk corpora test the **knowledge** engine, turn
-corpora test the **conversation-memory** engine (`remember`/`recall`) under a dedicated eval
-user/character — which isolates the memory eval **for free** (no hot-path threading). The
-group-threading idea now only applies to the *deferred* knowledge-eval isolation (its Phase 2).
-See that doc for the full plan.
+corpora test the **conversation-memory** engine (`remember`/`recall`). All eval data now lives under
+its own **`eval_` namespace** (`eval_mem_{set}` / `eval_kb_{set}`), reached by the **scoped
+service object** mechanism on each track — memory binds one constructor arg (cheap), knowledge binds
+an ingest+retrieval-scoped service. See that doc for the full plan and phasing.
 
 **Phase B — KB spaces as a feature (only if a real multi-knowledge-base need appears):**
 ingestion picks/creates a space; space dropdown for clear; spaces appear in the same Graph

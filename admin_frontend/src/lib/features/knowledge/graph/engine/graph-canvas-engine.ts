@@ -162,6 +162,14 @@ export class GraphCanvasEngine {
       .nodeRelSize(NODE_RADIUS) // matches drawn radius → default hit-test region works
       .linkColor((l: FgLink) => this.linkColor(l))
       .linkWidth((l: FgLink) => this.linkWidth(l))
+      // FIX (two-click edge selection): force-graph hit-tests links on a shadow canvas with a
+      // hit area of linkWidth (~1.2) + linkHoverPrecision (default 4) ≈ 5.2 graph-units. The
+      // relation label we draw is CENTERED on the line but its glyphs straddle it by several px,
+      // so a click on the label landed OUTSIDE that thin band → resolved as a background click →
+      // clearSelection() closed the open panel, forcing a second click. Widen the band so clicks
+      // on the label (or near the line) reliably select the edge in one click. Kept modest so
+      // edges passing near a node don't steal the node's own click.
+      .linkHoverPrecision(8)
       // Parallel edges between the same pair fan into arcs (see assignLinkCurvatures).
       .linkCurvature((l: FgLink) => l.__curvature ?? 0)
       // Hide arrowheads of non-matching edges in "hide" focus (color/width alone leaves the

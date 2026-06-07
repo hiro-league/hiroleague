@@ -1,10 +1,8 @@
 <script lang="ts">
   import { afterNavigate } from '$app/navigation';
-  import { base } from '$app/paths';
   import { onMount } from 'svelte';
-  import { ArrowUpRight, FlaskConical, FolderPlus, Library, MessageCircleQuestion, Settings2, Share2 } from '@lucide/svelte';
+  import { FlaskConical, FolderPlus, Library, MessageCircleQuestion } from '@lucide/svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminPageLinkAction from '$lib/components/page/AdminPageLinkAction.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
@@ -12,13 +10,8 @@
   import KnowledgeAskPanel from './ask/KnowledgeAskPanel.svelte';
   import KnowledgeBrowsePanel from './browse/KnowledgeBrowsePanel.svelte';
   import KnowledgeEvalPanel from './eval/KnowledgeEvalPanel.svelte';
-  import KnowledgeGraphPanel from './graph/KnowledgeGraphPanel.svelte';
   import KnowledgeIngestPanel from './ingest/KnowledgeIngestPanel.svelte';
-  import {
-    KNOWLEDGE_PREFERENCES_SECTION_HREF,
-    KNOWLEDGE_TABS,
-    type KnowledgeTabId
-  } from './shared/knowledge-pure';
+  import { KNOWLEDGE_TABS, type KnowledgeTabId } from './shared/knowledge-pure';
   import { createKnowledgePageController } from './state/knowledge-controller.svelte';
   import { knowledgeEventStream } from './shared/knowledge-event-stream.svelte';
 
@@ -39,7 +32,6 @@
     ingest: FolderPlus,
     browse: Library,
     ask: MessageCircleQuestion,
-    graph: Share2,
     eval: FlaskConical
   } as const satisfies Record<KnowledgeTabId, AdminTabDescriptor<KnowledgeTabId>['icon']>;
 
@@ -62,7 +54,6 @@
   title="Knowledge"
   subtitle="Markdown ingest and vector search"
   sticky
-  forceCompact={tabPrefs.activeTab === 'graph'}
 >
   {#snippet tabs()}
     <AdminTabStrip
@@ -73,17 +64,6 @@
         void tabPrefs.setActiveTab(id);
       }}
     />
-  {/snippet}
-
-  {#snippet actions()}
-    <AdminPageLinkAction
-      href={`${base}${KNOWLEDGE_PREFERENCES_SECTION_HREF}`}
-      icon={Settings2}
-      title="Open workspace knowledge preferences"
-    >
-      Preferences
-      <ArrowUpRight size={14} strokeWidth={2.25} aria-hidden="true" />
-    </AdminPageLinkAction>
   {/snippet}
 
   {#if ctl.error}
@@ -108,8 +88,6 @@
     <KnowledgeIngestPanel {ctl} />
   {:else if tabPrefs.activeTab === 'browse'}
     <KnowledgeBrowsePanel {ctl} />
-  {:else if tabPrefs.activeTab === 'graph'}
-    <KnowledgeGraphPanel {ctl} />
   {:else if tabPrefs.activeTab === 'eval'}
     <KnowledgeEvalPanel {ctl} />
   {:else}

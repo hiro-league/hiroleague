@@ -856,8 +856,12 @@ class BaseAgentGraph:
             # wrapper otherwise stamps only the exception class name, e.g. "googlegenerativeai").
             effective_model = model_id or str(state.get("model_id") or "")
             provider = effective_model.split(":", 1)[0] if ":" in effective_model else ""
+            # Per-turn tools kill-switch: invoke the un-bound model when tools are disabled for this
+            # turn (preference or per-chat opt-out) so no tool calls are emitted; should_continue then
+            # routes to memory_out. ``bound`` already == model when no tools were compiled in.
+            active = bound if state.get("tools_enabled", True) else model
             try:
-                response = await bound.ainvoke(inputs)
+                response = await active.ainvoke(inputs)
             except Exception as exc:
                 # Record which model failed (the wrapper can't), then fail() adds decision + message;
                 # re-raise so failure semantics are unchanged.
@@ -1082,6 +1086,14 @@ class BaseAgentGraph:
         # would double-count the extraction tokens in the turn total.
         entry = current_entry.get()
         substep_token = current_substep.set(entry.step_index) if entry is not None else None
+        # Anchor the episode to the REAL turn time (routing.timestamp, carried in the
+        # inbound envelope), not the ingest wall-clock. Inline ingest makes _now() ≈
+        # turn time today, but D4 background ingest would drift; passing the message
+        # timestamp keeps temporal ordering/supersession honest regardless of when
+        # extraction runs. Serialized as ISO → _parse_reference_time consumes it.
+        envelope = state.get("inbound_envelope") or {}
+        routing = envelope.get("routing") if isinstance(envelope, dict) else {}
+        inbound_ts = routing.get("timestamp") if isinstance(routing, dict) else None
         try:
             result = await self._memory.add(
                 # User turn ONLY — the assistant reply (``reply_text``) is intentionally
@@ -1098,6 +1110,9 @@ class BaseAgentGraph:
                     "thread_id": state.get("thread_id", ""),
                     "channel_id": state.get("chat_channel_id", 0),
                     "source": "conversation",
+                    # Real turn time → episode reference_time (see above). Empty ⇒
+                    # graphiti_conversation falls back to None ⇒ ingest stamps now.
+                    "timestamp": inbound_ts,
                     # A1 fix: anchor the user's facts to their real name. Graphiti extracts the
                     # speaker (token before ":") as the anchor entity, so this turns the generic
                     # "User" hub into a clean named Person. Empty ⇒ graphiti_conversation falls

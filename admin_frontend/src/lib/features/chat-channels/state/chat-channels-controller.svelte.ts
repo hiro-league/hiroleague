@@ -78,6 +78,8 @@ export function createChatChannelsPageController() {
   let requestVoiceReplyUi = $state(false);
   /** Per-message "use knowledge" toggle (default on); persisted like the voice-reply pref. */
   let useKnowledgeUi = $state(true);
+  /** Per-message "disable tools" toggle (default off ⇒ tools on); overrides the chat.tools_enabled pref. */
+  let disableToolsUi = $state(false);
   /** Token/cost stats on Messages bubbles; persisted like voice-reply pref. */
   let showAgentTokensUi = $state(true);
   /** Agent tool stack on Messages bubbles; persisted independently of stats. */
@@ -392,6 +394,19 @@ export function createChatChannelsPageController() {
     await nav.syncNav(selectedChannelId);
   }
 
+  /**
+   * Re-apply `?tab=`/`?channel_id=` after a *same-route* navigation. `mount()`'s
+   * `initializeNavigation()` runs only once, so without this the global overlay's
+   * "open full page" link (which pushes `?tab=messages` while already on /chats)
+   * would update the URL but leave the strip stuck on Channels. Flipping the tab
+   * here lets the live-updates lease effect load messages on its own.
+   */
+  function syncNavFromUrl() {
+    nav.syncActiveTabFromUrl();
+    const fromUrl = nav.readChannelIdFromLocation();
+    if (fromUrl && fromUrl !== selectedChannelId) selectedChannelId = fromUrl;
+  }
+
   function ensureSelectedChannel(): string | null {
     if (selectedChannelId && channels.some((channel) => String(channel.id) === selectedChannelId)) {
       return selectedChannelId;
@@ -699,7 +714,8 @@ export function createChatChannelsPageController() {
       const sent = await sendChatMessage(id, {
         text,
         request_voice_reply: requestVoiceReply || undefined,
-        use_knowledge: useKnowledgeUi
+        use_knowledge: useKnowledgeUi,
+        disable_tools: disableToolsUi || undefined
       });
       const sentAt = new Date().toISOString();
       draftMessage = '';
@@ -775,7 +791,8 @@ export function createChatChannelsPageController() {
         audio_mime_type: effectiveMime,
         audio_duration_ms: duration_ms,
         request_voice_reply: requestVoiceReply || undefined,
-        use_knowledge: useKnowledgeUi
+        use_knowledge: useKnowledgeUi,
+        disable_tools: disableToolsUi || undefined
       });
       const sentAt = new Date().toISOString();
       addOptimisticMessage({
@@ -849,6 +866,9 @@ export function createChatChannelsPageController() {
       const rawKnowledge = localStorage.getItem(PREF_KEYS.chatChannelsUseKnowledge);
       if (rawKnowledge === '1') useKnowledgeUi = true;
       if (rawKnowledge === '0') useKnowledgeUi = false;
+      const rawDisableTools = localStorage.getItem(PREF_KEYS.chatChannelsDisableTools);
+      if (rawDisableTools === '1') disableToolsUi = true;
+      if (rawDisableTools === '0') disableToolsUi = false;
       const rawTokens = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTelemetry);
       if (rawTokens === '0') showAgentTokensUi = false;
       if (rawTokens === '1') showAgentTokensUi = true;
@@ -928,6 +948,7 @@ export function createChatChannelsPageController() {
     loadChannels,
     refreshCurrent,
     setActiveTab,
+    syncNavFromUrl,
 
     openMessages,
     handleChannelSelect,
@@ -996,6 +1017,17 @@ export function createChatChannelsPageController() {
       useKnowledgeUi = v;
       try {
         localStorage.setItem(PREF_KEYS.chatChannelsUseKnowledge, v ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+    get disableToolsUi() {
+      return disableToolsUi;
+    },
+    set disableToolsUi(v: boolean) {
+      disableToolsUi = v;
+      try {
+        localStorage.setItem(PREF_KEYS.chatChannelsDisableTools, v ? '1' : '0');
       } catch {
         /* ignore */
       }

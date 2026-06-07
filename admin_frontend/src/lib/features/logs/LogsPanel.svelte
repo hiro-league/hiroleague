@@ -1,7 +1,17 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
-  import { Pause, Play, Search, Trash2, X } from '@lucide/svelte';
+  import {
+    ChevronDown,
+    ChevronUp,
+    PanelRightClose,
+    PanelRightOpen,
+    Pause,
+    Play,
+    Search,
+    Trash2,
+    X
+  } from '@lucide/svelte';
   import type { LogTimeRange } from '$lib/api/logs';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
@@ -40,15 +50,12 @@
   let clearLogsConfirmOpen = $state(false);
 
   // Sticky offsets clear the shell bar (4rem) + the sticky page header + the sticky
-  // filter toolbar (heights published as CSS vars). The toolbar term is gated on the
-  // collapse flag we own rather than read purely from the published var: a collapsed
-  // toolbar is 0px tall, but ResizeObserver does not reliably re-publish that shrink,
-  // which would otherwise leave a dead gap above the table head when collapsed.
-  const stickyToolbarTerm = $derived(
-    prefs.controlsCollapsed ? '0px' : 'var(--admin-page-sticky-toolbar-h, 0px)'
-  );
+  // filter toolbar (heights published as CSS vars). Collapsing now only removes the
+  // second (secondary-filters) line while the first toolbar line stays visible, so the
+  // toolbar always keeps a real, nonzero height — removing one row reliably re-fires
+  // ResizeObserver, so we can read the published var directly without gating on the flag.
   const tableStickyTop = $derived(
-    `calc(4rem + var(--admin-page-header-h, 0px) + ${stickyToolbarTerm})`
+    `calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px))`
   );
   const detailStickyTop = $derived(`calc(${tableStickyTop} + 0.75rem)`);
   // Fixed height (not just max-height) so the panel always fills the visible page
@@ -145,20 +152,13 @@
   );
 </script>
 
-<!-- Controls live on their own sticky line below the shared page header.
-     Collapsing hides the region's content (and zeroes the bar's padding/border)
-     rather than the toolbar element itself: a `display:none` element stops
-     emitting ResizeObserver notifications, which would freeze the published
-     toolbar height. Keeping the element keeps the height var in sync and keeps
-     the aria-controls target in the DOM while the chevron (in the host header)
-     still references it. -->
-<AdminPageStickyToolbar class={cn(prefs.controlsCollapsed && 'border-0 py-0')}>
-  <div
-    id={LOGS_FILTER_REGION_ID}
-    role="region"
-    aria-label="Log controls"
-    class={cn(prefs.controlsCollapsed ? 'hidden' : 'flex flex-col gap-3')}
-  >
+<!-- Controls live on their own sticky line below the shared page header. The first
+     line (level / search / pause / time window / actions) always stays mounted so it
+     remains visible and sticky even when filters are collapsed; only the second line
+     (secondary filters) collapses. The collapse chevron sits at the far right of the
+     first line and targets the second line's region via aria-controls. -->
+<AdminPageStickyToolbar>
+  <div class="flex flex-col gap-3">
     <div class="flex min-w-0 flex-wrap items-center gap-2">
       <div class="flex items-center gap-1" role="group" aria-label="Filter log levels">
         <span class="font-sans text-sm font-semibold text-muted-foreground">Level:</span>
@@ -235,21 +235,65 @@
           {/each}
         </select>
       </label>
-      <span class="hidden h-6 w-px bg-border md:block"></span>
-      <Button
-        variant="destructive"
-        size="icon"
-        class="size-8"
-        title={ctrl.clearingLogs ? 'Clearing logs…' : 'Clear all logs'}
-        aria-label="Clear all logs"
-        onclick={requestClearLogs}
-        disabled={ctrl.clearingLogs}
-      >
-        <Trash2 size={15} />
-      </Button>
+      <!-- Trailing actions grouped to the right; the collapse chevron pins to the far
+           right of the line so the first toolbar row stays usable while collapsed. -->
+      <div class="ml-auto flex items-center gap-2">
+        <span class="hidden h-6 w-px bg-border md:block"></span>
+        <!-- Icon-only toggle for the right-hand log details panel. -->
+        <Button
+          variant="outline"
+          size="icon"
+          class="size-8"
+          title={prefs.detailPanelOpen ? 'Hide log details' : 'Show log details'}
+          aria-label={prefs.detailPanelOpen ? 'Hide log details' : 'Show log details'}
+          aria-pressed={prefs.detailPanelOpen}
+          onclick={() => (prefs.detailPanelOpen = !prefs.detailPanelOpen)}
+        >
+          {#if prefs.detailPanelOpen}
+            <PanelRightClose size={15} />
+          {:else}
+            <PanelRightOpen size={15} />
+          {/if}
+        </Button>
+        <Button
+          variant="destructive"
+          size="icon"
+          class="size-8"
+          title={ctrl.clearingLogs ? 'Clearing logs…' : 'Clear all logs'}
+          aria-label="Clear all logs"
+          onclick={requestClearLogs}
+          disabled={ctrl.clearingLogs}
+        >
+          <Trash2 size={15} />
+        </Button>
+        <!-- Collapse/expand the secondary-filters line below. -->
+        <Button
+          variant="outline"
+          size="icon"
+          class="size-8"
+          aria-expanded={!prefs.controlsCollapsed}
+          aria-controls={LOGS_FILTER_REGION_ID}
+          aria-label={prefs.controlsCollapsed ? 'Expand log filters' : 'Collapse log filters'}
+          title={prefs.controlsCollapsed ? 'Expand log filters' : 'Collapse log filters'}
+          onclick={() => prefs.toggleControlsCollapsed()}
+        >
+          {#if prefs.controlsCollapsed}
+            <ChevronDown size={16} />
+          {:else}
+            <ChevronUp size={16} />
+          {/if}
+        </Button>
+      </div>
     </div>
 
-    <LogsFiltersPanel {prefs} {ctrl} />
+    <div
+      id={LOGS_FILTER_REGION_ID}
+      role="region"
+      aria-label="Log filters"
+      class={cn(prefs.controlsCollapsed && 'hidden')}
+    >
+      <LogsFiltersPanel {prefs} {ctrl} />
+    </div>
   </div>
 </AdminPageStickyToolbar>
 

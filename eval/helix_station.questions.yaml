@@ -1,0 +1,83 @@
+# Helix Station temporal question bank (10 Qs). Pairs with helix_station.episodes.jsonl.
+#
+# FICTIONAL by design: invented names mean the answer can ONLY come from temporal reasoning over
+# what was remembered (latest-wins supersession, valid/invalid intervals, ordering, point-in-time,
+# distinct-count) — there is no canon for a model to recall. With substring scoring dropped, the
+# LLM judge reads `expected_answer` (the ideal answer) and `must_not_contain` (superseded values
+# that must NOT resurface). `requires: [temporal]` flags the gate subset.
+
+# --- current value (latest-wins supersession) ---
+- id: q_current_commander
+  category: supersession
+  question: "Who currently commands Helix Station?"
+  expected_answer: "Commander Renn Solari (the most recent of three commanders)."
+  must_not_contain: ["Toryn", "Brask"]
+  requires: [temporal]
+
+- id: q_current_botanist
+  category: supersession
+  question: "Who is the current lead botanist of the greenhouse module?"
+  expected_answer: "Dr. Yune Petrov."
+  must_not_contain: ["Hassel"]
+  requires: [temporal]
+
+- id: q_current_rover
+  category: supersession
+  question: "Which research rover is active at Helix Station now?"
+  expected_answer: "Strider-9 (Strider-7 was destroyed)."
+  must_not_contain: ["Strider-7"]
+  requires: [temporal]
+
+- id: q_current_drone
+  category: supersession
+  question: "What is the station's current mascot drone called?"
+  expected_answer: "Otto."
+  must_not_contain: ["Pip"]
+  requires: [temporal]
+
+# --- invalidation (a fact that ended) ---
+- id: q_strider7_still
+  category: invalidation
+  question: "Is Strider-7 still Helix Station's active rover?"
+  expected_answer: "No — it was destroyed in a dust storm; Strider-9 is the active rover now."
+  must_not_contain: ["Strider-7 is the active", "yes, strider-7"]
+  requires: [temporal]
+
+# --- point-in-time ("as of" a date) ---
+- id: q_commander_early_2212
+  category: point_in_time
+  question: "Who was commanding Helix Station in early 2212, before mid-year?"
+  expected_answer: "Commander Vael Toryn (Iola Brask took over in mid-2212)."
+  must_not_contain: ["Solari", "Brask"]
+  requires: [temporal]
+
+# --- ordering (relative to another fact) ---
+- id: q_commander_before_solari
+  category: ordering
+  question: "Who commanded Helix Station immediately before Renn Solari?"
+  expected_answer: "Commander Iola Brask."
+  must_not_contain: ["Toryn", "Solari"]
+  requires: [temporal]
+
+- id: q_botanist_before_yune
+  category: ordering
+  question: "Who led the greenhouse module before Dr. Yune Petrov?"
+  expected_answer: "Dr. Mara Hassel."
+  must_not_contain: ["Yune", "Petrov"]
+  requires: [temporal]
+
+# --- first / earliest ---
+- id: q_first_commander
+  category: ordering
+  question: "Who was the first commander of Helix Station on record here?"
+  expected_answer: "Commander Vael Toryn."
+  must_not_contain: ["Solari", "Brask"]
+  requires: [temporal]
+
+# --- distinct-count over time ---
+- id: q_count_commanders
+  category: counting
+  question: "How many different commanders has Helix Station had across these records?"
+  expected_answer: "Three — Vael Toryn, Iola Brask, and Renn Solari."
+  must_not_contain: []
+  requires: [temporal]

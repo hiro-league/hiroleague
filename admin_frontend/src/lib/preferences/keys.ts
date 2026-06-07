@@ -13,6 +13,8 @@ export const PREF_KEYS = {
   chatChannelsShowAgentTools: 'hiro.admin.chatChannels.showAgentTools',
   /** "Use knowledge" per-message toggle on Messages tab (default on). */
   chatChannelsUseKnowledge: 'hiro.admin.chatChannels.useKnowledge',
+  /** "Disable tools" per-message toggle on Messages tab (default off ⇒ tools on). */
+  chatChannelsDisableTools: 'hiro.admin.chatChannels.disableTools',
   /** Global chat overlay: last open/closed state (Facebook-style pop-anywhere chat). */
   chatOverlayOpen: 'hiro.admin.chatOverlay.open',
   /** Global chat overlay: window mode — full | partial | minimized. */
@@ -20,6 +22,8 @@ export const PREF_KEYS = {
   catalogActiveTab: 'hiro.admin.catalog.activeTab',
   charactersActiveTab: 'hiro.admin.characters.activeTab',
   knowledgeActiveTab: 'hiro.admin.knowledge.activeTab',
+  /** Primary tab on the Memories page: memory facts list vs the entity Graph viz. */
+  memoriesActiveTab: 'hiro.admin.memories.activeTab',
   /** Primary tab on the Logs page: live log feed vs the Graph runs ledger. */
   logsPrimaryActiveTab: 'hiro.admin.logs.activeTab',
   preferencesActiveTab: 'hiro.admin.preferences.activeTab',
@@ -45,6 +49,10 @@ export const PREF_KEYS = {
   // run stays consistent across navigation and across origins (Vite vs packaged).
   knowledgeAskEvalIngest: 'hiro.admin.knowledge.askEvalIngest',
   knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph',
+  /** Eval corpus-picker folder (the path scanned for corpuses). */
+  knowledgeEvalFolder: 'hiro.admin.knowledge.evalFolder',
+  /** Eval: run the optional LLM judge (grade answers vs ideal). */
+  knowledgeEvalJudge: 'hiro.admin.knowledge.evalJudge',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
   knowledgeGraphOptions: 'hiro.admin.knowledge.graphOptions',
   /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */
@@ -52,7 +60,11 @@ export const PREF_KEYS = {
   /** Graph tab: hidden edge types (CSV) — sessionStorage; no URL param (not shareable). */
   knowledgeGraphHideEdges: 'hiro.admin.knowledge.graphHideEdges',
   /** Graph tab: last-viewed partition group_id — sessionStorage; restored on next open. */
-  knowledgeGraphActiveGroup: 'hiro.admin.knowledge.graphActiveGroup'
+  knowledgeGraphActiveGroup: 'hiro.admin.knowledge.graphActiveGroup',
+  /** Graph tab: which side the selection/detail aside docks on — 'auto' | 'left' | 'right'.
+   *  'auto' (default) follows the chat overlay: left while chat is open (so it isn't
+   *  covered), right otherwise. Left/right pin it explicitly. localStorage. */
+  knowledgeGraphPanelSide: 'hiro.admin.knowledge.graphPanelSide'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';
@@ -62,7 +74,9 @@ export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type ChatOverlayMode = 'full' | 'partial';
 export type CatalogTabPreference = 'active-providers' | 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
-export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask' | 'graph' | 'eval';
+export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask' | 'eval';
+export type MemoriesTabPreference = 'memories' | 'graph';
+export type GraphPanelSidePreference = 'auto' | 'left' | 'right';
 export type LogsPrimaryTabPreference = 'logs' | 'runs';
 export type PreferencesTabPreference =
   | 'models'

@@ -89,6 +89,7 @@
     onDiscardRecording: () => void | Promise<void>;
     requestVoiceReplyUi: boolean;
     useKnowledgeUi: boolean;
+    disableToolsUi: boolean;
     draftMessage: string;
     voiceReplyCheckboxDisabled: boolean;
     voiceReplyCheckboxHint: string;
@@ -136,6 +137,7 @@
     onDiscardRecording,
     requestVoiceReplyUi = $bindable(),
     useKnowledgeUi = $bindable(true),
+    disableToolsUi = $bindable(false),
     showAgentTokensUi = $bindable(true),
     showAgentToolsUi = $bindable(true),
     draftMessage = $bindable(),
@@ -328,6 +330,17 @@
             class="accent-primary h-4 w-4 shrink-0"
           />
           Use knowledge
+        </label>
+        <label
+          class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+          title="Disable agent tools for this message (overrides the global chat tools preference)."
+        >
+          <input
+            type="checkbox"
+            bind:checked={disableToolsUi}
+            class="accent-primary h-4 w-4 shrink-0"
+          />
+          Disable tools
         </label>
       </div>
       <div

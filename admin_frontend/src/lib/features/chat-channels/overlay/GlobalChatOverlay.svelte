@@ -127,6 +127,7 @@
           bind:selectedChannelId={engine.selectedChannelId}
           bind:requestVoiceReplyUi={engine.requestVoiceReplyUi}
           bind:useKnowledgeUi={engine.useKnowledgeUi}
+          bind:disableToolsUi={engine.disableToolsUi}
           bind:showAgentTokensUi={engine.showAgentTokensUi}
           bind:showAgentToolsUi={engine.showAgentToolsUi}
           bind:draftMessage={engine.draftMessage}

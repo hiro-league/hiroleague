@@ -62,6 +62,8 @@ def _tags(value: Any) -> list[str]:
 
 class KnowledgeScanFolderTool(Tool):
     runtime = True
+    # Knowledge tools off the chat agent surface (see MemoryListTool rationale).
+    agent_default = False
     name = "knowledge_scan_folder"
     description = "Scan a folder for knowledge-ingestible files"
     params = {
@@ -86,6 +88,7 @@ class KnowledgeScanFolderTool(Tool):
 
 class KnowledgeIngestTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_ingest"
     description = "Ingest selected markdown files into the workspace-local knowledge index"
     params = {
@@ -160,6 +163,7 @@ class KnowledgeIngestTool(Tool):
 
 class KnowledgeJobStatusTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_job_status"
     description = "Return persisted status for a knowledge ingestion job"
     params = {
@@ -183,6 +187,7 @@ class KnowledgeJobStatusTool(Tool):
 
 class KnowledgeSearchTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_search"
     description = "Vector-search ingested knowledge chunks"
     params = {
@@ -238,6 +243,7 @@ GRAPH_TEMPORAL_VALUES = ("current", "all")
 
 class KnowledgeAnswerTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_answer"
     description = "Answer a question against ingested knowledge with cited sources"
     params = {
@@ -351,6 +357,7 @@ class KnowledgeAnswerTool(Tool):
 
 class KnowledgeListDocumentsTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_list_documents"
     description = "List ingested knowledge documents"
     params = {
@@ -455,6 +462,7 @@ class KnowledgeReingestDocumentTool(Tool):
 
 class KnowledgeUpdateDocumentMetadataTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_update_document_metadata"
     description = "Update knowledge document owner, category, and tags"
     params = {
@@ -499,6 +507,7 @@ class KnowledgeUpdateDocumentMetadataTool(Tool):
 
 class KnowledgeGetDocumentTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_get_document"
     description = "Get one knowledge document and its vector-store chunks"
     params = {
@@ -532,6 +541,7 @@ class _KnowledgeWorkspaceRuntimeTool(Tool):
     """Shared runtime wiring for workspace-scoped knowledge read tools."""
 
     runtime = True
+    agent_default = False  # knowledge tools off the chat agent surface (subclasses inherit)
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
@@ -569,6 +579,7 @@ class KnowledgeListCategoriesTool(_KnowledgeWorkspaceRuntimeTool):
 
 class KnowledgeCreateCategoryTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_create_category"
     description = "Create a knowledge category or subcategory"
     params = {
@@ -603,6 +614,7 @@ class KnowledgeCreateCategoryTool(Tool):
 
 class KnowledgeCreateTagTool(Tool):
     runtime = True
+    agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_create_tag"
     description = "Create a knowledge tag"
     params = {

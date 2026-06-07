@@ -94,7 +94,7 @@
                 <span
                   class="inline-block size-2 rounded-full bg-muted-foreground/40"
                   title={isLocal
-                    ? `Not downloaded — ${model.manage_hint ?? 'manage in Preferences'}`
+                    ? `Not downloaded — ${model.manage_hint ?? 'manage in Settings'}`
                     : 'Offline — provider not configured in this workspace'}
                   aria-hidden="true"
                 ></span>

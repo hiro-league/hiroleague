@@ -116,6 +116,7 @@ class ChatChannelMessageSendRequest(BaseModel):
     audio_duration_ms: int | None = None
     request_voice_reply: bool = False
     use_knowledge: bool = True
+    disable_tools: bool = False
 
 
 class LogsTailRequest(BaseModel):
