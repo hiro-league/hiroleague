@@ -8,6 +8,7 @@
  */
 import { PREF_KEYS, type GraphPanelSidePreference } from '$lib/preferences/keys';
 import { readLocalString, writeLocalString } from '$lib/preferences/storage';
+import { CENTER_STRENGTH, RADIAL_RING } from './engine/graph-forces';
 
 /** Cap on parallel edges per node pair that means "show all" — also the slider max. */
 export const MAX_LINKS_CAP = 10;
@@ -23,6 +24,12 @@ export type GraphOptions = {
   linkStrength: number;
   /** d3 link-force resting length, in px. */
   linkDistance: number;
+  /** d3 center-force strength: pulls ALL nodes (incl. disconnected ones) toward the middle.
+   *  0 = no pull (clusters drift far) … higher = tighter overall graph. */
+  centerStrength: number;
+  /** Outer-ring radius for the degree-radial force, in px (scaled by √node-count by the
+   *  engine). Lower pulls least-connected / disconnected strays inward; higher pushes out. */
+  radialRing: number;
   /** Max bow for fanned parallel edges: 0 straight … 1 very curved. */
   curveAmount: number;
   /** Max parallel edges drawn per node pair; MAX_LINKS_CAP = show all. */
@@ -31,9 +38,17 @@ export type GraphOptions = {
   searchFocusMode: SearchFocusMode;
 };
 
+// Center/spread defaults come from the force constants so there's a single source of truth.
+export const CENTER_STRENGTH_MIN = 0;
+export const CENTER_STRENGTH_MAX = 0.5;
+export const RADIAL_RING_MIN = 20;
+export const RADIAL_RING_MAX = 200;
+
 export const GRAPH_OPTION_DEFAULTS: GraphOptions = {
   linkStrength: 0.5,
   linkDistance: 80,
+  centerStrength: CENTER_STRENGTH,
+  radialRing: RADIAL_RING,
   curveAmount: 0.45,
   maxLinksPerPair: MAX_LINKS_CAP,
   searchFocusMode: 'highlight'
@@ -55,6 +70,16 @@ export function readGraphOptions(): GraphOptions {
     return {
       linkStrength: clamp(num(p.linkStrength, GRAPH_OPTION_DEFAULTS.linkStrength), 0, 1),
       linkDistance: clamp(num(p.linkDistance, GRAPH_OPTION_DEFAULTS.linkDistance), 20, 300),
+      centerStrength: clamp(
+        num(p.centerStrength, GRAPH_OPTION_DEFAULTS.centerStrength),
+        CENTER_STRENGTH_MIN,
+        CENTER_STRENGTH_MAX
+      ),
+      radialRing: clamp(
+        num(p.radialRing, GRAPH_OPTION_DEFAULTS.radialRing),
+        RADIAL_RING_MIN,
+        RADIAL_RING_MAX
+      ),
       curveAmount: clamp(num(p.curveAmount, GRAPH_OPTION_DEFAULTS.curveAmount), 0, 1),
       maxLinksPerPair: clamp(
         Math.round(num(p.maxLinksPerPair, GRAPH_OPTION_DEFAULTS.maxLinksPerPair)),

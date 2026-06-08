@@ -118,7 +118,7 @@ memory surfaces **facts directly** (no conversation passage layer in Phase 1, D3
 | **D5** | Episode identity (provenance) | **Stable message id** from the persistence layer | Episode `uuid = message_id` → free provenance back to the stored turn (mirrors doc G6, episode == citable unit). |
 | **D6** | Models for extraction | **Reuse the Graphiti tiers** (extraction / small / shared embedder) | Same engine, same store; one embedder is mandatory anyway (A2). |
 | **D7** | mem0 cutover | **Rip out on day zero** | Repo no-backward-compat rule; no parallel run. A memory eval (§10) proves quality *after* on Graphiti, not by A/B with mem0. |
-| **D8** | Temporal lens default | **`current`** (overridable per query) | "Where does the user live *now*" dominates memory; superseded facts shouldn't eat the budget. |
+| **D8** | Temporal lens default | **Follows admin pref `graph.temporal_default`** (single source of truth across knowledge + memory legs). Default `current`; flip to `all` in Settings → Graph → Temporal lens to surface superseded/historical facts. | Originally hardcoded to `current`; that bypassed the admin pref and caused a settings/eval mismatch. Memory now obeys the same lens as knowledge `graph_expand`. No per-query override for memory yet (chat / Memory eval just follow the pref). |
 
 ### 4.2 Working assumptions
 

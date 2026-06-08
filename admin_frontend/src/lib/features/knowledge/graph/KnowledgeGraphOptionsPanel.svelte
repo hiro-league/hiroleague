@@ -12,9 +12,14 @@
   let {
     linkStrength = $bindable(),
     linkDistance = $bindable(),
+    centerStrength = $bindable(),
+    radialRing = $bindable(),
     curveAmount = $bindable(),
     maxLinksPerPair = $bindable(),
     searchFocusMode = $bindable(),
+    centerStrengthMax,
+    radialRingMin,
+    radialRingMax,
     maxLinksCap,
     onReset,
     onClose
@@ -23,12 +28,21 @@
     linkStrength: number;
     /** d3 link-force resting length, in px. */
     linkDistance: number;
+    /** d3 center-force strength: pulls all nodes (incl. disconnected ones) toward the middle. */
+    centerStrength: number;
+    /** Outer-ring radius (px) for least-connected/disconnected nodes; lower = pulled inward. */
+    radialRing: number;
     /** Max bow for fanned parallel edges: 0 = straight, 1 = very curved. */
     curveAmount: number;
     /** Max parallel edges drawn per node pair; === maxLinksCap means "show all". */
     maxLinksPerPair: number;
     /** How a search treats non-matching nodes/edges (ring-only / dim / hide). */
     searchFocusMode: SearchFocusMode;
+    /** Slider max for centerStrength. */
+    centerStrengthMax: number;
+    /** Slider min/max for radialRing. */
+    radialRingMin: number;
+    radialRingMax: number;
     /** The maxLinksPerPair value that means "show all" (slider's max). */
     maxLinksCap: number;
     /** Restore all graph options to their defaults. */
@@ -93,6 +107,48 @@
       />
       <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
         <span>near</span><span>far</span>
+      </div>
+    </label>
+
+    <!-- Center pull: connectivity-blind d3 center force. The one knob that reels in
+         disconnected nodes / detached components drifting away from the middle. -->
+    <label class="block">
+      <div class="mb-1 flex items-center justify-between text-xs">
+        <span class="font-medium">Center pull</span>
+        <span class="tabular-nums text-muted-foreground">{centerStrength.toFixed(2)}</span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max={centerStrengthMax}
+        step="0.01"
+        bind:value={centerStrength}
+        class="h-1.5 w-full cursor-pointer accent-primary"
+        aria-label="How strongly all nodes are pulled toward the center"
+      />
+      <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
+        <span>loose</span><span>tight</span>
+      </div>
+    </label>
+
+    <!-- Spread radius: outer-ring radius for least-connected/disconnected nodes (degree
+         radial force). Lower pulls strays inward; higher pushes them out. -->
+    <label class="block">
+      <div class="mb-1 flex items-center justify-between text-xs">
+        <span class="font-medium">Spread radius</span>
+        <span class="tabular-nums text-muted-foreground">{radialRing}</span>
+      </div>
+      <input
+        type="range"
+        min={radialRingMin}
+        max={radialRingMax}
+        step="5"
+        bind:value={radialRing}
+        class="h-1.5 w-full cursor-pointer accent-primary"
+        aria-label="How far the least-connected and disconnected nodes sit from the center"
+      />
+      <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
+        <span>tight</span><span>wide</span>
       </div>
     </label>
 

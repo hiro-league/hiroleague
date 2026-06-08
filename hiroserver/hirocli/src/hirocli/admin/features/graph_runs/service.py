@@ -6,7 +6,6 @@ import csv
 import io
 import os
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from hirocli.admin.shared.result import Result
 from hirocli.domain.config import load_config, resolve_log_dir
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS
+from hirocli.runtime.agent_graph.tracing import langsmith_run_id
 
 INITIAL_GRAPH_LEDGER_LINES = 100
 
@@ -117,6 +117,52 @@ class GraphLedgerService:
             path = _graph_log_path(workspace)
             payload = _inspect_run_rows(path, rid)
             return Result.success(payload)
+        except Exception as exc:
+            return Result.failure(str(exc))
+
+    def retrieval_trace(
+        self,
+        workspace: str | None,
+        run_id: str,
+    ) -> Result[list[dict[str, Any]]]:
+        """Return the per-stage Graphiti fact-search traces recorded for ``run_id``.
+
+        Reads the JSONL sidecar written by ``graph_expand`` when retrieval tracing is
+        enabled (one record per fact search, each tagged with its ``step_index`` so the
+        UI can link a trace to its ledger row). Empty list when no sidecar exists — the
+        common case, since tracing is opt-in."""
+        rid = (run_id or "").strip()
+        if not rid:
+            return Result.failure("run_id is required.")
+        try:
+            from hirocli.services.knowledge.graph.retrieval_trace import read_trace_sidecar
+
+            entry, _ = resolve_workspace(workspace)
+            records = read_trace_sidecar(Path(entry.path), rid)
+            return Result.success(records)
+        except Exception as exc:
+            return Result.failure(str(exc))
+
+    def ingest_trace(
+        self,
+        workspace: str | None,
+        run_id: str,
+    ) -> Result[list[dict[str, Any]]]:
+        """Return the per-stage Graphiti ``add_episode`` traces recorded for ``run_id``.
+
+        Reads the JSONL sidecar written by ``ingest_episodes`` when ingest tracing is
+        enabled (one record per episode, each tagged with its ``step_index`` so the UI
+        can link a trace to its episode ledger row). Empty list when no sidecar exists —
+        the common case, since tracing is opt-in."""
+        rid = (run_id or "").strip()
+        if not rid:
+            return Result.failure("run_id is required.")
+        try:
+            from hirocli.services.knowledge.graph.ingest_trace import read_ingest_trace_sidecar
+
+            entry, _ = resolve_workspace(workspace)
+            records = read_ingest_trace_sidecar(Path(entry.path), rid)
+            return Result.success(records)
         except Exception as exc:
             return Result.failure(str(exc))
 
@@ -288,7 +334,7 @@ def langsmith_url_for_run(run_id: str) -> str | None:
         log.debug("langsmith package not installed; omit LangSmith link")
         return None
 
-    trace_id = str(uuid.uuid5(uuid.NAMESPACE_URL, ledger_run_id))
+    trace_id = str(langsmith_run_id(ledger_run_id))
 
     try:
         client = Client()

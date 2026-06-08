@@ -269,7 +269,8 @@ async def test_service_ingest_chunks_delegates_and_inits() -> None:
     svc._closed = False  # type: ignore[attr-defined]
     svc._db_path = "test.db"  # type: ignore[attr-defined]  # only used in a log line
     svc._registry_key = "test-key"  # type: ignore[attr-defined]  # per-workspace write-lock key
-    svc._ledger_detail = "rich"  # type: ignore[attr-defined]
+    svc._observability = "ledger"  # type: ignore[attr-defined]
+    svc._sim_min_score = 0.3  # type: ignore[attr-defined]  # read by initialize() dedup-floor align
 
     stats = await svc.ingest_chunks(
         [GraphitiEpisodeInput(chunk_id="c1", document_id="d", text="hi")],
@@ -297,7 +298,7 @@ async def test_service_ingest_chunks_group_override() -> None:
     svc._closed = False  # type: ignore[attr-defined]
     svc._db_path = "test.db"  # type: ignore[attr-defined]
     svc._registry_key = "test-key"  # type: ignore[attr-defined]
-    svc._ledger_detail = "rich"  # type: ignore[attr-defined]
+    svc._observability = "ledger"  # type: ignore[attr-defined]
 
     await svc.ingest_chunks(
         [GraphitiEpisodeInput(chunk_id="m1", document_id="conv:7", text="hi")],

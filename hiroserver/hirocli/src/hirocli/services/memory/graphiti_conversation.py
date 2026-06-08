@@ -37,6 +37,7 @@ from hirocli.services.knowledge.graph.group_scope import (
 )
 
 if TYPE_CHECKING:
+    from hirocli.domain.preferences import KnowledgeGraphTemporalDefault
     from hirocli.runtime.agent_graph.ledger import LedgerSink
     from hirocli.services.knowledge.graph.graphiti_ingest import GraphEventSink
     from hirocli.services.knowledge.graph.graphiti_service import GraphitiMemoryService
@@ -91,11 +92,19 @@ class GraphitiConversationMemory:
         graph_service: "GraphitiMemoryService",
         *,
         default_top_k: int = 8,
+        temporal_default: "KnowledgeGraphTemporalDefault" = "current",
         event_sink: "GraphEventSink | None" = None,
         group_override: str | None = None,
     ) -> None:
         self._graph = graph_service
         self._default_top_k = int(default_top_k)
+        # Default temporal lens for recall — follows the admin pref ``graph.temporal_default``
+        # (single source of truth across knowledge AND memory legs). The factories in
+        # ``services/memory/__init__.py`` snapshot the pref at construction; the agent_manager
+        # rebuilds this service whenever ``graph.*`` prefs change, so the snapshot stays fresh.
+        # Retired: the previous hardcoded ``"current"`` (former design decision D8) — Settings
+        # → Graph → Temporal lens (default) now governs every retrieval leg uniformly.
+        self._temporal_default: "KnowledgeGraphTemporalDefault" = temporal_default
         # Optional live-viz sink: when set, each remembered turn streams its new nodes/edges
         # (tagged with the mem_ group) to the admin Graph tab via the DomainEventBus.
         self._event_sink = event_sink
@@ -178,9 +187,10 @@ class GraphitiConversationMemory:
         rerank: bool | None = None,
         metadata_filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Recall the current facts that bear on ``query`` (temporal lens ``current``,
-        decision D8). Returns facts-as-memory dicts (``{"memory": dated_fact}``) in the
-        shape ``context_assembly.memory_block`` renders.
+        """Recall the facts that bear on ``query``, using the admin temporal lens
+        (``graph.temporal_default`` — ``current`` hides superseded facts, ``all`` includes
+        them). Returns facts-as-memory dicts (``{"memory": dated_fact}``) in the shape
+        ``context_assembly.memory_block`` renders.
 
         ``threshold`` / ``rerank`` are intentionally ignored: those gates are owned by the
         shared graph-engine knobs (``sim_min_score`` / reranker), not re-applied per call
@@ -190,32 +200,58 @@ class GraphitiConversationMemory:
             return []
         group = self._group_for(user_id, character_id)
         top_k = self._default_top_k if limit is None else int(limit)
-        # Ledger Graphiti's fact search as sub-steps of the active ``memory_search`` node
-        # (embed_query / candidate_gen / bfs_expand / rrf_fuse / rerank + temporal_filter),
-        # mirroring knowledge's ``graph_expand``. The tracer buffers graphiti's ``search.*``
-        # spans; ``flush_graph_expand`` renders them onto the node's ledger entry. All of this
-        # no-ops outside a ledgered chat turn (CLI / admin / tools / tests → no active entry).
+        # Ledger Graphiti's fact search as a sub-step of the active ``memory_search`` node:
+        # ONE priced ``rerank`` roll-up child (cloud cross-encoder cost), mirroring knowledge's
+        # ``graph_expand``. The deep per-stage breakdown lives only in the ``trace`` sidecar.
+        # All of this no-ops outside a ledgered chat turn (CLI / admin / tools / tests).
         from hirocli.runtime.agent_graph.ledger import current_entry
-        from hirocli.services.knowledge.graph.ledger_tracer import SpanRecord, current_spans
+        from hirocli.services.knowledge.graph.ledger_tracer import (
+            RerankUsage,
+            current_rerank_usage,
+        )
+        from hirocli.services.knowledge.graph.retrieval_trace import (
+            RetrievalCapture,
+            current_capture,
+        )
 
-        spans: list[SpanRecord] = []
-        spans_token = current_spans.set(spans)
+        # Accumulate cross-encoder rerank usage so the priced ``rerank`` roll-up child carries
+        # model + processed tokens. Stays empty for RRF/MMR / local rerankers (no priced child).
+        rerank_usage = RerankUsage()
+        rerank_token = current_rerank_usage.set(rerank_usage)
+        # Deep per-stage retrieval trace (the ``trace`` observability tier) — mirrors knowledge's
+        # ``graph_expand`` block: capture activates the re-hosted, traced edge pipeline and we
+        # persist the sidecar below. Single pref dial — replaces HIRO_GRAPH_TRACE_RETRIEVAL.
+        capture = (
+            RetrievalCapture() if self._graph.observability == "trace" else None
+        )
+        capture_token = current_capture.set(capture) if capture is not None else None
+        # Memory recall reads the admin temporal lens (replaces the former D8 hardcode):
+        # the same ``graph.temporal_default`` pref that drives knowledge graph_expand applies
+        # here, so Settings → Graph → Temporal lens governs every leg uniformly.
+        temporal = self._temporal_default
         try:
             expansion = await self._graph.search_chunk_ids(
-                q, group_id=group, num_results=top_k, temporal="current"
+                q, group_id=group, num_results=top_k, temporal=temporal
             )
         finally:
-            current_spans.reset(spans_token)
+            current_rerank_usage.reset(rerank_token)
+            if capture_token is not None:
+                current_capture.reset(capture_token)
         if (entry := current_entry.get()) is not None:
             from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
 
-            flush_graph_expand(
-                entry,
-                spans,
-                expansion,
-                temporal="current",  # memory recall is always the current lens (D8)
-                ledger_detail=self._graph.ledger_detail,
-            )
+            flush_graph_expand(entry, expansion, rerank_usage=rerank_usage)
+            if capture is not None and capture.trace is not None:
+                from hirocli.services.knowledge.graph.retrieval_trace import (
+                    write_trace_sidecar,
+                )
+
+                write_trace_sidecar(
+                    self._graph.workspace_path,
+                    run_id=entry.run_id,
+                    step_index=entry.step_index,
+                    trace=capture.trace,
+                )
         # The kept, dated current facts ARE the recalled memories. Each fact text already
         # carries its validity date (e.g. "… (as of 2024-05-01)") from the search layer.
         # When ``graph.search_scope`` widens beyond ``edges``, the expansion also carries
@@ -226,9 +262,16 @@ class GraphitiConversationMemory:
         # test fakes (SimpleNamespace with only ``facts``) working without per-test edits.
         node_memories = tuple(getattr(expansion, "node_memories", ()) or ())
         episode_memories = tuple(getattr(expansion, "episode_memories", ()) or ())
-        hits: list[dict[str, Any]] = [{"memory": fact} for fact in expansion.facts]
-        hits.extend({"memory": summary} for summary in node_memories)
-        hits.extend({"memory": body} for body in episode_memories)
+        # Facts carry structured metadata (temporal validity, relationship, source uuids) so the
+        # eval recalled-facts table can render columns; ``memory`` stays the dated text so the
+        # agent's ``memory_block`` renders unchanged. Older fakes expose only ``facts`` strings.
+        fact_rows = tuple(getattr(expansion, "fact_rows", ()) or ())
+        if fact_rows:
+            hits: list[dict[str, Any]] = [dict(row) for row in fact_rows]
+        else:
+            hits = [{"memory": fact, "kind": "fact"} for fact in expansion.facts]
+        hits.extend({"memory": summary, "kind": "entity"} for summary in node_memories)
+        hits.extend({"memory": body, "kind": "episode"} for body in episode_memories)
         log.info(
             "⬇️ memory — recalled · n=%d (facts=%d nodes=%d episodes=%d) · group=%s",
             len(hits),

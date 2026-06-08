@@ -41,10 +41,28 @@ export type EvalStartedPayload = {
   modes: string[];
 };
 
+/** One recalled memory item — a fact (rich temporal/source metadata) or a widened-scope
+ *  entity/episode (text only). The fact table renders these columns. ``memory`` is always the
+ *  display text; the rest is best-effort and may be blank/absent depending on ``kind``. */
+export type RecalledFact = {
+  memory: string; // display text (dated fact / entity summary / episode body)
+  kind?: 'fact' | 'entity' | 'episode';
+  fact?: string; // raw fact text (without the appended date)
+  valid_at?: string; // ISO date the fact became true
+  invalid_at?: string; // ISO date the fact was invalidated (superseded)
+  superseded?: boolean; // dropped by the 'current' temporal lens
+  chunk_id?: string; // supporting episode/chunk id
+  name?: string; // relationship / edge type (e.g. WORKS_AT)
+  source_uuid?: string; // subject entity uuid
+  target_uuid?: string; // object entity uuid
+  uuid?: string; // fact edge uuid
+  score?: number | null; // relevance score when the backend exposes it
+};
+
 /** Per-leg result inside a ``knowledge.eval.question_completed`` event (unified across tracks).
  *  ``mode`` is ``flat``/``graphiti`` (knowledge) or ``recall`` (memory). ``mark`` is the LLM-judge
  *  verdict glyph, or ``""`` when the judge was off (answers only). ``recalled`` carries the memory
- *  engine's facts (empty for knowledge legs). */
+ *  engine's facts (empty for knowledge legs). ``cost_usd`` is this leg's LLM+reranker cost. */
 export type EvalQuestionLeg = {
   mode?: string;
   mark: string; // ✓ / ◐ / ✗ / 🛇 — or "" when not judged
@@ -53,13 +71,13 @@ export type EvalQuestionLeg = {
   answer: string; // the model's answer
   run_id: string | null; // ledger run for drill-in
   reason?: string; // judge's one-line justification
-  recalled?: string[]; // memory: the recalled facts (for the fold/detail)
+  recalled?: RecalledFact[]; // memory: the recalled facts (for the fold/detail table)
+  cost_usd?: number; // this leg's folded cost (LLM + reranker; embeddings unpriced)
 };
 
 /** Payload shape of ``knowledge.eval.question_completed`` events (unified).
  *  Both tracks carry ``legs`` (memory has a single ``recall`` leg), the ideal answer (``gold``)
- *  the judge grades against, and ``delta`` (knowledge Δ). ``stale_hit`` flags a recalled fact
- *  that contained a ``must_not_contain`` value (possible superseded leak). */
+ *  the judge grades against, and ``delta`` (knowledge Δ). */
 export type EvalQuestionPayload = {
   run_id?: string;
   index: number;
@@ -73,8 +91,7 @@ export type EvalQuestionPayload = {
   legs?: Record<string, EvalQuestionLeg>;
   delta?: string; // best graph leg vs flat (knowledge)
   gold?: string; // the ideal answer (judge reference / display)
-  stale_hit?: boolean; // memory: a recalled fact contained a must_not_contain value
-  must_not_contain?: string[];
+  cost_usd?: number; // whole-question cost (sum of leg runs + judge run)
 };
 
 /** Per-category passing counts, keyed by leg (the per-category results table). */
@@ -82,7 +99,7 @@ export type EvalCategoryStat = { total: number; pass: Record<string, number> };
 
 /** Payload shape of ``knowledge.eval.completed`` events (aggregate summary).
  *  Knowledge fields (passing/by_category/gate) and memory fields
- *  (remembered_turns/recalled_for/stale_hits) are mutually exclusive by ``track``. */
+ *  (remembered_turns/recalled_for) are mutually exclusive by ``track``. */
 export type EvalCompletedPayload = {
   run_id: string;
   track?: 'knowledge' | 'memory';
@@ -99,7 +116,11 @@ export type EvalCompletedPayload = {
   // Memory track.
   remembered_turns?: number;
   recalled_for?: number;
-  stale_hits?: number;
+  // Cost (LLM + reranker; embeddings unpriced). ``ingest_cost_usd`` is 0 for knowledge
+  // (multi-run ingest cost deferred); ``questions_cost_usd`` = sum of per-question costs.
+  questions_cost_usd?: number;
+  ingest_cost_usd?: number;
+  total_cost_usd?: number;
 };
 
 /** Payload shape of ``knowledge.eval.failed`` events. */

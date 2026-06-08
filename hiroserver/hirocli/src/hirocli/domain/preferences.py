@@ -434,8 +434,13 @@ KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
 #   "edges_and_nodes"       → + EntityNode.summary  (closes the "Misho turned 50" gap)
 #   "edges_nodes_episodes"  → + EpisodicNode bodies (last-resort BM25 recall over raw turn text)
 KnowledgeGraphSearchScope = Literal["edges", "edges_and_nodes", "edges_nodes_episodes"]
-# Graph Runs ledger verbosity for graph ingest + retrieval (docs §12.2).
-KnowledgeGraphLedgerDetail = Literal["compact", "rich"]
+# Graph observability tier for graph ingest + retrieval (docs §12.2). Single dial, supersets:
+#   "off"    → no graphiti ledger rows / tracer / usage sinks (spare CPU; graphiti cost NOT folded).
+#   "ledger" → ONE priced roll-up row per episode (ingest) + per search (rerank); cost folds. PROD.
+#   "trace"  → ledger + the deep per-stage JSONL sidecars (retrieval re-host + ingest stages).
+# Named ``Graph*`` (not ``KnowledgeGraph*``): the graph layer serves BOTH knowledge facts and
+# conversation memory (``prefs.graph`` is shared, top-level).
+GraphObservability = Literal["off", "ledger", "trace"]
 
 
 class KnowledgeGraphRerankerPreferences(BaseModel):
@@ -499,9 +504,11 @@ class GraphPreferences(BaseModel):
     # precision belongs); raise toward 0.6 to tighten candidates. Applies to all recipes
     # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
     sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0)
-    # Graph Runs ledger verbosity (docs §12.2): ``rich`` = per-node content previews
-    # + one row per edge in ``resolve_facts``; ``compact`` = stats only, aggregated.
-    ledger_detail: KnowledgeGraphLedgerDetail = "rich"
+    # Graph observability tier (docs §12.2): ``off`` = no graphiti ledger/tracer/sinks;
+    # ``ledger`` = one priced roll-up row per episode/search (cost folds — prod default);
+    # ``trace`` = + deep per-stage JSONL sidecars. Replaces the former ``ledger_detail``
+    # (compact/rich) AND the HIRO_GRAPH_TRACE_RETRIEVAL/INGEST env vars (one dial now).
+    observability: GraphObservability = "ledger"
     # Cross-encoder reranker for the fact-search leg (only when search_recipe='cross_encoder').
     reranker: KnowledgeGraphRerankerPreferences = Field(
         default_factory=KnowledgeGraphRerankerPreferences

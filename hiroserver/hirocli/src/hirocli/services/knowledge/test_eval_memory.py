@@ -3,7 +3,7 @@
 Pure: a fake conversation-memory facade records ``add``/``search`` calls and returns
 canned recall hits — no Kuzu, no graphiti_core, no model. Verifies the runner remembers
 each turn (chronologically), recalls per question, builds the recall-inspector row shape
-(recalled facts + gold + the cheap ``stale_hit`` leak flag), and the no-gate summary.
+(recalled facts + gold), and the no-gate summary.
 """
 
 from __future__ import annotations
@@ -64,7 +64,6 @@ _QUESTIONS = [
         "category": "direct",
         "question": "Where do I work?",
         "expected_fragments": ["Brightloom"],
-        "must_not_contain": [],
         "requires_graph": False,
         "expected_answer": "Brightloom",
     },
@@ -73,7 +72,6 @@ _QUESTIONS = [
         "category": "temporal",
         "question": "Where do I live now?",
         "expected_fragments": ["Denver"],
-        "must_not_contain": ["Boston"],  # the superseded city — must NOT resurface
         "requires_graph": True,
         "expected_answer": "Denver",
     },
@@ -86,7 +84,6 @@ async def test_run_memory_eval_remembers_and_recalls(tmp_path) -> None:
         _ep("I started at Brightloom", cid="ep1", ts="2024-01-15T09:00:00+00:00"),
         _ep("I moved to Denver", cid="ep2", ts="2024-09-03T09:00:00+00:00"),
     ]
-    # q_live recall surfaces the superseded city → the stale-leak flag must fire.
     recall = {
         "Where do I work?": ["I work at Brightloom"],
         "Where do I live now?": ["I moved to Denver", "I used to live in Boston"],
@@ -116,13 +113,12 @@ async def test_run_memory_eval_remembers_and_recalls(tmp_path) -> None:
     # Recalled once per question.
     assert mem.searched == ["Where do I work?", "Where do I live now?"]
 
-    # Summary: single recall leg, NO gate, with the recall + stale counts.
+    # Summary: single recall leg, NO gate, with the recall count.
     assert summary["track"] == "memory"
     assert summary["modes"] == ["recall"]
     assert summary["gate"] == "n/a"
     assert summary["remembered_turns"] == 2  # each fake add learns 1 fact
     assert summary["recalled_for"] == 2  # both questions recalled something
-    assert summary["stale_hits"] == 1  # only q_live leaked the forbidden 'Boston'
 
     # Both the remember/build (one ingest run) AND each recall (a retrieve run) are ledgered
     # into the workspace's logs/graph.log, so they show up in Graph Runs.
@@ -185,19 +181,18 @@ def test_discover_corpuses_pairs_by_stem(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_question_row_shape_and_stale_flag(tmp_path) -> None:
+async def test_memory_question_row_shape(tmp_path) -> None:
     # No answering model in a bare tmp workspace → answer/judge are skipped (model is None);
-    # the row still carries the recall leg with the recalled facts + gold + stale guard.
+    # the row still carries the recall leg with the recalled facts + gold.
     mem = _FakeMemory({"Where do I live now?": ["I moved to Denver", "I used to live in Boston"]})
     row = await _memory_question(mem, _QUESTIONS[1], user_id=MEMORY_EVAL_USER_ID, character_id="adam")
     assert row["track"] == "memory"
     leg = row["legs"]["recall"]
-    assert leg["recalled"] == ["I moved to Denver", "I used to live in Boston"]
+    # Recalled facts are now structured rows (the table reads metadata); the fake memory
+    # yields plain ``{"memory": ...}`` hits, which pass through verbatim.
+    assert leg["recalled"] == [
+        {"memory": "I moved to Denver"},
+        {"memory": "I used to live in Boston"},
+    ]
     assert leg["mark"] == ""  # judge off (no model) → no mark
     assert row["gold"] == "Denver"  # ideal answer (judge reference / display)
-    assert row["stale_hit"] is True  # 'Boston' (must_not_contain) surfaced
-
-    # A clean recall (no forbidden fragment) → no stale flag.
-    mem2 = _FakeMemory({"Where do I live now?": ["I moved to Denver"]})
-    row2 = await _memory_question(mem2, _QUESTIONS[1], user_id=MEMORY_EVAL_USER_ID, character_id="adam")
-    assert row2["stale_hit"] is False

@@ -70,6 +70,49 @@ async def get_graph_run_langsmith_url(
     }
 
 
+@graph_runs_router.get("/graph-runs/{run_id}/retrieval-trace")
+async def get_graph_run_retrieval_trace(
+    run_id: str,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """Per-stage Graphiti fact-search traces for a run (candidate legs / hop / rank /
+    temporal). Empty list when tracing wasn't enabled for the run."""
+    result = await run_in_threadpool(
+        GraphLedgerService().retrieval_trace,
+        workspace_id,
+        run_id,
+    )
+    if not result.ok or result.data is None:
+        return _api_from_result(result)
+    return {
+        "ok": True,
+        "error": None,
+        "data": {"traces": result.data},
+    }
+
+
+@graph_runs_router.get("/graph-runs/{run_id}/ingest-trace")
+async def get_graph_run_ingest_trace(
+    run_id: str,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """Per-stage Graphiti ``add_episode`` traces for a run (extract → resolve → facts →
+    dates → fact-resolution → summarize, plus the persisted result). Empty list when
+    tracing wasn't enabled for the run."""
+    result = await run_in_threadpool(
+        GraphLedgerService().ingest_trace,
+        workspace_id,
+        run_id,
+    )
+    if not result.ok or result.data is None:
+        return _api_from_result(result)
+    return {
+        "ok": True,
+        "error": None,
+        "data": {"traces": result.data},
+    }
+
+
 @graph_runs_router.get("/graph-runs/{run_id}")
 async def get_graph_run(
     run_id: str,

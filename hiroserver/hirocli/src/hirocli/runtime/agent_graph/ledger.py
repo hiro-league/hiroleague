@@ -503,6 +503,27 @@ class LedgerSink:
             payload = {column: priced.get(column, "") for column in GRAPH_LEDGER_COLUMNS}
             self._logger.info("graph_ledger", **payload)
 
+    def read_run_costs(self, run_ids: Iterable[str]) -> dict[str, float]:
+        """Read the folded ``cost_usd`` of each given run from ``graph.log`` (last write wins).
+
+        Used by the eval to total per-leg cost after sibling answer runs have already been
+        written and evicted from memory — the ledger file is their only remaining record.
+        Best-effort: a missing / not-yet-flushed run is simply absent (caller defaults to 0)."""
+        import csv
+
+        wanted = {str(r) for r in run_ids if r}
+        if not wanted or not self.path.exists():
+            return {}
+        out: dict[str, float] = {}
+        try:
+            with self.path.open(encoding="utf-8", errors="replace") as fh:
+                for row in csv.DictReader(fh):
+                    if row.get("row_kind") == "run" and row.get("run_id") in wanted:
+                        out[str(row.get("run_id"))] = _to_float(row.get("cost_usd"))
+        except OSError:
+            self._logger.warning("⚠️ ledger — read_run_costs failed · path=%s", self.path)
+        return out
+
     def write_run_row(
         self,
         accumulator: RunAccumulator,

@@ -24,6 +24,8 @@ export const PREF_KEYS = {
   knowledgeActiveTab: 'hiro.admin.knowledge.activeTab',
   /** Primary tab on the Memories page: memory facts list vs the entity Graph viz. */
   memoriesActiveTab: 'hiro.admin.memories.activeTab',
+  /** Primary tab on the Eval page: memory vs knowledge eval track. */
+  evalActiveTab: 'hiro.admin.eval.activeTab',
   /** Primary tab on the Logs page: live log feed vs the Graph runs ledger. */
   logsPrimaryActiveTab: 'hiro.admin.logs.activeTab',
   preferencesActiveTab: 'hiro.admin.preferences.activeTab',
@@ -51,6 +53,8 @@ export const PREF_KEYS = {
   knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph',
   /** Eval corpus-picker folder (the path scanned for corpuses). */
   knowledgeEvalFolder: 'hiro.admin.knowledge.evalFolder',
+  /** Eval last-selected corpus id, per track (JSON map { memory, knowledge }). */
+  knowledgeEvalCorpus: 'hiro.admin.knowledge.evalCorpus',
   /** Eval: run the optional LLM judge (grade answers vs ideal). */
   knowledgeEvalJudge: 'hiro.admin.knowledge.evalJudge',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
@@ -74,8 +78,9 @@ export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type ChatOverlayMode = 'full' | 'partial';
 export type CatalogTabPreference = 'active-providers' | 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
-export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask' | 'eval';
+export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type MemoriesTabPreference = 'memories' | 'graph';
+export type EvalTabPreference = 'memory' | 'knowledge';
 export type GraphPanelSidePreference = 'auto' | 'left' | 'right';
 export type LogsPrimaryTabPreference = 'logs' | 'runs';
 export type PreferencesTabPreference =

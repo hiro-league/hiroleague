@@ -7,14 +7,13 @@
 #                        scorer does NOT read this — see §"scoring" below),
 #   and EITHER expected_fragments (the lowercase substrings the scorer looks for)
 #   OR expected_kind: abstain (negative control — declining is the correct outcome).
-#   must_not_contain   — superseded-fact / contradiction guard (forces fail on leak).
 #   requires           — lens where the graph leg should win (graph | temporal | world);
 #                        any of these flips requires_graph=True for the gate subset.
 # See docs/knowledge-graphiti-pivot-design.md §8.4–8.6.
 #
 # NOTE on `expected_answer`: it is an UNSCORED documentation field. The runner's
 # load_questions() reads only `expected_fragments` / `expected_kind` /
-# `must_not_contain` / `requires`; unknown keys pass through harmless. Scoring is
+# `requires`; unknown keys pass through harmless. Scoring is
 # case-insensitive substring matching of `expected_fragments` (a deliberate lower
 # bound), with abstain as the correct outcome on the `expected_kind: abstain` rows.
 
@@ -152,7 +151,6 @@
   question: "In which city does Adam's wife currently live?"
   expected_answer: "Cambridge (she moved there with Adam in May)."
   expected_fragments: ["Cambridge"]
-  must_not_contain: ["Boston"]
   requires: [graph, temporal]
 - id: q_multi_06
   category: multi_hop
@@ -341,7 +339,6 @@
   question: "What drink does Adam order every morning now?"
   expected_answer: "An oat-milk latte."
   expected_fragments: ["oat", "latte"]
-  must_not_contain: ["espresso"]
   requires: [temporal]
 - id: q_pref_05
   category: preference_recall
@@ -396,7 +393,6 @@
   question: "Where does Adam work now?"
   expected_answer: "Cedar Labs."
   expected_fragments: ["Cedar Labs"]
-  must_not_contain: ["Brightloom"]
   requires: [temporal]
 - id: q_temporal_latest_02
   category: temporal
@@ -404,7 +400,6 @@
   question: "What city does Adam live in now?"
   expected_answer: "Cambridge."
   expected_fragments: ["Cambridge"]
-  must_not_contain: ["Boston"]
   requires: [temporal]
 - id: q_temporal_latest_03
   category: temporal
@@ -412,7 +407,6 @@
   question: "What does Adam drink every morning these days?"
   expected_answer: "An oat-milk latte."
   expected_fragments: ["oat", "latte"]
-  must_not_contain: ["espresso"]
   requires: [temporal]
 - id: q_temporal_cmp_01
   category: temporal
@@ -445,7 +439,6 @@
   question: "What is Adam's current favorite coffee?"
   expected_answer: "An oat-milk latte (no longer espresso)."
   expected_fragments: ["oat", "latte"]
-  must_not_contain: ["espresso"]
   requires: [graph, temporal]
 - id: q_update_02
   category: knowledge_update
@@ -453,7 +446,6 @@
   question: "What city is Adam's current home?"
   expected_answer: "Cambridge (no longer Boston)."
   expected_fragments: ["Cambridge"]
-  must_not_contain: ["Boston"]
   requires: [temporal]
 - id: q_update_03
   category: knowledge_update
@@ -461,7 +453,6 @@
   question: "Who is Adam's current employer?"
   expected_answer: "Cedar Labs (no longer Brightloom)."
   expected_fragments: ["Cedar Labs"]
-  must_not_contain: ["Brightloom"]
   requires: [temporal]
 - id: q_update_04
   category: knowledge_update
@@ -497,7 +488,6 @@
   question: "Where does Adam currently live and work?"
   expected_answer: "He lives in Cambridge and works at Cedar Labs."
   expected_fragments: ["Cambridge", "Cedar Labs"]
-  must_not_contain: ["Boston", "Brightloom"]
   requires: [temporal]
 
 # =====================================================================

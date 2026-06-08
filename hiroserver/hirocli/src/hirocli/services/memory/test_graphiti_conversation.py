@@ -29,6 +29,9 @@ class _FakeGraph:
         self.clear_calls: list[str] = []
         self.delete_calls: list[list[str]] = []
         self.closed = False
+        # Observability tier the recall path reads to gate the trace sidecar (default = ledger,
+        # so no RetrievalCapture is engaged in these tests).
+        self.observability = "ledger"
         self._edges_total = edges_total
         self._facts = tuple(facts)
         self._facts_list = list(facts_list or [])
@@ -195,13 +198,27 @@ async def test_search_returns_facts_as_memory() -> None:
     mem = GraphitiConversationMemory(g, default_top_k=5)
     hits = await mem.search("where does adam live", user_id=42, character_id="aria")
     assert hits == [
-        {"memory": "Adam lives in Tokyo (as of 2024-05-01)"},
-        {"memory": "Adam works at Cedar"},
+        {"memory": "Adam lives in Tokyo (as of 2024-05-01)", "kind": "fact"},
+        {"memory": "Adam works at Cedar", "kind": "fact"},
     ]
     call = g.search_calls[0]
     assert call["group_id"] == "mem_42_aria"
-    assert call["temporal"] == "current"  # default lens (D8)
+    # Default temporal lens follows the constructor's ``temporal_default`` (which the
+    # factory snapshots from ``graph.temporal_default``); the constructor default is
+    # ``"current"`` so an unscoped instance recalls only currently-valid facts.
+    assert call["temporal"] == "current"
     assert call["num_results"] == 5
+
+
+@pytest.mark.asyncio
+async def test_search_temporal_lens_follows_constructor_pref() -> None:
+    """``temporal_default="all"`` propagates into the underlying graph search — proving the
+    admin Settings → Graph → Temporal lens (default) actually drives memory recall (replaces
+    the former D8 hardcode that pinned recall to ``current`` regardless of pref)."""
+    g = _FakeGraph(facts=("Adam used to live in Berlin (as of 2018-01-01)",))
+    mem = GraphitiConversationMemory(g, temporal_default="all")
+    await mem.search("where did adam live before?", user_id=42, character_id="aria")
+    assert g.search_calls[0]["temporal"] == "all"
 
 
 @pytest.mark.asyncio

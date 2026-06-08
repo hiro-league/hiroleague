@@ -30,7 +30,8 @@ from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.driver.kuzu_driver import KuzuDriver
 from graphiti_core.errors import NodeNotFoundError
-from graphiti_core.graph_queries import get_fulltext_indices
+from graphiti_core.search.search_config_recipes import EDGE_HYBRID_SEARCH_RRF
+from graphiti_core.utils.maintenance import node_operations as _graphiti_node_ops
 from hiro_commons.log import Logger
 
 from hirocli.domain.preferences import (
@@ -56,6 +57,7 @@ from .graphiti_ingest import (
     GraphitiEpisodeInput,
     GraphitiIngestStats,
     ingest_episodes,
+    rebuild_fts_indices,
 )
 from .graphiti_ontology import GRAPHITI_ENTITY_TYPES
 from .group_scope import (
@@ -66,7 +68,7 @@ from .group_scope import (
 from .graphiti_search import GraphitiExpansion
 from .graphiti_search import search_chunk_ids as _search_chunk_ids
 from .ingest_ledger import record_episode_embed, record_episode_llm_usage
-from .ledger_tracer import LedgerTracer
+from .ledger_tracer import LedgerTracer, record_rerank_usage
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -122,28 +124,33 @@ _EPISODE_WIPE_PAGE = 500
 _SNAPSHOT_READ_POOL = 4
 
 
-async def _ensure_fts_indices(driver: Any) -> None:
-    """Create the Kuzu full-text indices graphiti-core 0.29.1 never builds.
+def _apply_dedup_min_score(score: float) -> None:
+    """Align graphiti's INTERNAL ingest-dedup similarity floor with our embedder-tuned
+    ``sim_min_score`` (single source of truth — no separate user pref).
 
-    graphiti's ``KuzuDriver.build_indices_and_constraints()`` is a no-op and
-    ``setup_schema()`` only creates the node/rel TABLES — but its edge/node dedup
-    search runs ``QUERY_FTS_INDEX('RelatesToNode_', 'edge_name_and_fact', …)``. Without
-    these indices, the FIRST ``add_episode`` crashes with "Table RelatesToNode_ doesn't
-    have an index with name edge_name_and_fact". We run graphiti's OWN DDL
-    (``get_fulltext_indices`` — no duplication) once here. Kuzu auto-loads the ``fts``
-    extension, and creating over empty tables is fine.
+    graphiti's ``add_episode`` finds duplicate / to-be-invalidated EDGES via
+    ``search(config=EDGE_HYBRID_SEARCH_RRF)`` and duplicate NODES via
+    ``node_similarity_search(..., NODE_DEDUP_COSINE_MIN_SCORE)``. Both default to graphiti's
+    ``DEFAULT_MIN_SCORE = 0.6`` — calibrated for graphiti's reference embedder and too strict
+    for ours (paraphrase-distant facts score < 0.6), so existing edges/nodes are not retrieved
+    as dedup candidates → duplicate facts + missed temporal supersession. We lower both to the
+    configured floor so dedup is recall-biased (an LLM verifies precision afterward).
 
-    Idempotent: the DB file persists across restarts, so a re-create raises
-    "Index … already exists" — swallow only that, raise anything else.
-    """
-    for stmt in get_fulltext_indices(driver.provider):
-        try:
-            await driver.execute_query(stmt)
-        except Exception as exc:
-            if "already exists" in str(exc).lower():
-                continue
-            log.exception("❌ graphiti — FTS index creation failed · stmt=%s", stmt[:64])
-            raise
+    Our SEARCH path is unaffected: ``_build_search_config`` deep-copies the recipe and sets
+    ``sim_min_score`` explicitly, so mutating the shared recipe object only reaches the dedup
+    path (which reads it directly). Defensive ``hasattr`` so a future graphiti rename degrades
+    visibly (warning) instead of silently writing a dead attribute."""
+    score = max(0.0, min(1.0, float(score)))
+    if EDGE_HYBRID_SEARCH_RRF.edge_config is not None:
+        EDGE_HYBRID_SEARCH_RRF.edge_config.sim_min_score = score
+    if hasattr(_graphiti_node_ops, "NODE_DEDUP_COSINE_MIN_SCORE"):
+        _graphiti_node_ops.NODE_DEDUP_COSINE_MIN_SCORE = score
+    else:
+        log.warning(
+            "⚠️ graphiti — NODE_DEDUP_COSINE_MIN_SCORE missing (graphiti drift?); "
+            "node dedup floor left at graphiti default"
+        )
+    log.info("✅ graphiti — ingest-dedup sim_min_score aligned · score=%.3f", score)
 
 
 def _registry_key(db_path: Path) -> str:
@@ -344,14 +351,16 @@ class GraphitiMemoryService:
         cross_encoder: CrossEncoderClient | None = None,
         group_id: str | None = None,
         max_coroutines: int | None = None,
-        ledger_detail: str = "rich",
+        observability: str = "ledger",
         search_recipe: str = "rrf",
         search_scope: str = "edges",
         k_hop: int = 1,
         reranker_min_score: float = 0.0,
         sim_min_score: float = 0.3,
     ) -> None:
-        self._ledger_detail = ledger_detail
+        # Observability tier (off / ledger / trace) — the single dial that gates the ledger
+        # roll-up rows, the tracer, the usage sinks, and the deep trace sidecars (docs §12.2).
+        self._observability = observability
         # Retrieval knobs (admin prefs) threaded into every search_chunk_ids call.
         self._search_recipe = search_recipe
         # Which legs the search reads from (edges / +nodes / +nodes+episodes). Orthogonal
@@ -396,14 +405,18 @@ class GraphitiMemoryService:
         # the LLM client (``llm.generate``). The tracer no-ops unless a consumer has
         # set ``current_spans`` (graph_expand / ledger_episode), so this is safe for
         # every other graphiti caller.
-        try:
-            tracer = LedgerTracer()
-            self._graphiti.tracer = tracer
-            self._graphiti.clients.tracer = tracer
-            self._graphiti.llm_client.set_tracer(tracer)
-        except Exception:
-            # Observability must never break the graph itself.
-            log.warning("⚠️ graphiti — ledger tracer injection failed", exc_info=True)
+        # Skip tracer wiring entirely at ``off`` — no spans buffered, no per-call hook overhead.
+        # At ``ledger``/``trace`` the tracer is needed for the ``add_episode`` rollup span
+        # (``edge.invalidated_count``, invisible to the response model).
+        if self._observability != "off":
+            try:
+                tracer = LedgerTracer()
+                self._graphiti.tracer = tracer
+                self._graphiti.clients.tracer = tracer
+                self._graphiti.llm_client.set_tracer(tracer)
+            except Exception:
+                # Observability must never break the graph itself.
+                log.warning("⚠️ graphiti — ledger tracer injection failed", exc_info=True)
         # Resolve ONE concrete group_id shared by ingest / search / snapshot
         # (snapshot's get_by_group_ids needs a concrete list). Knowledge uses the NAMED
         # ``kb_main`` partition — NOT graphiti's empty default (which on Kuzu is ""), because
@@ -437,12 +450,19 @@ class GraphitiMemoryService:
             return
         try:
             await self._graphiti.build_indices_and_constraints()
-            # No-op for Kuzu (above) → we must create the FTS indices ourselves, else
-            # the first add_episode's edge dedup search crashes (graphiti-core gap). The
-            # unit-test fake graphiti has no real `.driver` → skip (no Kuzu there).
+            # No-op for Kuzu (above) → we must (re)build the FTS indices ourselves, else
+            # the first add_episode's edge dedup search crashes (graphiti-core gap). We
+            # REBUILD (drop+create) rather than create-if-missing so that any rows already
+            # in the DB get (re)indexed on restart — Kuzu's FTS snapshot is otherwise frozen
+            # at first-create time, leaving pre-existing facts invisible to keyword search.
+            # The unit-test fake graphiti has no real `.driver` → skip (no Kuzu there).
             driver = getattr(self._graphiti, "driver", None)
             if driver is not None:
-                await _ensure_fts_indices(driver)
+                await rebuild_fts_indices(driver)
+            # Match graphiti's internal ingest-dedup cosine floor to our configured
+            # `sim_min_score` so duplicate facts/nodes are actually retrieved as dedup
+            # candidates (graphiti's 0.6 default is too strict for our embedder).
+            _apply_dedup_min_score(self._sim_min_score)
         except Exception:
             log.exception("❌ graphiti — build_indices_and_constraints failed")
             raise
@@ -450,12 +470,23 @@ class GraphitiMemoryService:
         log.info("✅ graphiti — graph ready · path=%s", self._db_path)
 
     @property
-    def ledger_detail(self) -> str:
-        """Graph-Runs ledger verbosity (``rich``/``compact``) from the shared graph prefs.
+    def workspace_path(self) -> Path:
+        """Workspace root derived from the Kuzu DB location (``<workspace>/knowledge/graph/graphiti_kuzu.db``).
 
-        Exposed so the conversation-memory recall path can render its fact-search sub-steps
-        at the same detail level as ingest (which reads ``self._ledger_detail`` directly)."""
-        return self._ledger_detail
+        Exposed so callers that hold only the service (e.g. memory recall) can persist
+        per-workspace artifacts — like the retrieval-trace sidecar — without threading
+        ``workspace_path`` through every API."""
+        # ``Path(...)`` so a caller that injected a plain string db_path (unit stubs that
+        # bypass ``__init__``) doesn't crash on ``.parent`` — production always holds a Path.
+        return Path(self._db_path).parent.parent.parent
+
+    @property
+    def observability(self) -> str:
+        """Graph observability tier (``off``/``ledger``/``trace``) from the shared graph prefs.
+
+        Exposed so the conversation-memory recall path gates its trace sidecar + rerank roll-up
+        the same way ingest does (which reads ``self._observability`` directly)."""
+        return self._observability
 
     async def ingest_chunks(
         self,
@@ -482,12 +513,15 @@ class GraphitiMemoryService:
         boundary, docs/graph-group-policy-design.md §6) — an empty or non-namespaced
         group raises, so a write can never land in graphiti's empty catch-all.
 
-        ``ledger_sink`` records a ``graph_ingest`` run (per-episode step + per-operation
-        sub-step nodes) in Graph Runs; ``None`` = no ledger (tests/CLI)."""
+        ``ledger_sink`` records a ``graph_ingest`` run (one priced roll-up row per episode)
+        in Graph Runs; ``None`` = no ledger (tests/CLI). At ``observability=off`` the sink is
+        dropped here so no episode rows are written at all."""
         await self.initialize()
         # Mint-or-default, then validate: bans the empty/unknown group that leaked
         # conversation memory into knowledge search (docs §2).
         target_group = validate_group_id(group_id or self._group_id)
+        # ``off`` → no episode ledger rows regardless of what the caller handed in.
+        effective_sink = ledger_sink if self._observability != "off" else None
         return await ingest_episodes(
             self._graphiti,
             episodes,
@@ -495,8 +529,11 @@ class GraphitiMemoryService:
             group_id=target_group,
             entity_types=GRAPHITI_ENTITY_TYPES,
             event_sink=event_sink,
-            ledger_sink=ledger_sink,
-            ledger_detail=self._ledger_detail,
+            ledger_sink=effective_sink,
+            observability=self._observability,
+            # Where the per-stage ingest-trace sidecar is written (only when observability=trace
+            # and a ledger sink is active).
+            workspace_path=self.workspace_path,
             # Per-workspace write lock: serialize every writer (this ingest, a concurrent
             # eval/graph build, future chat-memory) to one add_episode at a time. Required
             # by Kuzu (single-writer) AND graphiti (sequential dedup). Held per-episode and
@@ -860,6 +897,12 @@ class GraphitiMemoryService:
             workspace_path, embedder_model_id, credential_store=credential_store
         )
 
+        # Observability tier gates every usage sink: at ``off`` we wire NONE of them, so the
+        # adapters skip the per-call hook entirely (the choke point that spares CPU). ``ledger``
+        # and ``trace`` both capture usage — the difference is detail rendering, handled downstream.
+        observability = prefs.graph.observability
+        observe = observability != "off"
+
         llm_client = GraphitiLLMClient(
             medium=_spec(extraction),
             small=_spec(small),
@@ -869,9 +912,11 @@ class GraphitiMemoryService:
             # Route per-call usage into the active ingest episode (no-op outside
             # ingest, so retrieval/memory paths are unaffected). An explicit
             # ``on_usage`` still overrides for callers that want their own sink.
-            on_usage=on_usage or record_episode_llm_usage,
+            on_usage=(on_usage or record_episode_llm_usage) if observe else None,
         )
-        embedder = GraphitiEmbedderClient(backend, on_embed=record_episode_embed)
+        embedder = GraphitiEmbedderClient(
+            backend, on_embed=record_episode_embed if observe else None
+        )
 
         # Cross-encoder reranker for the fact-search leg (only when the recipe asks for
         # it). Resolve the SAME reranker the flat path uses (cloud or local) and wrap it
@@ -898,7 +943,14 @@ class GraphitiMemoryService:
                         device=graph.reranker.device,
                         credential_store=credential_store,
                     )
-                    cross_encoder = HiroRerankerCrossEncoder(compressor)
+                    # Report rerank usage into the active recall accumulator so the ``rerank``
+                    # ledger node carries model + processed tokens and prices via the catalog
+                    # (no-op outside a ledgered search; cross_encoder never runs during ingest).
+                    cross_encoder = HiroRerankerCrossEncoder(
+                        compressor,
+                        model_id=reranker_model_id,
+                        on_rank=record_rerank_usage if observe else None,
+                    )
                     reranker_min_score = graph.reranker.min_relevance
                     log.info("⬇️ graphiti — cross-encoder reranker · model=%s", reranker_model_id)
                 except Exception:
@@ -921,7 +973,7 @@ class GraphitiMemoryService:
             llm_client=llm_client,
             embedder=embedder,
             cross_encoder=cross_encoder,
-            ledger_detail=graph.ledger_detail,
+            observability=observability,
             search_recipe=recipe,
             # Which graph elements participate in recall. Validated against ``search_recipe``
             # at pref load (mmr × episodes is rejected up-front), so any value reaching here

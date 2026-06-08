@@ -10,6 +10,10 @@ source "$SCRIPT_DIR/scripts/stop-hiro-dev-processes.sh"
 
 export HIRO_ENV="${HIRO_ENV:-dev}"
 
+# Graph deep-trace sidecars are now a workspace preference, not an env var: set
+# Settings → Graph engine → Graph observability = "Trace" (or graph.observability="trace" in
+# preferences.json). Replaces the former HIRO_GRAPH_TRACE_RETRIEVAL / HIRO_GRAPH_TRACE_INGEST.
+
 # Some endpoint-security / TLS-inspection tools inject SSLKEYLOGFILE pointing at an
 # unwritable virtual file (e.g. \\?\Volume{GUID}\virtual_file.log). Python's
 # ssl.create_default_context() then raises PermissionError as soon as any TLS client

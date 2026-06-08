@@ -58,6 +58,47 @@ current_spans: ContextVar[list[SpanRecord] | None] = ContextVar(
     "graph_ledger_spans", default=None
 )
 
+
+@dataclass
+class RerankUsage:
+    """Cross-encoder rerank usage for one search — priced as the ``rerank`` ledger node.
+
+    Graphiti's ``cross_encoder`` reranker (``HiroRerankerCrossEncoder``) reports here via the
+    injected ``on_rank`` sink. ``processed_tokens`` follows Voyage's billed shape
+    (``query_tokens × doc_count + Σ doc_tokens``); Cohere-style per-search-unit pricing ignores
+    it (the ledger prices with ``search_units=1``). ``model_id`` is the prefixed catalog id so
+    ``_with_cost`` can resolve + price it (local rerankers miss the catalog → $0, correctly free).
+    """
+
+    model_id: str = ""
+    processed_tokens: int = 0
+    calls: int = 0
+    elapsed_ms: float = 0.0
+
+
+# Active rerank-usage accumulator, set by the SAME consumers that set ``current_spans``
+# (graph_expand / memory recall) around a search. ``None`` → ``record_rerank_usage`` no-ops, so
+# ingestion and non-ledgered callers are unaffected.
+current_rerank_usage: ContextVar[RerankUsage | None] = ContextVar(
+    "graph_ledger_rerank_usage", default=None
+)
+
+
+def record_rerank_usage(model_id: str, processed_tokens: int, elapsed_ms: float) -> None:
+    """Adapter ``on_rank`` sink — fold one cross-encoder rerank call into the active accumulator.
+
+    No-op outside a search that opened ``current_rerank_usage``. Engine-agnostic: the adapter
+    calls this through an injected callable, never importing the ledger (same shape as ``on_embed``).
+    """
+    acc = current_rerank_usage.get()
+    if acc is None:
+        return
+    if model_id and not acc.model_id:
+        acc.model_id = model_id
+    acc.processed_tokens += max(0, int(processed_tokens or 0))
+    acc.elapsed_ms += max(0.0, float(elapsed_ms or 0.0))
+    acc.calls += 1
+
 # Spans we keep: ``search.*`` (retrieval phases) + ``add_episode`` (ingest rollup).
 # ``llm.generate`` is intentionally excluded — its tokens arrive via the on_usage
 # sink, and we don't want a buffered row per internal LLM call here.
@@ -123,4 +164,11 @@ class LedgerTracer:
                 log.warning("⚠️ ledger tracer — span record failed · %s", name, exc_info=True)
 
 
-__all__ = ["LedgerTracer", "SpanRecord", "current_spans"]
+__all__ = [
+    "LedgerTracer",
+    "RerankUsage",
+    "SpanRecord",
+    "current_rerank_usage",
+    "current_spans",
+    "record_rerank_usage",
+]

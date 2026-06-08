@@ -11,6 +11,9 @@
     defaultExpanded?: boolean;
     /** Optional trailing header summary (visible expanded or collapsed). */
     summary?: string;
+    /** Optional trailing header summary shown ONLY while collapsed (e.g. the
+     *  current activity line, so a collapsed feed still tells you where it's at). */
+    collapsedSummary?: string;
     headerActions?: Snippet;
     children?: Snippet;
   };
@@ -20,6 +23,7 @@
     bodyId,
     defaultExpanded = true,
     summary,
+    collapsedSummary,
     headerActions,
     children
   }: Props = $props();
@@ -55,6 +59,11 @@
         {/if}
         {#if summary}
           <span class="font-sans text-xs text-muted-foreground">{summary}</span>
+        {/if}
+        {#if !expanded && collapsedSummary}
+          <span
+            class="max-w-[22rem] truncate font-mono text-xs text-muted-foreground"
+            title={collapsedSummary}>{collapsedSummary}</span>
         {/if}
       </div>
     </div>

@@ -173,3 +173,160 @@ export async function getGraphRunLangsmithUrl(
     `/graph-runs/${encodeURIComponent(runId)}/langsmith-url`
   );
 }
+
+// ── Retrieval stage trace (Graphiti fact search) ────────────────────────────
+// Full per-stage data (candidate legs / hop / rank / temporal) recorded by the
+// re-hosted search pipeline when tracing is enabled, read from the JSONL sidecar.
+
+/** One fact edge as it flows through a stage (the eval-relevant metadata). */
+/**
+ * One item flowing out of a stage. The populated fields depend on the stage `lane`:
+ *   - `edge` (facts): `fact`, `name` (relation), `episodes`, `valid_at`/`invalid_at`/`expired_at`.
+ *   - `node` (entities): `name`, `entity_type`, `summary`.
+ *   - `episode` (turns): `content`, `source`, `valid_at`.
+ * `uuid` and `score` are common. Lane-foreign fields are simply absent.
+ */
+export type RetrievalTraceItem = {
+  uuid: string;
+  // edge lane
+  fact?: string;
+  name?: string;
+  source_node_uuid?: string;
+  target_node_uuid?: string;
+  episodes?: string[];
+  valid_at?: string | null;
+  invalid_at?: string | null;
+  expired_at?: string | null;
+  // node lane
+  entity_type?: string;
+  summary?: string;
+  // episode lane
+  content?: string;
+  source?: string;
+  source_description?: string;
+  /** Stage score when one exists (fused / reranked); null on raw bm25/cosine legs. */
+  score: number | null;
+};
+
+/** One pipeline stage: `embed` | `candidate` (per leg) | `hop` | `rank` | `temporal`. */
+export type RetrievalTraceStage = {
+  kind: string;
+  label: string;
+  /** Entity type the stage belongs to: `edge` | `node` | `episode` | `query` (embed). */
+  lane: string;
+  elapsed_ms: number;
+  meta: Record<string, unknown>;
+  items: RetrievalTraceItem[];
+};
+
+/** One full fact search, tagged with the `step_index` of its `graph_expand` row. */
+export type RetrievalTraceRecord = {
+  run_id: string;
+  step_index: number | '';
+  schema_version: number;
+  query: string;
+  group_id: string;
+  recipe: string;
+  temporal: string;
+  num_results: number;
+  sim_min_score: number;
+  k_hop: number;
+  started_at: number;
+  stages: RetrievalTraceStage[];
+};
+
+export type GraphRunRetrievalTraceResponse = {
+  traces: RetrievalTraceRecord[];
+};
+
+/** Per-stage fact-search traces for a run (empty when tracing wasn't enabled). */
+export async function getGraphRunRetrievalTrace(
+  runId: string
+): Promise<ApiResponse<GraphRunRetrievalTraceResponse>> {
+  return apiRequest<GraphRunRetrievalTraceResponse>(
+    `/graph-runs/${encodeURIComponent(runId)}/retrieval-trace`
+  );
+}
+
+// ── Ingest stage trace (Graphiti add_episode) ───────────────────────────────
+// Full per-stage data (prompt IN / structured result OUT) for each add_episode
+// stage — extract entities → resolve/dedupe → extract facts → date facts →
+// resolve/invalidate facts → summarize — recorded by the LLM adapter when ingest
+// tracing is enabled, plus the persisted result (what actually landed in the graph).
+
+/** One prompt message of a stage's input (the model context the step ran on). */
+export type IngestTraceMessage = { role: string; content: string };
+
+/** A persisted entity node (what add_episode wrote to the graph). */
+export type IngestTraceNode = {
+  uuid: string;
+  name: string;
+  entity_type: string;
+  summary: string;
+  score: number | null;
+};
+
+/** A persisted fact edge (relationship triple) with its bi-temporal window. */
+export type IngestTraceEdge = {
+  uuid: string;
+  fact: string;
+  name: string;
+  source_node_uuid: string;
+  target_node_uuid: string;
+  episodes: string[];
+  valid_at: string | null;
+  invalid_at: string | null;
+  expired_at: string | null;
+  score: number | null;
+};
+
+/**
+ * One `add_episode` stage. `source` is `llm` for a captured model call (the common
+ * case) or `dedup` for a non-LLM auto-merge. `input` is the prompt messages for an
+ * LLM stage; `output` is the structured result (parsed model dump / dedup decision).
+ */
+export type IngestTraceStage = {
+  node: string;
+  label: string;
+  operation: string;
+  source: string;
+  elapsed_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  model_id: string;
+  meta: Record<string, unknown>;
+  input: IngestTraceMessage[] | unknown;
+  output: unknown;
+};
+
+/** One episode's full ingest trace, tagged with the `step_index` of its episode row. */
+export type IngestTraceRecord = {
+  run_id: string;
+  step_index: number | '';
+  schema_version: number;
+  chunk_id: string;
+  episode_index: number;
+  total: number;
+  name: string;
+  text: string;
+  group_id: string;
+  reference_time: string;
+  started_at: number;
+  invalidated_count: number;
+  persisted_nodes: IngestTraceNode[];
+  persisted_edges: IngestTraceEdge[];
+  stages: IngestTraceStage[];
+};
+
+export type GraphRunIngestTraceResponse = {
+  traces: IngestTraceRecord[];
+};
+
+/** Per-stage add_episode traces for a run (empty when tracing wasn't enabled). */
+export async function getGraphRunIngestTrace(
+  runId: string
+): Promise<ApiResponse<GraphRunIngestTraceResponse>> {
+  return apiRequest<GraphRunIngestTraceResponse>(
+    `/graph-runs/${encodeURIComponent(runId)}/ingest-trace`
+  );
+}

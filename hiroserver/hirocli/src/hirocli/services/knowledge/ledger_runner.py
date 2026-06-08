@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
 from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_run
+from hirocli.runtime.agent_graph.tracing import langsmith_run_id
 
 KNOWLEDGE_RUN_ID_PREFIX = "knowledge-"
 
@@ -56,8 +57,7 @@ def build_runnable_config(*, ledger_run_id: str, langsmith: bool) -> dict[str, A
         "configurable": {"run_id": ledger_run_id},
     }
     if langsmith:
-        langsmith_run_id = uuid.uuid5(uuid.NAMESPACE_URL, ledger_run_id)
-        config["run_id"] = langsmith_run_id
+        config["run_id"] = langsmith_run_id(ledger_run_id)
         config["run_name"] = "knowledge_answer"
         config["tags"] = ["knowledge", "answer"]
     return config

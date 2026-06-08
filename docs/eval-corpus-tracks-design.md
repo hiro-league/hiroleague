@@ -310,13 +310,11 @@ Gold (reference): Denver        Must-not-surface: Boston
 Recalled facts (current lens):
    • I moved to Denver in September   (valid_at 2024-09-03)
    • I live near the river            (valid_at 2024-02-03)
-   ⚠ a recalled fact contains "Boston" — possible stale leak
 [Open memory_search Graph Run ↗]
 ```
 
-Two cheap aids that work **without** a scorer: the **`⚠ stale?` hint** (flag when a recalled fact
-contains the row's `must_not_contain` string) and the **recalled-count / gold-vs-recalled**
-side-by-side. They make supersession failures eye-visible now; formal pass/fail lands with the
+A cheap aid that works **without** a scorer: the **recalled-count / gold-vs-recalled**
+side-by-side. It makes supersession failures eye-visible now; formal pass/fail lands with the
 scoring redesign.
 
 ### 12.4 Knowledge track — mostly unchanged
@@ -336,7 +334,7 @@ Graph/links point at **`eval_kb_{set}`** instead of `kb_main` (Phase 3).
 **Controller delta (implemented):** `track` sub-tabs; a corpus-picker surface (`folder`,
 `scanCorpuses`, `browseFolder`, `corpuses`, `selectedCorpus`, `selectCorpus`); questions loaded
 from the chosen corpus's `questions_path` with **no cap** and a **required non-empty** selection;
-`EvalRow` carries the memory `recalled`/`gold`/`stale_hit` fields; legs/gate/Δ render only on
+`EvalRow` carries the memory `recalled`/`gold` fields; legs/gate/Δ render only on
 `track === 'knowledge'`. New endpoints: `GET /knowledge/eval/corpuses` (discover), `GET
 /knowledge/eval/questions?path=` (bank by path); `POST /knowledge/eval/run` takes
 `corpus_id/corpus_path/questions_path` + required `question_ids`.

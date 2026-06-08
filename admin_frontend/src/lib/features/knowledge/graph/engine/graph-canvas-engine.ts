@@ -38,12 +38,10 @@ import { drawIcon, drawTextPill, labelFontSize, wrapLabel } from './graph-draw';
 import {
   ALPHA_DECAY_DEFAULT,
   ALPHA_DECAY_DELTA,
-  CENTER_STRENGTH,
   CHARGE_DISTANCE_MAX,
   CHARGE_STRENGTH,
   degreeRadial,
   GRAVITY_STRENGTH,
-  RADIAL_RING,
   RADIAL_STRENGTH,
   VELOCITY_DECAY_DEFAULT,
   VELOCITY_DECAY_DELTA
@@ -129,6 +127,10 @@ export class GraphCanvasEngine {
     searchFocusMode: 'highlight'
   };
   private curveAmount = 0.45;
+  // Live force params owned here so the draw/layout code reads plain values, not Svelte
+  // proxies. Seeded in mount() from the persisted "Center pull"/"Spread radius" sliders.
+  private centerStrength = 0.05; // d3 center-force strength (pull-to-middle for ALL nodes)
+  private radialRing = 90; // outer-ring radius for degreeRadial; used by setData's outerRing
 
   // ── Redraw gating ──────────────────────────────────────────────────────────────────────
   // force-graph's autoPauseRedraw lets the canvas idle once the sim settles. We keep it on
@@ -146,10 +148,18 @@ export class GraphCanvasEngine {
    *  the theme. Dynamic-imports force-graph (browser-only; this also runs during SSR). */
   async mount(
     container: HTMLDivElement,
-    initial: { linkStrength: number; linkDistance: number; curveAmount: number }
+    initial: {
+      linkStrength: number;
+      linkDistance: number;
+      curveAmount: number;
+      centerStrength: number;
+      radialRing: number;
+    }
   ): Promise<void> {
     this.container = container;
     this.curveAmount = initial.curveAmount;
+    this.centerStrength = initial.centerStrength;
+    this.radialRing = initial.radialRing;
     const { default: ForceGraphCtor } = await import('force-graph');
     // force-graph v1.51 ships as a class but still supports the legacy factory form
     // `ForceGraph()(container)` at runtime; cast to that factory shape (the class type
@@ -201,7 +211,7 @@ export class GraphCanvasEngine {
     fg.d3Force('link')?.distance(initial.linkDistance).strength(initial.linkStrength);
     // distanceMax caps repulsion range so strays aren't pushed to infinity.
     fg.d3Force('charge')?.strength(CHARGE_STRENGTH).distanceMax(CHARGE_DISTANCE_MAX);
-    fg.d3Force('center')?.strength(CENTER_STRENGTH);
+    fg.d3Force('center')?.strength(this.centerStrength); // live "Center pull" slider seed
     // Degree-based radial centrality (hubs centre, leaves out) — replaces plain gravity.
     void GRAVITY_STRENGTH; // retained for the tuning guide; radial uses RADIAL_STRENGTH
     fg.d3Force('gravity', degreeRadial(RADIAL_STRENGTH));
@@ -265,7 +275,7 @@ export class GraphCanvasEngine {
       degree.set(b, (degree.get(b) ?? 0) + 1);
     }
     const maxDegree = Math.max(1, ...degree.values());
-    const outerRing = RADIAL_RING * Math.max(1, Math.sqrt(fgNodes.length));
+    const outerRing = this.radialRing * Math.max(1, Math.sqrt(fgNodes.length));
     assignLinkCurvatures(fgLinks, this.curveAmount); // fan out parallel edges before painting
 
     if (structural) {
@@ -299,13 +309,44 @@ export class GraphCanvasEngine {
     fg.d3ReheatSimulation?.();
   }
 
-  /** "Link strength"/"Link distance" sliders → d3 link-force; reheat so the new stiffness
-   *  / resting length resolves on the existing layout. */
-  setForces(opts: { linkStrength: number; linkDistance: number }): void {
+  /** Layout-force sliders → d3 forces; reheat so the new params resolve on the existing
+   *  layout. "Center pull" tightens the whole graph toward the middle (connectivity-blind →
+   *  reels in disconnected strays/components); "Spread radius" moves the degree-radial outer
+   *  ring (so it only needs a retarget when it actually changed). */
+  setForces(opts: {
+    linkStrength: number;
+    linkDistance: number;
+    centerStrength: number;
+    radialRing: number;
+  }): void {
     const fg = this.fg;
     if (!fg) return;
     fg.d3Force('link')?.strength(opts.linkStrength).distance(opts.linkDistance);
+    fg.d3Force('center')?.strength(opts.centerStrength);
+    this.centerStrength = opts.centerStrength;
+    if (opts.radialRing !== this.radialRing) {
+      this.radialRing = opts.radialRing;
+      this.retargetAllNodes(); // recompute every node's __targetR against the new outer ring
+    }
     fg.d3ReheatSimulation?.();
+  }
+
+  /** Recompute the degree-radial target ring for every current mirror node using the live
+   *  radialRing (called when the "Spread radius" slider changes). Mirrors setData's degree
+   *  math but over the full existing mirror set, since no data delta is involved. */
+  private retargetAllNodes(): void {
+    const nodes = [...this.fgNodeById.values()];
+    const links = [...this.fgLinkById.values()];
+    const degree = new Map<string, number>();
+    for (const l of links) {
+      const a = linkEndId(l.source);
+      const b = linkEndId(l.target);
+      degree.set(a, (degree.get(a) ?? 0) + 1);
+      degree.set(b, (degree.get(b) ?? 0) + 1);
+    }
+    const maxDegree = Math.max(1, ...degree.values());
+    const outerRing = this.radialRing * Math.max(1, Math.sqrt(nodes.length));
+    for (const n of nodes) this.assignTarget(n, degree, maxDegree, outerRing);
   }
 
   /** "Edge curvature" slider → re-fan the current MIRROR links (no reheat; curvature is a

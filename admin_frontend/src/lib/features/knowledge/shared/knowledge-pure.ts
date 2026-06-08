@@ -24,18 +24,17 @@ import type {
   KnowledgeScannedFile
 } from '$lib/api/knowledge';
 
-export type KnowledgeTabId = 'ingest' | 'ask' | 'browse' | 'eval';
+export type KnowledgeTabId = 'ingest' | 'ask' | 'browse';
 
 export function normalizeKnowledgeTab(value: string | null | undefined): KnowledgeTabId | null {
-  if (value === 'ingest' || value === 'browse' || value === 'ask' || value === 'eval') return value;
+  if (value === 'ingest' || value === 'browse' || value === 'ask') return value;
   return null;
 }
 
 export const KNOWLEDGE_TABS: { id: KnowledgeTabId; label: string }[] = [
   { id: 'browse', label: 'Browse' },
   { id: 'ingest', label: 'Add' },
-  { id: 'ask', label: 'Ask' },
-  { id: 'eval', label: 'Eval' }
+  { id: 'ask', label: 'Ask' }
 ];
 
 /** Deep link to workspace Knowledge preferences (embedding, retrieval, chunking, answering). */

@@ -33,8 +33,8 @@ Bundled here:
 Each row: `id`, `question`, and **either** `expected_fragments` (lowercase substrings the scorer
 looks for) **or** `expected_kind: abstain` (negative control — declining is correct). Optional:
 `category`, `subcategory`, `requires` (`graph`/`temporal`/`world` → flips the `requires_graph` gate
-subset), `must_not_contain` (superseded-fact guard), and `expected_answer` (an **unscored** gold
-answer shown beside recalled facts in the memory recall inspector).
+subset), and `expected_answer` (an **unscored** gold answer shown beside recalled facts in the
+memory recall inspector).
 
 ## Running
 

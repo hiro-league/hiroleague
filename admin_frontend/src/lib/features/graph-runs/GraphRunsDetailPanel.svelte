@@ -1,6 +1,10 @@
 <script lang="ts">
   import type { CharacterDetail } from '$lib/api/characters';
-  import type { GraphLedgerRow } from '$lib/api/graph-runs';
+  import type {
+    GraphLedgerRow,
+    IngestTraceRecord,
+    RetrievalTraceRecord
+  } from '$lib/api/graph-runs';
   import {
     graphRunTabId,
     GRAPH_RUNS_PANEL_IDS,
@@ -12,6 +16,8 @@
   import GraphRunsRunDetailHeading from './view/GraphRunsRunDetailHeading.svelte';
   import GraphRunsNodesTable from './view/GraphRunsNodesTable.svelte';
   import GraphRunsNodeDetailPanel from './GraphRunsNodeDetailPanel.svelte';
+  import GraphRunsRetrievalTraceDialog from './GraphRunsRetrievalTraceDialog.svelte';
+  import GraphRunsIngestTraceDialog from './GraphRunsIngestTraceDialog.svelte';
 
   let {
     activePane,
@@ -31,9 +37,17 @@
     headerFieldList,
     nodeFieldList,
     nodeDetailFieldList,
+    traceStepIds,
+    activeRetrievalTrace,
+    ingestTraceStepIds,
+    activeIngestTrace,
     onToggleNodeRow,
     onOpenNodeDetails,
-    onCloseNodeDetails
+    onCloseNodeDetails,
+    onOpenRetrievalTrace,
+    onCloseRetrievalTrace,
+    onOpenIngestTrace,
+    onCloseIngestTrace
   }: {
     activePane: ActivePane;
     runDetailCardsExpanded: boolean;
@@ -52,9 +66,17 @@
     headerFieldList: readonly (keyof GraphLedgerRow)[];
     nodeFieldList: readonly (keyof GraphLedgerRow)[];
     nodeDetailFieldList: readonly (keyof GraphLedgerRow)[];
+    traceStepIds: Set<number>;
+    activeRetrievalTrace: RetrievalTraceRecord | null;
+    ingestTraceStepIds: Set<number>;
+    activeIngestTrace: IngestTraceRecord | null;
     onToggleNodeRow: (compositeRowId: string) => void;
     onOpenNodeDetails: (row: GraphLedgerRow) => void;
     onCloseNodeDetails: () => void;
+    onOpenRetrievalTrace: (row: GraphLedgerRow) => void;
+    onCloseRetrievalTrace: () => void;
+    onOpenIngestTrace: (row: GraphLedgerRow) => void;
+    onCloseIngestTrace: () => void;
   } = $props();
 
   const detailHidden = $derived(!isRunDetailPane(activePane));
@@ -113,8 +135,12 @@
         {timeline}
         {nodeFieldList}
         {selectedNodeRowId}
+        {traceStepIds}
+        {ingestTraceStepIds}
         {onToggleNodeRow}
         {onOpenNodeDetails}
+        {onOpenRetrievalTrace}
+        {onOpenIngestTrace}
       />
 
       {#if nodeDetailRow}
@@ -127,6 +153,10 @@
     </div>
   </div>
 </div>
+
+<GraphRunsRetrievalTraceDialog trace={activeRetrievalTrace} onClose={onCloseRetrievalTrace} />
+
+<GraphRunsIngestTraceDialog trace={activeIngestTrace} onClose={onCloseIngestTrace} />
 
 <style>
   /* Child slices use their own scoped classes; `:global` keeps flex + collapse rules on the flow host. */

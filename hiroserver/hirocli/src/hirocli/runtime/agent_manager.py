@@ -23,7 +23,6 @@ import contextlib
 import hashlib
 import inspect
 import time
-import uuid
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +36,7 @@ from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from .agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED, ChatAgentGraph
 from .agent_graph.base import BaseAgentGraph, _normalize_reply_content
 from .agent_graph.ledger import RunAccumulator, current_run
+from .agent_graph.tracing import langsmith_run_id
 from .comm_log import (
     LOG_IN,
     comm_extras,
@@ -409,9 +409,8 @@ class AgentManager:
             "messages": [],
         }
         ledger_run_id = f"chat-{msg.routing.id}"
-        langsmith_run_id = uuid.uuid5(uuid.NAMESPACE_URL, ledger_run_id)
         config = {
-            "run_id": langsmith_run_id,
+            "run_id": langsmith_run_id(ledger_run_id),
             "run_name": "chat",
             "tags": [
                 f"character:{character_id}",

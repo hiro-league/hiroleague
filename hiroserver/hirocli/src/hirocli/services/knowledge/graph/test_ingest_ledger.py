@@ -1,11 +1,11 @@
-"""Tests for graph-ingest ledger instrumentation (per-episode + per-operation nodes).
+"""Tests for graph-ingest ledger instrumentation (roll-up model, §12.2 observability).
 
 A fake Graphiti client simulates ``add_episode`` by firing the adapter usage/embed
 sinks (``record_episode_llm_usage`` / ``record_episode_embed``) with canned
 ``GraphitiLLMUsage`` for each internal operation — exactly what the real
-``GraphitiLLMClient`` does. We then read ``logs/graph.log`` and assert the run row,
-the per-episode step, and the per-operation sub-step nodes (extract/resolve/embed/
-persist) with their token folding and ordering. No Kuzu, no network, no LLM.
+``GraphitiLLMClient`` does. We then read ``logs/graph.log`` and assert the run row plus
+the SINGLE per-episode row carrying the rolled-up token usage (the per-operation
+breakdown now lives only in the ``trace`` sidecar). No Kuzu, no network, no LLM.
 """
 
 from __future__ import annotations
@@ -129,44 +129,22 @@ async def test_ingest_writes_run_and_per_operation_nodes(tmp_path: Path) -> None
     assert run["input_tokens"] == "260"
     assert run["output_tokens"] == "50"
 
-    # --- per-episode parent step (no usage of its own) ---------------------
+    # --- per-episode parent step: carries the ROLLED-UP usage of all internal LLM ops ----
     episode = by_node["knowledge_graph_ingest/episode"]
     assert episode["step_index"] == "1"
     assert episode["sub_step"] == ""
-    assert episode["input_tokens"] == ""  # parent carries no usage → no double-count
+    assert episode["model"] == _MODEL
+    assert episode["provider"] == "google"
+    assert episode["input_tokens"] == "260"  # 100+50+80+30 rolled onto the one episode row
+    assert episode["output_tokens"] == "50"  # 20+10+15+5
     assert episode["input_preview"].startswith("episode 1/1 · chunk ep_001")
     assert "entities=3" in episode["output_preview"]
     assert "facts=1" in episode["output_preview"]
+    assert "llm=4 calls" in episode["output_preview"]
 
-    # --- per-operation sub-steps, nested + ordered -------------------------
-    expected_order = [
-        ("knowledge_graph_ingest/extract_entities", "1", "100", "20"),
-        ("knowledge_graph_ingest/resolve_entities", "2", "50", "10"),
-        ("knowledge_graph_ingest/extract_facts", "3", "80", "15"),
-        ("knowledge_graph_ingest/resolve_facts", "4", "30", "5"),
-    ]
-    for node, sub_step, in_tok, out_tok in expected_order:
-        row = by_node[node]
-        assert row["step_index"] == "1"
-        assert row["sub_step"] == sub_step
-        assert row["model"] == _MODEL
-        assert row["provider"] == "google"
-        assert row["input_tokens"] == in_tok
-        assert row["output_tokens"] == out_tok
-
-    # embed + persist nodes round out the episode, in order.
-    embed = by_node["knowledge_graph_ingest/embed"]
-    assert embed["sub_step"] == "5"
-    assert "vectors=4" in embed["output_preview"]
-
-    persist = by_node["knowledge_graph_ingest/persist"]
-    assert persist["sub_step"] == "6"
-    assert "Adam" in persist["output_preview"]
-    assert "WORKS_AT" in persist["output_preview"]
-
-    # Operations that never fired in our config produce no rows.
-    assert "knowledge_graph_ingest/date_facts" not in by_node
-    assert "knowledge_graph_ingest/attributes" not in by_node
+    # --- NO per-operation / embed / persist sub-rows (the breakdown moved to the trace tier) ---
+    assert [n for n in by_node if n.startswith("knowledge_graph_ingest/") and n
+            != "knowledge_graph_ingest/episode"] == []
 
 
 @pytest.mark.asyncio

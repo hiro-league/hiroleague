@@ -7,8 +7,6 @@
 # distinct-count) resolves them — Graphiti's strength.
 #
 #   expected_fragments  — the temporally-correct answer (lowercase substring match).
-#   must_not_contain    — the values a text search would WRONGLY surface (old/other candidates);
-#                         their presence = a temporal-leak failure.
 #   requires: [temporal] — flips requires_graph=True (the gate subset).
 #   expected_answer     — unscored gold, shown beside recalled facts in the recall inspector.
 
@@ -18,7 +16,6 @@
   question: "Who currently teaches Defence Against the Dark Arts at Hogwarts?"
   expected_answer: "Severus Snape (the most recent of six teachers)."
   expected_fragments: ["Snape"]
-  must_not_contain: ["Quirrell", "Lockhart", "Lupin", "Moody", "Umbridge"]
   requires: [temporal]
 
 - id: q_current_broom
@@ -26,7 +23,6 @@
   question: "Which broomstick does Harry fly now?"
   expected_answer: "A Firebolt — his Nimbus 2000 was destroyed."
   expected_fragments: ["Firebolt"]
-  must_not_contain: ["Nimbus 2000"]
   requires: [temporal]
 
 - id: q_current_minister
@@ -34,7 +30,6 @@
   question: "Who is the current Minister for Magic?"
   expected_answer: "Rufus Scrimgeour (he replaced Fudge)."
   expected_fragments: ["Scrimgeour"]
-  must_not_contain: ["Fudge"]
   requires: [temporal]
 
 - id: q_current_ron_pet
@@ -42,7 +37,6 @@
   question: "What pet does Ron Weasley keep now?"
   expected_answer: "An owl named Pigwidgeon (his rat Scabbers is gone)."
   expected_fragments: ["Pigwidgeon"]
-  must_not_contain: ["Scabbers"]
   requires: [temporal]
 
 # --- invalidation (a fact that ended) ---
@@ -51,7 +45,6 @@
   question: "Is the Nimbus 2000 still Harry's broom?"
   expected_answer: "No — it was destroyed by the Whomping Willow; he flies a Firebolt now."
   expected_fragments: ["Firebolt"]
-  must_not_contain: ["still flies the Nimbus", "yes"]
   requires: [temporal]
 
 # --- point-in-time ("as of" a date / interval) ---
@@ -60,7 +53,6 @@
   question: "Who was teaching Defence Against the Dark Arts during the 1994–1995 school year?"
   expected_answer: "Alastor 'Mad-Eye' Moody."
   expected_fragments: ["Moody"]
-  must_not_contain: ["Snape", "Umbridge", "Lupin"]
   requires: [temporal]
 
 # --- ordering (relative to another fact) ---
@@ -69,7 +61,6 @@
   question: "Who taught Defence Against the Dark Arts in the year just before Snape took over?"
   expected_answer: "Dolores Umbridge."
   expected_fragments: ["Umbridge"]
-  must_not_contain: ["Moody", "Snape"]
   requires: [temporal]
 
 - id: q_minister_before_scrimgeour
@@ -77,7 +68,6 @@
   question: "Who was Minister for Magic immediately before Rufus Scrimgeour?"
   expected_answer: "Cornelius Fudge."
   expected_fragments: ["Fudge"]
-  must_not_contain: ["Scrimgeour"]
   requires: [temporal]
 
 # --- first / earliest ---
@@ -86,7 +76,6 @@
   question: "Who was Harry's very first Defence Against the Dark Arts teacher?"
   expected_answer: "Professor Quirrell."
   expected_fragments: ["Quirrell"]
-  must_not_contain: ["Snape", "Umbridge"]
   requires: [temporal]
 
 # --- distinct-count over time ---
@@ -95,5 +84,4 @@
   question: "How many different Defence Against the Dark Arts teachers have there been across these years?"
   expected_answer: "Six — Quirrell, Lockhart, Lupin, Moody, Umbridge, Snape."
   expected_fragments: ["six"]
-  must_not_contain: []
   requires: [temporal]

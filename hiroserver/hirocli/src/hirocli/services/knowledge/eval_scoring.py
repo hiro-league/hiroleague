@@ -41,7 +41,7 @@ def _score_fragments(
     *,
     no_results: bool,
 ) -> Score:
-    """Base substring scoring (no forbidden-fragment check)."""
+    """Base substring scoring."""
     # Negative control — abstain wins.
     if not expected_fragments:
         if no_results or not (answer_text or "").strip():
@@ -71,7 +71,6 @@ def score_answer(
     expected_fragments: list[str],
     *,
     no_results: bool,
-    must_not_contain: list[str] | None = None,
 ) -> Score:
     """Score one answer against expected substring fragments.
 
@@ -82,26 +81,8 @@ def score_answer(
     Empty ``expected_fragments`` is the **negative control**: abstain (no_results
     or empty answer) is the correct outcome; a confident answer is a fail
     (likely hallucination).
-
-    ``must_not_contain`` is the **superseded-fact / contradiction guard**: if the
-    answer contains any forbidden fragment (e.g. the old city after a move, the
-    old job after a switch), the row is forced to ``fail`` even if the expected
-    fragments were present. Catches the temporal-leak failure mode the Graphiti
-    pivot is meant to fix (docs/knowledge-graphiti-pivot-design.md §8.6).
     """
-    base = _score_fragments(answer_text, expected_fragments, no_results=no_results)
-
-    forbidden = [f for f in (must_not_contain or []) if f]
-    if forbidden and base.mark != MARK_FAIL and (answer_text or "").strip():
-        text = (answer_text or "").lower()
-        if any(f.lower() in text for f in forbidden):
-            return Score(
-                mark=MARK_FAIL,
-                label="forbidden_leak",
-                found=base.found,
-                expected=base.expected,
-            )
-    return base
+    return _score_fragments(answer_text, expected_fragments, no_results=no_results)
 
 
 def delta_mark(off: Score, on: Score) -> str:

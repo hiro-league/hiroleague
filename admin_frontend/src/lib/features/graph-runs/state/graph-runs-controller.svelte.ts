@@ -16,11 +16,15 @@ import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow }
 import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
 import {
   getGraphRun,
+  getGraphRunIngestTrace,
   getGraphRunLangsmithUrl,
+  getGraphRunRetrievalTrace,
   GRAPH_RUN_HEADER_FIELDS,
   GRAPH_RUN_HEADER_TAB_FIELDS,
   GRAPH_RUN_NODE_TABLE_FIELDS,
-  type GraphLedgerRow
+  type GraphLedgerRow,
+  type IngestTraceRecord,
+  type RetrievalTraceRecord
 } from '$lib/api/graph-runs';
 import {
   formatAgentElapsedMs,
@@ -51,6 +55,14 @@ export function createGraphRunsPageController() {
   let timelineByRun = $state<Record<string, GraphLedgerRow[]>>({});
   let langsmithUrlByRun = $state<Record<string, string | undefined>>({});
   let aggregateByRun = $state<Record<string, GraphLedgerRow | null>>({});
+  /** Per-stage Graphiti fact-search traces per run (only present when tracing was enabled). */
+  let retrievalTraceByRun = $state<Record<string, RetrievalTraceRecord[]>>({});
+  /** Open retrieval-trace dialog target — the step_index (graph_expand / memory_recall) whose trace is shown. */
+  let retrievalTraceStep = $state<number | null>(null);
+  /** Per-stage Graphiti add_episode traces per run (only present when ingest tracing was enabled). */
+  let ingestTraceByRun = $state<Record<string, IngestTraceRecord[]>>({});
+  /** Open ingest-trace dialog target — the step_index (the episode row) whose trace is shown. */
+  let ingestTraceStep = $state<number | null>(null);
   let chatChannels = $state<ChatChannelRow[]>([]);
   let characters = $state<CharacterRow[]>([]);
   let titleCharacter = $state<CharacterDetail | null>(null);
@@ -245,6 +257,46 @@ export function createGraphRunsPageController() {
     return timeline.find((r) => r.id === nodeDetailRowId) ?? null;
   });
 
+  /** Traces for the active run, indexed by the `step_index` they were recorded under. */
+  const retrievalTraceByStep = $derived.by((): Map<number, RetrievalTraceRecord> => {
+    const m = new Map<number, RetrievalTraceRecord>();
+    if (activePane === RUNS_TAB) return m;
+    for (const t of retrievalTraceByRun[activePane] ?? []) {
+      const step = typeof t.step_index === 'number' ? t.step_index : Number(t.step_index);
+      if (Number.isFinite(step)) m.set(step, t);
+    }
+    return m;
+  });
+
+  /** Step indexes (of the active run) that have a retrieval trace — drives the row marker. */
+  const retrievalTraceStepIds = $derived.by(
+    (): Set<number> => new Set(retrievalTraceByStep.keys())
+  );
+
+  const activeRetrievalTrace = $derived.by((): RetrievalTraceRecord | null => {
+    if (retrievalTraceStep === null) return null;
+    return retrievalTraceByStep.get(retrievalTraceStep) ?? null;
+  });
+
+  /** Ingest traces for the active run, indexed by the episode `step_index`. */
+  const ingestTraceByStep = $derived.by((): Map<number, IngestTraceRecord> => {
+    const m = new Map<number, IngestTraceRecord>();
+    if (activePane === RUNS_TAB) return m;
+    for (const t of ingestTraceByRun[activePane] ?? []) {
+      const step = typeof t.step_index === 'number' ? t.step_index : Number(t.step_index);
+      if (Number.isFinite(step)) m.set(step, t);
+    }
+    return m;
+  });
+
+  /** Episode step indexes (of the active run) that have an ingest trace — drives the row marker. */
+  const ingestTraceStepIds = $derived.by((): Set<number> => new Set(ingestTraceByStep.keys()));
+
+  const activeIngestTrace = $derived.by((): IngestTraceRecord | null => {
+    if (ingestTraceStep === null) return null;
+    return ingestTraceByStep.get(ingestTraceStep) ?? null;
+  });
+
   /* Narrowing character filter makes the selected channel invalid — clear channel so the table doesn’t go empty silently. */
   $effect(() => {
     const cid = filterCharacterId.trim();
@@ -363,6 +415,26 @@ export function createGraphRunsPageController() {
     langsmithUrlByRun = { ...langsmithUrlByRun };
   }
 
+  async function resolveRetrievalTrace(runId: string) {
+    const res = await getGraphRunRetrievalTrace(runId);
+    if (res.ok && res.data) {
+      retrievalTraceByRun[runId] = res.data.traces ?? [];
+    } else {
+      retrievalTraceByRun[runId] = [];
+    }
+    retrievalTraceByRun = { ...retrievalTraceByRun };
+  }
+
+  async function resolveIngestTrace(runId: string) {
+    const res = await getGraphRunIngestTrace(runId);
+    if (res.ok && res.data) {
+      ingestTraceByRun[runId] = res.data.traces ?? [];
+    } else {
+      ingestTraceByRun[runId] = [];
+    }
+    ingestTraceByRun = { ...ingestTraceByRun };
+  }
+
   async function loadRunDetail(runId: string) {
     langsmithUrlByRun[runId] = undefined;
     langsmithUrlByRun = { ...langsmithUrlByRun };
@@ -373,6 +445,8 @@ export function createGraphRunsPageController() {
       timelineByRun = { ...timelineByRun };
       aggregateByRun = { ...aggregateByRun };
       void resolveLangsmithUrl(runId);
+      void resolveRetrievalTrace(runId);
+      void resolveIngestTrace(runId);
     } else if (!response.ok) {
       timelineByRun[runId] = [];
       aggregateByRun[runId] = null;
@@ -391,6 +465,8 @@ export function createGraphRunsPageController() {
     activeRunId = runId;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
+    retrievalTraceStep = null;
+    ingestTraceStep = null;
     if (!alreadyOpen) {
       await loadRunDetail(runId);
     }
@@ -401,20 +477,46 @@ export function createGraphRunsPageController() {
     delete timelineByRun[runId];
     delete aggregateByRun[runId];
     delete langsmithUrlByRun[runId];
+    delete retrievalTraceByRun[runId];
+    delete ingestTraceByRun[runId];
     timelineByRun = { ...timelineByRun };
     aggregateByRun = { ...aggregateByRun };
     langsmithUrlByRun = { ...langsmithUrlByRun };
+    retrievalTraceByRun = { ...retrievalTraceByRun };
+    ingestTraceByRun = { ...ingestTraceByRun };
     if (activeRunId === runId) {
       activeRunId = null;
     }
     selectedNodeRowId = null;
     nodeDetailRowId = null;
+    retrievalTraceStep = null;
+    ingestTraceStep = null;
   }
 
   function showRunsOnly() {
     activeRunId = null;
     selectedNodeRowId = null;
     nodeDetailRowId = null;
+    retrievalTraceStep = null;
+    ingestTraceStep = null;
+  }
+
+  function openRetrievalTrace(row: GraphLedgerRow) {
+    const step = typeof row.step_index === 'number' ? row.step_index : Number(row.step_index);
+    retrievalTraceStep = Number.isFinite(step) ? step : null;
+  }
+
+  function closeRetrievalTrace() {
+    retrievalTraceStep = null;
+  }
+
+  function openIngestTrace(row: GraphLedgerRow) {
+    const step = typeof row.step_index === 'number' ? row.step_index : Number(row.step_index);
+    ingestTraceStep = Number.isFinite(step) ? step : null;
+  }
+
+  function closeIngestTrace() {
+    ingestTraceStep = null;
   }
 
   function refreshMain() {
@@ -474,6 +576,14 @@ export function createGraphRunsPageController() {
     const focus = ev.target instanceof HTMLElement ? ev.target : null;
     if (focus?.closest('input, textarea, select, [contenteditable="true"]')) return;
     ev.preventDefault();
+    if (ingestTraceStep !== null) {
+      closeIngestTrace();
+      return;
+    }
+    if (retrievalTraceStep !== null) {
+      closeRetrievalTrace();
+      return;
+    }
     if (nodeDetailRowId !== null) {
       closeNodeDetails();
       return;
@@ -630,6 +740,18 @@ export function createGraphRunsPageController() {
     get nodeDetailRow() {
       return nodeDetailRow;
     },
+    get retrievalTraceStepIds() {
+      return retrievalTraceStepIds;
+    },
+    get activeRetrievalTrace() {
+      return activeRetrievalTrace;
+    },
+    get ingestTraceStepIds() {
+      return ingestTraceStepIds;
+    },
+    get activeIngestTrace() {
+      return activeIngestTrace;
+    },
     RUNS_TAB,
     mount,
     dispose,
@@ -642,6 +764,10 @@ export function createGraphRunsPageController() {
     toggleNodeRowSelection,
     openNodeDetails,
     closeNodeDetails,
+    openRetrievalTrace,
+    closeRetrievalTrace,
+    openIngestTrace,
+    closeIngestTrace,
     runTabDisplayLabel,
     runTabTooltip
   };

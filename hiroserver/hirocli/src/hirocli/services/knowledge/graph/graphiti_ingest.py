@@ -23,13 +23,17 @@ import contextlib
 import datetime as dt
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from graphiti_core.driver.driver import GraphProvider
+from graphiti_core.graph_queries import get_fulltext_indices
 from graphiti_core.nodes import EpisodeType, EpisodicNode
 from hiro_commons.log import Logger
 from pydantic import BaseModel
 
 from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.tracing import traced_run
 
 from ..constants import (
     KNOWLEDGE_GRAPH_EDGE_UPSERTED,
@@ -44,11 +48,71 @@ from .ingest_ledger import (
     knowledge_graph_ingest_ledger,
     ledger_episode,
 )
+from .ingest_trace import (
+    IngestCapture,
+    build_episode_trace,
+    current_ingest_capture,
+    write_ingest_trace_sidecar,
+)
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI.INGEST")
 
+
+
 # Live-viz event sink: ``(event_type, payload) -> None``. None = no-op (CLI/tests).
 GraphEventSink = Callable[[str, dict[str, Any]], None]
+
+# (table, index_name) of every Kuzu FTS index — mirrors graphiti's CREATE DDL in
+# ``graph_queries.get_fulltext_indices(KUZU)`` (kept in lockstep; the CREATE side reuses
+# that helper, this list only supplies the DROP target names).
+_KUZU_FTS_INDICES: tuple[tuple[str, str], ...] = (
+    ("Episodic", "episode_content"),
+    ("Entity", "node_name_and_summary"),
+    ("Community", "community_name"),
+    ("RelatesToNode_", "edge_name_and_fact"),
+)
+
+
+async def rebuild_fts_indices(driver: Any) -> None:
+    """Drop + re-CREATE the Kuzu full-text indices so they cover all current rows.
+
+    WHY: Kuzu's FTS index is a STATIC snapshot built at ``CREATE_FTS_INDEX`` time — it is
+    NOT maintained as rows are inserted/updated/deleted. The indices are created once over
+    (initially empty) tables at init, so every episode added afterward is invisible to
+    ``QUERY_FTS_INDEX`` — the bm25 / keyword legs of search return nothing, and graphiti's
+    own ingest dedup (which also queries the FTS index) is partly blind, causing duplicate
+    facts. Re-creating re-indexes the WHOLE table, so this is called once per ingest batch
+    (and once at init for pre-existing data) — never per episode.
+
+    Only Kuzu needs this; neo4j/falkordb maintain their FTS indices automatically.
+    """
+    if getattr(driver, "provider", None) != GraphProvider.KUZU:
+        return
+    for table, name in _KUZU_FTS_INDICES:
+        try:
+            await driver.execute_query(f"CALL DROP_FTS_INDEX('{table}', '{name}');")
+        except Exception as exc:
+            # First-ever build: the index doesn't exist yet — that's fine, CREATE follows.
+            # Kuzu phrases the missing-index DROP error as "Table X doesn't have an index
+            # with name Y" (not "does not exist"), so match that shape too — otherwise the
+            # very first rebuild on a fresh DB raises instead of falling through to CREATE.
+            msg = str(exc).lower()
+            if (
+                "does not exist" in msg
+                or "not found" in msg
+                or "no index" in msg
+                or "have an index" in msg
+            ):
+                continue
+            log.exception("❌ graphiti — FTS drop failed · table=%s index=%s", table, name)
+            raise
+    for stmt in get_fulltext_indices(driver.provider):
+        try:
+            await driver.execute_query(stmt)
+        except Exception:
+            log.exception("❌ graphiti — FTS (re)create failed · stmt=%s", stmt[:64])
+            raise
+    log.info("✅ graphiti — Kuzu FTS indices rebuilt · count=%d", len(_KUZU_FTS_INDICES))
 
 # F7 — source-role allow-list (supersedes the earlier ingest's gate). Allow-list,
 # not deny-list: a future ingest path that forgets to tag its role is REJECTED by
@@ -263,8 +327,9 @@ async def ingest_episodes(
     edge_type_map: dict[tuple[str, str], list[str]] | None = None,
     event_sink: GraphEventSink | None = None,
     ledger_sink: LedgerSink | None = None,
-    ledger_detail: str = "rich",
+    observability: str = "ledger",
     write_lock: asyncio.Lock | None = None,
+    workspace_path: Path | None = None,
 ) -> GraphitiIngestStats:
     """Ingest chunks as Graphiti episodes — sequential, chronological, write-gated.
 
@@ -275,6 +340,11 @@ async def ingest_episodes(
     ``ledger_sink`` (when given) records a ``graph_ingest`` run with a per-episode
     step and per-operation sub-step nodes (extract/resolve/dates/…), so ingestion
     is visible in Graph Runs (docs §6/§12). ``None`` = no ledger (tests/CLI).
+
+    ``workspace_path`` is where the per-stage ingest-trace sidecar is written
+    (``<workspace>/logs/ingest_trace/<run_id>.jsonl``) when ``observability == "trace"``
+    AND a ledger sink is active (the trace dialog opens from a ledger row).
+    ``None`` ⇒ no sidecar (tests/CLI), even at the trace tier.
     """
     stats = GraphitiIngestStats(episodes_received=len(episodes))
     # Run row groups all episodes from this call (== one document for the per-doc
@@ -283,7 +353,7 @@ async def ingest_episodes(
     doc_title = episodes[0].document_title if episodes else ""
 
     async with knowledge_graph_ingest_ledger(
-        sink=ledger_sink, document_id=doc_id, ledger_detail=ledger_detail
+        sink=ledger_sink, document_id=doc_id
     ) as run:
         try:
             # F7 write-gate — one log + bail, before any model call.
@@ -331,6 +401,28 @@ async def ingest_episodes(
             )
             total = len(prepared)
 
+            # Full per-stage ingest trace (eval / Graph-Runs inspection) — the ``trace`` tier.
+            # Engaged only when a ledger run + workspace exist to anchor/persist the sidecar
+            # (the dialog opens from a ledger row, so a trace without one is useless).
+            ingest_trace_on = (
+                observability == "trace"
+                and run.sink is not None
+                and workspace_path is not None
+            )
+            log.info(
+                "🔎 graph_ingest — ingest trace %s · observability=%s",
+                "ON" if ingest_trace_on else "off",
+                observability,
+            )
+            if ingest_trace_on:
+                # Install the transparent observer for graphiti's NON-LLM entity dedup
+                # (exact/fuzzy auto-merges that skip the LLM). Idempotent + best-effort: a
+                # compat drift just skips dedup rows (LLM stages still captured), never
+                # breaks this write path.
+                from .graphiti_dedup_trace import install_dedup_trace
+
+                install_dedup_trace()
+
             # Real Graphiti exposes `.driver`; the unit-test fake does not → pre-seed only
             # on the real path (production always has a driver). Lets the fake-client tests
             # stay Kuzu-free while the live path creates episodes with our point_id.
@@ -340,94 +432,184 @@ async def ingest_episodes(
             # fake-client unit tests pass write_lock=None → a no-op guard.
             write_guard = write_lock if write_lock is not None else contextlib.nullcontext()
 
-            for index, (ep, ref) in enumerate(prepared):
-                # Compute body before the ledger context so the episode step can show the
-                # ingested text in its input preview (#1).
-                source = EpisodeType.message if ep.source == "message" else EpisodeType.text
-                body = _episode_body(ep, source)
-                async with ledger_episode(
-                    run,
-                    episode_index=index + 1,
-                    total=total,
-                    chunk_id=ep.chunk_id,
-                    document_id=ep.document_id,
-                    title=ep.document_title,
-                    reference_time=ref,
-                    text=body,
-                ) as episode:
-                    try:
-                        # One writer at a time: preseed + add_episode are this episode's
-                        # write unit. The lock spans the WHOLE add_episode (not just the
-                        # kuzu write) because graphiti's dedup reads prior graph state to
-                        # merge entities — concurrent episodes would dedup stale (§4.2).
-                        async with write_guard:
-                            # Multi-group fix (memory Phase 1): graphiti-core's add_episode
-                            # compares ``group_id != driver._database`` and, on a mismatch,
-                            # takes a Neo4j-only "clone to a per-group database" branch that
-                            # breaks on Kuzu. Conversation memory writes MANY groups (one per
-                            # user×character) to the SAME shared Kuzu driver, so we re-point
-                            # ``_database`` to THIS episode's group inside the single-writer
-                            # lock (no race) before add_episode. Knowledge (one fixed group)
-                            # just re-sets the value it was seeded with → a no-op there.
-                            if driver is not None and group_id:
-                                driver._database = group_id
-                            if driver is not None and ep.chunk_id:
-                                await _preseed_episode_node(
-                                    driver,
-                                    ep,
-                                    body=body,
-                                    source=source,
-                                    group_id=group_id,
-                                    ref=ref,
-                                    now=_now(),
-                                )
-                            result = await graphiti.add_episode(
-                                name=_episode_name(ep),
-                                episode_body=body,
-                                source_description=ep.document_id,
-                                reference_time=ref,
-                                source=source,
-                                group_id=group_id,
-                                uuid=ep.chunk_id or None,
-                                entity_types=entity_types,
-                                edge_types=edge_types,
-                                edge_type_map=edge_type_map,
-                            )
-                    except Exception:
-                        # External model + DB call — log + re-raise (general-coding-rule).
-                        stats.episodes_failed += 1
-                        log.exception(
-                            "❌ graphiti.ingest — add_episode failed · chunk=%s doc=%s",
-                            ep.chunk_id,
-                            ep.document_id,
-                        )
-                        raise
-
-                    stats.episodes_processed += 1
-                    node_names, edge_facts = _result_names(result)
-                    stats.entities_total += len(getattr(result, "nodes", None) or [])
-                    stats.edges_total += len(getattr(result, "edges", None) or [])
-                    if episode is not None:
-                        episode.set_persist(node_names=node_names, edge_facts=edge_facts)
-                        # Fold this episode's supersession + token totals into the run
-                        # stats (§12). invalidated_count comes from the add_episode
-                        # tracer span (already buffered now that add_episode returned);
-                        # tokens come from the per-call usage sink. Ledgered path only —
-                        # without a sink there's no collector and these stay 0.
-                        apply_episode_span_rollup(episode)
-                        stats.facts_invalidated += episode.invalidated_count
-                        stats.tokens_input += episode.total_input_tokens
-                        stats.tokens_output += episode.total_output_tokens
-                    _emit_graph_elements(
-                        event_sink, result, document_id=ep.document_id, group_id=group_id
-                    )
-                    _emit_progress(
-                        event_sink,
-                        document_id=ep.document_id,
-                        index=index + 1,
+            # Group every episode of this ingest under ONE LangSmith trace so Graphiti's
+            # internal LLM calls (extract entities / dedupe / date facts …) read as one tree
+            # instead of scattering as a separate root per call (the reason ingestion looked
+            # scattered in LangSmith). Force the deterministic ledger run id only on a
+            # STANDALONE ingest; when nested under an eval/chat run we just attach to its
+            # active span via contextvars. No-op when LangSmith tracing is off.
+            ingest_run_id = run.run_id if (run.run_id and not run.nested) else None
+            with traced_run(
+                "graph_ingest",
+                ledger_run_id=ingest_run_id,
+                tags=[f"role:{source_role}", f"group:{group_id}"],
+                metadata={"document_id": doc_id, "episode_count": total},
+            ):
+                for index, (ep, ref) in enumerate(prepared):
+                    # Compute body before the ledger context so the episode step can show the
+                    # ingested text in its input preview (#1).
+                    source = EpisodeType.message if ep.source == "message" else EpisodeType.text
+                    body = _episode_body(ep, source)
+                    async with ledger_episode(
+                        run,
+                        episode_index=index + 1,
                         total=total,
-                        group_id=group_id,
-                    )
+                        chunk_id=ep.chunk_id,
+                        document_id=ep.document_id,
+                        title=ep.document_title,
+                        reference_time=ref,
+                        text=body,
+                    ) as episode:
+                        # Engage the opt-in per-stage ingest trace for THIS episode: the LLM
+                        # adapter mirrors every stage's full in/out into this capture while
+                        # add_episode runs (gathered sub-tasks inherit the context). No-op when
+                        # tracing is off, so the production path is untouched.
+                        capture = IngestCapture() if ingest_trace_on else None
+                        cap_token = (
+                            current_ingest_capture.set(capture) if capture is not None else None
+                        )
+                        # One child span per episode: Graphiti's per-episode LLM calls nest
+                        # under it, mirroring the ledger's per-episode step. Scoped to the
+                        # add_episode unit only (post-processing below is cheap bookkeeping).
+                        with traced_run(
+                            "add_episode",
+                            tags=[f"chunk:{ep.chunk_id[:8]}"] if ep.chunk_id else None,
+                            metadata={
+                                "document_id": ep.document_id,
+                                "index": index + 1,
+                                "total": total,
+                            },
+                            inputs={"name": _episode_name(ep)},
+                        ):
+                            try:
+                                # One writer at a time: preseed + add_episode are this
+                                # episode's write unit. The lock spans the WHOLE add_episode
+                                # (not just the kuzu write) because graphiti's dedup reads prior
+                                # graph state to merge entities — concurrent episodes would
+                                # dedup stale (§4.2).
+                                async with write_guard:
+                                    # Multi-group fix (memory Phase 1): graphiti-core's
+                                    # add_episode compares ``group_id != driver._database`` and,
+                                    # on a mismatch, takes a Neo4j-only "clone to a per-group
+                                    # database" branch that breaks on Kuzu. Conversation memory
+                                    # writes MANY groups (one per user×character) to the SAME
+                                    # shared Kuzu driver, so we re-point ``_database`` to THIS
+                                    # episode's group inside the single-writer lock (no race)
+                                    # before add_episode. Knowledge (one fixed group) just
+                                    # re-sets the value it was seeded with → a no-op there.
+                                    if driver is not None and group_id:
+                                        driver._database = group_id
+                                    if driver is not None and ep.chunk_id:
+                                        await _preseed_episode_node(
+                                            driver,
+                                            ep,
+                                            body=body,
+                                            source=source,
+                                            group_id=group_id,
+                                            ref=ref,
+                                            now=_now(),
+                                        )
+                                    result = await graphiti.add_episode(
+                                        name=_episode_name(ep),
+                                        episode_body=body,
+                                        source_description=ep.document_id,
+                                        reference_time=ref,
+                                        source=source,
+                                        group_id=group_id,
+                                        uuid=ep.chunk_id or None,
+                                        entity_types=entity_types,
+                                        edge_types=edge_types,
+                                        edge_type_map=edge_type_map,
+                                    )
+                            except Exception:
+                                # External model + DB call — log + re-raise (general-coding-rule).
+                                stats.episodes_failed += 1
+                                if cap_token is not None:
+                                    current_ingest_capture.reset(cap_token)
+                                    cap_token = None
+                                log.exception(
+                                    "❌ graphiti.ingest — add_episode failed · chunk=%s doc=%s",
+                                    ep.chunk_id,
+                                    ep.document_id,
+                                )
+                                raise
+
+                        # add_episode done — drop the capture engagement (post-processing below
+                        # makes no model calls). The captured stages live on ``capture``.
+                        if cap_token is not None:
+                            current_ingest_capture.reset(cap_token)
+                            cap_token = None
+
+                        stats.episodes_processed += 1
+                        node_names, edge_facts = _result_names(result)
+                        stats.entities_total += len(getattr(result, "nodes", None) or [])
+                        stats.edges_total += len(getattr(result, "edges", None) or [])
+                        if episode is not None:
+                            episode.set_persist(node_names=node_names, edge_facts=edge_facts)
+                            # Fold this episode's supersession + token totals into the run
+                            # stats (§12). invalidated_count comes from the add_episode
+                            # tracer span (already buffered now that add_episode returned);
+                            # tokens come from the per-call usage sink. Ledgered path only —
+                            # without a sink there's no collector and these stay 0.
+                            apply_episode_span_rollup(episode)
+                            stats.facts_invalidated += episode.invalidated_count
+                            stats.tokens_input += episode.total_input_tokens
+                            stats.tokens_output += episode.total_output_tokens
+                        # Persist the full per-stage trace sidecar (when capture engaged) keyed
+                        # by this run + episode step, so the ingest-trace dialog can link it to
+                        # this episode row. Best-effort: a trace IO/render hiccup never aborts.
+                        if (
+                            capture is not None
+                            and episode is not None
+                            and workspace_path is not None
+                            and run.run_id
+                        ):
+                            try:
+                                trace = build_episode_trace(
+                                    capture=capture,
+                                    chunk_id=ep.chunk_id,
+                                    episode_index=index + 1,
+                                    total=total,
+                                    name=_episode_name(ep),
+                                    text=body,
+                                    group_id=group_id or "",
+                                    reference_time=(
+                                        ref.isoformat() if hasattr(ref, "isoformat") else str(ref)
+                                    ),
+                                    result=result,
+                                    invalidated_count=episode.invalidated_count,
+                                )
+                                write_ingest_trace_sidecar(
+                                    workspace_path,
+                                    run_id=run.run_id,
+                                    step_index=episode.step_index,
+                                    trace=trace,
+                                )
+                            except Exception:
+                                log.warning(
+                                    "⚠️ graphiti.ingest — ingest trace assemble/write failed · "
+                                    "chunk=%s",
+                                    ep.chunk_id,
+                                    exc_info=True,
+                                )
+                        _emit_graph_elements(
+                            event_sink, result, document_id=ep.document_id, group_id=group_id
+                        )
+                        _emit_progress(
+                            event_sink,
+                            document_id=ep.document_id,
+                            index=index + 1,
+                            total=total,
+                            group_id=group_id,
+                        )
+
+            # Kuzu FTS is a static snapshot (not maintained on insert) — refresh it now that
+            # this batch's edges/nodes/episodes are written, so keyword (bm25) search legs and
+            # graphiti's dedup can see them. Done once per batch (not per episode) under the
+            # single-writer lock, since DROP/CREATE_FTS_INDEX are writes.
+            if driver is not None and stats.episodes_processed > 0:
+                async with write_guard:
+                    await rebuild_fts_indices(driver)
 
             log.info(
                 "✅ graphiti.ingest — done · episodes=%d/%d entities=%d edges=%d",

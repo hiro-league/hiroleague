@@ -15,6 +15,9 @@
 import type { FgNode } from './graph-types';
 
 export const CHARGE_STRENGTH = -240;
+// DEFAULT for the live "Center pull" slider (knowledge-graph-prefs.centerStrength). The d3
+// center force is connectivity-blind, so it's the one knob that reels disconnected nodes /
+// detached components back toward the middle. Higher = tighter overall graph.
 export const CENTER_STRENGTH = 0.05;
 // Keeping orphaned / weakly-connected nodes from flying off:
 //  - GRAVITY pulls every node gently toward the origin. Links + charge dominate locally,
@@ -26,7 +29,10 @@ export const CHARGE_DISTANCE_MAX = 320;
 // Degree-based "centrality" layout: pull strength toward the per-node target ring, and
 // how far the outermost (least-connected) ring sits.
 export const RADIAL_STRENGTH = 0.08;
-export const RADIAL_RING = 90; // outer-ring spacing; scaled by √(node count) by the engine
+// DEFAULT for the live "Spread radius" slider (knowledge-graph-prefs.radialRing). Sets how
+// far the outermost (least-connected / disconnected) ring sits; scaled by √(node count) by
+// the engine. Lower = pulls strays inward; higher = pushes them out.
+export const RADIAL_RING = 35;
 
 // Simulation cooling, switched per update kind (see GraphCanvasEngine.setData). graphData
 // always restarts the sim at alpha=1 and there's no public way to start gentler, so we

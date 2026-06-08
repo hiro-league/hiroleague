@@ -1,7 +1,7 @@
 <script lang="ts">
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { FlaskConical, FolderPlus, Library, MessageCircleQuestion } from '@lucide/svelte';
+  import { FolderPlus, Library, MessageCircleQuestion } from '@lucide/svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
@@ -9,7 +9,6 @@
   import { createKnowledgePreferences } from '$lib/preferences/knowledge-preferences.svelte';
   import KnowledgeAskPanel from './ask/KnowledgeAskPanel.svelte';
   import KnowledgeBrowsePanel from './browse/KnowledgeBrowsePanel.svelte';
-  import KnowledgeEvalPanel from './eval/KnowledgeEvalPanel.svelte';
   import KnowledgeIngestPanel from './ingest/KnowledgeIngestPanel.svelte';
   import { KNOWLEDGE_TABS, type KnowledgeTabId } from './shared/knowledge-pure';
   import { createKnowledgePageController } from './state/knowledge-controller.svelte';
@@ -31,8 +30,7 @@
   const knowledgeTabIcons = {
     ingest: FolderPlus,
     browse: Library,
-    ask: MessageCircleQuestion,
-    eval: FlaskConical
+    ask: MessageCircleQuestion
   } as const satisfies Record<KnowledgeTabId, AdminTabDescriptor<KnowledgeTabId>['icon']>;
 
   const tabDescriptors: readonly AdminTabDescriptor<KnowledgeTabId>[] = KNOWLEDGE_TABS.map(
@@ -88,8 +86,6 @@
     <KnowledgeIngestPanel {ctl} />
   {:else if tabPrefs.activeTab === 'browse'}
     <KnowledgeBrowsePanel {ctl} />
-  {:else if tabPrefs.activeTab === 'eval'}
-    <KnowledgeEvalPanel {ctl} />
   {:else}
     <KnowledgeAskPanel {ctl} />
   {/if}

@@ -211,7 +211,7 @@ def judge_on(monkeypatch):
     monkeypatch.setattr(er, "build_answer_model", lambda ws: (object(), "fake:model"))
 
     async def _fake_judge(model, model_id, *, question, answer, expected_answer,
-                          must_not_contain, is_negative_control=False, sink=None):
+                          is_negative_control=False, sink=None):
         return ej.JudgeVerdict(mark=(MARK_PASS if str(answer).strip() else MARK_FAIL), reason="fake")
 
     monkeypatch.setattr(ej, "judge_answer", _fake_judge)
@@ -400,8 +400,11 @@ def test_question_result_to_payload_shape() -> None:
     # line) AND the full answer (expandable row) + per-leg run_id for drill-in.
     assert set(p["legs"].keys()) == {"flat", "graphiti"}
     assert set(p["legs"]["flat"].keys()) == {
-        "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id", "reason", "recalled"
+        "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id", "reason",
+        "recalled", "cost_usd"
     }
+    # Per-question total cost is surfaced for the live running total in the UI.
+    assert "cost_usd" in p
     assert p["legs"]["flat"]["answer"] == "flat"
     assert p["legs"]["graphiti"]["answer"] == "graph"
     assert p["legs"]["flat"]["run_id"] == "knowledge-flat-abc"

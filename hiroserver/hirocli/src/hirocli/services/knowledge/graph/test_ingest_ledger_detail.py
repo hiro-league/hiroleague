@@ -1,10 +1,13 @@
-"""Tests for the §12.2 ingest-ledger deltas: per-edge ``resolve_facts`` (Hybrid),
-content previews, ``edge.invalidated_count`` (from the add_episode tracer span), and
-the ``compact`` collapse.
+"""Tests for the ingest-ledger roll-up (§12.2 observability refactor).
 
-The fake ``add_episode`` fires the adapter usage/embed sinks like a real internal
-pass AND appends an ``add_episode`` ``SpanRecord`` to ``current_spans`` (what the
-``LedgerTracer`` does live) so the supersession count surfaces. No Kuzu/LLM.
+At the ``ledger`` tier, one ``add_episode``'s internal graphiti LLM work is rolled up onto the
+SINGLE ``episode`` row (priced) — there are NO per-operation sub-rows anymore (that breakdown
+moved to the ``trace`` sidecar). The roll-up total equals the sum of the per-op usage fed by the
+adapter sinks, so the run aggregate cost is unchanged.
+
+The fake ``add_episode`` fires the adapter usage/embed sinks like a real internal pass AND appends
+an ``add_episode`` ``SpanRecord`` to ``current_spans`` (what the ``LedgerTracer`` does live) so the
+supersession count surfaces. No Kuzu/LLM.
 """
 
 from __future__ import annotations
@@ -30,6 +33,10 @@ from hirocli.services.knowledge.graph.ingest_ledger import (
 from hirocli.services.knowledge.graph.ledger_tracer import SpanRecord, current_spans
 
 _MODEL = "google:gemini-3-flash-preview"
+# Totals the fake feeds (extract_entities + extract_edges + 2× EdgeDuplicate):
+_TOTAL_IN = 100 + 80 + 30 + 28  # 238
+_TOTAL_OUT = 20 + 15 + 5 + 6  # 46
+_EPISODE = "knowledge_graph_ingest/episode"
 
 
 class _Result:
@@ -54,7 +61,6 @@ class _FakeGraphiti:
                 preview="edges[2]: Adam—WORKS_AT→Cedar Labs",
             )
         )
-        # Per-edge resolve (graphiti semaphore_gathers resolve_edge): two calls.
         record_episode_llm_usage(
             GraphitiLLMUsage(
                 _MODEL, "medium", 30, 5, operation="EdgeDuplicate", elapsed_ms=3.0,
@@ -102,52 +108,50 @@ def _ep() -> GraphitiEpisodeInput:
     )
 
 
-def _nodes(tmp_path: Path) -> dict[str, dict[str, str]]:
-    path = tmp_path / "logs" / "graph.log"
-    with path.open(encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
-    return {r["node"]: r for r in rows if r["row_kind"] == "node"}
+def _rows(tmp_path: Path) -> list[dict[str, str]]:
+    with (tmp_path / "logs" / "graph.log").open(encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
 
 
 @pytest.mark.asyncio
-async def test_rich_renders_per_edge_resolve_facts_and_previews(tmp_path: Path) -> None:
+async def test_episode_row_carries_rolled_up_usage_and_prices(tmp_path: Path) -> None:
     await ingest_episodes(
         _FakeGraphiti(), [_ep()], source_role="user_document", group_id="kb_main",
-        ledger_sink=LedgerSink(tmp_path), ledger_detail="rich",
+        ledger_sink=LedgerSink(tmp_path),
     )
-    by_node = _nodes(tmp_path)
+    rows = _rows(tmp_path)
+    by_node = {r["node"]: r for r in rows if r["row_kind"] == "node"}
 
-    # Two edges → two per-item resolve_facts rows, each with its own decision preview.
-    r1 = by_node["knowledge_graph_ingest/resolve_facts[1]"]
-    r2 = by_node["knowledge_graph_ingest/resolve_facts[2]"]
-    assert "new" in r1["output_preview"]
-    assert "INVALIDATE" in r2["output_preview"]
-    # Aggregate (single) row is NOT used when there are 2+ edges.
-    assert "knowledge_graph_ingest/resolve_facts" not in by_node
+    # The episode row carries the ROLLED-UP usage of all internal LLM ops, and prices.
+    episode = by_node[_EPISODE]
+    assert episode["provider"] == "google"
+    assert episode["model"] == _MODEL
+    assert episode["input_tokens"] == str(_TOTAL_IN)
+    assert episode["output_tokens"] == str(_TOTAL_OUT)
+    assert episode["cost_usd"] not in ("", "0")
+    assert episode["pricing_version"] != ""
 
-    # Content preview rides on the extract nodes (what they produced).
-    assert "Adam" in by_node["knowledge_graph_ingest/extract_entities"]["output_preview"]
-    assert "Cedar Labs" in by_node["knowledge_graph_ingest/extract_facts"]["output_preview"]
+    # NO per-operation sub-rows anymore (they moved to the trace sidecar).
+    children = [n for n in by_node if n.startswith("knowledge_graph_ingest/") and n != _EPISODE]
+    assert children == [], children
 
-    # edge.invalidated_count from the add_episode span surfaces on episode + persist.
-    episode = by_node["knowledge_graph_ingest/episode"]
-    assert "1 invalidated" in episode["output_preview"]
-    assert "invalidated=1" in by_node["knowledge_graph_ingest/persist"]["output_preview"]
+    # The roll-up summary preview still surfaces structure (entities/facts/invalidated/tokens).
+    prev = episode["output_preview"]
+    assert "1 invalidated" in prev
+    assert "llm=4 calls" in prev
+    assert f"{_TOTAL_IN}i/{_TOTAL_OUT}o" in prev
 
 
 @pytest.mark.asyncio
-async def test_compact_aggregates_resolve_facts_and_drops_previews(tmp_path: Path) -> None:
+async def test_run_aggregate_cost_equals_episode_cost(tmp_path: Path) -> None:
+    """Cost-fold guarantee: rolling N per-op costs onto one episode row doesn't change the sum —
+    the ``@run`` aggregate cost equals the episode row's cost (both non-zero)."""
     await ingest_episodes(
         _FakeGraphiti(), [_ep()], source_role="user_document", group_id="kb_main",
-        ledger_sink=LedgerSink(tmp_path), ledger_detail="compact",
+        ledger_sink=LedgerSink(tmp_path),
     )
-    by_node = _nodes(tmp_path)
-
-    # One aggregate resolve_facts row (calls=2), no per-item rows.
-    agg = by_node["knowledge_graph_ingest/resolve_facts"]
-    assert "calls=2" in agg["output_preview"]
-    assert "knowledge_graph_ingest/resolve_facts[1]" not in by_node
-    # Compact omits the content previews on the op rows (stats only).
-    assert "Cedar Labs" not in by_node["knowledge_graph_ingest/extract_facts"]["output_preview"]
-    # The invalidated rollup is still shown (it's structural, not verbose).
-    assert "1 invalidated" in by_node["knowledge_graph_ingest/episode"]["output_preview"]
+    rows = _rows(tmp_path)
+    episode = next(r for r in rows if r["node"] == _EPISODE and r["row_kind"] == "node")
+    run = next(r for r in rows if r["row_kind"] == "run")
+    assert float(episode["cost_usd"]) > 0
+    assert float(run["cost_usd"]) == pytest.approx(float(episode["cost_usd"]))

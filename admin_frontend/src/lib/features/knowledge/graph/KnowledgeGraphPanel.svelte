@@ -14,8 +14,11 @@
   import { capParallelLinks } from './engine/graph-links';
   import { linkEndId } from './engine/graph-types';
   import {
+    CENTER_STRENGTH_MAX,
     GRAPH_OPTION_DEFAULTS,
     MAX_LINKS_CAP,
+    RADIAL_RING_MAX,
+    RADIAL_RING_MIN,
     readGraphOptions,
     readGraphPanelSide,
     writeGraphOptions,
@@ -39,6 +42,8 @@
   const savedOptions = readGraphOptions();
   let linkStrength = $state(savedOptions.linkStrength); // d3 link-force strength: 0 loose … 1 rigid
   let linkDistance = $state(savedOptions.linkDistance); // d3 link-force resting length in px
+  let centerStrength = $state(savedOptions.centerStrength); // d3 center pull: reels in drifting nodes/groups
+  let radialRing = $state(savedOptions.radialRing); // outer-ring radius for least-connected/disconnected nodes
   let curveAmount = $state(savedOptions.curveAmount); // max bow for fanned parallel edges (0 = straight)
   let maxLinksPerPair = $state(savedOptions.maxLinksPerPair); // parallel edges per pair; MAX = all
   // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
@@ -156,7 +161,13 @@
       onLinkClick: (id) => graph.selectEdge(id),
       onBackgroundClick: () => graph.clearSelection()
     });
-    await engine.mount(container, { linkStrength, linkDistance, curveAmount });
+    await engine.mount(container, {
+      linkStrength,
+      linkDistance,
+      curveAmount,
+      centerStrength,
+      radialRing
+    });
     // Resolve the partition list + active group FIRST (default = first in list, or the
     // remembered one), so the initial paint scopes to a group that actually has data rather
     // than the possibly-empty backend default. The LIVE SSE subscription is owned by the page
@@ -203,11 +214,19 @@
     engine?.markIntentionalReframe();
   });
 
-  // "Link strength" / "Link distance" sliders → d3 link-force (engine reheats).
+  // Layout-force sliders ("Link strength"/"Link distance"/"Center pull"/"Spread radius")
+  // → d3 forces (engine reheats; radial ring retargets only when it actually changed).
   $effect(() => {
     const linkStrengthValue = linkStrength; // tracked
     const linkDistanceValue = linkDistance; // tracked
-    engine?.setForces({ linkStrength: linkStrengthValue, linkDistance: linkDistanceValue });
+    const centerStrengthValue = centerStrength; // tracked
+    const radialRingValue = radialRing; // tracked
+    engine?.setForces({
+      linkStrength: linkStrengthValue,
+      linkDistance: linkDistanceValue,
+      centerStrength: centerStrengthValue,
+      radialRing: radialRingValue
+    });
   });
 
   // "Edge curvature" slider → re-fan the current edges (no reheat; render-only property).
@@ -229,7 +248,15 @@
   // Persist the graph-options sliders to localStorage whenever any of them change (also
   // runs once on mount, writing the just-loaded values back — harmless).
   $effect(() => {
-    writeGraphOptions({ linkStrength, linkDistance, curveAmount, maxLinksPerPair, searchFocusMode });
+    writeGraphOptions({
+      linkStrength,
+      linkDistance,
+      centerStrength,
+      radialRing,
+      curveAmount,
+      maxLinksPerPair,
+      searchFocusMode
+    });
   });
 
   // "Reset" in the options panel → restore slider defaults (the $effect above then
@@ -237,6 +264,8 @@
   function resetGraphOptions(): void {
     linkStrength = GRAPH_OPTION_DEFAULTS.linkStrength;
     linkDistance = GRAPH_OPTION_DEFAULTS.linkDistance;
+    centerStrength = GRAPH_OPTION_DEFAULTS.centerStrength;
+    radialRing = GRAPH_OPTION_DEFAULTS.radialRing;
     curveAmount = GRAPH_OPTION_DEFAULTS.curveAmount;
     maxLinksPerPair = GRAPH_OPTION_DEFAULTS.maxLinksPerPair;
     searchFocusMode = GRAPH_OPTION_DEFAULTS.searchFocusMode;
@@ -349,9 +378,14 @@
           <KnowledgeGraphOptionsPanel
             bind:linkStrength
             bind:linkDistance
+            bind:centerStrength
+            bind:radialRing
             bind:curveAmount
             bind:maxLinksPerPair
             bind:searchFocusMode
+            centerStrengthMax={CENTER_STRENGTH_MAX}
+            radialRingMin={RADIAL_RING_MIN}
+            radialRingMax={RADIAL_RING_MAX}
             maxLinksCap={MAX_LINKS_CAP}
             onReset={resetGraphOptions}
             onClose={() => (optionsOpen = false)}

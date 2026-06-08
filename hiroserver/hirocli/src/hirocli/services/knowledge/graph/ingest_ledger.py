@@ -27,7 +27,6 @@ See docs/knowledge-graphiti-pivot-design.md §6 (ingest) and §12 (observability
 
 from __future__ import annotations
 
-import time
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -69,22 +68,6 @@ _NODE_FOR_OPERATION: dict[str, str] = {
 }
 _FALLBACK_NODE = "attributes"
 
-# Stable render order for the per-episode sub-steps (sub_step is assigned in the
-# order children are spawned, and the Graph Runs reader sorts by it).
-_NODE_ORDER: tuple[str, ...] = (
-    "extract_entities",
-    "resolve_entities",
-    "summarize_entities",
-    "attributes",
-    "extract_facts",
-    "date_facts",
-    "resolve_facts",
-    "completion",
-    "embed",
-    "persist",
-)
-
-
 def _node_for_operation(operation: str) -> str:
     return _NODE_FOR_OPERATION.get(operation or "", _FALLBACK_NODE)
 
@@ -95,10 +78,8 @@ def _node_for_operation(operation: str) -> str:
 RESOLVE_FACTS_NODE = "resolve_facts"
 
 # Episode input-preview budget (#1 — surface the INGESTED TEXT so the admin can visually
-# validate extraction against source). Rich mode shows a generous slice of the chunk;
-# compact mode keeps the metadata-sized default. Capped so a chunk can't bloat the ledger.
+# validate extraction against source). Capped so a chunk can't bloat the ledger.
 _EPISODE_TEXT_PREVIEW_MAX_RICH = 1500
-_EPISODE_TEXT_PREVIEW_MAX_COMPACT = 280
 
 
 @dataclass
@@ -145,6 +126,10 @@ class EpisodeLedger:
     # From the ``add_episode`` tracer span (docs §12.2.1) — the supersession count
     # is invisible to ``AddEpisodeResults`` (which only returns current edges).
     invalidated_count: int = 0
+    # The episode parent step's index in the run timeline (set by ``ledger_episode``).
+    # Lets the ingest loop key the per-episode trace sidecar to THIS ledger row so the
+    # ingest-trace dialog can link them (mirrors the retrieval side's ``entry.step_index``).
+    step_index: int = 0
 
     def record_llm(self, usage: GraphitiLLMUsage) -> None:
         node = _node_for_operation(usage.operation)
@@ -234,7 +219,6 @@ class GraphIngestLedgerRun:
     nested: bool  # True when reusing a parent ``current_run`` (no aggregate row here)
     accumulator: RunAccumulator | None  # None when nested or sink is None
     sink: LedgerSink | None  # None disables ledgering (tests/CLI without a sink)
-    ledger_detail: str = "rich"  # rich = content previews + per-edge resolve_facts
 
 
 @asynccontextmanager
@@ -242,7 +226,6 @@ async def knowledge_graph_ingest_ledger(
     *,
     sink: LedgerSink | None,
     document_id: str = "",
-    ledger_detail: str = "rich",
 ) -> AsyncIterator[GraphIngestLedgerRun]:
     """Open a ledger context for one graph-ingest call.
 
@@ -251,19 +234,13 @@ async def knowledge_graph_ingest_ledger(
     no aggregate ``@run`` row is written here.
     """
     if sink is None:
-        yield GraphIngestLedgerRun(
-            run_id="", nested=False, accumulator=None, sink=None, ledger_detail=ledger_detail
-        )
+        yield GraphIngestLedgerRun(run_id="", nested=False, accumulator=None, sink=None)
         return
 
     parent = current_run.get()
     if parent is not None:
         yield GraphIngestLedgerRun(
-            run_id=parent.run_id,
-            nested=True,
-            accumulator=None,
-            sink=sink,
-            ledger_detail=ledger_detail,
+            run_id=parent.run_id, nested=True, accumulator=None, sink=sink
         )
         return
 
@@ -272,11 +249,7 @@ async def knowledge_graph_ingest_ledger(
     token = current_run.set(accumulator)
     try:
         yield GraphIngestLedgerRun(
-            run_id=run_id,
-            nested=False,
-            accumulator=accumulator,
-            sink=sink,
-            ledger_detail=ledger_detail,
+            run_id=run_id, nested=False, accumulator=accumulator, sink=sink
         )
     finally:
         current_run.reset(token)
@@ -307,14 +280,16 @@ async def ledger_episode(
         return
 
     collector = EpisodeLedger()
-    entry = run.sink.open_entry(EPISODE_NODE, {}, None, captures=frozenset({"decision"}))
-    entry.set_decision("episode", "")
-    # Rich mode shows a generous slice of the source text; compact stays metadata-sized.
-    text_max = (
-        _EPISODE_TEXT_PREVIEW_MAX_COMPACT
-        if run.ledger_detail == "compact"
-        else _EPISODE_TEXT_PREVIEW_MAX_RICH
+    # ``usage`` capture: the episode row carries the ROLLED-UP token usage for all of this
+    # episode's internal graphiti work, so it prices + folds into the run aggregate as ONE row
+    # (the per-operation breakdown lives only in the trace sidecar now — docs §12.2).
+    entry = run.sink.open_entry(
+        EPISODE_NODE, {}, None, captures=frozenset({"usage", "decision"})
     )
+    # Carry the step index onto the collector so the caller can anchor the ingest-trace
+    # sidecar to this episode row (the trace dialog opens from it).
+    collector.step_index = int(getattr(entry, "step_index", 0) or 0)
+    entry.set_decision("episode", "")
     entry.set_input_preview(
         _episode_input_preview(
             episode_index=episode_index,
@@ -324,7 +299,7 @@ async def ledger_episode(
             reference_time=reference_time,
             text=text,
         ),
-        max_len=text_max,
+        max_len=_EPISODE_TEXT_PREVIEW_MAX_RICH,
     )
     # Buffer graphiti's tracer spans for this episode so we can read the
     # ``add_episode`` rollup (esp. ``edge.invalidated_count`` — the supersession the
@@ -333,20 +308,19 @@ async def ledger_episode(
     token_entry = current_entry.set(entry)
     token_episode = current_ingest_episode.set(collector)
     token_spans = current_spans.set(spans)
-    started = time.perf_counter()
     try:
         yield collector
     except Exception as exc:
         _apply_episode_span_rollup(collector, spans)
         _record_node_exception(entry, exc)
-        _flush_episode_children(entry, collector, started, run.ledger_detail)
+        _stamp_episode_rollup(entry, collector)
         run.sink.write_rows(entry.rows(include_parent=True))
         raise
     else:
         _apply_episode_span_rollup(collector, spans)
         entry.set_output_preview(_episode_output_preview(collector))
         entry.finish("ok")
-        _flush_episode_children(entry, collector, started, run.ledger_detail)
+        _stamp_episode_rollup(entry, collector)
         run.sink.write_rows(entry.rows(include_parent=True))
     finally:
         current_spans.reset(token_spans)
@@ -374,121 +348,39 @@ def _apply_episode_span_rollup(collector: EpisodeLedger, spans: list[SpanRecord]
             return
 
 
-def _flush_episode_children(
-    entry: LedgerEntry,
-    collector: EpisodeLedger,
-    started: float,
-    ledger_detail: str = "rich",
-) -> None:
-    """Spawn one nested sub-step row per operation (+ resolve_facts + embed + persist).
-
-    ``rich`` adds a per-node content preview (what the step produced) and renders
-    ``resolve_facts`` as one row per edge; ``compact`` shows stats only and folds
-    ``resolve_facts`` into a single aggregate row. (Hybrid policy, docs §12.2.1.)"""
-    rich = ledger_detail != "compact"
-    total_elapsed_ms = (time.perf_counter() - started) * 1000.0
-    accounted_ms = 0.0
-
-    for node_name in _NODE_ORDER:
-        if node_name == "embed":
-            if collector.embed_calls:
-                child = entry.spawn_child(
-                    node=f"{GRAPH_INGEST_NODE_PREFIX}/embed",
-                    elapsed_ms=int(collector.embed_elapsed_ms),
-                    captures={"decision"},
-                )
-                child.set_decision("embed")
-                child.set_output_preview(
-                    f"vectors={collector.embed_vectors} · calls={collector.embed_calls}"
-                )
-                accounted_ms += collector.embed_elapsed_ms
-            continue
-        if node_name == "persist":
-            continue  # emitted last, after computing the residual elapsed
-        if node_name == RESOLVE_FACTS_NODE:
-            accounted_ms += _flush_resolve_facts(entry, collector, rich=rich)
-            continue
-
-        agg = collector.ops.get(node_name)
-        if agg is None:
-            continue
-        child = entry.spawn_child(
-            node=f"{GRAPH_INGEST_NODE_PREFIX}/{node_name}",
-            elapsed_ms=int(agg.elapsed_ms),
-            captures={"usage", "decision"},
-        )
-        provider = agg.model_id.split(":", 1)[0] if ":" in agg.model_id else ""
-        child.add_usage(
-            provider=provider,
-            model=agg.model_id,
-            input_tokens=agg.input_tokens,
-            output_tokens=agg.output_tokens,
-        )
-        child.set_decision(node_name)
-        stats = f"calls={agg.calls} · {agg.input_tokens}i/{agg.output_tokens}o"
-        child.set_output_preview(f"{stats} · {agg.preview}" if rich and agg.preview else stats)
-        accounted_ms += agg.elapsed_ms
-
-    # ``persist`` carries no model (DB write) — its elapsed is the residual after the
-    # LLM/embed calls (Kuzu commit + Graphiti orchestration), so the wall time adds up.
-    persist_ms = max(0, int(total_elapsed_ms - accounted_ms))
-    persist = entry.spawn_child(
-        node=f"{GRAPH_INGEST_NODE_PREFIX}/persist",
-        elapsed_ms=persist_ms,
-        captures={"decision"},
-    )
-    persist.set_decision("persist")
-    persist.set_output_preview(_persist_preview(collector))
+def _rollup_model_id(collector: EpisodeLedger) -> str:
+    """Dominant model id for the episode roll-up: the op (or resolve edge) with the most tokens
+    wins — graphiti runs the bulk of the work on the medium/extraction model — falling back to
+    any non-empty id."""
+    best_id, best_toks = "", -1
+    for agg in collector.ops.values():
+        toks = agg.input_tokens + agg.output_tokens
+        if agg.model_id and toks > best_toks:
+            best_id, best_toks = agg.model_id, toks
+    for item in collector.resolve_items:
+        toks = item.input_tokens + item.output_tokens
+        if item.model_id and toks > best_toks:
+            best_id, best_toks = item.model_id, toks
+    return best_id
 
 
-def _flush_resolve_facts(entry: LedgerEntry, collector: EpisodeLedger, *, rich: bool) -> float:
-    """Render ``resolve_facts``. Rich = one row per edge; compact = one aggregate row.
+def _stamp_episode_rollup(entry: LedgerEntry, collector: EpisodeLedger) -> None:
+    """Stamp the episode PARENT row with the rolled-up token usage of all its internal graphiti
+    LLM work, so it prices as ONE row and folds into the run aggregate.
 
-    Returns the elapsed_ms accounted, so the caller's persist residual stays correct."""
-    items = collector.resolve_items
-    if not items:
-        return 0.0
-    total_ms = sum(r.elapsed_ms for r in items)
-    in_tok = sum(r.input_tokens for r in items)
-    out_tok = sum(r.output_tokens for r in items)
-    model_id = next((r.model_id for r in items if r.model_id), "")
+    Replaces the former per-operation sub-rows (extract/dedupe/resolve_facts/…): the granular
+    breakdown now lives only in the ``trace``-tier sidecar (docs §12.2). The roll-up total equals
+    the sum of those former priced rows — ``embed``/``persist`` were never priced — so the
+    aggregate cost is unchanged. No LLM work (or no usage reported) → row stays decision-only."""
+    in_tok = collector.total_input_tokens
+    out_tok = collector.total_output_tokens
+    if not (in_tok or out_tok):
+        return
+    model_id = _rollup_model_id(collector)
     provider = model_id.split(":", 1)[0] if ":" in model_id else ""
-
-    if rich and len(items) > 1:
-        # One row per edge — each carries its own new/merge/INVALIDATE preview.
-        for i, item in enumerate(items, start=1):
-            child = entry.spawn_child(
-                node=f"{GRAPH_INGEST_NODE_PREFIX}/{RESOLVE_FACTS_NODE}[{i}]",
-                elapsed_ms=int(item.elapsed_ms),
-                captures={"usage", "decision"},
-            )
-            ip = item.model_id.split(":", 1)[0] if ":" in item.model_id else ""
-            child.add_usage(
-                provider=ip,
-                model=item.model_id,
-                input_tokens=item.input_tokens,
-                output_tokens=item.output_tokens,
-            )
-            child.set_decision(RESOLVE_FACTS_NODE)
-            stats = f"{item.input_tokens}i/{item.output_tokens}o"
-            child.set_output_preview(f"{stats} · {item.preview}" if item.preview else stats)
-        return total_ms
-
-    # compact (or single edge) — one aggregate row.
-    child = entry.spawn_child(
-        node=f"{GRAPH_INGEST_NODE_PREFIX}/{RESOLVE_FACTS_NODE}",
-        elapsed_ms=int(total_ms),
-        captures={"usage", "decision"},
-    )
-    child.add_usage(
+    entry.add_usage(
         provider=provider, model=model_id, input_tokens=in_tok, output_tokens=out_tok
     )
-    child.set_decision(RESOLVE_FACTS_NODE)
-    preview = f"calls={len(items)} · {in_tok}i/{out_tok}o"
-    if rich and items[0].preview:
-        preview += f" · {items[0].preview}"
-    child.set_output_preview(preview)
-    return total_ms
 
 
 def _episode_input_preview(
@@ -521,22 +413,6 @@ def _episode_output_preview(collector: EpisodeLedger) -> str:
         f"entities={collector.persist_nodes} · facts={collector.persist_edges}{inv}"
         f" · llm={collector.total_llm_calls} calls"
         f" · tok={collector.total_input_tokens}i/{collector.total_output_tokens}o"
-    )
-
-
-def _persist_preview(collector: EpisodeLedger, *, limit: int = 4) -> str:
-    nodes = collector.persist_node_names
-    edges = collector.persist_edge_facts
-    node_part = ", ".join(nodes[:limit]) or "—"
-    if len(nodes) > limit:
-        node_part += f" (+{len(nodes) - limit})"
-    edge_part = " | ".join(edges[:limit]) or "—"
-    if len(edges) > limit:
-        edge_part += f" (+{len(edges) - limit})"
-    inv = f" · invalidated={collector.invalidated_count}" if collector.invalidated_count else ""
-    return (
-        f"nodes[{collector.persist_nodes}]: {node_part}"
-        f" · edges[{collector.persist_edges}]: {edge_part}{inv}"
     )
 
 

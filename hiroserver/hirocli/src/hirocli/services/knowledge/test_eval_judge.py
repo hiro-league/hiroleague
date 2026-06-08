@@ -61,14 +61,14 @@ async def test_judge_maps_verdict_to_mark() -> None:
     m = _FakeModel(verdict="pass")
     v = await judge_answer(
         m, "fake:model", question="q", answer="Otto.", expected_answer="Otto.",
-        must_not_contain=["Pip"], sink=None,
+        sink=None,
     )
     assert v.mark == MARK_PASS and v.grounded is True
 
     m_fail = _FakeModel(verdict="fail")
     v2 = await judge_answer(
         m_fail, "fake:model", question="q", answer="Pip.", expected_answer="Otto.",
-        must_not_contain=["Pip"], sink=None,
+        sink=None,
     )
     assert v2.mark == MARK_FAIL
 
@@ -77,7 +77,7 @@ async def test_judge_maps_verdict_to_mark() -> None:
 async def test_judge_unknown_verdict_defaults_to_fail() -> None:
     v = await judge_answer(
         _FakeModel(verdict="weird"), "fake:model", question="q", answer="x",
-        expected_answer="y", must_not_contain=[], sink=None,
+        expected_answer="y", sink=None,
     )
     assert v.mark == MARK_FAIL
 
@@ -100,7 +100,6 @@ async def test_memory_question_wires_answer_and_judge() -> None:
         "id": "q1",
         "question": "What is the current mascot drone?",
         "expected_answer": "Otto",
-        "must_not_contain": ["Pip"],
         "category": "supersession",
     }
     row = await _memory_question(
@@ -122,7 +121,7 @@ async def test_memory_question_wires_answer_and_judge() -> None:
 @pytest.mark.asyncio
 async def test_memory_question_judge_off_has_answer_no_mark() -> None:
     mem = _FakeMemory(["Otto is the current mascot drone"])
-    q = {"id": "q1", "question": "drone?", "expected_answer": "Otto", "must_not_contain": []}
+    q = {"id": "q1", "question": "drone?", "expected_answer": "Otto"}
     row = await _memory_question(
         mem, q, user_id=MEMORY_EVAL_USER_ID, character_id="helix",
         model=_FakeModel(answer="Otto."), model_id="fake:model", judge=False,

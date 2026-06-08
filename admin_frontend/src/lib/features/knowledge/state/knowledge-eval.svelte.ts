@@ -52,7 +52,12 @@ export const EVAL_LEG_LABEL: Record<string, string> = {
   graphiti: 'Graphiti'
 };
 import { PREF_KEYS } from '$lib/preferences/keys';
-import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
+import {
+  readLocalBoolean,
+  readLocalString,
+  writeLocalBoolean,
+  writeLocalString
+} from '$lib/preferences/storage';
 
 export type EvalStatus =
   | 'idle' // nothing has run yet (or the last run was cleared)
@@ -77,8 +82,7 @@ export type EvalRow = {
   legs: Record<string, EvalQuestionLeg>;
   delta: string;
   gold: string; // the ideal answer (shown as "Ideal")
-  stale_hit: boolean; // memory: a recalled fact leaked a must_not_contain value
-  must_not_contain: string[];
+  cost_usd: number; // whole-question cost (LLM + reranker), for the live running total
 };
 
 function rowFromPayload(p: EvalQuestionPayload): EvalRow {
@@ -94,8 +98,7 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     legs: p.legs ?? {},
     delta: p.delta ?? '0',
     gold: p.gold ?? '',
-    stale_hit: p.stale_hit ?? false,
-    must_not_contain: p.must_not_contain ?? []
+    cost_usd: p.cost_usd ?? 0
   };
 }
 
@@ -135,6 +138,31 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   const selectedCorpus = (): EvalCorpus | null =>
     corpuses.find((c) => c.id === selectedCorpusId) ?? null;
 
+  // Per-track last-selected corpus (localStorage). Survives a fresh page load so the
+  // user lands back on the corpus they were working with — if it's still in the
+  // scanned list; otherwise we fall back to the first corpus (see scanCorpuses).
+  function readCorpusPref(t: EvalTrack): string {
+    try {
+      const raw = readLocalString(PREF_KEYS.knowledgeEvalCorpus);
+      if (!raw) return '';
+      return (JSON.parse(raw) as Partial<Record<EvalTrack, string>>)[t] ?? '';
+    } catch {
+      return '';
+    }
+  }
+  function writeCorpusPref(t: EvalTrack, id: string) {
+    let map: Partial<Record<EvalTrack, string>> = {};
+    try {
+      const raw = readLocalString(PREF_KEYS.knowledgeEvalCorpus);
+      if (raw) map = JSON.parse(raw) as Partial<Record<EvalTrack, string>>;
+    } catch {
+      map = {};
+    }
+    if (id) map[t] = id;
+    else delete map[t];
+    writeLocalString(PREF_KEYS.knowledgeEvalCorpus, JSON.stringify(map));
+  }
+
   function isModeSelected(mode: EvalLeg): boolean {
     return selectedModes.includes(mode);
   }
@@ -157,8 +185,12 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       corpuses = res.data.corpuses ?? [];
       // Keep the folder the server resolved (so the default eval/ path shows in the field).
       if (!folder.trim() && res.data.folder) folder = res.data.folder;
-      const keep = corpuses.find((c) => c.id === selectedCorpusId);
+      // Prefer the current in-session selection, else the persisted one (fresh load),
+      // else the first corpus. Only ids that still exist in the scanned list survive.
+      const desired = selectedCorpusId || readCorpusPref(track);
+      const keep = corpuses.find((c) => c.id === desired);
       selectedCorpusId = keep ? keep.id : (corpuses[0]?.id ?? '');
+      if (selectedCorpusId) writeCorpusPref(track, selectedCorpusId);
       await loadQuestions();
     } catch (err) {
       corpusesError = err instanceof Error ? err.message : 'Failed to scan corpuses.';
@@ -218,6 +250,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   function selectCorpus(id: string) {
     if (selectedCorpusId === id) return;
     selectedCorpusId = id;
+    writeCorpusPref(track, id);
     void loadQuestions();
   }
 
@@ -249,6 +282,11 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
 
   function clearSelection() {
     selected = new Set();
+  }
+
+  /** Select every question in the loaded bank (no cap). */
+  function selectAll() {
+    selected = new Set(questions.map((q) => q.id));
   }
 
   // Run state — hydrated from the server on mount (see ``init``), then kept live
@@ -283,8 +321,19 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
 
   /** Mount hook: subscribe (so an already-running eval keeps streaming) then
    *  replay the server's run state. Subscribe-first avoids a gap; the hydrate's
-   *  index-keyed upsert dedupes any event seen in the tiny overlap window. */
-  async function init() {
+   *  index-keyed upsert dedupes any event seen in the tiny overlap window.
+   *
+   *  ``initialTrack`` lets the host page start the model on the persisted /
+   *  deep-linked track tab. We set it WITHOUT a scan here (unlike ``setTrack``)
+   *  so init's own ``scanCorpuses`` is the single scan for the right track.
+   *  ``hydrateFromServer`` may still override the track if a run is in flight. */
+  async function init(initialTrack?: EvalTrack) {
+    if (initialTrack && initialTrack !== track) {
+      track = initialTrack;
+      selectedCorpusId = '';
+      selected = new Set();
+      questions = [];
+    }
     ensureSubscribed();
     await hydrateFromServer();
     // Populate the corpus picker for the current track (cheap; independent of any run).
@@ -313,7 +362,13 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     runId = state.run_id;
     status = state.status;
     totalQuestions = state.total_questions;
-    if (state.track) track = state.track;
+    // Adopt the run's track ONLY while it's live (starting/running) so navigating
+    // in mid-run — even from a different origin with its own tab persistence —
+    // snaps to the running track. A terminal run must NOT hijack the user's
+    // selected / deep-linked track tab (the page owns the track now).
+    if (state.track && (state.status === 'starting' || state.status === 'running')) {
+      track = state.track;
+    }
     if (state.modes?.length) runModes = state.modes;
     setupEvents = state.setup_events ?? [];
     setupPhase = setupEvents.length > 0 ? setupEvents[setupEvents.length - 1] : null;
@@ -564,6 +619,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     toggleQuestion,
     setCategorySelected,
     clearSelection,
+    selectAll,
     // Leg selection + the current run's active legs (table/summary columns).
     get selectedModes() {
       return selectedModes;

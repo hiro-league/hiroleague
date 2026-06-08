@@ -1,9 +1,10 @@
-"""Tests for the retrieval ledger — ``graph_expand`` unfolded into search sub-steps.
+"""Tests for the retrieval ledger — the priced ``rerank`` roll-up on the fact-search row.
 
-``flush_graph_expand`` turns buffered graphiti ``search.*`` spans + the
-``GraphitiExpansion`` result into one flattened level of sub-step rows under the
-``graph_expand`` entry. We open a real ``LedgerEntry``, flush, write rows, and read
-``logs/graph.log``. No graphiti, no network. (docs §12.2.2)
+At the ``ledger`` observability tier the graphiti fact-search renders as its single Graph-Runs
+node plus (when a catalogued cross-encoder ran) ONE priced ``rerank`` roll-up child carrying the
+model + processed tokens. RRF/MMR / local rerankers add no child. The deep per-stage breakdown
+lives only in the ``trace`` sidecar (not exercised here). We open a real ``LedgerEntry``, flush,
+write rows, and read ``logs/graph.log``. No graphiti, no network. (docs §12.2)
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import pytest
 from hiro_commons.log import Logger
 from hirocli.runtime.agent_graph.ledger import LedgerSink
 from hirocli.services.knowledge.graph.graphiti_search import GraphitiExpansion, RankedFact
-from hirocli.services.knowledge.graph.ledger_tracer import SpanRecord
+from hirocli.services.knowledge.graph.ledger_tracer import RerankUsage
 from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
 
 _GE = "knowledge/graph_expand"
@@ -32,23 +33,6 @@ def _setup_logger() -> Any:
     LedgerSink._opened.clear()
 
 
-def _spans() -> list[SpanRecord]:
-    return [
-        SpanRecord("search.embed_query_vector", {"query_vector.dimension": 1024}, 41.0),
-        SpanRecord(
-            "search.edge_search.execute_methods",
-            {"result_set_count": 2, "non_empty_result_sets": 2},
-            96.0,
-        ),
-        SpanRecord("search.edge_search.expand_bfs", {}, 28.0),
-        SpanRecord("search.edge_search.seed_rrf", {"candidate_count": 14}, 3.0),
-        SpanRecord(
-            "search.edge_search.rerank", {"candidate_count": 14, "reranked_count": 8}, 5.0
-        ),
-        SpanRecord("llm.generate", {}, 1.0),  # never mapped → ignored
-    ]
-
-
 def _expansion() -> GraphitiExpansion:
     return GraphitiExpansion(
         chunk_ids=("c1", "c2", "c3"),
@@ -57,92 +41,60 @@ def _expansion() -> GraphitiExpansion:
         facts_used=6,
         ranked=(
             RankedFact("Adam—WORKS_AT→Cedar Labs", valid_at="2024-08", chunk_id="8628aaaa"),
-            RankedFact(
-                "Adam—WORKS_AT→Brightloom",
-                valid_at="2024-01",
-                invalid_at="2024-08",
-                chunk_id="bbbb",
-                superseded=True,
-            ),
+            RankedFact("Adam—WORKS_AT→Brightloom", valid_at="2024-01", chunk_id="bbbb"),
         ),
     )
 
 
-def _flush_and_read(tmp_path: Path, detail: str) -> dict[str, dict[str, str]]:
+def _flush_and_read(
+    tmp_path: Path, rerank_usage: RerankUsage | None
+) -> dict[str, dict[str, str]]:
     sink = LedgerSink(tmp_path)
     entry = sink.open_entry(_GE, {}, None, captures=frozenset({"decision"}))
-    flush_graph_expand(entry, _spans(), _expansion(), temporal="current", ledger_detail=detail)
+    flush_graph_expand(entry, _expansion(), rerank_usage=rerank_usage)
     sink.write_rows(entry.rows(include_parent=True))
-    path = tmp_path / "logs" / "graph.log"
-    with path.open(encoding="utf-8") as fh:
+    with (tmp_path / "logs" / "graph.log").open(encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     return {r["node"]: r for r in rows if r["row_kind"] == "node"}
 
 
-def test_rich_unfolds_search_into_substeps_with_ranked_facts(tmp_path: Path) -> None:
-    by_node = _flush_and_read(tmp_path, "rich")
+def test_cloud_rerank_emits_one_priced_rollup(tmp_path: Path) -> None:
+    """A catalogued cloud reranker → ONE ``rerank`` child with provider/model/tokens + a real
+    cost, nested under the parent. No other sub-steps."""
+    usage = RerankUsage(
+        model_id="voyage:rerank-2.5", processed_tokens=5000, calls=1, elapsed_ms=42.0
+    )
+    by_node = _flush_and_read(tmp_path, usage)
 
-    # Every graphiti search phase + the temporal_filter wrapper renders.
-    for node in (
-        f"{_GE}/embed_query",
-        f"{_GE}/candidate_gen",
-        f"{_GE}/bfs_expand",
-        f"{_GE}/rrf_fuse",
-        f"{_GE}/rerank",
-        f"{_GE}/temporal_filter",
-    ):
-        assert node in by_node, node
-
-    # llm.generate was not mapped.
-    assert f"{_GE}/llm.generate" not in by_node
-
-    # Counts come from span attributes.
-    assert "dim=1024" in by_node[f"{_GE}/embed_query"]["output_preview"]
-    assert "methods=2" in by_node[f"{_GE}/candidate_gen"]["output_preview"]
-    assert "14 → 8 kept" in by_node[f"{_GE}/rerank"]["output_preview"]
-
-    # Ranked facts (text, not vectors) ride on the rerank node; superseded marked.
-    rerank_preview = by_node[f"{_GE}/rerank"]["output_preview"]
-    assert "Adam—WORKS_AT→Cedar Labs" in rerank_preview
-    assert "⊘" in rerank_preview  # the superseded Brightloom fact
-
-    # temporal_filter: current mode reports the query-level push-down (design §7);
-    # the fixture's 1 superseded fact slipped past it and is defensively dropped —
-    # labelled as such, never as the primary filter.
-    tf = by_node[f"{_GE}/temporal_filter"]["output_preview"]
-    assert "push-down" in tf
-    assert "6 current facts" in tf
-    assert "slipped past push-down" in tf
-    assert "chunk_ids[3]" in tf
+    rerank = by_node.get(f"{_GE}/rerank")
+    assert rerank is not None, "priced rerank roll-up child should be spawned"
+    assert rerank["provider"] == "voyage"
+    assert rerank["model"] == "voyage:rerank-2.5"  # FULL prefixed id → catalog resolves + prices
+    assert rerank["input_tokens"] == "5000"
+    assert rerank["cost_usd"] not in ("", "0")  # a real, non-zero cost
+    assert rerank["pricing_version"] != ""
+    assert rerank["sub_step"] not in ("", None)  # nests under graph_expand (2-level)
+    # The ONLY child is the rerank roll-up — no embed_query/candidate_gen/bfs_expand/etc.
+    children = [n for n in by_node if n.startswith(f"{_GE}/")]
+    assert children == [f"{_GE}/rerank"], children
 
 
-def test_compact_keeps_counts_drops_ranked_facts(tmp_path: Path) -> None:
-    by_node = _flush_and_read(tmp_path, "compact")
-    # Sub-steps still render (with counts)…
-    assert f"{_GE}/rerank" in by_node
-    assert "14 → 8 kept" in by_node[f"{_GE}/rerank"]["output_preview"]
-    # …but the ranked fact list is omitted in compact.
-    assert "Adam—WORKS_AT→Cedar Labs" not in by_node[f"{_GE}/rerank"]["output_preview"]
+def test_no_rerank_no_child(tmp_path: Path) -> None:
+    """RRF/MMR (no rerank usage) → no children at all; the parent stands alone."""
+    by_node = _flush_and_read(tmp_path, None)
+    assert [n for n in by_node if n.startswith(f"{_GE}/")] == []
+
+    # An empty accumulator (cross-encoder wired but never called) is also no-op.
+    by_node_empty = _flush_and_read(tmp_path, RerankUsage())
+    assert [n for n in by_node_empty if n.startswith(f"{_GE}/")] == []
 
 
-def test_substeps_nest_under_graph_expand(tmp_path: Path) -> None:
-    by_node = _flush_and_read(tmp_path, "rich")
-    # Children share the parent's step_index and carry a sub_step (2-level nesting).
+def test_local_reranker_priced_free(tmp_path: Path) -> None:
+    """A local reranker id misses the catalog → the row still renders, priced at $0 (free)."""
+    usage = RerankUsage(
+        model_id="flashrank:ms-marco-MiniLM", processed_tokens=4000, calls=1, elapsed_ms=12.0
+    )
+    by_node = _flush_and_read(tmp_path, usage)
     rerank = by_node[f"{_GE}/rerank"]
-    assert rerank["sub_step"] not in ("", None)
-
-
-def test_temporal_all_reports_history_not_dropped(tmp_path: Path) -> None:
-    """temporal=all keeps superseded facts — the ledger must report them as *shown*,
-    not *dropped* (the latent mislabel the §7 fix corrects)."""
-    sink = LedgerSink(tmp_path)
-    entry = sink.open_entry(_GE, {}, None, captures=frozenset({"decision"}))
-    flush_graph_expand(entry, _spans(), _expansion(), temporal="all", ledger_detail="rich")
-    sink.write_rows(entry.rows(include_parent=True))
-    with (tmp_path / "logs" / "graph.log").open(encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
-    by_node = {r["node"]: r for r in rows if r["row_kind"] == "node"}
-    tf = by_node[f"{_GE}/temporal_filter"]["output_preview"]
-    assert "history included" in tf
-    assert "superseded shown" in tf
-    assert "dropped" not in tf
+    assert rerank["model"] == "flashrank:ms-marco-MiniLM"
+    assert rerank["cost_usd"] == "0"  # not in catalog → calculated free, not blank

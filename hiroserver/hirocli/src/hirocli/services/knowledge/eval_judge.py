@@ -1,9 +1,9 @@
 """Eval LLM steps — answer-from-context + an optional LLM judge, shared by both tracks.
 
 Replaces the old substring scorer (dropped): instead of matching fragments, an LLM **judge**
-grades the model's answer against the ideal answer (``expected_answer``) and the superseded-value
-guard (``must_not_contain``), returning a mark compatible with the existing ``Score``/``MARK_*``
-(so the table marks, Δ, gate, and per-category breakdown keep working).
+grades the model's answer against the ideal answer (``expected_answer``), returning a mark
+compatible with the existing ``Score``/``MARK_*`` (so the table marks, Δ, gate, and per-category
+breakdown keep working).
 
 Two steps, both reusing the workspace **answering model** and both ledgered as their own node
 (``eval_answer`` / ``eval_judge``) under the caller's active run, so they show as priced sub-rows
@@ -61,12 +61,9 @@ class _JudgeOutput(BaseModel):
     reason: str = Field(description="one short sentence justifying the verdict")
 
 
-def _provider_model(model_id: str) -> tuple[str, str]:
-    """Split a ``provider:model`` id for ledger attribution; tolerate a bare id."""
-    if ":" in model_id:
-        provider, _, model = model_id.partition(":")
-        return provider, model
-    return "", model_id
+def _provider_prefix(model_id: str) -> str:
+    """Provider half of a ``provider:model`` id for the ledger's provider column (blank if bare)."""
+    return model_id.partition(":")[0] if ":" in model_id else ""
 
 
 async def _ledger_llm_node(
@@ -79,28 +76,42 @@ async def _ledger_llm_node(
 ) -> Any:
     """Run one model call as a ledgered node under the active run, recording token usage.
 
-    ``call`` is a 0-arg async callable returning ``(result, ai_message, output_preview)`` where
-    ``ai_message`` carries ``usage_metadata`` (may be ``None``). Returns ``result``. With
-    ``sink is None`` the call runs unledgered (tests / CLI)."""
+    ``call`` is a 0-arg async callable returning ``(result, ai_message, output_preview, decision)``
+    where ``ai_message`` carries ``usage_metadata`` (may be ``None``) and ``decision`` is an optional
+    ``(kind, detail)`` tuple. Returns ``result``. With ``sink is None`` the call runs unledgered
+    (tests / CLI)."""
     if sink is None:
-        result, _ai, _preview = await call()
+        result, _ai, _preview, _decision = await call()
         return result
 
+    # Shared usage extractor: pulls cached-read + reasoning tokens (nested in *_token_details), not
+    # just the flat input/output counts — so eval rows price like every other LLM node.
+    from hirocli.runtime.agent_graph.base import _usage_from_metadata
     from hirocli.runtime.agent_graph.ledger import current_entry
 
-    provider, model = _provider_model(model_id)
-    entry = sink.open_entry(node, {}, None)  # run id resolves from the active current_run
+    provider = _provider_prefix(model_id)
+    # captures={"usage","decision"} is REQUIRED: without it to_row() blanks the entire usage +
+    # decision block, so the row showed no model/tokens (and then priced off a now-blank model ⇒ no
+    # cost). Mirrors how call_model / memory_search_node / the ingest nodes declare their captures.
+    entry = sink.open_entry(node, {}, None, captures=frozenset({"usage", "decision"}))
     token = current_entry.set(entry)
     status, error_code = "ok", ""
     try:
-        result, ai, output_preview = await call()
-        usage = getattr(ai, "usage_metadata", None) or {}
+        result, ai, output_preview, decision = await call()
+        usage = _usage_from_metadata(getattr(ai, "usage_metadata", None) or {})
         entry.add_usage(
             provider=provider,
-            model=model,
-            input_tokens=int(usage.get("input_tokens") or 0),
-            output_tokens=int(usage.get("output_tokens") or 0),
+            # Store the FULL ``provider:model`` id (not the bare model) — the pricing catalog is
+            # keyed by the prefixed id, so a bare model misses the catalog and prices as $0. This
+            # mirrors call_model, which stores ``effective_model`` (the prefixed id) verbatim.
+            model=model_id,
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            cached_input_tokens=usage.get("cached_input_tokens"),
+            reasoning_tokens=usage.get("reasoning_tokens"),
         )
+        if decision:
+            entry.set_decision(*decision)
         entry.input_preview = input_preview
         entry.output_preview = output_preview
         return result
@@ -139,13 +150,17 @@ async def answer_from_context(
     facts = "\n".join(f"- {c}" for c in context) or "(no facts available)"
     human = f"Facts:\n{facts}\n\nQuestion: {question}"
 
-    async def _call() -> tuple[str, Any, str]:
+    async def _call() -> tuple[str, Any, str, tuple[str, str]]:
         ai = await model.ainvoke([SystemMessage(_ANSWER_SYSTEM), HumanMessage(human)])
         # Flatten provider content (Anthropic returns a list of text blocks) to plain text;
         # str() on the raw list leaked a JSON-ish repr into the recall answer. Reuse the
         # shared agent-graph normalizer instead of duplicating block-extraction here.
         text = _normalize_reply_content(getattr(ai, "content", "")).strip()
-        return text, ai, text[:200]
+        # Decision surfaces whether the model answered from the facts or declined (the prompt tells
+        # it to reply exactly "I don't know" when the context doesn't cover the question).
+        declined = text.lower().startswith("i don't know")
+        decision = ("abstained", "no_context") if declined else ("answered", "grounded")
+        return text, ai, text[:200], decision
 
     return await _ledger_llm_node(
         sink, "eval_answer", model_id, input_preview=f"q: {question[:160]}", call=_call
@@ -157,7 +172,7 @@ _JUDGE_SYSTEM = (
     "return a verdict:\n"
     "- pass: the answer matches the ideal (same facts).\n"
     "- partial: partially correct or incomplete.\n"
-    "- fail: wrong, or it states any of the FORBIDDEN (superseded) values.\n"
+    "- fail: wrong.\n"
     "- abstain: the answer declines / says it doesn't know.\n"
     "If the question is a NEGATIVE CONTROL (declining is correct), then 'abstain' is the right "
     "outcome and a confident answer is 'fail'. Judge only against the IDEAL — never your own "
@@ -172,7 +187,6 @@ async def judge_answer(
     question: str,
     answer: str,
     expected_answer: str,
-    must_not_contain: list[str],
     is_negative_control: bool = False,
     sink: Any | None = None,
 ) -> JudgeVerdict:
@@ -182,18 +196,16 @@ async def judge_answer(
     judge call errors, so one bad grade never aborts the run."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    forbidden = ", ".join(f for f in must_not_contain if f) or "(none)"
     control = "YES — declining is the correct outcome." if is_negative_control else "no"
     human = (
         f"Question: {question}\n"
         f"IDEAL answer: {expected_answer or '(none given)'}\n"
-        f"FORBIDDEN (superseded) values: {forbidden}\n"
         f"Negative control: {control}\n\n"
         f"Model ANSWER: {answer or '(empty)'}"
     )
     structured = model.with_structured_output(_JudgeOutput, include_raw=True)
 
-    async def _call() -> tuple[JudgeVerdict, Any, str]:
+    async def _call() -> tuple[JudgeVerdict, Any, str, tuple[str, str]]:
         raw = await structured.ainvoke([SystemMessage(_JUDGE_SYSTEM), HumanMessage(human)])
         parsed: _JudgeOutput | None = raw.get("parsed") if isinstance(raw, dict) else raw
         ai = raw.get("raw") if isinstance(raw, dict) else None
@@ -201,7 +213,9 @@ async def judge_answer(
         mark = _VERDICT_TO_MARK.get(verdict_word, MARK_FAIL)
         reason = str(getattr(parsed, "reason", "") or "").strip()
         grounded = bool(getattr(parsed, "grounded", True))
-        return JudgeVerdict(mark=mark, reason=reason, grounded=grounded), ai, f"{mark} {reason[:120]}"
+        verdict = JudgeVerdict(mark=mark, reason=reason, grounded=grounded)
+        # Decision detail carries the verdict word so the ledger row reads at a glance (e.g. graded/pass).
+        return verdict, ai, f"{mark} {reason[:120]}", ("graded", verdict_word or "fail")
 
     try:
         return await _ledger_llm_node(

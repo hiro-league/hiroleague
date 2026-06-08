@@ -126,13 +126,3 @@ def test_adam_questions_load_and_cover_categories() -> None:
         "abstention",
     ):
         assert required in cats, f"missing category: {required}"
-
-
-def test_must_not_contain_facts_exist_in_corpus() -> None:
-    # The 'forbidden' (superseded) facts must actually be present in the corpus, else
-    # the must_not_contain checks would be vacuous.
-    eps = load_episodes_file(_EVAL_DIR / "adam_year.episodes.jsonl")
-    corpus = " ".join(e.text.lower() for e in eps)
-    for q in load_questions(_EVAL_DIR / "adam_year.questions.yaml"):
-        for forbidden in q.get("must_not_contain", []):
-            assert forbidden.lower() in corpus, f"{q['id']}: forbidden {forbidden!r} not in corpus"

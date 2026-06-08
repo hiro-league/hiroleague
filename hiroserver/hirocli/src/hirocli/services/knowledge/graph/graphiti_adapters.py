@@ -49,6 +49,8 @@ from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_factory import build_chat_model_from_tuning
 from hirocli.domain.preferences import ModelTuning
 
+from .ingest_trace import current_ingest_capture, make_llm_stage
+
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
 
 
@@ -79,9 +81,8 @@ class GraphitiLLMUsage:
     for). ``elapsed_ms`` is this single call's wall time.
 
     ``preview`` is a compact, human-readable summary of the *parsed result* (e.g.
-    the entities extracted, the fact resolved/invalidated) so a Graph-Runs node can
-    show **what the step produced**, not just call/token counts (docs §12.2.1,
-    ``ledger_detail=rich``).
+    the entities extracted, the fact resolved/invalidated) — surfaced per-stage in the
+    ``trace``-tier ingest sidecar (the ``ledger`` tier rolls all ops into one episode row).
     """
 
     model_id: str
@@ -98,8 +99,29 @@ UsageSink = Callable[[GraphitiLLMUsage], None]
 # ``on_embed`` sink: called once per embedder call with (vector_count, elapsed_ms).
 # None = no-op. Lets the ingest ledger surface an ``embed`` node per episode.
 EmbedSink = Callable[[int, float], None]
+# ``on_rank`` sink: called once per cross-encoder rerank with
+# (model_id, processed_tokens, elapsed_ms). None = no-op. Lets the retrieval ledger price the
+# ``rerank`` node (cloud Cohere/Voyage); local rerankers miss the catalog → $0, correctly free.
+RankSink = Callable[[str, int, float], None]
 # Builds a LangChain chat model from a spec. Injectable so tests skip the network.
 ChatModelBuilder = Callable[[GraphitiModelSpec], BaseChatModel]
+
+
+def _estimate_processed_tokens(query: str, passages: Sequence[str]) -> int:
+    """Voyage-style billed token estimate: ``query_tokens × doc_count + Σ doc_tokens``.
+
+    Char/4 ceil heuristic (same shape as the ledger's text-token estimate). Rerankers don't
+    return usage metadata, so this is an estimate; it only needs to be order-of-magnitude right
+    for cost display. Cohere-style per-search-unit pricing ignores tokens entirely.
+    """
+    n = len(passages)
+    if n == 0:
+        return 0
+
+    def _toks(text: str) -> int:
+        return max(1, (len(str(text or "").strip()) + 3) // 4)
+
+    return _toks(query) * n + sum(_toks(p) for p in passages)
 
 
 def _to_langchain(messages: list[Message]) -> list[Any]:
@@ -406,6 +428,43 @@ class GraphitiLLMClient(LLMClient):
             # A ledger hiccup must never abort a graph build.
             log.warning("⚠️ graphiti.llm — usage sink failed", exc_info=True)
 
+    def _record_ingest_stage(
+        self,
+        *,
+        operation: str,
+        messages: list[Message],
+        output: Any,
+        raw: Any,
+        model_size: ModelSize,
+        elapsed_ms: float,
+    ) -> None:
+        """Record this LLM call's full in/out into the active ingest trace (best-effort).
+
+        No-op unless an :class:`IngestCapture` is engaged on ``current_ingest_capture``
+        (only the ingest loop sets it — search/memory paths never do), so the default
+        production add_episode path is untouched. We OBSERVE here, we don't reimplement:
+        graphiti still drives the real write; this only mirrors the prompt (input) and
+        the parsed structured result (output) so eval can inspect every stage. A trace
+        hiccup must never break ingestion."""
+        capture = current_ingest_capture.get()
+        if capture is None:
+            return
+        try:
+            in_tok, out_tok = _usage_from_raw(raw)
+            capture.add_stage(
+                make_llm_stage(
+                    operation=operation,
+                    messages=[{"role": m.role, "content": m.content} for m in messages],
+                    output=output,
+                    model_id=self._spec_for(model_size).model_id,
+                    elapsed_ms=elapsed_ms,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                )
+            )
+        except Exception:
+            log.warning("⚠️ graphiti.llm — ingest trace capture failed", exc_info=True)
+
     async def _generate_response(
         self,
         messages: list[Message],
@@ -431,16 +490,26 @@ class GraphitiLLMClient(LLMClient):
                 parsed = result.get("parsed") if isinstance(result, dict) else None
                 parsing_error = result.get("parsing_error") if isinstance(result, dict) else None
                 parsed_dump = parsed.model_dump(mode="json") if parsed is not None else None
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
                 self._report_usage(
                     raw,
                     model_size,
                     operation=operation,
-                    elapsed_ms=(time.perf_counter() - started) * 1000.0,
+                    elapsed_ms=elapsed_ms,
                     # What this step produced — for the Graph-Runs node preview. Dedup
                     # ops get a decision-oriented preview (new/merged/supersede, #2);
                     # everything else falls back to the generic name-list preview.
                     preview=_resolution_preview(operation, parsed_dump)
                     or _result_preview(parsed_dump),
+                )
+                # Full per-stage in/out for the (opt-in) ingest trace — eval source of truth.
+                self._record_ingest_stage(
+                    operation=operation,
+                    messages=messages,
+                    output=parsed_dump,
+                    raw=raw,
+                    model_size=model_size,
+                    elapsed_ms=elapsed_ms,
                 )
                 if parsed is None:
                     # Fail loud so the caller (Graphiti node op) surfaces the bad
@@ -452,14 +521,24 @@ class GraphitiLLMClient(LLMClient):
                 return parsed_dump
 
             raw = await model.ainvoke(lc_messages)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
             self._report_usage(
                 raw,
                 model_size,
                 operation=operation,
-                elapsed_ms=(time.perf_counter() - started) * 1000.0,
+                elapsed_ms=elapsed_ms,
             )
             content = getattr(raw, "content", None)
-            return {"content": content if isinstance(content, str) else str(content)}
+            content_str = content if isinstance(content, str) else str(content)
+            self._record_ingest_stage(
+                operation=operation,
+                messages=messages,
+                output={"content": content_str},
+                raw=raw,
+                model_size=model_size,
+                elapsed_ms=elapsed_ms,
+            )
+            return {"content": content_str}
         except Exception:
             # External model call — log + raise (general-coding-rule). Graphiti's
             # outer retry handles transient server errors; others fail loud.
@@ -580,8 +659,29 @@ class HiroRerankerCrossEncoder(CrossEncoderClient):
     the returned score, so raw ``relevance_score`` is passed through (no normalization).
     """
 
-    def __init__(self, compressor: Any) -> None:
+    def __init__(
+        self,
+        compressor: Any,
+        *,
+        model_id: str = "",
+        on_rank: "RankSink | None" = None,
+    ) -> None:
         self._compressor = compressor
+        # Prefixed catalog id (e.g. ``voyage:rerank-2``) — stamped on the priced ``rerank`` ledger
+        # node so ``_with_cost`` can resolve it. Reports through ``on_rank`` (mirrors ``on_embed``);
+        # None sink → no ledger reporting (tests / non-ledgered callers).
+        self._model_id = model_id
+        self._on_rank = on_rank
+
+    def _report_rank(self, query: str, passages: list[str], elapsed_ms: float) -> None:
+        if self._on_rank is None:
+            return
+        try:
+            processed = _estimate_processed_tokens(query, passages)
+            self._on_rank(self._model_id, processed, elapsed_ms)
+        except Exception:
+            # A ledger hiccup must never abort a search.
+            log.warning("⚠️ graphiti.rerank — usage sink failed", exc_info=True)
 
     async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
         if not passages:
@@ -589,6 +689,7 @@ class HiroRerankerCrossEncoder(CrossEncoderClient):
         from langchain_core.documents import Document
 
         docs = [Document(page_content=p, metadata={"_i": i}) for i, p in enumerate(passages)]
+        started = time.perf_counter()
         try:
             ranked = await asyncio.to_thread(self._compressor.compress_documents, docs, query)
         except Exception:
@@ -597,6 +698,8 @@ class HiroRerankerCrossEncoder(CrossEncoderClient):
             log.warning("⚠️ graphiti.rerank — cross-encoder failed; using input order", exc_info=True)
             n = len(passages)
             return [(p, float(n - i)) for i, p in enumerate(passages)]
+        # Report usage only on success — a fall-back to input order isn't a billed rerank call.
+        self._report_rank(query, passages, (time.perf_counter() - started) * 1000.0)
         out: list[tuple[str, float]] = []
         for doc in ranked:
             score = doc.metadata.get("relevance_score")
@@ -611,5 +714,6 @@ __all__ = [
     "GraphitiLLMUsage",
     "GraphitiModelSpec",
     "HiroRerankerCrossEncoder",
+    "RankSink",
     "UsageSink",
 ]

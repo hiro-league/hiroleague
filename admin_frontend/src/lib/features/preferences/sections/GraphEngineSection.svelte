@@ -217,17 +217,18 @@
         </FormField>
       </div>
       <FormField
-        label="Graph Runs detail"
-        hint="Verbosity of the Graph Runs ledger for graph ingest + retrieval. Rich = per-node content previews (extracted entities, resolution/invalidation decisions, ranked facts) and one row per edge in resolve_facts. Compact = stats only. Lower to Compact for noisy bulk/series ingests."
+        label="Graph observability"
+        hint="How much the graph engine records to Graph Runs (ingest + retrieval). Off = nothing — no ledger rows, tracer, or usage sinks (spares CPU; graph cost is NOT tracked). Ledger = one priced roll-up row per episode (ingest) and per search (rerank), so token cost still folds into the run total — the production default. Trace = Ledger plus a deep per-stage sidecar (the ⌗ retrieval/ingest trace dialogs) for debugging. Replaces the old Rich/Compact detail and the trace env vars."
         class="max-w-md"
       >
         <select
           class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.ledger_detail}
+          bind:value={ctrl.draft.graph.observability}
           onchange={ctrl.markDirty}
         >
-          <option value="rich">Rich (content previews)</option>
-          <option value="compact">Compact (stats only)</option>
+          <option value="off">Off (no graph ledger)</option>
+          <option value="ledger">Ledger (cost + roll-up · default)</option>
+          <option value="trace">Trace (+ deep per-stage sidecars)</option>
         </select>
       </FormField>
     </SectionCardMuted>

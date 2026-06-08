@@ -167,9 +167,9 @@ export function editsForSave(
     draft.graph.sim_min_score
   );
   add(
-    'graph.ledger_detail',
-    baseline.graph.ledger_detail,
-    draft.graph.ledger_detail
+    'graph.observability',
+    baseline.graph.observability,
+    draft.graph.observability
   );
   add(
     'graph.reranker.model_id',

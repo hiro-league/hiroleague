@@ -30,6 +30,7 @@ import yaml
 from hiro_commons.log import Logger
 
 from hirocli.domain.events import DomainEvent, get_domain_event_bus
+from hirocli.runtime.agent_graph.tracing import traced_run
 from hirocli.services.knowledge.graph.group_scope import (
     eval_memory_group_id,
     slug_group_part,
@@ -125,7 +126,8 @@ class LegResult:
     answer: str        # the model's answer
     run_id: str | None
     reason: str = ""   # judge's one-line justification
-    recalled: tuple[str, ...] = ()  # memory: the recalled facts (for the fold/detail)
+    recalled: tuple[Any, ...] = ()  # memory: the recalled facts (structured rows for the table)
+    cost_usd: float = 0.0  # this leg's folded LLM+reranker cost (read from its run; 0 if unknown)
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -137,6 +139,7 @@ class LegResult:
             "run_id": self.run_id,
             "reason": self.reason,
             "recalled": list(self.recalled),
+            "cost_usd": self.cost_usd,
         }
 
 
@@ -156,7 +159,8 @@ class QuestionResult:
     track: str = "knowledge"
     # The ideal answer the judge graded against (shown as "Ideal" in results).
     gold: str = ""
-    must_not_contain: list[str] = field(default_factory=list)
+    # Whole-question cost (sum of leg runs + judge run) — what the UI sums for the live total.
+    cost_usd: float = 0.0
 
     def to_payload(self, *, index: int, total: int) -> dict[str, Any]:
         """Event payload shape consumed by the Eval Batch UI. ``legs`` is keyed by leg name
@@ -171,9 +175,9 @@ class QuestionResult:
             "requires_graph": self.requires_graph,
             "track": self.track,
             "gold": self.gold,
+            "cost_usd": self.cost_usd,
             "legs": {mode: leg.to_payload() for mode, leg in self.legs.items()},
             "delta": self.delta,
-            "must_not_contain": self.must_not_contain,
         }
 
 
@@ -197,6 +201,10 @@ class EvalSummary:
     questions: list[QuestionResult] = field(default_factory=list)
     # category → {total, pass: {leg: count}} — the per-category × N-leg table.
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Cost (LLM + reranker; embeddings unpriced). Knowledge ingest cost is deferred (multi-run)
+    # so ``ingest_cost_usd`` stays 0 here; ``questions_cost_usd`` = sum of per-question costs.
+    questions_cost_usd: float = 0.0
+    ingest_cost_usd: float = 0.0
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -211,6 +219,9 @@ class EvalSummary:
             "judged": self.judged,
             "elapsed_ms": self.elapsed_ms,
             "by_category": self.by_category,
+            "questions_cost_usd": self.questions_cost_usd,
+            "ingest_cost_usd": self.ingest_cost_usd,
+            "total_cost_usd": self.questions_cost_usd + self.ingest_cost_usd,
         }
 
 
@@ -258,9 +269,6 @@ def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
             )
         if negative:
             expected_kind = "abstain"
-        must_not = row.get("must_not_contain") or []
-        if not isinstance(must_not, list):
-            raise ValueError(f"{target}: row {i} ({qid}): must_not_contain must be a list")
         # requires_graph: explicit bool OR derived from a ``requires`` list that names
         # graph/temporal/world (those categories are where graph/mix should win).
         requires_raw = row.get("requires") or []
@@ -275,7 +283,6 @@ def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
                 "subcategory": str(row.get("subcategory") or ""),
                 "question": qtext,
                 "expected_fragments": [str(f) for f in expected],
-                "must_not_contain": [str(f) for f in must_not],
                 "requires_graph": requires_graph,
                 # The ideal answer the LLM judge grades against (shown as "Ideal" in results).
                 "expected_answer": gold,
@@ -430,11 +437,11 @@ async def run_eval(
     # priced Graph Runs). When the judge is off — or no model is configured — legs carry the
     # answer but no mark, and the gate is n/a.
     model, model_id = (build_answer_model(workspace_path) if judge else (None, ""))
-    sink = None
-    if model is not None:
-        from hirocli.runtime.agent_graph.ledger import LedgerSink
+    # Always create the sink — even judge-off — so per-leg cost can be read back from the
+    # ledger (cost is NOT judge-dependent). Judge rows are only written when judging.
+    from hirocli.runtime.agent_graph.ledger import LedgerSink
 
-        sink = LedgerSink(workspace_path)
+    sink = LedgerSink(workspace_path)
     judged = model is not None
 
     _publish(
@@ -454,47 +461,74 @@ async def run_eval(
     )
 
     rows: list[QuestionResult] = []
-    try:
-        for index, q in enumerate(questions):
-            result = await _run_one_question(
-                service,
-                q,
-                modes=run_modes,
-                filters=eval_filters,
-                top_k=top_k,
-                min_score=min_score,
-                model=model,
-                model_id=model_id,
-                judge=judged,
-                sink=sink,
+    # One LangSmith root span for the whole run so each question's answer legs + judge
+    # nest under it instead of scattering as independent roots. run_id = uuid5(rid) ⇒ the
+    # admin "open in LangSmith" link (langsmith_url_for_run) resolves it. No-op when off.
+    with traced_run(
+        "knowledge_eval",
+        ledger_run_id=rid,
+        tags=["eval", "knowledge", f"judge:{judged}"],
+        metadata={"total_questions": total, "modes": run_modes, "filters": eval_filters},
+    ):
+        try:
+            for index, q in enumerate(questions):
+                # Per-question child span — answer legs (each its own knowledge_answer run)
+                # and the judge call attach here, so a question reads as one subtree.
+                with traced_run(
+                    "eval_question",
+                    tags=["eval", "knowledge", str(q.get("category") or "")],
+                    metadata={
+                        "id": q.get("id"),
+                        "requires_graph": bool(q.get("requires_graph")),
+                    },
+                    inputs={"question": q.get("question", "")},
+                ):
+                    result = await _run_one_question(
+                        service,
+                        q,
+                        modes=run_modes,
+                        filters=eval_filters,
+                        top_k=top_k,
+                        min_score=min_score,
+                        model=model,
+                        model_id=model_id,
+                        judge=judged,
+                        sink=sink,
+                        run_id=rid,
+                    )
+                rows.append(result)
+                # run_id on every event so the per-workspace registry can attribute
+                # this row to the right run (the registry replays state on mount /
+                # cross-origin; see eval_registry.py).
+                _publish(
+                    bus,
+                    workspace_path,
+                    KNOWLEDGE_EVAL_QUESTION_COMPLETED,
+                    {"run_id": rid, **result.to_payload(index=index, total=total)},
+                )
+        except Exception as exc:
+            log.error(
+                "❌ knowledge.eval — run aborted",
                 run_id=rid,
+                error=str(exc),
+                exc_info=True,
             )
-            rows.append(result)
-            # run_id on every event so the per-workspace registry can attribute
-            # this row to the right run (the registry replays state on mount /
-            # cross-origin; see eval_registry.py).
             _publish(
                 bus,
                 workspace_path,
-                KNOWLEDGE_EVAL_QUESTION_COMPLETED,
-                {"run_id": rid, **result.to_payload(index=index, total=total)},
+                KNOWLEDGE_EVAL_FAILED,
+                {"run_id": rid, "error": f"{type(exc).__name__}: {str(exc)[:200]}"},
             )
-    except Exception as exc:
-        log.error(
-            "❌ knowledge.eval — run aborted",
-            run_id=rid,
-            error=str(exc),
-            exc_info=True,
-        )
-        _publish(
-            bus,
-            workspace_path,
-            KNOWLEDGE_EVAL_FAILED,
-            {"run_id": rid, "error": f"{type(exc).__name__}: {str(exc)[:200]}"},
-        )
-        raise
+            raise
 
     summary = _summarize(rid, rows, started_at, run_modes, judged=judged)
+    log.info(
+        "✅ knowledge.eval — run complete · gate=%s · judged=%s · cost=$%.4f (Q; ingest deferred) · ms=%d",
+        summary.gate,
+        judged,
+        summary.questions_cost_usd,
+        summary.elapsed_ms,
+    )
     _publish(
         bus,
         workspace_path,
@@ -659,12 +693,11 @@ async def _memory_question(
 
     The run holds a ``memory_recall`` node (graph-search spans), an ``eval_answer`` node, and an
     ``eval_judge`` node — all priced. Returns the unified row (``legs={'recall': {...}}`` with the
-    model answer + verdict mark + recalled facts, plus ``gold`` and the ``stale_hit`` guard)."""
+    model answer + verdict mark + recalled facts, plus ``gold``)."""
     from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_entry, current_run
     from hirocli.services.knowledge.eval_judge import answer_from_context, judge_answer
     from hirocli.services.knowledge.ledger_runner import preview_answer, preview_query
 
-    must_not = q.get("must_not_contain") or []
     gold = q.get("expected_answer", "")
     is_control = str(q.get("expected_kind") or "") == "abstain"
 
@@ -680,7 +713,9 @@ async def _memory_question(
         run_token = current_run.set(acc)
 
     facts: list[str] = []
+    recalled_rows: list[dict[str, Any]] = []
     answer, mark, reason = "", "", ""
+    cost_usd = 0.0
     t0 = time.perf_counter()
     try:
         # 1) recall (graph search) — ledgered as a memory_recall node when a sink is present.
@@ -705,6 +740,9 @@ async def _memory_question(
             facts = [
                 str(h.get("memory") or "") for h in hits if str(h.get("memory") or "").strip()
             ]
+        # Structured recalled rows (temporal/source metadata) for the results fact table;
+        # ``facts`` (plain strings) still feeds the answer model for grounding.
+        recalled_rows = [h for h in hits if str(h.get("memory") or "").strip()]
         # 2) answer — grounded ONLY in the recalled facts (eval integrity).
         if model is not None:
             answer = await answer_from_context(
@@ -718,7 +756,6 @@ async def _memory_question(
                 question=q["question"],
                 answer=answer,
                 expected_answer=gold,
-                must_not_contain=must_not,
                 is_negative_control=is_control,
                 sink=sink,
             )
@@ -732,14 +769,15 @@ async def _memory_question(
                 input_preview=f"q: {q['question'][:160]}",
                 output_preview=(answer or " | ".join(facts))[:200],
             )
+            # The per-question run accumulator folds recall + answer + judge node costs →
+            # the whole question's LLM+reranker cost (read in-memory before evict).
+            cost_usd = float(getattr(acc, "cost_usd", 0.0) or 0.0)
     finally:
         if run_token is not None and acc is not None:
             sink.evict_run(acc.run_id)
             current_run.reset(run_token)
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
-    blob = "\n".join(facts).lower()
-    stale_hit = any(f.lower() in blob for f in must_not if f)
     return {
         "id": q["id"],
         "category": q.get("category", ""),
@@ -748,9 +786,8 @@ async def _memory_question(
         "requires_graph": bool(q.get("requires_graph")),
         "track": "memory",
         "gold": gold,
-        "must_not_contain": must_not,
-        "stale_hit": stale_hit,
         "delta": "0",
+        "cost_usd": cost_usd,
         "legs": {
             "recall": {
                 "mode": "recall",
@@ -760,7 +797,8 @@ async def _memory_question(
                 "answer": answer,
                 "answer_preview": _preview(answer, 200),
                 "run_id": (acc.run_id if acc is not None else None),
-                "recalled": facts,
+                "recalled": recalled_rows,
+                "cost_usd": cost_usd,
             }
         },
     }
@@ -824,98 +862,127 @@ async def run_memory_eval(
     )
 
     rows: list[dict[str, Any]] = []
-    try:
-        remembered = 0
-        if remember:
-            eps = episodes if episodes is not None else load_episodes_file(
-                corpus_path or ADAM_CORPUS_FILE
-            )
-            # Rebuild = clean slate. Wipe this eval set's graph drawer BEFORE re-remembering so
-            # the run rebuilds from scratch. Re-ingesting the same turns over an existing graph
-            # let Graphiti dedup/invalidate against stale state — a prior run's facts contaminated
-            # the next (observed: spurious edges + bad supersessions on re-run). Gated on
-            # `remember`: a question-subset re-run (remember=False) recalls the existing drawer
-            # untouched. Eval-scoped facade ⇒ clear_all targets only the eval_mem_{set} drawer.
-            cleared = await memory.clear_all(user_id=eval_user_id, character_id=character_id)
-            if cleared:
-                log.info(
-                    "🧹 knowledge.eval — memory rebuild · cleared %d prior fact(s) · set=%s",
-                    cleared,
-                    set_id,
+    # One LangSmith root span for the whole memory eval so the remember (ingest) subtree and
+    # each recall question nest under it instead of scattering. run_id = uuid5(rid) ⇒ findable
+    # via langsmith_url_for_run. No-op when LangSmith tracing is off.
+    with traced_run(
+        "memory_eval",
+        ledger_run_id=rid,
+        tags=["eval", "memory", f"set:{set_id}", f"judge:{judged}"],
+        metadata={"total_questions": total, "set": set_id},
+    ):
+        try:
+            remembered = 0
+            ingest_cost_usd = 0.0
+            if remember:
+                eps = episodes if episodes is not None else load_episodes_file(
+                    corpus_path or ADAM_CORPUS_FILE
                 )
-            # Open ONE parent run so every turn's Graphiti extraction nests under it (priced
-            # sub-rows fold into the aggregate) — the memory "ingest" Graph Run.
-            ledger_run_id = f"memory_eval-{slug_group_part(set_id)}-{rid}"
-            accumulator = RunAccumulator(
-                sink=sink,
-                run_id=ledger_run_id,
-                inbound_id=eval_memory_group_id(set_id),
-                character_id=set_id,
-            )
-            token = current_run.set(accumulator)
-            try:
-                remembered = await _remember_episodes(
-                    memory,
-                    eps,
-                    workspace_path=workspace_path,
-                    run_id=rid,
-                    user_id=eval_user_id,
-                    character_id=character_id,
-                    ledger_sink=sink,
+                # Rebuild = clean slate. Wipe this eval set's graph drawer BEFORE re-remembering
+                # so the run rebuilds from scratch. Re-ingesting the same turns over an existing
+                # graph let Graphiti dedup/invalidate against stale state — a prior run's facts
+                # contaminated the next (observed: spurious edges + bad supersessions on re-run).
+                # Gated on `remember`: a question-subset re-run (remember=False) recalls the
+                # existing drawer untouched. Eval-scoped facade ⇒ clear_all targets only the
+                # eval_mem_{set} drawer.
+                cleared = await memory.clear_all(user_id=eval_user_id, character_id=character_id)
+                if cleared:
+                    log.info(
+                        "🧹 knowledge.eval — memory rebuild · cleared %d prior fact(s) · set=%s",
+                        cleared,
+                        set_id,
+                    )
+                # Open ONE parent run so every turn's Graphiti extraction nests under it (priced
+                # sub-rows fold into the aggregate) — the memory "ingest" Graph Run.
+                ledger_run_id = f"memory_eval-{slug_group_part(set_id)}-{rid}"
+                # The "remember" LangSmith subtree mirrors that ingest run: every turn's
+                # add_episode span (graphiti_ingest) attaches here. ledger_run_id aligns the
+                # span id with the ingest Graph Run row.
+                with traced_run(
+                    "remember",
+                    ledger_run_id=ledger_run_id,
+                    tags=["eval", "memory", "ingest"],
+                    metadata={"set": set_id, "episode_count": len(eps)},
+                ):
+                    accumulator = RunAccumulator(
+                        sink=sink,
+                        run_id=ledger_run_id,
+                        inbound_id=eval_memory_group_id(set_id),
+                        character_id=set_id,
+                    )
+                    token = current_run.set(accumulator)
+                    try:
+                        remembered = await _remember_episodes(
+                            memory,
+                            eps,
+                            workspace_path=workspace_path,
+                            run_id=rid,
+                            user_id=eval_user_id,
+                            character_id=character_id,
+                            ledger_sink=sink,
+                        )
+                        sink.write_run_row(
+                            accumulator,
+                            status="completed",
+                            decision_kind="completed",
+                            decision_detail="memory_eval_remember",
+                            input_preview=f"corpus: {set_id} ({len(eps)} turns)",
+                            output_preview=f"remembered {len(eps)} turns · learned {remembered} facts",
+                        )
+                        # Ingest (graph build) cost — the remember run's folded LLM+reranker cost.
+                        ingest_cost_usd = float(getattr(accumulator, "cost_usd", 0.0) or 0.0)
+                    finally:
+                        sink.evict_run(ledger_run_id)
+                        current_run.reset(token)
+            for index, q in enumerate(questions):
+                # Each question is its own Graph Run + LangSmith subtree: recall → answer → judge.
+                with traced_run(
+                    "eval_question",
+                    tags=["eval", "memory", str(q.get("category") or "")],
+                    metadata={"id": q.get("id")},
+                    inputs={"question": q.get("question", "")},
+                ):
+                    row = await _memory_question(
+                        memory,
+                        q,
+                        user_id=eval_user_id,
+                        character_id=character_id,
+                        sink=sink,
+                        run_id=rid,
+                        set_id=set_id,
+                        model=model,
+                        model_id=model_id,
+                        judge=judged,
+                    )
+                rows.append(row)
+                _publish(
+                    bus,
+                    workspace_path,
+                    KNOWLEDGE_EVAL_QUESTION_COMPLETED,
+                    {"run_id": rid, "index": index, "total": total, **row},
                 )
-                sink.write_run_row(
-                    accumulator,
-                    status="completed",
-                    decision_kind="completed",
-                    decision_detail="memory_eval_remember",
-                    input_preview=f"corpus: {set_id} ({len(eps)} turns)",
-                    output_preview=f"remembered {len(eps)} turns · learned {remembered} facts",
-                )
-            finally:
-                sink.evict_run(ledger_run_id)
-                current_run.reset(token)
-        for index, q in enumerate(questions):
-            # Each question is its own Graph Run: recall → answer → (judge).
-            row = await _memory_question(
-                memory,
-                q,
-                user_id=eval_user_id,
-                character_id=character_id,
-                sink=sink,
+        except Exception as exc:
+            # CancelledError is a BaseException (not Exception) → it propagates past this
+            # handler to the route's cancel path, exactly as run_eval relies on.
+            log.error(
+                "❌ knowledge.eval — memory run aborted",
                 run_id=rid,
-                set_id=set_id,
-                model=model,
-                model_id=model_id,
-                judge=judged,
+                error=str(exc),
+                exc_info=True,
             )
-            rows.append(row)
             _publish(
                 bus,
                 workspace_path,
-                KNOWLEDGE_EVAL_QUESTION_COMPLETED,
-                {"run_id": rid, "index": index, "total": total, **row},
+                KNOWLEDGE_EVAL_FAILED,
+                {"run_id": rid, "error": f"{type(exc).__name__}: {str(exc)[:200]}"},
             )
-    except Exception as exc:
-        # CancelledError is a BaseException (not Exception) → it propagates past this
-        # handler to the route's cancel path, exactly as run_eval relies on.
-        log.error(
-            "❌ knowledge.eval — memory run aborted",
-            run_id=rid,
-            error=str(exc),
-            exc_info=True,
-        )
-        _publish(
-            bus,
-            workspace_path,
-            KNOWLEDGE_EVAL_FAILED,
-            {"run_id": rid, "error": f"{type(exc).__name__}: {str(exc)[:200]}"},
-        )
-        raise
+            raise
 
     def _recall_leg(r: dict[str, Any]) -> dict[str, Any]:
         return (r.get("legs") or {}).get("recall") or {}
 
     passing_recall = sum(1 for r in rows if _recall_leg(r).get("mark") in _PASSING_MARKS)
+    questions_cost_usd = sum(float(r.get("cost_usd") or 0.0) for r in rows)
     summary = {
         "run_id": rid,
         "track": "memory",
@@ -924,23 +991,30 @@ async def run_memory_eval(
         "judged": judged,
         "remembered_turns": remembered,
         "recalled_for": sum(1 for r in rows if _recall_leg(r).get("recalled")),
-        "stale_hits": sum(1 for r in rows if r.get("stale_hit")),
         # Judge pass-count for the single recall leg (0 when the judge was off).
         "passing": {"recall": passing_recall},
         # No flat/graph legs → the PROCEED/PIVOT gate is undefined for the memory track.
         "gate": "n/a",
         "by_category": category_breakdown_rows(rows, ["recall"]),
         "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+        # Cost (LLM + reranker; embeddings unpriced). Ingest = the remember/graph-build run;
+        # questions = sum of per-question recall+answer+judge runs.
+        "ingest_cost_usd": ingest_cost_usd,
+        "questions_cost_usd": questions_cost_usd,
+        "total_cost_usd": ingest_cost_usd + questions_cost_usd,
     }
     _publish(bus, workspace_path, KNOWLEDGE_EVAL_COMPLETED, summary)
     log.info(
         "✅ knowledge.eval — memory run complete · remembered=%d · recalled_for=%d/%d · "
-        "judged=%s · pass=%d · set=%s",
+        "judged=%s · pass=%d · cost=$%.4f (ingest $%.4f + Q $%.4f) · set=%s",
         summary["remembered_turns"],
         summary["recalled_for"],
         total,
         judged,
         passing_recall,
+        summary["total_cost_usd"],
+        summary["ingest_cost_usd"],
+        summary["questions_cost_usd"],
         set_id,
     )
     return summary
@@ -982,8 +1056,11 @@ async def _run_one_question(
         rewrite=True,
     )
     gold = q.get("expected_answer", "")
-    must_not = q.get("must_not_contain") or []
     is_control = str(q.get("expected_kind") or "") == "abstain"
+    # Per-leg cost — each leg's answer already ran as its own (now-written) Graph Run; read the
+    # folded cost back by run_id (LLM + reranker; embeddings unpriced). Judge cost added below.
+    leg_run_ids = {getattr(r, "run_id", None) for r in results.values() if getattr(r, "run_id", None)}
+    leg_costs = sink.read_run_costs(leg_run_ids) if sink is not None else {}
     legs: dict[str, LegResult] = {}
     marks: dict[str, str] = {}
 
@@ -1013,7 +1090,6 @@ async def _run_one_question(
                     question=q["question"],
                     answer=answer,
                     expected_answer=gold,
-                    must_not_contain=must_not,
                     is_negative_control=is_control,
                     sink=sink,
                 )
@@ -1026,6 +1102,7 @@ async def _run_one_question(
                 answer=answer,
                 run_id=getattr(res, "run_id", None),
                 reason=reason,
+                cost_usd=float(leg_costs.get(str(getattr(res, "run_id", "") or ""), 0.0)),
             )
         if judging:
             sink.write_run_row(
@@ -1042,6 +1119,9 @@ async def _run_one_question(
 
             sink.evict_run(acc.run_id)
             _cr.reset(run_token)
+    # Whole-question cost = sum of leg answer runs + the judge run (when judged).
+    judge_cost = float(getattr(acc, "cost_usd", 0.0) or 0.0) if judging else 0.0
+    question_cost = sum(leg.cost_usd for leg in legs.values()) + judge_cost
     return QuestionResult(
         id=q["id"],
         category=q.get("category", ""),
@@ -1052,7 +1132,7 @@ async def _run_one_question(
         delta=_best_graph_delta_marks(marks),
         track="knowledge",
         gold=gold,
-        must_not_contain=must_not,
+        cost_usd=question_cost,
     )
 
 
@@ -1156,6 +1236,8 @@ def _summarize(
         elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         questions=list(rows),
         by_category=category_breakdown(rows, modes),
+        # LLM + reranker cost summed across questions (knowledge ingest cost deferred → 0).
+        questions_cost_usd=sum(float(r.cost_usd or 0.0) for r in rows),
     )
 
 

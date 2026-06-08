@@ -48,6 +48,8 @@ from graphiti_core.search.search_filters import (
 )
 from hiro_commons.log import Logger
 
+from .retrieval_trace import RetrievalTrace, StageRecord, current_capture
+
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI.SEARCH")
 
 # search_recipe (admin pref) → Graphiti edge-search recipe. ``cross_encoder`` reranks
@@ -154,6 +156,13 @@ class RankedFact:
     invalid_at: str = ""
     chunk_id: str = ""
     superseded: bool = False
+    # Edge metadata surfaced for the eval recalled-facts table (best-effort via getattr —
+    # the production ``search_()`` edge always carries these; older fakes default to blank).
+    name: str = ""           # relationship/edge type (e.g. WORKS_AT)
+    source_uuid: str = ""    # subject entity uuid
+    target_uuid: str = ""    # object entity uuid
+    uuid: str = ""           # fact edge uuid
+    score: float | None = None  # relevance score when the backend exposes it (else None)
 
 
 @dataclass(frozen=True)
@@ -179,6 +188,9 @@ class GraphitiExpansion:
     ranked: tuple[RankedFact, ...] = ()
     node_memories: tuple[str, ...] = ()
     episode_memories: tuple[str, ...] = ()
+    # Structured kept facts (parallel to ``facts``) for the eval recalled-facts table:
+    # each carries the dated text + temporal/source metadata. Default keeps older fakes working.
+    fact_rows: tuple[dict[str, Any], ...] = ()
 
 
 def _is_superseded(edge: Any) -> bool:
@@ -212,6 +224,115 @@ def _fact_with_date(fact: str, valid_at: str, invalid_at: str) -> str:
     if valid_at:
         return f"{fact} (as of {valid_at})"
     return fact
+
+
+async def _traced_search(
+    graphiti: Any,
+    query: str,
+    *,
+    group_id: str,
+    config: SearchConfig,
+    search_filter: SearchFilters | None,
+    temporal: str,
+    num_results: int,
+    sim_min_score: float,
+    k_hop: int,
+    recipe: str,
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Run the re-hosted, per-stage-traced pipeline for every configured lane.
+
+    Replaces ``graphiti.search_()`` WHEN a capture is active so we record each lane's
+    candidate legs / hop / rank / temporal: the ``edge`` (fact) lane always, plus the
+    ``node`` (entity) and ``episode`` lanes when the scope mounted their configs. Pinned
+    to a known graphiti layout (``graphiti_compat``); the embed stage is recorded here
+    (one shared query vector) since the embedder call is ours. Returns
+    ``(edges, nodes, episodes)`` — the same triple ``graphiti.search_`` would produce."""
+    # Lazy imports: only the capture path touches graphiti internals + the compat pin,
+    # so the default production path never pays for them.
+    from .graphiti_compat import assert_graphiti_compatible
+    from .graphiti_fact_search import (
+        search_episodes_traced,
+        search_facts_traced,
+        search_nodes_traced,
+    )
+    from .retrieval_trace import RetrievalCapture
+
+    assert_graphiti_compatible()
+    capture = current_capture.get()
+    if capture is None:  # defensive — only called when a capture is active
+        capture = RetrievalCapture()
+
+    clients = graphiti.clients
+    trace = RetrievalTrace(
+        query=query,
+        group_id=group_id,
+        recipe=recipe,
+        temporal=temporal,
+        num_results=num_results,
+        sim_min_score=sim_min_score,
+        k_hop=k_hop,
+    )
+    sf = search_filter if search_filter is not None else SearchFilters()
+
+    import time as _time
+
+    started = _time.perf_counter()
+    query_vector = await clients.embedder.create(input_data=[query.replace("\n", " ")])
+    trace.add_stage(
+        StageRecord(
+            kind="embed",
+            label="Embed query",
+            lane="query",
+            elapsed_ms=(_time.perf_counter() - started) * 1000.0,
+            meta={"query_length": len(query), "vector_dim": len(query_vector)},
+        )
+    )
+
+    # Edge (fact) lane — always present.
+    edges = await search_facts_traced(
+        clients,
+        query,
+        query_vector,
+        group_ids=[group_id],
+        edge_config=config.edge_config,
+        search_filter=sf,
+        limit=config.limit,
+        reranker_min_score=config.reranker_min_score,
+        capture=capture,
+        trace=trace,
+    )
+
+    # Node (entity) lane — only when the scope mounted a node_config.
+    nodes: list[Any] = []
+    if getattr(config, "node_config", None) is not None:
+        nodes = await search_nodes_traced(
+            clients,
+            query,
+            query_vector,
+            group_ids=[group_id],
+            node_config=config.node_config,
+            search_filter=sf,
+            limit=config.limit,
+            reranker_min_score=config.reranker_min_score,
+            trace=trace,
+        )
+
+    # Episode lane — only when the scope mounted an episode_config.
+    episodes: list[Any] = []
+    if getattr(config, "episode_config", None) is not None:
+        episodes = await search_episodes_traced(
+            clients,
+            query,
+            group_ids=[group_id],
+            episode_config=config.episode_config,
+            search_filter=sf,
+            limit=config.limit,
+            reranker_min_score=config.reranker_min_score,
+            trace=trace,
+        )
+
+    capture.trace = trace
+    return edges, nodes, episodes
 
 
 async def search_chunk_ids(
@@ -260,21 +381,47 @@ async def search_chunk_ids(
         sim_min_score=sim_min_score,
         scope=scope,
     )
+    # When a retrieval capture is active (eval / Graph-Runs inspection), route ALL
+    # configured lanes (edge always; node/episode when the scope mounts them) through the
+    # re-hosted, per-stage-traced pipeline so we record candidate legs / hop / rank /
+    # temporal. With no capture we keep the stock ``search_()`` production path untouched
+    # (test fakes that only expose ``search_`` never set a capture, so they're unaffected).
+    capture = current_capture.get()
+    use_trace = capture is not None
+    nodes_result: list[Any] = []
+    episodes_result: list[Any] = []
     try:
-        results = await graphiti.search_(
-            q,
-            config=config,
-            group_ids=[group_id],  # always scoped — never None/all-groups (see guard above)
-            search_filter=search_filter,
-        )
+        if use_trace:
+            edges, nodes_result, episodes_result = await _traced_search(
+                graphiti,
+                q,
+                group_id=group_id,
+                config=config,
+                search_filter=search_filter,
+                temporal=temporal,
+                num_results=num_results,
+                sim_min_score=sim_min_score,
+                k_hop=k_hop,
+                recipe=recipe,
+            )
+        else:
+            results = await graphiti.search_(
+                q,
+                config=config,
+                group_ids=[group_id],  # always scoped — never None/all-groups (see guard above)
+                search_filter=search_filter,
+            )
+            edges = getattr(results, "edges", None) or []
+            nodes_result = getattr(results, "nodes", None) or []
+            episodes_result = getattr(results, "episodes", None) or []
     except Exception:
         # External model + DB call — log + re-raise (caller soft-falls-back to flat).
         log.warning("❌ graphiti.search_ — failed · q=%r recipe=%s", q[:80], recipe, exc_info=True)
         raise
 
-    edges = getattr(results, "edges", None) or []
     chunk_ids: set[str] = set()
     facts: list[str] = []
+    fact_rows: list[dict[str, Any]] = []
     ranked: list[RankedFact] = []
     used = 0
     for edge in edges:
@@ -285,6 +432,13 @@ async def search_chunk_ids(
         valid_at = _iso(getattr(edge, "valid_at", None))
         invalid_at = _iso(getattr(edge, "invalid_at", None))
         episodes = [str(ep) for ep in (getattr(edge, "episodes", None) or []) if ep]
+        # Edge metadata for the recalled-facts table (best-effort; blank when absent).
+        name = (getattr(edge, "name", "") or "").strip()
+        source_uuid = str(getattr(edge, "source_node_uuid", "") or "")
+        target_uuid = str(getattr(edge, "target_node_uuid", "") or "")
+        edge_uuid = str(getattr(edge, "uuid", "") or "")
+        raw_score = getattr(edge, "score", None)
+        score = float(raw_score) if isinstance(raw_score, (int, float)) else None
         # Ranked list keeps a bounded prefix incl. superseded (marked) for the ledger.
         if fact and len(ranked) < 8:
             ranked.append(
@@ -294,6 +448,11 @@ async def search_chunk_ids(
                     invalid_at=invalid_at,
                     chunk_id=episodes[0] if episodes else "",
                     superseded=superseded,
+                    name=name,
+                    source_uuid=source_uuid,
+                    target_uuid=target_uuid,
+                    uuid=edge_uuid,
+                    score=score,
                 )
             )
         # Defense-in-depth only: the query-level SearchFilters already excludes these
@@ -306,12 +465,30 @@ async def search_chunk_ids(
         if fact:
             # Carry the date into the skeleton fact so the answer model can ground
             # relative phrasing in the supporting passage to an absolute date.
-            facts.append(_fact_with_date(fact, valid_at, invalid_at))
+            dated = _fact_with_date(fact, valid_at, invalid_at)
+            facts.append(dated)
+            # Parallel structured row (the recalled-facts table reads these).
+            fact_rows.append(
+                {
+                    "kind": "fact",
+                    "memory": dated,
+                    "fact": fact,
+                    "valid_at": valid_at,
+                    "invalid_at": invalid_at,
+                    "superseded": superseded,
+                    "chunk_id": episodes[0] if episodes else "",
+                    "name": name,
+                    "source_uuid": source_uuid,
+                    "target_uuid": target_uuid,
+                    "uuid": edge_uuid,
+                    "score": score,
+                }
+            )
 
     # Scope-widened legs — only populated when the recipe mounted them. ``SearchResults``
     # always has the fields (defaulted to ``[]``), so unmounted legs naturally return empty.
     node_memories: list[str] = []
-    for node in getattr(results, "nodes", None) or []:
+    for node in nodes_result:
         summary = (getattr(node, "summary", "") or "").strip()
         if not summary:
             continue
@@ -320,7 +497,7 @@ async def search_chunk_ids(
         # attribute the statement back to its subject ("About Misho: …").
         node_memories.append(f"About {name}: {summary}" if name else summary)
     episode_memories: list[str] = []
-    for ep in getattr(results, "episodes", None) or []:
+    for ep in episodes_result:
         content = (getattr(ep, "content", "") or "").strip()
         if content:
             episode_memories.append(content)
@@ -343,6 +520,7 @@ async def search_chunk_ids(
         ranked=tuple(ranked),
         node_memories=tuple(node_memories),
         episode_memories=tuple(episode_memories),
+        fact_rows=tuple(fact_rows),
     )
 
 

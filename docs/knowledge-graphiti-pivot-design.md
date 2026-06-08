@@ -437,7 +437,6 @@ so flat/mix see it, then **`add_episode(uuid=id, …)`**. One small body per cal
   text: "What is Adam's current favorite coffee?"
   expected_kind: fragments          # fragments | abstain | world
   expected: ["oat", "latte"]
-  must_not_contain: ["espresso"]     # catches superseded-fact leakage
   requires: [graph, temporal]        # which mode "should" win
 - id: q_falsepremise_01
   category: misleading
@@ -477,8 +476,7 @@ selected Qs × modes → returns per-question verdicts, **per-category aggregate
 
 ### 8.6 Scoring & gate
 
-- **fragments:** all `expected` present (substring, normalized) **and** none of
-  `must_not_contain` → ✓; partial → ◐; miss → ✗.
+- **fragments:** all `expected` present (substring, normalized) → ✓; partial → ◐; miss → ✗.
 - **abstain:** ✓ when the answer declines; **✗ = hallucination** when it fabricates — the
   metric that matters for `non_existing` / `false_premise` / `abstention`.
 - **Per-category × 3-way table** so you see *where* graph/mix helps:
@@ -881,10 +879,10 @@ New durable pref **`knowledge.graph.ledger_detail`** (`compact` | `rich`, defaul
 
 ### Phase 5 — Eval backend: corpus + scoring + parser ✅
 - [x] `eval/adam_year.episodes.jsonl` — **35 dated episodes** (relatable; all categories + temporal traps).
-- [x] `eval/adam_questions.yaml` — **32 questions** across all 12 categories (abstain + must_not_contain + requires).
+- [x] `eval/adam_questions.yaml` — **32 questions** across all 12 categories (abstain + requires).
 - [x] JSONL parser `graphiti_corpus.py` (our-split, chronological, fail-loud on oversize).
-- [x] Scoring: `must_not_contain` (superseded-fact guard); `load_questions` extended; `category_breakdown` + `by_category`.
-- [x] Tests: ~20 incl. corpus integrity (35 episodes, all categories, forbidden facts present).
+- [x] Scoring: `load_questions` extended; `category_breakdown` + `by_category`.
+- [x] Tests: ~20 incl. corpus integrity (35 episodes, all categories).
 
 ### Phase 6 — Eval runner wiring (Adam corpus ingest + run) ✅
 - [x] `KnowledgeVectorStore.upsert_point` (caller-chosen `point_id`) + `KnowledgeService.ingest_text_chunk` (dense+sparse) for the Qdrant double-write.

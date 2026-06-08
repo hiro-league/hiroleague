@@ -173,9 +173,17 @@
       headerFieldList={runsCtrl.headerFieldList}
       nodeFieldList={runsCtrl.nodeFieldList}
       nodeDetailFieldList={runsCtrl.nodeDetailFieldList}
+      traceStepIds={runsCtrl.retrievalTraceStepIds}
+      activeRetrievalTrace={runsCtrl.activeRetrievalTrace}
+      ingestTraceStepIds={runsCtrl.ingestTraceStepIds}
+      activeIngestTrace={runsCtrl.activeIngestTrace}
       onToggleNodeRow={runsCtrl.toggleNodeRowSelection}
       onOpenNodeDetails={runsCtrl.openNodeDetails}
       onCloseNodeDetails={runsCtrl.closeNodeDetails}
+      onOpenRetrievalTrace={runsCtrl.openRetrievalTrace}
+      onCloseRetrievalTrace={runsCtrl.closeRetrievalTrace}
+      onOpenIngestTrace={runsCtrl.openIngestTrace}
+      onCloseIngestTrace={runsCtrl.closeIngestTrace}
     />
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />

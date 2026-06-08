@@ -29,7 +29,10 @@ from hirocli.runtime.agent_graph.base import _llm_usage_payload as llm_usage_pay
 from hirocli.runtime.agent_graph.base import _normalize_reply_content
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
 from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged
-from hirocli.services.knowledge.graph.ledger_tracer import SpanRecord, current_spans
+from hirocli.services.knowledge.graph.ledger_tracer import (
+    RerankUsage,
+    current_rerank_usage,
+)
 
 from .helpers import (
     NormalizedQuery,
@@ -529,16 +532,31 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 state.get("graph_temporal") or self._prefs.graph.temporal_default
             )
             num_results = max(1, int(self._prefs.knowledge.retrieval.top_k))
-            # Buffer graphiti's ``search.*`` tracer spans so graph_expand can render
-            # them as sub-steps (docs §12.2.2). The tracer no-ops without this.
-            spans: list[SpanRecord] = []
-            spans_token = current_spans.set(spans)
+            # Accumulate cross-encoder rerank usage so the priced ``rerank`` roll-up child carries
+            # model + processed tokens. Stays empty for RRF/MMR / local rerankers (no priced child).
+            rerank_usage = RerankUsage()
+            rerank_token = current_rerank_usage.set(rerank_usage)
+            # Deep per-stage retrieval trace (the ``trace`` observability tier): the EDGES scope
+            # routes through the re-hosted traced pipeline and we persist a sidecar the retrieval-
+            # trace dialog reads back (docs §12.2). Single pref dial — replaces the former
+            # HIRO_GRAPH_TRACE_RETRIEVAL env var.
+            from hirocli.services.knowledge.graph.retrieval_trace import (
+                RetrievalCapture,
+                current_capture,
+            )
+
+            capture = (
+                RetrievalCapture() if self._prefs.graph.observability == "trace" else None
+            )
+            capture_token = current_capture.set(capture) if capture is not None else None
             try:
                 expansion = await service.search_chunk_ids(
                     query, num_results=num_results, temporal=temporal
                 )
             finally:
-                current_spans.reset(spans_token)
+                current_rerank_usage.reset(rerank_token)
+                if capture_token is not None:
+                    current_capture.reset(capture_token)
         except Exception as exc:
             log.warning(
                 "⚠️ graphiti graph_expand failed · falling back to flat search",
@@ -562,18 +580,24 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             entry.set_output_preview(
                 f"facts[{expansion.facts_used}]: {facts_preview}{more} · chunks: {len(expansion.chunk_ids)}"
             )
-            # Unfold the opaque graph_expand node into Graphiti search sub-steps
-            # (embed_query / candidate_gen / bfs_expand / rrf_fuse / rerank +
-            # temporal_filter), with the ranked facts in rich mode (docs §12.2.2).
+            # Attach the priced ``rerank`` roll-up (cloud cross-encoder cost); the deep per-stage
+            # breakdown lives only in the ``trace`` sidecar below (docs §12.2).
             from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
 
-            flush_graph_expand(
-                entry,
-                spans,
-                expansion,
-                temporal=temporal,
-                ledger_detail=self._prefs.graph.ledger_detail,
-            )
+            flush_graph_expand(entry, expansion, rerank_usage=rerank_usage)
+            # Persist the full per-stage trace sidecar (when capture was engaged) keyed by
+            # this run + step, so the retrieval-trace dialog can link it to this row.
+            if capture is not None and capture.trace is not None:
+                from hirocli.services.knowledge.graph.retrieval_trace import (
+                    write_trace_sidecar,
+                )
+
+                write_trace_sidecar(
+                    self._workspace_path,
+                    run_id=entry.run_id,
+                    step_index=entry.step_index,
+                    trace=capture.trace,
+                )
         # graph_facts feed the answer skeleton for the graphiti leg; graph_chunk_ids
         # drive the by-id passage fetch (graph_fetch).
         return {
