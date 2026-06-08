@@ -77,6 +77,14 @@
     void loadPrefs();
   });
 
+  // The shared knowledge SSE is paused while this browser tab is hidden (to free the
+  // per-origin connection budget so other tabs don't stall). A run keeps progressing
+  // server-side meanwhile, so on refocus we re-pull the authoritative run state to
+  // backfill any events missed while backgrounded.
+  function onVisibilityChange(): void {
+    if (document.visibilityState === 'visible') void eval_.resync();
+  }
+
   const TRACK_TABS: { id: EvalTrack; label: string }[] = [
     { id: 'memory', label: 'Memory' },
     { id: 'knowledge', label: 'Knowledge' }
@@ -113,7 +121,7 @@
       case 'idle':
         return '';
       case 'starting':
-        if (eval_.setupPhase?.phase === 'remember') return 'Remembering turns…';
+        if (eval_.setupPhase?.phase === 'remember') return 'Rebuilding graph…';
         if (eval_.setupPhase?.phase === 'ingest_synthetic')
           return `Ingesting synthetic corpus${
             eval_.setupPhase.file_count ? ` · ${eval_.setupPhase.file_count} files` : ''
@@ -224,6 +232,8 @@
 
 </script>
 
+<svelte:document onvisibilitychange={onVisibilityChange} />
+
 <section class="grid gap-4">
   <!-- Track sub-tabs — Memory vs Knowledge select the whole panel's shape. -->
   <div
@@ -327,14 +337,22 @@
         </select>
       </label>
 
-      <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
+      <label
+        class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
+        title={isMemory
+          ? 'Wipe this set’s memory graph, then re-remember the turns from scratch. Leave off to recall the existing graph (e.g. re-run a question subset).'
+          : 'Wipe this corpus’s eval docs (chunks + graph), then re-ingest from scratch. Leave off to reuse the existing index.'}
+      >
         <input type="checkbox" class="size-4" bind:checked={eval_.ingestSynthetic} disabled={isBusy} />
-        <span>{isMemory ? 'Remember turns first' : 'Ingest corpus first'}</span>
+        <span>{isMemory ? 'Rebuild graph' : 'Ingest corpus first'}</span>
       </label>
       {#if !isMemory}
-        <label class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm">
+        <label
+          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
+          title="Wipe this corpus's prior graph, then rebuild it from the ingested chunks. Leave off to reuse the existing graph."
+        >
           <input type="checkbox" class="size-4" bind:checked={eval_.buildGraph} disabled={isBusy} />
-          <span>Build graph</span>
+          <span>Rebuild graph</span>
         </label>
         <div class="flex items-center gap-2 font-sans text-sm">
           <span class="text-muted-foreground">Legs</span>
@@ -624,25 +642,22 @@
               </div>
             </td>
           </tr>
-          <!-- Fold: full question + ideal + per-leg answer/judge/recalled facts. -->
+          <!-- Fold: per-leg judge verdict + recalled facts (expanded). Question/ideal/answer are
+               already in the row above, so we don't repeat them here — only the diagnostic detail. -->
           <tr class="border-t bg-muted/10" hidden={!expandedRows.has(r.index)}>
             <td colspan={resultsColspan} class="px-3 py-3">
               <div class="grid gap-3">
-                <div class="font-sans text-sm">
-                  <span class="font-semibold">Q:</span>
-                  {r.question}
-                  {#if r.subcategory}<span class="text-xs text-muted-foreground"> &middot; {r.subcategory}</span>{/if}
-                </div>
-                <div class="flex flex-wrap items-center gap-2 font-sans text-xs">
-                  <span class="font-semibold text-muted-foreground">Ideal:</span>
-                  <span>{r.gold || '—'}</span>
-                  {#if r.must_not_contain.length > 0}
-                    <span class="font-semibold text-muted-foreground">Must not contain:</span>
-                    {#each r.must_not_contain as frag (frag)}
-                      <Badge variant="warning" class="font-mono font-normal">{frag}</Badge>
-                    {/each}
-                  {/if}
-                </div>
+                {#if r.subcategory || r.must_not_contain.length > 0}
+                  <div class="flex flex-wrap items-center gap-2 font-sans text-xs">
+                    {#if r.subcategory}<span class="text-muted-foreground">{r.subcategory}</span>{/if}
+                    {#if r.must_not_contain.length > 0}
+                      <span class="font-semibold text-muted-foreground">Must not contain:</span>
+                      {#each r.must_not_contain as frag (frag)}
+                        <Badge variant="warning" class="font-mono font-normal">{frag}</Badge>
+                      {/each}
+                    {/if}
+                  </div>
+                {/if}
                 {#if r.stale_hit}
                   <div class="rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1 font-sans text-xs text-amber-700">
                     &#9888; a recalled fact contains a must-not-surface value &mdash; possible superseded-fact leak
@@ -652,7 +667,7 @@
                   {#each legColumns as mode (mode)}
                     {#if r.legs[mode]}
                       {@const leg = r.legs[mode]}
-                      <div class="grid content-start gap-1 rounded-md border bg-background p-2.5">
+                      <div class="grid content-start gap-1.5 rounded-md border bg-background p-2.5">
                         <div class="flex items-center gap-2">
                           <span class="font-sans text-xs font-semibold">{legLabel(mode)}</span>
                           <Badge variant={markVariant(leg.mark)} class="font-mono">{leg.mark || '—'}</Badge>
@@ -667,19 +682,20 @@
                             </a>
                           {/if}
                         </div>
-                        <p class="max-h-60 overflow-y-auto whitespace-pre-wrap font-sans text-sm leading-6">
-                          {leg.answer || '— (no answer)'}
-                        </p>
                         {#if leg.reason}
-                          <p class="text-xs text-muted-foreground"><span class="font-semibold">Judge:</span> {leg.reason}</p>
+                          <p class="text-xs leading-6 text-muted-foreground"><span class="font-semibold">Judge:</span> {leg.reason}</p>
+                        {:else}
+                          <p class="text-xs italic text-muted-foreground">No judge verdict.</p>
                         {/if}
                         {#if (leg.recalled ?? []).length > 0}
-                          <details class="text-xs">
-                            <summary class="cursor-pointer text-muted-foreground">Recalled facts ({(leg.recalled ?? []).length})</summary>
+                          <div class="text-xs">
+                            <div class="font-semibold text-muted-foreground">Recalled facts ({(leg.recalled ?? []).length})</div>
                             <ul class="ml-4 mt-1 list-disc leading-6">
                               {#each leg.recalled ?? [] as f, i (i)}<li>{f}</li>{/each}
                             </ul>
-                          </details>
+                          </div>
+                        {:else}
+                          <div class="text-xs italic text-muted-foreground">No recalled facts.</div>
                         {/if}
                       </div>
                     {/if}

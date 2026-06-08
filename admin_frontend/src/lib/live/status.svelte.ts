@@ -22,7 +22,15 @@ function createLiveStatusStore() {
   let connected = $state(false);
   let error = $state<string | null>(null);
   let source: EventSource | null = null;
+  // Remember the last requested workspace + whether the store is "active" so we can drop the
+  // connection while the tab is hidden and transparently re-establish it on refocus.
+  let activeWorkspace: string | null | undefined;
+  let active = false;
   const listeners = new Set<Listener>();
+
+  function isHidden(): boolean {
+    return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  }
 
   function emit(nextPayload: AdminStatusPayload) {
     payload = nextPayload;
@@ -32,7 +40,13 @@ function createLiveStatusStore() {
   }
 
   function start(workspaceId?: string | null) {
-    if (!browser || source) return;
+    if (!browser) return;
+    active = true;
+    activeWorkspace = workspaceId;
+    if (source) return;
+    // Don't hold a connection while backgrounded — each open tab also owns the knowledge
+    // stream, and at ~3 tabs the per-origin HTTP/1.1 cap is hit, stalling ordinary fetches.
+    if (isHidden()) return;
     const query = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : '';
     source = new EventSource(`${base}/api/events/status${query}`);
     source.addEventListener('status', (event) => {
@@ -47,9 +61,23 @@ function createLiveStatusStore() {
   }
 
   function stop() {
+    active = false;
     source?.close();
     source = null;
     connected = false;
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (isHidden()) {
+        // Pause (free the connection) but stay "active" so refocus reconnects automatically.
+        source?.close();
+        source = null;
+        connected = false;
+      } else if (active && !source) {
+        start(activeWorkspace);
+      }
+    });
   }
 
   function subscribe(listener: Listener) {

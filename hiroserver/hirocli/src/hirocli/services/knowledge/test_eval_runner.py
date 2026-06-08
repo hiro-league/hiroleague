@@ -490,14 +490,17 @@ class _FakeEvalClearService:
 
 
 @pytest.mark.asyncio
-async def test_clear_eval_data_deletes_synthetic_corpus() -> None:
-    """Deletes the KNOWLEDGE-track eval docs (synthetic tag) via the service's per-document
-    delete (which purges catalog + Qdrant + graph episodes). The memory track clears
-    separately by graph group (eval_mem_{set}), so it is NOT part of this sweep."""
-    from hirocli.services.knowledge.eval_runner import clear_eval_data
+async def test_clear_eval_data_deletes_corpus() -> None:
+    """Deletes ONE corpus's KNOWLEDGE-track eval docs (live per-corpus tag) via the service's
+    per-document delete (which purges catalog + Qdrant + graph episodes). The memory track
+    clears separately by graph group (eval_mem_{set}), so it is NOT part of this sweep."""
+    from hirocli.services.knowledge.eval_runner import clear_eval_data, eval_kb_tag
 
-    svc = _FakeEvalClearService({EVAL_SYNTHETIC_TAG: ["s1", "s2", "s3"]})
-    removed = await clear_eval_data(svc)
+    # Only the chosen corpus's tag is swept — a different corpus's docs are left alone.
+    svc = _FakeEvalClearService(
+        {eval_kb_tag("helix"): ["s1", "s2", "s3"], eval_kb_tag("other"): ["x1"]}
+    )
+    removed = await clear_eval_data(svc, "helix")
     assert removed == 3
     assert sorted(svc.deleted) == ["s1", "s2", "s3"]
 
@@ -507,5 +510,5 @@ async def test_clear_eval_data_noop_when_empty() -> None:
     from hirocli.services.knowledge.eval_runner import clear_eval_data
 
     svc = _FakeEvalClearService({})
-    assert await clear_eval_data(svc) == 0
+    assert await clear_eval_data(svc, "missing") == 0
     assert svc.deleted == []

@@ -35,8 +35,14 @@ class _FakeMemory:
     def __init__(self, recall: dict[str, list[str]]) -> None:
         self.added: list[dict] = []
         self.searched: list[str] = []
+        self.cleared: int = 0  # times clear_all was called (rebuild-before-remember)
         self.closed = False
         self._recall = recall
+
+    async def clear_all(self, *, user_id, character_id=None) -> int:
+        # Rebuild gate: run_memory_eval wipes the drawer before re-remembering.
+        self.cleared += 1
+        return 0
 
     async def add(self, content, *, user_id, run_id, character_id, metadata=None, ledger_sink=None):
         self.added.append(
@@ -97,6 +103,9 @@ async def test_run_memory_eval_remembers_and_recalls(tmp_path) -> None:
         remember=True,
     )
 
+    # Rebuild gate: remember=True wipes the drawer ONCE before re-remembering, so a
+    # re-run rebuilds from scratch (no prior-run facts contaminating Graphiti dedup).
+    assert mem.cleared == 1
     # Remembered every turn through the real `add` path, under the eval sentinel user.
     assert len(mem.added) == 2
     assert {a["user_id"] for a in mem.added} == {MEMORY_EVAL_USER_ID}
@@ -137,6 +146,7 @@ async def test_run_memory_eval_remember_false_skips_add(tmp_path) -> None:
         remember=False,  # re-run questions without re-remembering
     )
     assert mem.added == []  # nothing remembered
+    assert mem.cleared == 0  # remember=False never wipes — recalls the existing drawer
     assert summary["remembered_turns"] == 0
     assert mem.searched == ["Where do I work?"]  # still recalls
 

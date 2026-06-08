@@ -70,7 +70,21 @@ DEFAULT_EVAL_FOLDER = _REPO_ROOT / "eval"
 # Tag auto-applied to ingested eval docs so flat/graph retrieval can be scoped
 # to ONLY the synthetic corpus (so the eval comparison stays fair even when the
 # workspace has unrelated knowledge docs already ingested). See plan §5f.
+#
+# Legacy flat tag — matched only the single bundled l3_synthetic corpus. Kept for the
+# legacy CLI tool path (knowledge_eval.py). The admin route uses the per-corpus tag below.
 EVAL_SYNTHETIC_TAG = "_l3_eval_synthetic"
+
+# Per-corpus knowledge-eval tag — the LIVE convention. The admin route tags every ingested
+# eval doc with ``_eval_kb_{corpus_id}`` so retrieval AND clear scope to one corpus. Minted
+# here (single source) so ingest + clear can't drift onto different tags (the bug that
+# stranded orphan eval vectors when the manual clear keyed off the stale flat tag).
+EVAL_KB_TAG_PREFIX = "_eval_kb_"
+
+
+def eval_kb_tag(corpus_id: str) -> str:
+    """The per-corpus knowledge-eval document tag (``_eval_kb_{corpus_id}``)."""
+    return f"{EVAL_KB_TAG_PREFIX}{corpus_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -816,6 +830,19 @@ async def run_memory_eval(
             eps = episodes if episodes is not None else load_episodes_file(
                 corpus_path or ADAM_CORPUS_FILE
             )
+            # Rebuild = clean slate. Wipe this eval set's graph drawer BEFORE re-remembering so
+            # the run rebuilds from scratch. Re-ingesting the same turns over an existing graph
+            # let Graphiti dedup/invalidate against stale state — a prior run's facts contaminated
+            # the next (observed: spurious edges + bad supersessions on re-run). Gated on
+            # `remember`: a question-subset re-run (remember=False) recalls the existing drawer
+            # untouched. Eval-scoped facade ⇒ clear_all targets only the eval_mem_{set} drawer.
+            cleared = await memory.clear_all(user_id=eval_user_id, character_id=character_id)
+            if cleared:
+                log.info(
+                    "🧹 knowledge.eval — memory rebuild · cleared %d prior fact(s) · set=%s",
+                    cleared,
+                    set_id,
+                )
             # Open ONE parent run so every turn's Graphiti extraction nests under it (priced
             # sub-rows fold into the aggregate) — the memory "ingest" Graph Run.
             ledger_run_id = f"memory_eval-{slug_group_part(set_id)}-{rid}"
@@ -1163,28 +1190,28 @@ async def collect_synthetic_doc_ids(service: Any) -> list[str]:
     return [d.id for d in docs_result.documents]
 
 
-async def collect_eval_doc_ids(service: Any) -> list[str]:
-    """Return doc_ids of every KNOWLEDGE-track eval document (tag ``_l3_eval_synthetic``).
+async def collect_eval_doc_ids(service: Any, corpus_id: str) -> list[str]:
+    """Return doc_ids of one KNOWLEDGE-track eval corpus (tag ``_eval_kb_{corpus_id}``).
 
     The memory track no longer writes knowledge documents (its data lives in the
     ``eval_mem_{set}`` graph drawer, cleared by group — not by document), so the knowledge
-    eval footprint is exactly the synthetic-tagged docs."""
-    docs_result = await service.list_documents(tag=EVAL_SYNTHETIC_TAG, limit=500)
+    eval footprint is exactly this corpus's tagged docs."""
+    docs_result = await service.list_documents(tag=eval_kb_tag(corpus_id), limit=500)
     return [doc.id for doc in docs_result.documents]
 
 
-async def clear_eval_data(service: Any) -> int:
-    """Delete the KNOWLEDGE-track eval data (synthetic corpus) — catalog rows, Qdrant
-    chunks, and graph episodes — and return the document count removed.
+async def clear_eval_data(service: Any, corpus_id: str) -> int:
+    """Delete one KNOWLEDGE-track eval corpus — catalog rows, Qdrant chunks, and graph
+    episodes — and return the document count removed.
 
-    Document-scoped over the eval-tagged docs: ``service.delete_document`` purges all three
-    stores per document (catalog + Qdrant + graph episodes). Idempotent: a workspace with no
-    eval docs removes 0. (The MEMORY track clears separately by graph group — ``clear_all`` /
-    ``clear_group("eval_mem_{set}")``.)
+    Scopes to the LIVE per-corpus tag (``_eval_kb_{corpus_id}``): ``service.delete_document``
+    purges all three stores per document (catalog + Qdrant + graph episodes). Idempotent: a
+    corpus with no eval docs removes 0. (The MEMORY track clears separately by graph group —
+    ``clear_all`` / ``clear_group("eval_mem_{set}")``.)
     """
-    doc_ids = await collect_eval_doc_ids(service)
+    doc_ids = await collect_eval_doc_ids(service, corpus_id)
     if not doc_ids:
-        log.info("🧹 knowledge.eval — no eval documents to clear")
+        log.info("🧹 knowledge.eval — no eval documents to clear · corpus=%s", corpus_id)
         return 0
     removed = 0
     for doc_id in doc_ids:
@@ -1199,7 +1226,12 @@ async def clear_eval_data(service: Any) -> int:
             continue
         if result.get("deleted"):
             removed += 1
-    log.info("🧹 knowledge.eval — cleared eval data · documents=%d/%d", removed, len(doc_ids))
+    log.info(
+        "🧹 knowledge.eval — cleared eval data · corpus=%s · documents=%d/%d",
+        corpus_id,
+        removed,
+        len(doc_ids),
+    )
     return removed
 
 
@@ -1213,6 +1245,8 @@ __all__ = [
     "DEFAULT_MEMORY_EVAL_SET",
     "DEFAULT_QUESTIONS_FILE",
     "EVAL_SYNTHETIC_TAG",
+    "EVAL_KB_TAG_PREFIX",
+    "eval_kb_tag",
     "MEMORY_EVAL_USER_ID",
     "discover_corpuses",
     "EvalSummary",

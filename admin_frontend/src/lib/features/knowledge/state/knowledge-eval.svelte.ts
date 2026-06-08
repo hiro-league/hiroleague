@@ -575,6 +575,10 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     toggleMode,
     loadQuestions,
     init,
+    // Re-pull the server-side run state. Used when the tab regains focus: the knowledge
+    // SSE is paused on hidden tabs (to free the connection pool), so any events that fired
+    // while backgrounded were missed — re-hydrating snaps the panel back to server truth.
+    resync: hydrateFromServer,
     start,
     cancel,
     clear,

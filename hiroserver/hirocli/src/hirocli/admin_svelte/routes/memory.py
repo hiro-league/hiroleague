@@ -116,6 +116,11 @@ async def list_workspace_memories(
     tab. The client-supplied scope is re-validated at this API boundary (firm group policy,
     docs/graph-group-policy-design.md §6) so a crafted/empty id can't trigger an all-groups
     scan."""
+    # region agent log
+    from hirocli.services.knowledge.graph.graphiti_service import _dbg as _dbg
+    _dbg("C", "memory.py:list_workspace_memories:enter",
+         "memory/list HTTP handler entered", group_id=group_id)
+    # endregion
     try:
         service, workspace_path = await _resolve_memory_service(request, workspace_id)
         if service is None:
@@ -137,6 +142,10 @@ async def list_workspace_memories(
             memories = _sort_memories(
                 await service.list_all(user_id=get_default_user_id(workspace_path))
             )
+        # region agent log
+        _dbg("C", "memory.py:list_workspace_memories:done",
+             "memory/list returning", group_id=group_id, count=len(memories))
+        # endregion
         return _success({"memory_enabled": True, "memories": memories})
     except Exception as exc:
         log.error("list memories - admin failed", error=str(exc), exc_info=True)

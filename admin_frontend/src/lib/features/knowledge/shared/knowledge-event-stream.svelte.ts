@@ -36,6 +36,10 @@ function currentWorkspace(): string | null {
     : localStorage.getItem(PREF_KEYS.selectedWorkspace);
 }
 
+function isHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
 function createKnowledgeEventStream() {
   let source: EventSource | null = null;
   let workspace: string | null = null;
@@ -77,6 +81,10 @@ function createKnowledgeEventStream() {
 
   function open(): void {
     if (typeof EventSource === 'undefined') return; // SSR guard
+    // A backgrounded tab must NOT hold a connection — browsers cap HTTP/1.1 at ~6 per
+    // origin and each tab also owns the status stream, so a few open tabs would exhaust
+    // the pool and stall ordinary fetches (graph export / memory list). Reopened on focus.
+    if (isHidden()) return;
     workspace = currentWorkspace();
     const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
     const src = new EventSource(`${base}${KNOWLEDGE_EVENTS_PATH}${query}`);
@@ -144,6 +152,18 @@ function createKnowledgeEventStream() {
     return () => {
       for (const off of offs) off();
     };
+  }
+
+  // Free / reclaim the connection as the tab is hidden / shown. Handlers stay registered
+  // across the pause, so on refocus we reconnect with the exact same subscriptions.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (isHidden()) {
+        close();
+      } else if (totalHandlers() > 0) {
+        ensureOpen();
+      }
+    });
   }
 
   return {

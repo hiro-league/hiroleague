@@ -797,6 +797,11 @@ async def graph_export(
     from hirocli.services.knowledge.graph.group_scope import GroupPolicyError, validate_group_id
     from hirocli.tools.knowledge_graph import graph_snapshot_payload
 
+    # region agent log
+    from hirocli.services.knowledge.graph.graphiti_service import _dbg as _dbg
+    _dbg("C", "knowledge.py:graph_export:enter", "graph_export HTTP handler entered",
+         group_ids=body.group_ids)
+    # endregion
     try:
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path).resolve()
@@ -820,6 +825,10 @@ async def graph_export(
             edge_limit=body.edge_limit,
             group_ids=validated_groups,
         )
+        # region agent log
+        _dbg("C", "knowledge.py:graph_export:done", "graph_export returning payload",
+             group_ids=validated_groups, counts=payload.get("counts"))
+        # endregion
         return _success(payload)
     except Exception as exc:
         # With the shared driver, in-process opens no longer collide; a lock error here
@@ -1005,13 +1014,17 @@ async def eval_run(
     # Local imports keep the module's top-level deps thin — eval is a niche path.
     from hirocli.services.knowledge.eval_registry import get_eval_registry
     from hirocli.services.knowledge.eval_runner import (
+        eval_kb_tag,
         ingest_synthetic_corpus_via_service,
         load_questions,
         normalize_modes,
         run_eval,
         run_memory_eval,
     )
-    from hirocli.tools.knowledge_graph import _run_graph_ingest_for_documents
+    from hirocli.tools.knowledge_graph import (
+        _run_graph_ingest_for_documents,
+        remove_document_from_graph,
+    )
 
     try:
         service, owned = await _resolve_service(request, workspace_id)
@@ -1089,9 +1102,23 @@ async def eval_run(
 
                 # Knowledge track: ingest the chosen .md corpus folder (tagged per corpus so
                 # retrieval scopes to it), optionally build the graph, then run flat/graphiti.
-                eval_tag = f"_eval_kb_{corpus_id}"
+                eval_tag = eval_kb_tag(corpus_id)
                 ingested_ids: list[str] = []
                 if body.ingest_synthetic:
+                    # Re-ingest = clean slate. Drop this corpus's prior eval docs (catalog +
+                    # Qdrant chunks + their graph episodes) BEFORE re-ingesting, so a re-run
+                    # starts fresh. Re-ingesting over existing chunks/graph let stale state
+                    # contaminate retrieval + Graphiti dedup (memory-track parity). Gated on the
+                    # checkbox: a subset re-run (both off) reuses the existing index.
+                    prior = await service.list_documents(tag=eval_tag, limit=500)
+                    for doc in prior.documents:
+                        await service.delete_document(doc.id)
+                    if prior.documents:
+                        log.info(
+                            "🧹 knowledge.eval — cleared %d prior eval doc(s) · corpus=%s",
+                            len(prior.documents),
+                            corpus_id,
+                        )
                     log.info(
                         "⬇️ knowledge.eval — ingesting corpus '%s' · run_id=%s",
                         corpus_id,
@@ -1111,6 +1138,19 @@ async def eval_run(
                     else:
                         docs = await service.list_documents(tag=eval_tag, limit=500)
                         doc_ids = [d.id for d in docs.documents]
+                    # Rebuild = clean slate. On a build-ONLY run (ingest off, reusing existing
+                    # chunks) wipe these docs' prior graph episodes first so the graph rebuilds
+                    # clean — re-ingesting episodes over the old graph let Graphiti dedup against
+                    # stale state. When ingest just ran, the docs are fresh with no graph yet, so
+                    # the delete_document above already cleared it → skip this pass.
+                    if doc_ids and not body.ingest_synthetic:
+                        for did in doc_ids:
+                            await remove_document_from_graph(workspace_path, did)
+                        log.info(
+                            "🧹 knowledge.eval — cleared prior graph for %d doc(s) · corpus=%s",
+                            len(doc_ids),
+                            corpus_id,
+                        )
                     if doc_ids:
                         log.info(
                             "⬇️ knowledge.eval — graph-ingesting %d doc(s) · run_id=%s",
@@ -1279,8 +1319,8 @@ async def eval_clear(
 ) -> dict[str, Any]:
     """Delete a track's eval data from the workspace. Backs the Eval panel's "Clear eval data".
 
-    - **knowledge** (default): document-scoped wipe of the synthetic eval-tagged docs (catalog +
-      Qdrant + knowledge-graph episodes) via ``clear_eval_data``.
+    - **knowledge** (default): document-scoped wipe of the chosen corpus's eval-tagged docs
+      (``_eval_kb_{corpus_id}`` → catalog + Qdrant + graph episodes) via ``clear_eval_data``.
     - **memory**: group-scoped wipe of the chosen ``eval_mem_{corpus_id}`` drawer via the
       eval-scoped memory facade's ``clear_all`` (docs/eval-corpus-tracks-design.md §8.5).
     """
@@ -1310,9 +1350,12 @@ async def eval_clear(
 
     from hirocli.services.knowledge.eval_runner import clear_eval_data
 
+    kb_corpus = (corpus_id or "").strip()
+    if not kb_corpus:
+        return envelope_failure("corpus_id is required to clear a knowledge eval corpus.")
     service, owned = await _resolve_service(request, workspace_id)
     try:
-        removed = await clear_eval_data(service)
+        removed = await clear_eval_data(service, kb_corpus)
         return _success({"removed_documents": removed})
     except Exception as exc:
         log.error("knowledge eval clear failed · %s", str(exc), exc_info=True)

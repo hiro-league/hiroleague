@@ -89,6 +89,10 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let nodes = $state<GraphNodeDTO[]>([]);
   let links = $state<GraphEdgeDTO[]>([]);
   let loading = $state(false);
+  // Last load failure (timeout / network / server). Lets the panel show an actionable
+  // "couldn't load — retry" warning instead of the misleading "No graph yet" empty state
+  // when an export request is aborted (e.g. too many open tabs saturate the connection pool).
+  let loadError = $state<string | null>(null);
   let truncated = $state(false);
   // Bumped on every full (re)export so the renderer can tell a structural reload
   // (initial load / manual reload / reconcile) apart from incremental live deltas.
@@ -200,6 +204,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
 
   async function load(): Promise<void> {
     loading = true;
+    loadError = null;
     deps.setError(null);
     try {
       // Scope to the selected partition. null only when no group exists yet (empty graph) —
@@ -208,7 +213,8 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
         activeGroupId ? { groupIds: [activeGroupId] } : {}
       );
       if (!res.ok || !res.data) {
-        deps.setError(res.error ?? 'Failed to load graph');
+        loadError = res.error ?? 'Failed to load graph';
+        deps.setError(loadError);
         return;
       }
       nodeById.clear();
@@ -220,7 +226,8 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       rebuildArrays();
       loadVersion += 1; // signal a structural reload to the renderer (full relayout + fit)
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : String(err));
+      loadError = err instanceof Error ? err.message : String(err);
+      deps.setError(loadError);
     } finally {
       loading = false;
     }
@@ -516,6 +523,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     nodes: () => nodes,
     links: () => links,
     loading: () => loading,
+    loadError: () => loadError,
     loadVersion: () => loadVersion,
     truncated: () => truncated,
     live: () => live,

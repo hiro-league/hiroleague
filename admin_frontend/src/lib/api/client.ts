@@ -36,19 +36,40 @@ export async function apiRequest<T>(
   }
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 20000);
+  // Track whether OUR timeout (not the caller's signal) aborted the request, so the abort
+  // can be surfaced as a readable "timed out / server busy" message instead of the raw
+  // DOMException "signal is aborted without reason".
+  const timeoutMs = options.timeoutMs ?? 20000;
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   // Cancel too if the caller's signal fires (forwards an external abort to the fetch).
   if (options.signal) {
     if (options.signal.aborted) controller.abort();
     else options.signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  const response = await fetch(`${apiBase}${path}`, {
-    method: options.method ?? 'GET',
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: controller.signal
-  }).finally(() => window.clearTimeout(timeout));
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      method: options.method ?? 'GET',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: controller.signal
+    }).finally(() => window.clearTimeout(timeout));
+  } catch (err) {
+    // Our timeout fired → readable, actionable message (the request never completed,
+    // often because too many open tabs/SSE streams saturate the browser connection pool).
+    if (timedOut) {
+      throw new Error(
+        `Request timed out after ${Math.round(timeoutMs / 1000)}s — the server may be busy or ` +
+          `too many browser tabs are open (each holds a live event stream). Close extra tabs and retry.`
+      );
+    }
+    throw err; // caller-initiated cancel (component unmount / superseded) or a genuine network error
+  }
 
   let payload: ApiResponse<T>;
   try {

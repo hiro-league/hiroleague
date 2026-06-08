@@ -281,11 +281,12 @@ async def test_list_facts_no_db_file_is_empty(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_clear_group_enumerates_all_episodes_and_removes(tmp_path, monkeypatch) -> None:
-    """``clear_group`` collects EVERY episode in the group (no source_description filter,
-    unlike the per-document wipe), paging via uuid_cursor, then delegates the full set to
-    ``remove_episodes``. Graph reads/deletes stubbed (no Kuzu writes — the read/delete
-    paths run constantly in ingest)."""
+async def test_clear_group_uses_group_scoped_clear_data(tmp_path, monkeypatch) -> None:
+    """``clear_group`` counts the group's episodes (for the metric) then delegates the wipe to
+    graphiti's group-scoped Kuzu op ``driver.graph_ops.clear_data(group_ids=[...])`` — which
+    deletes RelatesToNode_ + Entity + Episodic + Community for the group (no orphan fact nodes
+    left). Critically it must be GROUP-SCOPED, not a whole-DB wipe. clear_data stubbed (no real
+    Kuzu deletes)."""
     from graphiti_core.nodes import EpisodicNode
 
     from hirocli.services.knowledge.graph import graphiti_service as gsvc_mod
@@ -308,21 +309,22 @@ async def test_clear_group_enumerates_all_episodes_and_removes(tmp_path, monkeyp
     monkeypatch.setattr(gsvc_mod, "_EPISODE_WIPE_PAGE", 2)
     monkeypatch.setattr(EpisodicNode, "get_by_group_ids", classmethod(_fake_get))
 
-    captured: list[str] = []
+    await svc.initialize()  # so the real driver (and driver.graph_ops) exists to patch
+    captured: dict[str, object] = {}
 
-    async def _fake_remove(uuids):
-        captured.extend(uuids)
-        return len(uuids)
+    async def _fake_clear(executor, group_ids=None):
+        captured["group_ids"] = group_ids
 
-    monkeypatch.setattr(svc, "remove_episodes", _fake_remove)
+    monkeypatch.setattr(svc._graphiti.driver.graph_ops, "clear_data", _fake_clear)
 
     try:
         removed = await svc.clear_group("mem_42_aria")
     finally:
         await svc.close()
 
-    assert captured == ["m1", "m2", "m3"]  # every episode in the group, across both pages
-    assert removed == 3
+    # GROUP-SCOPED wipe (never a whole-DB delete that would erase other groups).
+    assert captured["group_ids"] == ["mem_42_aria"]
+    assert removed == 3  # episode count reported for the caller's metric
 
 
 @pytest.mark.asyncio

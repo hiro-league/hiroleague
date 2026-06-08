@@ -134,12 +134,17 @@ async def answer_from_context(
     should decline (tests memory recall honestly)."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    from hirocli.runtime.agent_graph.base import _normalize_reply_content
+
     facts = "\n".join(f"- {c}" for c in context) or "(no facts available)"
     human = f"Facts:\n{facts}\n\nQuestion: {question}"
 
     async def _call() -> tuple[str, Any, str]:
         ai = await model.ainvoke([SystemMessage(_ANSWER_SYSTEM), HumanMessage(human)])
-        text = str(getattr(ai, "content", "") or "").strip()
+        # Flatten provider content (Anthropic returns a list of text blocks) to plain text;
+        # str() on the raw list leaked a JSON-ish repr into the recall answer. Reuse the
+        # shared agent-graph normalizer instead of duplicating block-extraction here.
+        text = _normalize_reply_content(getattr(ai, "content", "")).strip()
         return text, ai, text[:200]
 
     return await _ledger_llm_node(

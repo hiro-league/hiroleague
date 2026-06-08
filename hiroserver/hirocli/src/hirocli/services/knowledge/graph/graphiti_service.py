@@ -79,6 +79,32 @@ if TYPE_CHECKING:
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
 
+
+# region agent log
+def _dbg(hyp: str, loc: str, msg: str, **data: Any) -> None:
+    try:
+        import json as _j
+        import time as _t
+
+        with open(r"d:/projects/hiroleague/debug-4c5bfb.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                _j.dumps(
+                    {
+                        "sessionId": "4c5bfb",
+                        "hypothesisId": hyp,
+                        "location": loc,
+                        "message": msg,
+                        "data": data,
+                        "timestamp": int(_t.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+# endregion
+
+
 # Reranker ``top_n`` for the cross-encoder: rank ALL candidate facts Graphiti hands it
 # (the final cut is Graphiti's ``SearchConfig.limit``). Generous so we never pre-trim.
 _RERANK_CANDIDATE_CAP = 512
@@ -578,61 +604,47 @@ class GraphitiMemoryService:
         return uuids
 
     async def clear_group(self, group_id: str) -> int:
-        """Delete every episode in ``group_id`` (and the nodes/edges it exclusively owns).
+        """Delete the WHOLE ``group_id`` partition via graphiti's group-scoped Kuzu clear.
 
         Conversation-memory wipe (memory Phase 2, decision D1): clearing a per-
-        ``(user, character)`` memory group removes all of that pairing's remembered turns
-        and the facts/entities derived from them. Groups are isolated partitions, so
-        nothing in the group is shared with another — removing all its episodes removes
-        all its facts. Returns the number of episodes removed; serialized under the
-        per-workspace write lock by :meth:`remove_episodes`.
+        ``(user, character)`` memory group removes all of that pairing's remembered turns and
+        the facts/entities derived from them. Groups are isolated partitions, so this drops the
+        whole partition cleanly. Returns the episode count removed (counted up front, since the
+        underlying op returns ``None``); the clear runs under the per-workspace write lock.
 
-        Final orphan sweep: graphiti's ``remove_episode`` only deletes an entity when
-        the MENTIONS count equals 1 at delete time — so an entity mentioned by two
-        episodes can survive both deletions and leave an orphan in the group. Since a
-        memory group is an isolated partition, any ``Entity`` still in it after the
-        episode wipe is by definition orphan, so we DETACH DELETE the remainder.
+        Delegates to ``driver.graph_ops.clear_data(driver, group_ids=[group_id])`` —
+        graphiti-core's Kuzu maintenance op, which DETACH DELETEs ``RelatesToNode_`` (Kuzu
+        reifies edges as nodes) **plus** ``Entity`` / ``Episodic`` / ``Community`` scoped to the
+        group. This replaces a hand-rolled wipe (per-episode ``remove_episode`` + an
+        Entity-only ``DETACH DELETE``) that left orphan ``RelatesToNode_`` fact nodes behind:
+        ``remove_episode`` only deletes what one episode exclusively owns, and deleting an
+        ``Entity`` removes its relationships but NOT the reified fact *node* between two
+        entities — so fact nodes orphaned across re-runs survived every clear and could
+        resurface in recall.
+
+        Why the DRIVER op and not the top-level ``graph_data_operations.clear_data`` helper:
+        that helper only group-scopes when ``driver.graph_operations_interface`` is set, which
+        the Kuzu driver leaves ``None`` — so it would fall through to a whole-DB
+        ``MATCH (n) DETACH DELETE n`` and wipe EVERY group (incl. real conversation memory).
+        The driver op is the group-safe path.
         """
         await self.initialize()
-        uuids = await self._episode_uuids_in_group(group_id)
-        if not uuids:
-            log.info("🧹 graphiti — no memory episodes to clear · group=%s", group_id)
-            removed = 0
-        else:
-            log.info("🧹 graphiti — clearing memory group · group=%s count=%d", group_id, len(uuids))
-            removed = await self.remove_episodes(uuids)
-        await self._sweep_orphan_entities(group_id)
-        return removed
-
-    async def _sweep_orphan_entities(self, group_id: str) -> None:
-        """DETACH DELETE every ``Entity`` still in ``group_id`` (orphan cleanup for
-        :meth:`clear_group`). Best-effort + logged: a sweep failure must not bubble up
-        and undo the user-visible "cleared N memories" outcome."""
-        if not group_id:
-            return
+        driver = getattr(self._graphiti, "driver", None)
+        if driver is None:
+            return 0  # test fakes without a driver — nothing to clear
+        count = len(await self._episode_uuids_in_group(group_id))
         lock = kuzu_registry.write_lock(self._registry_key)
         async with lock:
             try:
-                driver = self._graphiti.driver
-                count_rows, _, _ = await driver.execute_query(
-                    "MATCH (n:Entity) WHERE n.group_id = $g RETURN count(n) AS c",
-                    g=group_id,
-                )
-                rows = count_rows or []
-                count = int(rows[0].get("c", 0)) if rows else 0
-                if count <= 0:
-                    return
-                log.info(
-                    "🧹 graphiti — sweeping %d orphan entities · group=%s", count, group_id
-                )
-                await driver.execute_query(
-                    "MATCH (n:Entity) WHERE n.group_id = $g DETACH DELETE n",
-                    g=group_id,
-                )
+                # Group-scoped: deletes RelatesToNode_ + Entity + Episodic + Community for THIS
+                # group only (graphiti_core kuzu graph_ops.clear_data) — no orphan fact nodes left.
+                await driver.graph_ops.clear_data(driver, group_ids=[group_id])
             except Exception:
-                log.warning(
-                    "⚠️ graphiti — orphan-entity sweep failed · group=%s", group_id, exc_info=True
-                )
+                # Real Kuzu writes — fail loud + let the caller surface it (general-coding-rule).
+                log.exception("❌ graphiti — group clear failed · group=%s", group_id)
+                raise
+        log.info("🧹 graphiti — cleared group · group=%s episodes=%d", group_id, count)
+        return count
 
     async def list_facts(
         self, group_ids: list[str], *, limit: int | None = None
@@ -657,6 +669,10 @@ class GraphitiMemoryService:
 
         if not group_ids or not self._db_path.exists():
             return []
+        # region agent log
+        _dbg("A", "graphiti_service.py:list_facts:enter",
+             "list_facts — about to read", group_ids=group_ids)
+        # endregion
         async with _snapshot_read_driver(self._db_path) as read_driver:
             try:
                 edges = await EntityEdge.get_by_group_ids(read_driver, group_ids, limit=limit)
@@ -669,6 +685,10 @@ class GraphitiMemoryService:
                     exc_info=True,
                 )
                 raise
+            # region agent log
+            _dbg("A", "graphiti_service.py:list_facts:after_edges",
+                 "list_facts — edges read", group_ids=group_ids, edge_count=len(edges or []))
+            # endregion
             try:
                 nodes = await EntityNode.get_by_group_ids(read_driver, group_ids, limit=limit)
             except GroupsNodesNotFoundError:
@@ -929,6 +949,16 @@ async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
     our hold; the registry closes the shared driver only if we were the last holder.
     """
     key = _registry_key(path)
+    # region agent log
+    _dbg(
+        "E",
+        "graphiti_service.py:_snapshot_read_driver:enter",
+        "snapshot read driver — before acquire",
+        key=key,
+        write_lock_locked=kuzu_registry.write_lock(key).locked(),
+        refcount=kuzu_registry._refcount(key),
+    )
+    # endregion
     driver = kuzu_registry.acquire(
         key, lambda: KuzuDriver(str(path), max_concurrent_queries=1)
     )
@@ -936,6 +966,15 @@ async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
     read_driver.client = kuzu.AsyncConnection(
         driver.db, max_concurrent_queries=_SNAPSHOT_READ_POOL
     )
+    # region agent log
+    _dbg(
+        "E",
+        "graphiti_service.py:_snapshot_read_driver:acquired",
+        "snapshot read driver — acquired + read connection opened",
+        key=key,
+        write_lock_locked=kuzu_registry.write_lock(key).locked(),
+    )
+    # endregion
     try:
         yield read_driver
     finally:
@@ -983,15 +1022,27 @@ async def read_graph_snapshot(
         # Default to the named knowledge group (kb_main) when no explicit selection is made
         # (docs/graph-group-policy-design.md §7) — never graphiti's empty default group.
         gids = [g for g in (group_ids or []) if g] or [KNOWLEDGE_GROUP_ID]
+        # region agent log
+        _dbg("A", "graphiti_service.py:read_graph_snapshot:before_nodes",
+             "snapshot — about to read nodes", gids=gids)
+        # endregion
         # The get_by_group_ids helpers RAISE (not return []) on an empty graph.
         try:
             nodes = await EntityNode.get_by_group_ids(read_driver, gids, limit=node_limit)
         except GroupsNodesNotFoundError:
             nodes = []
+        # region agent log
+        _dbg("A", "graphiti_service.py:read_graph_snapshot:after_nodes",
+             "snapshot — nodes read", gids=gids, node_count=len(nodes or []))
+        # endregion
         try:
             edges = await EntityEdge.get_by_group_ids(read_driver, gids, limit=edge_limit)
         except GroupsEdgesNotFoundError:
             edges = []
+        # region agent log
+        _dbg("A", "graphiti_service.py:read_graph_snapshot:after_edges",
+             "snapshot — edges read", gids=gids, edge_count=len(edges or []))
+        # endregion
         # Episodes carry document_id in ``source_description`` (set at ingest); map
         # chunk_id (episode uuid) → document_id for node/edge document_ids provenance.
         try:

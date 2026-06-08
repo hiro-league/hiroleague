@@ -242,6 +242,19 @@
     searchFocusMode = GRAPH_OPTION_DEFAULTS.searchFocusMode;
   }
 
+  // The shared knowledge SSE is paused while this browser tab is hidden (frees the
+  // per-origin connection budget so other tabs don't stall). Live deltas have no backlog,
+  // so on refocus we backfill from a full re-export — but ONLY while a build is/was
+  // streaming (progress set), otherwise an idle, carefully-posed graph would needlessly
+  // relayout + reframe every time the user alt-tabs back.
+  function onVisibilityChange(): void {
+    if (document.visibilityState !== 'visible') return;
+    if (graph.progress() === null) return;
+    engine?.markIntentionalReframe();
+    void graph.loadGroups();
+    void graph.load();
+  }
+
   // ── Toolbar actions (engine-owned; search orchestration lives in the model) ──────
   // A reload should reframe the fresh data, so hand the camera back to auto-fit first.
   function reload(): void {
@@ -267,6 +280,7 @@
 </script>
 
 <svelte:window onresize={resize} onkeydown={onKeydown} />
+<svelte:document onvisibilitychange={onVisibilityChange} />
 
 <!--
   Two layouts:
@@ -348,7 +362,20 @@
 
     {#if graph.nodes().length === 0 && !graph.loading()}
       <div class="absolute inset-0 grid place-items-center p-6">
-        {#if graph.progress()}
+        {#if graph.loadError()}
+          <!-- A load that FAILED (timeout / server busy / network) must not masquerade as an
+               empty graph — show what went wrong + a Retry so the user isn't left guessing. -->
+          <InlineEmptyState
+            message="Couldn’t load the graph."
+            hint={graph.loadError() ?? undefined}
+          >
+            {#snippet actions()}
+              <Button variant="outline" size="sm" onclick={reload} disabled={graph.loading()}>
+                Retry
+              </Button>
+            {/snippet}
+          </InlineEmptyState>
+        {:else if graph.progress()}
           <InlineEmptyState
             message="Building knowledge graph…"
             hint={`Ingesting chunk ${graph.progress()?.chunk_index}/${graph.progress()?.chunk_total} — nodes and relations will appear here as they’re extracted.`}
