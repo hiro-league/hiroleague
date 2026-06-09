@@ -195,7 +195,7 @@ async def test_node_rehost_matches_graphiti_node_search_rrf(monkeypatch) -> None
         limit=2, reranker_min_score=0,
     )
 
-    nodes = await search_nodes_traced(
+    nodes, _scores = await search_nodes_traced(
         SimpleNamespace(driver=object(), cross_encoder=None, embedder=None),
         "q",
         [0.1, 0.2],
@@ -276,7 +276,7 @@ async def test_episode_rehost_matches_graphiti_episode_search_rrf(monkeypatch) -
         limit=2, reranker_min_score=0,
     )
 
-    eps = await search_episodes_traced(
+    eps, _scores = await search_episodes_traced(
         SimpleNamespace(driver=object(), cross_encoder=None, embedder=None),
         "q",
         group_ids=["kb_main"],

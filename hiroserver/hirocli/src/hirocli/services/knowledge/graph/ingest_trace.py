@@ -82,7 +82,7 @@ _STAGE_FOR_OPERATION: dict[str, str] = {
 # the current FIELD-LESS ontology graphiti skips that call (no fields ⇒ no extraction), so this
 # only engages if a type later gains structured fields — registered now so it never silently
 # falls through. (Import is our own light module — no graphiti dependency leaks in.)
-from .graphiti_ontology import GRAPHITI_ENTITY_TYPES  # noqa: E402
+from .graphiti_ontology import GRAPHITI_ENTITY_TYPES, entity_type_legend  # noqa: E402
 
 for _type_name in GRAPHITI_ENTITY_TYPES:
     _STAGE_FOR_OPERATION.setdefault(_type_name, "extract_attributes")
@@ -205,6 +205,9 @@ class EpisodeIngestTrace:
             "reference_time": self.reference_time,
             "started_at": self.started_at,
             "invalidated_count": self.invalidated_count,
+            # The active ontology's id→name+description legend, so the dialog can render the
+            # extract_entities stage's numeric entity_type_id as the actual type (+ description).
+            "entity_types": entity_type_legend(),
             "persisted_nodes": self.persisted_nodes,
             "persisted_edges": self.persisted_edges,
             "stages": [s.to_dict() for s in self.stages],

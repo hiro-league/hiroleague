@@ -1,5 +1,6 @@
 <script lang="ts">
   import FormField from '$lib/components/ui/form-field.svelte';
+  import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
@@ -234,6 +235,28 @@
     </SectionCardMuted>
 
     <SectionCardMuted
+      title="Graph view (display)"
+      description="Display-only settings for the shared Knowledge / Memories Graph tab. These tune the in-browser graph view and do not affect extraction, search, or retrieval."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphView}
+    >
+      <FormField
+        label="Large node-type warning threshold"
+        hint="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only."
+        class="max-w-md"
+      >
+        <input
+          type="number"
+          min="10"
+          max="10000"
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.view.large_type_threshold}
+          oninput={ctrl.markDirty}
+        />
+      </FormField>
+    </SectionCardMuted>
+
+    <SectionCardMuted
       title="Graphiti Reranker (Cross-encoder)"
       description="Reranks graph fact-search candidates with a real cross-encoder. Only active when the Search recipe above is set to Cross-encoder — otherwise these settings are disabled. Reuses the same reranker models as the flat path (cloud or local)."
       collapsible
@@ -293,6 +316,40 @@
           </FormField>
         </div>
       </fieldset>
+    </SectionCardMuted>
+
+    <SectionCardMuted
+      title="Eval answering"
+      description="System prompts used when the eval harness generates answers from recalled/retrieved context. Relaxing these lets multi-part questions earn partial credit instead of a blanket decline. Eval-only — does not affect production chat."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngineEval}
+    >
+      <MarkdownEditorPreview
+        editorLabel="Memory eval answer prompt editor"
+        previewLabel="Preview"
+        ariaLabel="Memory eval answer prompt (markdown)"
+        bind:value={ctrl.draft.graph.eval.memory_answer_prompt}
+        onInput={ctrl.markDirty}
+      />
+      <p class="text-xs text-muted-foreground">
+        Drives the memory eval's <span class="font-medium">recall</span> leg. Blank uses the relaxed
+        default: answer the parts the recalled facts support, and reply exactly "I don't know" only
+        when the facts cover none of the question (so negative-control questions still score).
+      </p>
+
+      <MarkdownEditorPreview
+        editorLabel="Knowledge eval answer prompt editor"
+        previewLabel="Preview"
+        ariaLabel="Knowledge answering prompt (markdown)"
+        bind:value={ctrl.draft.knowledge.answering.prompt}
+        onInput={ctrl.markDirty}
+      />
+      <p class="text-xs text-muted-foreground">
+        The knowledge eval legs (flat/graphiti) run the real answering pipeline, so they are graded
+        against the <span class="font-medium">production</span> Knowledge answering prompt — this is
+        the same value as Knowledge → Answering (editing it here changes production Ask too). Kept
+        shared on purpose so the knowledge eval measures real behavior.
+      </p>
     </SectionCardMuted>
   {/if}
 </div>

@@ -19,7 +19,7 @@
  * removed ids are dropped.
  */
 import type ForceGraph from 'force-graph';
-import { colorFor } from '../knowledge-graph-style';
+import { colorFor, humanizeRelType } from '../knowledge-graph-style';
 import type { SearchFocusMode } from '../knowledge-graph-prefs';
 import {
   EDGE_FONT_MAX,
@@ -61,6 +61,19 @@ export interface RenderLink {
   source: string | { id: string };
   target: string | { id: string };
   rel_type: string;
+  /** Bi-temporal markers; an edge is "invalid" (superseded) when either is set. */
+  invalid_at?: string | null;
+  expired_at?: string | null;
+}
+
+/** Neighbor focus: when a node is SELECTED (and no search is active), fade/hide everything
+ *  outside its ego network. Renderer-only (no relayout) so clicking around stays snappy. */
+export interface NeighborFocusState {
+  active: boolean;
+  mode: 'dim' | 'hide';
+  selectedId: string;
+  nodeIds: Set<string>;
+  edgeIds: Set<string>;
 }
 
 export interface GraphCanvasCallbacks {
@@ -77,8 +90,10 @@ type FgInstance = ForceGraph<FgNode, FgLink>;
  *  this is a full relayout (load/reload/reconcile/filter) or an incremental live delta. */
 export interface StructuralContext {
   loadVersion: number;
-  hiddenNodeTypes: Set<string>;
+  hiddenNodeIds: Set<string>;
   hiddenEdgeTypes: Set<string>;
+  /** Edge-filter token (validity / date ranges / max-connections) — changes force a relayout. */
+  filterToken: string;
 }
 
 export interface SearchState {
@@ -101,6 +116,7 @@ export class GraphCanvasEngine {
   private prevLoadVersion = -1;
   private prevHiddenNodes: Set<string> | null = null;
   private prevHiddenEdges: Set<string> | null = null;
+  private prevFilterToken: string | null = null;
 
   // Set when the visible node/link set changes so the next engine-stop auto-fits the view.
   private fitPending = false;
@@ -126,11 +142,34 @@ export class GraphCanvasEngine {
     focusNodeIds: null,
     searchFocusMode: 'highlight'
   };
+  // Neighbor focus (selected node's ego network). Lower priority than search — applied only
+  // while no search is active (decision: search wins). Renderer-only; no relayout.
+  private neighborFocus: NeighborFocusState = {
+    active: false,
+    mode: 'dim',
+    selectedId: '',
+    nodeIds: new Set(),
+    edgeIds: new Set()
+  };
+  // The currently-selected node/edge (the one whose detail panel is open). Drawn with a blue
+  // ring/line that overrides the amber search highlight. Null when nothing is selected.
+  private selected: { kind: 'node' | 'edge'; id: string } | null = null;
   private curveAmount = 0.45;
   // Live force params owned here so the draw/layout code reads plain values, not Svelte
   // proxies. Seeded in mount() from the persisted "Center pull"/"Spread radius" sliders.
   private centerStrength = 0.05; // d3 center-force strength (pull-to-middle for ALL nodes)
   private radialRing = 90; // outer-ring radius for degreeRadial; used by setData's outerRing
+  // Live label sizing (View → font controls), seeded from graph-config defaults; the "Edge label
+  // max" trims relation labels to this many characters. Updated via setLabelSizing().
+  private edgeZoomMin = EDGE_ZOOM_MIN;
+  private edgeZoomMax = EDGE_ZOOM_MAX;
+  private edgeFontMin = EDGE_FONT_MIN;
+  private edgeFontMax = EDGE_FONT_MAX;
+  private nodeZoomMin = NODE_ZOOM_MIN;
+  private nodeZoomMax = NODE_ZOOM_MAX;
+  private nodeFontMin = NODE_FONT_MIN;
+  private nodeFontMax = NODE_FONT_MAX;
+  private edgeLabelMax = 22;
 
   // ── Redraw gating ──────────────────────────────────────────────────────────────────────
   // force-graph's autoPauseRedraw lets the canvas idle once the sim settles. We keep it on
@@ -169,6 +208,12 @@ export class GraphCanvasEngine {
       .nodeId('id')
       // Tooltip on hover still useful for full type + name when the on-canvas label is truncated.
       .nodeLabel((n: FgNode) => `${n.name} · ${n.type}`)
+      // Hover tooltip ONLY for edges whose on-canvas label was trimmed (humanized length exceeds
+      // the edge-label-max) — shows the full relation. Non-truncated edges return '' (no tooltip).
+      .linkLabel((l: FgLink) => {
+        const human = humanizeRelType(l.rel_type);
+        return human.length > this.edgeLabelMax ? human : '';
+      })
       .nodeRelSize(NODE_RADIUS) // matches drawn radius → default hit-test region works
       .linkColor((l: FgLink) => this.linkColor(l))
       .linkWidth((l: FgLink) => this.linkWidth(l))
@@ -184,13 +229,10 @@ export class GraphCanvasEngine {
       .linkCurvature((l: FgLink) => l.__curvature ?? 0)
       // Hide arrowheads of non-matching edges in "hide" focus (color/width alone leaves the
       // arrow glyph visible).
-      .linkDirectionalArrowLength((l: FgLink) =>
-        this.search.searchActive &&
-        this.search.searchFocusMode === 'hide' &&
-        !this.search.matchedEdgeIds.has(l.id)
-          ? 0
-          : 5
-      )
+      .linkDirectionalArrowLength((l: FgLink) => {
+        const { off, mode } = this.focusFor(this.edgeInFocus(l.id));
+        return off && mode === 'hide' ? 0 : 5;
+      })
       .linkDirectionalArrowRelPos(0.92) // pull arrowhead inside the target disc
       .autoPauseRedraw(true) // PERF: idle when settled; we kick frames via keepRedrawing()
       .onNodeClick((n: FgNode) => this.callbacks.onNodeClick(n.id))
@@ -253,12 +295,14 @@ export class GraphCanvasEngine {
     // First paint = no mirrors yet. Structural reloads / filter changes also force relayout.
     const structural =
       ctx.loadVersion !== this.prevLoadVersion ||
-      ctx.hiddenNodeTypes !== this.prevHiddenNodes ||
+      ctx.hiddenNodeIds !== this.prevHiddenNodes ||
       ctx.hiddenEdgeTypes !== this.prevHiddenEdges ||
+      ctx.filterToken !== this.prevFilterToken ||
       this.fgNodeById.size === 0;
     this.prevLoadVersion = ctx.loadVersion;
-    this.prevHiddenNodes = ctx.hiddenNodeTypes;
+    this.prevHiddenNodes = ctx.hiddenNodeIds;
     this.prevHiddenEdges = ctx.hiddenEdgeTypes;
+    this.prevFilterToken = ctx.filterToken;
 
     const { fgNodes, fgLinks, freshNodeIds } = this.reconcile(rNodes, rLinks);
 
@@ -318,17 +362,45 @@ export class GraphCanvasEngine {
     linkDistance: number;
     centerStrength: number;
     radialRing: number;
+    chargeStrength: number;
   }): void {
     const fg = this.fg;
     if (!fg) return;
     fg.d3Force('link')?.strength(opts.linkStrength).distance(opts.linkDistance);
     fg.d3Force('center')?.strength(opts.centerStrength);
+    // Live "Node repulsion" slider — d3 charge (negative = repulsion); reach stays capped.
+    fg.d3Force('charge')?.strength(opts.chargeStrength).distanceMax(CHARGE_DISTANCE_MAX);
     this.centerStrength = opts.centerStrength;
     if (opts.radialRing !== this.radialRing) {
       this.radialRing = opts.radialRing;
       this.retargetAllNodes(); // recompute every node's __targetR against the new outer ring
     }
     fg.d3ReheatSimulation?.();
+  }
+
+  /** Live label sizing (View → font controls) + edge-label trim length. Render-only: repaint
+   *  once, no relayout. */
+  setLabelSizing(opts: {
+    edgeZoomMin: number;
+    edgeZoomMax: number;
+    edgeFontMin: number;
+    edgeFontMax: number;
+    nodeZoomMin: number;
+    nodeZoomMax: number;
+    nodeFontMin: number;
+    nodeFontMax: number;
+    edgeLabelMax: number;
+  }): void {
+    this.edgeZoomMin = opts.edgeZoomMin;
+    this.edgeZoomMax = opts.edgeZoomMax;
+    this.edgeFontMin = opts.edgeFontMin;
+    this.edgeFontMax = opts.edgeFontMax;
+    this.nodeZoomMin = opts.nodeZoomMin;
+    this.nodeZoomMax = opts.nodeZoomMax;
+    this.nodeFontMin = opts.nodeFontMin;
+    this.nodeFontMax = opts.nodeFontMax;
+    this.edgeLabelMax = opts.edgeLabelMax;
+    this.keepRedrawing(120); // paint the new sizing even when the sim is idle
   }
 
   /** Recompute the degree-radial target ring for every current mirror node using the live
@@ -374,6 +446,30 @@ export class GraphCanvasEngine {
     this.programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 80, (n: FgNode) => focus.has(n.id)));
   }
 
+  /** Neighbor focus for the selected node's ego network (renderer-only, no relayout). */
+  setNeighborFocus(state: NeighborFocusState): void {
+    this.neighborFocus = state;
+    this.keepRedrawing(200);
+  }
+
+  /** The selected node/edge (detail panel open) — drawn with a blue ring/line that overrides the
+   *  amber search highlight. Renderer-only repaint. */
+  setSelection(sel: { kind: 'node' | 'edge'; id: string } | null): void {
+    this.selected = sel;
+    this.keepRedrawing(120);
+  }
+
+  /** Resolve the effective focus for THIS draw — search wins, else neighbor focus. `off` means
+   *  the node/edge is outside the focus set; `mode` says how to treat it ('dim'/'hide'/'none'). */
+  private focusFor(inFocus: boolean): { off: boolean; mode: 'dim' | 'hide' | 'none' } {
+    if (this.search.searchActive) {
+      if (this.search.searchFocusMode === 'highlight') return { off: false, mode: 'none' };
+      return { off: !inFocus, mode: this.search.searchFocusMode };
+    }
+    if (this.neighborFocus.active) return { off: !inFocus, mode: this.neighborFocus.mode };
+    return { off: false, mode: 'none' };
+  }
+
   /** Push the model's glow-timestamp map; drive frames while halos fade, then idle. */
   setRecent(recent: Record<string, number>): void {
     this.recent = recent;
@@ -397,6 +493,20 @@ export class GraphCanvasEngine {
    *  search, manual reload) so a prior manual zoom doesn't suppress the post-change fit. */
   markIntentionalReframe(): void {
     this.userMovedCamera = false;
+  }
+
+  /** Re-run the force layout on the CURRENT in-memory data (with the current filters) — full-energy
+   *  reheat + zoom-to-fit, but NO server re-fetch (that's `reload`). Re-spreads the visible graph
+   *  from its present positions. */
+  relayout(): void {
+    const fg = this.fg;
+    if (!fg) return;
+    this.retargetAllNodes(); // recompute each node's radial target for the current set
+    fg.d3VelocityDecay?.(VELOCITY_DECAY_DEFAULT);
+    fg.d3AlphaDecay?.(ALPHA_DECAY_DEFAULT);
+    this.markIntentionalReframe(); // allow the post-settle auto-fit
+    this.fitPending = true;
+    fg.d3ReheatSimulation?.(); // alpha→1 restart → forces re-spread the current nodes
   }
 
   destroy(): void {
@@ -441,13 +551,15 @@ export class GraphCanvasEngine {
     const linkIds = new Set<string>();
     for (const l of rLinks) {
       linkIds.add(l.id);
+      const invalid = !!(l.invalid_at || l.expired_at);
       let m = this.fgLinkById.get(l.id);
       if (!m) {
         // New mirror: endpoints as ids; force-graph resolves them to the mirror node objects.
-        m = { id: l.id, source: linkEndId(l.source), target: linkEndId(l.target), rel_type: l.rel_type };
+        m = { id: l.id, source: linkEndId(l.source), target: linkEndId(l.target), rel_type: l.rel_type, invalid };
         this.fgLinkById.set(l.id, m);
       } else {
         m.rel_type = l.rel_type; // keep m.source/m.target (force-graph resolved them to nodes)
+        m.invalid = invalid; // validity can flip on a provenance-merge pulse
       }
       fgLinks.push(m);
     }
@@ -558,19 +670,38 @@ export class GraphCanvasEngine {
   }
 
   // ── link accessors (read by force-graph each frame) ──
+  // Is this node/edge inside the active focus set (search matches, else neighbor ego set)?
+  private nodeInFocus(id: string): boolean {
+    if (this.search.searchActive) return !!this.search.focusNodeIds?.has(id);
+    if (this.neighborFocus.active) return this.neighborFocus.nodeIds.has(id);
+    return true;
+  }
+  private edgeInFocus(id: string): boolean {
+    if (this.search.searchActive) return this.search.matchedEdgeIds.has(id);
+    if (this.neighborFocus.active) return this.neighborFocus.edgeIds.has(id);
+    return true;
+  }
+
   private linkColor(l: FgLink): string {
     const s = this.search;
-    if (!s.searchActive) return this.scheme.linkColor;
-    if (s.matchedEdgeIds.has(l.id)) return this.scheme.matchRing;
-    if (s.searchFocusMode === 'hide') return 'rgba(0,0,0,0)'; // invisible non-match
-    if (s.searchFocusMode === 'dim') return this.scheme.linkColorDim;
+    // Selected edge → solid blue, overriding search/invalid styling (drawLink skips the dash too).
+    if (this.selected?.kind === 'edge' && this.selected.id === l.id) return this.scheme.selectRing;
+    if (s.searchActive && s.matchedEdgeIds.has(l.id)) return this.scheme.matchRing;
+    // Invalid edges always hide the built-in solid line — drawLink draws their dashed red line
+    // (and applies any dim/hide there), so we never double-draw a solid + dashed line.
+    if (l.invalid) return 'rgba(0,0,0,0)';
+    const { off, mode } = this.focusFor(this.edgeInFocus(l.id));
+    if (off && mode === 'hide') return 'rgba(0,0,0,0)'; // invisible non-focus
+    if (off && mode === 'dim') return this.scheme.linkColorDim;
     return this.scheme.linkColor;
   }
 
   private linkWidth(l: FgLink): number {
     const s = this.search;
+    if (this.selected?.kind === 'edge' && this.selected.id === l.id) return 3; // selected edge
     if (s.searchActive && s.matchedEdgeIds.has(l.id)) return 2.5;
-    if (s.searchActive && s.searchFocusMode === 'hide' && !s.matchedEdgeIds.has(l.id)) return 0;
+    const { off, mode } = this.focusFor(this.edgeInFocus(l.id));
+    if (off && mode === 'hide') return 0;
     return 1.2;
   }
 
@@ -582,11 +713,11 @@ export class GraphCanvasEngine {
     const s = this.scheme;
     const search = this.search;
 
-    // Search focus: a node is "off-focus" when a search is active and it's neither a match
-    // nor an endpoint of a matched edge. 'hide' skips it; 'dim' fades it; 'highlight' rings.
-    const offFocus = search.searchActive && !search.focusNodeIds?.has(node.id);
-    if (offFocus && search.searchFocusMode === 'hide') return; // fully hidden (layout unchanged)
-    const dimmed = offFocus && search.searchFocusMode === 'dim';
+    // Focus treatment (search matches, else the selected node's neighbor ego set): 'hide' skips
+    // off-focus nodes, 'dim' fades them, 'none'/in-focus draws normally. Layout unchanged either way.
+    const { off: offFocus, mode: focusMode } = this.focusFor(this.nodeInFocus(node.id));
+    if (offFocus && focusMode === 'hide') return; // fully hidden (layout unchanged)
+    const dimmed = offFocus && focusMode === 'dim';
     if (dimmed) {
       ctx.save();
       ctx.globalAlpha = 0.12; // faded non-match; restored at the end of this draw
@@ -618,12 +749,14 @@ export class GraphCanvasEngine {
     ctx.fillStyle = colorFor(node.type);
     ctx.fill();
 
-    // 2b. Search highlight: semi-transparent amber ring around matched nodes.
-    if (search.searchActive && search.matchedNodeIds.has(node.id)) {
+    // 2b. Highlight ring: BLUE for the selected node (overrides search), else amber for a search
+    //     match. Selection wins so a clicked node reads clearly even when it's also a match.
+    const isSelectedNode = this.selected?.kind === 'node' && this.selected.id === node.id;
+    if (isSelectedNode || (search.searchActive && search.matchedNodeIds.has(node.id))) {
       ctx.beginPath();
       ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
-      ctx.strokeStyle = s.matchRing;
-      ctx.lineWidth = 2.5 / scale; // ≈2.5px on-screen regardless of zoom
+      ctx.strokeStyle = isSelectedNode ? s.selectRing : s.matchRing;
+      ctx.lineWidth = (isSelectedNode ? 3 : 2.5) / scale; // selection ring a touch thicker
       ctx.stroke();
     }
 
@@ -632,7 +765,7 @@ export class GraphCanvasEngine {
 
     // 4. Name label below the disc — wraps onto stacked lines; zoom-gated so a dense graph
     //    at low zoom isn't a mess of labels.
-    const fontSize = labelFontSize(scale, NODE_ZOOM_MIN, NODE_ZOOM_MAX, NODE_FONT_MIN, NODE_FONT_MAX);
+    const fontSize = labelFontSize(scale, this.nodeZoomMin, this.nodeZoomMax, this.nodeFontMin, this.nodeFontMax);
     if (fontSize !== null && node.name) {
       const lines = wrapLabel(node.name);
       const lineH = fontSize * 1.25;
@@ -686,12 +819,52 @@ export class GraphCanvasEngine {
       }
     }
 
-    const fontSize = labelFontSize(scale, EDGE_ZOOM_MIN, EDGE_ZOOM_MAX, EDGE_FONT_MIN, EDGE_FONT_MAX);
+    // Focus treatment for this edge (search wins, else neighbor focus). Hidden edges skip both
+    // the dashed-invalid line below AND the label; dimmed ones fade.
+    const { off: edgeOffFocus, mode: edgeFocusMode } = this.focusFor(this.edgeInFocus(link.id));
+    const edgeHidden = edgeOffFocus && edgeFocusMode === 'hide';
+    const edgeDim = edgeOffFocus && edgeFocusMode === 'dim';
+
+    // Invalid (superseded) facts → dashed red line, drawn before the zoom-gated label so it shows
+    // even when labels are hidden. Skipped when search-matched (keeps its amber highlight) or
+    // focus-hidden. linkColor() already made the built-in solid line transparent for these.
+    if (
+      link.invalid &&
+      !edgeHidden &&
+      !(this.selected?.kind === 'edge' && this.selected.id === link.id) && // selected → solid blue
+      !(this.search.searchActive && this.search.matchedEdgeIds.has(link.id))
+    ) {
+      const isrc = link.source;
+      const itgt = link.target;
+      if (
+        isrc &&
+        itgt &&
+        typeof isrc === 'object' &&
+        typeof itgt === 'object' &&
+        isrc.x != null &&
+        isrc.y != null &&
+        itgt.x != null &&
+        itgt.y != null
+      ) {
+        const cps = link.__controlPoints as number[] | null;
+        ctx.save();
+        if (edgeDim) ctx.globalAlpha = 0.2;
+        ctx.beginPath();
+        ctx.moveTo(isrc.x, isrc.y);
+        if (cps && cps.length === 2) ctx.quadraticCurveTo(cps[0], cps[1], itgt.x, itgt.y);
+        else if (cps && cps.length === 4) ctx.bezierCurveTo(cps[0], cps[1], cps[2], cps[3], itgt.x, itgt.y);
+        else ctx.lineTo(itgt.x, itgt.y);
+        ctx.strokeStyle = this.scheme.edgeInvalid;
+        ctx.lineWidth = 1.4 / scale;
+        ctx.setLineDash([5 / scale, 4 / scale]);
+        ctx.stroke();
+        ctx.restore(); // restore clears the line dash for subsequent draws
+      }
+    }
+
+    const fontSize = labelFontSize(scale, this.edgeZoomMin, this.edgeZoomMax, this.edgeFontMin, this.edgeFontMax);
     if (fontSize === null) return;
-    // Search focus: a non-matching edge's label is hidden ('hide') or faded ('dim').
-    const edgeOffFocus = this.search.searchActive && !this.search.matchedEdgeIds.has(link.id);
-    if (edgeOffFocus && this.search.searchFocusMode === 'hide') return;
-    const edgeDim = edgeOffFocus && this.search.searchFocusMode === 'dim';
+    if (edgeHidden) return; // non-focus edge label hidden
     const src = link.source;
     const tgt = link.target;
     if (!src || !tgt || typeof src !== 'object' || typeof tgt !== 'object') return;
@@ -700,8 +873,10 @@ export class GraphCanvasEngine {
     const tx = tgt.x;
     const ty = tgt.y;
     if (sx == null || sy == null || tx == null || ty == null) return;
-    const text = link.rel_type;
-    if (!text) return;
+    if (!link.rel_type) return;
+    // Humanize (USES_NAME_IN_STORES → "Uses Name In Stores") + trim to the configured length.
+    const human = humanizeRelType(link.rel_type);
+    const text = human.length > this.edgeLabelMax ? `${human.slice(0, this.edgeLabelMax - 1)}…` : human;
 
     const s = this.scheme;
     // Label anchor = bezier point at t=0.5 (the visual middle of the arc).
@@ -734,8 +909,9 @@ export class GraphCanvasEngine {
     if (edgeDim) ctx.globalAlpha = 0.15; // faded label for a dimmed non-match
     ctx.translate(lx, ly);
     ctx.rotate(angle);
-    // null bg → edge label text drawn directly on the line (no background pill).
-    drawTextPill(ctx, text, 0, 0, fontSize, s.edgeText, null);
+    // Rounded pill (same colour as the canvas bg) behind the label so it masks the line for
+    // readability; radius scales with the font so it stays pill-shaped at every zoom.
+    drawTextPill(ctx, text, 0, 0, fontSize, s.edgeText, s.edgePillBg, fontSize * 0.5);
     ctx.restore();
   }
 }

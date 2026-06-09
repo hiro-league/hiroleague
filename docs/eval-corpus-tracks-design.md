@@ -345,3 +345,67 @@ from the chosen corpus's `questions_path` with **no cap** and a **required non-e
 > implementation-ready, with **scoring out of scope**. Phases 2–3 (dedicated knowledge corpus +
 > `eval_kb_` isolation) follow **in this scope**. The group-policy doc's KB-spaces (Phase B) remain
 > deferred; its namespace grammar is updated to admit `eval_mem_`/`eval_kb_`.
+
+---
+
+## 13. Persisted per-corpus memory results (implemented)
+
+The in-memory run registry (`eval_registry.py`) keeps only the *latest run per workspace* and
+drops everything on restart. For the **memory track** results are now also **persisted to disk per
+corpus**, so picking a corpus shows its latest results and re-running a question subset makes the
+saved snapshot **more complete** over time without re-running everything.
+
+**Model — a single living snapshot per corpus.** One row per `(corpus_id, question_id)` in a
+per-workspace SQLite DB `knowledge/eval_results.db` (`EvalResultStore`, table
+`memory_eval_results`, full `question_completed` payload stored as `row_json`). A re-run
+**upserts** each question's row (add new / overwrite existing) — there is **no run history**.
+Rows are written as each question completes (`eval_registry._persist_memory_row`), so a
+cancelled/crashed run still keeps the questions that finished.
+
+**Read — bank is the spine.** `GET /knowledge/eval/results?track=memory&corpus_id=&questions_path=`
+joins the **current question bank** (fresh question text / category / ideal) with the saved rows,
+in **bank order**, and **recomputes the merged summary** over the whole accumulated set
+(`summarize_memory_rows`, shared with the live runner). Bank questions with no saved row are absent
+here and surface as **`not run`** badges in the checklist.
+
+**Clear — results only.** `POST /knowledge/eval/results/clear` deletes a corpus's saved snapshot
+from disk. **Distinct** from `POST /knowledge/eval/clear` (which wipes the ingested `eval_mem_{set}`
+drawer): clearing results leaves ingested memory intact, so a re-run reuses it. The panel's memory
+**“Clear results”** button is the disk clear; re-running every question eventually overwrites all
+rows.
+
+**UI deltas (memory track only).** Picking a corpus auto-loads the saved snapshot into Results +
+summary; the checklist shows per-question **coverage badges** (`pass`/`partial`/`fail`/`abstain`/
+`answered`/`not run`) from `savedStatusById`; switching corpora no longer prompts (nothing is lost —
+results are saved); on run completion the table **reconciles** to the full merged snapshot. The
+knowledge track is unchanged (its results are still in-memory only; the store is built track-aware
+so it can adopt this later). Initial-dev mode: clean add, **no migration** — the DB is created
+lazily on first write.
+
+> **Reloaded-snapshot fix:** on snapshot load the controller now sets `runModes` to the snapshot's
+> legs (`['recall']`). Without it `runModes` stayed at the default flat/graphiti, so the memory
+> rows' `recall` leg matched no table column and expanded rows rendered empty.
+
+### 13.1 Question + corpus filters (panel)
+
+- **Question checklist filters:** free-text search (question/subcategory/id/category) + **difficulty**
+  + (memory) **saved-state** (`pass`/`partial`/`fail`/`abstain`/`answered`/`not run`). **Select all /
+  Clear** act on the **filtered** set ("Select shown" / "Clear shown" when a filter is active), so you
+  can e.g. select only the failed questions and re-run them. View-only; the badge icons are small
+  colored status glyphs with hover tooltips, placed after the question.
+- **Corpus search:** the Corpus section filters the episode transcript to matches and **highlights**
+  the term (`EvalCorpusReview` + `highlightSegments`, no `{@html}`). The old "Questions by category"
+  pills were removed.
+
+### 13.2 Corpus tab in the pipeline trace dialogs
+
+Both Graph-Runs trace dialogs gained an **optional** `extraTabLabel` + `extraTab` (Snippet) prop —
+generic, so `graph-runs` stays decoupled from eval. The eval panel injects a searchable **Corpus
+(N)** tab (`EvalCorpusReview`) into:
+
+- the **retrieval** trace dialog (already opened per question via a leg's recall run), and
+- the **ingest** trace dialog, opened from a new **“Ingest pipeline”** button in the Cost strip. The
+  remember run's ingest Graph Run id is surfaced via `ingest_run_id` on the `remember_done` setup
+  event **and** the completed summary (`run_memory_eval`); the controller exposes it as `ingestRunId`
+  (null on a subset re-run or a reloaded snapshot). Opening fetches `getGraphRunIngestTrace`; the
+  Corpus tab shows the full source transcript regardless of which episode the pipeline view lands on.

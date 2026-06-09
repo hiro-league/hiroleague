@@ -299,6 +299,14 @@ export type IngestTraceStage = {
   output: unknown;
 };
 
+/** Active ontology legend: `entity_type_id` → type name + description (graphiti's id ordering,
+ *  id 0 = base `Entity`). Lets the dialog resolve `extract_entities`' numeric ids to real types. */
+export type IngestEntityType = {
+  id: number;
+  name: string;
+  description: string;
+};
+
 /** One episode's full ingest trace, tagged with the `step_index` of its episode row. */
 export type IngestTraceRecord = {
   run_id: string;
@@ -313,6 +321,8 @@ export type IngestTraceRecord = {
   reference_time: string;
   started_at: number;
   invalidated_count: number;
+  /** Ontology legend for resolving `extract_entities` type ids (absent on pre-legend sidecars). */
+  entity_types?: IngestEntityType[];
   persisted_nodes: IngestTraceNode[];
   persisted_edges: IngestTraceEdge[];
   stages: IngestTraceStage[];

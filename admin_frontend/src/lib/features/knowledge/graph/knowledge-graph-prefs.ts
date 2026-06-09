@@ -8,16 +8,46 @@
  */
 import { PREF_KEYS, type GraphPanelSidePreference } from '$lib/preferences/keys';
 import { readLocalString, writeLocalString } from '$lib/preferences/storage';
-import { CENTER_STRENGTH, RADIAL_RING } from './engine/graph-forces';
+import { CENTER_STRENGTH, CHARGE_STRENGTH, RADIAL_RING } from './engine/graph-forces';
+import {
+  EDGE_FONT_MAX,
+  EDGE_FONT_MIN,
+  EDGE_ZOOM_MAX,
+  EDGE_ZOOM_MIN,
+  NODE_FONT_MAX,
+  NODE_FONT_MIN,
+  NODE_ZOOM_MAX,
+  NODE_ZOOM_MIN
+} from './engine/graph-config';
 
 /** Cap on parallel edges per node pair that means "show all" — also the slider max. */
 export const MAX_LINKS_CAP = 10;
+
+/** Node-node repulsion ("charge") slider bounds. d3 charge is NEGATIVE (repulsion); more
+ *  negative = nodes push apart harder (airier). 0 = no repulsion. Left = spread, right = clump. */
+export const CHARGE_STRENGTH_MIN = -600;
+export const CHARGE_STRENGTH_MAX = 0;
+
+/** Bounds for the label-sizing range sliders (View → font controls). */
+export const LABEL_ZOOM_BOUND_MIN = 0.2; // zoom level at which a label first appears / clamps
+export const LABEL_ZOOM_BOUND_MAX = 6;
+export const LABEL_FONT_BOUND_MIN = 4; // on-screen px
+export const LABEL_FONT_BOUND_MAX = 40;
+/** Edge-label truncation (X letters) slider bounds. */
+export const EDGE_LABEL_MAX_MIN = 6;
+export const EDGE_LABEL_MAX_MAX = 48;
 
 /** How the search highlight treats NON-matching nodes/edges:
  *  'highlight' = ring matches only, leave others as-is · 'dim' = fade others ·
  *  'hide' = render others invisible (layout unchanged, so clearing restores instantly). */
 export type SearchFocusMode = 'highlight' | 'dim' | 'hide';
 const SEARCH_FOCUS_MODES: readonly SearchFocusMode[] = ['highlight', 'dim', 'hide'];
+
+/** How a SELECTED node focuses its neighborhood (node + directly-connected nodes/edges):
+ *  'all' = no focus · 'dim' = fade everything else · 'hide' = render everything else invisible.
+ *  Renderer-only (no relayout) so clicking around stays snappy. */
+export type SelectionFocusMode = 'all' | 'dim' | 'hide';
+const SELECTION_FOCUS_MODES: readonly SelectionFocusMode[] = ['all', 'dim', 'hide'];
 
 export type GraphOptions = {
   /** d3 link-force strength: 0 loose … 1 rigid. */
@@ -34,14 +64,32 @@ export type GraphOptions = {
   curveAmount: number;
   /** Max parallel edges drawn per node pair; MAX_LINKS_CAP = show all. */
   maxLinksPerPair: number;
+  /** d3 charge (node-node repulsion); negative = repulsion. Live "Node repulsion" slider. */
+  chargeStrength: number;
   /** What a search does to non-matching nodes/edges (see SearchFocusMode). */
   searchFocusMode: SearchFocusMode;
+  /** What a SELECTED node does to the rest of the graph (see SelectionFocusMode). */
+  selectionFocusMode: SelectionFocusMode;
+  // ── Label sizing (live; replaces the former hardcoded graph-config constants) ──
+  /** Edge label: zoom at which it appears (min) → clamps to full size (max). */
+  edgeZoomMin: number;
+  edgeZoomMax: number;
+  /** Edge label: on-screen px at min-zoom → max-zoom. */
+  edgeFontMin: number;
+  edgeFontMax: number;
+  /** Node label zoom + font, same meaning as the edge pair. */
+  nodeZoomMin: number;
+  nodeZoomMax: number;
+  nodeFontMin: number;
+  nodeFontMax: number;
+  /** Trim edge labels longer than this many characters (with an ellipsis). */
+  edgeLabelMax: number;
 };
 
 // Center/spread defaults come from the force constants so there's a single source of truth.
 export const CENTER_STRENGTH_MIN = 0;
 export const CENTER_STRENGTH_MAX = 0.5;
-export const RADIAL_RING_MIN = 20;
+export const RADIAL_RING_MIN = 0;
 export const RADIAL_RING_MAX = 200;
 
 export const GRAPH_OPTION_DEFAULTS: GraphOptions = {
@@ -49,9 +97,20 @@ export const GRAPH_OPTION_DEFAULTS: GraphOptions = {
   linkDistance: 80,
   centerStrength: CENTER_STRENGTH,
   radialRing: RADIAL_RING,
-  curveAmount: 0.45,
+  curveAmount: 0.15,
   maxLinksPerPair: MAX_LINKS_CAP,
-  searchFocusMode: 'highlight'
+  chargeStrength: CHARGE_STRENGTH,
+  searchFocusMode: 'highlight',
+  selectionFocusMode: 'all',
+  edgeZoomMin: EDGE_ZOOM_MIN,
+  edgeZoomMax: EDGE_ZOOM_MAX,
+  edgeFontMin: EDGE_FONT_MIN,
+  edgeFontMax: EDGE_FONT_MAX,
+  nodeZoomMin: NODE_ZOOM_MIN,
+  nodeZoomMax: NODE_ZOOM_MAX,
+  nodeFontMin: NODE_FONT_MIN,
+  nodeFontMax: NODE_FONT_MAX,
+  edgeLabelMax: 22
 };
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -86,9 +145,30 @@ export function readGraphOptions(): GraphOptions {
         1,
         MAX_LINKS_CAP
       ),
+      chargeStrength: clamp(
+        num(p.chargeStrength, GRAPH_OPTION_DEFAULTS.chargeStrength),
+        CHARGE_STRENGTH_MIN,
+        CHARGE_STRENGTH_MAX
+      ),
       searchFocusMode: SEARCH_FOCUS_MODES.includes(p.searchFocusMode as SearchFocusMode)
         ? (p.searchFocusMode as SearchFocusMode)
-        : GRAPH_OPTION_DEFAULTS.searchFocusMode
+        : GRAPH_OPTION_DEFAULTS.searchFocusMode,
+      selectionFocusMode: SELECTION_FOCUS_MODES.includes(p.selectionFocusMode as SelectionFocusMode)
+        ? (p.selectionFocusMode as SelectionFocusMode)
+        : GRAPH_OPTION_DEFAULTS.selectionFocusMode,
+      edgeZoomMin: clamp(num(p.edgeZoomMin, GRAPH_OPTION_DEFAULTS.edgeZoomMin), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
+      edgeZoomMax: clamp(num(p.edgeZoomMax, GRAPH_OPTION_DEFAULTS.edgeZoomMax), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
+      edgeFontMin: clamp(num(p.edgeFontMin, GRAPH_OPTION_DEFAULTS.edgeFontMin), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
+      edgeFontMax: clamp(num(p.edgeFontMax, GRAPH_OPTION_DEFAULTS.edgeFontMax), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
+      nodeZoomMin: clamp(num(p.nodeZoomMin, GRAPH_OPTION_DEFAULTS.nodeZoomMin), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
+      nodeZoomMax: clamp(num(p.nodeZoomMax, GRAPH_OPTION_DEFAULTS.nodeZoomMax), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
+      nodeFontMin: clamp(num(p.nodeFontMin, GRAPH_OPTION_DEFAULTS.nodeFontMin), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
+      nodeFontMax: clamp(num(p.nodeFontMax, GRAPH_OPTION_DEFAULTS.nodeFontMax), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
+      edgeLabelMax: clamp(
+        Math.round(num(p.edgeLabelMax, GRAPH_OPTION_DEFAULTS.edgeLabelMax)),
+        EDGE_LABEL_MAX_MIN,
+        EDGE_LABEL_MAX_MAX
+      )
     };
   } catch {
     return { ...GRAPH_OPTION_DEFAULTS };

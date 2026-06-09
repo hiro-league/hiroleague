@@ -188,9 +188,24 @@ class GraphitiExpansion:
     ranked: tuple[RankedFact, ...] = ()
     node_memories: tuple[str, ...] = ()
     episode_memories: tuple[str, ...] = ()
-    # Structured kept facts (parallel to ``facts``) for the eval recalled-facts table:
-    # each carries the dated text + temporal/source metadata. Default keeps older fakes working.
+    # Structured kept items (parallel to the ``*_memories`` strings) for the eval recalled-items
+    # tables: each carries the display text + metadata + relevance score. ``fact_rows`` adds
+    # temporal/source/relationship; ``node_rows`` adds entity name/type; ``episode_rows`` adds the
+    # turn timestamp. All default to () so older fakes (and the agent's string-only path) work.
     fact_rows: tuple[dict[str, Any], ...] = ()
+    node_rows: tuple[dict[str, Any], ...] = ()
+    episode_rows: tuple[dict[str, Any], ...] = ()
+
+
+def _node_entity_type(node: Any) -> str:
+    """First non-base ontology label is the entity's type (e.g. ``Person``); else ``Entity``.
+
+    Mirrors ``retrieval_trace._node_entity_type`` so the recall entity rows show the same type
+    the trace dialog does (kept local to avoid importing the trace module on the hot path)."""
+    for label in getattr(node, "labels", None) or []:
+        if label and label != "Entity":
+            return str(label)
+    return "Entity"
 
 
 def _is_superseded(edge: Any) -> bool:
@@ -238,7 +253,14 @@ async def _traced_search(
     sim_min_score: float,
     k_hop: int,
     recipe: str,
-) -> tuple[list[Any], list[Any], list[Any], dict[str, float | None]]:
+) -> tuple[
+    list[Any],
+    list[Any],
+    list[Any],
+    dict[str, float | None],
+    dict[str, float | None],
+    dict[str, float | None],
+]:
     """Run the re-hosted, per-stage-traced pipeline for every configured lane.
 
     Replaces ``graphiti.search_()`` WHEN a capture is active so we record each lane's
@@ -303,10 +325,12 @@ async def _traced_search(
         trace=trace,
     )
 
-    # Node (entity) lane — only when the scope mounted a node_config.
+    # Node (entity) lane — only when the scope mounted a node_config. ``node_scores`` (uuid→rerank
+    # score) is threaded back so recall entity rows can show the same score the trace does.
     nodes: list[Any] = []
+    node_scores: dict[str, float | None] = {}
     if getattr(config, "node_config", None) is not None:
-        nodes = await search_nodes_traced(
+        nodes, node_scores = await search_nodes_traced(
             clients,
             query,
             query_vector,
@@ -318,10 +342,12 @@ async def _traced_search(
             trace=trace,
         )
 
-    # Episode lane — only when the scope mounted an episode_config.
+    # Episode lane — only when the scope mounted an episode_config. ``episode_scores`` threaded
+    # back for the same reason as the node lane.
     episodes: list[Any] = []
+    episode_scores: dict[str, float | None] = {}
     if getattr(config, "episode_config", None) is not None:
-        episodes = await search_episodes_traced(
+        episodes, episode_scores = await search_episodes_traced(
             clients,
             query,
             group_ids=[group_id],
@@ -333,7 +359,7 @@ async def _traced_search(
         )
 
     capture.trace = trace
-    return edges, nodes, episodes, edge_scores
+    return edges, nodes, episodes, edge_scores, node_scores, episode_scores
 
 
 async def search_chunk_ids(
@@ -392,11 +418,21 @@ async def search_chunk_ids(
     nodes_result: list[Any] = []
     episodes_result: list[Any] = []
     # uuid→rerank score from the traced fact pipeline (empty on the stock ``search_`` path);
-    # the fact loop prefers this over edge.score, which graphiti leaves unset.
+    # the fact loop prefers this over edge.score, which graphiti leaves unset. The node/episode
+    # lanes get the same treatment so the recall entity/episode rows can show a real score.
     edge_scores: dict[str, float | None] = {}
+    node_scores: dict[str, float | None] = {}
+    episode_scores: dict[str, float | None] = {}
     try:
         if use_trace:
-            edges, nodes_result, episodes_result, edge_scores = await _traced_search(
+            (
+                edges,
+                nodes_result,
+                episodes_result,
+                edge_scores,
+                node_scores,
+                episode_scores,
+            ) = await _traced_search(
                 graphiti,
                 q,
                 group_id=group_id,
@@ -494,7 +530,10 @@ async def search_chunk_ids(
 
     # Scope-widened legs — only populated when the recipe mounted them. ``SearchResults``
     # always has the fields (defaulted to ``[]``), so unmounted legs naturally return empty.
+    # ``*_memories`` stay plain strings (the agent memory_block reads them); the parallel
+    # ``*_rows`` carry score + metadata for the eval recalled-items tables (mirrors fact_rows).
     node_memories: list[str] = []
+    node_rows: list[dict[str, Any]] = []
     for node in nodes_result:
         summary = (getattr(node, "summary", "") or "").strip()
         if not summary:
@@ -502,12 +541,39 @@ async def search_chunk_ids(
         name = (getattr(node, "name", "") or "").strip()
         # Attribute-style memory: prefix with the entity name so the answer model can
         # attribute the statement back to its subject ("About Misho: …").
-        node_memories.append(f"About {name}: {summary}" if name else summary)
+        memory_text = f"About {name}: {summary}" if name else summary
+        node_memories.append(memory_text)
+        node_uuid = str(getattr(node, "uuid", "") or "")
+        raw_score = node_scores.get(node_uuid, getattr(node, "score", None))
+        node_rows.append(
+            {
+                "kind": "entity",
+                "memory": memory_text,
+                "name": name,
+                "summary": summary,
+                "entity_type": _node_entity_type(node),
+                "uuid": node_uuid,
+                "score": float(raw_score) if isinstance(raw_score, (int, float)) else None,
+            }
+        )
     episode_memories: list[str] = []
+    episode_rows: list[dict[str, Any]] = []
     for ep in episodes_result:
         content = (getattr(ep, "content", "") or "").strip()
-        if content:
-            episode_memories.append(content)
+        if not content:
+            continue
+        episode_memories.append(content)
+        ep_uuid = str(getattr(ep, "uuid", "") or "")
+        raw_score = episode_scores.get(ep_uuid, getattr(ep, "score", None))
+        episode_rows.append(
+            {
+                "kind": "episode",
+                "memory": content,
+                "valid_at": _iso(getattr(ep, "valid_at", None)),
+                "uuid": ep_uuid,
+                "score": float(raw_score) if isinstance(raw_score, (int, float)) else None,
+            }
+        )
 
     log.info(
         "⬇️ graphiti.search — facts=%d/%d nodes=%d episodes=%d chunks=%d scope=%s temporal=%s",
@@ -528,6 +594,8 @@ async def search_chunk_ids(
         node_memories=tuple(node_memories),
         episode_memories=tuple(episode_memories),
         fact_rows=tuple(fact_rows),
+        node_rows=tuple(node_rows),
+        episode_rows=tuple(episode_rows),
     )
 
 

@@ -52,11 +52,14 @@ export type RecalledFact = {
   invalid_at?: string; // ISO date the fact was invalidated (superseded)
   superseded?: boolean; // dropped by the 'current' temporal lens
   chunk_id?: string; // supporting episode/chunk id
-  name?: string; // relationship / edge type (e.g. WORKS_AT)
+  name?: string; // fact: relationship / edge type (e.g. WORKS_AT); entity: the entity name
   source_uuid?: string; // subject entity uuid
   target_uuid?: string; // object entity uuid
-  uuid?: string; // fact edge uuid
-  score?: number | null; // relevance score when the backend exposes it
+  uuid?: string; // fact edge / entity / episode uuid
+  score?: number | null; // relevance score when the backend exposes it (now also entities/episodes)
+  // Entity-only (kind === 'entity'): the ontology type (Person/Org/…) and the raw attribute summary.
+  entity_type?: string;
+  summary?: string;
 };
 
 /** Per-leg result inside a ``knowledge.eval.question_completed`` event (unified across tracks).
@@ -124,6 +127,9 @@ export type EvalCompletedPayload = {
   questions_cost_usd?: number;
   ingest_cost_usd?: number;
   total_cost_usd?: number;
+  // Memory track: the remember-phase ingest Graph Run id (null on a subset re-run that didn't
+  // re-ingest). Lets the panel open the ingest pipeline trace for the corpus build.
+  ingest_run_id?: string | null;
 };
 
 /** Payload shape of ``knowledge.eval.failed`` events. */
@@ -153,6 +159,9 @@ export type EvalSetupProgressPayload = {
   // Folded ingest (graph-build) cost in USD — set on the 'remember_done' line so the panel
   // shows ingestion cost LIVE, before the terminal `completed` summary arrives.
   ingest_cost_usd?: number;
+  // The remember-phase ingest Graph Run id (on the 'remember_done' line) — lets the panel open
+  // the ingest pipeline trace even before the terminal summary lands.
+  ingest_run_id?: string;
 };
 
 export type EvalEventHandlers = {
@@ -246,7 +255,10 @@ export type KnowledgeGraphEventHandlers = {
   onNode?: (p: GraphNodeEvent) => void;
   onEdge?: (p: GraphEdgeEvent) => void;
   onProgress?: (p: GraphIngestProgress) => void;
-  onCompleted?: () => void;
+  // ``group_id`` scopes the completion to a partition (mirrors ingest_progress) so the panel
+  // only clears its "ingesting…" status / reconciles when it's viewing that group. Absent on
+  // legacy emits ⇒ treat as global (clear unconditionally).
+  onCompleted?: (group_id?: string | null) => void;
 };
 
 const KNOWLEDGE_GRAPH_EVENT_TYPES = [
@@ -281,8 +293,9 @@ export function connectKnowledgeGraphEvents(handlers: KnowledgeGraphEventHandler
       const p = parse<GraphIngestProgress>(e);
       if (p && handlers.onProgress) handlers.onProgress(p);
     },
-    'knowledge.graph.ingest_completed': () => {
-      handlers.onCompleted?.();
+    'knowledge.graph.ingest_completed': (e) => {
+      const p = parse<{ group_id?: string | null }>(e);
+      handlers.onCompleted?.(p?.group_id ?? null);
     }
   };
 

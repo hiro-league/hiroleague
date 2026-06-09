@@ -17,6 +17,7 @@ from langgraph.types import StreamWriter
 from hirocli.domain.model_catalog import get_model_catalog
 from hirocli.domain.model_factory import create_chat_model
 from hirocli.domain.preferences import (
+    DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
     DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
     resolve_knowledge_answering_llm,
     resolve_knowledge_rewrite_llm,
@@ -1058,10 +1059,12 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         return "\n".join(lines)
 
     def _system_prompt(self, normalized: NormalizedQuery) -> str:
-        parts = [
-            "Answer using only the provided knowledge context.",
-            "If the context is insufficient, say what is missing.",
-        ]
+        # Base instruction now comes from the editable answering pref (blank → relaxed default that
+        # allows partial answers); the citation + language clauses below are still appended at runtime.
+        base = (
+            self._prefs.knowledge.answering.prompt or ""
+        ).strip() or DEFAULT_KNOWLEDGE_ANSWERING_PROMPT
+        parts = [base]
         if self._prefs.knowledge.answering.cite_sources:
             parts.append("Cite evidence inline with footnote references like [1].")
         else:

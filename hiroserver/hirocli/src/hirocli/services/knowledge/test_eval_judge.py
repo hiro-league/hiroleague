@@ -13,6 +13,7 @@ from hirocli.domain.memory import MemoryAddResult
 from hirocli.services.knowledge.eval_judge import (
     _JudgeOutput,
     answer_from_context,
+    format_recall_context,
     judge_answer,
 )
 from hirocli.services.knowledge.eval_runner import MEMORY_EVAL_USER_ID, _memory_question
@@ -26,32 +27,53 @@ class _FakeAI:
 
 
 class _FakeStructured:
-    def __init__(self, parsed: _JudgeOutput) -> None:
+    def __init__(self, parsed: _JudgeOutput, owner: "_FakeModel | None" = None) -> None:
         self._parsed = parsed
+        self._owner = owner
 
-    async def ainvoke(self, messages):  # noqa: ANN001
+    async def ainvoke(self, messages, config=None):  # noqa: ANN001
+        if self._owner is not None:
+            self._owner.last_messages = messages  # let tests assert on the judge prompt
         return {"parsed": self._parsed, "raw": _FakeAI("{}")}
 
 
 class _FakeModel:
     """Minimal chat model: returns a canned answer + a canned judge verdict."""
 
-    def __init__(self, *, answer: str = "Otto.", verdict: str = "pass") -> None:
+    def __init__(
+        self, *, answer: str = "Otto.", verdict: str = "pass", recall_sufficient: bool = True
+    ) -> None:
         self._answer = answer
         self._verdict = verdict
+        self._recall_sufficient = recall_sufficient
+        # Capture the messages the judge/answer was actually invoked with (for prompt assertions).
+        self.last_messages: list = []
 
-    async def ainvoke(self, messages):  # noqa: ANN001
+    async def ainvoke(self, messages, config=None):  # noqa: ANN001
+        self.last_messages = messages
         return _FakeAI(self._answer)
 
     def with_structured_output(self, schema, include_raw: bool = False):  # noqa: ANN001, ARG002
-        return _FakeStructured(_JudgeOutput(verdict=self._verdict, grounded=True, reason="ok"))
+        return _FakeStructured(
+            _JudgeOutput(
+                verdict=self._verdict,
+                grounded=True,
+                reason="ok",
+                recall_sufficient=self._recall_sufficient,
+            ),
+            owner=self,
+        )
 
 
 @pytest.mark.asyncio
 async def test_answer_from_context_returns_model_text() -> None:
     m = _FakeModel(answer="The drone is Otto.")
     ans = await answer_from_context(
-        m, "fake:model", question="Which drone?", context=["Otto is the mascot drone"], sink=None
+        m,
+        "fake:model",
+        question="Which drone?",
+        context=[{"kind": "fact", "memory": "Otto is the mascot drone", "fact": "Otto is the mascot drone"}],
+        sink=None,
     )
     assert ans == "The drone is Otto."
 
@@ -129,3 +151,59 @@ async def test_memory_question_judge_off_has_answer_no_mark() -> None:
     )
     leg = row["legs"]["recall"]
     assert leg["answer"] == "Otto." and leg["mark"] == ""  # answer only, no judge mark
+    assert leg["recall_sufficient"] is True  # default when unjudged
+
+
+def test_format_recall_context_sections_with_metadata_no_score() -> None:
+    """Structured hits → Facts/Entities/Episodes sections with metadata; retrieval score excluded."""
+    out = format_recall_context(
+        [
+            {
+                "kind": "fact", "fact": "Adam works at Cedar Labs", "name": "WORKS_AT",
+                "valid_at": "2024-08", "invalid_at": "", "superseded": False, "score": 0.91,
+            },
+            {"kind": "entity", "name": "Adam", "entity_type": "Person", "summary": "an engineer", "score": 0.8},
+            {"kind": "episode", "memory": "I started at Cedar Labs.", "valid_at": "2024-08-12", "score": 0.7},
+        ]
+    )
+    assert "Facts:" in out and "Entities:" in out and "Episodes:" in out
+    assert "Adam works at Cedar Labs [WORKS_AT · valid 2024-08 → present]" in out
+    assert "Adam (Person): an engineer" in out
+    assert "[2024-08-12] I started at Cedar Labs." in out
+    # The retrieval score is a ranking artifact — it must NOT leak into the prompt.
+    assert "0.91" not in out and "score" not in out.lower()
+
+
+def test_format_recall_context_empty_is_blank() -> None:
+    assert format_recall_context([]) == ""
+    assert format_recall_context(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_judge_reports_recall_sufficient() -> None:
+    """The judge surfaces recall_sufficient (recall-miss vs answering-miss); defaults true."""
+    v_miss = await judge_answer(
+        _FakeModel(verdict="fail", recall_sufficient=False), "fake:model",
+        question="q", answer="I don't know.", expected_answer="Otto",
+        context=[{"kind": "fact", "memory": "unrelated fact"}], sink=None,
+    )
+    assert v_miss.mark == MARK_FAIL and v_miss.recall_sufficient is False
+
+    v_ok = await judge_answer(
+        _FakeModel(verdict="pass"), "fake:model",
+        question="q", answer="Otto.", expected_answer="Otto",
+        context=[{"kind": "fact", "memory": "Otto is the mascot"}], sink=None,
+    )
+    assert v_ok.recall_sufficient is True
+
+
+@pytest.mark.asyncio
+async def test_judge_prompt_includes_recalled_context() -> None:
+    """When context is passed, the judge's human prompt carries the recalled context block."""
+    m = _FakeModel(verdict="pass")
+    await judge_answer(
+        m, "fake:model", question="drone?", answer="Otto.", expected_answer="Otto",
+        context=[{"kind": "fact", "fact": "Otto is the mascot drone", "name": "IS"}], sink=None,
+    )
+    human = m.last_messages[-1].content
+    assert "RECALLED CONTEXT" in human and "Otto is the mascot drone" in human

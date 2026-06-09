@@ -308,7 +308,7 @@ async def search_nodes_traced(
     limit: int,
     reranker_min_score: float,
     trace: RetrievalTrace,
-) -> list[Any]:
+) -> tuple[list[Any], dict[str, float | None]]:
     """Re-host graphiti's ``node_search`` (entity lane) with per-stage capture.
 
     Same shape as the edge pipeline (bm25/cosine/bfs legs → rrf/mmr/cross_encoder), but
@@ -420,7 +420,9 @@ async def search_nodes_traced(
             items=[_node_brief(n, score=score_by_uuid.get(n.uuid)) for n in reranked_nodes[:limit]],
         )
     )
-    return reranked_nodes[:limit]
+    # Return the uuid→score map alongside the nodes so the recall path can show the same
+    # per-entity score the trace does (graphiti never writes it back onto the node object).
+    return reranked_nodes[:limit], score_by_uuid
 
 
 async def search_episodes_traced(
@@ -433,7 +435,7 @@ async def search_episodes_traced(
     limit: int,
     reranker_min_score: float,
     trace: RetrievalTrace,
-) -> list[Any]:
+) -> tuple[list[Any], dict[str, float | None]]:
     """Re-host graphiti's ``episode_search`` (episode lane) with per-stage capture.
 
     Episodes are BM25-only (one candidate leg), then rrf — or, under cross_encoder, an rrf
@@ -490,7 +492,8 @@ async def search_episodes_traced(
             items=[_episode_brief(e, score=score_by_uuid.get(e.uuid)) for e in reranked_eps[:limit]],
         )
     )
-    return reranked_eps[:limit]
+    # Return the uuid→score map alongside the episodes (same reason as the node lane above).
+    return reranked_eps[:limit], score_by_uuid
 
 
 def _reranker_name(reranker: Any) -> str:

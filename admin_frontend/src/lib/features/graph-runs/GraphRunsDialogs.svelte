@@ -3,7 +3,7 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import type { GraphChunkDetail } from '$lib/api/knowledge';
-  import { memoryDateDisplay, memoryId, memoryPrimaryText } from './graph-runs-pure';
+  import { memoryDateDisplay, memoryPrimaryText } from './graph-runs-pure';
 
   let {
     memoryJsonRow,
@@ -12,14 +12,11 @@
     memoryProvenanceLoading,
     memoryProvenanceError,
     clearMemoriesConfirmOpen,
-    deleteMemoryTarget,
     memoryActionBusy,
     onCloseMemoryJson,
     onCloseProvenance,
     onCloseClearMemories,
-    onConfirmClearMemories,
-    onCloseDeleteMemory,
-    onConfirmDeleteMemory
+    onConfirmClearMemories
   }: {
     memoryJsonRow: Record<string, unknown> | null;
     memoryProvenanceRow: Record<string, unknown> | null;
@@ -27,14 +24,11 @@
     memoryProvenanceLoading: boolean;
     memoryProvenanceError: string;
     clearMemoriesConfirmOpen: boolean;
-    deleteMemoryTarget: Record<string, unknown> | null;
     memoryActionBusy: boolean;
     onCloseMemoryJson: () => void;
     onCloseProvenance: () => void;
     onCloseClearMemories: () => void;
     onConfirmClearMemories: () => void;
-    onCloseDeleteMemory: () => void;
-    onConfirmDeleteMemory: () => void;
   } = $props();
 </script>
 
@@ -102,26 +96,6 @@
     <Dialog.Footer>
       <Button variant="outline" disabled={memoryActionBusy} onclick={onCloseClearMemories}>Cancel</Button>
       <Button variant="destructive" disabled={memoryActionBusy} onclick={onConfirmClearMemories}>
-        Delete
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root open={deleteMemoryTarget !== null} onOpenChange={(next) => { if (!next) onCloseDeleteMemory(); }}>
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>Delete memory?</Dialog.Title>
-      {#if deleteMemoryTarget}
-        <Dialog.Description>{memoryId(deleteMemoryTarget)}</Dialog.Description>
-      {/if}
-    </Dialog.Header>
-    {#if deleteMemoryTarget}
-      <p class="font-sans text-sm text-muted-foreground">{memoryPrimaryText(deleteMemoryTarget)}</p>
-    {/if}
-    <Dialog.Footer>
-      <Button variant="outline" disabled={memoryActionBusy} onclick={onCloseDeleteMemory}>Cancel</Button>
-      <Button variant="destructive" disabled={memoryActionBusy} onclick={onConfirmDeleteMemory}>
         Delete
       </Button>
     </Dialog.Footer>

@@ -6,8 +6,7 @@
    * / reframe / fullscreen). Search orchestration (debounce + backend lookup) lives in the
    * model; this just binds the input to graph.search / graph.clearSearch.
    */
-  import { Maximize2, Minimize2, RefreshCw, Scan, Search, Trash2, X } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Search, X } from '@lucide/svelte';
   import { cn } from '$lib/utils';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import KnowledgeGraphFilterBar from './KnowledgeGraphFilterBar.svelte';
@@ -15,30 +14,13 @@
   interface Props {
     graph: KnowledgeGraphModel;
     fullscreen: boolean;
-    /** Fit the whole graph (or search subset) to view. */
-    onFit: () => void;
-    /** Reload the authoritative export (also reframes the camera). */
-    onReload: () => void;
-    /** Toggle the full-viewport overlay. */
-    onToggleFullscreen: () => void;
-    /** Open the "clear entire knowledge graph" confirm. */
-    onClearGraph: () => void;
     /** Switch the viewed partition (knowledge vs a conversation-memory group). */
     onSelectGroup: (id: string) => void;
     /** Hand the camera back to auto-fit — called before a query change so a new/cleared
      *  search reframes onto its matches (engine.markIntentionalReframe in the panel). */
     onSearchReframe: () => void;
   }
-  let {
-    graph,
-    fullscreen,
-    onFit,
-    onReload,
-    onToggleFullscreen,
-    onClearGraph,
-    onSelectGroup,
-    onSearchReframe
-  }: Props = $props();
+  let { graph, fullscreen, onSelectGroup, onSearchReframe }: Props = $props();
 
   // The knowledge partition's id (its option maps to the default view).
   const knowledgeGroupId = $derived(graph.groups().find((g) => g.kind === 'knowledge')?.id ?? '');
@@ -122,42 +104,6 @@
           </div>
         {/if}
       </div>
-      <!-- Fit to view: reframe the whole graph (or the search subset) on demand. -->
-      <Button variant="outline" size="icon" onclick={onFit} aria-label="Fit graph to view" title="Fit to view">
-        <Scan size={16} aria-hidden="true" />
-      </Button>
     {/if}
-    <Button variant="outline" size="sm" onclick={onReload} disabled={graph.loading()} title="Reload graph">
-      <RefreshCw size={14} class={graph.loading() ? 'animate-spin' : ''} aria-hidden="true" />
-      Reload
-    </Button>
-    {#if graph.nodes().length > 0}
-      <!-- Clear graph: wipe ALL entities + facts (documents/chunks are kept so it can be
-           rebuilt). Confirmed in a dialog owned by the panel. -->
-      <Button
-        variant="outline"
-        size="sm"
-        onclick={onClearGraph}
-        disabled={graph.loading()}
-        class="text-destructive hover:text-destructive"
-        title="Delete the entire knowledge graph (keeps documents)"
-      >
-        <Trash2 size={14} aria-hidden="true" />
-        Clear graph
-      </Button>
-    {/if}
-    <Button
-      variant="outline"
-      size="icon"
-      onclick={onToggleFullscreen}
-      aria-label={fullscreen ? 'Exit full screen (Esc)' : 'View graph full screen'}
-      title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen'}
-    >
-      {#if fullscreen}
-        <Minimize2 size={16} aria-hidden="true" />
-      {:else}
-        <Maximize2 size={16} aria-hidden="true" />
-      {/if}
-    </Button>
   </div>
 </div>

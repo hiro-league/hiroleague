@@ -34,10 +34,12 @@ import {
 export type EvalTrack = 'knowledge' | 'memory';
 import {
   cancelKnowledgeEval,
+  clearEvalResults,
   getEvalCorpus,
   getKnowledgeEvalState,
   listEvalCorpuses,
   listEvalQuestions,
+  listEvalResults,
   pickKnowledgeFolder,
   runKnowledgeEval,
   type EvalCorpus,
@@ -122,6 +124,11 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   // list, and the chosen corpus. Folder persists across reloads.
   let folder = $state<string>(localStorage.getItem(PREF_KEYS.knowledgeEvalFolder) ?? '');
   let corpuses = $state<EvalCorpus[]>([]);
+  // Absolute workspace ``logs/`` dir (ledger sidecar root) from the corpus scan. The "Copy for AI"
+  // brief uses it to point an agent at retrieval_trace/ingest_trace/graph.log without searching.
+  // '' until the first scan resolves (or if the workspace can't be resolved) → brief falls back
+  // to relative paths. Workspace-global, so it survives track/corpus switches.
+  let logDir = $state<string>('');
   let corpusesLoading = $state(false);
   let corpusesError = $state<string | null>(null);
   let pickingFolder = $state(false);
@@ -146,6 +153,12 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   // Selected question ids — explicit; NO cap, and an empty set blocks the run.
   let selected = $state<Set<string>>(new Set());
 
+  // Memory track only: per-question SAVED status, keyed by question id, from the corpus's
+  // persisted results on disk. Drives the checklist coverage badges (pass/partial/fail/
+  // abstain, or '' when answered-but-judge-off; ABSENT id = not-run). Kept independent of
+  // the live `rows` so badges reflect saved coverage even mid-run or after a Clear.
+  let savedStatusById = $state<Record<string, string>>({});
+
   // Selected legs to compare (flat/graphiti, knowledge only). Default = both; one must stay.
   let selectedModes = $state<EvalLeg[]>([...EVAL_ALL_LEGS]);
   // The legs the CURRENT run actually used (started/state event) — drives table columns.
@@ -153,6 +166,25 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
 
   const selectedCorpus = (): EvalCorpus | null =>
     corpuses.find((c) => c.id === selectedCorpusId) ?? null;
+
+  /** Derive the "Rebuild graph" checkbox default from the selected corpus's graph state:
+   *  OFF when a graph already exists (reuse it), ON when none exists (you must build one).
+   *  The corpus's graph state wins over the persisted last-used value on every corpus change.
+   *  The relevant flag differs by track — memory's "Rebuild graph" is `ingestSynthetic`
+   *  (re-remember turns); knowledge's is `buildGraph` (re-ingest entity graph). We write
+   *  through the same vars + localStorage keys the setters use, so the persisted value tracks. */
+  function applyRebuildDefaultForCorpus() {
+    const corpus = selectedCorpus();
+    if (!corpus) return;
+    const rebuild = !corpus.has_graph;
+    if (track === 'memory') {
+      ingestSynthetic = rebuild;
+      writeLocalBoolean(PREF_KEYS.knowledgeAskEvalIngest, rebuild);
+    } else {
+      buildGraph = rebuild;
+      writeLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, rebuild);
+    }
+  }
 
   // Per-track last-selected corpus (localStorage). Survives a fresh page load so the
   // user lands back on the corpus they were working with — if it's still in the
@@ -199,6 +231,9 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     try {
       const res = await listEvalCorpuses(track, folder.trim());
       corpuses = res.data.corpuses ?? [];
+      // Keep the resolved logs/ dir if present; never clobber a good value with an empty one
+      // (a degraded scan shouldn't wipe a path the brief already has).
+      if (res.data.log_dir) logDir = res.data.log_dir;
       // Keep the folder the server resolved (so the default eval/ path shows in the field).
       if (!folder.trim() && res.data.folder) folder = res.data.folder;
       // Prefer the current in-session selection, else the persisted one (fresh load),
@@ -207,6 +242,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       const keep = corpuses.find((c) => c.id === desired);
       selectedCorpusId = keep ? keep.id : (corpuses[0]?.id ?? '');
       if (selectedCorpusId) writeCorpusPref(track, selectedCorpusId);
+      // Auto-set "Rebuild graph" from the (re)selected corpus's graph state.
+      applyRebuildDefaultForCorpus();
       await loadQuestions();
     } catch (err) {
       corpusesError = err instanceof Error ? err.message : 'Failed to scan corpuses.';
@@ -265,11 +302,58 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     }
   }
 
+  /** Load the chosen corpus's SAVED (merged) eval results from disk (memory track).
+   *
+   *  Two jobs:
+   *   1. Always refresh `savedStatusById` so the checklist coverage badges are current.
+   *   2. When no live run is in flight, show the merged snapshot in the Results table +
+   *      summary — so picking a corpus immediately shows its latest accumulated results.
+   *
+   *  ``applyView=false`` (used after a FAILED run) refreshes only the badges and leaves the
+   *  failure banner/status intact. Knowledge track has no persisted results → clears badges. */
+  async function loadResults(applyView = true) {
+    if (track !== 'memory') {
+      savedStatusById = {};
+      return;
+    }
+    const corpus = selectedCorpus();
+    if (!corpus) {
+      savedStatusById = {};
+      return;
+    }
+    try {
+      const res = await listEvalResults('memory', corpus.id, corpus.questions_path);
+      const data = res.data;
+      const map: Record<string, string> = {};
+      for (const r of data.rows) map[r.id] = r.legs?.recall?.mark ?? '';
+      savedStatusById = map;
+      if (!applyView) return;
+      // The live stream owns the table while a run is in flight; don't clobber it.
+      if (status === 'starting' || status === 'running') return;
+      rows = data.rows.map(rowFromPayload).sort((a, b) => a.index - b.index);
+      summary = data.summary;
+      // Lock the table/fold leg columns to the snapshot's legs (memory = ['recall']).
+      // Without this, runModes stays at the default flat/graphiti and the memory rows'
+      // `recall` leg matches no column → expanded rows render empty (only the leg loop is
+      // keyed by runModes). Fixes "reloaded results expand to nothing".
+      runModes = data.summary?.modes?.length ? data.summary.modes : ['recall'];
+      failureMessage = null;
+      // A non-empty snapshot reads as a completed (saved) run; empty falls back to idle.
+      status = rows.length > 0 ? 'completed' : 'idle';
+    } catch (err) {
+      // Saved results are best-effort enrichment — a failure just means no snapshot to show.
+      console.warn('eval saved-results load failed', err);
+    }
+  }
+
   /** Load the chosen corpus's question bank; clears the prior selection. */
   async function loadQuestions() {
     // Refresh the Corpus review transcript alongside the bank — both follow the chosen
     // corpus, so every entry point (scan / select / reload) keeps them in sync.
     void loadCorpus();
+    // Refresh saved results (badges + merged snapshot) for the chosen corpus, in step
+    // with the bank. Memory only; a no-op clear on the knowledge track.
+    void loadResults();
     selected = new Set();
     const corpus = selectedCorpus();
     if (!corpus || !corpus.questions_path) {
@@ -294,8 +378,27 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
 
   function selectCorpus(id: string) {
     if (selectedCorpusId === id) return;
+    if (track === 'memory') {
+      // Memory results are PERSISTED per corpus, so switching loses nothing — reset the
+      // live view silently; loadQuestions→loadResults then shows the new corpus's saved
+      // snapshot. (No confirm prompt; that was for the old in-memory-only behaviour.)
+      resetRunState();
+    } else {
+      // Knowledge results aren't persisted: a run's results belong to the corpus it ran
+      // against, so switching abandons them. Confirm before wiping a completed/failed run
+      // (a misclick shouldn't silently drop it); a fresh/idle panel switches without a
+      // prompt. Cancel aborts the switch (the bound <select> re-asserts the old value).
+      const hasResults = rows.length > 0 || summary !== null || failureMessage !== null;
+      if (hasResults && status !== 'starting' && status !== 'running') {
+        const ok = confirm('Switching corpus will clear the previous run’s results. Continue?');
+        if (!ok) return;
+        resetRunState();
+      }
+    }
     selectedCorpusId = id;
     writeCorpusPref(track, id);
+    // Auto-set "Rebuild graph" from the newly chosen corpus's graph state.
+    applyRebuildDefaultForCorpus();
     void loadQuestions();
   }
 
@@ -305,6 +408,11 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     selectedCorpusId = '';
     selected = new Set();
     questions = [];
+    // Clear the displayed run/results too — otherwise the previous track's snapshot (e.g. a
+    // memory corpus's saved results) bleeds into the new track's view until something replaces
+    // it. scanCorpuses → loadQuestions → loadResults then repopulates for the new track.
+    resetRunState();
+    savedStatusById = {};
     void scanCorpuses();
   }
 
@@ -483,6 +591,9 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     summary = p;
     status = 'completed';
     cancelling = false;
+    // Memory: the run upserted its questions to disk — reconcile the table to the FULL
+    // merged snapshot (the subset we just ran + everything previously saved).
+    if (track === 'memory') void loadResults(true);
   }
 
   function handleFailed(p: EvalFailedPayload) {
@@ -490,12 +601,17 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     failureMessage = p.error;
     status = 'failed';
     cancelling = false;
+    // Refresh badges only (questions that completed before the failure were saved); keep
+    // the failure banner — don't let the snapshot view overwrite it.
+    if (track === 'memory') void loadResults(false);
   }
 
   function handleCancelled(p: EvalCancelledPayload) {
     if (!isOurRun(p.run_id)) return;
     status = 'cancelled';
     cancelling = false;
+    // Cancel still saved every question that finished — show the merged snapshot.
+    if (track === 'memory') void loadResults(true);
   }
 
   async function start() {
@@ -562,8 +678,23 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     }
   }
 
-  function clear() {
+  /** Clear the panel. Memory: DELETE the corpus's saved results from disk (results-only —
+   *  ingested memory is untouched), then reset the view. Knowledge: client-only reset (its
+   *  results aren't persisted). */
+  async function clear() {
     if (status === 'starting' || status === 'running') return;
+    if (track === 'memory') {
+      const corpus = selectedCorpus();
+      if (corpus) {
+        try {
+          await clearEvalResults('memory', corpus.id);
+        } catch (err) {
+          deps.setError(err instanceof Error ? err.message : 'Failed to clear saved results.');
+          return;
+        }
+      }
+      savedStatusById = {};
+    }
     resetRunState();
   }
 
@@ -581,6 +712,14 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     set buildGraph(v: boolean) {
       buildGraph = v;
       writeLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, v);
+    },
+    // Whether the selected corpus already has a graph (drives the run-time wipe warning).
+    get selectedCorpusHasGraph() {
+      return selectedCorpus()?.has_graph ?? false;
+    },
+    // The track's active "Rebuild graph" flag — memory uses `ingestSynthetic`, knowledge `buildGraph`.
+    get rebuildChecked() {
+      return track === 'memory' ? ingestSynthetic : buildGraph;
     },
     get judge() {
       return judge;
@@ -603,6 +742,17 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     },
     get summary() {
       return summary;
+    },
+    // The remember-phase ingest Graph Run id for the current run, if known — from the terminal
+    // summary or the live 'remember_done' setup event. Null on a subset re-run (no ingest) or a
+    // reloaded snapshot (no single ingest run). Drives the panel's "Ingest pipeline" button.
+    get ingestRunId(): string | null {
+      if (summary?.ingest_run_id) return summary.ingest_run_id;
+      for (let i = setupEvents.length - 1; i >= 0; i--) {
+        const id = setupEvents[i].ingest_run_id;
+        if (id) return id;
+      }
+      return null;
     },
     get failureMessage() {
       return failureMessage;
@@ -643,6 +793,10 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     get selectedCorpusId() {
       return selectedCorpusId;
     },
+    // Absolute workspace logs/ dir for the "Copy for AI" brief's ledger-file pointers.
+    get logDir() {
+      return logDir;
+    },
     get selectedCorpus() {
       return selectedCorpus();
     },
@@ -676,6 +830,12 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       return selected.size;
     },
     isSelected: (id: string) => selected.has(id),
+    // Saved (persisted) per-question status for the checklist coverage badges (memory).
+    // Returns the judge mark glyph, '' (answered, judge off), or undefined (not run).
+    savedStatus: (id: string): string | undefined => savedStatusById[id],
+    get savedCount() {
+      return Object.keys(savedStatusById).length;
+    },
     toggleQuestion,
     setCategorySelected,
     clearSelection,
@@ -690,6 +850,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     isModeSelected,
     toggleMode,
     loadQuestions,
+    loadResults,
     init,
     // Re-pull the server-side run state. Used when the tab regains focus: the knowledge
     // SSE is paused on hidden tabs (to free the connection pool), so any events that fired

@@ -55,8 +55,7 @@
     onRequestClearAll,
     onRefreshMemories,
     onViewJson,
-    onViewProvenance,
-    onDeleteRow
+    onViewProvenance
   }: {
     memorySearch?: string;
     memoryFilterGroupId?: string;
@@ -83,7 +82,6 @@
     onRefreshMemories: () => void;
     onViewJson: (row: Record<string, unknown>) => void;
     onViewProvenance: (row: Record<string, unknown>) => void;
-    onDeleteRow: (row: Record<string, unknown>) => void;
   } = $props();
 
   const characterOptions = $derived(
@@ -207,7 +205,6 @@
               <th>Origin</th>
               <th>Id</th>
               <th>Payload</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -296,20 +293,6 @@
                   >
                     <Eye size={14} aria-hidden="true" />
                     View JSON
-                  </Button>
-                </td>
-                <td class="memories-actions-cell">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    class="size-[30px] text-muted-foreground hover:text-destructive"
-                    disabled={memoryActionBusy || !memoryId(row)}
-                    title={memoryId(row) ? 'Delete memory' : 'Cannot delete: missing memory id'}
-                    aria-label="Delete memory"
-                    onclick={() => onDeleteRow(row)}
-                  >
-                    <Trash2 size={15} aria-hidden="true" />
                   </Button>
                 </td>
               </tr>
@@ -409,11 +392,6 @@
   .memories-payload-cell {
     vertical-align: top;
     min-width: 100px;
-  }
-
-  .memories-actions-cell {
-    text-align: center;
-    min-width: 64px;
   }
 
   :global(.admin-table-shell-dense.memories-table-wrap) :global(table) {

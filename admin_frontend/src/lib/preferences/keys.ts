@@ -63,6 +63,9 @@ export const PREF_KEYS = {
   knowledgeGraphHideNodes: 'hiro.admin.knowledge.graphHideNodes',
   /** Graph tab: hidden edge types (CSV) — sessionStorage; no URL param (not shareable). */
   knowledgeGraphHideEdges: 'hiro.admin.knowledge.graphHideEdges',
+  /** Graph tab: edge filter MODES (validity / include-undated / max-per-node / by) as a JSON
+   *  blob — localStorage. Date ranges are NOT persisted (default to the data's full span). */
+  knowledgeGraphEdgeFilters: 'hiro.admin.knowledge.graphEdgeFilters',
   /** Graph tab: last-viewed partition group_id — sessionStorage; restored on next open. */
   knowledgeGraphActiveGroup: 'hiro.admin.knowledge.graphActiveGroup',
   /** Graph tab: which side the selection/detail aside docks on — 'auto' | 'left' | 'right'.

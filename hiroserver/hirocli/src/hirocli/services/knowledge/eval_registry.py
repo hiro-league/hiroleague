@@ -228,7 +228,13 @@ class EvalRunRegistry:
                 # Tail view — drop the oldest, keep the recent trail bounded.
                 del state.setup_events[: len(state.setup_events) - _MAX_SETUP_EVENTS]
         elif etype == KNOWLEDGE_EVAL_QUESTION_COMPLETED:
-            self._upsert_row(state, dict(payload))
+            row = dict(payload)
+            self._upsert_row(state, row)
+            # Memory track: persist this question's result to disk so it survives a
+            # restart and accumulates per corpus (re-running a subset upserts only
+            # those rows). Best-effort — a store hiccup must never abort the run.
+            if state.track == "memory":
+                self._persist_memory_row(event.workspace_path, state.corpus_source, row)
         elif etype == KNOWLEDGE_EVAL_COMPLETED:
             state.summary = dict(payload)
             state.status = "completed"
@@ -247,6 +253,40 @@ class EvalRunRegistry:
                 state.rows[i] = payload
                 return
         state.rows.append(payload)
+
+    @staticmethod
+    def _persist_memory_row(
+        workspace_path: Path, corpus_id: str, row: dict[str, Any]
+    ) -> None:
+        """Upsert one memory-track question result into the per-corpus disk store.
+
+        Keyed by ``(corpus_id, question_id)`` so a re-run overwrites that question
+        and leaves the rest of the corpus's saved rows intact. Lazy import keeps the
+        store (and sqlite) off the registry's base import path."""
+        question_id = str(row.get("id") or "")
+        if not corpus_id or not question_id:
+            return
+        try:
+            from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+            leg = (row.get("legs") or {}).get("recall") or {}
+            store = get_eval_result_store(Path(workspace_path))
+            store.upsert_row(
+                corpus_id,
+                question_id,
+                row,
+                mark=str(leg.get("mark") or ""),
+                cost_usd=float(row.get("cost_usd") or 0.0),
+            )
+        except Exception:
+            # Persistence is a side effect of the live run — never let it break the
+            # event fold (the in-memory row was already recorded above).
+            log.warning(
+                "⚠️ knowledge.eval — failed to persist memory result row · corpus=%s · qid=%s",
+                corpus_id,
+                question_id,
+                exc_info=True,
+            )
 
 
 _REGISTRY = EvalRunRegistry()

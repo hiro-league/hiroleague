@@ -1,4 +1,12 @@
 <script lang="ts">
+  import {
+    ChevronDown,
+    ChevronsDownUp,
+    ChevronsUpDown,
+    ChevronUp,
+    Search,
+    Settings2
+  } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import type {
@@ -10,11 +18,30 @@
 
   let {
     trace,
-    onClose
+    onClose,
+    // Optional eval context — when this dialog is opened from the knowledge eval (per-leg
+    // retrieval trace), the question's ideal answer and the model's answer are surfaced in the
+    // header so the recalled facts can be read against the expected/produced answer. Absent on
+    // the plain Graph-Runs path (a bare pipeline trace with no eval to compare against).
+    idealAnswer = '',
+    llmAnswer = '',
+    // Optional extra tab (eval: the source corpus, searchable) rendered after the lane tabs.
+    // Decoupled via a snippet so this Graph-Runs component stays generic — the caller owns the
+    // content. Both props must be set for the tab to appear.
+    extraTabLabel = '',
+    extraTab
   }: {
     trace: RetrievalTraceRecord | null;
     onClose: () => void;
+    idealAnswer?: string;
+    llmAnswer?: string;
+    extraTabLabel?: string;
+    extraTab?: import('svelte').Snippet;
   } = $props();
+
+  // Sentinel lane key for the optional extra (caller-provided) tab.
+  const EXTRA_TAB = '__extra__';
+  const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
   // Per-stage collapse state, keyed by the stage's index in `trace.stages` (stable across
   // the lane grouping). Reset whenever a different trace opens so it starts fully expanded.
@@ -24,12 +51,108 @@
   // so candidate/hop/rank rows that didn't survive to the result are visually demoted.
   let strikeDropped = $state(false);
 
+  // Free-text filter highlight: typed text is <mark>-ed wherever it appears in a stage table
+  // (and the stage labels), and each tab shows how many distinct items in its lane match.
+  let search = $state('');
+
+  // The config/settings line (recipe · temporal · top_k …) is collapsed by default to save
+  // header space; the disclosure below it expands the line on demand.
+  let settingsOpen = $state(false);
+
+  // Which long summary/content cells the user expanded past the 3-line clamp, keyed by
+  // `${stageIdx}:${uuid}:${col}` so each cell toggles independently.
+  let expandedCells = $state<Set<string>>(new Set());
+
   $effect(() => {
     void trace;
     collapsed = new Set();
     strikeDropped = false;
+    search = '';
+    settingsOpen = false;
+    expandedCells = new Set();
     sortByStage = new Map();
   });
+
+  const cellKey = (index: number, uuid: string, col: string): string => `${index}:${uuid}:${col}`;
+  const isCellOpen = (key: string): boolean => expandedCells.has(key);
+
+  function toggleCell(key: string): void {
+    const next = new Set(expandedCells);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedCells = next;
+  }
+
+  // Only offer the more/less toggle when the text is long enough to actually clamp (~3 lines);
+  // short summaries render in full with no dangling control.
+  const isLongText = (text: string | null | undefined): boolean => (text?.length ?? 0) > 140;
+
+  // ── Text-search highlight ───────────────────────────────────────────────────────────────
+  // Split a cell's plain text into matched / unmatched segments so matches can be wrapped in
+  // <mark> without ever touching {@html} (the text stays data-bound, so it can't inject markup).
+  function splitHL(text: string | null | undefined): { text: string; hit: boolean }[] {
+    const value = text ?? '';
+    const q = search.trim();
+    if (!q || !value) return [{ text: value, hit: false }];
+    const haystack = value.toLowerCase();
+    const needle = q.toLowerCase();
+    const out: { text: string; hit: boolean }[] = [];
+    let i = 0;
+    while (i < value.length) {
+      const at = haystack.indexOf(needle, i);
+      if (at === -1) {
+        out.push({ text: value.slice(i), hit: false });
+        break;
+      }
+      if (at > i) out.push({ text: value.slice(i, at), hit: false });
+      out.push({ text: value.slice(at, at + needle.length), hit: true });
+      i = at + needle.length;
+    }
+    return out;
+  }
+
+  /** The searchable text of an item, by lane (the same columns the table renders). */
+  function itemText(item: RetrievalTraceItem, lane: string): string {
+    if (lane === 'edge') return [item.fact, item.name, item.uuid].filter(Boolean).join(' ');
+    if (lane === 'node')
+      return [item.name, item.entity_type, item.summary, item.uuid].filter(Boolean).join(' ');
+    return [item.content, item.source, item.uuid].filter(Boolean).join(' ');
+  }
+
+  /** Per-lane count of DISTINCT matching items (by uuid) — shown next to each tab while searching. */
+  const laneMatchCounts = $derived.by<Map<string, number>>(() => {
+    const m = new Map<string, number>();
+    const q = search.trim().toLowerCase();
+    if (!q) return m;
+    for (const lane of lanes) {
+      const hits = new Set<string>();
+      for (const { stage } of lane.stages) {
+        for (const item of stage.items) {
+          if (itemText(item, lane.lane).toLowerCase().includes(q)) hits.add(item.uuid);
+        }
+      }
+      m.set(lane.lane, hits.size);
+    }
+    return m;
+  });
+
+  const searching = $derived(search.trim().length > 0);
+
+  /** How many of a stage's rows match the current search (drives the highlighted count pill). */
+  function stageMatchCount(stage: RetrievalTraceStage, laneKey: string): number {
+    const q = search.trim().toLowerCase();
+    if (!q) return 0;
+    let n = 0;
+    for (const item of stage.items) {
+      if (itemText(item, laneKey).toLowerCase().includes(q)) n++;
+    }
+    return n;
+  }
+
+  /** Stage header label — the temporal lens spells out that rows are ordered by date, not score. */
+  function stageHeadLabel(stage: RetrievalTraceStage): string {
+    return stage.kind === 'temporal' ? 'Temporal lens (ordered by date)' : stage.label;
+  }
 
   function toggleStage(index: number): void {
     const next = new Set(collapsed);
@@ -151,7 +274,11 @@
 
   $effect(() => {
     const keys = lanes.map((l) => l.lane);
-    if (!keys.includes(activeTab)) activeTab = keys[0] ?? '';
+    // Keep the active tab valid as lanes change — but allow the caller's extra tab to stay
+    // selected (it isn't a lane). Only snap back to the first lane on a genuinely stale key.
+    if (!keys.includes(activeTab) && !(hasExtraTab && activeTab === EXTRA_TAB)) {
+      activeTab = keys[0] ?? '';
+    }
   });
 
   const activeLane = $derived<Lane | null>(
@@ -263,15 +390,26 @@
     sortByStage = next;
   }
 
+  // The effective sort shown in the headers: the user's explicit per-column override, else the
+  // stage's implicit order. The temporal lens arrives pre-sorted by valid_at (ascending) from the
+  // backend, so we surface that as a Valid-column arrow even with no override — otherwise the
+  // header looks unsorted when it isn't. (Matches `displayItems`, which leaves that order as-is.)
+  function effectiveSort(index: number): { key: string; dir: SortDir } | null {
+    const cur = sortByStage.get(index);
+    if (cur) return cur;
+    if (trace?.stages[index]?.kind === 'temporal') return { key: 'valid', dir: 1 };
+    return null;
+  }
+
   /** Header arrow for the active sort column: ▲ asc, ▼ desc, '' when this column isn't sorted. */
   function sortArrow(index: number, key: string): string {
-    const cur = sortByStage.get(index);
+    const cur = effectiveSort(index);
     if (!cur || cur.key !== key) return '';
     return cur.dir === 1 ? '▲' : '▼';
   }
 
   function ariaSort(index: number, key: string): 'ascending' | 'descending' | 'none' {
-    const cur = sortByStage.get(index);
+    const cur = effectiveSort(index);
     if (!cur || cur.key !== key) return 'none';
     return cur.dir === 1 ? 'ascending' : 'descending';
   }
@@ -326,6 +464,21 @@
   }
 </script>
 
+<!-- Highlight the active search text inside a plain-text cell. Splits on the query (no {@html},
+     so it's injection-safe) and wraps matches in <mark>. Top-level so it's a local snippet. -->
+{#snippet hl(text: string | null | undefined)}{#each splitHL(text) as seg, i (i)}{#if seg.hit}<mark class="search-hit">{seg.text}</mark>{:else}{seg.text}{/if}{/each}{/snippet}
+
+<!-- A potentially-long cell (entity summary / episode content): clamped to 3 lines with a
+     more/less toggle, search matches still highlighted. Top-level local snippet. -->
+{#snippet clampCell(text: string, key: string)}
+  <div class="clamp" class:clamp--open={isCellOpen(key)}>{@render hl(text)}</div>
+  {#if isLongText(text)}
+    <button type="button" class="clamp-toggle" onclick={() => toggleCell(key)}>
+      {#if isCellOpen(key)}<ChevronUp size={11} aria-hidden="true" />less{:else}<ChevronDown size={11} aria-hidden="true" />more{/if}
+    </button>
+  {/if}
+{/snippet}
+
 <!-- Sortable column header: click to cycle asc → desc → original order (per stage). Declared at
      the top level so it's a local snippet, not a prop of <Dialog.Content>. -->
 {#snippet sortTh(index: number, key: string, label: string, cls: string, title: string)}
@@ -344,34 +497,92 @@
     class="retrieval-trace-content sm:max-w-[min(96vw,1200px)] flex flex-col h-[90vh]"
   >
     <Dialog.Header>
+      <!-- Title · search · actions all share one line to keep the header compact. -->
       <div class="trace-head-row">
         <Dialog.Title>Retrieval pipeline trace</Dialog.Title>
+        {#if trace}
+          <div class="trace-search">
+            <Search size={14} aria-hidden="true" class="trace-search__icon" />
+            <input
+              type="search"
+              class="trace-search__input"
+              placeholder="Search facts, entities, episodes…"
+              bind:value={search}
+            />
+          </div>
+        {/if}
         {#if trace && activeLane}
           <div class="trace-head-actions">
             <Button
-              variant={strikeDropped ? 'default' : 'outline'}
+              variant="outline"
               size="sm"
               title="Strike through rows not in the final result set (per tab)"
               aria-pressed={strikeDropped}
               onclick={() => (strikeDropped = !strikeDropped)}
             >
-              Strike dropped
+              <span class="dropped-label" class:dropped-label--on={strikeDropped}>Dropped</span>
             </Button>
-            <Button variant="outline" size="sm" onclick={expandActive}>Expand all</Button>
-            <Button variant="outline" size="sm" onclick={collapseActive}>Collapse all</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Expand all sections"
+              aria-label="Expand all sections"
+              onclick={expandActive}
+            >
+              <ChevronsUpDown size={14} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Collapse all sections"
+              aria-label="Collapse all sections"
+              onclick={collapseActive}
+            >
+              <ChevronsDownUp size={14} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title={settingsOpen ? 'Hide settings' : 'Show settings'}
+              aria-label="Settings"
+              aria-pressed={settingsOpen}
+              onclick={() => (settingsOpen = !settingsOpen)}
+            >
+              <Settings2 size={14} aria-hidden="true" />
+            </Button>
           </div>
         {/if}
       </div>
       {#if trace}
-        <Dialog.Description>
-          <span class="trace-query">{trace.query}</span>
+        <!-- Question → Answer → Ideal (the eval context); only the question is always present. -->
+        <div class="trace-answers">
+          <div class="trace-answer">
+            <span class="trace-answer__label trace-answer__label--q">Question</span>
+            <span class="trace-answer__text">{@render hl(trace.query)}</span>
+          </div>
+          {#if llmAnswer}
+            <div class="trace-answer">
+              <span class="trace-answer__label trace-answer__label--llm">Answer</span>
+              <span class="trace-answer__text">{@render hl(llmAnswer)}</span>
+            </div>
+          {/if}
+          {#if idealAnswer}
+            <div class="trace-answer">
+              <span class="trace-answer__label trace-answer__label--ideal">Ideal</span>
+              <span class="trace-answer__text">{@render hl(idealAnswer)}</span>
+            </div>
+          {/if}
+        </div>
+        <!-- Config line — toggled by the Settings (gear) button in the header actions; only takes
+             a line when expanded, so the collapsed state costs no header height. -->
+        {#if settingsOpen}
           <span class="trace-config">
             recipe={trace.recipe} · temporal={trace.temporal} · top_k={trace.num_results} ·
             candidate_limit=2×top_k={2 * trace.num_results} · sim_min_score={trace.sim_min_score} ·
             k_hop={trace.k_hop} · group={trace.group_id}
             {#if embedStage}· embed {embedStage.elapsed_ms.toFixed(1)}ms{/if}
           </span>
-        </Dialog.Description>
+        {/if}
       {/if}
     </Dialog.Header>
 
@@ -388,11 +599,29 @@
             onclick={() => (activeTab = lane.lane)}
           >
             {lane.title}
+            {#if searching}<span class="trace-tab__count">({laneMatchCounts.get(lane.lane) ?? 0})</span>{/if}
           </button>
         {/each}
+        {#if hasExtraTab}
+          <button
+            type="button"
+            role="tab"
+            class="trace-tab"
+            class:trace-tab--active={activeTab === EXTRA_TAB}
+            aria-selected={activeTab === EXTRA_TAB}
+            onclick={() => (activeTab = EXTRA_TAB)}
+          >
+            {extraTabLabel}
+          </button>
+        {/if}
       </div>
 
-      {#if activeLane}
+      {#if hasExtraTab && activeTab === EXTRA_TAB}
+        <!-- Caller-provided tab (eval: the searchable source corpus). -->
+        <div class="trace-lanes">
+          <div class="p-4">{@render extraTab?.()}</div>
+        </div>
+      {:else if activeLane}
         {@const lane = activeLane}
         <div class="trace-lanes">
           <section class="lane" data-lane={lane.lane}>
@@ -417,16 +646,28 @@
             {#each lane.stages as { stage, idx } (idx)}
               <div class="trace-stage" id={stageDomId(idx)} data-kind={stage.kind}>
                 <header class="trace-stage__head">
+                  <!-- Whole title row toggles the section (not just the caret). -->
                   <button
                     type="button"
-                    class="trace-stage__toggle"
+                    class="trace-stage__titlebtn"
                     aria-expanded={!isCollapsed(idx)}
                     title={isCollapsed(idx) ? 'Expand stage' : 'Collapse stage'}
                     onclick={() => toggleStage(idx)}
                   >
-                    {isCollapsed(idx) ? '\u25B8' : '\u25BE'}
+                    <span class="trace-stage__caret">{isCollapsed(idx) ? '\u25B8' : '\u25BE'}</span>
+                    <span class="trace-stage__label">{@render hl(stageHeadLabel(stage))}</span>
+                    <span class="trace-stage__pill" title="Rows returned by this stage">
+                      {stage.items.length}
+                    </span>
+                    {#if searching}
+                      {@const mc = stageMatchCount(stage, lane.lane)}
+                      {#if mc > 0}
+                        <span class="trace-stage__pill trace-stage__pill--hit" title="Search matches in this stage">
+                          {mc}
+                        </span>
+                      {/if}
+                    {/if}
                   </button>
-                  <span class="trace-stage__label">{stage.label}</span>
                   <span class="trace-stage__meta">{stageMetaSummary(stage)}</span>
                 </header>
 
@@ -501,19 +742,19 @@
                                     {isCurrent(item) ? '\u2713' : '\u2717'}
                                   </span>
                                 </td>
-                                <td class="fact">{item.fact}</td>
-                                <td class="rel">{item.name || '—'}</td>
+                                <td class="fact">{@render hl(item.fact)}</td>
+                                <td class="rel">{#if item.name}{@render hl(item.name)}{:else}—{/if}</td>
                                 <td class="temporal">{shortDate(item.valid_at) || '—'}</td>
                                 <td class="temporal">{shortDate(item.invalid_at) || '—'}</td>
                                 <td class="num">{item.episodes?.length ?? 0}</td>
                               {:else if lane.lane === 'node'}
-                                <td class="entity">{item.name || '—'}</td>
-                                <td class="rel">{item.entity_type || '—'}</td>
-                                <td class="fact">{item.summary || '—'}</td>
+                                <td class="entity">{#if item.name}{@render hl(item.name)}{:else}—{/if}</td>
+                                <td class="rel">{#if item.entity_type}{@render hl(item.entity_type)}{:else}—{/if}</td>
+                                <td class="fact">{#if item.summary}{@render clampCell(item.summary, cellKey(idx, item.uuid, 'summary'))}{:else}—{/if}</td>
                               {:else}
-                                <td class="fact">{item.content}</td>
+                                <td class="fact">{#if item.content}{@render clampCell(item.content, cellKey(idx, item.uuid, 'content'))}{:else}—{/if}</td>
                                 <td class="temporal">{shortDate(item.valid_at) || '—'}</td>
-                                <td class="rel">{episodeSource(item)}</td>
+                                <td class="rel">{@render hl(episodeSource(item))}</td>
                               {/if}
                               {#if isRankStage(stage)}
                                 <td class="from">
@@ -522,7 +763,7 @@
                                   {/each}
                                 </td>
                               {/if}
-                              <td class="uuid" title={item.uuid}>{shortGraphId(item.uuid)}</td>
+                              <td class="uuid" title={item.uuid}>{@render hl(shortGraphId(item.uuid))}</td>
                             </tr>
                           {/each}
                         </tbody>
@@ -546,15 +787,9 @@
 </Dialog.Root>
 
 <style>
-  .trace-query {
-    display: block;
-    font-weight: 600;
-    color: var(--foreground);
-    margin-bottom: 2px;
-  }
-
   .trace-config {
     display: block;
+    margin-top: 6px;
     font-family:
       ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
       monospace;
@@ -611,6 +846,14 @@
   .trace-tab--active {
     color: var(--foreground);
     border-bottom-color: var(--primary);
+  }
+
+  .trace-tab__count {
+    margin-left: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary);
+    font-variant-numeric: tabular-nums;
   }
 
   .trace-tab:focus-visible {
@@ -715,6 +958,96 @@
     flex: none;
   }
 
+  /* "Dropped" toggle: when on, the label itself reads as struck-through (the action it applies to
+     dropped rows) and tints to primary — replacing the old filled-button highlight. */
+  .dropped-label--on {
+    text-decoration: line-through;
+    text-decoration-thickness: 2px;
+    color: var(--primary);
+  }
+
+  /* Header search box — shares the title line (flex-grows in the middle) to save header space;
+     highlights matches in the tables and drives the per-tab / per-stage hit counts. */
+  .trace-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 120px;
+    max-width: 380px;
+    padding: 4px 8px;
+    border: 1px solid color-mix(in srgb, var(--muted-foreground) 25%, transparent);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--muted-foreground) 6%, transparent);
+  }
+
+  .trace-search :global(.trace-search__icon) {
+    flex: none;
+    color: var(--muted-foreground);
+  }
+
+  .trace-search__input {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    border: none;
+    background: transparent;
+    outline: none;
+    font-size: 12px;
+    color: var(--foreground);
+  }
+
+  /* Search matches wrapped in <mark> — yellow-ish, theme-aware, readable on hovered rows. */
+  .search-hit {
+    background: color-mix(in srgb, #facc15 55%, transparent);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+  /* Question → Answer → Ideal. Question is always present; Answer/Ideal only in eval context. */
+  .trace-answers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .trace-answer {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .trace-answer__label {
+    flex: none;
+    width: 58px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted-foreground);
+  }
+
+  .trace-answer__label--q {
+    color: var(--foreground);
+  }
+
+  .trace-answer__label--llm {
+    color: var(--primary);
+  }
+
+  .trace-answer__label--ideal {
+    color: #16a34a;
+  }
+
+  .trace-answer__text {
+    color: var(--foreground);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
   .trace-stage__head {
     display: flex;
     align-items: center;
@@ -724,37 +1057,67 @@
     background: color-mix(in srgb, var(--muted-foreground) 8%, transparent);
   }
 
-  .trace-stage__toggle {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
+  /* Whole title row is the toggle — caret + label + count pills, all clickable. */
+  .trace-stage__titlebtn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 8px;
     padding: 0;
-    border: 1px solid color-mix(in srgb, var(--muted-foreground) 30%, transparent);
-    border-radius: 4px;
+    border: none;
     background: transparent;
     color: var(--foreground);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .trace-stage__titlebtn:hover .trace-stage__label {
+    color: var(--primary);
+  }
+
+  .trace-stage__titlebtn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .trace-stage__caret {
+    flex: none;
+    width: 14px;
     font-size: 11px;
     line-height: 1;
-    cursor: pointer;
-  }
-
-  .trace-stage__toggle:hover {
-    background: color-mix(in srgb, var(--muted-foreground) 16%, transparent);
-  }
-
-  .trace-stage__toggle:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
+    color: var(--muted-foreground);
   }
 
   .trace-stage__label {
-    flex: 1;
     min-width: 0;
     font-weight: 600;
     font-size: 13px;
+  }
+
+  /* Count pills after the stage title: neutral = rows returned; --hit = search matches (eye-catch). */
+  .trace-stage__pill {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    min-width: 18px;
+    height: 17px;
+    padding: 0 6px;
+    justify-content: center;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted-foreground);
+    background: color-mix(in srgb, var(--muted-foreground) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--muted-foreground) 24%, transparent);
+  }
+
+  .trace-stage__pill--hit {
+    color: #92400e;
+    background: color-mix(in srgb, #facc15 60%, transparent);
+    border-color: color-mix(in srgb, #facc15 80%, transparent);
   }
 
   .trace-stage__meta {
@@ -840,6 +1203,43 @@
     min-width: 240px;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  /* Long entity summaries / episode content: clamp to 3 lines until the user expands them. */
+  .clamp {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .clamp--open {
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    overflow: visible;
+  }
+
+  .clamp-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 2px;
+    padding: 0;
+    appearance: none;
+    border: none;
+    background: transparent;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--primary);
+    cursor: pointer;
+  }
+
+  .clamp-toggle:hover {
+    text-decoration: underline;
   }
 
   .trace-table .entity {

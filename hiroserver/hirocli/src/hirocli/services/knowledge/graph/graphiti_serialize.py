@@ -77,7 +77,9 @@ def edge_to_dto(edge: Any, *, document_ids: list[str] | None = None) -> dict[str
     ``rel_type`` is the relation name (``LIVES_IN``); ``chunk_ids`` are the supporting
     episode uuids (== Qdrant point_ids). The full temporal window flows through for the
     viz: ``valid_at`` (became true) · ``invalid_at`` (stopped being true) · ``expired_at``
-    (when the system learned it was superseded) — the last lets the tab mark retired facts."""
+    (when the system learned it was superseded) — the last lets the tab mark retired facts.
+    ``created_at`` is the transaction time (when the fact row was written to the graph DB),
+    distinct from ``valid_at`` (event time) — the Graph tab filters on both axes."""
     episodes = [str(e) for e in (getattr(edge, "episodes", None) or []) if e]
     return {
         "id": getattr(edge, "uuid", "") or "",
@@ -90,6 +92,7 @@ def edge_to_dto(edge: Any, *, document_ids: list[str] | None = None) -> dict[str
         "valid_at": _iso(getattr(edge, "valid_at", None)),
         "invalid_at": _iso(getattr(edge, "invalid_at", None)),
         "expired_at": _iso(getattr(edge, "expired_at", None)),
+        "created_at": _iso(getattr(edge, "created_at", None)),
     }
 
 

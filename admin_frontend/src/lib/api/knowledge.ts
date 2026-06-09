@@ -1,5 +1,9 @@
 import { apiRequest, type ApiResponse } from './client';
-import type { EvalRunStateData } from '$lib/features/knowledge/shared/knowledge-events';
+import type {
+  EvalCompletedPayload,
+  EvalQuestionPayload,
+  EvalRunStateData
+} from '$lib/features/knowledge/shared/knowledge-events';
 
 export type KnowledgeScannedFile = {
   path: string;
@@ -419,16 +423,20 @@ export type EvalCorpus = {
   questions_path: string;
   question_count: number;
   item_count: number; // episodes (memory) or .md docs (knowledge)
+  has_graph: boolean; // a graph is already built for this corpus (drives the Rebuild-graph default + wipe warning)
 };
 
 /** List the corpuses found in a folder for a track (the corpus-picker dropdown source). */
 export function listEvalCorpuses(
   track: 'memory' | 'knowledge',
   folder = ''
-): Promise<ApiResponse<{ track: string; folder: string; corpuses: EvalCorpus[] }>> {
+  // ``log_dir`` is the workspace's absolute ``logs/`` dir (the ledger sidecar root) — used by
+  // the eval "Copy for AI" brief to point an agent at retrieval_trace/ingest_trace/graph.log.
+  // Empty when the workspace can't be resolved (brief then falls back to relative paths).
+): Promise<ApiResponse<{ track: string; folder: string; corpuses: EvalCorpus[]; log_dir?: string }>> {
   const qs = new URLSearchParams({ track });
   if (folder) qs.set('folder', folder);
-  return apiRequest<{ track: string; folder: string; corpuses: EvalCorpus[] }>(
+  return apiRequest<{ track: string; folder: string; corpuses: EvalCorpus[]; log_dir?: string }>(
     `/knowledge/eval/corpuses?${qs.toString()}`,
     { method: 'GET', timeoutMs: 15000 }
   );
@@ -479,6 +487,42 @@ export function listEvalQuestions(
     `/knowledge/eval/questions?path=${encodeURIComponent(path)}`,
     { method: 'GET', timeoutMs: 15000 }
   );
+}
+
+/** Persisted per-corpus eval results (memory track) — the merged snapshot the panel
+ *  shows when a corpus is picked. ``rows`` is bank-ordered; ``summary`` is recomputed
+ *  over the whole accumulated set. Both empty when nothing's been saved yet. */
+export type EvalResultsData = {
+  rows: EvalQuestionPayload[];
+  summary: EvalCompletedPayload | null;
+};
+
+/** Load a corpus's saved eval results (memory track). ``questionsPath`` lets the
+ *  server spine the rows on the current bank (fresh question text + bank order). */
+export function listEvalResults(
+  track: 'memory' | 'knowledge',
+  corpusId: string,
+  questionsPath = ''
+): Promise<ApiResponse<EvalResultsData>> {
+  const qs = new URLSearchParams({ track, corpus_id: corpusId });
+  if (questionsPath) qs.set('questions_path', questionsPath);
+  return apiRequest<EvalResultsData>(`/knowledge/eval/results?${qs.toString()}`, {
+    method: 'GET',
+    timeoutMs: 15000
+  });
+}
+
+/** Delete a corpus's saved eval results from disk (results-only; the ingested memory
+ *  drawer is left intact). Memory track only. */
+export function clearEvalResults(
+  track: 'memory' | 'knowledge',
+  corpusId: string
+): Promise<ApiResponse<{ removed: number }>> {
+  return apiRequest<{ removed: number }>('/knowledge/eval/results/clear', {
+    method: 'POST',
+    body: { track, corpus_id: corpusId },
+    timeoutMs: 15000
+  });
 }
 
 /** L3 (Phase 5f) — per-document result inside a batch graph-ingest response. */
@@ -638,6 +682,9 @@ export type GraphEdgeDTO = {
   valid_at: string | null;
   invalid_at: string | null;
   expired_at: string | null;
+  // Transaction time: when the fact row was written to the graph DB (distinct from valid_at,
+  // which is the event/world time). The Graph tab's "Creation Date" filter reads this.
+  created_at: string | null;
 };
 
 export type KnowledgeGraphExportData = {
@@ -696,15 +743,6 @@ export function listKnowledgeGraphGroups(): Promise<ApiResponse<KnowledgeGraphGr
   return apiRequest<KnowledgeGraphGroupsData>('/knowledge/graph/groups', { timeoutMs: 30000 });
 }
 
-/** Delete the ENTIRE knowledge graph (all entities + facts); Qdrant chunks are kept so
- *  it can be rebuilt. Backs the Graph tab "Clear graph" action. */
-export function clearKnowledgeGraph(): Promise<ApiResponse<{ removed_episodes: number }>> {
-  return apiRequest<{ removed_episodes: number }>('/knowledge/graph/clear', {
-    method: 'POST',
-    body: {},
-    timeoutMs: 120000
-  });
-}
 
 /** Delete one document's episodes/entities/facts from the knowledge graph, keeping its
  *  Qdrant chunks. Backs the Browse tab per-document "Remove from graph" action. */

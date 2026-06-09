@@ -62,6 +62,8 @@ export type KnowledgePreferences = {
     model: string | null;
     model_resolved?: string | null;
     model_resolved_source?: string | null;
+    // Base answer-generation system prompt; blank → relaxed backend default (partial answers allowed).
+    prompt: string;
     cite_sources: boolean;
     language_policy: 'match_query' | 'prefer_english' | 'prefer_arabic';
   };
@@ -100,6 +102,18 @@ export type GraphPreferences = {
     model_id: string | null;
     min_relevance: number;
     device: string | null;
+  };
+  // Eval-only answering knobs surfaced under the Graphiti engine settings. memory_answer_prompt
+  // drives the memory-eval recall leg; blank → relaxed backend default (partial answers allowed).
+  eval: {
+    memory_answer_prompt: string;
+  };
+  // Admin graph-viz DISPLAY knobs (the shared Knowledge/Memories Graph tab's per-type node
+  // filter). Frontend-only — the graph engine ignores these.
+  view: {
+    // A node type with more than this many instances shows a "many instances" warning in its
+    // filter dropdown (the dropdown still lists + searches all; this is just a perf heads-up).
+    large_type_threshold: number;
   };
 };
 
@@ -174,6 +188,7 @@ export const DEFAULT_KNOWLEDGE: KnowledgePreferences = {
   answering: {
     model: null,
     model_resolved: null,
+    prompt: '',
     cite_sources: true,
     language_policy: 'match_query'
   },
@@ -200,6 +215,12 @@ export const DEFAULT_GRAPH: GraphPreferences = {
     model_id: null,
     min_relevance: 0.0,
     device: null
+  },
+  eval: {
+    memory_answer_prompt: ''
+  },
+  view: {
+    large_type_threshold: 200
   }
 };
 
@@ -253,6 +274,15 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       reranker: {
         ...DEFAULT_GRAPH.reranker,
         ...(prefs.graph?.reranker ?? {})
+      },
+      eval: {
+        ...DEFAULT_GRAPH.eval,
+        ...(prefs.graph?.eval ?? {})
+      },
+      // Older payloads predate the graph-viz display knobs — fill from defaults.
+      view: {
+        ...DEFAULT_GRAPH.view,
+        ...(prefs.graph?.view ?? {})
       }
     }
   };

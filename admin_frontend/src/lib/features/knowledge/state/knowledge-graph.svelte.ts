@@ -17,7 +17,6 @@
  */
 
 import {
-  clearKnowledgeGraph,
   exportKnowledgeGraph,
   listKnowledgeGraphGroups,
   searchGraphChunks,
@@ -28,14 +27,17 @@ import {
   type GraphNodeDTO,
   type GraphNodeEvent
 } from '$lib/api/knowledge';
+import { getPreferences } from '$lib/api/preferences';
 import { connectKnowledgeGraphEvents } from '../shared/knowledge-events';
 import { GLOW_MS } from '../graph/engine/graph-config';
 import { linkEndId } from '../graph/engine/graph-types';
 import { KNOWN_NODE_TYPE_ORDER } from '../graph/knowledge-graph-style';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import {
+  readLocalString,
   readSessionString,
   removeSessionString,
+  writeLocalString,
   writeSessionString
 } from '$lib/preferences/storage';
 
@@ -45,8 +47,113 @@ export interface KnowledgeGraphModelDeps {
 
 export type GraphSelection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
 
-/** One row of the node/edge type filter strip: a type, how many carry it, hidden state. */
+/** One row of the edge-type filter strip: a type, how many carry it, hidden state. */
 export type GraphTypeFacet = { type: string; count: number; hidden: boolean };
+
+/** One node-type group for the per-type instance filter: every instance of the type plus which
+ *  ones are currently visible (checked). Nodes are filtered per-INSTANCE now (pick all/none/some
+ *  Persons), not per whole type — each group drives one MultiSelectFilter dropdown. */
+export type GraphNodeInstanceOption = {
+  id: string;
+  name: string;
+  connections: number; // edge degree (how many facts touch this node)
+};
+
+export type GraphNodeTypeGroup = {
+  type: string;
+  count: number; // total instances of this type
+  visibleCount: number; // currently-visible (checked) instances
+  options: GraphNodeInstanceOption[]; // all instances (component owns sort order)
+  selectedIds: string[]; // visible instance ids (the dropdown's checked set)
+};
+
+// Fallback large-type warning threshold until the admin preference (graph.view.large_type_threshold)
+// loads. A node type with more instances than this flags a "use search" perf note in its dropdown.
+const DEFAULT_LARGE_TYPE_THRESHOLD = 200;
+
+// ── Edge filters (the Graph options panel's "Filters" section) ──────────────────────────────
+/** Edge validity filter. Mirrors the codebase's "current fact" rule (graphiti_search): a fact is
+ *  CURRENT/valid when invalid_at IS NULL AND expired_at IS NULL; INVALID when either is set. */
+export type EdgeValidity = 'all' | 'valid' | 'invalid';
+/** When capping connections per node, which edges to keep — newest or oldest by valid_at. */
+export type MaxConnBy = 'newest' | 'oldest';
+/** Orphan = a node with NO visible connections (after all edge filters). 'all' = show every node ·
+ *  'hide' = drop orphans · 'only' = show ONLY orphans (and thus no edges). */
+export type OrphanMode = 'all' | 'hide' | 'only';
+/** Inclusive epoch-ms range for a date slider; null = inactive (full span, no filtering). */
+export type DateRange = { lo: number; hi: number } | null;
+
+/** Max-connections-per-node slider cap; this value === "show all" (no cap). */
+export const MAX_CONN_PER_NODE_CAP = 25;
+
+/** Persisted edge-filter MODES (NOT the date ranges — those default to the data's full span). */
+type EdgeFilterModes = {
+  edgeValidity: EdgeValidity;
+  includeUndatedEdges: boolean;
+  maxConnPerNode: number;
+  maxConnBy: MaxConnBy;
+  orphanMode: OrphanMode;
+};
+const EDGE_FILTER_DEFAULTS: EdgeFilterModes = {
+  edgeValidity: 'all',
+  includeUndatedEdges: true,
+  maxConnPerNode: MAX_CONN_PER_NODE_CAP, // === cap → no limit
+  maxConnBy: 'newest',
+  orphanMode: 'all'
+};
+
+function readEdgeFilterModes(): EdgeFilterModes {
+  const raw = readLocalString(PREF_KEYS.knowledgeGraphEdgeFilters);
+  if (!raw) return { ...EDGE_FILTER_DEFAULTS };
+  try {
+    const p = JSON.parse(raw) as Partial<EdgeFilterModes>;
+    const cap = Number(p.maxConnPerNode);
+    return {
+      edgeValidity: (['all', 'valid', 'invalid'] as const).includes(p.edgeValidity as EdgeValidity)
+        ? (p.edgeValidity as EdgeValidity)
+        : EDGE_FILTER_DEFAULTS.edgeValidity,
+      includeUndatedEdges:
+        typeof p.includeUndatedEdges === 'boolean'
+          ? p.includeUndatedEdges
+          : EDGE_FILTER_DEFAULTS.includeUndatedEdges,
+      maxConnPerNode: Number.isFinite(cap)
+        ? Math.min(MAX_CONN_PER_NODE_CAP, Math.max(1, Math.round(cap)))
+        : EDGE_FILTER_DEFAULTS.maxConnPerNode,
+      maxConnBy: p.maxConnBy === 'oldest' ? 'oldest' : 'newest',
+      orphanMode: (['all', 'hide', 'only'] as const).includes(p.orphanMode as OrphanMode)
+        ? (p.orphanMode as OrphanMode)
+        : EDGE_FILTER_DEFAULTS.orphanMode
+    };
+  } catch {
+    return { ...EDGE_FILTER_DEFAULTS };
+  }
+}
+
+/** Parse an ISO timestamp to epoch ms, or null when absent/unparseable. */
+function epoch(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+
+/** Clamp a date range to the data span; collapse to null (inactive) when it covers the full
+ *  span — so a slider parked at both ends never filters (and never gates undated edges). A
+ *  one-step tolerance snaps near-edge knobs to the exact span ends: the slider step-snaps its
+ *  thumbs (the max rarely lands on a step boundary), which would otherwise leave `hi` a hair
+ *  below the true max on mount and spuriously hide the newest edges. */
+function normalizeRange(
+  range: DateRange,
+  span: { lo: number; hi: number } | null
+): DateRange {
+  if (!range || !span) return null;
+  const tol = Math.max(1, (span.hi - span.lo) / 100); // == the slider's step granularity
+  const lo = Math.max(span.lo, Math.min(range.lo, range.hi));
+  const hi = Math.min(span.hi, Math.max(range.lo, range.hi));
+  const atStart = lo <= span.lo + tol;
+  const atEnd = hi >= span.hi - tol;
+  if (atStart && atEnd) return null;
+  return { lo: atStart ? span.lo : lo, hi: atEnd ? span.hi : hi };
+}
 
 // GLOW_MS (how long a freshly-created node/edge glows after appearing) is shared with the
 // canvas engine via engine/graph-config so the recent[] prune window and the fade window agree.
@@ -55,9 +162,10 @@ const RECONCILE_DEBOUNCE_MS = 400;
 // Debounce window for the backend chunk-text search leg (ms).
 const SEARCH_DEBOUNCE_MS = 250;
 
-// Filter persistence: each hidden-type set is kept in sessionStorage only — no URL
-// params (filters aren't meant to be shareable links), just remembered for the
-// session. Comma-joined hidden-type lists; empty set clears the key.
+// Filter persistence: the hidden sets are kept in sessionStorage only — no URL params
+// (filters aren't meant to be shareable links), just remembered for the session. Comma-joined;
+// empty set clears the key. NODES persist hidden INSTANCE ids (per-instance filter); EDGES
+// persist hidden relation TYPES.
 const SESSION_HIDE_NODES = PREF_KEYS.knowledgeGraphHideNodes;
 const SESSION_HIDE_EDGES = PREF_KEYS.knowledgeGraphHideEdges;
 // Last-viewed partition group_id — remembered across opens (design: default = first in list,
@@ -75,14 +183,11 @@ function writeHidden(key: string, hidden: Set<string>): void {
   else removeSessionString(key);
 }
 
-// Sort node-type facets: known ontology types first (in canonical order), then
-// any Graphiti-emitted unknown types alphabetically.
-function sortNodeFacets(facets: GraphTypeFacet[]): GraphTypeFacet[] {
-  const rank = (t: string) => {
-    const i = KNOWN_NODE_TYPE_ORDER.indexOf(t);
-    return i === -1 ? KNOWN_NODE_TYPE_ORDER.length : i;
-  };
-  return [...facets].sort((a, b) => rank(a.type) - rank(b.type) || a.type.localeCompare(b.type));
+// Sort node-type groups: known ontology types first (in canonical order), then any
+// Graphiti-emitted unknown types alphabetically.
+function rankNodeType(t: string): number {
+  const i = KNOWN_NODE_TYPE_ORDER.indexOf(t);
+  return i === -1 ? KNOWN_NODE_TYPE_ORDER.length : i;
 }
 
 export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
@@ -113,11 +218,36 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let recent = $state<Record<string, number>>({});
 
   // ── View filters (client-side; the full snapshot is already in memory) ──
-  // We store the HIDDEN types so the default (empty set) means "show all".
-  // Reassigned with a fresh Set on every change so $state reactivity fires.
-  // Seeded from the URL so a filtered view is restored on reload.
-  let hiddenNodeTypes = $state<Set<string>>(readHidden(SESSION_HIDE_NODES));
+  // We store the HIDDEN set so the default (empty set) means "show all". Reassigned with a fresh
+  // Set on every change so $state reactivity fires. Seeded from sessionStorage so a filtered view
+  // is restored across opens. Nodes are filtered per-INSTANCE (hidden instance ids — pick all/none/
+  // some Persons); edges per relation TYPE.
+  let hiddenNodeIds = $state<Set<string>>(readHidden(SESSION_HIDE_NODES));
   let hiddenEdgeTypes = $state<Set<string>>(readHidden(SESSION_HIDE_EDGES));
+  // Admin-settable threshold (graph.view.large_type_threshold) above which a node type's dropdown
+  // shows a "many instances — use search" perf note. Loaded once via loadPreferences(); falls back
+  // to DEFAULT_LARGE_TYPE_THRESHOLD until then.
+  let largeTypeThreshold = $state(DEFAULT_LARGE_TYPE_THRESHOLD);
+
+  // ── Edge filters (Graph options → Filters). Modes persist to localStorage; the two date
+  // ranges default to the data's full span each load (absolute dates don't carry across graphs),
+  // so they live as ephemeral null-until-touched state. ──
+  const persistedFilters = readEdgeFilterModes();
+  let edgeValidity = $state<EdgeValidity>(persistedFilters.edgeValidity);
+  let includeUndatedEdges = $state(persistedFilters.includeUndatedEdges);
+  let maxConnPerNode = $state(persistedFilters.maxConnPerNode);
+  let maxConnBy = $state<MaxConnBy>(persistedFilters.maxConnBy);
+  let orphanMode = $state<OrphanMode>(persistedFilters.orphanMode);
+  // null = "full span" (slider sits at both ends, no filtering); set when the user drags a knob.
+  let validRange = $state<DateRange>(null);
+  let creationRange = $state<DateRange>(null);
+
+  function persistEdgeFilterModes(): void {
+    writeLocalString(
+      PREF_KEYS.knowledgeGraphEdgeFilters,
+      JSON.stringify({ edgeValidity, includeUndatedEdges, maxConnPerNode, maxConnBy, orphanMode })
+    );
+  }
 
   // Non-reactive O(1) indexes — the dedup source of truth. Values are the same
   // object references held in the reactive arrays (mutated in place on upsert).
@@ -223,31 +353,15 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       for (const e of res.data.edges) edgeById.set(e.id, { ...e });
       truncated = res.data.truncated;
       recent = {};
+      // Date-range knobs default to the full span of the freshly-loaded data (the spans below
+      // re-derive from the new edges); reset so a stale absolute range can't hide the new graph.
+      validRange = null;
+      creationRange = null;
       rebuildArrays();
       loadVersion += 1; // signal a structural reload to the renderer (full relayout + fit)
     } catch (err) {
       loadError = err instanceof Error ? err.message : String(err);
       deps.setError(loadError);
-    } finally {
-      loading = false;
-    }
-  }
-
-  /** Wipe the entire knowledge graph (server clears the knowledge group). Returns true
-   *  on success — the panel then reloads so the canvas reflects the now-empty graph. */
-  async function clearGraph(): Promise<boolean> {
-    loading = true;
-    deps.setError(null);
-    try {
-      const res = await clearKnowledgeGraph();
-      if (!res.ok) {
-        deps.setError(res.error ?? 'Failed to clear graph');
-        return false;
-      }
-      return true;
-    } catch (err) {
-      deps.setError(err instanceof Error ? err.message : String(err));
-      return false;
     } finally {
       loading = false;
     }
@@ -276,6 +390,19 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     await load();
   }
 
+  /** Load the admin graph-viz display preference (large-type warning threshold). Non-fatal: a
+   *  failure keeps the default threshold, since this only tunes a perf heads-up in the filter
+   *  dropdowns. Called once when the panel mounts (shared by the Knowledge + Memories graph tabs). */
+  async function loadPreferences(): Promise<void> {
+    try {
+      const res = await getPreferences();
+      const t = res.data?.preferences?.graph?.view?.large_type_threshold;
+      if (typeof t === 'number' && t > 0) largeTypeThreshold = t;
+    } catch (err) {
+      console.error('graph: failed to load view preferences', err);
+    }
+  }
+
   // Does a live delta belong to the partition we're currently showing? Exact match on the
   // selected group_id — no privileged-default special-casing. When nothing is selected yet
   // (empty graph), deltas wait for the post-ingest reconcile (which re-lists groups).
@@ -301,11 +428,16 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
         if (!eventMatchesActiveGroup(e.group_id)) return;
         progress = e;
       },
-      onCompleted: () => {
-        progress = null;
-        // Refresh the partition list too: a first ingest into an empty graph creates a new
-        // group that should appear in the selector (and get auto-selected if none was).
+      onCompleted: (gid) => {
+        // Always refresh the partition list: a first ingest into an empty graph creates a new
+        // group that should appear in the selector (and get auto-selected if none was) — even
+        // when the completion is for a partition we're not currently viewing.
         void loadGroups();
+        // Clear the "ingesting…" status + reconcile ONLY for the partition we're showing. A
+        // bare/legacy emit (gid == null) is treated as global so it still clears. This mirrors
+        // onProgress' group gate: a completion for another group must not wipe our status.
+        if (gid != null && !eventMatchesActiveGroup(gid)) return;
+        progress = null;
         scheduleReconcile();
       }
     });
@@ -341,36 +473,71 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     return nodeById.get(id)?.name ?? id;
   }
 
-  // Resolve a link endpoint to its node type. force-graph mutates link.source/
-  // target from id strings into node-object references once the graph is laid
-  // out, so accept either shape.
-  function endpointType(end: unknown): string | undefined {
-    if (end && typeof end === 'object') return (end as GraphNodeDTO).type;
-    return typeof end === 'string' ? nodeById.get(end)?.type : undefined;
+  // A fact is CURRENT/valid when neither invalidated nor expired — the exact rule the graph
+  // search uses (graphiti_search: invalid_at IS NULL AND expired_at IS NULL). Anything with
+  // invalid_at or expired_at set is treated as INVALID (superseded / retired).
+  function edgeIsCurrent(edge: GraphEdgeDTO): boolean {
+    return edge.invalid_at == null && edge.expired_at == null;
   }
 
-  // An edge is visible only if its relation type is shown AND both endpoints'
-  // node types are shown — hiding a node type also hides edges touching it
-  // ("hide connected edges" semantics).
+  // Does an edge pass an active date-range filter on the given field? An edge WITHOUT that date
+  // is governed by the includeUndatedEdges toggle (default: shown). An inactive range (null) is
+  // always a pass.
+  function passesRange(value: number | null, range: DateRange): boolean {
+    if (!range) return true;
+    if (value == null) return includeUndatedEdges;
+    return value >= range.lo && value <= range.hi;
+  }
+
+  // Per-edge visibility (everything EXCEPT the per-node cap, which needs a global pass below):
+  // relation type shown, both endpoints shown, validity mode, and the valid_at / created_at
+  // date ranges. linkEndId normalizes force-graph's object-ified endpoints back to ids.
   function isEdgeVisible(edge: GraphEdgeDTO): boolean {
     if (hiddenEdgeTypes.has(edge.rel_type)) return false;
-    const st = endpointType(edge.source);
-    const tt = endpointType(edge.target);
-    if (st && hiddenNodeTypes.has(st)) return false;
-    if (tt && hiddenNodeTypes.has(tt)) return false;
+    if (hiddenNodeIds.has(linkEndId(edge.source))) return false;
+    if (hiddenNodeIds.has(linkEndId(edge.target))) return false;
+    if (edgeValidity === 'valid' && !edgeIsCurrent(edge)) return false;
+    if (edgeValidity === 'invalid' && edgeIsCurrent(edge)) return false;
+    if (!passesRange(epoch(edge.valid_at), validRange)) return false;
+    if (!passesRange(epoch(edge.created_at), creationRange)) return false;
     return true;
   }
   function isNodeVisible(node: GraphNodeDTO): boolean {
-    return !hiddenNodeTypes.has(node.type);
+    return !hiddenNodeIds.has(node.id);
   }
 
-  // Facets reflect ALL loaded data (not the filtered subset) so hidden types
-  // stay listed and can be toggled back on.
-  const nodeTypeFacets = $derived.by<GraphTypeFacet[]>(() => {
-    const counts = new Map<string, number>();
-    for (const n of nodes) counts.set(n.type, (counts.get(n.type) ?? 0) + 1);
-    return sortNodeFacets(
-      [...counts].map(([type, count]) => ({ type, count, hidden: hiddenNodeTypes.has(type) }))
+  // Per-type instance groups for the node filter dropdowns. Reflect ALL loaded data (not the
+  // filtered subset) so hidden instances stay listed and can be re-checked. One group per node
+  // type → one MultiSelectFilter; selectedIds = the visible (un-hidden) instances of that type.
+  const nodeInstanceFacets = $derived.by<GraphNodeTypeGroup[]>(() => {
+    // Edge degree per node id (how many facts touch it) — drives the per-instance connection
+    // count + the dropdown's default "busiest first" sort. Counted over ALL links so the number
+    // is stable regardless of the active edge filter.
+    const degree = new Map<string, number>();
+    for (const e of links) {
+      const a = linkEndId(e.source);
+      const b = linkEndId(e.target);
+      degree.set(a, (degree.get(a) ?? 0) + 1);
+      degree.set(b, (degree.get(b) ?? 0) + 1);
+    }
+    const byType = new Map<string, GraphNodeDTO[]>();
+    for (const n of nodes) {
+      const arr = byType.get(n.type);
+      if (arr) arr.push(n);
+      else byType.set(n.type, [n]);
+    }
+    const groups = [...byType].map(([type, ns]) => {
+      // empty name → fall back to id. Order is left to the component (it offers a sort toggle).
+      const options = ns.map((n) => ({
+        id: n.id,
+        name: n.name || n.id,
+        connections: degree.get(n.id) ?? 0
+      }));
+      const selectedIds = options.filter((o) => !hiddenNodeIds.has(o.id)).map((o) => o.id);
+      return { type, count: options.length, visibleCount: selectedIds.length, options, selectedIds };
+    });
+    return groups.sort(
+      (a, b) => rankNodeType(a.type) - rankNodeType(b.type) || a.type.localeCompare(b.type)
     );
   });
   const edgeTypeFacets = $derived.by<GraphTypeFacet[]>(() => {
@@ -382,16 +549,103 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
   });
 
-  // The filtered subsets fed to the force-graph instance. Filtering rebuilds the
-  // graph from these (recreate + re-layout) rather than hiding in place, so the
-  // remaining nodes spread to fill the frame. visibleLinks is derived from the
-  // already-non-dangling `links`, and isEdgeVisible drops any edge whose endpoint
-  // type is hidden, so every visible edge's endpoints are in visibleNodes.
-  const visibleNodes = $derived(nodes.filter(isNodeVisible));
-  const visibleLinks = $derived(links.filter(isEdgeVisible));
+  // Min/max epoch span of each date field across loaded edges (null → no dated edges). Drives the
+  // range sliders' bounds; the panel shows a disabled note when null.
+  function spanOf(field: 'valid_at' | 'created_at'): { lo: number; hi: number } | null {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const e of links) {
+      const t = epoch(e[field]);
+      if (t == null) continue;
+      if (t < lo) lo = t;
+      if (t > hi) hi = t;
+    }
+    return hi >= lo ? { lo, hi } : null;
+  }
+  const validAtSpan = $derived(spanOf('valid_at'));
+  const createdAtSpan = $derived(spanOf('created_at'));
+
+  // The filtered subsets fed to the force-graph instance. Filtering rebuilds the graph from these
+  // (recreate + re-layout) so the remaining nodes spread to fill the frame. First apply the
+  // per-edge filters (type/instance/validity/date), THEN the per-node connection cap.
+  const baseVisibleLinks = $derived(links.filter(isEdgeVisible));
+
+  // Per-node connection cap: keep at most `maxConnPerNode` edges per node. Greedy — walk edges in
+  // valid_at order (newest or oldest first; undated last) and keep an edge only if BOTH endpoints
+  // are still under the cap, so no node ever exceeds it. Returns null (no cap) at the slider max.
+  const cappedEdgeIds = $derived.by<Set<string> | null>(() => {
+    if (maxConnPerNode >= MAX_CONN_PER_NODE_CAP) return null;
+    const dir = maxConnBy === 'oldest' ? 1 : -1;
+    const ranked = [...baseVisibleLinks].sort((a, b) => {
+      const ta = epoch(a.valid_at);
+      const tb = epoch(b.valid_at);
+      if (ta == null && tb == null) return 0;
+      if (ta == null) return 1; // undated sinks to the end regardless of direction
+      if (tb == null) return -1;
+      return (ta - tb) * dir;
+    });
+    const deg = new Map<string, number>();
+    const kept = new Set<string>();
+    for (const e of ranked) {
+      const a = linkEndId(e.source);
+      const b = linkEndId(e.target);
+      if ((deg.get(a) ?? 0) < maxConnPerNode && (deg.get(b) ?? 0) < maxConnPerNode) {
+        kept.add(e.id);
+        deg.set(a, (deg.get(a) ?? 0) + 1);
+        deg.set(b, (deg.get(b) ?? 0) + 1);
+      }
+    }
+    return kept;
+  });
+  // Links surviving all EDGE filters (type / instance / validity / date + per-node cap), BEFORE
+  // the orphan node filter prunes their endpoints.
+  const edgeFilteredLinks = $derived(
+    cappedEdgeIds ? baseVisibleLinks.filter((e) => cappedEdgeIds.has(e.id)) : baseVisibleLinks
+  );
+  // Node ids that still carry ≥1 visible connection — the basis for the orphan filter. A node the
+  // per-node cap stripped of all its edges correctly counts as an orphan here ("no visible conn").
+  const connectedNodeIds = $derived.by<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const e of edgeFilteredLinks) {
+      s.add(linkEndId(e.source));
+      s.add(linkEndId(e.target));
+    }
+    return s;
+  });
+  function orphanPass(id: string): boolean {
+    if (orphanMode === 'hide') return connectedNodeIds.has(id); // drop the disconnected
+    if (orphanMode === 'only') return !connectedNodeIds.has(id); // keep ONLY the disconnected
+    return true;
+  }
+  const visibleNodes = $derived(nodes.filter((n) => isNodeVisible(n) && orphanPass(n.id)));
+  const visibleNodeIdSet = $derived(new Set(visibleNodes.map((n) => n.id)));
+  // Drop any edge whose endpoint the orphan filter hid — so "only orphans" shows no edges (orphans
+  // have none) and a hidden endpoint never leaves a dangling line.
+  const visibleLinks = $derived(
+    edgeFilteredLinks.filter(
+      (e) => visibleNodeIdSet.has(linkEndId(e.source)) && visibleNodeIdSet.has(linkEndId(e.target))
+    )
+  );
   const visibleNodeCount = $derived(visibleNodes.length);
   const visibleEdgeCount = $derived(visibleLinks.length);
-  const hasActiveFilters = $derived(hiddenNodeTypes.size > 0 || hiddenEdgeTypes.size > 0);
+
+  const edgeFiltersActive = $derived(
+    edgeValidity !== 'all' ||
+      validRange !== null ||
+      creationRange !== null ||
+      maxConnPerNode < MAX_CONN_PER_NODE_CAP ||
+      orphanMode !== 'all'
+  );
+  const hasActiveFilters = $derived(
+    hiddenNodeIds.size > 0 || hiddenEdgeTypes.size > 0 || edgeFiltersActive
+  );
+  // A single token that changes whenever any edge filter changes — the renderer treats a change
+  // as a STRUCTURAL update (relayout + fit), matching how the node/edge-type filters behave.
+  const filterToken = $derived(
+    `${edgeValidity}|${includeUndatedEdges}|${maxConnPerNode}|${maxConnBy}|${orphanMode}|` +
+      `${validRange ? `${validRange.lo}-${validRange.hi}` : 'x'}|` +
+      `${creationRange ? `${creationRange.lo}-${creationRange.hi}` : 'x'}`
+  );
 
   // ── Search highlight (transient view state; not persisted) ──────────────────
   // One unified query highlights matching nodes/edges WITHOUT hiding the rest:
@@ -494,11 +748,18 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   });
   const matchCount = $derived(matchedNodeIds.size + matchedEdgeIds.size);
 
-  function toggleNodeType(type: string): void {
-    const next = new Set(hiddenNodeTypes);
-    if (next.has(type)) next.delete(type);
-    else next.add(type);
-    hiddenNodeTypes = next;
+  // Node instances are filtered per type via a multi-select dropdown that works in terms of
+  // VISIBLE (checked) instance ids. We only touch THIS type's instances: hidden gains the type's
+  // unchecked instances and loses its checked ones, leaving other types' hidden ids untouched.
+  function setVisibleNodeIds(type: string, visible: string[]): void {
+    const shown = new Set(visible);
+    const next = new Set(hiddenNodeIds);
+    for (const n of nodes) {
+      if (n.type !== type) continue;
+      if (shown.has(n.id)) next.delete(n.id);
+      else next.add(n.id);
+    }
+    hiddenNodeIds = next;
     writeHidden(SESSION_HIDE_NODES, next);
   }
   // Edge types are filtered via the multi-select dropdown, which works in terms
@@ -512,11 +773,52 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     hiddenEdgeTypes = next;
     writeHidden(SESSION_HIDE_EDGES, next);
   }
+  // ── Edge filter setters (Graph options → Filters). Modes persist; ranges are ephemeral. ──
+  function setEdgeValidity(v: EdgeValidity): void {
+    edgeValidity = v;
+    persistEdgeFilterModes();
+  }
+  function setIncludeUndatedEdges(on: boolean): void {
+    includeUndatedEdges = on;
+    persistEdgeFilterModes();
+  }
+  function setMaxConnPerNode(n: number): void {
+    maxConnPerNode = Math.min(MAX_CONN_PER_NODE_CAP, Math.max(1, Math.round(n)));
+    persistEdgeFilterModes();
+  }
+  function setMaxConnBy(by: MaxConnBy): void {
+    maxConnBy = by;
+    persistEdgeFilterModes();
+  }
+  function setOrphanMode(m: OrphanMode): void {
+    orphanMode = m;
+    persistEdgeFilterModes();
+  }
+  // A range equal to (or wider than) the full data span is treated as "inactive" (null) so the
+  // slider at both ends never counts as a filter and undated edges aren't gated by it.
+  function setValidRange(range: DateRange): void {
+    validRange = normalizeRange(range, validAtSpan);
+  }
+  function setCreationRange(range: DateRange): void {
+    creationRange = normalizeRange(range, createdAtSpan);
+  }
+  function resetEdgeFilters(): void {
+    edgeValidity = EDGE_FILTER_DEFAULTS.edgeValidity;
+    includeUndatedEdges = EDGE_FILTER_DEFAULTS.includeUndatedEdges;
+    maxConnPerNode = EDGE_FILTER_DEFAULTS.maxConnPerNode;
+    maxConnBy = EDGE_FILTER_DEFAULTS.maxConnBy;
+    orphanMode = EDGE_FILTER_DEFAULTS.orphanMode;
+    validRange = null;
+    creationRange = null;
+    persistEdgeFilterModes();
+  }
+
   function clearFilters(): void {
-    hiddenNodeTypes = new Set();
+    hiddenNodeIds = new Set();
     hiddenEdgeTypes = new Set();
-    writeHidden(SESSION_HIDE_NODES, hiddenNodeTypes);
+    writeHidden(SESSION_HIDE_NODES, hiddenNodeIds);
     writeHidden(SESSION_HIDE_EDGES, hiddenEdgeTypes);
+    resetEdgeFilters();
   }
 
   return {
@@ -537,7 +839,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     selectEdge,
     clearSelection,
     load,
-    clearGraph,
+    loadPreferences,
     connectEvents,
     // ── group filter ──
     groups: () => groups,
@@ -545,18 +847,38 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     loadGroups,
     selectGroup,
     // ── view filters ──
-    nodeTypeFacets: () => nodeTypeFacets,
+    nodeInstanceFacets: () => nodeInstanceFacets,
     edgeTypeFacets: () => edgeTypeFacets,
-    hiddenNodeTypes: () => hiddenNodeTypes,
+    largeTypeThreshold: () => largeTypeThreshold,
+    hiddenNodeIds: () => hiddenNodeIds,
     hiddenEdgeTypes: () => hiddenEdgeTypes,
     visibleNodes: () => visibleNodes,
     visibleLinks: () => visibleLinks,
     visibleNodeCount: () => visibleNodeCount,
     visibleEdgeCount: () => visibleEdgeCount,
     hasActiveFilters: () => hasActiveFilters,
-    toggleNodeType,
+    setVisibleNodeIds,
     setVisibleEdgeTypes,
     clearFilters,
+    // ── edge filters (Graph options → Filters) ──
+    filterToken: () => filterToken,
+    edgeValidity: () => edgeValidity,
+    includeUndatedEdges: () => includeUndatedEdges,
+    maxConnPerNode: () => maxConnPerNode,
+    maxConnBy: () => maxConnBy,
+    orphanMode: () => orphanMode,
+    validRange: () => validRange,
+    creationRange: () => creationRange,
+    validAtSpan: () => validAtSpan,
+    createdAtSpan: () => createdAtSpan,
+    setEdgeValidity,
+    setIncludeUndatedEdges,
+    setMaxConnPerNode,
+    setMaxConnBy,
+    setOrphanMode,
+    setValidRange,
+    setCreationRange,
+    resetEdgeFilters,
     // ── search highlight ──
     searchQuery: () => searchQuery,
     searchBusy: () => searchBusy,

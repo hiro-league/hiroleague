@@ -28,7 +28,6 @@ import {
 import {
   graphRunsClearAllMemories,
   graphRunsDeleteMemories,
-  graphRunsDeleteMemory,
   graphRunsLoadMemoriesList
 } from '$lib/features/graph-runs/state/graph-runs-memory-service';
 import { createKnowledgeGraphModel } from '$lib/features/knowledge/state/knowledge-graph.svelte';
@@ -56,7 +55,6 @@ export function createMemoriesPageController() {
   let memoryActionBusy = $state(false);
   let memoryJsonRow = $state<Record<string, unknown> | null>(null);
   let clearMemoriesConfirmOpen = $state(false);
-  let deleteMemoryTarget = $state<Record<string, unknown> | null>(null);
 
   // Provenance drill-down: the originating conversation turn(s) for a fact. Resolved lazily
   // from the row's chunk_ids via the same chunk-detail endpoint the Graph tab uses (it reads
@@ -210,15 +208,6 @@ export function createMemoriesPageController() {
     memoryJsonRow = null;
   }
 
-  function openDeleteMemoryDialog(row: Record<string, unknown>) {
-    if (!memoryId(row)) return;
-    deleteMemoryTarget = row;
-  }
-
-  function closeDeleteMemoryDialog() {
-    if (!memoryActionBusy) deleteMemoryTarget = null;
-  }
-
   function closeClearMemoriesDialog() {
     if (!memoryActionBusy) clearMemoriesConfirmOpen = false;
   }
@@ -285,23 +274,6 @@ export function createMemoriesPageController() {
       await loadMemories();
     } catch (e) {
       memoriesError = e instanceof Error ? e.message : 'Failed to clear memories.';
-    } finally {
-      memoryActionBusy = false;
-    }
-  }
-
-  async function confirmDeleteMemory() {
-    const target = deleteMemoryTarget;
-    const id = target ? memoryId(target) : '';
-    if (!id) return;
-    memoryActionBusy = true;
-    memoriesError = '';
-    try {
-      await graphRunsDeleteMemory(id);
-      deleteMemoryTarget = null;
-      memoriesRows = memoriesRows.filter((row) => memoryId(row) !== id);
-    } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to delete memory.';
     } finally {
       memoryActionBusy = false;
     }
@@ -381,9 +353,6 @@ export function createMemoriesPageController() {
     get clearMemoriesConfirmOpen() {
       return clearMemoriesConfirmOpen;
     },
-    get deleteMemoryTarget() {
-      return deleteMemoryTarget;
-    },
     get memorySearch() {
       return memorySearch;
     },
@@ -432,15 +401,12 @@ export function createMemoriesPageController() {
     loadMemories,
     refreshMemories: loadMemories,
     closeMemoryJsonDialog,
-    openDeleteMemoryDialog,
-    closeDeleteMemoryDialog,
     closeClearMemoriesDialog,
     requestClearMemoriesConfirm,
     showMemoryJsonRow,
     showMemoryProvenance,
     closeMemoryProvenance,
-    confirmClearMemories,
-    confirmDeleteMemory
+    confirmClearMemories
   };
 }
 

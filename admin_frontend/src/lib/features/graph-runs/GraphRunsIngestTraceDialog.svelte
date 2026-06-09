@@ -2,6 +2,7 @@
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import type {
+    IngestEntityType,
     IngestTraceEdge,
     IngestTraceMessage,
     IngestTraceNode,
@@ -12,16 +13,24 @@
 
   let {
     trace,
-    onClose
+    onClose,
+    // Optional extra tab (eval: the searchable source corpus) — decoupled via a snippet so this
+    // Graph-Runs component stays generic. Both props must be set for the tab to appear.
+    extraTabLabel = '',
+    extraTab
   }: {
     trace: IngestTraceRecord | null;
     onClose: () => void;
+    extraTabLabel?: string;
+    extraTab?: import('svelte').Snippet;
   } = $props();
+
+  const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
   // ── Tabs ────────────────────────────────────────────────────────────────────────────────
   // Pipeline = the per-stage journey (prompt in / structured out); Result = what landed in the
-  // graph (persisted nodes + edges). Reset to Pipeline whenever a different episode opens.
-  let activeTab = $state<'pipeline' | 'result'>('pipeline');
+  // graph (persisted nodes + edges); Corpus = caller's optional tab. Reset to Pipeline on open.
+  let activeTab = $state<'pipeline' | 'result' | 'corpus'>('pipeline');
 
   // Per-stage collapse, keyed by the stage's index in `trace.stages`. Separate disclosures for
   // the (large, repetitive) prompt and the raw-JSON fallback — both collapsed by default since
@@ -390,6 +399,34 @@
     }
   }
 
+  // ── Extracted entities (resolve type ids) ───────────────────────────────────────────────────
+  // graphiti's `extract_entities` output is `{extracted_entities: [{name, entity_type_id, …}]}`
+  // where `entity_type_id` is a bare integer index into the ontology. The trace carries the
+  // active ontology legend (id → name + description), so we render the ACTUAL type name and its
+  // description instead of the opaque number. Missing legend (older sidecar) → `#id` fallback.
+  const entityTypeById = $derived.by<Map<number, IngestEntityType>>(() => {
+    const m = new Map<number, IngestEntityType>();
+    for (const t of trace?.entity_types ?? []) m.set(t.id, t);
+    return m;
+  });
+
+  type ExtractedEntityRow = { name: string; typeName: string; description: string };
+
+  function extractedEntities(stage: IngestTraceStage): ExtractedEntityRow[] | null {
+    const out = stage.output as { extracted_entities?: unknown } | null;
+    const list = out && Array.isArray(out.extracted_entities) ? out.extracted_entities : null;
+    if (!list) return null;
+    return list.map((raw) => {
+      const e = (raw ?? {}) as { name?: string; entity_type_id?: number };
+      const t = e.entity_type_id != null ? entityTypeById.get(e.entity_type_id) : undefined;
+      return {
+        name: e.name || '—',
+        typeName: t?.name ?? (e.entity_type_id != null ? `#${e.entity_type_id}` : '—'),
+        description: t?.description ?? ''
+      };
+    });
+  }
+
   function stageMeta(stage: IngestTraceStage): string {
     const parts: string[] = [];
     if (stage.operation) parts.push(stage.operation);
@@ -510,6 +547,33 @@
   </div>
 {/snippet}
 
+<!-- Extract-entities output: each entity with its RESOLVED ontology type (name + description)
+     rather than the raw numeric entity_type_id graphiti emits. Top-level local snippet. -->
+{#snippet entitiesTable(rows: ExtractedEntityRow[])}
+  <div class="trace-table-wrap">
+    <table class="trace-table out-table">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Entity</th>
+          <th>Type</th>
+          <th>Type description</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each rows as row, ri (ri)}
+          <tr>
+            <td class="num">{ri + 1}</td>
+            <td class="entity">{row.name}</td>
+            <td><span class="type-chip">{row.typeName}</span></td>
+            <td class="cell type-desc">{row.description || '—'}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
+{/snippet}
+
 <Dialog.Root open={trace !== null} onOpenChange={(next) => { if (!next) onClose(); }}>
   <Dialog.Content class="ingest-trace-content sm:max-w-[min(96vw,1200px)] flex flex-col h-[90vh]">
     <Dialog.Header>
@@ -542,6 +606,18 @@
               >
                 Result
               </button>
+              {#if hasExtraTab}
+                <button
+                  type="button"
+                  role="tab"
+                  class="trace-tab"
+                  class:trace-tab--active={activeTab === 'corpus'}
+                  aria-selected={activeTab === 'corpus'}
+                  onclick={() => (activeTab = 'corpus')}
+                >
+                  {extraTabLabel}
+                </button>
+              {/if}
             </div>
           </div>
         {/if}
@@ -676,6 +752,7 @@
                     {@const ov = outputView(stage)}
                     {@const iv = inputView(stage)}
                     {@const rfv = group.node === 'resolve_facts' ? resolveFactsView(stage) : null}
+                    {@const ee = group.node === 'extract_entities' ? extractedEntities(stage) : null}
                     <div class="stage-card" data-source={stage.source}>
                       <header class="stage-card__head">
                         <button
@@ -726,6 +803,8 @@
                             <span class="output-block__label">Output — what the stage produced</span>
                             {#if rfv}
                               {@render factVerdict(rfv)}
+                            {:else if ee}
+                              {@render entitiesTable(ee)}
                             {:else if ov.kind === 'empty'}
                               <p class="trace-empty">No structured output.</p>
                             {:else}
@@ -753,7 +832,7 @@
           {:else}
             <p class="trace-empty">No stages were captured for this episode.</p>
           {/if}
-        {:else}
+        {:else if activeTab === 'result'}
           <!-- Result tab: what actually landed in the graph (AddEpisodeResults). -->
           <section class="result-section">
             <h3 class="stage-group__title">Entities ({nodes.length})</h3>
@@ -830,6 +909,11 @@
             {:else}
               <p class="trace-empty">No facts persisted.</p>
             {/if}
+          </section>
+        {:else if activeTab === 'corpus' && extraTab}
+          <!-- Caller-provided tab (eval: the searchable source corpus). -->
+          <section class="result-section">
+            {@render extraTab()}
           </section>
         {/if}
       </div>
@@ -1162,6 +1246,22 @@
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  /* Extract-entities table: the resolved ontology type as a chip + its muted description. */
+  .type-chip {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  }
+
+  .type-desc {
+    color: var(--muted-foreground);
   }
 
   /* Dedup merge map: dim the entity type + center the → arrow column. */

@@ -330,6 +330,7 @@ async def ingest_episodes(
     observability: str = "ledger",
     write_lock: asyncio.Lock | None = None,
     workspace_path: Path | None = None,
+    trace_name: str = "graph_ingest",
 ) -> GraphitiIngestStats:
     """Ingest chunks as Graphiti episodes — sequential, chronological, write-gated.
 
@@ -345,6 +346,9 @@ async def ingest_episodes(
     (``<workspace>/logs/ingest_trace/<run_id>.jsonl``) when ``observability == "trace"``
     AND a ledger sink is active (the trace dialog opens from a ledger row).
     ``None`` ⇒ no sidecar (tests/CLI), even at the trace tier.
+
+    ``trace_name`` is the LangSmith span name for this ingest unit (default ``graph_ingest``).
+    The memory-eval remember loop passes ``graph_ingest_{n}`` so each turn's tree is numbered.
     """
     stats = GraphitiIngestStats(episodes_received=len(episodes))
     # Run row groups all episodes from this call (== one document for the per-doc
@@ -440,7 +444,7 @@ async def ingest_episodes(
             # active span via contextvars. No-op when LangSmith tracing is off.
             ingest_run_id = run.run_id if (run.run_id and not run.nested) else None
             with traced_run(
-                "graph_ingest",
+                trace_name,
                 ledger_run_id=ingest_run_id,
                 tags=[f"role:{source_role}", f"group:{group_id}"],
                 metadata={"document_id": doc_id, "episode_count": total},

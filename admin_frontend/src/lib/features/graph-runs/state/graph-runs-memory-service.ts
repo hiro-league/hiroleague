@@ -1,7 +1,6 @@
 import {
   clearWorkspaceMemories,
   deleteWorkspaceMemories,
-  deleteWorkspaceMemory,
   listWorkspaceMemories
 } from '$lib/api/memory';
 
@@ -30,10 +29,6 @@ export async function graphRunsLoadMemoriesList(groupId?: string): Promise<{
 
 export async function graphRunsClearAllMemories(): Promise<void> {
   await clearWorkspaceMemories();
-}
-
-export async function graphRunsDeleteMemory(memoryId: string): Promise<void> {
-  await deleteWorkspaceMemory(memoryId);
 }
 
 /** Delete several memories at once (the filtered "Clear shown" set). No-op on empty input. */

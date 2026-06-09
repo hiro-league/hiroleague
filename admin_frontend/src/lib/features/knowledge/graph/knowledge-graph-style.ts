@@ -21,6 +21,14 @@ export const TYPE_COLORS: Record<string, string> = {
 
 export const colorFor = (type: string): string => TYPE_COLORS[type] ?? TYPE_COLORS.Entity;
 
+/** Humanize a SCREAMING_SNAKE relation type for display: `USES_NAME_IN_STORES` → `Uses Name In
+ *  Stores`. Display-only — the raw rel_type stays the canonical value for filtering/search. */
+export const humanizeRelType = (rel: string): string =>
+  rel
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
 // Preferred ordering for the known types in the filter strip; any unknown
 // (Graphiti-emitted) type sorts after these, alphabetically.
 export const KNOWN_NODE_TYPE_ORDER: readonly string[] = [

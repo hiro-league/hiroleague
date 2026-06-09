@@ -496,6 +496,7 @@ class GraphitiMemoryService:
         group_id: str | None = None,
         event_sink: GraphEventSink | None = None,
         ledger_sink: "LedgerSink | None" = None,
+        trace_label: str | None = None,
     ) -> GraphitiIngestStats:
         """Ingest document chunks as Graphiti episodes (F7 write-gated, sequential).
 
@@ -531,6 +532,9 @@ class GraphitiMemoryService:
             event_sink=event_sink,
             ledger_sink=effective_sink,
             observability=self._observability,
+            # LangSmith span name for this ingest unit (e.g. ``graph_ingest_3`` from the
+            # memory-eval remember loop); ``None`` ⇒ ingest_episodes' default ``graph_ingest``.
+            trace_name=trace_label or "graph_ingest",
             # Where the per-stage ingest-trace sidecar is written (only when observability=trace
             # and a ledger sink is active).
             workspace_path=self.workspace_path,
@@ -763,21 +767,9 @@ class GraphitiMemoryService:
         Naming-agnostic — this module knows nothing of the ``mem_`` convention; it just
         runs a DISTINCT-with-prefix over the ``Episodic`` node table. Returns ``[]`` when
         the DB file doesn't exist."""
-        if not prefix or not self._db_path.exists():
-            return []
-        query = (
-            "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $prefix "
-            "RETURN DISTINCT e.group_id AS group_id"
-        )
-        async with _snapshot_read_driver(self._db_path) as read_driver:
-            try:
-                rows, _, _ = await read_driver.execute_query(query, prefix=prefix)
-            except Exception:
-                log.warning(
-                    "⚠️ graphiti — list_group_ids failed · prefix=%s", prefix, exc_info=True
-                )
-                raise
-        return _distinct_group_ids(rows)
+        # reason: delegate to the module-level helper so the DISTINCT-by-prefix query lives
+        # in one place (the corpus-listing route reuses it without a constructed service).
+        return list(await distinct_group_ids_with_prefix(self._db_path, prefix))
 
     async def delete_facts(self, uuids: list[str]) -> int:
         """Delete specific fact edges (memories) by uuid → count requested.
@@ -1130,6 +1122,35 @@ async def read_graph_group_ids(db_path: Path) -> tuple[list[str], str | None]:
             log.warning("⚠️ graphiti — read_graph_group_ids failed", exc_info=True)
             return [], default_gid
     return _distinct_group_ids(rows), default_gid
+
+
+async def distinct_group_ids_with_prefix(db_path: Path, prefix: str) -> set[str]:
+    """Distinct ``group_id``s starting with ``prefix`` present in the graph (read-only).
+
+    A cheap existence probe over the ``Episodic`` node table — one DISTINCT query returns
+    every group under a namespace prefix (e.g. ``eval_kb_`` / ``eval_mem_``), so callers
+    can test membership instead of opening the DB once per corpus. Returns an empty set
+    when ``prefix`` is blank or the DB file does not exist (nothing built yet). Backs the
+    eval corpus picker's ``has_graph`` flag.
+    """
+    path = Path(db_path)
+    if not prefix or not path.exists():
+        return set()
+    query = (
+        "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $prefix "
+        "RETURN DISTINCT e.group_id AS group_id"
+    )
+    async with _snapshot_read_driver(path) as read_driver:
+        try:
+            rows, _, _ = await read_driver.execute_query(query, prefix=prefix)
+        except Exception:
+            log.warning(
+                "⚠️ graphiti — distinct_group_ids_with_prefix failed · prefix=%s",
+                prefix,
+                exc_info=True,
+            )
+            raise
+    return set(_distinct_group_ids(rows))
 
 
 async def read_episode_valid_at(db_path: Path, uuids: list[str]) -> dict[str, str | None]:

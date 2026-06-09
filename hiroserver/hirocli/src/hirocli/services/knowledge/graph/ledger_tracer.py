@@ -99,6 +99,13 @@ def record_rerank_usage(model_id: str, processed_tokens: int, elapsed_ms: float)
     acc.elapsed_ms += max(0.0, float(elapsed_ms or 0.0))
     acc.calls += 1
 
+# Innermost graphiti tracer span currently active (set by ``LedgerTracer.start_span``). Lets a
+# lane-blind callee (e.g. the cross-encoder adapter, which graphiti calls inside
+# ``search.node_search.cross_encoder_rank``) read the lane to label its own LangSmith span.
+# ``None`` when no graphiti span is active (tracer not attached / outside a graphiti call).
+current_graphiti_span: ContextVar[str | None] = ContextVar("graphiti_active_span", default=None)
+
+
 # Spans we keep: ``search.*`` (retrieval phases) + ``add_episode`` (ingest rollup).
 # ``llm.generate`` is intentionally excluded — its tokens arrive via the on_usage
 # sink, and we don't want a buffered row per internal LLM call here.
@@ -144,9 +151,13 @@ class LedgerTracer:
     def start_span(self, name: str) -> Iterator[_LedgerSpan]:
         span = _LedgerSpan()
         started = time.perf_counter()
+        # Publish this span as the innermost active graphiti span so a lane-blind callee
+        # (cross-encoder adapter) can read the lane from e.g. ``search.node_search.*``.
+        active_token = current_graphiti_span.set(name)
         try:
             yield span
         finally:
+            current_graphiti_span.reset(active_token)
             # A ledger hiccup must never abort an ingest/search.
             try:
                 buffer = current_spans.get()
@@ -167,6 +178,7 @@ class LedgerTracer:
 __all__ = [
     "LedgerTracer",
     "RerankUsage",
+    "current_graphiti_span",
     "SpanRecord",
     "current_rerank_usage",
     "current_spans",

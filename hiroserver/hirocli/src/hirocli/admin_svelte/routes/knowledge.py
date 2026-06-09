@@ -44,6 +44,7 @@ from hirocli.services.knowledge.constants import (
     KNOWLEDGE_JOB_PROGRESS,
     KNOWLEDGE_JOB_STARTED,
 )
+from hirocli.services.knowledge.graph.group_scope import KNOWLEDGE_GROUP_ID
 from hirocli.services.knowledge.live_registry import maybe_recover_abandoned_work
 
 log = Logger.get("ADMIN.KNOWLEDGE")
@@ -745,6 +746,10 @@ async def graph_ingest_batch(
                 {
                     "document_count": result.get("document_count", 0),
                     "totals": result.get("totals", {}),
+                    # Scope the completion to the partition that was written (knowledge docs land
+                    # in the default kb_main group) so the Graph tab only clears/reconciles when
+                    # it's viewing that group — matches the group_id carried on ingest_progress.
+                    "group_id": KNOWLEDGE_GROUP_ID,
                 },
             )
             return _success(result)
@@ -1174,7 +1179,14 @@ async def eval_run(
                         _publish_graph_event(
                             workspace_path,
                             KNOWLEDGE_GRAPH_INGEST_COMPLETED,
-                            {"document_count": len(doc_ids), "totals": {}},
+                            # Knowledge-eval graph docs ingest into the default kb_main group;
+                            # tag the completion so the Graph tab gates the clear/reconcile by
+                            # the partition it's viewing (mirrors ingest_progress' group_id).
+                            {
+                                "document_count": len(doc_ids),
+                                "totals": {},
+                                "group_id": KNOWLEDGE_GROUP_ID,
+                            },
                         )
                     else:
                         log.warning(
@@ -1364,18 +1376,164 @@ async def eval_clear(
         await _close_if_owned(service, owned)
 
 
+@knowledge_router.get("/knowledge/eval/results")
+async def eval_results(
+    workspace_id: SelectedWorkspaceIdDep,
+    track: str = "memory",
+    corpus_id: str = "",
+    questions_path: str = "",
+) -> dict[str, Any]:
+    """Persisted per-corpus eval results (the merged snapshot) — backs "show latest".
+
+    Memory track only. Joins the CURRENT question bank (the spine — so edited
+    question text/category/ideal show fresh) with the saved per-question rows, in
+    bank order, and recomputes the merged summary over the whole accumulated set.
+    Questions in the bank with no saved row are simply absent here (the checklist
+    surfaces them as "not run"). Returns ``{rows, summary}``; both empty when
+    nothing has been saved for the corpus."""
+    if track != "memory":
+        # Knowledge results aren't persisted yet (the store is memory-only for now).
+        return _success({"rows": [], "summary": None})
+    cid = (corpus_id or "").strip()
+    if not cid:
+        return envelope_failure("corpus_id is required to read eval results.")
+    from hirocli.services.knowledge.eval_runner import load_questions, summarize_memory_rows
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        stored = get_eval_result_store(workspace_path).read_corpus(cid)
+        if not stored:
+            return _success({"rows": [], "summary": None})
+        # Bank is the spine: order rows by the bank and refresh their display fields
+        # from it. Falls back to stored order/fields if the bank is missing (corpus
+        # moved/renamed) so saved results are never lost behind a path mismatch.
+        qpath = Path(questions_path.strip()) if questions_path.strip() else None
+        bank = load_questions(qpath) if qpath and qpath.exists() else []
+        if bank:
+            bank_by_id = {q["id"]: q for q in bank}
+            ordered_ids = [q["id"] for q in bank if q["id"] in stored]
+        else:
+            bank_by_id = {}
+            ordered_ids = list(stored.keys())
+        total = len(ordered_ids)
+        merged: list[dict[str, Any]] = []
+        for index, qid in enumerate(ordered_ids):
+            row = dict(stored[qid])
+            q = bank_by_id.get(qid)
+            if q is not None:
+                # Refresh spine fields from the bank (edits show immediately); keep the
+                # saved legs/answer/recall/mark/cost — those are the actual results.
+                row["question"] = q.get("question", row.get("question", ""))
+                row["category"] = q.get("category", row.get("category", ""))
+                row["subcategory"] = q.get("subcategory", row.get("subcategory", ""))
+                row["difficulty"] = q.get("difficulty", row.get("difficulty", ""))
+                row["requires_graph"] = bool(
+                    q.get("requires_graph", row.get("requires_graph"))
+                )
+                row["gold"] = q.get("expected_answer", row.get("gold", ""))
+            # Stable display position within the merged snapshot (bank order).
+            row["index"] = index
+            row["total"] = total
+            merged.append(row)
+        summary = summarize_memory_rows(merged, run_id=f"saved-{cid}")
+        return _success({"rows": merged, "summary": summary})
+    except Exception as exc:
+        log.error("knowledge eval results read failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+class EvalResultsClearBody(BaseModel):
+    """Results-only clear of a corpus's persisted eval snapshot (memory track)."""
+
+    track: str = "memory"
+    corpus_id: str = ""
+
+
+@knowledge_router.post("/knowledge/eval/results/clear")
+async def eval_results_clear(
+    body: EvalResultsClearBody,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """Delete a corpus's persisted eval RESULTS from disk (results-only).
+
+    Distinct from ``/knowledge/eval/clear`` (which wipes the ingested memory
+    drawer): this removes only the saved result snapshot, leaving ingested memory
+    intact so a re-run reuses it. Memory track only."""
+    if body.track != "memory":
+        return envelope_failure("Only the memory track persists eval results.")
+    cid = (body.corpus_id or "").strip()
+    if not cid:
+        return envelope_failure("corpus_id is required to clear eval results.")
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        removed = get_eval_result_store(workspace_path).clear_corpus(cid)
+        log.info("🧹 knowledge.eval — cleared %d saved result row(s) · corpus=%s", removed, cid)
+        return _success({"removed": removed})
+    except Exception as exc:
+        log.error("knowledge eval results clear failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
 @knowledge_router.get("/knowledge/eval/corpuses")
-async def eval_corpuses(track: str = "memory", folder: str = "") -> dict[str, Any]:
+async def eval_corpuses(
+    workspace_id: SelectedWorkspaceIdDep,
+    track: str = "memory",
+    folder: str = "",
+) -> dict[str, Any]:
     """List the corpuses in ``folder`` for ``track`` (the corpus-picker source).
 
     ``folder`` defaults to the repo ``eval/`` dir. Each corpus pairs with its
-    ``<id>.questions.yaml`` bank by the stem convention (docs §12). Workspace-independent."""
+    ``<id>.questions.yaml`` bank by the stem convention (docs §12). The corpus files
+    are workspace-independent, but each entry's ``has_graph`` flag (whether a graph was
+    already built for it) is read from the selected workspace's graph — it drives the
+    picker's "Rebuild graph" default + wipe warning."""
     from hirocli.services.knowledge.eval_runner import DEFAULT_EVAL_FOLDER, discover_corpuses
+    from hirocli.services.knowledge.graph import distinct_group_ids_with_prefix, graphiti_db_path
+    from hirocli.services.knowledge.graph.group_scope import (
+        EVAL_KNOWLEDGE_PREFIX,
+        EVAL_MEMORY_PREFIX,
+        eval_knowledge_group_id,
+        eval_memory_group_id,
+    )
 
     try:
         base = Path(folder.strip()) if folder.strip() else DEFAULT_EVAL_FOLDER
         corpuses = discover_corpuses(base, track)
-        return _success({"track": track, "folder": str(base), "corpuses": corpuses})
+        # reason: tag each corpus with whether its graph is already built, so the picker can
+        # default "Rebuild graph" OFF (reuse) vs ON (build), and warn before a rebuild wipes it.
+        # One DISTINCT-by-prefix read covers the whole list (membership test per corpus); a
+        # graph-read hiccup degrades to has_graph=False so the picker still works.
+        prefix = EVAL_MEMORY_PREFIX if track == "memory" else EVAL_KNOWLEDGE_PREFIX
+        group_for = eval_memory_group_id if track == "memory" else eval_knowledge_group_id
+        # reason: resolve the workspace once and hand the client its absolute ``logs/`` dir.
+        # The eval "Copy for AI" brief uses it to point an investigating agent straight at the
+        # on-disk ledger sidecars (retrieval_trace/<run_id>.jsonl, ingest_trace/, graph.log)
+        # so it never has to search for them. log_dir is set before the (fallible) graph probe,
+        # so a probe hiccup still yields the path; "" only when the workspace can't be resolved.
+        log_dir = ""
+        existing: set[str] = set()
+        try:
+            entry, _ = resolve_workspace(workspace_id)
+            ws_path = Path(entry.path)
+            log_dir = str(ws_path / "logs")
+            db_path = graphiti_db_path(ws_path)
+            existing = await distinct_group_ids_with_prefix(db_path, prefix)
+        except Exception:
+            log.warning(
+                "⚠️ knowledge.eval — has_graph probe failed · track=%s · defaulting to false",
+                track,
+                exc_info=True,
+            )
+        for c in corpuses:
+            c["has_graph"] = group_for(c["id"]) in existing
+        return _success(
+            {"track": track, "folder": str(base), "corpuses": corpuses, "log_dir": log_dir}
+        )
     except Exception as exc:
         log.error("knowledge eval corpuses list failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))

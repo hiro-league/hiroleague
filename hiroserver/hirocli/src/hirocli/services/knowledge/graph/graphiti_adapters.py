@@ -107,6 +107,28 @@ RankSink = Callable[[str, int, float], None]
 ChatModelBuilder = Callable[[GraphitiModelSpec], BaseChatModel]
 
 
+# Cap on candidates/ranked items recorded in a rerank LangSmith span (keep the payload bounded).
+_RERANK_TRACE_CAP = 20
+# graphiti search span middle-segment → friendly rerank lane label.
+_RERANK_LANE_BY_SEGMENT = {
+    "edge_search": "facts",
+    "node_search": "entities",
+    "episode_search": "episodes",
+    "community_search": "communities",
+}
+
+
+def _rerank_lane(span_name: str | None) -> str:
+    """Friendly lane for a rerank, parsed from graphiti's active tracer span
+    (e.g. ``search.node_search.cross_encoder_rank`` → ``entities``). Empty when the span is absent
+    or unrecognized (tracer not attached / graphiti rename) — caller falls back to a bare label."""
+    if not span_name:
+        return ""
+    parts = span_name.split(".")
+    segment = parts[1] if len(parts) >= 2 else ""
+    return _RERANK_LANE_BY_SEGMENT.get(segment, "")
+
+
 def _estimate_processed_tokens(query: str, passages: Sequence[str]) -> int:
     """Voyage-style billed token estimate: ``query_tokens × doc_count + Σ doc_tokens``.
 
@@ -690,8 +712,42 @@ class HiroRerankerCrossEncoder(CrossEncoderClient):
 
         docs = [Document(page_content=p, metadata={"_i": i}) for i, p in enumerate(passages)]
         started = time.perf_counter()
+        # LangSmith span for the cross-encoder: it's NOT a LangChain Runnable (a sync compressor
+        # run in a worker thread), so LangSmith never auto-traces it — this makes the rerank step
+        # visible in the recall subtree. No-op when tracing is off.
+        from hirocli.runtime.agent_graph.tracing import traced_run
+
+        from .ledger_tracer import current_graphiti_span
+
+        # graphiti reranks each lane separately (edge/node/episode), all via this lane-blind
+        # rank() — so name the span by the lane read off graphiti's active tracer span, so two
+        # reranks in one search read ``rerank · facts`` vs ``rerank · entities`` not both "rerank".
+        lane = _rerank_lane(current_graphiti_span.get())
+        span_name = f"rerank · {lane}" if lane else "rerank"
         try:
-            ranked = await asyncio.to_thread(self._compressor.compress_documents, docs, query)
+            with traced_run(
+                span_name,
+                run_type="tool",
+                tags=["graph", "rerank"] + ([f"lane:{lane}"] if lane else []),
+                metadata={"model": self._model_id, "lane": lane or "unknown",
+                          "candidates": len(passages)},
+                # Inputs = the candidates being ranked (capped); outputs = the scored results. The
+                # old wrapper recorded only the query (input) and nothing out — useless.
+                inputs={"query": query, "candidates": list(passages[:_RERANK_TRACE_CAP])},
+            ) as _rt:
+                ranked = await asyncio.to_thread(self._compressor.compress_documents, docs, query)
+                out: list[tuple[str, float]] = []
+                for doc in ranked:
+                    score = doc.metadata.get("relevance_score")
+                    out.append((doc.page_content, float(score) if score is not None else 0.0))
+                if _rt is not None:
+                    _rt.outputs = {
+                        "ranked": [
+                            {"text": text, "score": round(score, 4)}
+                            for text, score in out[:_RERANK_TRACE_CAP]
+                        ],
+                        "count": len(out),
+                    }
         except Exception:
             # A reranker failure must not abort the search — fall back to input order
             # (the same defensive behavior as the no-op passthrough).
@@ -700,10 +756,6 @@ class HiroRerankerCrossEncoder(CrossEncoderClient):
             return [(p, float(n - i)) for i, p in enumerate(passages)]
         # Report usage only on success — a fall-back to input order isn't a billed rerank call.
         self._report_rank(query, passages, (time.perf_counter() - started) * 1000.0)
-        out: list[tuple[str, float]] = []
-        for doc in ranked:
-            score = doc.metadata.get("relevance_score")
-            out.append((doc.page_content, float(score) if score is not None else 0.0))
         return out
 
 

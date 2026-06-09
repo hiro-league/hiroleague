@@ -367,6 +367,18 @@
           {/each}
         </select>
       </FormField>
+      <MarkdownEditorPreview
+        editorLabel="Answering prompt editor"
+        previewLabel="Preview"
+        ariaLabel="Knowledge answering prompt (markdown)"
+        bind:value={ctrl.draft.knowledge.answering.prompt}
+        onInput={ctrl.markDirty}
+      />
+      <p class="text-xs text-muted-foreground">
+        Base system prompt for answer generation. Leave blank to use the relaxed default, which
+        allows partial answers and avoids a bare "I don't know" when the context covers part of the
+        question. The citation and language settings below are appended automatically.
+      </p>
       <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
         <input
           type="checkbox"

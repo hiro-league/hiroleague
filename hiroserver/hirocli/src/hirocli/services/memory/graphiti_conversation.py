@@ -129,6 +129,7 @@ class GraphitiConversationMemory:
         character_id: str,
         metadata: dict[str, Any] | None = None,
         ledger_sink: "LedgerSink | None" = None,
+        trace_label: str | None = None,
     ) -> MemoryAddResult:
         """Remember the USER half of a turn (decision D2). Returns the facts Graphiti
         learned this turn as ``stored_count`` (facts-as-memory).
@@ -167,6 +168,7 @@ class GraphitiConversationMemory:
             group_id=group,
             ledger_sink=ledger_sink,
             event_sink=self._event_sink,  # live viz: stream new facts to the Graph tab
+            trace_label=trace_label,  # e.g. graph_ingest_3 for a numbered memory-eval remember turn
         )
         stored = int(getattr(stats, "edges_total", 0) or 0)
         log.info(
@@ -262,16 +264,26 @@ class GraphitiConversationMemory:
         # test fakes (SimpleNamespace with only ``facts``) working without per-test edits.
         node_memories = tuple(getattr(expansion, "node_memories", ()) or ())
         episode_memories = tuple(getattr(expansion, "episode_memories", ()) or ())
-        # Facts carry structured metadata (temporal validity, relationship, source uuids) so the
-        # eval recalled-facts table can render columns; ``memory`` stays the dated text so the
-        # agent's ``memory_block`` renders unchanged. Older fakes expose only ``facts`` strings.
+        # Each kind carries structured rows (relevance score + metadata) so the eval recalled-items
+        # tables render the right columns per kind: facts add temporal/relationship/source;
+        # entities add name/type; episodes add the turn timestamp. ``memory`` stays the dated/plain
+        # text so the agent's ``memory_block`` renders unchanged. Older fakes expose only the plain
+        # ``*_memories`` strings → fall back to the text-only shape (no score) for each kind.
         fact_rows = tuple(getattr(expansion, "fact_rows", ()) or ())
+        node_rows = tuple(getattr(expansion, "node_rows", ()) or ())
+        episode_rows = tuple(getattr(expansion, "episode_rows", ()) or ())
         if fact_rows:
             hits: list[dict[str, Any]] = [dict(row) for row in fact_rows]
         else:
             hits = [{"memory": fact, "kind": "fact"} for fact in expansion.facts]
-        hits.extend({"memory": summary, "kind": "entity"} for summary in node_memories)
-        hits.extend({"memory": body, "kind": "episode"} for body in episode_memories)
+        if node_rows:
+            hits.extend(dict(row) for row in node_rows)
+        else:
+            hits.extend({"memory": summary, "kind": "entity"} for summary in node_memories)
+        if episode_rows:
+            hits.extend(dict(row) for row in episode_rows)
+        else:
+            hits.extend({"memory": body, "kind": "episode"} for body in episode_memories)
         log.info(
             "⬇️ memory — recalled · n=%d (facts=%d nodes=%d episodes=%d) · group=%s",
             len(hits),

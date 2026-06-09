@@ -90,6 +90,7 @@ export function editsForSave(
     draft.knowledge.default_tuning_profile
   );
   add('knowledge.answering.model', baseline.knowledge.answering.model, draft.knowledge.answering.model || null);
+  add('knowledge.answering.prompt', baseline.knowledge.answering.prompt, draft.knowledge.answering.prompt);
   add('knowledge.answering.cite_sources', baseline.knowledge.answering.cite_sources, draft.knowledge.answering.cite_sources);
   add(
     'knowledge.answering.language_policy',
@@ -185,6 +186,16 @@ export function editsForSave(
     'graph.reranker.device',
     baseline.graph.reranker.device,
     draft.graph.reranker.device || null
+  );
+  add(
+    'graph.eval.memory_answer_prompt',
+    baseline.graph.eval.memory_answer_prompt,
+    draft.graph.eval.memory_answer_prompt
+  );
+  add(
+    'graph.view.large_type_threshold',
+    baseline.graph.view.large_type_threshold,
+    draft.graph.view.large_type_threshold
   );
   add('chat.instructions', baseline.chat.instructions, draft.chat.instructions);
   add('chat.max_messages', baseline.chat.max_messages, draft.chat.max_messages);

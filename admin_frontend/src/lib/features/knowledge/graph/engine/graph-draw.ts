@@ -115,7 +115,8 @@ export function labelFontSize(
 
 /**
  * Draw a centered text label. When bgColor is null the text is drawn directly (no pill
- * background) — edge labels use this; node labels still pass a pill bg.
+ * background). `radius` rounds the pill corners (0 = sharp rectangle); edge labels pass a
+ * radius for a rounded pill, node labels keep the default sharp rect.
  */
 export function drawTextPill(
   ctx: CanvasRenderingContext2D,
@@ -124,7 +125,8 @@ export function drawTextPill(
   cy: number,
   fontSize: number,
   textColor: string,
-  bgColor: string | null
+  bgColor: string | null,
+  radius = 0
 ): void {
   ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
   ctx.textAlign = 'center';
@@ -133,8 +135,18 @@ export function drawTextPill(
     const m = ctx.measureText(text);
     const padX = fontSize * 0.35;
     const padY = fontSize * 0.18;
+    const x = cx - m.width / 2 - padX;
+    const y = cy - fontSize / 2 - padY;
+    const w = m.width + 2 * padX;
+    const h = fontSize + 2 * padY;
     ctx.fillStyle = bgColor;
-    ctx.fillRect(cx - m.width / 2 - padX, cy - fontSize / 2 - padY, m.width + 2 * padX, fontSize + 2 * padY);
+    if (radius > 0 && typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.fill();
+    } else {
+      ctx.fillRect(x, y, w, h);
+    }
   }
   ctx.fillStyle = textColor;
   ctx.fillText(text, cx, cy);

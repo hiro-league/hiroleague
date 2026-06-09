@@ -1,12 +1,11 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import MultiSelectFilter, {
-    type MultiSelectOption
-  } from '$lib/components/ui/multi-select-filter.svelte';
-  import { cn } from '$lib/utils';
+  import KnowledgeGraphFilterDropdown, {
+    type GraphFilterOption
+  } from './KnowledgeGraphFilterDropdown.svelte';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
-  import { colorFor } from './knowledge-graph-style';
+  import { colorFor, humanizeRelType } from './knowledge-graph-style';
 
   type Props = {
     graph: KnowledgeGraphModel;
@@ -14,60 +13,51 @@
 
   let { graph }: Props = $props();
 
-  const nodeFacets = $derived(graph.nodeTypeFacets());
-  const edgeFacets = $derived(graph.edgeTypeFacets());
+  // One dropdown PER node type, each listing that type's instances (pick all / none / some
+  // Persons, etc.). The dropdown thinks in VISIBLE (checked) ids; the model stores hidden and
+  // exposes the per-type selected set + per-instance connection count for us.
+  const nodeGroups = $derived(graph.nodeInstanceFacets());
+  const largeTypeThreshold = $derived(graph.largeTypeThreshold());
 
-  // Edge relation vocabulary is free-form and long, so it goes in a searchable
-  // multi-select dropdown. The dropdown thinks in VISIBLE (checked) values; the
-  // model stores hidden, so we map between them here.
-  const edgeOptions = $derived<MultiSelectOption[]>(
-    edgeFacets.map((f) => ({ value: f.type, label: f.type, count: f.count }))
+  // Edges use the SAME control: relation type as the option, edge-count as the weight.
+  const edgeFacets = $derived(graph.edgeTypeFacets());
+  // value stays the raw rel_type (canonical for filtering); label is humanized for display.
+  const edgeOptions = $derived<GraphFilterOption[]>(
+    edgeFacets.map((f) => ({ value: f.type, label: humanizeRelType(f.type), weight: f.count }))
   );
   const visibleEdgeTypes = $derived(edgeFacets.filter((f) => !f.hidden).map((f) => f.type));
-
-  // Shared chip styling: pressed (= visible) reads solid; un-pressed (= hidden)
-  // dims, matching the catalog filter toggles.
-  const chipBase =
-    'inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors';
-  const chipOn = 'border-border bg-background text-foreground hover:bg-accent';
-  const chipOff = 'border-transparent bg-muted/40 text-muted-foreground opacity-55 hover:opacity-100';
 </script>
 
-<!-- One scrolling row so a long, derived edge-type list never blows out the
-     header height; the node-type group and Clear stay pinned at the ends. -->
+<!-- One scrolling row so a long, derived type list never blows out the header height; the
+     node-type group and Clear stay pinned at the ends. -->
 <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-  {#if nodeFacets.length}
-    <div class="flex items-center gap-2" role="group" aria-label="Filter node types">
+  {#if nodeGroups.length}
+    <div class="flex items-center gap-2" role="group" aria-label="Filter node instances by type">
       <span class="font-sans text-xs font-semibold text-muted-foreground">Nodes</span>
       <div class="flex flex-wrap items-center gap-1">
-        {#each nodeFacets as facet (facet.type)}
-          {@const visible = !facet.hidden}
-          <button
-            type="button"
-            class={cn(chipBase, visible ? chipOn : chipOff)}
-            aria-pressed={visible}
-            title={`${visible ? 'Hide' : 'Show'} ${facet.type} (${facet.count})`}
-            onclick={() => graph.toggleNodeType(facet.type)}
-          >
-            <span
-              class="size-2.5 rounded-full"
-              style:background-color={colorFor(facet.type)}
-              style:opacity={visible ? '1' : '0.5'}
-              aria-hidden="true"
-            ></span>
-            {facet.type}
-            <span class="tabular-nums text-muted-foreground">{facet.count}</span>
-          </button>
+        {#each nodeGroups as group (group.type)}
+          <KnowledgeGraphFilterDropdown
+            label={group.type}
+            color={colorFor(group.type)}
+            options={group.options.map((o) => ({ value: o.id, label: o.name, weight: o.connections }))}
+            selected={group.selectedIds}
+            weightNoun="connection"
+            note={group.count > largeTypeThreshold
+              ? `${group.count} ${group.type} nodes — use search to narrow the list.`
+              : undefined}
+            onSelectedChange={(ids) => graph.setVisibleNodeIds(group.type, ids)}
+          />
         {/each}
       </div>
     </div>
   {/if}
 
   {#if edgeOptions.length}
-    <MultiSelectFilter
+    <KnowledgeGraphFilterDropdown
       label="Edges"
       options={edgeOptions}
       selected={visibleEdgeTypes}
+      weightNoun="edge"
       searchPlaceholder="Search relations…"
       onSelectedChange={(values) => graph.setVisibleEdgeTypes(values)}
     />

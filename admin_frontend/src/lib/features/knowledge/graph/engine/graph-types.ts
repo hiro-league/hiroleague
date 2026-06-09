@@ -32,6 +32,8 @@ export interface FgLink {
   source: string | FgNode;
   target: string | FgNode;
   rel_type: string;
+  /** True when the fact is superseded (invalid_at or expired_at set) — drawn dashed + red. */
+  invalid?: boolean;
   /** Per-link curvature for fanned parallel edges (see assignLinkCurvatures). */
   __curvature?: number;
   /** Bezier control points force-graph computes just before the 'after' paint. */

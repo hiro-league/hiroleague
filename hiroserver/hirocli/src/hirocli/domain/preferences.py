@@ -359,6 +359,24 @@ DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
 )
 
 
+# System prompt for the answer-generation step. Editable in preferences; the answer node falls
+# back to this constant when the stored prompt is blank. Relaxed (vs. the old all-or-nothing
+# wording) so multi-part questions degrade gracefully: it keeps the facts-only-from-context guard
+# but explicitly allows PARTIAL answers and forbids a bare "I don't know" when any part is
+# supported. Safe because the empty-context case is gated upstream by ``no_results`` and never
+# reaches this prompt. Citation + language clauses are appended at runtime from the other answering
+# prefs, so they are intentionally not part of this text.
+DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = (
+    "Use the provided knowledge context as your only source of facts; "
+    "do not invent or assume anything that is not supported by it.\n\n"
+    "Answer every part of the question that the context supports. Partial answers are expected "
+    "and welcome — never withhold a supported part just because another part is unsupported.\n\n"
+    "If a part of the question is not covered by the context, give the parts you can and briefly "
+    "note what is missing. Do not reply with only 'I don't know' when any part of the question is "
+    "supported by the context."
+)
+
+
 class KnowledgeChunkingMarkdownPreferences(BaseModel):
     respect_headings: bool = True
 
@@ -414,6 +432,10 @@ class KnowledgeRetrievalPreferences(BaseModel):
 
 class KnowledgeAnsweringPreferences(BaseModel):
     model: str | None = None
+    # Base answer-generation system prompt. Editable; blank falls back to the relaxed default
+    # (partial answers allowed, no bare "I don't know" when any part is supported). The citation
+    # and language clauses are appended at runtime from the fields below.
+    prompt: str = DEFAULT_KNOWLEDGE_ANSWERING_PROMPT
     cite_sources: bool = True
     language_policy: Literal["match_query", "prefer_english", "prefer_arabic"] = "match_query"
 
@@ -465,6 +487,49 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     device: str | None = None
 
 
+# Answer-generation system prompt for the MEMORY eval's recall leg (eval_judge.answer_from_context).
+# Eval-only — there is no production equivalent on this path. Relaxed vs. the old wording (which
+# commanded an exact "I don't know" + one sentence and so collapsed multi-part questions): it keeps
+# the grounding guard (answer ONLY from the recalled facts) and still declines when the facts cover
+# NONE of the question (preserves negative-control scoring), but now allows PARTIAL answers so a
+# question whose facts cover only some parts is no longer scored as a full decline.
+DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = (
+    "You answer a question using ONLY the facts provided. Do not use any outside or prior "
+    "knowledge.\n"
+    "Answer every part of the question that the facts support. Partial answers are expected — "
+    "do not withhold a supported part just because another part is unsupported.\n"
+    "If the facts cover NONE of the question, reply exactly: I don't know.\n"
+    "Be concise."
+)
+
+
+class GraphViewPreferences(BaseModel):
+    """Admin graph-VIZ display knobs for the shared Knowledge/Memories Graph tab.
+
+    Pure frontend-display settings: they tune how the force-graph view's per-node-type
+    filter dropdowns behave, NOT how facts are extracted, searched, or retrieved. The
+    graph engine ignores everything here.
+    """
+
+    # A node TYPE whose instance count exceeds this shows a "many instances" perf
+    # heads-up inside its per-type filter dropdown (the dropdown still lists + searches
+    # every instance — this only flags very large types so the user reaches for search).
+    large_type_threshold: int = Field(default=200, ge=10, le=10000)
+
+
+class GraphEvalPreferences(BaseModel):
+    """Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
+
+    ``memory_answer_prompt`` is the system prompt for the memory-eval recall leg
+    (``eval_judge.answer_from_context``). The knowledge-eval legs intentionally have no separate
+    prompt here: they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
+    ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
+    behavior). The admin UI surfaces that production prompt alongside this one for convenience.
+    """
+
+    memory_answer_prompt: str = DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+
+
 class GraphPreferences(BaseModel):
     """Graphiti-backed temporal knowledge graph (the pivot from the earlier L3 graph slice).
 
@@ -513,6 +578,12 @@ class GraphPreferences(BaseModel):
     reranker: KnowledgeGraphRerankerPreferences = Field(
         default_factory=KnowledgeGraphRerankerPreferences
     )
+    # Eval-only answering knobs (memory-eval answer prompt). Lives here so the admin UI can show an
+    # "Eval" subsection under the shared Graphiti engine settings.
+    eval: GraphEvalPreferences = Field(default_factory=GraphEvalPreferences)
+    # Admin graph-viz DISPLAY knobs (the shared Knowledge/Memories Graph tab's per-type node
+    # filter). Frontend-only — kept here because ``prefs.graph`` is the shared graph namespace.
+    view: GraphViewPreferences = Field(default_factory=GraphViewPreferences)
 
     @property
     def embedder_model_resolved(self) -> str | None:

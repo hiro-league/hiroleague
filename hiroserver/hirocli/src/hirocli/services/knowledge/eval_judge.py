@@ -26,6 +26,8 @@ from typing import Any
 from hiro_commons.log import Logger
 from pydantic import BaseModel, Field
 
+from hirocli.domain.preferences import DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+
 from hirocli.services.knowledge.eval_scoring import (
     MARK_ABSTAIN,
     MARK_FAIL,
@@ -46,11 +48,17 @@ _VERDICT_TO_MARK = {
 
 @dataclass(frozen=True)
 class JudgeVerdict:
-    """One judge outcome: a mark glyph + short reason (and whether the answer was grounded)."""
+    """One judge outcome: a mark glyph + short reason (and whether the answer was grounded).
+
+    ``recall_sufficient`` lets the eval attribute a miss: ``False`` ⇒ the recalled context did NOT
+    contain the info needed to answer (a *recall* failure), vs a *answering* failure when the
+    context was sufficient but the answer was still wrong. Defaults ``True`` (judge unaware / not
+    asked, e.g. the knowledge track which passes no context)."""
 
     mark: str
     reason: str
     grounded: bool = True
+    recall_sufficient: bool = True
 
 
 class _JudgeOutput(BaseModel):
@@ -59,6 +67,74 @@ class _JudgeOutput(BaseModel):
     verdict: str = Field(description="one of: pass, partial, fail, abstain")
     grounded: bool = Field(description="true if the answer is supported by the provided context")
     reason: str = Field(description="one short sentence justifying the verdict")
+    recall_sufficient: bool = Field(
+        default=True,
+        description=(
+            "true if the RECALLED CONTEXT contained the information needed to answer; false when "
+            "the needed fact was simply not recalled (so a wrong/declined answer is a recall miss, "
+            "not an answering miss). If no context was provided, leave true."
+        ),
+    )
+
+
+# Per-kind section order + heading for the recalled-context prompt (facts → entities → episodes).
+_RECALL_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("fact", "Facts"),
+    ("entity", "Entities"),
+    ("episode", "Episodes"),
+)
+
+
+def _format_recall_item(hit: dict[str, Any]) -> str:
+    """One recalled item → a prompt line WITH useful metadata, but NOT the retrieval score.
+
+    Score is a ranking artifact that doesn't help the model answer (and can bias it), so it stays
+    in the ledger/UI only. Metadata kept: relationship + temporal validity (facts), type (entities),
+    timestamp (episodes)."""
+    kind = str(hit.get("kind") or "fact")
+    if kind == "entity":
+        name = str(hit.get("name") or "").strip()
+        etype = str(hit.get("entity_type") or "").strip()
+        summary = str(hit.get("summary") or hit.get("memory") or "").strip()
+        head = f"{name} ({etype})" if name and etype else (name or "entity")
+        return f"{head}: {summary}" if summary else head
+    if kind == "episode":
+        when = str(hit.get("valid_at") or "").strip()
+        body = str(hit.get("memory") or "").strip()
+        return f"[{when}] {body}" if when else body
+    # fact (default): raw fact + relationship + temporal validity/supersession.
+    fact = str(hit.get("fact") or hit.get("memory") or "").strip()
+    rel = str(hit.get("name") or "").strip()
+    valid_at = str(hit.get("valid_at") or "").strip()
+    invalid_at = str(hit.get("invalid_at") or "").strip()
+    bits: list[str] = []
+    if rel:
+        bits.append(rel)
+    if valid_at or invalid_at:
+        bits.append(f"valid {valid_at or '?'} → {invalid_at or 'present'}")
+    if hit.get("superseded"):
+        bits.append("SUPERSEDED")
+    return f"{fact} [{' · '.join(bits)}]" if bits else fact
+
+
+def format_recall_context(hits: "list[dict[str, Any]] | None") -> str:
+    """Render recalled hits into prompt sections (Facts / Entities / Episodes) — only the kinds
+    that exist, each item with metadata (no score). Shared by the answer + judge prompts so both
+    see the SAME structured context. Empty ⇒ ``""`` (callers supply their own fallback)."""
+    items = list(hits or [])
+    if not items:
+        return ""
+    by_kind: dict[str, list[dict[str, Any]]] = {}
+    for hit in items:
+        by_kind.setdefault(str(hit.get("kind") or "fact"), []).append(hit)
+    sections: list[str] = []
+    for kind, heading in _RECALL_SECTIONS:
+        rows = by_kind.get(kind)
+        if not rows:
+            continue
+        lines = "\n".join(f"- {_format_recall_item(h)}" for h in rows)
+        sections.append(f"{heading}:\n{lines}")
+    return "\n\n".join(sections)
 
 
 def _provider_prefix(model_id: str) -> str:
@@ -124,22 +200,23 @@ async def _ledger_llm_node(
         current_entry.reset(token)
 
 
-_ANSWER_SYSTEM = (
-    "You answer a question using ONLY the facts provided. Do not use any outside or prior "
-    "knowledge. If the facts do not contain the answer, reply exactly: I don't know. "
-    "Answer in one short sentence."
-)
-
-
 async def answer_from_context(
     model: Any,
     model_id: str,
     *,
     question: str,
-    context: list[str],
+    context: "list[dict[str, Any]]",
     sink: Any | None = None,
+    system_prompt: str | None = None,
 ) -> str:
-    """Brief answer to ``question`` grounded ONLY in ``context`` (the recalled facts).
+    """Brief answer to ``question`` grounded ONLY in ``context`` — the recalled hits as STRUCTURED
+    rows (``{kind, memory, …metadata}``), rendered into Facts / Entities / Episodes sections so the
+    model sees each kind with its metadata (relationship, temporal validity, entity type).
+
+    ``system_prompt`` is the answering instruction; callers pass the editable
+    ``graph.eval.memory_answer_prompt`` pref. Blank falls back to
+    ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT`` (relaxed: partial answers allowed, declines only when the
+    context covers NONE of the question — so negative-control scoring still works).
 
     Ledgered as an ``eval_answer`` node. Empty context ⇒ the model is asked over no facts, so it
     should decline (tests memory recall honestly)."""
@@ -147,11 +224,17 @@ async def answer_from_context(
 
     from hirocli.runtime.agent_graph.base import _normalize_reply_content
 
-    facts = "\n".join(f"- {c}" for c in context) or "(no facts available)"
-    human = f"Facts:\n{facts}\n\nQuestion: {question}"
+    sys_prompt = (system_prompt or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+    recalled = format_recall_context(context) or "(no facts available)"
+    human = f"Recalled context:\n{recalled}\n\nQuestion: {question}"
 
     async def _call() -> tuple[str, Any, str, tuple[str, str]]:
-        ai = await model.ainvoke([SystemMessage(_ANSWER_SYSTEM), HumanMessage(human)])
+        # ``run_name`` labels this LLM call as ``eval_answer`` in LangSmith (under the
+        # ``eval_question`` span), so the answering step is distinguishable from the judge.
+        ai = await model.ainvoke(
+            [SystemMessage(sys_prompt), HumanMessage(human)],
+            config={"run_name": "eval_answer"},
+        )
         # Flatten provider content (Anthropic returns a list of text blocks) to plain text;
         # str() on the raw list leaked a JSON-ish repr into the recall answer. Reuse the
         # shared agent-graph normalizer instead of duplicating block-extraction here.
@@ -175,8 +258,13 @@ _JUDGE_SYSTEM = (
     "- fail: wrong.\n"
     "- abstain: the answer declines / says it doesn't know.\n"
     "If the question is a NEGATIVE CONTROL (declining is correct), then 'abstain' is the right "
-    "outcome and a confident answer is 'fail'. Judge only against the IDEAL — never your own "
-    "knowledge."
+    "outcome and a confident answer is 'fail'. Judge the verdict ONLY against the IDEAL — never "
+    "your own knowledge.\n"
+    "You are ALSO given the RECALLED CONTEXT that was shown to the answering model (the same facts "
+    "/ entities / episodes it saw). Use it ONLY to set ``recall_sufficient``: true if that context "
+    "contained the information needed to answer, false if the needed fact was simply not recalled "
+    "(so a wrong/declined answer is a recall miss, not an answering miss). The recalled context "
+    "must NOT change the pass/partial/fail/abstain verdict, which stays measured against the IDEAL."
 )
 
 
@@ -187,33 +275,50 @@ async def judge_answer(
     question: str,
     answer: str,
     expected_answer: str,
+    context: "list[dict[str, Any]] | None" = None,
     is_negative_control: bool = False,
     sink: Any | None = None,
 ) -> JudgeVerdict:
     """Grade ``answer`` against the ideal ``expected_answer`` → :class:`JudgeVerdict`.
+
+    ``context`` is the SAME structured recalled hits the answerer saw; the judge uses it only to
+    set ``recall_sufficient`` (recall-miss vs answering-miss), never to shift the verdict (which is
+    measured against the IDEAL). ``None`` (e.g. the knowledge track) ⇒ no context section,
+    ``recall_sufficient`` defaults true.
 
     Ledgered as an ``eval_judge`` node. Falls back to a ``fail`` verdict (not an exception) if the
     judge call errors, so one bad grade never aborts the run."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
     control = "YES — declining is the correct outcome." if is_negative_control else "no"
+    recalled = format_recall_context(context)
+    context_block = f"RECALLED CONTEXT (shown to the answerer):\n{recalled}\n\n" if recalled else ""
     human = (
         f"Question: {question}\n"
         f"IDEAL answer: {expected_answer or '(none given)'}\n"
         f"Negative control: {control}\n\n"
+        f"{context_block}"
         f"Model ANSWER: {answer or '(empty)'}"
     )
     structured = model.with_structured_output(_JudgeOutput, include_raw=True)
 
     async def _call() -> tuple[JudgeVerdict, Any, str, tuple[str, str]]:
-        raw = await structured.ainvoke([SystemMessage(_JUDGE_SYSTEM), HumanMessage(human)])
+        # ``run_name`` labels this LLM call as ``eval_judge`` in LangSmith, so the grading step
+        # is distinguishable from the answering step under the same ``eval_question`` span.
+        raw = await structured.ainvoke(
+            [SystemMessage(_JUDGE_SYSTEM), HumanMessage(human)],
+            config={"run_name": "eval_judge"},
+        )
         parsed: _JudgeOutput | None = raw.get("parsed") if isinstance(raw, dict) else raw
         ai = raw.get("raw") if isinstance(raw, dict) else None
         verdict_word = str(getattr(parsed, "verdict", "") or "").strip().lower()
         mark = _VERDICT_TO_MARK.get(verdict_word, MARK_FAIL)
         reason = str(getattr(parsed, "reason", "") or "").strip()
         grounded = bool(getattr(parsed, "grounded", True))
-        verdict = JudgeVerdict(mark=mark, reason=reason, grounded=grounded)
+        recall_sufficient = bool(getattr(parsed, "recall_sufficient", True))
+        verdict = JudgeVerdict(
+            mark=mark, reason=reason, grounded=grounded, recall_sufficient=recall_sufficient
+        )
         # Decision detail carries the verdict word so the ledger row reads at a glance (e.g. graded/pass).
         return verdict, ai, f"{mark} {reason[:120]}", ("graded", verdict_word or "fail")
 
@@ -226,4 +331,4 @@ async def judge_answer(
         return JudgeVerdict(mark=MARK_FAIL, reason="judge error", grounded=False)
 
 
-__all__ = ["JudgeVerdict", "answer_from_context", "judge_answer"]
+__all__ = ["JudgeVerdict", "answer_from_context", "format_recall_context", "judge_answer"]

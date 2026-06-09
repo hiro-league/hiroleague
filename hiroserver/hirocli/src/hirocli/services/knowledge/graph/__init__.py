@@ -29,7 +29,11 @@ from .graphiti_ingest import (
     ingest_episodes,
 )
 from .graphiti_search import GraphitiExpansion, search_chunk_ids
-from .graphiti_service import GraphitiMemoryService, graphiti_db_path
+from .graphiti_service import (
+    GraphitiMemoryService,
+    distinct_group_ids_with_prefix,
+    graphiti_db_path,
+)
 
 __all__ = [
     "ALLOWED_SOURCE_ROLES",
@@ -41,6 +45,7 @@ __all__ = [
     "GraphitiLLMUsage",
     "GraphitiMemoryService",
     "GraphitiModelSpec",
+    "distinct_group_ids_with_prefix",
     "graphiti_db_path",
     "ingest_episodes",
     "search_chunk_ids",

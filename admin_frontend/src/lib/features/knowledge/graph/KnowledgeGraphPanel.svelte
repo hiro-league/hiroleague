@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { SlidersHorizontal } from '@lucide/svelte';
+  import { Maximize2, Minimize2, RefreshCw, Scan, Shuffle, SlidersHorizontal } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
@@ -15,7 +14,15 @@
   import { linkEndId } from './engine/graph-types';
   import {
     CENTER_STRENGTH_MAX,
+    CHARGE_STRENGTH_MAX,
+    CHARGE_STRENGTH_MIN,
+    EDGE_LABEL_MAX_MAX,
+    EDGE_LABEL_MAX_MIN,
     GRAPH_OPTION_DEFAULTS,
+    LABEL_FONT_BOUND_MAX,
+    LABEL_FONT_BOUND_MIN,
+    LABEL_ZOOM_BOUND_MAX,
+    LABEL_ZOOM_BOUND_MIN,
     MAX_LINKS_CAP,
     RADIAL_RING_MAX,
     RADIAL_RING_MIN,
@@ -46,8 +53,22 @@
   let radialRing = $state(savedOptions.radialRing); // outer-ring radius for least-connected/disconnected nodes
   let curveAmount = $state(savedOptions.curveAmount); // max bow for fanned parallel edges (0 = straight)
   let maxLinksPerPair = $state(savedOptions.maxLinksPerPair); // parallel edges per pair; MAX = all
+  let chargeStrength = $state(savedOptions.chargeStrength); // d3 charge (node repulsion); negative
   // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
   let searchFocusMode = $state(savedOptions.searchFocusMode);
+  // Selected-node focus: 'all' (off) | 'dim' others | 'hide' others. Search wins when both active.
+  let selectionFocusMode = $state(savedOptions.selectionFocusMode);
+  // Live label sizing (View → font controls) — zoom thresholds + font px ranges per text type,
+  // plus the edge-label trim length. Seeded from persisted options; pushed to the engine below.
+  let edgeZoomMin = $state(savedOptions.edgeZoomMin);
+  let edgeZoomMax = $state(savedOptions.edgeZoomMax);
+  let edgeFontMin = $state(savedOptions.edgeFontMin);
+  let edgeFontMax = $state(savedOptions.edgeFontMax);
+  let nodeZoomMin = $state(savedOptions.nodeZoomMin);
+  let nodeZoomMax = $state(savedOptions.nodeZoomMax);
+  let nodeFontMin = $state(savedOptions.nodeFontMin);
+  let nodeFontMax = $state(savedOptions.nodeFontMax);
+  let edgeLabelMax = $state(savedOptions.edgeLabelMax);
   let optionsOpen = $state(false);
 
   // Which side the selection/detail aside docks on. 'auto' (default) follows the chat
@@ -73,20 +94,6 @@
   $effect(() => {
     writeGraphPanelSide(panelSide);
   });
-
-  // "Clear graph" confirm — wipes ALL entities/facts (documents/chunks are kept).
-  let clearConfirmOpen = $state(false);
-  let clearing = $state(false);
-  async function confirmClearGraph(): Promise<void> {
-    clearing = true;
-    const ok = await graph.clearGraph();
-    clearing = false;
-    if (ok) {
-      clearConfirmOpen = false;
-      engine?.markIntentionalReframe();
-      await graph.load(); // reflect the now-empty graph on the canvas
-    }
-  }
 
   // Fullscreen: the expand button lifts the panel to a true full-viewport overlay
   // (position:fixed inset-0, above the shell) so the graph gets the whole screen. Esc — or
@@ -175,6 +182,9 @@
     // build that started while this tab was closed are already in the model when we mount.
     await graph.loadGroups();
     await graph.load();
+    // Load the admin graph-viz display preference (large-type warning threshold). Non-blocking —
+    // the filter dropdowns work with the default until it resolves.
+    void graph.loadPreferences();
   });
 
   // Switch the viewed partition — an intentional reframe so the new group's graph fits.
@@ -195,10 +205,13 @@
     const nodes = renderNodes; // tracked
     const links = renderLinks; // tracked
     const loadVersion = graph.loadVersion(); // tracked: structural reload signal
-    const hiddenNodeTypes = graph.hiddenNodeTypes(); // tracked: a filter change is structural
+    const hiddenNodeIds = graph.hiddenNodeIds(); // tracked: a node-instance filter change is structural
     const hiddenEdgeTypes = graph.hiddenEdgeTypes(); // tracked
+    const filterToken = graph.filterToken(); // tracked: an edge-filter change is structural too
     if (!engine) return;
-    untrack(() => engine?.setData(nodes, links, { loadVersion, hiddenNodeTypes, hiddenEdgeTypes }));
+    untrack(() =>
+      engine?.setData(nodes, links, { loadVersion, hiddenNodeIds, hiddenEdgeTypes, filterToken })
+    );
   });
 
   // Push the model's glow-timestamp map so the engine drives frames while halos fade.
@@ -209,8 +222,9 @@
   // A filter change is an intentional reframe — hand the camera back to auto-fit (the
   // setData effect sets fitPending; the engine then frames the new set on engine-stop).
   $effect(() => {
-    graph.hiddenNodeTypes(); // tracked
+    graph.hiddenNodeIds(); // tracked
     graph.hiddenEdgeTypes(); // tracked
+    graph.filterToken(); // tracked: edge filters reframe too
     engine?.markIntentionalReframe();
   });
 
@@ -221,17 +235,34 @@
     const linkDistanceValue = linkDistance; // tracked
     const centerStrengthValue = centerStrength; // tracked
     const radialRingValue = radialRing; // tracked
+    const chargeStrengthValue = chargeStrength; // tracked
     engine?.setForces({
       linkStrength: linkStrengthValue,
       linkDistance: linkDistanceValue,
       centerStrength: centerStrengthValue,
-      radialRing: radialRingValue
+      radialRing: radialRingValue,
+      chargeStrength: chargeStrengthValue
     });
   });
 
   // "Edge curvature" slider → re-fan the current edges (no reheat; render-only property).
   $effect(() => {
     engine?.setCurveAmount(curveAmount); // tracked
+  });
+
+  // Label sizing (View → font controls) → engine repaints labels at the new zoom/size mapping.
+  $effect(() => {
+    engine?.setLabelSizing({
+      edgeZoomMin, // tracked
+      edgeZoomMax,
+      edgeFontMin,
+      edgeFontMax,
+      nodeZoomMin,
+      nodeZoomMax,
+      nodeFontMin,
+      nodeFontMax,
+      edgeLabelMax
+    });
   });
 
   // Search highlight state → engine repaints rings/dim/hide and frames the matched subset.
@@ -245,6 +276,45 @@
     });
   });
 
+  // ── Selection (neighbor) focus ──────────────────────────────────────────────
+  // When a node is selected and selectionFocusMode isn't 'all', focus its ego network (the node
+  // + its directly-connected nodes/edges from the rendered set). Search WINS — this is inert while
+  // a search is active. Renderer-only (no relayout) so clicking nodes stays snappy.
+  const selectedNodeId = $derived(
+    graph.selected()?.kind === 'node' ? (graph.selected() as { id: string }).id : null
+  );
+  const neighborFocus = $derived.by(() => {
+    if (searchActive || selectionFocusMode === 'all' || !selectedNodeId) {
+      return { active: false, mode: 'dim' as const, selectedId: '', nodeIds: new Set<string>(), edgeIds: new Set<string>() };
+    }
+    const nodeIds = new Set<string>([selectedNodeId]);
+    const edgeIds = new Set<string>();
+    for (const l of displayLinks) {
+      const a = String(linkEndId(l.source));
+      const b = String(linkEndId(l.target));
+      if (a === selectedNodeId || b === selectedNodeId) {
+        edgeIds.add(l.id);
+        nodeIds.add(a);
+        nodeIds.add(b);
+      }
+    }
+    return {
+      active: true,
+      mode: selectionFocusMode === 'hide' ? ('hide' as const) : ('dim' as const),
+      selectedId: selectedNodeId,
+      nodeIds,
+      edgeIds
+    };
+  });
+  $effect(() => {
+    engine?.setNeighborFocus(neighborFocus); // tracked
+  });
+
+  // Highlight the selected node/edge (blue ring/line, overrides the search highlight).
+  $effect(() => {
+    engine?.setSelection(graph.selected()); // tracked
+  });
+
   // Persist the graph-options sliders to localStorage whenever any of them change (also
   // runs once on mount, writing the just-loaded values back — harmless).
   $effect(() => {
@@ -255,7 +325,18 @@
       radialRing,
       curveAmount,
       maxLinksPerPair,
-      searchFocusMode
+      chargeStrength,
+      searchFocusMode,
+      selectionFocusMode,
+      edgeZoomMin,
+      edgeZoomMax,
+      edgeFontMin,
+      edgeFontMax,
+      nodeZoomMin,
+      nodeZoomMax,
+      nodeFontMin,
+      nodeFontMax,
+      edgeLabelMax
     });
   });
 
@@ -268,7 +349,19 @@
     radialRing = GRAPH_OPTION_DEFAULTS.radialRing;
     curveAmount = GRAPH_OPTION_DEFAULTS.curveAmount;
     maxLinksPerPair = GRAPH_OPTION_DEFAULTS.maxLinksPerPair;
+    chargeStrength = GRAPH_OPTION_DEFAULTS.chargeStrength;
     searchFocusMode = GRAPH_OPTION_DEFAULTS.searchFocusMode;
+    selectionFocusMode = GRAPH_OPTION_DEFAULTS.selectionFocusMode;
+    edgeZoomMin = GRAPH_OPTION_DEFAULTS.edgeZoomMin;
+    edgeZoomMax = GRAPH_OPTION_DEFAULTS.edgeZoomMax;
+    edgeFontMin = GRAPH_OPTION_DEFAULTS.edgeFontMin;
+    edgeFontMax = GRAPH_OPTION_DEFAULTS.edgeFontMax;
+    nodeZoomMin = GRAPH_OPTION_DEFAULTS.nodeZoomMin;
+    nodeZoomMax = GRAPH_OPTION_DEFAULTS.nodeZoomMax;
+    nodeFontMin = GRAPH_OPTION_DEFAULTS.nodeFontMin;
+    nodeFontMax = GRAPH_OPTION_DEFAULTS.nodeFontMax;
+    edgeLabelMax = GRAPH_OPTION_DEFAULTS.edgeLabelMax;
+    graph.resetEdgeFilters(); // "Reset to defaults" clears the Filters section too
   }
 
   // The shared knowledge SSE is paused while this browser tab is hidden (frees the
@@ -290,6 +383,14 @@
     engine?.markIntentionalReframe();
     void graph.load();
   }
+  // Redraw = re-run the force layout on the CURRENT in-memory (filtered) data, no server fetch.
+  function redraw(): void {
+    engine?.relayout();
+  }
+
+  // Shared style for the floating canvas control buttons (Options · Redraw · Fit · Reload · Fullscreen).
+  const ctrlBtn =
+    'rounded-md border bg-background/85 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50 disabled:hover:bg-background/85';
   // Called by the toolbar before any query change (type / clear): a new or cleared search
   // is an intentional reframe → re-enable the focus fit so the engine frames the new set.
   function reframeForSearch(): void {
@@ -338,10 +439,6 @@
   <KnowledgeGraphToolbar
     {graph}
     {fullscreen}
-    onFit={() => engine?.fitToView()}
-    onReload={reload}
-    onToggleFullscreen={toggleFullscreen}
-    onClearGraph={() => (clearConfirmOpen = true)}
     onSelectGroup={selectGroup}
     onSearchReframe={reframeForSearch}
   />
@@ -356,37 +453,107 @@
   >
     <div bind:this={container} class="absolute inset-0"></div>
 
-    <!-- Graph options: toggle button + dropdown. Anchored to the side OPPOSITE the detail
-         aside (controlsSide) so the full-height aside never covers them. -->
-    {#if graph.nodes().length > 0}
+    <!-- Floating canvas controls: Options · Redraw · Fit · Reload · Fullscreen. Anchored to the
+         side OPPOSITE the detail aside (controlsSide). Options/Redraw/Fit need a graph; Reload and
+         Fullscreen stay available even when it's empty. -->
+    <div
+      class={cn(
+        'absolute top-2 z-10 flex items-center gap-1',
+        controlsSide === 'left' ? 'left-2' : 'right-2'
+      )}
+    >
+      {#if graph.nodes().length > 0}
+        <button
+          type="button"
+          onclick={() => (optionsOpen = !optionsOpen)}
+          class={cn(ctrlBtn, optionsOpen && 'text-foreground')}
+          aria-label={optionsOpen ? 'Hide graph options' : 'Show graph options'}
+          aria-pressed={optionsOpen}
+          title="Graph options"
+        >
+          <SlidersHorizontal size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onclick={redraw}
+          class={ctrlBtn}
+          aria-label="Redraw layout with current filters"
+          title="Redraw — re-run the layout on the current (filtered) graph"
+        >
+          <Shuffle size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onclick={() => engine?.fitToView()}
+          class={ctrlBtn}
+          aria-label="Fit graph to view"
+          title="Fit to view"
+        >
+          <Scan size={16} aria-hidden="true" />
+        </button>
+      {/if}
       <button
         type="button"
-        onclick={() => (optionsOpen = !optionsOpen)}
-        class={cn(
-          'absolute top-2 z-10 rounded-md border bg-background/85 p-1.5 shadow-sm backdrop-blur transition-colors hover:bg-accent',
-          controlsSide === 'left' ? 'left-2' : 'right-2',
-          optionsOpen ? 'text-foreground' : 'text-muted-foreground'
-        )}
-        aria-label={optionsOpen ? 'Hide graph options' : 'Show graph options'}
-        aria-pressed={optionsOpen}
-        title="Graph options"
+        onclick={reload}
+        disabled={graph.loading()}
+        class={ctrlBtn}
+        aria-label="Reload graph from server"
+        title="Reload — re-fetch the graph from the server"
       >
-        <SlidersHorizontal size={16} aria-hidden="true" />
+        <RefreshCw size={16} class={graph.loading() ? 'animate-spin' : ''} aria-hidden="true" />
       </button>
+      <button
+        type="button"
+        onclick={toggleFullscreen}
+        class={ctrlBtn}
+        aria-label={fullscreen ? 'Exit full screen (Esc)' : 'View graph full screen'}
+        title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen'}
+      >
+        {#if fullscreen}
+          <Minimize2 size={16} aria-hidden="true" />
+        {:else}
+          <Maximize2 size={16} aria-hidden="true" />
+        {/if}
+      </button>
+    </div>
+    {#if graph.nodes().length > 0}
       {#if optionsOpen}
-        <div class={cn('absolute top-12 z-10', controlsSide === 'left' ? 'left-2' : 'right-2')}>
+        <!-- top-12..bottom-12 bounds the panel to the canvas card (the card is overflow-hidden, so a
+             viewport-tall panel would clip its lower rows) AND leaves the bottom-left stats overlay
+             uncovered so node/edge/live counts stay visible while options are open. -->
+        <div class={cn('absolute top-12 bottom-12 z-10', controlsSide === 'left' ? 'left-2' : 'right-2')}>
           <KnowledgeGraphOptionsPanel
+            {graph}
             bind:linkStrength
             bind:linkDistance
             bind:centerStrength
             bind:radialRing
             bind:curveAmount
             bind:maxLinksPerPair
+            bind:chargeStrength
             bind:searchFocusMode
+            bind:selectionFocusMode
+            bind:edgeZoomMin
+            bind:edgeZoomMax
+            bind:edgeFontMin
+            bind:edgeFontMax
+            bind:nodeZoomMin
+            bind:nodeZoomMax
+            bind:nodeFontMin
+            bind:nodeFontMax
+            bind:edgeLabelMax
             centerStrengthMax={CENTER_STRENGTH_MAX}
             radialRingMin={RADIAL_RING_MIN}
             radialRingMax={RADIAL_RING_MAX}
             maxLinksCap={MAX_LINKS_CAP}
+            chargeMin={CHARGE_STRENGTH_MIN}
+            chargeMax={CHARGE_STRENGTH_MAX}
+            zoomBoundMin={LABEL_ZOOM_BOUND_MIN}
+            zoomBoundMax={LABEL_ZOOM_BOUND_MAX}
+            fontBoundMin={LABEL_FONT_BOUND_MIN}
+            fontBoundMax={LABEL_FONT_BOUND_MAX}
+            edgeLabelMaxMin={EDGE_LABEL_MAX_MIN}
+            edgeLabelMaxMax={EDGE_LABEL_MAX_MAX}
             onReset={resetGraphOptions}
             onClose={() => (optionsOpen = false)}
           />
@@ -429,7 +596,7 @@
     {#if graph.nodes().length > 0}
       <div
         class={cn(
-          'pointer-events-none absolute bottom-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm',
+          'pointer-events-none absolute bottom-2 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm',
           controlsSide === 'left' ? 'left-2' : 'right-2'
         )}
       >
@@ -459,26 +626,3 @@
     <KnowledgeGraphDetailPanel {node} {edge} {graph} side={detailSide} onFlipSide={flipPanelSide} />
   </div>
 </div>
-
-<!-- Clear-graph confirm. Wipes every entity + fact; documents/chunks are kept so the
-     graph can be rebuilt from the Add tab. -->
-<Dialog.Root bind:open={clearConfirmOpen}>
-  <Dialog.Content showCloseButton={!clearing}>
-    <Dialog.Header>
-      <Dialog.Title>Clear the entire knowledge graph?</Dialog.Title>
-      <Dialog.Description>
-        This deletes every entity and relation ({graph.nodes().length} nodes · {graph.links().length}
-        edges). Your documents and their chunks are kept, so you can rebuild the graph from the Add
-        tab. This can't be undone.
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer>
-      <Button variant="outline" disabled={clearing} onclick={() => (clearConfirmOpen = false)}>
-        Cancel
-      </Button>
-      <Button variant="destructive" disabled={clearing} onclick={() => void confirmClearGraph()}>
-        {clearing ? 'Clearing…' : 'Clear graph'}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>

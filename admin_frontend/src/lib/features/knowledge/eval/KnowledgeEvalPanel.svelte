@@ -12,10 +12,18 @@
   this component is a thin view.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, type Component, type Snippet } from 'svelte';
   import { base } from '$app/paths';
   import {
+    Check,
     ChevronRight,
+    Circle,
+    CircleCheck,
+    CircleDashed,
+    CircleDot,
+    CircleSlash,
+    CircleX,
+    Copy,
     ExternalLink,
     FolderSearch,
     LoaderCircle,
@@ -31,9 +39,19 @@
   import Button from '$lib/components/ui/button.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import KnowledgeEvalTerminal from '$lib/features/knowledge/eval/KnowledgeEvalTerminal.svelte';
+  import EvalCorpusReview from '$lib/features/knowledge/eval/EvalCorpusReview.svelte';
+  import KnowledgeEvalRebuildConfirmDialog from '$lib/features/knowledge/eval/KnowledgeEvalRebuildConfirmDialog.svelte';
   import { buildActivityLines } from '$lib/features/knowledge/eval/eval-activity';
+  import { formatEvalRowForAI } from '$lib/features/knowledge/eval/eval-clipboard';
+  import type { EvalRow } from '$lib/features/knowledge/state/knowledge-eval.svelte';
   import GraphRunsRetrievalTraceDialog from '$lib/features/graph-runs/GraphRunsRetrievalTraceDialog.svelte';
-  import { getGraphRunRetrievalTrace, type RetrievalTraceRecord } from '$lib/api/graph-runs';
+  import GraphRunsIngestTraceDialog from '$lib/features/graph-runs/GraphRunsIngestTraceDialog.svelte';
+  import {
+    getGraphRunIngestTrace,
+    getGraphRunRetrievalTrace,
+    type IngestTraceRecord,
+    type RetrievalTraceRecord
+  } from '$lib/api/graph-runs';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
   import type { EvalQuestionItem } from '$lib/api/knowledge';
@@ -52,6 +70,16 @@
   }
 
   let { eval_ }: Props = $props();
+
+  // The memory track is a single recall leg: no flat/graphiti legs, no Δ, no gate. Declared
+  // up top because several derived values + helpers below branch on it.
+  const isMemory = $derived(eval_.track === 'memory');
+
+  // Label for the dialogs' optional "Corpus" tab (empty = no tab). Memory track with episodes
+  // loaded; the count is shown so it reads as a real tab.
+  const corpusTabLabel = $derived(
+    isMemory && eval_.corpusEpisodes.length > 0 ? `Corpus (${eval_.corpusEpisodes.length})` : ''
+  );
 
   // Engine preferences shown at the top (read-only) so the user sees exactly which
   // settings drive this run, with a link to change them. Loaded once on mount.
@@ -90,10 +118,78 @@
     expandedRows = next;
   }
 
-  // Group the question bank by category for the checklist.
+  // --- Question filters (free text + difficulty + saved state) -------------------------------
+  // View-only filters over the checklist. "Select all" / "Clear selection" act on the *filtered*
+  // set, so you can e.g. select only the failed questions, or only one difficulty. State filtering
+  // is memory-only (knowledge has no saved per-question status).
+  type QDifficulty = 'all' | 'medium' | 'hard' | 'very_hard' | 'unspecified';
+  type QState = 'all' | 'pass' | 'partial' | 'fail' | 'abstain' | 'answered' | 'not_run';
+  let qSearch = $state('');
+  let qDifficulty = $state<QDifficulty>('all');
+  let qState = $state<QState>('all');
+  let qCategory = $state<string>('all');
+  const qFiltered = $derived(
+    qSearch.trim() !== '' || qDifficulty !== 'all' || qState !== 'all' || qCategory !== 'all'
+  );
+  function resetQuestionFilters() {
+    qSearch = '';
+    qDifficulty = 'all';
+    qState = 'all';
+    qCategory = 'all';
+  }
+
+  // Distinct categories (in first-seen order) for the category filter dropdown.
+  const categoryOptions = $derived.by(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const q of eval_.questions) {
+      const c = q.category || '';
+      if (c && !seen.has(c)) {
+        seen.add(c);
+        out.push(c);
+      }
+    }
+    return out;
+  });
+
+  // Match a question's saved status against the state filter. savedStatus → ✓/◐/✗/🛇 (judged),
+  // '' (answered, judge off) or undefined (not run).
+  function matchesState(id: string): boolean {
+    if (qState === 'all') return true;
+    const s = eval_.savedStatus(id);
+    switch (qState) {
+      case 'pass': return s === '✓';
+      case 'partial': return s === '◐';
+      case 'fail': return s === '✗';
+      case 'abstain': return s === '🛇';
+      case 'answered': return s === '';
+      case 'not_run': return s === undefined;
+      default: return true;
+    }
+  }
+
+  const filteredQuestions = $derived.by(() => {
+    const term = qSearch.trim().toLowerCase();
+    return eval_.questions.filter((q) => {
+      if (qCategory !== 'all' && (q.category || '') !== qCategory) return false;
+      if (qDifficulty !== 'all') {
+        const d = (q.difficulty || 'unspecified') as string;
+        if ((d === '' ? 'unspecified' : d) !== qDifficulty) return false;
+      }
+      if (isMemory && !matchesState(q.id)) return false;
+      if (term) {
+        const hay = `${q.question} ${q.subcategory ?? ''} ${q.id} ${q.category}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+  });
+  const filteredIds = $derived(filteredQuestions.map((q) => q.id));
+
+  // Group the (filtered) question bank by category for the checklist.
   const groups = $derived.by(() => {
     const map = new Map<string, EvalQuestionItem[]>();
-    for (const q of eval_.questions) {
+    for (const q of filteredQuestions) {
       const arr = map.get(q.category) ?? [];
       arr.push(q);
       map.set(q.category, arr);
@@ -104,6 +200,7 @@
   function categoryAllSelected(items: EvalQuestionItem[]): boolean {
     return items.length > 0 && items.every((q) => eval_.isSelected(q.id));
   }
+
 
   // Difficulty buckets render as a fixed curve (easiest→hardest), not summary-dict order, so
   // the by-difficulty table reads top-to-bottom as a difficulty ramp.
@@ -133,10 +230,31 @@
     }
   }
 
-  // --- Corpus review (memory track) ---------------------------------------------------------
-  // Question count per category (reuses the checklist grouping) — the stats-header breakdown.
-  const categoryCounts = $derived(groups.map(([cat, items]) => [cat, items.length] as const));
+  // Saved-result coverage indicator for a question in the checklist (memory track only). A small
+  // colored status icon (with a hover tooltip) — non-intrusive, sits after the question text — so
+  // you can see at a glance what's been run and target the gaps when re-running a subset. Maps the
+  // persisted judge mark, or its absence (``undefined`` ⇒ not run yet).
+  function savedBadge(id: string): { Icon: Component; cls: string; title: string } | null {
+    if (!isMemory) return null;
+    const s = eval_.savedStatus(id);
+    if (s === undefined)
+      return { Icon: Circle, cls: 'text-muted-foreground/40', title: 'Not run yet' };
+    switch (s) {
+      case '✓':
+        return { Icon: CircleCheck, cls: 'text-emerald-600 dark:text-emerald-400', title: 'Pass — saved answer matches the ideal' };
+      case '◐':
+        return { Icon: CircleDashed, cls: 'text-amber-600 dark:text-amber-400', title: 'Partial — partially correct or incomplete' };
+      case '✗':
+        return { Icon: CircleX, cls: 'text-rose-600 dark:text-rose-400', title: 'Fail — saved answer is wrong' };
+      case '🛇':
+        return { Icon: CircleSlash, cls: 'text-muted-foreground', title: 'Abstain — declined (correct for a negative-control question)' };
+      default:
+        // Answered, but judge was off (no mark) — it has a saved answer, just no grade.
+        return { Icon: CircleDot, cls: 'text-sky-600 dark:text-sky-400', title: 'Answered — saved, but judge was off (no grade)' };
+    }
+  }
 
+  // --- Corpus review (memory track) ---------------------------------------------------------
   // Episode timestamps are dated turns (fictional far-future dates); show the date only —
   // the time-of-day is noise for a review-at-a-glance. ISO slice keeps the UTC date stable.
   function fmtEpisodeDate(iso: string): string {
@@ -157,6 +275,16 @@
   const corpusSummary = $derived(
     eval_.corpusEpisodes.length > 0 ? `${eval_.corpusEpisodes.length} episodes · ${corpusSpan}` : ''
   );
+
+  // Episode search lives on the Corpus stats line (panel-owned, bound into EvalCorpusReview).
+  let corpusSearch = $state('');
+  const corpusMatchCount = $derived.by(() => {
+    const t = corpusSearch.trim().toLowerCase();
+    if (!t) return eval_.corpusEpisodes.length;
+    return eval_.corpusEpisodes.filter((ep) =>
+      `${ep.body} ${ep.speaker} ${ep.id}`.toLowerCase().includes(t)
+    ).length;
+  });
 
   // The live activity feed lines (built once here, shared with the terminal and the
   // collapsed Activity header). `currentActivityLine` is the latest line — shown in
@@ -179,10 +307,13 @@
   const questionsSummary = $derived(
     `${eval_.selectedCount}/${eval_.questions.length} selected${
       eval_.selectedCount === 0 ? ' · select at least one' : ''
+    }${qFiltered ? ` · ${filteredQuestions.length} shown` : ''}${
+      isMemory && eval_.savedCount > 0 ? ` · ${eval_.savedCount} saved` : ''
     }`
   );
+  // "all selected" is over the FILTERED set (drives the Select-all button's disabled state).
   const allSelected = $derived(
-    eval_.questions.length > 0 && eval_.selectedCount === eval_.questions.length
+    filteredQuestions.length > 0 && filteredQuestions.every((q) => eval_.isSelected(q.id))
   );
 
   // Engine params strip — the preference values that actually drive this run, per track.
@@ -273,9 +404,6 @@
     return '';
   });
 
-  // The memory track is a single recall leg: no flat/graphiti legs, no Δ, no gate.
-  const isMemory = $derived(eval_.track === 'memory');
-
   // Cost (LLM + reranker; embeddings unpriced). Questions cost accumulates live from rows;
   // ingest + grand total arrive with the summary (memory only — knowledge ingest is deferred).
   function fmtCost(v: number | null | undefined): string {
@@ -315,12 +443,31 @@
   );
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
+  // Rebuild-graph wipe guard: when "Rebuild graph" is checked on a corpus that ALREADY has a
+  // graph, Run opens a confirm dialog (the rebuild wipes the old graph + costs money) instead
+  // of starting immediately. No graph to wipe (or rebuild off) → run straight away.
+  let confirmOpen = $state(false);
+  function requestRun() {
+    if (eval_.rebuildChecked && eval_.selectedCorpusHasGraph) confirmOpen = true;
+    else void eval_.start();
+  }
+
   /** Color the mark chip. Negative-control abstain (🛇) reads as neutral, not green. */
   function markVariant(mark: string): 'success' | 'warning' | 'destructive' | 'secondary' {
     if (mark === '✓') return 'success';
     if (mark === '◐') return 'warning';
     if (mark === '✗') return 'destructive';
     return 'secondary'; // 🛇 abstain
+  }
+
+  /** Tooltip for the judge-mark glyph — the icons aren't self-explanatory (esp. the 🛇 abstain
+   *  "stop sign"), so every mark badge carries this as its title. */
+  function markTitle(mark: string): string {
+    if (mark === '✓') return 'Pass — the answer matches the ideal';
+    if (mark === '◐') return 'Partial — partially correct or incomplete';
+    if (mark === '✗') return 'Fail — the answer is wrong';
+    if (mark === '🛇') return 'Abstain — declined / “I don’t know” (the correct outcome for a negative-control question)';
+    return 'Not judged (judge was off)';
   }
 
   function deltaVariant(delta: string): 'success' | 'warning' | 'secondary' {
@@ -337,18 +484,23 @@
   const legColumns = $derived(eval_.runModes);
   // Δ (best graph leg vs flat) only makes sense on the knowledge track (multi-leg compare).
   const showDelta = $derived(!isMemory);
-  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, <N legs>, [Δ], Links.
-  const resultsColspan = $derived(5 + legColumns.length + (showDelta ? 1 : 0) + 1);
+  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, <N legs>, [Δ].
+  // (Trace/recall links moved out of the main row into the expanded fold.)
+  const resultsColspan = $derived(5 + legColumns.length + (showDelta ? 1 : 0));
 
   // Graphiti retrieval trace — opens the SAME rich pipeline-trace dialog the Graph Runs page uses
   // (candidate→rank→temporal stage tables, with scores), loaded by the leg's ledger run_id. Only
   // graph legs have one (memory `recall`, knowledge `graphiti`); the flat leg has no graph search.
   let activeTrace = $state<RetrievalTraceRecord | null>(null);
+  // Ideal + model answer for the trace's question, surfaced in the dialog header so recalled
+  // facts can be read against what was expected / produced (set alongside `activeTrace`).
+  let activeTraceIdeal = $state('');
+  let activeTraceAnswer = $state('');
   let traceLoadingRunId = $state<string | null>(null);
   let traceError = $state<string | null>(null);
   const traceableLeg = (mode: string): boolean => mode === 'recall' || mode === 'graphiti';
 
-  async function openTrace(runId: string) {
+  async function openTrace(runId: string, ideal = '', answer = '') {
     traceError = null;
     traceLoadingRunId = runId;
     try {
@@ -357,6 +509,8 @@
       if (traces.length > 0) {
         // A recall is one fact search → one trace; take the latest if a run held several.
         activeTrace = traces[traces.length - 1];
+        activeTraceIdeal = ideal;
+        activeTraceAnswer = answer;
       } else {
         traceError = 'No retrieval trace recorded for this run (graph tracing may have been off).';
       }
@@ -364,6 +518,66 @@
       traceError = err instanceof Error ? err.message : 'Failed to load retrieval trace.';
     } finally {
       traceLoadingRunId = null;
+    }
+  }
+
+  // Ingest pipeline trace — the per-episode graph-build trace for the corpus's remember run.
+  // Opened from the "Ingest pipeline" button when the run's ingest Graph Run id is known. Shows
+  // the searchable source corpus as an extra tab (same as the retrieval trace).
+  let activeIngestTrace = $state<IngestTraceRecord | null>(null);
+  let ingestTraceLoading = $state(false);
+  let ingestTraceError = $state<string | null>(null);
+  async function openIngestTrace(runId: string) {
+    ingestTraceError = null;
+    ingestTraceLoading = true;
+    try {
+      const res = await getGraphRunIngestTrace(runId);
+      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      if (traces.length > 0) {
+        // The remember run ingests many episodes → many per-episode traces; open the first.
+        // The Corpus tab shows the full (searchable) corpus regardless of which episode is shown.
+        activeIngestTrace = traces[0];
+      } else {
+        ingestTraceError = 'No ingest trace recorded for this run (graph tracing may have been off).';
+      }
+    } catch (err) {
+      ingestTraceError = err instanceof Error ? err.message : 'Failed to load ingest trace.';
+    } finally {
+      ingestTraceLoading = false;
+    }
+  }
+
+  // Compact engine line for the "Copy for AI" brief — the few knobs that actually shape recall.
+  const aiEngine = $derived.by(() => {
+    if (!prefs) return '';
+    const g = prefs.graph;
+    const answer = prefs.knowledge.answering.model_resolved ?? prefs.knowledge.answering.model ?? '';
+    return `${g.backend} · recipe=${g.search_recipe} · hops=${g.k_hop}${answer ? ` · answer=${answer}` : ''}`;
+  });
+
+  // Per-row "Copy for AI": build the Markdown brief (inline answers/judge/recalled + ledger-file
+  // pointers) and write it to the clipboard. `copiedRow` flips the icon to a check briefly;
+  // `copyError` surfaces a clipboard failure (e.g. denied permission) as a small banner.
+  let copiedRow = $state<number | null>(null);
+  let copyError = $state<string | null>(null);
+  async function copyRowForAI(r: EvalRow) {
+    copyError = null;
+    try {
+      const text = formatEvalRowForAI({
+        row: r,
+        legColumns,
+        track: eval_.track,
+        engine: aiEngine,
+        corpus: eval_.selectedCorpus?.id ?? '',
+        logDir: eval_.logDir
+      });
+      await navigator.clipboard.writeText(text);
+      copiedRow = r.index;
+      setTimeout(() => {
+        if (copiedRow === r.index) copiedRow = null;
+      }, 1500);
+    } catch (err) {
+      copyError = err instanceof Error ? err.message : 'Could not copy to clipboard.';
     }
   }
 
@@ -495,9 +709,16 @@
         <span>Judge answers</span>
       </label>
       <div class="ml-auto flex gap-2">
-        {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage}
-          <Button variant="outline" disabled={isBusy} onclick={eval_.clear} title="Clear the last run's results">
-            <Trash2 size={14} /> Clear
+        {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage || (isMemory && eval_.savedCount > 0)}
+          <Button
+            variant="outline"
+            disabled={isBusy}
+            onclick={() => void eval_.clear()}
+            title={isMemory
+              ? 'Delete this corpus’s saved results from disk (ingested memory is kept)'
+              : "Clear the last run's results"}
+          >
+            <Trash2 size={14} /> {isMemory ? 'Clear results' : 'Clear'}
           </Button>
         {/if}
         {#if isBusy}
@@ -517,7 +738,7 @@
         {/if}
         <Button
           disabled={!canRun || !eval_.selectedCorpus || eval_.selectedCount === 0}
-          onclick={() => void eval_.start()}
+          onclick={requestRun}
           title={eval_.selectedCount === 0 ? 'Select at least one question' : 'Run the eval'}
         >
           {#if isBusy}
@@ -605,9 +826,9 @@
       {:else if eval_.corpusEpisodes.length === 0 && !eval_.corpusLoading}
         <p class="text-xs text-muted-foreground">No episodes loaded.</p>
       {:else}
-        <!-- Stats header: corpus size + span + question count. -->
+        <!-- Top line: corpus stats + episode search (filters + highlights the transcript below). -->
         <div
-          class="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs"
+          class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs"
         >
           <span class="text-muted-foreground">
             Episodes: <span class="font-mono text-foreground">{eval_.corpusMeta?.episode_count ?? 0}</span>
@@ -618,33 +839,26 @@
           <span class="text-muted-foreground">
             Questions: <span class="font-mono text-foreground">{eval_.questions.length}</span>
           </span>
-        </div>
-        <!-- Per-category question breakdown (chips). -->
-        {#if categoryCounts.length > 0}
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Questions by category
-            </span>
-            {#each categoryCounts as [cat, n] (cat)}
-              <Badge variant="secondary" class="font-sans text-xs">
-                {cat} <span class="ml-1 font-mono">{n}</span>
-              </Badge>
-            {/each}
+          <div class="ml-auto flex items-center gap-2">
+            <input
+              class="h-7 w-56 rounded-md border bg-background px-2 font-sans text-xs"
+              placeholder="Search episodes…"
+              bind:value={corpusSearch}
+            />
+            {#if corpusSearch.trim()}
+              <span class="text-muted-foreground">{corpusMatchCount} of {eval_.corpusEpisodes.length} match</span>
+              <button
+                type="button"
+                class="rounded border px-2 py-0.5 hover:bg-muted"
+                onclick={() => (corpusSearch = '')}
+              >
+                Clear
+              </button>
+            {/if}
           </div>
-        {/if}
-        <!-- Episode transcript — dated turns in chronological order. -->
-        <div class="max-h-96 overflow-y-auto rounded-md border">
-          {#each eval_.corpusEpisodes as ep (ep.id)}
-            <div class="border-t px-3 py-2 first:border-t-0">
-              <div class="flex flex-wrap items-center gap-2 font-sans text-[11px] text-muted-foreground">
-                <span class="font-mono">{ep.id}</span>
-                <span class="font-mono tabular-nums">{fmtEpisodeDate(ep.timestamp)}</span>
-                {#if ep.speaker}<Badge variant="outline" class="font-sans normal-case">{ep.speaker}</Badge>{/if}
-              </div>
-              <p class="mt-1 whitespace-pre-wrap font-sans text-sm leading-6">{ep.body}</p>
-            </div>
-          {/each}
         </div>
+        <!-- Episode transcript with highlight; search owned by the stats line above. -->
+        <EvalCorpusReview episodes={eval_.corpusEpisodes} bind:search={corpusSearch} showSearch={false} />
       {/if}
     </KnowledgeCollapsibleSectionCard>
   {/if}
@@ -661,21 +875,78 @@
         {#if eval_.questionsLoading}
           <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
         {/if}
+        {#if eval_.questions.length > 0}
+          <!-- Filters on the header line: search + category + difficulty + (memory) saved-state. -->
+          <input
+            class="h-7 w-40 rounded-md border bg-background px-2 font-sans text-xs"
+            placeholder="Search questions…"
+            bind:value={qSearch}
+          />
+          <select
+            class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+            bind:value={qCategory}
+            title="Filter by category"
+          >
+            <option value="all">All categories</option>
+            {#each categoryOptions as c (c)}
+              <option value={c}>{c}</option>
+            {/each}
+          </select>
+          <select
+            class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+            bind:value={qDifficulty}
+            title="Filter by difficulty"
+          >
+            <option value="all">All difficulties</option>
+            <option value="medium">medium</option>
+            <option value="hard">hard</option>
+            <option value="very_hard">very hard</option>
+            <option value="unspecified">unspecified</option>
+          </select>
+          {#if isMemory}
+            <select
+              class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+              bind:value={qState}
+              title="Filter by saved result state"
+            >
+              <option value="all">All states</option>
+              <option value="pass">Pass</option>
+              <option value="partial">Partial</option>
+              <option value="fail">Fail</option>
+              <option value="abstain">Abstain</option>
+              <option value="answered">Answered (no grade)</option>
+              <option value="not_run">Not run</option>
+            </select>
+          {/if}
+          {#if qFiltered}
+            <button
+              type="button"
+              class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted"
+              onclick={resetQuestionFilters}
+              title="Clear all filters"
+            >
+              Reset
+            </button>
+          {/if}
+        {/if}
+        <!-- Select all / Clear act on the FILTERED set (so e.g. "select all failed" works). -->
         <button
           type="button"
           class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
-          disabled={allSelected || eval_.questions.length === 0 || isBusy}
-          onclick={eval_.selectAll}
+          disabled={allSelected || filteredQuestions.length === 0 || isBusy}
+          onclick={() => eval_.setCategorySelected(filteredIds, true)}
+          title={qFiltered ? 'Select all questions matching the filters' : 'Select all questions'}
         >
-          Select all
+          {qFiltered ? 'Select shown' : 'Select all'}
         </button>
         <button
           type="button"
           class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
-          disabled={eval_.selectedCount === 0 || isBusy}
-          onclick={eval_.clearSelection}
+          disabled={!filteredQuestions.some((q) => eval_.isSelected(q.id)) || isBusy}
+          onclick={() => eval_.setCategorySelected(filteredIds, false)}
+          title={qFiltered ? 'Deselect the questions matching the filters' : 'Clear the selection'}
         >
-          Clear selection
+          {qFiltered ? 'Clear shown' : 'Clear selection'}
         </button>
         <button
           type="button"
@@ -692,6 +963,9 @@
         <p class="text-xs text-muted-foreground">No questions loaded.</p>
       {:else}
         <div class="max-h-96 overflow-y-auto rounded-md border px-3 py-2">
+          {#if groups.length === 0}
+            <p class="py-2 font-sans text-xs text-muted-foreground">No questions match the filters.</p>
+          {/if}
           {#each groups as [category, items] (category)}
             <div class="mb-2">
               <label
@@ -712,7 +986,7 @@
                 <span class="font-normal normal-case">({items.length})</span>
               </label>
               <div class="grid gap-0.5 pl-5">
-                {#each items as q (q.id)}
+                {#each items as q, qi (q.id)}
                   {@const dm = difficultyMeta(q.difficulty ?? '')}
                   <label class="flex cursor-pointer select-none items-start gap-2 py-0.5 font-sans text-sm">
                     <input
@@ -722,6 +996,8 @@
                       disabled={isBusy}
                       onchange={() => eval_.toggleQuestion(q.id)}
                     />
+                    <!-- Per-category number (1..N within this category). -->
+                    <span class="mt-px w-5 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{qi + 1}.</span>
                     <span class="min-w-0">
                       {#if dm}
                         <span
@@ -733,6 +1009,22 @@
                       {q.question}
                       {#if q.subcategory}
                         <span class="text-xs text-muted-foreground"> · {q.subcategory}</span>
+                      {/if}
+                      {#if savedBadge(q.id)}
+                        {@const sb = savedBadge(q.id)}
+                        {@const SavedIcon = sb?.Icon}
+                        {#if SavedIcon}
+                          <!-- Tooltip lives on a wrapping <span>: a `title` attr on the lucide
+                               <svg> itself isn't shown as a hover tooltip by browsers. -->
+                          <span
+                            class="ml-1 inline-flex align-[-2px] {sb?.cls}"
+                            title={sb?.title}
+                            aria-label={sb?.title}
+                            role="img"
+                          >
+                            <SavedIcon size={13} class="shrink-0" aria-hidden="true" />
+                          </span>
+                        {/if}
                       {/if}
                     </span>
                   </label>
@@ -776,9 +1068,29 @@
               : '—'
           : '—'} · Q {fmtCost(questionsCost)})
       </span>
-      <span class="ml-auto text-[11px] text-muted-foreground">
-        LLM + reranker · embeddings not priced
-      </span>
+      {#if isMemory && eval_.ingestRunId}
+        <!-- Open the corpus's graph-build (remember) pipeline trace; its Corpus tab shows the
+             full source transcript, searchable. -->
+        <button
+          type="button"
+          class="ml-auto inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5 disabled:opacity-50"
+          disabled={ingestTraceLoading}
+          onclick={() => void openIngestTrace(eval_.ingestRunId!)}
+          title="Open the ingest (graph-build) pipeline trace for this corpus"
+        >
+          {#if ingestTraceLoading}
+            <LoaderCircle size={10} class="animate-spin" aria-hidden="true" />
+          {:else}
+            <Microscope size={10} aria-hidden="true" />
+          {/if}
+          Ingest pipeline
+        </button>
+        <span class="text-[11px] text-muted-foreground">LLM + reranker · embeddings not priced</span>
+      {:else}
+        <span class="ml-auto text-[11px] text-muted-foreground">
+          LLM + reranker · embeddings not priced
+        </span>
+      {/if}
     </div>
   {/if}
 
@@ -827,7 +1139,54 @@
     {traceError}
   </div>
 {/if}
-<GraphRunsRetrievalTraceDialog trace={activeTrace} onClose={() => (activeTrace = null)} />
+{#if copyError}
+  <div
+    class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive"
+    role="alert"
+  >
+    Copy for AI failed: {copyError}
+  </div>
+{/if}
+{#if ingestTraceError}
+  <div
+    class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive"
+    role="alert"
+  >
+    {ingestTraceError}
+  </div>
+{/if}
+<!-- Shared corpus tab content for both trace dialogs (memory track): the searchable source
+     transcript, so a recalled/ingested fact can be traced back to its episode in-context. -->
+{#snippet corpusTab()}
+  <EvalCorpusReview episodes={eval_.corpusEpisodes} compact />
+{/snippet}
+<GraphRunsRetrievalTraceDialog
+  trace={activeTrace}
+  idealAnswer={activeTraceIdeal}
+  llmAnswer={activeTraceAnswer}
+  onClose={() => (activeTrace = null)}
+  extraTabLabel={corpusTabLabel}
+  extraTab={corpusTabLabel ? corpusTab : undefined}
+/>
+<!-- Ingest (graph-build) pipeline trace — opened from the Cost strip's "Ingest pipeline" button;
+     same Corpus tab so the source transcript is reachable while inspecting the build. -->
+<GraphRunsIngestTraceDialog
+  trace={activeIngestTrace}
+  onClose={() => (activeIngestTrace = null)}
+  extraTabLabel={corpusTabLabel}
+  extraTab={corpusTabLabel ? corpusTab : undefined}
+/>
+
+<!-- Rebuild-graph wipe confirm — gates Run when "Rebuild graph" is checked on a graphed corpus. -->
+<KnowledgeEvalRebuildConfirmDialog
+  bind:open={confirmOpen}
+  track={eval_.track}
+  corpusName={eval_.selectedCorpus?.name ?? ''}
+  onConfirm={() => {
+    confirmOpen = false;
+    void eval_.start();
+  }}
+/>
 
 <!-- Unified results table: Question, Ideal, per-leg [mark + model answer]; fold for details. -->
 {#snippet resultsTable()}
@@ -848,7 +1207,6 @@
             <th class="px-2 py-1.5 text-left">{legLabel(mode)} answer</th>
           {/each}
           {#if showDelta}<th class="px-2 py-1.5 text-center" title="best graph leg vs flat">&#916;</th>{/if}
-          <th class="px-2 py-1.5 text-right">Links</th>
         </tr>
       </thead>
       <tbody>
@@ -868,7 +1226,7 @@
                   class="mt-0.5 shrink-0 text-muted-foreground transition-transform {expandedRows.has(r.index) ? 'rotate-90' : ''}"
                   aria-hidden="true"
                 />
-                <span class="line-clamp-2">{r.question}</span>
+                <span class="line-clamp-2" title={r.question}>{r.question}</span>
               </button>
             </td>
             <!-- Type = the question's category (e.g. direct_recall, temporal). -->
@@ -887,15 +1245,15 @@
               {/if}
             </td>
             <td class="px-2 py-1.5 text-xs text-muted-foreground">
-              <span class="line-clamp-2">{r.gold || '—'}</span>
+              <span class="line-clamp-2" title={r.gold || ''}>{r.gold || '—'}</span>
             </td>
             {#each legColumns as mode (mode)}
               <td class="px-2 py-1.5">
                 {#if r.legs[mode]}
                   {@const leg = r.legs[mode]}
                   <div class="flex items-start gap-1.5">
-                    <Badge variant={markVariant(leg.mark)} class="mt-0.5 font-mono">{leg.mark || '—'}</Badge>
-                    <span class="line-clamp-2 text-sm">{leg.answer || '— (no answer)'}</span>
+                    <Badge variant={markVariant(leg.mark)} class="mt-0.5 font-mono" title={markTitle(leg.mark)}>{leg.mark || '—'}</Badge>
+                    <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{leg.answer || '— (no answer)'}</span>
                   </div>
                 {:else}
                   <span class="text-xs text-muted-foreground">—</span>
@@ -907,70 +1265,39 @@
                 <Badge variant={deltaVariant(r.delta)} class="font-mono">{r.delta}</Badge>
               </td>
             {/if}
-            <td class="px-2 py-1.5 text-right">
-              <div class="inline-flex flex-wrap justify-end gap-1">
-                {#each legColumns as mode (mode)}
-                  {#if r.legs[mode]?.run_id}
-                    {#if traceableLeg(mode)}
-                      <!-- Graphiti retrieval trace: opens the rich pipeline-trace dialog (per-stage
-                           candidate→rank→temporal with scores) for this leg's recall run. -->
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5 disabled:opacity-50"
-                        disabled={traceLoadingRunId !== null}
-                        onclick={() => void openTrace(r.legs[mode].run_id!)}
-                        title="{legLabel(mode)} retrieval trace"
-                      >
-                        {#if traceLoadingRunId === r.legs[mode].run_id}
-                          <LoaderCircle size={10} class="animate-spin" aria-hidden="true" />
-                        {:else}
-                          <Microscope size={10} aria-hidden="true" />
-                        {/if}
-                        trace
-                      </button>
-                    {/if}
-                    <a
-                      class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
-                      href={graphRunPageUrl(r.legs[mode].run_id!)}
-                      title="{legLabel(mode)} Graph Run"
-                    >
-                      <ExternalLink size={10} aria-hidden="true" />{mode}
-                    </a>
-                  {/if}
-                {/each}
-              </div>
-            </td>
           </tr>
           <!-- Fold: per-leg judge verdict + recalled facts (expanded). Question/ideal/answer are
                already in the row above, so we don't repeat them here — only the diagnostic detail. -->
           <tr class="border-t bg-muted/10" hidden={!expandedRows.has(r.index)}>
             <td colspan={resultsColspan} class="px-3 py-3">
-              <div class="grid gap-3">
-                {#if r.subcategory}
-                  <div class="flex flex-wrap items-center gap-2 font-sans text-xs">
-                    <span class="text-muted-foreground">{r.subcategory}</span>
-                  </div>
-                {/if}
-                <!-- Single column for the memory recall leg (full width); side-by-side only when
-                     there are multiple legs to compare (knowledge flat vs graphiti). -->
-                <div class="grid gap-4 {legColumns.length > 1 ? 'md:grid-cols-2' : ''}">
-                  {#each legColumns as mode (mode)}
-                    {#if r.legs[mode]}
-                      {@const leg = r.legs[mode]}
-                      <div class="grid content-start gap-2">
+              <!-- Single column for the memory recall leg (full width); side-by-side only when
+                   there are multiple legs to compare (knowledge flat vs graphiti). -->
+              <div class="grid gap-4 {legColumns.length > 1 ? 'md:grid-cols-2' : ''}">
+                {#each legColumns as mode, legIdx (mode)}
+                  {#if r.legs[mode]}
+                    {@const leg = r.legs[mode]}
+                    <div class="grid content-start gap-2">
+                      <!-- First line: leg meta (left) · actions trace / recall / copy (right). -->
+                      <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-sans text-xs font-semibold">{legLabel(mode)}</span>
-                          <Badge variant={markVariant(leg.mark)} class="font-mono">{leg.mark || '—'}</Badge>
+                          <Badge variant={markVariant(leg.mark)} class="font-mono" title={markTitle(leg.mark)}>{leg.mark || '—'}</Badge>
                           <span class="font-mono text-xs tabular-nums text-muted-foreground">{leg.elapsed_ms}ms</span>
                           {#if leg.cost_usd}
                             <span class="font-mono text-xs tabular-nums text-muted-foreground">{fmtCost(leg.cost_usd)}</span>
                           {/if}
+                          {#if r.subcategory && legIdx === 0}
+                            <span class="font-sans text-xs text-muted-foreground">· {r.subcategory}</span>
+                          {/if}
+                        </div>
+                        <div class="flex flex-wrap items-center gap-1">
                           {#if traceableLeg(mode) && leg.run_id}
+                            <!-- Retrieval pipeline trace (per-stage candidate→rank→temporal). -->
                             <button
                               type="button"
                               class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5 disabled:opacity-50"
                               disabled={traceLoadingRunId !== null}
-                              onclick={() => void openTrace(leg.run_id!)}
+                              onclick={() => void openTrace(leg.run_id!, r.gold, leg.answer)}
                               title="Open the retrieval pipeline trace"
                             >
                               {#if traceLoadingRunId === leg.run_id}
@@ -978,25 +1305,47 @@
                               {:else}
                                 <Microscope size={10} aria-hidden="true" />
                               {/if}
-                              Retrieval trace
+                              trace
+                            </button>
+                          {/if}
+                          {#if leg.run_id}
+                            <!-- Graph Run drill-in (labelled by leg: recall / graphiti / flat). -->
+                            <a
+                              class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
+                              href={graphRunPageUrl(leg.run_id)}
+                              title="{legLabel(mode)} Graph Run"
+                            >
+                              <ExternalLink size={10} aria-hidden="true" />{mode}
+                            </a>
+                          {/if}
+                          {#if legIdx === 0}
+                            <!-- Copy-for-AI brief (per row; shown once, on the first leg). -->
+                            <button
+                              type="button"
+                              class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
+                              onclick={() => void copyRowForAI(r)}
+                              title="Copy a Markdown brief (answer + judge + recalled facts inline, ledger-file pointers for the full traces) to paste into your AI agent"
+                            >
+                              {#if copiedRow === r.index}
+                                <Check size={10} aria-hidden="true" /> Copied
+                              {:else}
+                                <Copy size={10} aria-hidden="true" /> Copy
+                              {/if}
                             </button>
                           {/if}
                         </div>
-                        <!-- Judge verdict — OUTSIDE the recalled-facts card below, so it reads as the
-                             leg's overall grade, not a row of the fact table. -->
-                        {#if leg.reason}
-                          <p class="rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
-                            <span class="font-semibold text-foreground">Judge:</span> {leg.reason}
-                          </p>
-                        {/if}
-                        <!-- Recalled-facts table in its own card (the table section). -->
-                        <div class="rounded-md border bg-background p-2.5">
-                          {@render recalledTable(leg.recalled ?? [])}
-                        </div>
                       </div>
-                    {/if}
-                  {/each}
-                </div>
+                      <!-- Judge verdict — its own line, above the recalled-memory sections. -->
+                      {#if leg.reason}
+                        <p class="rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
+                          <span class="font-semibold text-foreground">Judge:</span> {leg.reason}
+                        </p>
+                      {/if}
+                      <!-- Recalled memories: separate collapsible Facts / Entities / Episodes. -->
+                      {@render recalledTable(leg.recalled ?? [])}
+                    </div>
+                  {/if}
+                {/each}
               </div>
             </td>
           </tr>
@@ -1014,61 +1363,134 @@
   </div>
 {/snippet}
 
-<!-- Recalled facts as a table: fact text + temporal validity + relationship + status + score.
-     Memory legs populate this; knowledge graphiti facts are pending the answer-path change. -->
-{#snippet recalledTable(facts: RecalledFact[])}
-  {#if facts.length === 0}
-    <p class="text-xs italic text-muted-foreground">No recalled facts.</p>
+<!-- Recalled items, split by kind into Facts / Entities / Episodes — each kind gets only the
+     columns that apply (facts have temporal validity + relationship + status; entities have a
+     type; episodes a turn timestamp), so non-fact rows stop rendering mostly-empty fact columns.
+     Stacked (not tabbed): counts are small and review reads better without a click to reveal. -->
+{#snippet recalledTable(items: RecalledFact[])}
+  {@const facts = items.filter((r) => (r.kind ?? 'fact') === 'fact')}
+  {@const entities = items.filter((r) => r.kind === 'entity')}
+  {@const episodes = items.filter((r) => r.kind === 'episode')}
+  {#if items.length === 0}
+    <p class="text-xs italic text-muted-foreground">No recalled memories.</p>
   {:else}
-    <div class="rounded-md border">
-      <div class="border-b bg-muted/30 px-2 py-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Recalled facts ({facts.length})
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full border-collapse font-sans text-xs">
-          <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th class="px-2 py-1 text-left">Fact</th>
-              <th class="px-2 py-1 text-left">Relationship</th>
-              <th class="px-2 py-1 text-left">Valid from</th>
-              <th class="px-2 py-1 text-left">Invalid at</th>
-              <th class="px-2 py-1 text-left">Status</th>
-              <th class="px-2 py-1 text-right">Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each facts as f, i (i)}
-              <tr class="border-t align-top">
-                <td class="max-w-[24rem] px-2 py-1">
-                  <span>{f.fact || f.memory}</span>
-                  {#if f.kind && f.kind !== 'fact'}
-                    <span class="ml-1 text-[10px] uppercase text-muted-foreground">· {f.kind}</span>
-                  {/if}
-                </td>
-                <td class="px-2 py-1 font-mono text-[11px] text-muted-foreground">{f.name || '—'}</td>
-                <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.valid_at || '—'}</td>
-                <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.invalid_at || '—'}</td>
-                <td class="px-2 py-1">
-                  {#if (f.kind ?? 'fact') === 'fact'}
-                    {#if f.superseded}
-                      <Badge variant="warning">superseded</Badge>
-                    {:else}
-                      <Badge variant="success">active</Badge>
-                    {/if}
-                  {:else}
-                    <span class="text-muted-foreground">—</span>
-                  {/if}
-                </td>
-                <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
-                  {f.score != null ? f.score.toFixed(3) : '—'}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+    <div class="grid gap-2.5">
+      {#if facts.length > 0}{@render factsTable(facts)}{/if}
+      {#if entities.length > 0}{@render entitiesTable(entities)}{/if}
+      {#if episodes.length > 0}{@render episodesTable(episodes)}{/if}
     </div>
   {/if}
+{/snippet}
+
+<!-- Reusable collapsible section: a <details> with a COLOR-CODED summary header (so Facts /
+     Entities / Episodes are visually distinct and clearly separated) wrapping a scrollable table.
+     Open by default; the disclosure triangle signals it collapses. ``headerCls`` is the per-kind
+     color. -->
+{#snippet recalledSection(title: string, count: number, headerCls: string, body: Snippet)}
+  <details open class="overflow-hidden rounded-md border">
+    <summary class="cursor-pointer select-none px-2 py-1 font-sans text-[11px] font-semibold uppercase tracking-wide {headerCls}">
+      {title} ({count})
+    </summary>
+    <div class="overflow-x-auto border-t">
+      <table class="w-full border-collapse font-sans text-xs">
+        {@render body()}
+      </table>
+    </div>
+  </details>
+{/snippet}
+
+{#snippet factsTable(facts: RecalledFact[])}
+  {#snippet body()}
+    <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <tr>
+        <th class="px-2 py-1 text-left">Fact</th>
+        <th class="px-2 py-1 text-left">Relationship</th>
+        <th class="px-2 py-1 text-left">Valid from</th>
+        <th class="px-2 py-1 text-left">Invalid at</th>
+        <th class="px-2 py-1 text-left">Status</th>
+        <th class="px-2 py-1 text-right">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {#each facts as f, i (i)}
+        <tr class="border-t align-top">
+          <td class="max-w-[24rem] px-2 py-1">
+            <span class="line-clamp-3" title={f.fact || f.memory}>{f.fact || f.memory}</span>
+          </td>
+          <td class="px-2 py-1 font-mono text-[11px] text-muted-foreground">{f.name || '—'}</td>
+          <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.valid_at || '—'}</td>
+          <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.invalid_at || '—'}</td>
+          <td class="px-2 py-1">
+            {#if f.superseded}
+              <Badge variant="warning">superseded</Badge>
+            {:else}
+              <Badge variant="success">active</Badge>
+            {/if}
+          </td>
+          <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
+            {f.score != null ? f.score.toFixed(3) : '—'}
+          </td>
+        </tr>
+      {/each}
+    </tbody>
+  {/snippet}
+  {@render recalledSection('Recalled facts', facts.length, 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200', body)}
+{/snippet}
+
+{#snippet entitiesTable(entities: RecalledFact[])}
+  {#snippet body()}
+    <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <tr>
+        <th class="px-2 py-1 text-left">Entity</th>
+        <th class="px-2 py-1 text-left">Type</th>
+        <th class="px-2 py-1 text-right">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {#each entities as e, i (i)}
+        <tr class="border-t align-top">
+          <td class="max-w-[28rem] px-2 py-1">
+            <!-- Entity name (bold) over its attribute summary; both clamped with full text on hover. -->
+            {#if e.name}<span class="font-semibold">{e.name}</span>{/if}
+            <span class="line-clamp-2 text-muted-foreground" title={e.summary || e.memory}>{e.summary || e.memory}</span>
+          </td>
+          <td class="px-2 py-1">
+            {#if e.entity_type}<Badge variant="outline" class="font-sans normal-case">{e.entity_type}</Badge>{:else}<span class="text-muted-foreground">—</span>{/if}
+          </td>
+          <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
+            {e.score != null ? e.score.toFixed(3) : '—'}
+          </td>
+        </tr>
+      {/each}
+    </tbody>
+  {/snippet}
+  {@render recalledSection('Recalled entities', entities.length, 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-200', body)}
+{/snippet}
+
+{#snippet episodesTable(episodes: RecalledFact[])}
+  {#snippet body()}
+    <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <tr>
+        <th class="px-2 py-1 text-left">Episode</th>
+        <th class="px-2 py-1 text-left">When</th>
+        <th class="px-2 py-1 text-right">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {#each episodes as ep, i (i)}
+        <tr class="border-t align-top">
+          <td class="max-w-[32rem] px-2 py-1">
+            <span class="line-clamp-3" title={ep.memory}>{ep.memory}</span>
+          </td>
+          <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{ep.valid_at ? fmtEpisodeDate(ep.valid_at) : '—'}</td>
+          <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
+            {ep.score != null ? ep.score.toFixed(3) : '—'}
+          </td>
+        </tr>
+      {/each}
+    </tbody>
+  {/snippet}
+  {@render recalledSection('Recalled episodes', episodes.length, 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200', body)}
 {/snippet}
 
 <!-- Summary: knowledge PROCEED/PIVOT gate or memory recall counts; both note when judge is off. -->

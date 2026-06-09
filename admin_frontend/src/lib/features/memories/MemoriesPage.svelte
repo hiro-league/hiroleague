@@ -92,7 +92,6 @@
       onRefreshMemories={() => void ctl.refreshMemories()}
       onViewJson={ctl.showMemoryJsonRow}
       onViewProvenance={ctl.showMemoryProvenance}
-      onDeleteRow={ctl.openDeleteMemoryDialog}
     />
   {/if}
 </AdminPageHeader>
@@ -104,12 +103,9 @@
   memoryProvenanceLoading={ctl.memoryProvenanceLoading}
   memoryProvenanceError={ctl.memoryProvenanceError}
   clearMemoriesConfirmOpen={ctl.clearMemoriesConfirmOpen}
-  deleteMemoryTarget={ctl.deleteMemoryTarget}
   memoryActionBusy={ctl.memoryActionBusy}
   onCloseMemoryJson={ctl.closeMemoryJsonDialog}
   onCloseProvenance={ctl.closeMemoryProvenance}
   onCloseClearMemories={ctl.closeClearMemoriesDialog}
   onConfirmClearMemories={() => void ctl.confirmClearMemories()}
-  onCloseDeleteMemory={ctl.closeDeleteMemoryDialog}
-  onConfirmDeleteMemory={() => void ctl.confirmDeleteMemory()}
 />

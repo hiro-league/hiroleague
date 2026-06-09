@@ -16,7 +16,9 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   knowledgeRewrite: 'preferences-section-knowledge-rewrite',
   knowledgeGraphBackend: 'preferences-section-knowledge-graph-backend',
   graphEngine: 'preferences-section-graph-engine',
-  graphEngineReranker: 'preferences-section-graph-engine-reranker'
+  graphEngineReranker: 'preferences-section-graph-engine-reranker',
+  graphEngineEval: 'preferences-section-graph-engine-eval',
+  graphView: 'preferences-section-graph-view'
 } as const;
 
 export function tuningProfileSectionBodyId(profileId: string): string {
