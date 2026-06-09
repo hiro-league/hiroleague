@@ -34,12 +34,14 @@ import {
 export type EvalTrack = 'knowledge' | 'memory';
 import {
   cancelKnowledgeEval,
+  getEvalCorpus,
   getKnowledgeEvalState,
   listEvalCorpuses,
   listEvalQuestions,
   pickKnowledgeFolder,
   runKnowledgeEval,
   type EvalCorpus,
+  type EvalEpisode,
   type EvalQuestionItem
 } from '$lib/api/knowledge';
 
@@ -76,6 +78,7 @@ export type EvalRow = {
   id: string;
   category: string;
   subcategory: string;
+  difficulty: string; // authored difficulty (medium/hard/very_hard); '' when omitted
   question: string;
   requires_graph: boolean;
   track: EvalTrack;
@@ -92,6 +95,7 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     id: p.id,
     category: p.category,
     subcategory: p.subcategory ?? '',
+    difficulty: p.difficulty ?? '',
     question: p.question,
     requires_graph: p.requires_graph,
     track: p.track ?? 'knowledge',
@@ -127,6 +131,18 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   let questions = $state<EvalQuestionItem[]>([]);
   let questionsLoading = $state(false);
   let questionsError = $state<string | null>(null);
+
+  // Corpus review (memory track only) — the chosen corpus's episodes rendered as a readable
+  // transcript above the questions, plus light meta (count + date span) for the stats header.
+  // Knowledge corpora are folders of .md docs, not episode turns, so this stays empty there.
+  let corpusEpisodes = $state<EvalEpisode[]>([]);
+  let corpusMeta = $state<{
+    episode_count: number;
+    first_timestamp: string;
+    last_timestamp: string;
+  } | null>(null);
+  let corpusLoading = $state(false);
+  let corpusError = $state<string | null>(null);
   // Selected question ids — explicit; NO cap, and an empty set blocks the run.
   let selected = $state<Set<string>>(new Set());
 
@@ -223,8 +239,37 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     localStorage.setItem(PREF_KEYS.knowledgeEvalFolder, v);
   }
 
+  /** Load the chosen corpus's episodes for the Corpus review panel (memory track only).
+   *  Independent of the question bank, so it runs even when the bank is missing. Clears
+   *  to empty on the knowledge track (its corpora are .md folders, not episode turns). */
+  async function loadCorpus() {
+    corpusEpisodes = [];
+    corpusMeta = null;
+    corpusError = null;
+    if (track !== 'memory') return;
+    const corpus = selectedCorpus();
+    if (!corpus || !corpus.corpus_path) return;
+    corpusLoading = true;
+    try {
+      const res = await getEvalCorpus(corpus.corpus_path);
+      corpusEpisodes = res.data.episodes ?? [];
+      corpusMeta = {
+        episode_count: res.data.episode_count,
+        first_timestamp: res.data.first_timestamp,
+        last_timestamp: res.data.last_timestamp
+      };
+    } catch (err) {
+      corpusError = err instanceof Error ? err.message : 'Failed to load corpus episodes.';
+    } finally {
+      corpusLoading = false;
+    }
+  }
+
   /** Load the chosen corpus's question bank; clears the prior selection. */
   async function loadQuestions() {
+    // Refresh the Corpus review transcript alongside the bank — both follow the chosen
+    // corpus, so every entry point (scan / select / reload) keeps them in sync.
+    void loadCorpus();
     selected = new Set();
     const corpus = selectedCorpus();
     if (!corpus || !corpus.questions_path) {
@@ -612,6 +657,21 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     get questionsError() {
       return questionsError;
     },
+    // Corpus review surface (memory track) — episodes transcript + meta for the section above
+    // the questions.
+    get corpusEpisodes() {
+      return corpusEpisodes;
+    },
+    get corpusMeta() {
+      return corpusMeta;
+    },
+    get corpusLoading() {
+      return corpusLoading;
+    },
+    get corpusError() {
+      return corpusError;
+    },
+    loadCorpus,
     get selectedCount() {
       return selected.size;
     },

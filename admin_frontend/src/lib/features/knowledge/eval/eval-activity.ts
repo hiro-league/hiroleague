@@ -55,6 +55,15 @@ function setupLine(e: EvalSetupProgressPayload): ActivityLine {
       tone: 'info',
       text: `▶ building knowledge graph${e.episode_count ? ` (${e.episode_count} episodes)` : ''}…`
     };
+  if (e.phase === 'remember_done') {
+    // Ingest phase finished — report the folded graph-build cost (streamed before any question).
+    const c = e.ingest_cost_usd ?? 0;
+    const cost = c > 0 ? ` · ingest ≈ $${c < 0.01 ? c.toFixed(4) : c.toFixed(2)}` : '';
+    return {
+      tone: 'success',
+      text: `✓ remembered${e.episode_count ? ` ${e.episode_count} turns` : ''}${cost}`
+    };
+  }
   return { tone: 'info', text: `▶ ${e.phase}…` };
 }
 

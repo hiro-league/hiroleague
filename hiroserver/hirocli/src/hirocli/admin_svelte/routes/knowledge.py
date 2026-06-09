@@ -1381,6 +1381,48 @@ async def eval_corpuses(track: str = "memory", folder: str = "") -> dict[str, An
         return envelope_failure(str(exc))
 
 
+@knowledge_router.get("/knowledge/eval/corpus")
+async def eval_corpus(path: str = "") -> dict[str, Any]:
+    """Load a memory-track corpus's episodes for the human-readable Corpus review panel.
+
+    ``path`` is the ``<id>.episodes.jsonl`` for the chosen corpus (from the corpuses list).
+    Returns each turn as ``{id, timestamp, speaker, type, body}`` in chronological order
+    (``load_episodes_file`` sorts by timestamp), plus light meta (episode count + date span)
+    for the stats header. Read-only and workspace-independent — episodes live beside their
+    question banks. Memory-track only; knowledge corpora are folders of ``.md`` docs."""
+    from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+
+    try:
+        cpath = Path(path.strip())
+        if not path.strip() or not cpath.exists():
+            return envelope_failure(f"Corpus not found: {path or '(none given)'}")
+        # Parsing reads + validates the whole file; keep it off the event loop.
+        episodes = await run_in_threadpool(load_episodes_file, cpath)
+        rows = [
+            {
+                "id": ep.chunk_id,
+                "timestamp": ep.reference_time.isoformat() if ep.reference_time else "",
+                "speaker": ep.speaker or "",
+                "type": ep.source or "text",
+                "body": ep.text,
+            }
+            for ep in episodes
+        ]
+        return _success(
+            {
+                "path": str(cpath),
+                "episode_count": len(rows),
+                # Episodes are already chronological → first/last bound the corpus date span.
+                "first_timestamp": rows[0]["timestamp"] if rows else "",
+                "last_timestamp": rows[-1]["timestamp"] if rows else "",
+                "episodes": rows,
+            }
+        )
+    except Exception as exc:
+        log.error("knowledge eval corpus load failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
 @knowledge_router.get("/knowledge/eval/questions")
 async def eval_questions(path: str = "") -> dict[str, Any]:
     """List a corpus's question bank for the checklist (id/category/subcategory/text/gold).
@@ -1399,6 +1441,8 @@ async def eval_questions(path: str = "") -> dict[str, Any]:
                 "id": q["id"],
                 "category": q.get("category", ""),
                 "subcategory": q.get("subcategory", ""),
+                # Authored difficulty — surfaced as a chip in the question-picker checklist.
+                "difficulty": q.get("difficulty", ""),
                 "question": q["question"],
                 "requires_graph": bool(q.get("requires_graph")),
                 "expected_answer": q.get("expected_answer", ""),

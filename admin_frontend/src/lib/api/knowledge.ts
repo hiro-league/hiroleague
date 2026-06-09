@@ -439,10 +439,37 @@ export type EvalQuestionItem = {
   id: string;
   category: string;
   subcategory: string;
+  difficulty?: string; // medium/hard/very_hard — shown as a chip in the picker
   question: string;
   requires_graph: boolean;
   expected_answer?: string;
 };
+
+/** One episode (turn) in a memory-track corpus — the unit shown in the Corpus review transcript. */
+export type EvalEpisode = {
+  id: string;
+  timestamp: string; // ISO-8601 (the dated turn)
+  speaker: string;
+  type: string;
+  body: string;
+};
+
+/** A memory corpus's episodes + light meta (count + date span), for the Corpus review panel. */
+export type EvalCorpusData = {
+  path: string;
+  episode_count: number;
+  first_timestamp: string;
+  last_timestamp: string;
+  episodes: EvalEpisode[];
+};
+
+/** Load a memory corpus's episodes by its <id>.episodes.jsonl path (the Corpus review source). */
+export function getEvalCorpus(path: string): Promise<ApiResponse<EvalCorpusData>> {
+  return apiRequest<EvalCorpusData>(
+    `/knowledge/eval/corpus?path=${encodeURIComponent(path)}`,
+    { method: 'GET', timeoutMs: 15000 }
+  );
+}
 
 /** List a corpus's question bank by its <id>.questions.yaml path (the checklist source). */
 export function listEvalQuestions(

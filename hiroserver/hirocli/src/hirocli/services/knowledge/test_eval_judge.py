@@ -114,7 +114,8 @@ async def test_memory_question_wires_answer_and_judge() -> None:
     leg = row["legs"]["recall"]
     assert leg["answer"] == "Otto."  # the model answer (grounded in recalled facts)
     assert leg["mark"] == MARK_PASS  # judged against the ideal
-    assert leg["recalled"] == ["Otto is the current mascot drone"]
+    # recalled keeps structured hit dicts (temporal/source metadata), not plain strings
+    assert leg["recalled"] == [{"memory": "Otto is the current mascot drone"}]
     assert row["gold"] == "Otto"
 
 

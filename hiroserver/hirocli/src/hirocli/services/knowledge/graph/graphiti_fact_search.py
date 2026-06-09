@@ -75,8 +75,13 @@ async def search_facts_traced(
     reranker_min_score: float,
     capture: RetrievalCapture,
     trace: RetrievalTrace,
-) -> list[Any]:
-    """Run the edge pipeline, recording each stage into ``trace``; return reranked edges.
+) -> tuple[list[Any], dict[str, float | None]]:
+    """Run the edge pipeline, recording each stage into ``trace``; return reranked edges
+    AND their uuid→rerank-score map.
+
+    The score map is returned because graphiti never writes the rerank score back onto the
+    edge objects — so the caller can surface the same score the trace shows onto the recall
+    fact rows (the eval recalled-facts Score column was always blank without it).
 
     Mirrors ``graphiti_core.search.search.edge_search`` for the rerankers our recipes
     use (rrf / mmr / cross_encoder). ``query_vector`` is the already-embedded query
@@ -246,7 +251,7 @@ async def search_facts_traced(
     )
 
     capture.trace = trace
-    return final_edges
+    return final_edges, score_by_uuid
 
 
 async def _rerank_edges(

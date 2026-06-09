@@ -98,7 +98,7 @@ async def test_rehost_matches_graphiti_edge_search_rrf(monkeypatch) -> None:
     )
 
     capture = RetrievalCapture()
-    my_edges = await search_facts_traced(
+    my_edges, edge_scores = await search_facts_traced(
         SimpleNamespace(driver=object(), cross_encoder=None, embedder=None),
         "q",
         [0.1, 0.2],
@@ -113,6 +113,8 @@ async def test_rehost_matches_graphiti_edge_search_rrf(monkeypatch) -> None:
 
     assert [e.uuid for e in my_edges] == [e.uuid for e in g_edges]
     assert len(my_edges) == 2  # limit applied
+    # The score map is keyed by the returned edges' uuids (surfaced onto recall fact rows).
+    assert set(edge_scores) >= {e.uuid for e in my_edges}
 
 
 @pytest.mark.asyncio

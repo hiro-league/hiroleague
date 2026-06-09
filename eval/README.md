@@ -33,8 +33,13 @@ Bundled here:
 Each row: `id`, `question`, and **either** `expected_fragments` (lowercase substrings the scorer
 looks for) **or** `expected_kind: abstain` (negative control — declining is correct). Optional:
 `category`, `subcategory`, `requires` (`graph`/`temporal`/`world` → flips the `requires_graph` gate
-subset), and `expected_answer` (an **unscored** gold answer shown beside recalled facts in the
-memory recall inspector).
+subset), `difficulty` (`medium`/`hard`/`very_hard` — see below), and `expected_answer` (an
+**unscored** gold answer shown beside recalled facts in the memory recall inspector).
+
+`difficulty` is **optional** and **reporting-only**: it does not affect the gate. When present, the
+results panel adds a **Results by difficulty** table (pass counts per leg, bucketed by difficulty)
+next to the per-category table. Rows without it fall into an `unspecified` bucket, so mixing
+labeled and unlabeled corpora is fine.
 
 ## Running
 

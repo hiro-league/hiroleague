@@ -156,6 +156,8 @@ class QuestionResult:
     # Best graph leg vs flat, as a signed rank delta (knowledge Δ column). "0" otherwise.
     delta: str
     subcategory: str = ""
+    # Authored difficulty (medium/hard/very_hard); "" when the corpus omits it. Reporting-only.
+    difficulty: str = ""
     track: str = "knowledge"
     # The ideal answer the judge graded against (shown as "Ideal" in results).
     gold: str = ""
@@ -171,6 +173,7 @@ class QuestionResult:
             "id": self.id,
             "category": self.category,
             "subcategory": self.subcategory,
+            "difficulty": self.difficulty,
             "question": self.question,
             "requires_graph": self.requires_graph,
             "track": self.track,
@@ -201,6 +204,8 @@ class EvalSummary:
     questions: list[QuestionResult] = field(default_factory=list)
     # category → {total, pass: {leg: count}} — the per-category × N-leg table.
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # difficulty → {total, pass: {leg: count}} — same shape, bucketed by authored difficulty.
+    by_difficulty: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Cost (LLM + reranker; embeddings unpriced). Knowledge ingest cost is deferred (multi-run)
     # so ``ingest_cost_usd`` stays 0 here; ``questions_cost_usd`` = sum of per-question costs.
     questions_cost_usd: float = 0.0
@@ -219,6 +224,7 @@ class EvalSummary:
             "judged": self.judged,
             "elapsed_ms": self.elapsed_ms,
             "by_category": self.by_category,
+            "by_difficulty": self.by_difficulty,
             "questions_cost_usd": self.questions_cost_usd,
             "ingest_cost_usd": self.ingest_cost_usd,
             "total_cost_usd": self.questions_cost_usd + self.ingest_cost_usd,
@@ -281,6 +287,9 @@ def load_questions(path: Path | None = None) -> list[dict[str, Any]]:
                 "id": qid,
                 "category": str(row.get("category") or ""),
                 "subcategory": str(row.get("subcategory") or ""),
+                # Authored difficulty (medium/hard/very_hard). Optional — corpora without it
+                # fall into the "unspecified" bucket in the by_difficulty report. Reporting-only.
+                "difficulty": str(row.get("difficulty") or "").strip().lower(),
                 "question": qtext,
                 "expected_fragments": [str(f) for f in expected],
                 "requires_graph": requires_graph,
@@ -782,6 +791,7 @@ async def _memory_question(
         "id": q["id"],
         "category": q.get("category", ""),
         "subcategory": q.get("subcategory", ""),
+        "difficulty": q.get("difficulty", ""),
         "question": q["question"],
         "requires_graph": bool(q.get("requires_graph")),
         "track": "memory",
@@ -931,6 +941,22 @@ async def run_memory_eval(
                         )
                         # Ingest (graph build) cost — the remember run's folded LLM+reranker cost.
                         ingest_cost_usd = float(getattr(accumulator, "cost_usd", 0.0) or 0.0)
+                        # Stream the ingest cost the moment the remember phase ends — emitted as a
+                        # setup_progress line so the panel surfaces graph-build cost LIVE, instead of
+                        # only when the terminal `completed` summary lands at run end. The remember
+                        # phase is the priciest part and runs before any question row exists, so
+                        # without this the cost UI showed nothing during ingestion.
+                        _publish(
+                            bus,
+                            workspace_path,
+                            KNOWLEDGE_EVAL_SETUP_PROGRESS,
+                            {
+                                "run_id": rid,
+                                "phase": "remember_done",
+                                "episode_count": len(eps),
+                                "ingest_cost_usd": ingest_cost_usd,
+                            },
+                        )
                     finally:
                         sink.evict_run(ledger_run_id)
                         current_run.reset(token)
@@ -995,7 +1021,10 @@ async def run_memory_eval(
         "passing": {"recall": passing_recall},
         # No flat/graph legs → the PROCEED/PIVOT gate is undefined for the memory track.
         "gate": "n/a",
-        "by_category": category_breakdown_rows(rows, ["recall"]),
+        "by_category": field_breakdown_rows(rows, ["recall"], field="category"),
+        "by_difficulty": field_breakdown_rows(
+            rows, ["recall"], field="difficulty", fallback="unspecified"
+        ),
         "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
         # Cost (LLM + reranker; embeddings unpriced). Ingest = the remember/graph-build run;
         # questions = sum of per-question recall+answer+judge runs.
@@ -1126,6 +1155,7 @@ async def _run_one_question(
         id=q["id"],
         category=q.get("category", ""),
         subcategory=q.get("subcategory", ""),
+        difficulty=q.get("difficulty", ""),
         question=q["question"],
         requires_graph=bool(q.get("requires_graph")),
         legs=legs,
@@ -1154,17 +1184,22 @@ def _best_graph_delta_marks(marks: dict[str, str]) -> str:
     return "0"
 
 
-def category_breakdown(
-    rows: list[QuestionResult], modes: list[str]
+def field_breakdown(
+    rows: list[QuestionResult],
+    modes: list[str],
+    *,
+    field: str = "category",
+    fallback: str = "uncategorized",
 ) -> dict[str, dict[str, Any]]:
-    """Per-category × N-leg passing counts — the per-category results table.
+    """Per-``field`` × N-leg passing counts — drives the per-category / per-difficulty tables.
 
-    Shape: ``{category: {"total": int, "pass": {leg: count}}}``. Pure so tests can
-    reuse it. ``category`` empty → ``"uncategorized"``."""
+    Shape: ``{key: {"total": int, "pass": {leg: count}}}``, keyed by the named
+    ``QuestionResult`` attribute (``category`` or ``difficulty``). Pure so tests can
+    reuse it. Empty attribute → ``fallback``."""
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
-        cat = r.category or "uncategorized"
-        bucket = out.setdefault(cat, {"total": 0, "pass": {m: 0 for m in modes}})
+        key = getattr(r, field, "") or fallback
+        bucket = out.setdefault(key, {"total": 0, "pass": {m: 0 for m in modes}})
         bucket["total"] += 1
         for mode in modes:
             leg = r.legs.get(mode)
@@ -1173,17 +1208,21 @@ def category_breakdown(
     return out
 
 
-def category_breakdown_rows(
-    rows: list[dict[str, Any]], modes: list[str]
+def field_breakdown_rows(
+    rows: list[dict[str, Any]],
+    modes: list[str],
+    *,
+    field: str = "category",
+    fallback: str = "uncategorized",
 ) -> dict[str, dict[str, Any]]:
-    """Per-category × leg passing counts over **dict** rows (the memory track's payloads).
+    """Per-``field`` × leg passing counts over **dict** rows (the memory track's payloads).
 
-    Mirrors :func:`category_breakdown` but reads ``row['legs'][mode]['mark']`` from the dict
-    shape the memory runner emits. ``category`` empty → ``"uncategorized"``."""
+    Mirrors :func:`field_breakdown` but reads ``row[field]`` and ``row['legs'][mode]['mark']``
+    from the dict shape the memory runner emits. Empty value → ``fallback``."""
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
-        cat = str(r.get("category") or "") or "uncategorized"
-        bucket = out.setdefault(cat, {"total": 0, "pass": {m: 0 for m in modes}})
+        key = str(r.get(field) or "") or fallback
+        bucket = out.setdefault(key, {"total": 0, "pass": {m: 0 for m in modes}})
         bucket["total"] += 1
         legs = r.get("legs") or {}
         for mode in modes:
@@ -1235,7 +1274,8 @@ def _summarize(
         judged=judged,
         elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         questions=list(rows),
-        by_category=category_breakdown(rows, modes),
+        by_category=field_breakdown(rows, modes, field="category"),
+        by_difficulty=field_breakdown(rows, modes, field="difficulty", fallback="unspecified"),
         # LLM + reranker cost summed across questions (knowledge ingest cost deferred → 0).
         questions_cost_usd=sum(float(r.cost_usd or 0.0) for r in rows),
     )
@@ -1334,7 +1374,8 @@ __all__ = [
     "EvalSummary",
     "LegResult",
     "QuestionResult",
-    "category_breakdown",
+    "field_breakdown",
+    "field_breakdown_rows",
     "clear_eval_data",
     "collect_eval_doc_ids",
     "collect_synthetic_doc_ids",

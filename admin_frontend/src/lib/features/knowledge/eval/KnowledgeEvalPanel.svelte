@@ -19,6 +19,7 @@
     ExternalLink,
     FolderSearch,
     LoaderCircle,
+    Microscope,
     Play,
     RefreshCw,
     Settings2,
@@ -31,6 +32,8 @@
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import KnowledgeEvalTerminal from '$lib/features/knowledge/eval/KnowledgeEvalTerminal.svelte';
   import { buildActivityLines } from '$lib/features/knowledge/eval/eval-activity';
+  import GraphRunsRetrievalTraceDialog from '$lib/features/graph-runs/GraphRunsRetrievalTraceDialog.svelte';
+  import { getGraphRunRetrievalTrace, type RetrievalTraceRecord } from '$lib/api/graph-runs';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
   import type { EvalQuestionItem } from '$lib/api/knowledge';
@@ -101,6 +104,59 @@
   function categoryAllSelected(items: EvalQuestionItem[]): boolean {
     return items.length > 0 && items.every((q) => eval_.isSelected(q.id));
   }
+
+  // Difficulty buckets render as a fixed curve (easiest→hardest), not summary-dict order, so
+  // the by-difficulty table reads top-to-bottom as a difficulty ramp.
+  const DIFFICULTY_ORDER = ['medium', 'hard', 'very_hard', 'unspecified'];
+  function orderedDifficulty(
+    bd: Record<string, { total: number; pass: Record<string, number> }>
+  ): Record<string, { total: number; pass: Record<string, number> }> {
+    const rank = (k: string) => {
+      const i = DIFFICULTY_ORDER.indexOf(k);
+      return i === -1 ? DIFFICULTY_ORDER.length : i;
+    };
+    return Object.fromEntries(Object.entries(bd).sort((a, b) => rank(a[0]) - rank(b[0])));
+  }
+
+  // Difficulty chip shown next to each question in the picker. Returns null for
+  // unspecified/empty so unlabeled corpora render no chip.
+  function difficultyMeta(d: string): { label: string; cls: string } | null {
+    switch (d) {
+      case 'medium':
+        return { label: 'medium', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' };
+      case 'hard':
+        return { label: 'hard', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' };
+      case 'very_hard':
+        return { label: 'very hard', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' };
+      default:
+        return null;
+    }
+  }
+
+  // --- Corpus review (memory track) ---------------------------------------------------------
+  // Question count per category (reuses the checklist grouping) — the stats-header breakdown.
+  const categoryCounts = $derived(groups.map(([cat, items]) => [cat, items.length] as const));
+
+  // Episode timestamps are dated turns (fictional far-future dates); show the date only —
+  // the time-of-day is noise for a review-at-a-glance. ISO slice keeps the UTC date stable.
+  function fmtEpisodeDate(iso: string): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Corpus date span (first → last episode) for the stats header + collapsed summary.
+  const corpusSpan = $derived.by(() => {
+    const m = eval_.corpusMeta;
+    if (!m || !m.first_timestamp) return '—';
+    const a = fmtEpisodeDate(m.first_timestamp);
+    const b = fmtEpisodeDate(m.last_timestamp);
+    return a === b ? a : `${a} → ${b}`;
+  });
+  const corpusSummary = $derived(
+    eval_.corpusEpisodes.length > 0 ? `${eval_.corpusEpisodes.length} episodes · ${corpusSpan}` : ''
+  );
 
   // The live activity feed lines (built once here, shared with the terminal and the
   // collapsed Activity header). `currentActivityLine` is the latest line — shown in
@@ -228,8 +284,28 @@
     return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
   }
   const questionsCost = $derived(eval_.rows.reduce((s, r) => s + (r.cost_usd || 0), 0));
-  const ingestCost = $derived(eval_.summary?.ingest_cost_usd ?? null);
+  // Ingest (graph-build) cost streams live: the memory runner emits a 'remember_done' setup event
+  // carrying the folded ingest cost the moment ingestion ends — so it shows BEFORE the terminal
+  // summary (and before the first question row). Fall back to that live value until the summary lands.
+  const ingestCostLive = $derived.by(() => {
+    for (let i = eval_.setupEvents.length - 1; i >= 0; i--) {
+      const c = eval_.setupEvents[i].ingest_cost_usd;
+      if (typeof c === 'number') return c;
+    }
+    return null;
+  });
+  const ingestCost = $derived(eval_.summary?.ingest_cost_usd ?? ingestCostLive);
   const totalCost = $derived(eval_.summary?.total_cost_usd ?? questionsCost + (ingestCost ?? 0));
+  // "building…" only while ingestion is genuinely in flight: a remember phase has started but its
+  // cost isn't known yet AND no question row exists yet (questions only run after remember). Once
+  // rows stream — or the run isn't doing a rebuild — fall back to "—", never a stuck "building…".
+  const ingestBuilding = $derived(
+    isMemory &&
+      ingestCost == null &&
+      eval_.rows.length === 0 &&
+      (eval_.status === 'starting' || eval_.status === 'running') &&
+      eval_.setupEvents.some((e) => e.phase === 'remember')
+  );
 
   const canRun = $derived(
     eval_.status === 'idle' ||
@@ -261,8 +337,35 @@
   const legColumns = $derived(eval_.runModes);
   // Δ (best graph leg vs flat) only makes sense on the knowledge track (multi-leg compare).
   const showDelta = $derived(!isMemory);
-  // Full-width row colspan: #, Question, Ideal, <N legs>, [Δ], Links.
-  const resultsColspan = $derived(3 + legColumns.length + (showDelta ? 1 : 0) + 1);
+  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, <N legs>, [Δ], Links.
+  const resultsColspan = $derived(5 + legColumns.length + (showDelta ? 1 : 0) + 1);
+
+  // Graphiti retrieval trace — opens the SAME rich pipeline-trace dialog the Graph Runs page uses
+  // (candidate→rank→temporal stage tables, with scores), loaded by the leg's ledger run_id. Only
+  // graph legs have one (memory `recall`, knowledge `graphiti`); the flat leg has no graph search.
+  let activeTrace = $state<RetrievalTraceRecord | null>(null);
+  let traceLoadingRunId = $state<string | null>(null);
+  let traceError = $state<string | null>(null);
+  const traceableLeg = (mode: string): boolean => mode === 'recall' || mode === 'graphiti';
+
+  async function openTrace(runId: string) {
+    traceError = null;
+    traceLoadingRunId = runId;
+    try {
+      const res = await getGraphRunRetrievalTrace(runId);
+      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      if (traces.length > 0) {
+        // A recall is one fact search → one trace; take the latest if a run held several.
+        activeTrace = traces[traces.length - 1];
+      } else {
+        traceError = 'No retrieval trace recorded for this run (graph tracing may have been off).';
+      }
+    } catch (err) {
+      traceError = err instanceof Error ? err.message : 'Failed to load retrieval trace.';
+    } finally {
+      traceLoadingRunId = null;
+    }
+  }
 
   // One-line settings summary for the collapsed Settings card header.
   const settingsSummary = $derived.by(() => {
@@ -482,6 +585,70 @@
     </div>
   {/if}
 
+  <!-- Corpus review (memory track) — a human-readable look at the turn corpus the questions
+       probe: stats header (episode count / date span / question count + per-category breakdown)
+       then the full episode transcript. Collapsed by default; sits above the questions. -->
+  {#if isMemory && eval_.selectedCorpus}
+    <KnowledgeCollapsibleSectionCard
+      title="Corpus"
+      bodyId="knowledge-eval-corpus"
+      defaultExpanded={false}
+      summary={corpusSummary}
+    >
+      {#snippet headerActions()}
+        {#if eval_.corpusLoading}
+          <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
+        {/if}
+      {/snippet}
+      {#if eval_.corpusError}
+        <p class="text-xs text-destructive">{eval_.corpusError}</p>
+      {:else if eval_.corpusEpisodes.length === 0 && !eval_.corpusLoading}
+        <p class="text-xs text-muted-foreground">No episodes loaded.</p>
+      {:else}
+        <!-- Stats header: corpus size + span + question count. -->
+        <div
+          class="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs"
+        >
+          <span class="text-muted-foreground">
+            Episodes: <span class="font-mono text-foreground">{eval_.corpusMeta?.episode_count ?? 0}</span>
+          </span>
+          <span class="text-muted-foreground">
+            Span: <span class="font-mono text-foreground">{corpusSpan}</span>
+          </span>
+          <span class="text-muted-foreground">
+            Questions: <span class="font-mono text-foreground">{eval_.questions.length}</span>
+          </span>
+        </div>
+        <!-- Per-category question breakdown (chips). -->
+        {#if categoryCounts.length > 0}
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Questions by category
+            </span>
+            {#each categoryCounts as [cat, n] (cat)}
+              <Badge variant="secondary" class="font-sans text-xs">
+                {cat} <span class="ml-1 font-mono">{n}</span>
+              </Badge>
+            {/each}
+          </div>
+        {/if}
+        <!-- Episode transcript — dated turns in chronological order. -->
+        <div class="max-h-96 overflow-y-auto rounded-md border">
+          {#each eval_.corpusEpisodes as ep (ep.id)}
+            <div class="border-t px-3 py-2 first:border-t-0">
+              <div class="flex flex-wrap items-center gap-2 font-sans text-[11px] text-muted-foreground">
+                <span class="font-mono">{ep.id}</span>
+                <span class="font-mono tabular-nums">{fmtEpisodeDate(ep.timestamp)}</span>
+                {#if ep.speaker}<Badge variant="outline" class="font-sans normal-case">{ep.speaker}</Badge>{/if}
+              </div>
+              <p class="mt-1 whitespace-pre-wrap font-sans text-sm leading-6">{ep.body}</p>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </KnowledgeCollapsibleSectionCard>
+  {/if}
+
   <!-- Questions section — pick the questions to run (required; no implicit "run all"). -->
   {#if eval_.selectedCorpus}
     <KnowledgeCollapsibleSectionCard
@@ -546,6 +713,7 @@
               </label>
               <div class="grid gap-0.5 pl-5">
                 {#each items as q (q.id)}
+                  {@const dm = difficultyMeta(q.difficulty ?? '')}
                   <label class="flex cursor-pointer select-none items-start gap-2 py-0.5 font-sans text-sm">
                     <input
                       type="checkbox"
@@ -555,6 +723,13 @@
                       onchange={() => eval_.toggleQuestion(q.id)}
                     />
                     <span class="min-w-0">
+                      {#if dm}
+                        <span
+                          class="mr-1 inline-block rounded px-1 py-px align-[1px] text-[10px] font-medium uppercase tracking-wide {dm.cls}"
+                        >
+                          {dm.label}
+                        </span>
+                      {/if}
                       {q.question}
                       {#if q.subcategory}
                         <span class="text-xs text-muted-foreground"> · {q.subcategory}</span>
@@ -583,6 +758,30 @@
     </KnowledgeCollapsibleSectionCard>
   {/if}
 
+  <!-- Cost — its own strip (NOT nested in Results) so it shows during ingestion too: the memory
+       remember/graph-build phase is the priciest part and runs before any question row exists, so
+       a Results-gated cost box reported nothing while ingesting. Ingest cost streams in on the
+       'remember_done' setup event; questions accumulate live; total folds both (LLM + reranker;
+       embeddings unpriced). Knowledge ingest cost is deferred (multi-run), shown as “—”. -->
+  {#if totalCost > 0 || isBusy}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
+      <span class="font-semibold uppercase tracking-wide text-muted-foreground">Cost</span>
+      <span class="font-mono text-foreground">≈ {fmtCost(totalCost)}</span>
+      <span class="text-muted-foreground">
+        (ingest {isMemory
+          ? ingestCost != null
+            ? fmtCost(ingestCost)
+            : ingestBuilding
+              ? 'building…'
+              : '—'
+          : '—'} · Q {fmtCost(questionsCost)})
+      </span>
+      <span class="ml-auto text-[11px] text-muted-foreground">
+        LLM + reranker · embeddings not priced
+      </span>
+    </div>
+  {/if}
+
   <!-- Results — unified across tracks: Question, Ideal, Model answer(s) at a glance;
        fold for recalled facts / judge reason / full answers / run links. -->
   {#if eval_.rows.length > 0 || eval_.summary}
@@ -592,20 +791,6 @@
       defaultExpanded={true}
       summary={resultsSummary}
     >
-      <!-- Total cost — accumulates live as questions land (LLM + reranker; embeddings unpriced).
-           Knowledge ingest cost is deferred (multi-run), shown as “—”. -->
-      {#if totalCost > 0 || isBusy}
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
-          <span class="font-semibold uppercase tracking-wide text-muted-foreground">Cost</span>
-          <span class="font-mono text-foreground">≈ {fmtCost(totalCost)}</span>
-          <span class="text-muted-foreground">
-            (ingest {isMemory ? fmtCost(ingestCost) : '—'} · Q {fmtCost(questionsCost)})
-          </span>
-          <span class="ml-auto text-[11px] text-muted-foreground">
-            LLM + reranker · embeddings not priced
-          </span>
-        </div>
-      {/if}
       {#if eval_.rows.length > 0 || eval_.status === 'running'}
         {@render resultsTable()}
       {/if}
@@ -613,11 +798,36 @@
         {@render summaryCard(eval_.summary)}
       {/if}
       {#if eval_.summary?.by_category && Object.keys(eval_.summary.by_category).length > 0}
-        {@render categoryBreakdown(eval_.summary.by_category, eval_.summary.modes)}
+        <p class="mb-1 mt-3 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Results by category
+        </p>
+        {@render breakdownTable(eval_.summary.by_category, eval_.summary.modes, 'Category')}
+      {/if}
+      {#if eval_.summary?.by_difficulty && Object.keys(eval_.summary.by_difficulty).length > 0}
+        <p class="mb-1 mt-3 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Results by difficulty
+        </p>
+        {@render breakdownTable(
+          orderedDifficulty(eval_.summary.by_difficulty),
+          eval_.summary.modes,
+          'Difficulty'
+        )}
       {/if}
     </KnowledgeCollapsibleSectionCard>
   {/if}
 </section>
+
+<!-- Graphiti retrieval trace dialog — reuses the Graph Runs pipeline-trace viewer (per-stage
+     candidate→rank→temporal tables with scores), opened by a leg's recall run_id. -->
+{#if traceError}
+  <div
+    class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive"
+    role="alert"
+  >
+    {traceError}
+  </div>
+{/if}
+<GraphRunsRetrievalTraceDialog trace={activeTrace} onClose={() => (activeTrace = null)} />
 
 <!-- Unified results table: Question, Ideal, per-leg [mark + model answer]; fold for details. -->
 {#snippet resultsTable()}
@@ -631,6 +841,8 @@
         <tr>
           <th class="px-2 py-1.5 text-left">#</th>
           <th class="px-2 py-1.5 text-left">Question</th>
+          <th class="px-2 py-1.5 text-left">Type</th>
+          <th class="px-2 py-1.5 text-left">Difficulty</th>
           <th class="px-2 py-1.5 text-left">Ideal</th>
           {#each legColumns as mode (mode)}
             <th class="px-2 py-1.5 text-left">{legLabel(mode)} answer</th>
@@ -643,7 +855,7 @@
         {#each eval_.rows as r (r.id)}
           <tr class="border-t align-top">
             <td class="px-2 py-1.5 font-mono tabular-nums text-xs text-muted-foreground">{r.index + 1}/{r.total}</td>
-            <td class="max-w-[22rem] px-2 py-1.5">
+            <td class="px-2 py-1.5">
               <button
                 type="button"
                 class="flex w-full items-start gap-1.5 text-left hover:text-primary"
@@ -659,11 +871,26 @@
                 <span class="line-clamp-2">{r.question}</span>
               </button>
             </td>
-            <td class="max-w-[16rem] px-2 py-1.5 text-xs text-muted-foreground">
+            <!-- Type = the question's category (e.g. direct_recall, temporal). -->
+            <td class="px-2 py-1.5 text-xs text-muted-foreground">{r.category || '—'}</td>
+            <!-- Difficulty chip (authored medium/hard/very_hard); blank corpora show a dash. -->
+            <td class="px-2 py-1.5">
+              {#if difficultyMeta(r.difficulty)}
+                {@const dm = difficultyMeta(r.difficulty)}
+                <span
+                  class="inline-block rounded px-1.5 py-px text-[10px] font-medium uppercase tracking-wide {dm?.cls}"
+                >
+                  {dm?.label}
+                </span>
+              {:else}
+                <span class="text-xs text-muted-foreground">—</span>
+              {/if}
+            </td>
+            <td class="px-2 py-1.5 text-xs text-muted-foreground">
               <span class="line-clamp-2">{r.gold || '—'}</span>
             </td>
             {#each legColumns as mode (mode)}
-              <td class="max-w-[20rem] px-2 py-1.5">
+              <td class="px-2 py-1.5">
                 {#if r.legs[mode]}
                   {@const leg = r.legs[mode]}
                   <div class="flex items-start gap-1.5">
@@ -681,9 +908,27 @@
               </td>
             {/if}
             <td class="px-2 py-1.5 text-right">
-              <div class="inline-flex gap-1">
+              <div class="inline-flex flex-wrap justify-end gap-1">
                 {#each legColumns as mode (mode)}
                   {#if r.legs[mode]?.run_id}
+                    {#if traceableLeg(mode)}
+                      <!-- Graphiti retrieval trace: opens the rich pipeline-trace dialog (per-stage
+                           candidate→rank→temporal with scores) for this leg's recall run. -->
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5 disabled:opacity-50"
+                        disabled={traceLoadingRunId !== null}
+                        onclick={() => void openTrace(r.legs[mode].run_id!)}
+                        title="{legLabel(mode)} retrieval trace"
+                      >
+                        {#if traceLoadingRunId === r.legs[mode].run_id}
+                          <LoaderCircle size={10} class="animate-spin" aria-hidden="true" />
+                        {:else}
+                          <Microscope size={10} aria-hidden="true" />
+                        {/if}
+                        trace
+                      </button>
+                    {/if}
                     <a
                       class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
                       href={graphRunPageUrl(r.legs[mode].run_id!)}
@@ -706,11 +951,13 @@
                     <span class="text-muted-foreground">{r.subcategory}</span>
                   </div>
                 {/if}
-                <div class="grid gap-3 md:grid-cols-2">
+                <!-- Single column for the memory recall leg (full width); side-by-side only when
+                     there are multiple legs to compare (knowledge flat vs graphiti). -->
+                <div class="grid gap-4 {legColumns.length > 1 ? 'md:grid-cols-2' : ''}">
                   {#each legColumns as mode (mode)}
                     {#if r.legs[mode]}
                       {@const leg = r.legs[mode]}
-                      <div class="grid content-start gap-2 rounded-md border bg-background p-2.5">
+                      <div class="grid content-start gap-2">
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-sans text-xs font-semibold">{legLabel(mode)}</span>
                           <Badge variant={markVariant(leg.mark)} class="font-mono">{leg.mark || '—'}</Badge>
@@ -718,14 +965,34 @@
                           {#if leg.cost_usd}
                             <span class="font-mono text-xs tabular-nums text-muted-foreground">{fmtCost(leg.cost_usd)}</span>
                           {/if}
+                          {#if traceableLeg(mode) && leg.run_id}
+                            <button
+                              type="button"
+                              class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5 disabled:opacity-50"
+                              disabled={traceLoadingRunId !== null}
+                              onclick={() => void openTrace(leg.run_id!)}
+                              title="Open the retrieval pipeline trace"
+                            >
+                              {#if traceLoadingRunId === leg.run_id}
+                                <LoaderCircle size={10} class="animate-spin" aria-hidden="true" />
+                              {:else}
+                                <Microscope size={10} aria-hidden="true" />
+                              {/if}
+                              Retrieval trace
+                            </button>
+                          {/if}
                         </div>
-                        <!-- Compact judge line (the verdict mark is already in the header above). -->
+                        <!-- Judge verdict — OUTSIDE the recalled-facts card below, so it reads as the
+                             leg's overall grade, not a row of the fact table. -->
                         {#if leg.reason}
-                          <p class="text-xs leading-5 text-muted-foreground">
+                          <p class="rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
                             <span class="font-semibold text-foreground">Judge:</span> {leg.reason}
                           </p>
                         {/if}
-                        {@render recalledTable(leg.recalled ?? [])}
+                        <!-- Recalled-facts table in its own card (the table section). -->
+                        <div class="rounded-md border bg-background p-2.5">
+                          {@render recalledTable(leg.recalled ?? [])}
+                        </div>
                       </div>
                     {/if}
                   {/each}
@@ -853,13 +1120,18 @@
   </div>
 {/snippet}
 
-<!-- Per-category x leg passing counts (judge marks). -->
-{#snippet categoryBreakdown(bc: Record<string, { total: number; pass: Record<string, number> }>, cols: string[])}
+<!-- Per-bucket x leg passing counts (judge marks). ``header`` labels the first column
+     (Category or Difficulty); ``cols`` are the legs. -->
+{#snippet breakdownTable(
+  bc: Record<string, { total: number; pass: Record<string, number> }>,
+  cols: string[],
+  header: string
+)}
   <div class="overflow-x-auto rounded-md border">
     <table class="w-full border-collapse font-sans text-sm">
       <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
         <tr>
-          <th class="px-2 py-1.5 text-left">Category</th>
+          <th class="px-2 py-1.5 text-left">{header}</th>
           {#each cols as mode (mode)}<th class="px-2 py-1.5 text-center">{legLabel(mode)}</th>{/each}
         </tr>
       </thead>

@@ -238,7 +238,7 @@ async def _traced_search(
     sim_min_score: float,
     k_hop: int,
     recipe: str,
-) -> tuple[list[Any], list[Any], list[Any]]:
+) -> tuple[list[Any], list[Any], list[Any], dict[str, float | None]]:
     """Run the re-hosted, per-stage-traced pipeline for every configured lane.
 
     Replaces ``graphiti.search_()`` WHEN a capture is active so we record each lane's
@@ -288,8 +288,9 @@ async def _traced_search(
         )
     )
 
-    # Edge (fact) lane — always present.
-    edges = await search_facts_traced(
+    # Edge (fact) lane — always present. ``edge_scores`` (uuid→rerank score) is threaded back so
+    # recall fact rows can show the same score the trace does (graphiti leaves edge.score unset).
+    edges, edge_scores = await search_facts_traced(
         clients,
         query,
         query_vector,
@@ -332,7 +333,7 @@ async def _traced_search(
         )
 
     capture.trace = trace
-    return edges, nodes, episodes
+    return edges, nodes, episodes, edge_scores
 
 
 async def search_chunk_ids(
@@ -390,9 +391,12 @@ async def search_chunk_ids(
     use_trace = capture is not None
     nodes_result: list[Any] = []
     episodes_result: list[Any] = []
+    # uuid→rerank score from the traced fact pipeline (empty on the stock ``search_`` path);
+    # the fact loop prefers this over edge.score, which graphiti leaves unset.
+    edge_scores: dict[str, float | None] = {}
     try:
         if use_trace:
-            edges, nodes_result, episodes_result = await _traced_search(
+            edges, nodes_result, episodes_result, edge_scores = await _traced_search(
                 graphiti,
                 q,
                 group_id=group_id,
@@ -437,7 +441,10 @@ async def search_chunk_ids(
         source_uuid = str(getattr(edge, "source_node_uuid", "") or "")
         target_uuid = str(getattr(edge, "target_node_uuid", "") or "")
         edge_uuid = str(getattr(edge, "uuid", "") or "")
-        raw_score = getattr(edge, "score", None)
+        # Prefer the threaded rerank score (traced path) — graphiti never writes it back onto
+        # the edge, so the recalled-facts Score column was always blank. Fall back to edge.score
+        # for the stock path (where it stays None today, but keep the read for forward-compat).
+        raw_score = edge_scores.get(edge_uuid, getattr(edge, "score", None))
         score = float(raw_score) if isinstance(raw_score, (int, float)) else None
         # Ranked list keeps a bounded prefix incl. superseded (marked) for the ledger.
         if fact and len(ranked) < 8:

@@ -85,6 +85,7 @@ export type EvalQuestionPayload = {
   id: string;
   category: string;
   subcategory?: string;
+  difficulty?: string; // authored difficulty (medium/hard/very_hard); '' when the corpus omits it
   question: string;
   requires_graph: boolean;
   track?: 'knowledge' | 'memory';
@@ -113,6 +114,8 @@ export type EvalCompletedPayload = {
   requires_graph_total?: number;
   requires_graph_passing?: Record<string, number>;
   by_category?: Record<string, EvalCategoryStat>;
+  // Same shape as by_category, bucketed by authored difficulty (medium/hard/very_hard/unspecified).
+  by_difficulty?: Record<string, EvalCategoryStat>;
   // Memory track.
   remembered_turns?: number;
   recalled_for?: number;
@@ -139,7 +142,7 @@ export type EvalCancelledPayload = {
  *  events) so the live terminal can show fine-grained ingest/graph-build progress. */
 export type EvalSetupProgressPayload = {
   run_id?: string;
-  phase: 'ingest_synthetic' | 'graph_build' | 'build_graph' | 'remember';
+  phase: 'ingest_synthetic' | 'graph_build' | 'build_graph' | 'remember' | 'remember_done';
   file_count?: number;
   episode_count?: number;
   // Per-episode granularity (absent on the coarse phase-start events).
@@ -147,6 +150,9 @@ export type EvalSetupProgressPayload = {
   total?: number;
   title?: string;
   snippet?: string;
+  // Folded ingest (graph-build) cost in USD — set on the 'remember_done' line so the panel
+  // shows ingestion cost LIVE, before the terminal `completed` summary arrives.
+  ingest_cost_usd?: number;
 };
 
 export type EvalEventHandlers = {
