@@ -58,6 +58,14 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "credential_env_keys": ["GOOGLE_API_KEY"],
                 "metadata_updated_at": "2026-01-01",
             },
+            {
+                "id": "deepseek",
+                "display_name": "DeepSeek",
+                "hosting": "cloud",
+                "credential_env_keys": ["DEEPSEEK_API_KEY"],
+                "default_base_url": "https://api.deepseek.com",
+                "metadata_updated_at": "2026-01-01",
+            },
         ],
         "models": [
             {
@@ -75,6 +83,14 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "model_kind": "chat",
                 "model_class": "balanced",
                 "features": ["reasoning"],
+            },
+            {
+                "id": "deepseek:deepseek-v4-flash",
+                "provider_id": "deepseek",
+                "display_name": "DeepSeek V4 Flash",
+                "model_kind": "chat",
+                "model_class": "fast",
+                "features": ["tools", "structured_output", "reasoning"],
             },
             {
                 "id": "openai:text-embedding-3-small",
@@ -152,6 +168,53 @@ def test_google_thinking_level_maps_for_gemini_3(
     assert model.model == "gemini-3-flash-preview"
     assert model.thinking_level == "low"
     assert model.max_output_tokens == 8192
+
+
+def test_deepseek_thinking_enables_reasoning_effort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("deepseek", "ds-test")
+
+    model = create_chat_model(
+        "deepseek:deepseek-v4-flash",
+        workspace_path=tmp_path,
+        credential_store=store,
+        temperature=0.7,
+        max_tokens=4096,
+        thinking="high",
+    )
+
+    assert model.model_name == "deepseek-v4-flash"
+    assert str(model.api_base).startswith("https://api.deepseek.com")
+    # high → "max"; thinking enabled and temperature NOT sent (DeepSeek ignores it in thinking mode).
+    assert model.reasoning_effort == "max"
+    assert model.extra_body == {"thinking": {"type": "enabled"}}
+
+
+def test_deepseek_off_disables_thinking_and_keeps_temperature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("deepseek", "ds-test")
+
+    model = create_chat_model(
+        "deepseek:deepseek-v4-flash",
+        workspace_path=tmp_path,
+        credential_store=store,
+        temperature=0.2,
+        max_tokens=1024,
+        thinking="off",
+    )
+
+    # Non-thinking mode: temperature honored, thinking explicitly disabled, no effort.
+    assert model.temperature == 0.2
+    assert model.extra_body == {"thinking": {"type": "disabled"}}
+    assert model.reasoning_effort is None
 
 
 def test_create_embedding_model_openai(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

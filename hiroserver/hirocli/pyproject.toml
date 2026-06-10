@@ -42,6 +42,7 @@ dependencies = [
     "langchain-openai>=0.3",
     "langchain-anthropic>=1.4",
     "langchain-google-genai>=4.2",
+    "langchain-deepseek>=1.0",
     "langchain-ollama>=1.0.1",
     "langchain-community>=0.3",
     # Qdrant: vector store for the knowledge passage layer (dense + BM25 hybrid).

@@ -5,6 +5,19 @@
 
 > **Editing mintdocs?** Before adding or changing any documentation under `../hiro-docs/mintdocs/`, read [mintdocs/AGENTS.md](../hiro-docs/mintdocs/AGENTS.md) and follow its rules (folder structure, style, and especially the **Diagrams** rule — mermaid wrapped in `<DiagramViewer>` with `actions={false}`).
 
+# Conventions
+
+## Adding a `preferences.json` field
+
+A new preference is not done when the backend model has it — it must be **representable and editable in the Preferences admin UI**, and it must actually **persist on Save**. Do the whole round-trip, in order:
+
+1. **Backend model** — add the field to the right model in `hiroserver/hirocli/src/hirocli/domain/preferences.py` (with `Field(...)` bounds/default). The PATCH endpoint is **schema-driven** (`preferences_runtime._set_path` walks the pydantic model), so a new field becomes a valid write path automatically — no backend allow-list to update.
+2. **Frontend type + default** — add it to the matching type **and** the default object in `admin_frontend/src/lib/api/preferences.ts`.
+3. **UI control** — add an input bound to `ctrl.draft.<section>.<field>` in the correct `admin_frontend/src/lib/features/preferences/sections/*.svelte` section (with `oninput={ctrl.markDirty}`). **If you're unsure which section/tab a field belongs in, ask the user — do not guess.**
+4. **⚠️ Save enumeration (the easy one to miss)** — add an `add('<section>.<field>', baseline…, draft…)` line in `admin_frontend/src/lib/features/preferences/state/preferences-edits.ts`. `editsForSave` only sends the paths it **explicitly enumerates**. A field that renders and binds but is missing here will appear editable, then **silently fail to save** and snap back on reload — with no error. Always verify this step.
+
+Run `npm run check` (admin_frontend) and the preferences tests after, and remember a backend field change needs a **server restart** to take effect.
+
 # Architecture Documentation Index
 
 This mirrors the `Architecture` tab in `../hiro-docs/mintdocs/docs.json`; use it to choose the right document before making architecture-sensitive changes.

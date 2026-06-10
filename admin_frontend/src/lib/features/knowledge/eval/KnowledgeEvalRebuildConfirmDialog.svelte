@@ -1,8 +1,8 @@
 <!--
-  Confirm dialog shown when "Run eval" is clicked with "Rebuild graph" checked on a
-  corpus that ALREADY has a graph. Rebuilding wipes the existing graph and re-ingests
-  from scratch (LLM + embedder cost), so the run is gated behind an explicit confirm.
-  Mirrors KnowledgeBrowseRemoveGraphDialog (bits-ui Dialog + destructive confirm).
+  Confirm dialog shown when "Run" is clicked with a graph-WIPING option checked on a corpus that
+  ALREADY has a graph — memory "Clear graph first", or knowledge "Rebuild graph" (which wipes on
+  re-ingest). The wipe is destructive and costs LLM + embedder to rebuild, so it's gated behind an
+  explicit confirm. Mirrors KnowledgeBrowseRemoveGraphDialog (bits-ui Dialog + destructive confirm).
 -->
 <script lang="ts">
   import Button from '$lib/components/ui/button.svelte';
@@ -18,24 +18,29 @@
 
   let { open = $bindable(false), track, corpusName, onConfirm }: Props = $props();
 
-  // Memory rebuilds re-remember the turn corpus; knowledge rebuilds re-ingest the entity graph.
-  const what = $derived(track === 'memory' ? 'memory graph' : 'entity graph');
+  const isMemory = $derived(track === 'memory');
+  const what = $derived(isMemory ? 'memory graph' : 'entity graph');
+  // The checkbox that triggered this confirm — its label + the verb differ per track.
+  const toggle = $derived(isMemory ? 'Clear graph first' : 'Rebuild graph');
+  const verb = $derived(isMemory ? 'Clear' : 'Rebuild');
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
-      <Dialog.Title class="break-words">Rebuild graph for “{corpusName}”?</Dialog.Title>
+      <Dialog.Title class="break-words">{verb} graph for “{corpusName}”?</Dialog.Title>
       <Dialog.Description>
-        This corpus already has a {what}. Running with “Rebuild graph” on will
-        <strong>wipe the existing graph</strong> and rebuild it from scratch — incurring LLM and
-        embedder cost. To reuse the existing graph instead, cancel and uncheck “Rebuild graph”.
+        This corpus already has a {what}. Running with “{toggle}” on will
+        <strong>wipe the existing graph</strong> before {isMemory ? 'remembering' : 'rebuilding'} —
+        incurring LLM and embedder cost to rebuild. {isMemory
+          ? 'To APPEND another batch to the existing graph instead, cancel and uncheck “Clear graph first”.'
+          : 'To reuse the existing graph instead, cancel and uncheck “Rebuild graph”.'}
       </Dialog.Description>
     </Dialog.Header>
 
     <Dialog.Footer>
       <Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
-      <Button variant="destructive" onclick={() => onConfirm()}>Rebuild &amp; run</Button>
+      <Button variant="destructive" onclick={() => onConfirm()}>{verb} &amp; run</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

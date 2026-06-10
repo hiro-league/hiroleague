@@ -154,6 +154,12 @@ export type EvalSetupProgressPayload = {
   // Per-episode granularity (absent on the coarse phase-start events).
   index?: number;
   total?: number;
+  // Memory remember phase — ABSOLUTE 1-based episode numbers so the activity shows the real
+  // episode ("episode 11"), not a window-relative counter. ``episode_no`` is the current turn;
+  // ``from``/``to`` are the batch's first/last episode (on the phase-start line).
+  episode_no?: number;
+  from?: number;
+  to?: number;
   title?: string;
   snippet?: string;
   // Folded ingest (graph-build) cost in USD — set on the 'remember_done' line so the panel

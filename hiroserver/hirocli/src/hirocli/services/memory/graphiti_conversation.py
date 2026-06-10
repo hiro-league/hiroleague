@@ -130,6 +130,7 @@ class GraphitiConversationMemory:
         metadata: dict[str, Any] | None = None,
         ledger_sink: "LedgerSink | None" = None,
         trace_label: str | None = None,
+        rebuild_fts: bool = True,
     ) -> MemoryAddResult:
         """Remember the USER half of a turn (decision D2). Returns the facts Graphiti
         learned this turn as ``stored_count`` (facts-as-memory).
@@ -139,7 +140,13 @@ class GraphitiConversationMemory:
         chat turn already set ``current_run``, those rows NEST under the active ``memory_out``
         node (the caller sets ``current_substep``) and carry the priced extraction tokens.
         ``usage`` is therefore ``None`` here — token accounting lives on those sub-rows, not
-        on a separate ``MemoryUsage`` (per the domain contract)."""
+        on a separate ``MemoryUsage`` (per the domain contract).
+
+        ``rebuild_fts`` (default True) rebuilds the Kuzu keyword index after this turn so the fact
+        is immediately searchable — the right default for live chat (one turn, then recall). A
+        BULK remember loop passes False per turn (avoiding a Kuzu checkpoint per episode, which
+        deadlocks against a concurrent graph read) and calls :meth:`flush_search_index` once at
+        the end."""
         text = str(content or "").strip()
         if not text:
             return MemoryAddResult(usage=None, stored_count=0)
@@ -169,6 +176,7 @@ class GraphitiConversationMemory:
             ledger_sink=ledger_sink,
             event_sink=self._event_sink,  # live viz: stream new facts to the Graph tab
             trace_label=trace_label,  # e.g. graph_ingest_3 for a numbered memory-eval remember turn
+            rebuild_fts=rebuild_fts,  # bulk remember defers this → one rebuild at batch end
         )
         stored = int(getattr(stats, "edges_total", 0) or 0)
         log.info(
@@ -177,6 +185,12 @@ class GraphitiConversationMemory:
             group,
         )
         return MemoryAddResult(usage=None, stored_count=stored)
+
+    async def flush_search_index(self) -> None:
+        """Rebuild the keyword (FTS) index once — call after a bulk remember that added turns with
+        ``rebuild_fts=False``, so the deferred per-episode rebuilds collapse into a single Kuzu
+        checkpoint. Cheap no-op on non-Kuzu backends."""
+        await self._graph.rebuild_search_index()
 
     async def search(
         self,

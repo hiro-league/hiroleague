@@ -24,6 +24,7 @@
     CircleSlash,
     CircleX,
     Copy,
+    Download,
     ExternalLink,
     FolderSearch,
     LoaderCircle,
@@ -54,7 +55,7 @@
   } from '$lib/api/graph-runs';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
-  import type { EvalQuestionItem } from '$lib/api/knowledge';
+  import { exportEvalResultsLocomo, type EvalQuestionItem } from '$lib/api/knowledge';
   import type { EvalCompletedPayload, RecalledFact } from '$lib/features/knowledge/shared/knowledge-events';
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import {
@@ -276,6 +277,26 @@
     eval_.corpusEpisodes.length > 0 ? `${eval_.corpusEpisodes.length} episodes · ${corpusSpan}` : ''
   );
 
+  // Ingested-episode readout for the Corpus header — which turns are in the graph. Stored spans
+  // are 0-based inclusive; displayed +1 as 1-based episode numbers to match the "Episodes From..To"
+  // box (so "11–30" in the box reads as "11–30" here). Gaps stay visible so a missed range shows.
+  // "not ingested yet" until the first ingest batch lands; resets after a graph wipe.
+  const ingestedLabel = $derived.by(() => {
+    const ing = eval_.ingested;
+    if (!ing || ing.count === 0) return 'not ingested yet';
+    const spans = ing.ranges
+      .map(([s, e]) => (s === e ? `${s + 1}` : `${s + 1}–${e + 1}`))
+      .join(', ');
+    const total = eval_.corpusMeta?.episode_count ?? 0;
+    const totalStr = total > 0 ? `/${total}` : '';
+    const batchStr = ing.batches > 1 ? ` · ${ing.batches} batches` : '';
+    return `ingested ${spans} · ${ing.count}${totalStr} eps${batchStr}`;
+  });
+  // Header line for the Corpus card: episode stats + ingested progress.
+  const corpusHeaderSummary = $derived(
+    corpusSummary ? `${corpusSummary} · ${ingestedLabel}` : ingestedLabel
+  );
+
   // Episode search lives on the Corpus stats line (panel-owned, bound into EvalCorpusReview).
   let corpusSearch = $state('');
   const corpusMatchCount = $derived.by(() => {
@@ -412,9 +433,12 @@
     return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
   }
   const questionsCost = $derived(eval_.rows.reduce((s, r) => s + (r.cost_usd || 0), 0));
-  // Ingest (graph-build) cost streams live: the memory runner emits a 'remember_done' setup event
-  // carrying the folded ingest cost the moment ingestion ends — so it shows BEFORE the terminal
-  // summary (and before the first question row). Fall back to that live value until the summary lands.
+  // CUMULATIVE per-corpus ingest spend (persisted in the ingested-ranges store; survives reload).
+  // This is the source of truth when idle — the only place ingest cost lives across runs.
+  const ingestCostCumulative = $derived(eval_.ingested?.cost_usd ?? 0);
+  // Ingest (graph-build) cost also streams live: the memory runner emits a 'remember_done' setup
+  // event carrying THIS batch's folded ingest cost the moment ingestion ends — before the terminal
+  // summary and before the first question row — so the strip shows progress mid-run.
   const ingestCostLive = $derived.by(() => {
     for (let i = eval_.setupEvents.length - 1; i >= 0; i--) {
       const c = eval_.setupEvents[i].ingest_cost_usd;
@@ -422,8 +446,16 @@
     }
     return null;
   });
-  const ingestCost = $derived(eval_.summary?.ingest_cost_usd ?? ingestCostLive);
-  const totalCost = $derived(eval_.summary?.total_cost_usd ?? questionsCost + (ingestCost ?? 0));
+  // Displayed ingest cost: while a run is in flight, the persisted cumulative + this batch's live
+  // cost (the batch isn't saved to the store until the run completes); once idle/reloaded, the
+  // persisted cumulative is authoritative (loadResults refreshes it after each run).
+  const ingestCost = $derived.by(() => {
+    const running = eval_.status === 'starting' || eval_.status === 'running';
+    if (running && ingestCostLive != null) return ingestCostCumulative + ingestCostLive;
+    if (ingestCostCumulative > 0) return ingestCostCumulative;
+    return eval_.summary?.ingest_cost_usd ?? ingestCostLive;
+  });
+  const totalCost = $derived((ingestCost ?? 0) + questionsCost);
   // "building…" only while ingestion is genuinely in flight: a remember phase has started but its
   // cost isn't known yet AND no question row exists yet (questions only run after remember). Once
   // rows stream — or the run isn't doing a rebuild — fall back to "—", never a stuck "building…".
@@ -443,12 +475,28 @@
   );
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
-  // Rebuild-graph wipe guard: when "Rebuild graph" is checked on a corpus that ALREADY has a
-  // graph, Run opens a confirm dialog (the rebuild wipes the old graph + costs money) instead
-  // of starting immediately. No graph to wipe (or rebuild off) → run straight away.
+  // Setup-only memory batch: Remember a range and/or Clear, with no questions selected — the
+  // way a large corpus is built in monitored chunks before any recall. Lets Run fire with an
+  // empty question selection (which is otherwise required).
+  const setupOnlyMemory = $derived(isMemory && (eval_.ingestSynthetic || eval_.clearBefore));
+  const runDisabled = $derived(
+    !canRun || !eval_.selectedCorpus || (eval_.selectedCount === 0 && !setupOnlyMemory)
+  );
+  const runTitle = $derived(
+    eval_.selectedCount === 0
+      ? setupOnlyMemory
+        ? 'Run a setup-only batch (remember / clear — no questions)'
+        : 'Select at least one question'
+      : 'Run the eval'
+  );
+
+  // Wipe guard: when the run will WIPE an existing graph — memory "Clear graph first", or the
+  // knowledge "Rebuild graph" (which still wipes on ingest) — Run opens a confirm dialog first
+  // (the wipe is destructive + costs money to rebuild). Nothing to wipe → run straight away.
   let confirmOpen = $state(false);
   function requestRun() {
-    if (eval_.rebuildChecked && eval_.selectedCorpusHasGraph) confirmOpen = true;
+    const wipes = isMemory ? eval_.clearBefore : eval_.rebuildChecked;
+    if (wipes && eval_.selectedCorpusHasGraph) confirmOpen = true;
     else void eval_.start();
   }
 
@@ -560,6 +608,9 @@
   // `copyError` surfaces a clipboard failure (e.g. denied permission) as a small banner.
   let copiedRow = $state<number | null>(null);
   let copyError = $state<string | null>(null);
+  let exportingLocomo = $state(false);
+  let locomoExportError = $state<string | null>(null);
+  let locomoExportNotice = $state<string | null>(null);
   async function copyRowForAI(r: EvalRow) {
     copyError = null;
     try {
@@ -581,6 +632,36 @@
     }
   }
 
+  async function exportLocomoResults() {
+    const corpus = eval_.selectedCorpus;
+    if (!corpus) return;
+    exportingLocomo = true;
+    locomoExportError = null;
+    locomoExportNotice = null;
+    try {
+      const res = await exportEvalResultsLocomo(corpus.id, corpus.questions_path);
+      const blob = new Blob([res.data.content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.data.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      locomoExportNotice = `${res.data.exported_count}/${res.data.total_count} LoCoMo rows exported${
+        res.data.partial ? ' (partial)' : ''
+      }.`;
+      setTimeout(() => {
+        locomoExportNotice = null;
+      }, 3500);
+    } catch (err) {
+      locomoExportError = err instanceof Error ? err.message : 'Could not export LoCoMo results.';
+    } finally {
+      exportingLocomo = false;
+    }
+  }
+
   // One-line settings summary for the collapsed Settings card header.
   const settingsSummary = $derived.by(() => {
     if (!prefs) return '';
@@ -595,8 +676,11 @@
 <section class="grid gap-4">
   <!-- Corpus picker + run controls. Inputs disable while a run is in flight. -->
   <AdminPageStickyToolbar>
-    <div class="flex flex-wrap items-center gap-3">
-      <!-- Folder: text input + native pick (like Knowledge Add) + rescan. -->
+    <div class="flex flex-col gap-3">
+      <!-- Row 1: corpus selection (folder + corpus) + run controls. Run is the primary
+           action, so it stays on this line with the selection it acts on. -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- Folder: text input + native pick (like Knowledge Add) + rescan. -->
       <div class="flex items-center gap-1.5 font-sans text-sm">
         <span class="text-muted-foreground">Folder</span>
         <input
@@ -654,14 +738,59 @@
         </select>
       </label>
 
+      <!-- Run controls — kept on the selection row; Run is the primary action. -->
+      <div class="ml-auto flex gap-2">
+        {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage || (isMemory && eval_.savedCount > 0)}
+          <Button
+            variant="outline"
+            disabled={isBusy}
+            onclick={() => void eval_.clear()}
+            title={isMemory
+              ? 'Delete this corpus’s saved results from disk (ingested memory is kept)'
+              : "Clear the last run's results"}
+          >
+            <Trash2 size={14} /> {isMemory ? 'Clear results' : 'Clear'}
+          </Button>
+        {/if}
+        {#if isBusy}
+          <Button
+            variant="destructive"
+            disabled={eval_.cancelling}
+            onclick={() => void eval_.cancel()}
+            title="Stop the running eval"
+          >
+            {#if eval_.cancelling}
+              <LoaderCircle size={14} class="animate-spin" />
+            {:else}
+              <Square size={14} />
+            {/if}
+            {eval_.cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+        {/if}
+        <Button disabled={runDisabled} onclick={requestRun} title={runTitle}>
+          {#if isBusy}
+            <LoaderCircle size={14} class="animate-spin" />
+          {:else}
+            <Play size={14} />
+          {/if}
+          {setupOnlyMemory && eval_.selectedCount === 0 ? 'Run batch' : 'Run eval'}
+        </Button>
+      </div>
+      </div>
+
+      <!-- Row 2: run options (ingest / legs / batch window / judge). -->
+      <div class="flex flex-wrap items-center gap-3">
       <label
         class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
         title={isMemory
-          ? 'Wipe this set’s memory graph, then re-remember the turns from scratch. Leave off to recall the existing graph (e.g. re-run a question subset).'
+          ? 'Remember this episode range into the memory graph (APPENDS — does not wipe). Leave off to recall the existing graph (e.g. re-run a question subset).'
           : 'Wipe this corpus’s eval docs (chunks + graph), then re-ingest from scratch. Leave off to reuse the existing index.'}
       >
         <input type="checkbox" class="size-4" bind:checked={eval_.ingestSynthetic} disabled={isBusy} />
-        <span>{isMemory ? 'Rebuild graph' : 'Ingest corpus first'}</span>
+        <!-- Memory label aligned to the rest of the UI: these items are "episodes" everywhere
+             else (corpus card, dropdown, batch window), and this mirrors the knowledge track's
+             "Ingest corpus first". The old "Remember turns" used a word ("turns") found nowhere else. -->
+        <span>{isMemory ? 'Ingest episodes first' : 'Ingest corpus first'}</span>
       </label>
       {#if !isMemory}
         <label
@@ -693,6 +822,46 @@
           </div>
         </div>
       {:else}
+        <!-- Clear graph first — explicit, decoupled wipe. Off by default so batched remember
+             APPENDS; check it only for a from-scratch rebuild (first batch). -->
+        <label
+          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
+          title="Wipe this set’s memory graph BEFORE remembering. Use for a from-scratch rebuild (first batch only); leave OFF to append more episode batches to the existing graph."
+        >
+          <input type="checkbox" class="size-4" bind:checked={eval_.clearBefore} disabled={isBusy} />
+          <span>Clear graph first</span>
+        </label>
+        <!-- Episode batch window — only meaningful while ingesting. 1-based, INCLUSIVE episode
+             numbers (episode 1 = the first turn): ingest episodes From..To this run. To = 0 means
+             "to the end". Build a large corpus in monitored chunks; the window auto-advances after
+             each batch. (Controller converts to the backend's 0-based offset/count.) -->
+        {#if eval_.ingestSynthetic}
+          <div
+            class="flex items-center gap-1.5 font-sans text-sm"
+            title="Ingest episodes From..To this run (1-based, inclusive — episode 1 is the first turn). To = 0 means to the end. Auto-advances after each batch."
+          >
+            <span class="text-muted-foreground">Episodes</span>
+            <input
+              type="number"
+              min="1"
+              class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
+              value={eval_.episodeFrom}
+              oninput={(e) => (eval_.episodeFrom = e.currentTarget.valueAsNumber)}
+              disabled={isBusy}
+              title="From episode (1-based, inclusive)"
+            />
+            <span class="text-muted-foreground">to</span>
+            <input
+              type="number"
+              min="0"
+              class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
+              value={eval_.episodeTo}
+              oninput={(e) => (eval_.episodeTo = e.currentTarget.valueAsNumber)}
+              disabled={isBusy}
+              title="To episode (1-based, inclusive; 0 = to the end)"
+            />
+          </div>
+        {/if}
         <span
           class="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/5 px-2 py-1 font-sans text-xs text-primary"
           title="Conversation memory recall — the single engine the memory track exercises"
@@ -708,46 +877,6 @@
         <input type="checkbox" class="size-4" bind:checked={eval_.judge} disabled={isBusy} />
         <span>Judge answers</span>
       </label>
-      <div class="ml-auto flex gap-2">
-        {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage || (isMemory && eval_.savedCount > 0)}
-          <Button
-            variant="outline"
-            disabled={isBusy}
-            onclick={() => void eval_.clear()}
-            title={isMemory
-              ? 'Delete this corpus’s saved results from disk (ingested memory is kept)'
-              : "Clear the last run's results"}
-          >
-            <Trash2 size={14} /> {isMemory ? 'Clear results' : 'Clear'}
-          </Button>
-        {/if}
-        {#if isBusy}
-          <Button
-            variant="destructive"
-            disabled={eval_.cancelling}
-            onclick={() => void eval_.cancel()}
-            title="Stop the running eval"
-          >
-            {#if eval_.cancelling}
-              <LoaderCircle size={14} class="animate-spin" />
-            {:else}
-              <Square size={14} />
-            {/if}
-            {eval_.cancelling ? 'Cancelling…' : 'Cancel'}
-          </Button>
-        {/if}
-        <Button
-          disabled={!canRun || !eval_.selectedCorpus || eval_.selectedCount === 0}
-          onclick={requestRun}
-          title={eval_.selectedCount === 0 ? 'Select at least one question' : 'Run the eval'}
-        >
-          {#if isBusy}
-            <LoaderCircle size={14} class="animate-spin" />
-          {:else}
-            <Play size={14} />
-          {/if}
-          Run eval
-        </Button>
       </div>
     </div>
   </AdminPageStickyToolbar>
@@ -814,7 +943,7 @@
       title="Corpus"
       bodyId="knowledge-eval-corpus"
       defaultExpanded={false}
-      summary={corpusSummary}
+      summary={corpusHeaderSummary}
     >
       {#snippet headerActions()}
         {#if eval_.corpusLoading}
@@ -1059,8 +1188,8 @@
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
       <span class="font-semibold uppercase tracking-wide text-muted-foreground">Cost</span>
       <span class="font-mono text-foreground">≈ {fmtCost(totalCost)}</span>
-      <span class="text-muted-foreground">
-        (ingest {isMemory
+      <span class="text-muted-foreground" title="Ingest = cumulative graph-build spend for this corpus (sum of every ingest batch; survives reload). Q = this view's question cost.">
+        (ingest{isMemory && ingestCostCumulative > 0 ? ' cumulative' : ''} {isMemory
           ? ingestCost != null
             ? fmtCost(ingestCost)
             : ingestBuilding
@@ -1103,6 +1232,25 @@
       defaultExpanded={true}
       summary={resultsSummary}
     >
+      {#snippet headerActions()}
+        {#if isMemory}
+          <Button
+            type="button"
+            variant="outline"
+            class="h-7"
+            disabled={exportingLocomo || eval_.savedCount === 0 || !eval_.selectedCorpus}
+            onclick={() => void exportLocomoResults()}
+            title="Download saved memory results as a LoCoMo-compatible QA JSON file"
+          >
+            {#if exportingLocomo}
+              <LoaderCircle size={14} class="animate-spin" />
+            {:else}
+              <Download size={14} />
+            {/if}
+            Export to LoCoMo
+          </Button>
+        {/if}
+      {/snippet}
       {#if eval_.rows.length > 0 || eval_.status === 'running'}
         {@render resultsTable()}
       {/if}
@@ -1145,6 +1293,22 @@
     role="alert"
   >
     Copy for AI failed: {copyError}
+  </div>
+{/if}
+{#if locomoExportError}
+  <div
+    class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive"
+    role="alert"
+  >
+    LoCoMo export failed: {locomoExportError}
+  </div>
+{/if}
+{#if locomoExportNotice}
+  <div
+    class="mt-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 font-sans text-sm text-primary"
+    role="status"
+  >
+    {locomoExportNotice}
   </div>
 {/if}
 {#if ingestTraceError}

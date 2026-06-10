@@ -32,7 +32,10 @@ function setupLine(e: EvalSetupProgressPayload): ActivityLine {
     }
     if (e.phase === 'remember') {
       const snip = e.snippet ? ` — ${e.snippet}` : '';
-      return { tone: 'muted', text: `  remembered ${e.index}/${e.total}${snip}` };
+      // Show the ABSOLUTE 1-based episode number (e.g. "episode 11"), with the window position
+      // as a quiet hint — never a bare window-relative counter that misreads a mid-corpus batch.
+      const no = e.episode_no ?? e.index;
+      return { tone: 'muted', text: `  ingested episode ${no} (${e.index}/${e.total})${snip}` };
     }
     const head = `  episode ${e.index}/${e.total} → Qdrant`;
     const title = e.title ? ` · ${e.title}` : '';
@@ -45,11 +48,13 @@ function setupLine(e: EvalSetupProgressPayload): ActivityLine {
       tone: 'info',
       text: `▶ ingesting synthetic corpus${e.file_count ? ` (${e.file_count} files)` : ''}…`
     };
-  if (e.phase === 'remember')
-    return {
-      tone: 'info',
-      text: `▶ remembering turns${e.episode_count ? ` (${e.episode_count} episodes)` : ''}…`
-    };
+  if (e.phase === 'remember') {
+    // Header carries the ABSOLUTE episode range this batch covers (e.g. "episodes 11–30"), so
+    // the user sees exactly which turns are being ingested — not just how many.
+    const range = e.from && e.to ? ` ${e.from}–${e.to}` : '';
+    const count = e.episode_count ? ` (${e.episode_count} episodes)` : '';
+    return { tone: 'info', text: `▶ ingesting episodes${range}${count}…` };
+  }
   if (e.phase === 'build_graph' || e.phase === 'graph_build')
     return {
       tone: 'info',
@@ -61,7 +66,7 @@ function setupLine(e: EvalSetupProgressPayload): ActivityLine {
     const cost = c > 0 ? ` · ingest ≈ $${c < 0.01 ? c.toFixed(4) : c.toFixed(2)}` : '';
     return {
       tone: 'success',
-      text: `✓ remembered${e.episode_count ? ` ${e.episode_count} turns` : ''}${cost}`
+      text: `✓ ingested${e.episode_count ? ` ${e.episode_count} episodes` : ''}${cost}`
     };
   }
   return { tone: 'info', text: `▶ ${e.phase}…` };

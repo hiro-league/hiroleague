@@ -51,6 +51,12 @@ export const PREF_KEYS = {
   // run stays consistent across navigation and across origins (Vite vs packaged).
   knowledgeAskEvalIngest: 'hiro.admin.knowledge.askEvalIngest',
   knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph',
+  /** Eval (memory track) — remember-phase episode batch window as 1-based, INCLUSIVE episode
+   *  numbers (From episode N to episode M; To = 0 ⇒ to the end). Persisted so manual batched
+   *  builds keep their place across reloads. (Clear is never persisted — it must be opted into
+   *  per run so a reload can't silently wipe the graph.) */
+  knowledgeEvalEpisodeFrom: 'hiro.admin.knowledge.evalEpisodeFrom',
+  knowledgeEvalEpisodeTo: 'hiro.admin.knowledge.evalEpisodeTo',
   /** Eval corpus-picker folder (the path scanned for corpuses). */
   knowledgeEvalFolder: 'hiro.admin.knowledge.evalFolder',
   /** Eval last-selected corpus id, per track (JSON map { memory, knowledge }). */

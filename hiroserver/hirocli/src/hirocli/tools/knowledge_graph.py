@@ -263,6 +263,10 @@ async def _run_graph_ingest_for_documents(
                     source_role=source_role,
                     event_sink=event_sink,
                     ledger_sink=ledger_sink,
+                    # Defer the per-document Kuzu FTS rebuild: N docs would otherwise force N
+                    # checkpoints, each able to stall against a concurrent graph read (the
+                    # memory-eval freeze, same class). ONE rebuild after the loop instead.
+                    rebuild_fts=False,
                 )
                 stats_dict = stats.as_dict()
                 entry["ok"] = True
@@ -283,6 +287,19 @@ async def _run_graph_ingest_for_documents(
                     on_progress(dict(entry))
                 except Exception:
                     log.exception("⚠️ graphiti.ingest — on_progress callback failed")
+        # One FTS rebuild for the whole batch (per-doc rebuilds deferred above). NON-FATAL:
+        # the docs' episodes are already committed — a failed rebuild only leaves the keyword
+        # index stale until the next graph open (initialize() rebuilds it). Aborting here would
+        # mark a fully-built (paid-for) batch failed.
+        if any(e["ok"] for e in per_doc):
+            try:
+                await svc.rebuild_search_index()
+            except Exception:
+                log.warning(
+                    "⚠️ graphiti.ingest — batch FTS rebuild failed; episodes are committed, "
+                    "keyword index refreshes on next graph open",
+                    exc_info=True,
+                )
     finally:
         await svc.close()
 

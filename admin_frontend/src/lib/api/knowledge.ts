@@ -377,6 +377,13 @@ export type EvalRunRequest = {
   // knowledge: ingest the doc corpus first. memory: remember the turn corpus first.
   ingest_synthetic?: boolean;
   build_graph?: boolean; // knowledge only
+  // Memory track — explicitly wipe the eval graph before remembering (decoupled from remember,
+  // so a corpus can be built across appended batches). Default off ⇒ never clear implicitly.
+  clear_before?: boolean;
+  // Memory track — remember-phase episode window: start index + max count into the corpus.
+  // 0 / null = from the start / to the end. Lets a large corpus be remembered in chunks.
+  episode_offset?: number;
+  episode_limit?: number | null;
   judge?: boolean; // run the optional LLM judge (grade answers vs the ideal)
   // REQUIRED, non-empty — the UI forces an explicit question selection (no "run all").
   question_ids?: string[];
@@ -492,9 +499,32 @@ export function listEvalQuestions(
 /** Persisted per-corpus eval results (memory track) — the merged snapshot the panel
  *  shows when a corpus is picked. ``rows`` is bank-ordered; ``summary`` is recomputed
  *  over the whole accumulated set. Both empty when nothing's been saved yet. */
+/** Ingested-episode progress for a memory corpus — which turns have been remembered into the
+ *  graph. `ranges` are sorted, INCLUSIVE [start, end] episode-index spans (coalesced, gaps
+ *  preserved); `count` is distinct episodes ingested; `batches` is how many remember runs. */
+export type EvalIngestedRanges = {
+  ranges: [number, number][];
+  count: number;
+  batches: number;
+  // Cumulative per-corpus ingest (graph-build) spend in USD — summed across every remember batch.
+  // The only place ingest cost survives a reload (per-question rows never carry it). 0 when unset.
+  cost_usd?: number;
+};
+
 export type EvalResultsData = {
   rows: EvalQuestionPayload[];
   summary: EvalCompletedPayload | null;
+  // Absent on the knowledge track (memory-only); defaults to empty when unset.
+  ingested?: EvalIngestedRanges;
+};
+
+export type EvalLocomoExportData = {
+  filename: string;
+  content: string;
+  exported_count: number;
+  total_count: number;
+  prediction_key: string;
+  partial: boolean;
 };
 
 /** Load a corpus's saved eval results (memory track). ``questionsPath`` lets the
@@ -522,6 +552,23 @@ export function clearEvalResults(
     method: 'POST',
     body: { track, corpus_id: corpusId },
     timeoutMs: 15000
+  });
+}
+
+/** Downloadable LoCoMo-compatible JSON export for saved memory-eval results. */
+export function exportEvalResultsLocomo(
+  corpusId: string,
+  questionsPath: string,
+  predictionKey = 'hiro_memory_prediction'
+): Promise<ApiResponse<EvalLocomoExportData>> {
+  const qs = new URLSearchParams({
+    corpus_id: corpusId,
+    questions_path: questionsPath,
+    prediction_key: predictionKey
+  });
+  return apiRequest<EvalLocomoExportData>(`/knowledge/eval/results/locomo?${qs.toString()}`, {
+    method: 'GET',
+    timeoutMs: 30000
   });
 }
 

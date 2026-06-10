@@ -154,6 +154,41 @@ def build_chat_model_from_tuning(
             **kwargs,
         )
 
+    if pid == "deepseek":
+        # DeepSeek V4 is dual-mode (thinking / non-thinking) toggled per-request via
+        # extra_body. We use the dedicated ChatDeepSeek wrapper (not a generic ChatOpenAI
+        # shim) so reasoning_content round-trips across multi-turn tool calls (required, or
+        # the API 400s) and DeepSeek cache/reasoning token usage is reported. Thinking mode
+        # ignores temperature, so we only send it when reasoning is disabled.
+        from langchain_deepseek import ChatDeepSeek
+
+        key = store.get_api_key("deepseek")
+        if not key:
+            raise ValueError("DeepSeek API key missing (keyring or DEEPSEEK_API_KEY).")
+        cred = store.get("deepseek")
+        prov = cat.get_provider("deepseek")
+        api_base = (cred.base_url if cred and cred.base_url else None) or (
+            prov.default_base_url if prov else None
+        )
+        if not api_base:
+            raise ValueError("DeepSeek api_base missing (catalog default_base_url).")
+        ds_kwargs: dict[str, Any] = {
+            "model": api_model,
+            "api_base": api_base,
+            "api_key": key,
+            "max_tokens": effective.max_tokens,
+            "callbacks": cb,
+        }
+        effort = _deepseek_reasoning_effort(effective.thinking, spec)
+        if effort is None:
+            # Non-thinking mode honors temperature; explicitly disable thinking.
+            ds_kwargs["temperature"] = effective.temperature
+            ds_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        else:
+            ds_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            ds_kwargs["reasoning_effort"] = effort
+        return ChatDeepSeek(**ds_kwargs)
+
     if pid == "lm_studio":
         from langchain_openai import ChatOpenAI
 
@@ -196,6 +231,21 @@ def _openai_reasoning_effort(thinking: ThinkingLevel | None) -> str | None:
     if thinking in (None, "off"):
         return None
     return thinking
+
+
+def _deepseek_reasoning_effort(
+    thinking: ThinkingLevel | None,
+    spec: ModelSpec,
+) -> str | None:
+    """Map ThinkingLevel → DeepSeek ``reasoning_effort``, or None to disable thinking.
+
+    DeepSeek V4 is dual-mode and only exposes ``high``/``max`` effort (default ``high``),
+    so we clamp: ``high`` → ``"max"``, any other enabled level → ``"high"``. ``None``/``off``
+    (or a non-reasoning model) returns None → caller disables thinking and honors temperature.
+    """
+    if thinking in (None, "off") or not spec.supports_reasoning():
+        return None
+    return "max" if thinking == "high" else "high"
 
 
 def _google_thinking_kwargs(

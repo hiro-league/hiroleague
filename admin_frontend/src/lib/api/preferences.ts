@@ -106,6 +106,9 @@ export type GraphPreferences = {
   search_scope: 'edges' | 'edges_and_nodes' | 'edges_nodes_episodes';
   // Cosine candidate floor (Graphiti EdgeSearchConfig.sim_min_score). Low = recall.
   sim_min_score: number;
+  // Hard ceiling (seconds) on any single Kuzu query (writer + snapshot reads). Bounds the
+  // checkpoint-vs-reader stall that froze the admin UI. 0 = unlimited.
+  query_timeout_s: number;
   // Graph observability tier (docs §12.2). off = no graphiti ledger/tracer/sinks; ledger = one
   // priced roll-up row per episode/search (cost folds — prod default); trace = + deep per-stage
   // JSONL sidecars. Replaces the former ledger_detail (compact/rich) + the trace env vars.
@@ -226,6 +229,7 @@ export const DEFAULT_GRAPH: GraphPreferences = {
   search_recipe: 'rrf',
   search_scope: 'edges',
   sim_min_score: 0.3,
+  query_timeout_s: 60,
   observability: 'ledger',
   reranker: {
     model_id: null,

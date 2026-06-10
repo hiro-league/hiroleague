@@ -307,3 +307,45 @@ async def test_service_ingest_chunks_group_override() -> None:
     )
 
     assert fake.calls[0]["group_id"] == "mem_42_aria"  # override, not the default
+
+
+class _FtsRecordingDriver:
+    """Kuzu-shaped driver fake for the FTS-rebuild path: records every DDL statement and
+    succeeds. Carries ``provider=KUZU`` (the rebuild's gate) and ``_database`` (the
+    multi-group re-point writes it)."""
+
+    def __init__(self) -> None:
+        from graphiti_core.driver.driver import GraphProvider
+
+        self.provider = GraphProvider.KUZU
+        self._database = "kb_main"
+        self.executed: list[str] = []
+
+    async def execute_query(self, stmt: str, **kwargs) -> None:
+        self.executed.append(stmt)
+
+
+@pytest.mark.asyncio
+async def test_ingest_rebuild_fts_flag_defers_checkpoint(monkeypatch) -> None:
+    """``rebuild_fts=False`` must skip the per-call FTS rebuild entirely (the checkpoint-storm
+    fix: a bulk caller defers to ONE rebuild at batch end); the default (True) keeps the
+    end-of-call rebuild for single-shot callers (live chat memory)."""
+
+    async def _fake_save(self, driver) -> None:  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(EpisodicNode, "save", _fake_save)
+    eps = [GraphitiEpisodeInput(chunk_id="m1", document_id="conv:7", text="hi")]
+
+    # Deferred: no FTS DDL runs as part of the ingest call.
+    g = _FakeGraphiti()
+    g.driver = _FtsRecordingDriver()
+    await ingest_episodes(g, eps, source_role="conversation", group_id="mem_42_aria", rebuild_fts=False)
+    assert not any("FTS_INDEX" in s.upper() for s in g.driver.executed)
+
+    # Default: the end-of-call rebuild still fires (DROP + CREATE statements recorded).
+    g2 = _FakeGraphiti()
+    g2.driver = _FtsRecordingDriver()
+    await ingest_episodes(g2, eps, source_role="conversation", group_id="mem_42_aria")
+    assert any("DROP_FTS_INDEX" in s.upper() for s in g2.driver.executed)
+    assert any("CREATE_FTS_INDEX" in s.upper() for s in g2.driver.executed)

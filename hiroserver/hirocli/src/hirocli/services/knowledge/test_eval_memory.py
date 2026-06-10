@@ -36,19 +36,34 @@ class _FakeMemory:
         self.added: list[dict] = []
         self.searched: list[str] = []
         self.cleared: int = 0  # times clear_all was called (rebuild-before-remember)
+        self.fts_flushes: int = 0  # times flush_search_index was called (end-of-batch rebuild)
+        self.rebuild_fts_flags: list[bool] = []  # the rebuild_fts arg seen on each add
+        self.flush_should_fail = False  # when True, flush_search_index raises (non-fatal test)
         self.closed = False
         self._recall = recall
 
     async def clear_all(self, *, user_id, character_id=None) -> int:
-        # Rebuild gate: run_memory_eval wipes the drawer before re-remembering.
+        # Explicit clear: run_memory_eval wipes the drawer only when clear_before=True
+        # (decoupled from remember, so batched builds can append without wiping).
         self.cleared += 1
         return 0
 
-    async def add(self, content, *, user_id, run_id, character_id, metadata=None, ledger_sink=None):
+    async def add(
+        self, content, *, user_id, run_id, character_id, metadata=None, ledger_sink=None, **kwargs
+    ):
+        # **kwargs absorbs the remember path's extra trace knobs (e.g. trace_label) so the fake
+        # tracks the real facade signature without enumerating every cosmetic argument.
+        self.rebuild_fts_flags.append(bool(kwargs.get("rebuild_fts", True)))
         self.added.append(
             {"content": content, "user_id": user_id, "character_id": character_id, "metadata": metadata or {}}
         )
         return MemoryAddResult(usage=None, stored_count=1)
+
+    async def flush_search_index(self) -> None:
+        # The bulk remember loop rebuilds the keyword index ONCE here (per-episode rebuild deferred).
+        self.fts_flushes += 1
+        if self.flush_should_fail:
+            raise RuntimeError("simulated FTS checkpoint timeout")
 
     async def search(self, query, *, user_id, character_id, limit=None, **kwargs):
         self.searched.append(query)
@@ -98,10 +113,11 @@ async def test_run_memory_eval_remembers_and_recalls(tmp_path) -> None:
         episodes=episodes,
         run_id="t1",
         remember=True,
+        clear_before=True,
     )
 
-    # Rebuild gate: remember=True wipes the drawer ONCE before re-remembering, so a
-    # re-run rebuilds from scratch (no prior-run facts contaminating Graphiti dedup).
+    # Decoupled clear: clear_before=True wipes the drawer ONCE before remembering, so a
+    # from-scratch rebuild starts clean (no prior-run facts contaminating Graphiti dedup).
     assert mem.cleared == 1
     # Remembered every turn through the real `add` path, under the eval sentinel user.
     assert len(mem.added) == 2
@@ -145,6 +161,106 @@ async def test_run_memory_eval_remember_false_skips_add(tmp_path) -> None:
     assert mem.cleared == 0  # remember=False never wipes — recalls the existing drawer
     assert summary["remembered_turns"] == 0
     assert mem.searched == ["Where do I work?"]  # still recalls
+
+
+@pytest.mark.asyncio
+async def test_run_memory_eval_batch_appends_without_clear(tmp_path) -> None:
+    # Batched build: remember a contiguous slice [offset:offset+limit] WITHOUT clearing, so
+    # successive batches append to the same drawer instead of each wiping the last.
+    episodes = [_ep(f"turn {i}", cid=f"ep{i}") for i in range(5)]
+    mem = _FakeMemory({})
+    summary = await run_memory_eval(
+        mem,
+        tmp_path,
+        set_id="adam",
+        questions=[],  # setup-only batch: build the corpus, recall nothing
+        episodes=episodes,
+        run_id="b1",
+        remember=True,
+        clear_before=False,  # append — do NOT wipe
+        episode_offset=1,
+        episode_limit=2,
+    )
+    assert mem.cleared == 0  # no wipe on an append batch
+    # Only the windowed turns (index 1,2) were remembered — proving the slice is applied.
+    assert [a["content"] for a in mem.added] == ["turn 1", "turn 2"]
+    assert summary["remembered_turns"] == 2
+    assert mem.searched == []  # no questions → no recall
+    # Freeze fix: every turn deferred its Kuzu FTS rebuild, and the loop flushed the index ONCE
+    # at the end (one checkpoint for the batch, not one per episode).
+    assert mem.rebuild_fts_flags == [False, False]
+    assert mem.fts_flushes == 1
+
+
+@pytest.mark.asyncio
+async def test_run_memory_eval_clear_only_batch(tmp_path) -> None:
+    # A clear-only batch: wipe the drawer with neither remember nor questions (the "start fresh"
+    # action before building the first range).
+    mem = _FakeMemory({})
+    summary = await run_memory_eval(
+        mem,
+        tmp_path,
+        set_id="adam",
+        questions=[],
+        episodes=[_ep("x", cid="ep0")],
+        run_id="c1",
+        remember=False,
+        clear_before=True,
+    )
+    assert mem.cleared == 1  # wiped
+    assert mem.added == []  # nothing remembered
+    assert summary["remembered_turns"] == 0
+
+
+@pytest.mark.asyncio
+async def test_run_memory_eval_records_and_resets_ingested_ranges(tmp_path) -> None:
+    # The runner records each remember batch's window for the panel readout, and resets the whole
+    # record in lock-step with a clear_before wipe (the agreed invariant: the range never outlives
+    # the data).
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    episodes = [_ep(f"turn {i}", cid=f"ep{i}") for i in range(10)]
+    mem = _FakeMemory({})
+    common = dict(set_id="adam", questions=[], episodes=episodes, remember=True)
+    # Two appended batches (no clear) → both windows recorded.
+    await run_memory_eval(mem, tmp_path, run_id="r1", clear_before=False, episode_offset=0, episode_limit=5, **common)
+    await run_memory_eval(mem, tmp_path, run_id="r2", clear_before=False, episode_offset=5, episode_limit=5, **common)
+    store = get_eval_result_store(tmp_path)
+    assert store.read_ranges("adam") == [
+        {"start": 0, "count": 5, "cost_usd": 0.0},
+        {"start": 5, "count": 5, "cost_usd": 0.0},
+    ]
+
+    # A clear_before batch wipes the range record FIRST, then records only its own window.
+    await run_memory_eval(mem, tmp_path, run_id="r3", clear_before=True, episode_offset=0, episode_limit=3, **common)
+    assert store.read_ranges("adam") == [{"start": 0, "count": 3, "cost_usd": 0.0}]
+
+
+@pytest.mark.asyncio
+async def test_run_memory_eval_flush_failure_is_non_fatal(tmp_path) -> None:
+    # A failed end-of-batch FTS rebuild must NOT abort the run: the turns are already committed,
+    # so aborting would mark a paid-for batch FAILED and skip the ingested-range record (→ a
+    # re-run duplicates). The run completes; the range is recorded; the index self-heals later.
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    mem = _FakeMemory({})
+    mem.flush_should_fail = True
+    summary = await run_memory_eval(
+        mem,
+        tmp_path,
+        set_id="adam",
+        questions=[],
+        episodes=[_ep("turn 0", cid="ep0"), _ep("turn 1", cid="ep1")],
+        run_id="f1",
+        remember=True,
+        clear_before=False,
+    )
+    assert mem.fts_flushes == 1  # flush was attempted
+    assert summary["remembered_turns"] == 2  # run did NOT abort
+    # The ingested-range record still landed (it runs after the remember returns).
+    assert get_eval_result_store(tmp_path).read_ranges("adam") == [
+        {"start": 0, "count": 2, "cost_usd": 0.0}
+    ]
 
 
 def test_discover_corpuses_pairs_by_stem(tmp_path) -> None:

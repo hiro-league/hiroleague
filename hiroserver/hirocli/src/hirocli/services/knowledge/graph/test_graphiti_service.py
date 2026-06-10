@@ -351,3 +351,47 @@ async def test_delete_facts_filters_blanks_and_delegates(tmp_path, monkeypatch) 
 
     assert captured["uuids"] == ["e1", "e2"]  # blank filtered out
     assert n == 2
+
+
+def test_apply_query_timeout_sets_ms_and_is_best_effort() -> None:
+    """graph.query_timeout_s → Kuzu's per-query ceiling (the checkpoint-freeze bound).
+
+    Seconds are converted to ms; 0/negative = unlimited (skip); a client failure is
+    swallowed with a warning (hardening must never block opening the graph)."""
+    from hirocli.services.knowledge.graph.graphiti_service import _apply_query_timeout
+
+    class _Client:
+        def __init__(self, fail: bool = False) -> None:
+            self.calls: list[int] = []
+            self._fail = fail
+
+        def set_query_timeout(self, ms: int) -> None:
+            if self._fail:
+                raise RuntimeError("boom")
+            self.calls.append(ms)
+
+    c = _Client()
+    _apply_query_timeout(c, 60)
+    assert c.calls == [60_000]
+
+    c2 = _Client()
+    _apply_query_timeout(c2, 0)  # 0 = unlimited → no call
+    _apply_query_timeout(None, 60)  # missing client → no crash
+    assert c2.calls == []
+
+    _apply_query_timeout(_Client(fail=True), 30)  # raises inside → swallowed
+
+
+def test_graph_preferences_query_timeout_default_and_bounds() -> None:
+    """The knob is an admin preference (no hardcoded params rule): default 60s, clamped 0–600."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from hirocli.domain.preferences import GraphPreferences
+
+    assert GraphPreferences().query_timeout_s == 60
+    assert GraphPreferences(query_timeout_s=0).query_timeout_s == 0  # 0 = unlimited
+    with _pytest.raises(ValidationError):
+        GraphPreferences(query_timeout_s=-1)
+    with _pytest.raises(ValidationError):
+        GraphPreferences(query_timeout_s=601)

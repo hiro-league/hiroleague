@@ -62,6 +62,7 @@ def _tracing_enabled() -> bool:
 def traced_run(
     name: str,
     *,
+    when: bool = True,
     ledger_run_id: str | None = None,
     run_type: str = "chain",
     tags: Sequence[str] | None = None,
@@ -75,10 +76,15 @@ def traced_run(
     ledger uses. Pass it only on the **outermost** span of a unit of work (eval root,
     standalone ingest); inner spans omit it and simply nest.
 
+    ``when`` lets the caller skip the span without restructuring the ``with``: pass a
+    cheap "will this scope emit child runs?" predicate (e.g. ``when=bool(eps)``) and a
+    falsey value no-ops exactly like tracing-off, so a leg that does no traceable work
+    never posts a hollow tree to LangSmith.
+
     Yields the LangSmith ``RunTree`` (for adding outputs/metadata), or ``None`` when
-    tracing is off / unavailable. Body exceptions propagate (LangSmith records the span
-    as errored); tracing setup never raises into the caller."""
-    if not _tracing_enabled():
+    tracing is off / unavailable / gated off. Body exceptions propagate (LangSmith
+    records the span as errored); tracing setup never raises into the caller."""
+    if not when or not _tracing_enabled():
         yield None
         return
     try:

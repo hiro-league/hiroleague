@@ -89,6 +89,18 @@ providers:
       chat: anthropic:claude-sonnet-4-6
     metadata_updated_at: "2026-03-27"
 
+  # DeepSeek V4 — OpenAI-compatible (api.deepseek.com). Unified dual-mode models
+  # (thinking / non-thinking) toggled per-request; old deepseek-chat/reasoner deprecate 2026-07-24.
+  - id: deepseek
+    display_name: DeepSeek
+    hosting: cloud
+    credential_env_keys: [DEEPSEEK_API_KEY]
+    default_base_url: https://api.deepseek.com
+    docs_url: https://api-docs.deepseek.com
+    recommended_models:
+      chat: deepseek:deepseek-v4-flash
+    metadata_updated_at: "2026-06-10"
+
   - id: ollama
     display_name: Ollama (local)
     hosting: local
@@ -683,6 +695,42 @@ models:
       output_per_1m_tokens: 5.00
       pricing_updated_at: "2026-05-14"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
+  # --- DeepSeek V4 (api-docs.deepseek.com; OpenAI-compatible). Dual-mode: thinking
+  #     toggled via extra_body.thinking; structured output via function calling. ---
+  - id: deepseek:deepseek-v4-flash
+    provider_id: deepseek
+    display_name: DeepSeek V4 Flash
+    released_at: "2026-04-24"
+    model_kind: chat
+    model_class: fast
+    context_window: 1048576
+    modalities: [text]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    notes: Fast/economical tier (284B total / 13B active). 1M context, up to 131K output. Thinking mode ignores temperature.
+    pricing:
+      input_per_1m_tokens: 0.14
+      cached_input_per_1m_tokens: 0.0028
+      output_per_1m_tokens: 0.28
+      pricing_updated_at: "2026-06-10"
+      pricing_source: https://api-docs.deepseek.com/quick_start/pricing
+
+  - id: deepseek:deepseek-v4-pro
+    provider_id: deepseek
+    display_name: DeepSeek V4 Pro
+    released_at: "2026-04-24"
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1048576
+    modalities: [text]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    notes: Frontier tier (1.6T total / 49B active). 1M context, up to 384K output. Thinking mode ignores temperature.
+    pricing:
+      input_per_1m_tokens: 0.435
+      cached_input_per_1m_tokens: 0.003625
+      output_per_1m_tokens: 0.87
+      pricing_updated_at: "2026-06-10"
+      pricing_source: https://api-docs.deepseek.com/quick_start/pricing
 
   # --- Local: Ollama (library names; pull the tag you use) ---
   - id: ollama:llama3.2

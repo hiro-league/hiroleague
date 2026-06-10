@@ -76,8 +76,35 @@ class EvalResultStore:
                   updated_at   TEXT NOT NULL,
                   PRIMARY KEY (corpus_id, question_id)
                 );
+                -- Ingested episode batches per corpus (one row per remember batch). Tracks WHICH
+                -- episodes of a turn corpus have been remembered into the graph, so the panel can
+                -- print the ingested range — remember-only batches write no question rows, so this
+                -- is the only record of build progress. Keyed by (corpus_id, start) so re-running
+                -- the same offset updates that batch's count instead of stacking duplicates. RESET
+                -- whenever the graph is wiped (clear_before / eval clear) so the range never lies.
+                CREATE TABLE IF NOT EXISTS memory_eval_ingested_ranges (
+                  corpus_id     TEXT NOT NULL,
+                  start         INTEGER NOT NULL,
+                  count         INTEGER NOT NULL,
+                  -- This batch's ingest (graph-build) cost in USD. Summed across batches for the
+                  -- panel's CUMULATIVE per-corpus ingest cost — the only place ingest cost survives
+                  -- a reload (the per-question results table never holds it). Reset with the ranges
+                  -- on a graph wipe, so the cumulative can't outlive the data it paid for.
+                  cost_usd      REAL NOT NULL DEFAULT 0,
+                  updated_at    TEXT NOT NULL,
+                  PRIMARY KEY (corpus_id, start)
+                );
                 """
             )
+            # No-migration mode, but a ranges table created before cost_usd existed would have
+            # CREATE TABLE IF NOT EXISTS skip the new column → read_ranges' SELECT cost_usd crashes.
+            # Reconcile additively (no data migration — existing rows default to 0) so an older
+            # eval_results.db keeps its saved results instead of forcing a workspace wipe.
+            cols = {r["name"] for r in con.execute("PRAGMA table_info(memory_eval_ingested_ranges)")}
+            if "cost_usd" not in cols:
+                con.execute(
+                    "ALTER TABLE memory_eval_ingested_ranges ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0"
+                )
 
     def upsert_row(
         self,
@@ -148,6 +175,89 @@ class EvalResultStore:
                 "DELETE FROM memory_eval_results WHERE corpus_id = ?", (corpus_id,)
             )
             return int(cur.rowcount or 0)
+
+    # --- Ingested episode ranges (build progress) -------------------------------------------
+
+    def append_range(
+        self, corpus_id: str, start: int, count: int, cost_usd: float = 0.0
+    ) -> None:
+        """Record that a remember batch ingested ``count`` episodes starting at ``start``,
+        at ``cost_usd`` (this batch's graph-build cost).
+
+        Upsert on ``(corpus_id, start)`` so re-running the same offset overwrites that batch's
+        count AND cost rather than stacking a duplicate row (so the cumulative never double-counts
+        a re-ingested offset). No-op for empty/invalid batches."""
+        if not corpus_id or count <= 0 or start < 0:
+            return
+        self.ensure_schema()
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT INTO memory_eval_ingested_ranges
+                  (corpus_id, start, count, cost_usd, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(corpus_id, start) DO UPDATE SET
+                  count      = excluded.count,
+                  cost_usd   = excluded.cost_usd,
+                  updated_at = excluded.updated_at
+                """,
+                (corpus_id, int(start), int(count), float(cost_usd or 0.0), utc_now_iso()),
+            )
+
+    def read_ranges(self, corpus_id: str) -> list[dict[str, float]]:
+        """Return the recorded ingest batches for ``corpus_id`` as ``[{start, count, cost_usd}]``,
+        ordered by start (empty if none / no DB yet)."""
+        if not corpus_id or not self.db_path.exists():
+            return []
+        # The DB file may predate this table (added after the results table). No-migration mode:
+        # create-on-access so a read never trips "no such table" on an older eval_results.db.
+        self.ensure_schema()
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT start, count, cost_usd FROM memory_eval_ingested_ranges "
+                "WHERE corpus_id = ? ORDER BY start",
+                (corpus_id,),
+            ).fetchall()
+        return [
+            {
+                "start": int(r["start"]),
+                "count": int(r["count"]),
+                "cost_usd": float(r["cost_usd"] or 0.0),
+            }
+            for r in rows
+        ]
+
+    def clear_ranges(self, corpus_id: str) -> int:
+        """Drop all ingested-range records for ``corpus_id`` (called whenever the graph is
+        wiped, so the printed range resets in lock-step). Returns rows removed."""
+        if not corpus_id or not self.db_path.exists():
+            return 0
+        # Create-on-access (see read_ranges) so a reset on an older DB can't fail on a missing table.
+        self.ensure_schema()
+        with self.connect() as con:
+            cur = con.execute(
+                "DELETE FROM memory_eval_ingested_ranges WHERE corpus_id = ?", (corpus_id,)
+            )
+            return int(cur.rowcount or 0)
+
+
+def coalesce_ingested_ranges(ranges: list[dict[str, int]]) -> list[list[int]]:
+    """Merge ``[{start, count}]`` batches into sorted, INCLUSIVE ``[start, end]`` spans.
+
+    Contiguous/overlapping batches fold together (0–49 + 50–99 → 0–99); gaps stay visible
+    (0–99, 150–199) so a missed range is obvious. End is the last ingested index (start+count-1)."""
+    spans = sorted(
+        ([int(r["start"]), int(r["start"]) + int(r["count"]) - 1] for r in ranges if int(r["count"]) > 0),
+        key=lambda s: s[0],
+    )
+    merged: list[list[int]] = []
+    for start, end in spans:
+        # Fold into the previous span when it touches or overlaps it (gap of 1 = contiguous).
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return merged
 
 
 # Process-wide cache of one store per workspace (mirrors how the registry is a

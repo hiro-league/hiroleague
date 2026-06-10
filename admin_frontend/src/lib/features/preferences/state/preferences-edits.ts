@@ -168,6 +168,11 @@ export function editsForSave(
     draft.graph.sim_min_score
   );
   add(
+    'graph.query_timeout_s',
+    baseline.graph.query_timeout_s,
+    draft.graph.query_timeout_s
+  );
+  add(
     'graph.observability',
     baseline.graph.observability,
     draft.graph.observability

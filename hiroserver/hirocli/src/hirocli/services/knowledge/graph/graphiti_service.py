@@ -19,8 +19,10 @@ construction, ``build_indices_and_constraints``, and teardown only.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import datetime as dt
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -135,6 +137,26 @@ def _registry_key(db_path: Path) -> str:
     absolute path so they share one ``Database`` via ``kuzu_registry`` (resolve() so
     differing relative/symlinked spellings of the same file map to one entry)."""
     return str(Path(db_path).resolve())
+
+
+def _apply_query_timeout(client: Any, timeout_s: int) -> None:
+    """Set Kuzu's per-query timeout on an ``AsyncConnection`` (``graph.query_timeout_s`` pref).
+
+    Why: a Kuzu CHECKPOINT (e.g. triggered by ``CREATE_FTS_INDEX``) waits for every active
+    transaction to leave — and that native wait was observed to hold the GIL, starving the
+    event loop (and thus the whole admin UI) for ~2.5 minutes before Kuzu's own internal
+    timeout fired. A query-level ceiling turns that into a bounded, catchable failure that the
+    non-fatal FTS-rebuild retry absorbs. ``timeout_s <= 0`` = unlimited (skip). Best-effort:
+    a failure to set the timeout must never block opening the graph."""
+    if client is None or timeout_s <= 0:
+        return
+    try:
+        client.set_query_timeout(int(timeout_s) * 1000)
+    except Exception:
+        log.warning(
+            "⚠️ graphiti — failed to set Kuzu query timeout · timeout_s=%s", timeout_s,
+            exc_info=True,
+        )
 
 
 def _close_kuzu_driver(driver: Any) -> None:
@@ -332,6 +354,7 @@ class GraphitiMemoryService:
         k_hop: int = 1,
         reranker_min_score: float = 0.0,
         sim_min_score: float = 0.3,
+        query_timeout_s: int = 60,
     ) -> None:
         # Observability tier (off / ledger / trace) — the single dial that gates the ledger
         # roll-up rows, the tracer, the usage sinks, and the deep trace sidecars (docs §12.2).
@@ -366,6 +389,12 @@ class GraphitiMemoryService:
         except Exception:
             log.exception("❌ graphiti — failed to open Kuzu driver · path=%s", self._db_path)
             raise
+        # Bound every query on the shared writer pool (graph.query_timeout_s pref). This is the
+        # floor under the checkpoint-freeze: a CHECKPOINT stuck behind a concurrent reader dies
+        # in ~timeout seconds instead of starving the event loop for Kuzu's multi-minute internal
+        # wait. Re-applied on every service build (idempotent; the driver is shared/refcounted).
+        self._query_timeout_s = query_timeout_s
+        _apply_query_timeout(getattr(driver, "client", None), query_timeout_s)
         self._graphiti = Graphiti(
             graph_driver=driver,
             llm_client=llm_client,
@@ -472,6 +501,7 @@ class GraphitiMemoryService:
         event_sink: GraphEventSink | None = None,
         ledger_sink: "LedgerSink | None" = None,
         trace_label: str | None = None,
+        rebuild_fts: bool = True,
     ) -> GraphitiIngestStats:
         """Ingest document chunks as Graphiti episodes (F7 write-gated, sequential).
 
@@ -519,7 +549,48 @@ class GraphitiMemoryService:
             # released between episodes (docs §4.2), so a waiting reader/writer isn't
             # blocked for the whole batch.
             write_lock=kuzu_registry.write_lock(self._registry_key),
+            # Callers looping single-episode ingests (memory remember batch) pass False to defer
+            # the per-episode Kuzu FTS checkpoint and call ``rebuild_search_index`` once at the end.
+            rebuild_fts=rebuild_fts,
         )
+
+    async def rebuild_search_index(self, *, attempts: int = 2, backoff_s: float = 1.0) -> None:
+        """Rebuild the Kuzu FTS index ONCE (drop+create) under the write lock.
+
+        For callers that ingested with ``rebuild_fts=False`` (deferred per-episode rebuild): run
+        this after the batch so keyword (bm25) search + graphiti dedup see the new rows. Collapses
+        a per-episode checkpoint storm into a single checkpoint. No-op on non-Kuzu backends.
+
+        ``CREATE_FTS_INDEX`` triggers a Kuzu CHECKPOINT, which fails if any concurrent READ
+        transaction is still open (e.g. the Graph-tab live export). We retry a BOUNDED number of
+        times so a transient reader has a chance to clear — deliberately small (not aggressive)
+        because the checkpoint wait can itself be long, and re-attempting many times would only
+        extend a stall. Raises once every attempt fails; the caller decides whether that's fatal
+        (the eval treats it as non-fatal — rows are already committed and ``initialize()`` rebuilds
+        the FTS index on the next graph open)."""
+        await self.initialize()
+        driver = getattr(self._graphiti, "driver", None)
+        if driver is None:
+            return
+        last_exc: Exception | None = None
+        for attempt in range(1, max(1, attempts) + 1):
+            try:
+                async with kuzu_registry.write_lock(self._registry_key):
+                    await rebuild_fts_indices(driver)
+                return
+            except Exception as exc:
+                last_exc = exc
+                log.warning(
+                    "⚠️ graphiti — FTS rebuild attempt %d/%d failed · path=%s",
+                    attempt,
+                    attempts,
+                    self._db_path,
+                    exc_info=True,
+                )
+                if attempt < attempts:
+                    await asyncio.sleep(backoff_s * attempt)
+        if last_exc is not None:
+            raise last_exc
 
     async def remove_episodes(self, uuids: list[str]) -> int:
         """Delete the given episodes and the nodes/edges they EXCLUSIVELY own.
@@ -685,7 +756,7 @@ class GraphitiMemoryService:
 
         if not group_ids or not self._db_path.exists():
             return []
-        async with _snapshot_read_driver(self._db_path) as read_driver:
+        async with _snapshot_read_driver(self._db_path, purpose="list_facts") as read_driver:
             try:
                 edges = await EntityEdge.get_by_group_ids(read_driver, group_ids, limit=limit)
             except GroupsEdgesNotFoundError:
@@ -941,11 +1012,12 @@ class GraphitiMemoryService:
             k_hop=graph.k_hop,
             reranker_min_score=reranker_min_score,
             sim_min_score=graph.sim_min_score,
+            query_timeout_s=graph.query_timeout_s,
         )
 
 
 @asynccontextmanager
-async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
+async def _snapshot_read_driver(path: Path, purpose: str = "") -> AsyncIterator[Any]:
     """Yield a dedicated read connection on the *shared* Kuzu ``Database`` (lock-free reads).
 
     Shared across every read-only graph access (snapshot export, chunk-detail temporal
@@ -967,6 +1039,21 @@ async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
     read_driver.client = kuzu.AsyncConnection(
         driver.db, max_concurrent_queries=_SNAPSHOT_READ_POOL
     )
+    # Same per-query ceiling as the writer pool (graph.query_timeout_s): an open snapshot READ
+    # is exactly what a checkpoint waits on, so bounding readers kills the blocker side of the
+    # freeze too. Pref read is best-effort (db path → workspace root); fallback = pref default.
+    timeout_s = 60
+    try:
+        from hirocli.domain.preferences import load_preferences
+
+        timeout_s = load_preferences(path.parent.parent.parent).graph.query_timeout_s
+    except Exception:
+        log.warning("⚠️ graphiti — query-timeout pref read failed; using default", exc_info=True)
+    _apply_query_timeout(read_driver.client, timeout_s)
+    # Forensic trail for the checkpoint-vs-reader freeze: the OPEN line names which read was
+    # in flight when a stall hit (the close line never lands in that case — that's the signal).
+    log.info("⬇️ graphiti — snapshot read open · purpose=%s", purpose or "unspecified")
+    started = time.perf_counter()
     try:
         yield read_driver
     finally:
@@ -977,6 +1064,11 @@ async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
                 "⚠️ graphiti — snapshot read connection close failed", exc_info=True
             )
         kuzu_registry.release(key, _close_kuzu_driver)
+        log.info(
+            "✅ graphiti — snapshot read closed · purpose=%s · elapsed_ms=%d",
+            purpose or "unspecified",
+            int((time.perf_counter() - started) * 1000),
+        )
 
 
 async def read_graph_snapshot(
@@ -1010,7 +1102,7 @@ async def read_graph_snapshot(
     nodes: list[Any] = []
     edges: list[Any] = []
     chunk_to_document: dict[str, str] = {}
-    async with _snapshot_read_driver(path) as read_driver:
+    async with _snapshot_read_driver(path, purpose="graph_snapshot_export") as read_driver:
         # Default to the named knowledge group (kb_main) when no explicit selection is made
         # (docs/graph-group-policy-design.md §7) — never graphiti's empty default group.
         gids = [g for g in (group_ids or []) if g] or [KNOWLEDGE_GROUP_ID]
@@ -1050,7 +1142,7 @@ async def read_graph_group_ids(db_path: Path) -> tuple[list[str], str | None]:
         return [], None
     # The knowledge partition is the NAMED kb_main group, not graphiti's empty default.
     default_gid = KNOWLEDGE_GROUP_ID
-    async with _snapshot_read_driver(path) as read_driver:
+    async with _snapshot_read_driver(path, purpose="group_ids") as read_driver:
         query = "MATCH (e:Episodic) RETURN DISTINCT e.group_id AS group_id"
         try:
             rows, _, _ = await read_driver.execute_query(query)
@@ -1076,7 +1168,7 @@ async def distinct_group_ids_with_prefix(db_path: Path, prefix: str) -> set[str]
         "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $prefix "
         "RETURN DISTINCT e.group_id AS group_id"
     )
-    async with _snapshot_read_driver(path) as read_driver:
+    async with _snapshot_read_driver(path, purpose="group_ids_prefix") as read_driver:
         try:
             rows, _, _ = await read_driver.execute_query(query, prefix=prefix)
         except Exception:
@@ -1106,7 +1198,7 @@ async def read_episode_valid_at(db_path: Path, uuids: list[str]) -> dict[str, st
     if not ids or not path.exists():
         return {}
     out: dict[str, str | None] = {}
-    async with _snapshot_read_driver(path) as read_driver:
+    async with _snapshot_read_driver(path, purpose="episode_valid_at") as read_driver:
         try:
             episodes = await EpisodicNode.get_by_uuids(read_driver, ids)
         except Exception:
@@ -1146,7 +1238,7 @@ async def read_episode_chunks(db_path: Path, uuids: list[str]) -> dict[str, dict
     if not ids or not path.exists():
         return {}
     out: dict[str, dict[str, Any]] = {}
-    async with _snapshot_read_driver(path) as read_driver:
+    async with _snapshot_read_driver(path, purpose="episode_chunks") as read_driver:
         try:
             episodes = await EpisodicNode.get_by_uuids(read_driver, ids)
         except Exception:

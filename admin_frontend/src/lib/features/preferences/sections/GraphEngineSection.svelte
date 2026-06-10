@@ -216,6 +216,19 @@
             oninput={ctrl.markDirty}
           />
         </FormField>
+        <FormField
+          label="Query timeout (seconds)"
+          hint="Hard ceiling on any single graph (Kuzu) query — writes, index rebuilds, and Graph-tab reads. Protects the server from a stuck index-rebuild checkpoint that can otherwise freeze the whole admin UI for minutes; a bounded failure is retried and logged instead. Keep above your slowest legitimate operation (index rebuilds take seconds). 0 = unlimited."
+        >
+          <input
+            type="number"
+            min="0"
+            max="600"
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.graph.query_timeout_s}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
       </div>
       <FormField
         label="Graph observability"

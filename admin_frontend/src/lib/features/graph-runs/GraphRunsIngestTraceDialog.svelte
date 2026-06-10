@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ChevronsDownUp, ChevronsUpDown, Settings2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import type {
@@ -28,9 +29,12 @@
   const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
   // ── Tabs ────────────────────────────────────────────────────────────────────────────────
-  // Pipeline = the per-stage journey (prompt in / structured out); Result = what landed in the
-  // graph (persisted nodes + edges); Corpus = caller's optional tab. Reset to Pipeline on open.
-  let activeTab = $state<'pipeline' | 'result' | 'corpus'>('pipeline');
+  // One flat tab row: a tab per pipeline phase (Entities / Attributes / Facts / Other) — the
+  // per-stage journey — then Result (what landed in the graph: persisted nodes + edges), then
+  // the caller's optional Corpus tab. Sentinels keep the last two distinct from phase keys.
+  const RESULT_TAB = '__result__';
+  const EXTRA_TAB = '__extra__';
+  let activeTab = $state<string>('');
 
   // Per-stage collapse, keyed by the stage's index in `trace.stages`. Separate disclosures for
   // the (large, repetitive) prompt and the raw-JSON fallback — both collapsed by default since
@@ -39,12 +43,17 @@
   let promptOpen = $state<Set<number>>(new Set());
   let jsonOpen = $state<Set<number>>(new Set());
 
+  // The config/stats line (episode · chunk · tokens …) is collapsed by default behind the
+  // header gear so the header stays compact — mirrors the recall (retrieval) trace dialog.
+  let settingsOpen = $state(false);
+
   $effect(() => {
     void trace;
-    activeTab = 'pipeline';
+    activeTab = phases[0]?.phase ?? RESULT_TAB;
     collapsed = new Set();
     promptOpen = new Set();
     jsonOpen = new Set();
+    settingsOpen = false;
   });
 
   function toggleStage(index: number): void {
@@ -163,15 +172,21 @@
     });
   });
 
-  let activePhase = $state<string>('');
+  // The flat tab order: each present phase, then Result, then the optional Corpus tab.
+  const tabKeys = $derived<string[]>([
+    ...phases.map((p) => p.phase),
+    RESULT_TAB,
+    ...(hasExtraTab ? [EXTRA_TAB] : [])
+  ]);
 
+  // Keep the active tab valid as the trace (and thus its phases) changes.
   $effect(() => {
-    const keys = phases.map((p) => p.phase);
-    if (!keys.includes(activePhase)) activePhase = keys[0] ?? '';
+    if (!tabKeys.includes(activeTab)) activeTab = tabKeys[0] ?? RESULT_TAB;
   });
 
+  // The active phase, or null when the active tab is Result / Corpus (no per-stage cards).
   const activePhaseObj = $derived<Phase | null>(
-    phases.find((p) => p.phase === activePhase) ?? phases[0] ?? null
+    phases.find((p) => p.phase === activeTab) ?? null
   );
 
   /** Expand / collapse all stage cards in the ACTIVE phase (mirrors the retrieval dialog). */
@@ -440,6 +455,16 @@
     return parts.join(' · ');
   }
 
+  // Count pill for a stage header (mirrors the recall dialog): how many items the stage
+  // produced, when that's a meaningful number. List-shaped outputs (extracted entities, table
+  // rows, resolved-fact candidates) → their length; key/value / scalar outputs → null (no pill).
+  function stageCount(stage: IngestTraceStage, node: string): number | null {
+    if (node === 'extract_entities') return extractedEntities(stage)?.length ?? null;
+    if (node === 'resolve_facts') return resolveFactsView(stage)?.candidates.length ?? null;
+    const ov = outputView(stage);
+    return ov.kind === 'rows' ? ov.rows.length : null;
+  }
+
   const isCurrent = (e: IngestTraceEdge): boolean => !(e.invalid_at || e.expired_at);
 
   function temporalTitle(e: IngestTraceEdge): string {
@@ -581,94 +606,112 @@
         <Dialog.Title>Ingest pipeline trace</Dialog.Title>
         {#if trace}
           <div class="trace-head-actions">
-            {#if activeTab === 'pipeline' && activePhaseObj}
-              <Button variant="outline" size="sm" onclick={expandActive}>Expand all</Button>
-              <Button variant="outline" size="sm" onclick={collapseActive}>Collapse all</Button>
+            {#if activePhaseObj}
+              <Button
+                variant="outline"
+                size="sm"
+                title="Expand all sections"
+                aria-label="Expand all sections"
+                onclick={expandActive}
+              >
+                <ChevronsUpDown size={14} aria-hidden="true" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                title="Collapse all sections"
+                aria-label="Collapse all sections"
+                onclick={collapseActive}
+              >
+                <ChevronsDownUp size={14} aria-hidden="true" />
+              </Button>
             {/if}
-            <div class="trace-tabs" role="tablist" aria-label="Ingest trace views">
-              <button
-                type="button"
-                role="tab"
-                class="trace-tab"
-                class:trace-tab--active={activeTab === 'pipeline'}
-                aria-selected={activeTab === 'pipeline'}
-                onclick={() => (activeTab = 'pipeline')}
-              >
-                Pipeline
-              </button>
-              <button
-                type="button"
-                role="tab"
-                class="trace-tab"
-                class:trace-tab--active={activeTab === 'result'}
-                aria-selected={activeTab === 'result'}
-                onclick={() => (activeTab = 'result')}
-              >
-                Result
-              </button>
-              {#if hasExtraTab}
-                <button
-                  type="button"
-                  role="tab"
-                  class="trace-tab"
-                  class:trace-tab--active={activeTab === 'corpus'}
-                  aria-selected={activeTab === 'corpus'}
-                  onclick={() => (activeTab = 'corpus')}
-                >
-                  {extraTabLabel}
-                </button>
-              {/if}
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              title={settingsOpen ? 'Hide settings' : 'Show settings'}
+              aria-label="Settings"
+              aria-pressed={settingsOpen}
+              onclick={() => (settingsOpen = !settingsOpen)}
+            >
+              <Settings2 size={14} aria-hidden="true" />
+            </Button>
           </div>
         {/if}
       </div>
       {#if trace}
         <Dialog.Description>
           <span class="trace-query">{trace.name || trace.chunk_id}</span>
-          <span class="trace-config">
-            episode {trace.episode_index}/{trace.total} · chunk {shortGraphId(trace.chunk_id)} ·
-            group={trace.group_id}
-            {#if trace.reference_time}· <span title={trace.reference_time}>t={fmtDate(trace.reference_time, false)}</span>{/if}
-            · stages={totals.calls} · {totals.inTok}i/{totals.outTok}o · {totals.ms.toFixed(0)}ms
-            · persisted {nodes.length} entities / {edges.length} facts
-            {#if trace.invalidated_count}· invalidated={trace.invalidated_count}{/if}
-          </span>
+          <!-- Ingested source text inline (compact, no card) right under the title — the thing
+               every stage was extracted from. -->
+          {#if trace.text}
+            <span class="trace-ingested">
+              <span class="trace-ingested__label">Ingested text:</span>
+              {trace.text}
+            </span>
+          {/if}
+          <!-- Config / stats line — toggled by the header gear; collapsed by default to keep the
+               header compact (mirrors the recall trace dialog). -->
+          {#if settingsOpen}
+            <span class="trace-config">
+              episode {trace.episode_index}/{trace.total} · chunk {shortGraphId(trace.chunk_id)} ·
+              group={trace.group_id}
+              {#if trace.reference_time}· <span title={trace.reference_time}>t={fmtDate(trace.reference_time, false)}</span>{/if}
+              · stages={totals.calls} · {totals.inTok}i/{totals.outTok}o · {totals.ms.toFixed(0)}ms
+              · persisted {nodes.length} entities / {edges.length} facts
+              {#if trace.invalidated_count}· invalidated={trace.invalidated_count}{/if}
+            </span>
+          {/if}
         </Dialog.Description>
       {/if}
     </Dialog.Header>
 
     {#if trace}
       <div class="trace-body">
-        {#if activeTab === 'pipeline'}
-          {#if trace.text}
-            <section class="source-card">
-              <span class="source-card__label">Ingested text</span>
-              <p class="source-card__text">{trace.text}</p>
-            </section>
+        <!-- One flat tab row: a tab per pipeline phase (Entities / Attributes / Facts / Other),
+             then Result (what landed in the graph), then the caller's optional Corpus tab. -->
+        <div class="trace-tabs trace-subtabs" role="tablist" aria-label="Ingest trace views">
+          {#each phases as phase (phase.phase)}
+            <button
+              type="button"
+              role="tab"
+              class="trace-tab"
+              class:trace-tab--active={activeTab === phase.phase}
+              aria-selected={activeTab === phase.phase}
+              onclick={() => (activeTab = phase.phase)}
+            >
+              {phase.title}
+              <span class="trace-tab__count">{phase.idxs.length}</span>
+            </button>
+          {/each}
+          <button
+            type="button"
+            role="tab"
+            class="trace-tab"
+            class:trace-tab--active={activeTab === RESULT_TAB}
+            aria-selected={activeTab === RESULT_TAB}
+            onclick={() => (activeTab = RESULT_TAB)}
+          >
+            Result
+            <span class="trace-tab__count">{nodes.length + edges.length}</span>
+          </button>
+          {#if hasExtraTab}
+            <button
+              type="button"
+              role="tab"
+              class="trace-tab"
+              class:trace-tab--active={activeTab === EXTRA_TAB}
+              aria-selected={activeTab === EXTRA_TAB}
+              onclick={() => (activeTab = EXTRA_TAB)}
+            >
+              {extraTabLabel}
+            </button>
           {/if}
+        </div>
 
-          {#if phases.length}
-            <!-- One sub-tab per present phase (Entities / Attributes / Facts / Other). -->
-            <div class="trace-tabs trace-subtabs" role="tablist" aria-label="Pipeline phases">
-              {#each phases as phase (phase.phase)}
-                <button
-                  type="button"
-                  role="tab"
-                  class="trace-tab"
-                  class:trace-tab--active={phase.phase === activePhase}
-                  aria-selected={phase.phase === activePhase}
-                  onclick={() => (activePhase = phase.phase)}
-                >
-                  {phase.title}
-                  <span class="trace-tab__count">{phase.idxs.length}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-
-          {#if activePhaseObj}
-            {@const phase = activePhaseObj}
-            {#if phase.hint}<p class="phase-hint">{phase.hint}</p>{/if}
+        {#if activePhaseObj}
+          {@const phase = activePhaseObj}
+          {#if phase.hint}<p class="phase-hint">{phase.hint}</p>{/if}
 
             {#each phase.groups as group (group.node)}
               <section class="stage-group">
@@ -685,17 +728,18 @@
                     <header class="stage-card__head">
                       <button
                         type="button"
-                        class="stage-card__toggle"
+                        class="stage-card__titlebtn"
                         aria-expanded={!isCollapsed(gidx)}
                         title={isCollapsed(gidx) ? 'Expand' : 'Collapse'}
                         onclick={() => toggleStage(gidx)}
                       >
-                        {isCollapsed(gidx) ? '\u25B8' : '\u25BE'}
+                        <span class="stage-card__caret">{isCollapsed(gidx) ? '\u25B8' : '\u25BE'}</span>
+                        <span class="stage-card__label">
+                          Merge map<span class="stage-card__badge">dedup</span>
+                        </span>
+                        <span class="stage-card__pill" title="Auto-merges">{merges.length}</span>
                       </button>
-                      <span class="stage-card__label">
-                        Merge map<span class="stage-card__badge">dedup</span>
-                      </span>
-                      <span class="stage-card__meta">{merges.length} auto-merge{merges.length === 1 ? '' : 's'} · deterministic (no LLM)</span>
+                      <span class="stage-card__meta">auto-merges · deterministic (no LLM)</span>
                     </header>
                     {#if !isCollapsed(gidx)}
                       <div class="stage-card__body">
@@ -753,46 +797,29 @@
                     {@const iv = inputView(stage)}
                     {@const rfv = group.node === 'resolve_facts' ? resolveFactsView(stage) : null}
                     {@const ee = group.node === 'extract_entities' ? extractedEntities(stage) : null}
+                    {@const count = stageCount(stage, group.node)}
                     <div class="stage-card" data-source={stage.source}>
                       <header class="stage-card__head">
                         <button
                           type="button"
-                          class="stage-card__toggle"
+                          class="stage-card__titlebtn"
                           aria-expanded={!isCollapsed(idx)}
                           title={isCollapsed(idx) ? 'Expand stage' : 'Collapse stage'}
                           onclick={() => toggleStage(idx)}
                         >
-                          {isCollapsed(idx) ? '\u25B8' : '\u25BE'}
+                          <span class="stage-card__caret">{isCollapsed(idx) ? '\u25B8' : '\u25BE'}</span>
+                          <span class="stage-card__label">
+                            {stage.label}
+                            {#if stage.source !== 'llm'}<span class="stage-card__badge">{stage.source}</span>{/if}
+                          </span>
+                          {#if count !== null}<span class="stage-card__pill" title="Items produced by this stage">{count}</span>{/if}
                         </button>
-                        <span class="stage-card__label">
-                          {stage.label}
-                          {#if stage.source !== 'llm'}<span class="stage-card__badge">{stage.source}</span>{/if}
-                        </span>
                         <span class="stage-card__meta">{stageMeta(stage)}</span>
                       </header>
 
                       {#if !isCollapsed(idx)}
                         <div class="stage-card__body">
-                          {#if messages(stage).length}
-                            <button
-                              type="button"
-                              class="prompt-toggle"
-                              aria-expanded={isPromptOpen(idx)}
-                              onclick={() => togglePrompt(idx)}
-                            >
-                              {isPromptOpen(idx) ? '\u25BE' : '\u25B8'} Prompt ({messages(stage).length} messages) — the context this stage ran on
-                            </button>
-                            {#if isPromptOpen(idx)}
-                              <div class="prompt-list">
-                                {#each messages(stage) as msg, mi (mi)}
-                                  <div class="prompt-msg">
-                                    <span class="prompt-msg__role">{msg.role}</span>
-                                    <pre class="prompt-msg__content">{msg.content}</pre>
-                                  </div>
-                                {/each}
-                              </div>
-                            {/if}
-                          {:else if iv.kind !== 'empty'}
+                          {#if iv.kind !== 'empty'}
                             <div class="output-block">
                               <span class="output-block__label">Input — what this stage was given</span>
                               {@render viewTable(iv)}
@@ -800,7 +827,6 @@
                           {/if}
 
                           <div class="output-block">
-                            <span class="output-block__label">Output — what the stage produced</span>
                             {#if rfv}
                               {@render factVerdict(rfv)}
                             {:else if ee}
@@ -810,6 +836,30 @@
                             {:else}
                               {@render viewTable(ov)}
                             {/if}
+
+                            <!-- Prompt sits right before the Raw JSON fallback — both are the
+                                 raw, click-to-reveal detail behind the structured view above. -->
+                            {#if messages(stage).length}
+                              <button
+                                type="button"
+                                class="prompt-toggle"
+                                aria-expanded={isPromptOpen(idx)}
+                                onclick={() => togglePrompt(idx)}
+                              >
+                                {isPromptOpen(idx) ? '▾' : '▸'} Prompt ({messages(stage).length} messages) — the context this stage ran on
+                              </button>
+                              {#if isPromptOpen(idx)}
+                                <div class="prompt-list">
+                                  {#each messages(stage) as msg, mi (mi)}
+                                    <div class="prompt-msg">
+                                      <span class="prompt-msg__role">{msg.role}</span>
+                                      <pre class="prompt-msg__content">{msg.content}</pre>
+                                    </div>
+                                  {/each}
+                                </div>
+                              {/if}
+                            {/if}
+
                             <button
                               type="button"
                               class="prompt-toggle"
@@ -829,10 +879,7 @@
                 {/if}
               </section>
             {/each}
-          {:else}
-            <p class="trace-empty">No stages were captured for this episode.</p>
-          {/if}
-        {:else if activeTab === 'result'}
+        {:else if activeTab === RESULT_TAB}
           <!-- Result tab: what actually landed in the graph (AddEpisodeResults). -->
           <section class="result-section">
             <h3 class="stage-group__title">Entities ({nodes.length})</h3>
@@ -910,7 +957,7 @@
               <p class="trace-empty">No facts persisted.</p>
             {/if}
           </section>
-        {:else if activeTab === 'corpus' && extraTab}
+        {:else if activeTab === EXTRA_TAB && extraTab}
           <!-- Caller-provided tab (eval: the searchable source corpus). -->
           <section class="result-section">
             {@render extraTab()}
@@ -1030,28 +1077,23 @@
     color: var(--muted-foreground);
   }
 
-  /* Ingested source text — the thing every stage was extracted from. */
-  .source-card {
-    flex: none;
-    border: 1px solid color-mix(in srgb, var(--muted-foreground) 18%, transparent);
-    border-radius: 8px;
-    padding: 8px 10px;
-    background: color-mix(in srgb, var(--muted-foreground) 5%, transparent);
-  }
-
-  .source-card__label {
-    display: block;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--muted-foreground);
-    margin-bottom: 4px;
-  }
-
-  .source-card__text {
-    margin: 0;
+  /* Ingested source text — inline under the title, compact (clamped to 2 lines, no card). */
+  .trace-ingested {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    margin-top: 2px;
     font-size: 12px;
+    color: var(--foreground);
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .trace-ingested__label {
+    font-weight: 600;
+    color: var(--muted-foreground);
   }
 
   .stage-group {
@@ -1090,40 +1132,70 @@
   .stage-card__head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
     padding: 8px 10px;
     background: color-mix(in srgb, var(--muted-foreground) 8%, transparent);
   }
 
-  .stage-card__toggle {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
+  /* Whole title row is the toggle — caret + label + count pill, all clickable (mirrors recall). */
+  .stage-card__titlebtn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 8px;
     padding: 0;
-    border: 1px solid color-mix(in srgb, var(--muted-foreground) 30%, transparent);
-    border-radius: 4px;
+    border: none;
     background: transparent;
     color: var(--foreground);
-    font-size: 11px;
-    line-height: 1;
     cursor: pointer;
+    text-align: left;
   }
 
-  .stage-card__toggle:hover {
-    background: color-mix(in srgb, var(--muted-foreground) 16%, transparent);
+  .stage-card__titlebtn:hover .stage-card__label {
+    color: var(--primary);
+  }
+
+  .stage-card__titlebtn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .stage-card__caret {
+    flex: none;
+    width: 14px;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--muted-foreground);
   }
 
   .stage-card__label {
-    flex: 1;
     min-width: 0;
     font-weight: 600;
     font-size: 13px;
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* Count pill after the stage title: how many items the stage produced (mirrors recall). */
+  .stage-card__pill {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 17px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted-foreground);
+    background: color-mix(in srgb, var(--muted-foreground) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--muted-foreground) 24%, transparent);
   }
 
   .stage-card__badge {

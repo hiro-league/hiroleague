@@ -267,6 +267,8 @@ async def _main(
     # bind admin_port before TTS / AgentManager / metrics startup. We include
     # the existing admin_task in the gather list so cancellation propagates on
     # shutdown.
+    from hirocli.runtime.loop_sentinel import run_loop_stall_sentinel
+
     coros: list = [
         run_http_server(ctx),
         channel_manager.run(),
@@ -274,6 +276,9 @@ async def _main(
         agent_manager.serve(),
         knowledge_manager.serve(),
         metrics_collector.run(),
+        # Stall forensics: logs a WARNING (with duration) whenever a blocking/native call
+        # starves the event loop — the silent multi-minute freezes become named evidence.
+        run_loop_stall_sentinel(),
     ]
     if admin_task is not None:
         coros.append(admin_task)

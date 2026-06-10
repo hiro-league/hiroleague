@@ -182,6 +182,10 @@ class KnowledgeL3EvalRunTool(Tool):
                         questions=questions,
                         run_id=rid,
                         remember=ingest_synthetic,
+                        # The tool is a one-shot rebuild (no batching): clearing the drawer is now
+                        # decoupled from remember in the runner, so pair them here to keep this
+                        # path's "ingest = rebuild from scratch" behavior unchanged.
+                        clear_before=ingest_synthetic,
                         judge=judge,
                     )
                 finally:

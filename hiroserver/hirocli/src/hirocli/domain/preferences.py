@@ -614,6 +614,14 @@ class GraphPreferences(BaseModel):
     # precision belongs); raise toward 0.6 to tighten candidates. Applies to all recipes
     # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
     sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0)
+    # Hard ceiling (seconds) on any single Kuzu query — applied to the shared writer pool AND
+    # the snapshot read connections. Bounds the pathological case where a CHECKPOINT (triggered
+    # by an FTS rebuild) waits minutes for a concurrent read transaction to leave — observed to
+    # starve the event loop for ~2.5 min (native wait) and freeze the whole admin UI. With this
+    # bound the stall dies in ~query_timeout_s and the non-fatal FTS retry absorbs the failure.
+    # Sized above legit operations (per-episode writes are sub-second; a full FTS rebuild is
+    # seconds at current scale) but far below Kuzu's internal wait. 0 = unlimited.
+    query_timeout_s: int = Field(default=60, ge=0, le=600)
     # Graph observability tier (docs §12.2): ``off`` = no graphiti ledger/tracer/sinks;
     # ``ledger`` = one priced roll-up row per episode/search (cost folds — prod default);
     # ``trace`` = + deep per-stage JSONL sidecars. Replaces the former ``ledger_detail``

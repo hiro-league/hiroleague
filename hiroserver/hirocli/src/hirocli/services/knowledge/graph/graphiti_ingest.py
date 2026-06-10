@@ -331,6 +331,7 @@ async def ingest_episodes(
     write_lock: asyncio.Lock | None = None,
     workspace_path: Path | None = None,
     trace_name: str = "graph_ingest",
+    rebuild_fts: bool = True,
 ) -> GraphitiIngestStats:
     """Ingest chunks as Graphiti episodes — sequential, chronological, write-gated.
 
@@ -611,7 +612,12 @@ async def ingest_episodes(
             # this batch's edges/nodes/episodes are written, so keyword (bm25) search legs and
             # graphiti's dedup can see them. Done once per batch (not per episode) under the
             # single-writer lock, since DROP/CREATE_FTS_INDEX are writes.
-            if driver is not None and stats.episodes_processed > 0:
+            # ``rebuild_fts=False`` defers it: a caller looping many SINGLE-episode ingests (the
+            # memory remember batch) would otherwise force a Kuzu CHECKPOINT per episode — each
+            # one stalls until every concurrent READ leaves (the Graph-tab live export), which is
+            # exactly the "Timeout waiting for active transactions before checkpointing" freeze.
+            # Such callers pass False here and rebuild ONCE at the end of their batch instead.
+            if rebuild_fts and driver is not None and stats.episodes_processed > 0:
                 async with write_guard:
                     await rebuild_fts_indices(driver)
 

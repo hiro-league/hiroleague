@@ -6,6 +6,7 @@ from pathlib import Path
 
 from hirocli.services.knowledge.eval_store import (
     EvalResultStore,
+    coalesce_ingested_ranges,
     eval_results_db_path,
     get_eval_result_store,
 )
@@ -98,6 +99,79 @@ def test_get_eval_result_store_is_cached_per_workspace(tmp_path: Path) -> None:
     a = get_eval_result_store(tmp_path)
     b = get_eval_result_store(tmp_path)
     assert a is b
+
+
+def test_ingested_ranges_append_upsert_and_read(tmp_path: Path) -> None:
+    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store.append_range("adam", 0, 50, 0.10)
+    store.append_range("adam", 50, 50, 0.20)
+    assert store.read_ranges("adam") == [
+        {"start": 0, "count": 50, "cost_usd": 0.10},
+        {"start": 50, "count": 50, "cost_usd": 0.20},
+    ]
+    # Re-running the SAME offset upserts that batch's count AND cost (no duplicate row stacking,
+    # and the cumulative never double-counts a re-ingested offset).
+    store.append_range("adam", 0, 100, 0.35)
+    assert store.read_ranges("adam") == [
+        {"start": 0, "count": 100, "cost_usd": 0.35},
+        {"start": 50, "count": 50, "cost_usd": 0.20},
+    ]
+    # Cumulative per-corpus ingest cost = sum of every batch's cost.
+    assert sum(r["cost_usd"] for r in store.read_ranges("adam")) == 0.55
+    # Empty/invalid batches are ignored.
+    store.append_range("adam", 200, 0)
+    store.append_range("adam", -1, 5)
+    assert [r["start"] for r in store.read_ranges("adam")] == [0, 50]
+
+
+def test_ingested_ranges_clear_and_isolation(tmp_path: Path) -> None:
+    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store.append_range("adam", 0, 50)
+    store.append_range("other", 0, 10)
+    # Clearing ranges is corpus-scoped and independent of the results table.
+    store.upsert_row("adam", "q1", _row("q1", "✓"), mark="✓", cost_usd=0.0)
+    removed = store.clear_ranges("adam")
+    assert removed == 1
+    assert store.read_ranges("adam") == []
+    assert store.read_ranges("other") == [{"start": 0, "count": 10, "cost_usd": 0.0}]
+    # Range clear leaves the saved question rows untouched (separate concern).
+    assert set(store.read_corpus("adam")) == {"q1"}
+
+
+def test_ranges_survive_preexisting_db_without_the_table(tmp_path: Path) -> None:
+    """A DB created before the ranges table existed must not crash range reads/clears
+    (no-migration: the table is created on access)."""
+    import sqlite3
+
+    db = tmp_path / "knowledge" / "eval_results.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    # Simulate the OLD schema: only the results table, no memory_eval_ingested_ranges.
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "CREATE TABLE memory_eval_results (corpus_id TEXT, question_id TEXT, "
+            "row_json TEXT, mark TEXT, cost_usd REAL, updated_at TEXT, "
+            "PRIMARY KEY (corpus_id, question_id))"
+        )
+    store = EvalResultStore(db)
+    # Previously raised sqlite3.OperationalError: no such table.
+    assert store.read_ranges("adam") == []
+    assert store.clear_ranges("adam") == 0
+    # And the table is now usable.
+    store.append_range("adam", 0, 5)
+    assert store.read_ranges("adam") == [{"start": 0, "count": 5, "cost_usd": 0.0}]
+
+
+def test_coalesce_ingested_ranges_merges_and_keeps_gaps() -> None:
+    # Contiguous (0–49 + 50–99) and overlapping batches fold; a gap stays visible.
+    spans = coalesce_ingested_ranges(
+        [{"start": 50, "count": 50}, {"start": 0, "count": 50}, {"start": 150, "count": 50}]
+    )
+    assert spans == [[0, 99], [150, 199]]
+    # Overlap folds to the wider end; a zero-count batch is dropped.
+    assert coalesce_ingested_ranges(
+        [{"start": 0, "count": 100}, {"start": 50, "count": 10}, {"start": 300, "count": 0}]
+    ) == [[0, 99]]
+    assert coalesce_ingested_ranges([]) == []
 
 
 def test_summarize_memory_rows_merged_snapshot() -> None:

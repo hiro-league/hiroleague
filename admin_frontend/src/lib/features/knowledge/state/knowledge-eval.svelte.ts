@@ -44,6 +44,7 @@ import {
   runKnowledgeEval,
   type EvalCorpus,
   type EvalEpisode,
+  type EvalIngestedRanges,
   type EvalQuestionItem
 } from '$lib/api/knowledge';
 
@@ -108,6 +109,12 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
   };
 }
 
+/** Read a persisted non-negative integer setting, falling back when unset/invalid. */
+function readEvalInt(key: string, fallback: number): number {
+  const n = parseInt(readLocalString(key) ?? '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 export function createKnowledgeEvalModel(deps: { setError: (message: string | null) => void }) {
   // Setup-form state — defaults off, but the user's last choice persists across
   // reloads via localStorage (mirrors the ingest tab's buildGraphAfter pattern).
@@ -115,6 +122,17 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   let buildGraph = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false));
   // Optional LLM judge step (grades the model's answer vs the ideal). Off = answers only.
   let judge = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeEvalJudge, false));
+
+  // Memory track — explicit graph wipe BEFORE remembering. Decoupled from `ingestSynthetic`
+  // (Remember) so a corpus can be built across appended batches without each wiping the last.
+  // NOT persisted: a reload must never silently re-arm a wipe — the user opts in per run.
+  let clearBefore = $state<boolean>(false);
+  // Memory track — remember-phase episode window as 1-based, INCLUSIVE episode numbers (what the
+  // user actually counts: episode 1 is the first turn). `episodeFrom` ≥ 1; `episodeTo` of 0 means
+  // "to the end" (no cap). Converted to the backend's 0-based offset/limit at send time. Persisted
+  // so a manual batched build keeps its place across reloads (and auto-advances after each batch).
+  let episodeFrom = $state<number>(Math.max(1, readEvalInt(PREF_KEYS.knowledgeEvalEpisodeFrom, 1)));
+  let episodeTo = $state<number>(readEvalInt(PREF_KEYS.knowledgeEvalEpisodeTo, 50));
 
   // Eval track. Default to the memory track (the new capability). 'knowledge' is the
   // document/chunk eval. Each track scans its own corpuses from the chosen folder.
@@ -158,6 +176,12 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   // abstain, or '' when answered-but-judge-off; ABSENT id = not-run). Kept independent of
   // the live `rows` so badges reflect saved coverage even mid-run or after a Clear.
   let savedStatusById = $state<Record<string, string>>({});
+
+  // Ingested-episode progress for the selected memory corpus (which turns are in the graph) —
+  // drives the Corpus header's "ingested …" readout. Refreshed by loadResults; reset to empty on
+  // the knowledge track, no corpus, or after a graph wipe (the server returns empty ranges then).
+  const EMPTY_INGESTED: EvalIngestedRanges = { ranges: [], count: 0, batches: 0, cost_usd: 0 };
+  let ingested = $state<EvalIngestedRanges>(EMPTY_INGESTED);
 
   // Selected legs to compare (flat/graphiti, knowledge only). Default = both; one must stay.
   let selectedModes = $state<EvalLeg[]>([...EVAL_ALL_LEGS]);
@@ -314,11 +338,13 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   async function loadResults(applyView = true) {
     if (track !== 'memory') {
       savedStatusById = {};
+      ingested = EMPTY_INGESTED;
       return;
     }
     const corpus = selectedCorpus();
     if (!corpus) {
       savedStatusById = {};
+      ingested = EMPTY_INGESTED;
       return;
     }
     try {
@@ -327,6 +353,9 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       const map: Record<string, string> = {};
       for (const r of data.rows) map[r.id] = r.legs?.recall?.mark ?? '';
       savedStatusById = map;
+      // Ingested-range readout always refreshes (independent of the view guards below), so the
+      // Corpus header stays accurate even mid-run or after a failed run.
+      ingested = data.ingested ?? EMPTY_INGESTED;
       if (!applyView) return;
       // The live stream owns the table while a run is in flight; don't clobber it.
       if (status === 'starting' || status === 'running') return;
@@ -593,7 +622,31 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     cancelling = false;
     // Memory: the run upserted its questions to disk — reconcile the table to the FULL
     // merged snapshot (the subset we just ran + everything previously saved).
-    if (track === 'memory') void loadResults(true);
+    if (track === 'memory') {
+      advanceEpisodeWindow();
+      void loadResults(true);
+    }
+  }
+
+  /** Auto-advance the From/To window past the batch just ingested, so a chunked build "just works"
+   *  (run, run, run) without re-typing the range. Shifts BOTH ends by the actual episodes ingested
+   *  (the `remember_done` setup event's count) to preserve the window width. No-op when this run
+   *  didn't ingest (no remember_done) or ingested to the end (`to` = 0 stays open-ended). */
+  function advanceEpisodeWindow() {
+    let batch = 0;
+    for (let i = setupEvents.length - 1; i >= 0; i--) {
+      if (setupEvents[i].phase === 'remember_done') {
+        batch = setupEvents[i].episode_count ?? 0;
+        break;
+      }
+    }
+    if (batch <= 0) return;
+    episodeFrom = episodeFrom + batch;
+    writeLocalString(PREF_KEYS.knowledgeEvalEpisodeFrom, String(episodeFrom));
+    if (episodeTo > 0) {
+      episodeTo = episodeTo + batch;
+      writeLocalString(PREF_KEYS.knowledgeEvalEpisodeTo, String(episodeTo));
+    }
   }
 
   function handleFailed(p: EvalFailedPayload) {
@@ -622,8 +675,11 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       deps.setError('Pick a corpus before running the eval.');
       return;
     }
-    if (selected.size === 0) {
-      deps.setError('Select at least one question to run.');
+    // Setup-only batches (memory: remember a range / clear, with no questions) are allowed —
+    // that's how a large corpus gets built in monitored chunks before any recall.
+    const setupOnly = track === 'memory' && (ingestSynthetic || clearBefore);
+    if (selected.size === 0 && !setupOnly) {
+      deps.setError('Select at least one question, or enable Remember / Clear for a setup-only batch.');
       return;
     }
     // Fresh slate every run — last run's table doesn't bleed into this one.
@@ -655,6 +711,15 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       if (track === 'knowledge') {
         req.build_graph = buildGraph;
         req.modes = [...selectedModes];
+      } else {
+        // Memory track — explicit wipe + remember-phase episode window. Convert the user-facing
+        // 1-based INCLUSIVE from/to to the backend's 0-based offset + count: offset = from-1;
+        // count = to-from+1 (≥0). `to` of 0 = "to the end" → null count (remember every remaining
+        // episode). This is the layer that kills the off-by-one — the user types real episode
+        // numbers, never a 0-based index.
+        req.clear_before = clearBefore;
+        req.episode_offset = Math.max(0, episodeFrom - 1);
+        req.episode_limit = episodeTo > 0 ? Math.max(0, episodeTo - episodeFrom + 1) : null;
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
@@ -712,6 +777,29 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     set buildGraph(v: boolean) {
       buildGraph = v;
       writeLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, v);
+    },
+    // Memory track — explicit "Clear graph first" (decoupled from Remember). Not persisted.
+    get clearBefore() {
+      return clearBefore;
+    },
+    set clearBefore(v: boolean) {
+      clearBefore = v;
+    },
+    // Memory track — remember-phase episode window as 1-based INCLUSIVE episode numbers
+    // (From episode ≥ 1; To = 0 ⇒ to the end). Converted to 0-based offset/count at send time.
+    get episodeFrom() {
+      return episodeFrom;
+    },
+    set episodeFrom(v: number) {
+      episodeFrom = Number.isFinite(v) && v >= 1 ? Math.floor(v) : 1;
+      writeLocalString(PREF_KEYS.knowledgeEvalEpisodeFrom, String(episodeFrom));
+    },
+    get episodeTo() {
+      return episodeTo;
+    },
+    set episodeTo(v: number) {
+      episodeTo = Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+      writeLocalString(PREF_KEYS.knowledgeEvalEpisodeTo, String(episodeTo));
     },
     // Whether the selected corpus already has a graph (drives the run-time wipe warning).
     get selectedCorpusHasGraph() {
@@ -835,6 +923,10 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     savedStatus: (id: string): string | undefined => savedStatusById[id],
     get savedCount() {
       return Object.keys(savedStatusById).length;
+    },
+    // Ingested-episode progress for the selected memory corpus (drives the Corpus header readout).
+    get ingested() {
+      return ingested;
     },
     toggleQuestion,
     setCategorySelected,

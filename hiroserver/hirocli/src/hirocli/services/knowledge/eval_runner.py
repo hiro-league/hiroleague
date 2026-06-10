@@ -627,6 +627,45 @@ def load_adam_questions(path: Path | None = None) -> list[dict[str, Any]]:
     return load_questions(path or ADAM_QUESTIONS_FILE)
 
 
+def _record_ingested_range(
+    workspace_path: Path, set_id: str, start: int, count: int, cost_usd: float = 0.0
+) -> None:
+    """Persist that a remember batch ingested ``count`` episodes from ``start`` at ``cost_usd``
+    (for the panel's ingested-range readout + the CUMULATIVE per-corpus ingest cost — the only
+    place ingest cost survives a reload). Best-effort — a store hiccup must never abort the run."""
+    if count <= 0:
+        return
+    try:
+        from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+        get_eval_result_store(Path(workspace_path)).append_range(
+            set_id, int(start), int(count), float(cost_usd or 0.0)
+        )
+    except Exception:
+        log.warning(
+            "⚠️ knowledge.eval — failed to record ingested range · set=%s · [%s:+%s]",
+            set_id,
+            start,
+            count,
+            exc_info=True,
+        )
+
+
+def _reset_ingested_ranges(workspace_path: Path, set_id: str) -> None:
+    """Drop the corpus's ingested-range records — called in lock-step with a graph wipe so the
+    printed range can never outlive the data. Best-effort (never breaks the run)."""
+    try:
+        from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+        get_eval_result_store(Path(workspace_path)).clear_ranges(set_id)
+    except Exception:
+        log.warning(
+            "⚠️ knowledge.eval — failed to reset ingested ranges · set=%s",
+            set_id,
+            exc_info=True,
+        )
+
+
 async def _remember_episodes(
     memory: Any,
     episodes: "list[Any]",
@@ -635,6 +674,7 @@ async def _remember_episodes(
     run_id: str,
     user_id: int,
     character_id: str,
+    episode_offset: int = 0,
     ledger_sink: Any | None = None,
 ) -> int:
     """Replay each episode through the ``remember`` path (one turn at a time, in
@@ -647,11 +687,23 @@ async def _remember_episodes(
     into its aggregate). ``None`` ⇒ no ledger. Returns the facts learned across all turns."""
     bus = get_domain_event_bus()
     total = len(episodes)
+    # Absolute 1-based episode numbers for the activity readout (offset is the 0-based start of
+    # this batch's slice): the FIRST episode of the window is offset+1, the LAST is offset+total.
+    # The panel shows these real episode numbers (e.g. "episode 11"), NOT a window-relative 1/N
+    # counter that misleads when a batch starts partway through the corpus.
+    first_no = int(episode_offset) + 1
+    last_no = int(episode_offset) + total
     _publish(
         bus,
         workspace_path,
         KNOWLEDGE_EVAL_SETUP_PROGRESS,
-        {"run_id": run_id, "phase": "remember", "episode_count": total},
+        {
+            "run_id": run_id,
+            "phase": "remember",
+            "episode_count": total,
+            "from": first_no if total else 0,
+            "to": last_no if total else 0,
+        },
     )
     learned = 0
     for index, ep in enumerate(episodes, start=1):
@@ -671,6 +723,11 @@ async def _remember_episodes(
             # Number each turn's LangSmith ingest tree so they read graph_ingest_1, _2, … under
             # the ingestion root (instead of N identical "graph_ingest" siblings).
             trace_label=f"graph_ingest_{index}",
+            # Defer the Kuzu FTS rebuild: rebuilding per episode forces a CHECKPOINT each turn,
+            # which stalls until every concurrent graph READ (the Graph-tab live export) leaves —
+            # the "Timeout waiting for active transactions before checkpointing" freeze. We rebuild
+            # ONCE after the loop instead (matches the knowledge ingest batch's end-of-batch rebuild).
+            rebuild_fts=False,
         )
         learned += int(getattr(result, "stored_count", 0) or 0)
         _publish(
@@ -682,9 +739,29 @@ async def _remember_episodes(
                 "phase": "remember",
                 "index": index,
                 "total": total,
+                # Absolute 1-based episode number (offset + this turn's 1-based position in the
+                # window) so the line reads "episode 11", not a window-relative "1/20".
+                "episode_no": int(episode_offset) + index,
                 "snippet": _preview(ep.text, 90),
             },
         )
+    # All turns written with rebuild_fts=False above → rebuild the keyword index ONCE now, so
+    # keyword search + dedup see this batch (one Kuzu checkpoint instead of one per episode).
+    # NON-FATAL: the turns are ALREADY committed to the graph. A failed FTS rebuild (e.g. the
+    # checkpoint still racing a concurrent reader after retries) only leaves the keyword index
+    # stale until the next graph open — initialize() rebuilds it. Aborting here would mark a
+    # fully-ingested (paid-for) batch FAILED and skip the ingested-range record, so a re-run would
+    # duplicate. Warn loudly and continue. (CancelledError is a BaseException → still propagates.)
+    if episodes:
+        try:
+            await memory.flush_search_index()
+        except Exception:
+            log.warning(
+                "⚠️ knowledge.eval — FTS rebuild after remember failed; turns are committed, "
+                "keyword index refreshes on next graph open · run_id=%s",
+                run_id,
+                exc_info=True,
+            )
     return learned
 
 
@@ -861,6 +938,9 @@ async def run_memory_eval(
     corpus_path: Path | None = None,
     run_id: str | None = None,
     remember: bool = True,
+    clear_before: bool = False,
+    episode_offset: int = 0,
+    episode_limit: int | None = None,
     judge: bool = False,
     eval_user_id: int = MEMORY_EVAL_USER_ID,
 ) -> dict[str, Any]:
@@ -871,6 +951,11 @@ async def run_memory_eval(
     so the existing registry/SSE/replay infra carries it unchanged. ``memory`` must be an
     **eval-scoped** facade (its writes/reads target ``eval_mem_{set}``); the caller owns
     its lifecycle (build + close).
+
+    ``clear_before`` wipes the drawer up front (decoupled from ``remember`` so a corpus can be
+    built across appended batches). ``episode_offset``/``episode_limit`` bound the remember phase
+    to a contiguous slice of the (chronological) corpus, so a large corpus is built in monitored
+    chunks. ``questions`` may be empty for a setup-only (remember/clear) batch.
 
     Returns the summary payload (also published as ``knowledge.eval.completed``)."""
     from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
@@ -922,33 +1007,48 @@ async def run_memory_eval(
         # The remember phase's ingest Graph Run id — surfaced to the panel so it can open the
         # ingest pipeline trace. Empty on a question-subset re-run (remember=False = no ingest).
         ingest_run_id = ""
+        # Explicit, decoupled clear (batched-build support): wipe this eval set's graph drawer
+        # ONLY when asked — NOT as a side effect of remember. This is what lets a large corpus be
+        # built in appended batches (remember a range with clear_before=False) without each batch
+        # wiping the last. A from-scratch rebuild = clear_before=True on the FIRST batch only.
+        # Re-remembering the SAME turns over an existing graph lets Graphiti dedup/invalidate
+        # against stale state, so clear when you mean to rebuild, not when you mean to append.
+        # Eval-scoped facade ⇒ clear_all targets only the eval_mem_{set} drawer.
+        if clear_before:
+            cleared = await memory.clear_all(user_id=eval_user_id, character_id=character_id)
+            # Reset the ingested-range record in the SAME breath as the graph wipe so the panel's
+            # printed range never describes data that's no longer there (the agreed invariant).
+            _reset_ingested_ranges(workspace_path, set_id)
+            if cleared:
+                log.info(
+                    "🧹 knowledge.eval — memory clear · wiped %d prior fact(s) · set=%s",
+                    cleared,
+                    set_id,
+                )
         if remember:
             eps = episodes if episodes is not None else load_episodes_file(
                 corpus_path or ADAM_CORPUS_FILE
             )
-            # Rebuild = clean slate. Wipe this eval set's graph drawer BEFORE re-remembering
-            # so the run rebuilds from scratch. Re-ingesting the same turns over an existing
-            # graph let Graphiti dedup/invalidate against stale state — a prior run's facts
-            # contaminated the next (observed: spurious edges + bad supersessions on re-run).
-            # Gated on `remember`: a question-subset re-run (remember=False) recalls the
-            # existing drawer untouched. Eval-scoped facade ⇒ clear_all targets only the
-            # eval_mem_{set} drawer.
-            cleared = await memory.clear_all(user_id=eval_user_id, character_id=character_id)
-            if cleared:
-                log.info(
-                    "🧹 knowledge.eval — memory rebuild · cleared %d prior fact(s) · set=%s",
-                    cleared,
-                    set_id,
-                )
+            # Batch window: remember only episodes [offset : offset+limit] this run, so a large
+            # corpus builds in monitored chunks (each batch's graph-build cost lands in the
+            # summary). The corpus is chronologically sorted, so contiguous ranges run in order
+            # across batches and supersession still resolves. offset past the end ⇒ empty slice ⇒
+            # a no-op batch (remembers nothing), not an error.
+            if episode_offset or episode_limit is not None:
+                end = len(eps) if episode_limit is None else episode_offset + episode_limit
+                eps = eps[episode_offset:end]
             # Open ONE parent run so every turn's Graphiti extraction nests under it (priced
             # sub-rows fold into the aggregate) — the memory "ingest" Graph Run.
             ledger_run_id = f"memory_eval-{slug_group_part(set_id)}-{rid}"
             ingest_run_id = ledger_run_id
             # Root 1 — INGESTION: its own LangSmith tree for the "remember" leg; every turn's
             # graph_ingest_{n}/add_episode span nests here. ledger_run_id aligns the span id with
-            # the ingest Graph Run row (so "open in LangSmith" links from it).
+            # the ingest Graph Run row (so "open in LangSmith" links from it). when=bool(eps): an
+            # empty slice (no-op append batch / offset past the end) makes no add_episode calls, so
+            # skip the span instead of posting a hollow ingestion tree to LangSmith.
             with traced_run(
                 f"memory_eval_{set_id}_ingestion",
+                when=bool(eps),
                 ledger_run_id=ledger_run_id,
                 tags=["eval", "memory", "ingest", f"set:{set_id}"],
                 metadata={"set": set_id, "episode_count": len(eps)},
@@ -968,7 +1068,19 @@ async def run_memory_eval(
                         run_id=rid,
                         user_id=eval_user_id,
                         character_id=character_id,
+                        episode_offset=episode_offset,
                         ledger_sink=sink,
+                    )
+                    # Ingest (graph build) cost — the remember run's folded LLM+reranker cost.
+                    # Computed BEFORE recording the range so this batch's cost is persisted with it
+                    # (the range row is the only durable home for ingest cost across reloads).
+                    ingest_cost_usd = float(getattr(accumulator, "cost_usd", 0.0) or 0.0)
+                    # Record THIS batch's episode window (offset + actual slice length) AND its
+                    # ingest cost so the panel can print the ingested range + the cumulative
+                    # per-corpus ingest spend. After clear_before reset above, batches accumulate;
+                    # len(eps) is the true count (≤ requested limit at the tail).
+                    _record_ingested_range(
+                        workspace_path, set_id, episode_offset, len(eps), ingest_cost_usd
                     )
                     sink.write_run_row(
                         accumulator,
@@ -978,8 +1090,6 @@ async def run_memory_eval(
                         input_preview=f"corpus: {set_id} ({len(eps)} turns)",
                         output_preview=f"remembered {len(eps)} turns · learned {remembered} facts",
                     )
-                    # Ingest (graph build) cost — the remember run's folded LLM+reranker cost.
-                    ingest_cost_usd = float(getattr(accumulator, "cost_usd", 0.0) or 0.0)
                     # Stream the ingest cost the moment the remember phase ends — emitted as a
                     # setup_progress line so the panel surfaces graph-build cost LIVE, instead of
                     # only when the terminal `completed` summary lands at run end. The remember
@@ -1014,9 +1124,11 @@ async def run_memory_eval(
                     sink.evict_run(ledger_run_id)
                     current_run.reset(token)
         # Root 2 — QUESTIONS: its own LangSmith tree; each question nests under it as an
-        # ``eval_question`` span (recall → answer → judge).
+        # ``eval_question`` span (recall → answer → judge). when=bool(questions): a setup-only
+        # batch (remember/clear with no questions) nests nothing, so skip the empty root span.
         with traced_run(
             f"memory_eval_{set_id}_questions",
+            when=bool(questions),
             ledger_run_id=rid,
             tags=["eval", "memory", "questions", f"set:{set_id}", f"judge:{judged}"],
             metadata={"total_questions": total, "set": set_id},

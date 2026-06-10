@@ -199,6 +199,16 @@ class EvalRunBody(BaseModel):
     # Remember the turn corpus (memory) / ingest the doc corpus (knowledge) before running.
     ingest_synthetic: bool = False
     build_graph: bool = False  # knowledge only
+    # Memory track — explicitly wipe the eval graph BEFORE remembering. Decoupled from
+    # ``ingest_synthetic`` so a corpus can be built across appended batches without each batch
+    # wiping the last; set it only for a from-scratch rebuild (first batch). Default off ⇒ the
+    # graph is never cleared implicitly.
+    clear_before: bool = False
+    # Memory track — episode batch window for the remember phase: start index + max count into
+    # the (chronologically sorted) corpus. 0 / None = from the start / to the end. Lets a large
+    # corpus be remembered in monitored chunks. Ignored on the knowledge track.
+    episode_offset: int = 0
+    episode_limit: int | None = None
     # Optional LLM judge step: grade the model's answer against the ideal answer. When off, the
     # eval generates answers but assigns no marks (and no PROCEED/PIVOT gate).
     judge: bool = False
@@ -1030,26 +1040,36 @@ async def eval_run(
         run_modes = ["recall"] if body.track == "memory" else normalize_modes(body.modes)
 
         # Resolve + validate the chosen corpus and question selection up front, so a bad
-        # request fails the HTTP call directly (not as a silent background crash). The UI
-        # forces an explicit, non-empty selection — there is no implicit "run all".
+        # request fails the HTTP call directly (not as a silent background crash). Questions are
+        # an explicit selection (no implicit "run all"), but may be empty for a setup-only batch
+        # (remember/ingest/build/clear) — see the setup_only check below.
         corpus_id = (body.corpus_id or "").strip()
         corpus_path = (body.corpus_path or "").strip()
         questions_path = (body.questions_path or "").strip()
         selected_ids = [q for q in (body.question_ids or []) if q]
         if not corpus_id or not corpus_path:
             return envelope_failure("Pick a corpus before running the eval.")
-        if not questions_path or not Path(questions_path).exists():
+        # Setup-only runs (remember/ingest/build/clear a batch with NO questions) are allowed —
+        # that's how a large corpus gets built in monitored chunks before any recall. A run with
+        # neither questions nor a setup action would do nothing, so reject only that case.
+        setup_only = body.ingest_synthetic or body.build_graph or body.clear_before
+        if not selected_ids and not setup_only:
             return envelope_failure(
-                f"No question bank found for corpus '{corpus_id}' "
-                f"(expected {corpus_id}.questions.yaml beside the corpus)."
+                "Select at least one question, or enable Remember / Clear for a setup-only batch."
             )
-        if not selected_ids:
-            return envelope_failure("Select at least one question to run.")
-        # Load + filter the bank to the explicit selection (preserving bank order).
-        wanted = set(selected_ids)
-        questions = [q for q in load_questions(Path(questions_path)) if q["id"] in wanted]
-        if not questions:
-            return envelope_failure("None of the selected question ids exist in the bank.")
+        # Questions need their bank; a setup-only batch doesn't. Load + filter to the explicit
+        # selection (preserving bank order). Empty selection ⇒ no questions (setup-only run).
+        questions: list[dict[str, Any]] = []
+        if selected_ids:
+            if not questions_path or not Path(questions_path).exists():
+                return envelope_failure(
+                    f"No question bank found for corpus '{corpus_id}' "
+                    f"(expected {corpus_id}.questions.yaml beside the corpus)."
+                )
+            wanted = set(selected_ids)
+            questions = [q for q in load_questions(Path(questions_path)) if q["id"] in wanted]
+            if not questions:
+                return envelope_failure("None of the selected question ids exist in the bank.")
         # Subscribe the per-workspace run registry BEFORE the task starts so it
         # captures the full event trail for mid-run replay / cross-origin reads.
         registry = get_eval_registry()
@@ -1077,9 +1097,13 @@ async def eval_run(
                     )
                     try:
                         log.info(
-                            "⬇️ knowledge.eval — memory track · corpus=%s · remember=%s · run_id=%s",
+                            "⬇️ knowledge.eval — memory track · corpus=%s · remember=%s · "
+                            "clear=%s · range=[%s:%s] · run_id=%s",
                             corpus_id,
                             body.ingest_synthetic,
+                            body.clear_before,
+                            body.episode_offset,
+                            body.episode_limit,
                             run_id,
                         )
                         await run_memory_eval(
@@ -1090,6 +1114,9 @@ async def eval_run(
                             questions=questions,
                             run_id=run_id,
                             remember=body.ingest_synthetic,
+                            clear_before=body.clear_before,
+                            episode_offset=body.episode_offset,
+                            episode_limit=body.episode_limit,
                             judge=body.judge,
                         )
                     finally:
@@ -1346,6 +1373,11 @@ async def eval_clear(
                 )
             finally:
                 await memory.close()
+            # Wiping the drawer invalidates the ingested-range readout — drop it in the same
+            # call so the panel can't show a range for data that's gone.
+            from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+            get_eval_result_store(workspace_path).clear_ranges(set_id)
             return _success({"removed_facts": removed})
         except Exception as exc:
             log.error("knowledge eval clear (memory) failed · %s", str(exc), exc_info=True)
@@ -1389,14 +1421,34 @@ async def eval_results(
     if not cid:
         return envelope_failure("corpus_id is required to read eval results.")
     from hirocli.services.knowledge.eval_runner import load_questions, summarize_memory_rows
-    from hirocli.services.knowledge.eval_store import get_eval_result_store
+    from hirocli.services.knowledge.eval_store import (
+        coalesce_ingested_ranges,
+        get_eval_result_store,
+    )
 
     try:
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path)
-        stored = get_eval_result_store(workspace_path).read_corpus(cid)
+        store = get_eval_result_store(workspace_path)
+        stored = store.read_corpus(cid)
+        # Ingested-range readout (build progress). Read BEFORE the no-rows early-return: a
+        # remember-only build has ingested ranges but zero saved question rows, so returning
+        # early on empty `stored` would hide its progress.
+        raw_ranges = store.read_ranges(cid)
+        spans = coalesce_ingested_ranges(raw_ranges)
+        # Cumulative per-corpus ingest cost = sum of every recorded batch's cost (re-ingesting an
+        # offset overwrites that batch's row, so this never double-counts). This is the ONLY place
+        # ingest cost survives a reload — the per-question rows never carry it — so the panel's Cost
+        # strip reads it even for a remember-only corpus with zero saved questions.
+        ingest_cost_usd = sum(float(r.get("cost_usd") or 0.0) for r in raw_ranges)
+        ingested = {
+            "ranges": spans,  # sorted, inclusive [start, end] episode-index spans
+            "count": sum(end - start + 1 for start, end in spans),  # distinct episodes ingested
+            "batches": len(raw_ranges),  # how many remember batches recorded
+            "cost_usd": ingest_cost_usd,  # cumulative ingest (graph-build) spend for this corpus
+        }
         if not stored:
-            return _success({"rows": [], "summary": None})
+            return _success({"rows": [], "summary": None, "ingested": ingested})
         # Bank is the spine: order rows by the bank and refresh their display fields
         # from it. Falls back to stored order/fields if the bank is missing (corpus
         # moved/renamed) so saved results are never lost behind a path mismatch.
@@ -1429,7 +1481,12 @@ async def eval_results(
             row["total"] = total
             merged.append(row)
         summary = summarize_memory_rows(merged, run_id=f"saved-{cid}")
-        return _success({"rows": merged, "summary": summary})
+        # The merged snapshot spans many runs, so summarize_memory_rows can't know a single ingest
+        # cost (it leaves ingest_cost_usd=0). Override with the persisted CUMULATIVE ingest spend so
+        # a reloaded run shows the corpus's full build cost, not just the question cost.
+        summary["ingest_cost_usd"] = ingest_cost_usd
+        summary["total_cost_usd"] = ingest_cost_usd + summary.get("questions_cost_usd", 0.0)
+        return _success({"rows": merged, "summary": summary, "ingested": ingested})
     except Exception as exc:
         log.error("knowledge eval results read failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
@@ -1467,6 +1524,51 @@ async def eval_results_clear(
         return _success({"removed": removed})
     except Exception as exc:
         log.error("knowledge eval results clear failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/eval/results/locomo")
+async def eval_results_locomo(
+    workspace_id: SelectedWorkspaceIdDep,
+    corpus_id: str = "",
+    questions_path: str = "",
+    prediction_key: str = "hiro_memory_prediction",
+) -> dict[str, Any]:
+    """Export saved memory-eval results in LoCoMo's QA-result JSON shape.
+
+    The API envelope carries filename/counts for the admin UI, but ``data.content`` is the
+    exact file body to download for LoCoMo evaluation: ``[{sample_id, qa: [...]}]``.
+    Partial saved snapshots export the answered subset, matching LoCoMo's evaluator (it
+    scores whichever QA rows are present).
+    """
+    cid = (corpus_id or "").strip()
+    qpath = Path(questions_path.strip()) if questions_path.strip() else None
+    if not cid:
+        return envelope_failure("corpus_id is required to export LoCoMo results.")
+    if qpath is None:
+        return envelope_failure("questions_path is required to export LoCoMo results.")
+
+    from hirocli.services.knowledge.eval_locomo import (
+        LocomoExportError,
+        build_locomo_results_export,
+    )
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        stored = get_eval_result_store(workspace_path).read_corpus(cid)
+        export = build_locomo_results_export(
+            corpus_id=cid,
+            questions_path=qpath,
+            stored_rows=stored,
+            prediction_key=(prediction_key or "hiro_memory_prediction").strip(),
+        )
+        return _success(export)
+    except LocomoExportError as exc:
+        return envelope_failure(str(exc))
+    except Exception as exc:
+        log.error("knowledge eval LoCoMo export failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 
