@@ -18,6 +18,19 @@ export type TuningProfile = ModelTuning & {
   locked: boolean;
 };
 
+// Named image-generation recipe (image analog of TuningProfile) — model + diffusion
+// params + prompt scaffolding. Edited from the Image Lab page.
+export type ImageProfilePreference = {
+  label: string;
+  locked: boolean;
+  model: string | null;
+  steps: number;
+  size: string | null;
+  style_prefix: string;
+  style_suffix: string;
+  seed: number | null;
+};
+
 export type MemorySearchPreferences = {
   enabled: boolean;
   top_k: number;
@@ -131,7 +144,9 @@ export type WorkspacePreferences = {
     default_chat: string | null;
     default_stt: string | null;
     default_tts: string | null;
+    default_image_gen: string | null;
     default_tuning_profile: string;
+    default_image_profile: string;
   };
   media: {
     input: ModalityFlags;
@@ -150,6 +165,7 @@ export type WorkspacePreferences = {
   graph: GraphPreferences;
   chat: ChatPreferences;
   tuning_profiles: Record<string, TuningProfile>;
+  image_profiles: Record<string, ImageProfilePreference>;
 };
 
 export const DEFAULT_MEMORY_SEARCH: MemorySearchPreferences = {
@@ -236,6 +252,13 @@ export const DEFAULT_CHAT: ChatPreferences = {
 export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): WorkspacePreferences {
   return {
     ...prefs,
+    // Older payloads predate image generation — fill the llm defaults and profile map.
+    llm: {
+      ...prefs.llm,
+      default_image_gen: prefs.llm.default_image_gen ?? null,
+      default_image_profile: prefs.llm.default_image_profile ?? 'image_playground'
+    },
+    image_profiles: prefs.image_profiles ?? {},
     chat: { ...DEFAULT_CHAT, ...(prefs.chat ?? {}) },
     memory: {
       ...prefs.memory,

@@ -25,6 +25,7 @@ htmlcov/
 # IDE / OS
 # .vscode/
 .cursor/debug-*.log
+debug-*.log
 .idea/
 .DS_Store
 Thumbs.db

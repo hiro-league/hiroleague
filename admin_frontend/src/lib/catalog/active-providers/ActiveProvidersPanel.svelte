@@ -150,6 +150,7 @@
   addableProviders={store.addableProviders}
   providerId={store.addForm.provider_id}
   apiKey={store.addForm.api_key}
+  accountId={store.addForm.account_id}
   onClose={() => store.closeDialog()}
   onSubmit={() => void store.submitAddProvider(notify)}
   onProviderIdChange={(value) => {
@@ -157,6 +158,9 @@
   }}
   onApiKeyChange={(value) => {
     store.addForm = { ...store.addForm, api_key: value };
+  }}
+  onAccountIdChange={(value) => {
+    store.addForm = { ...store.addForm, account_id: value };
   }}
 />
 

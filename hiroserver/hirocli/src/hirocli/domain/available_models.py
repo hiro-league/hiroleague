@@ -25,6 +25,7 @@ class ConfiguredProviderSummary:
     has_stt: bool
     has_embedding: bool
     has_rerank: bool
+    has_image_gen: bool
 
 
 @dataclass
@@ -58,6 +59,7 @@ class AvailableModelsService:
             has_stt = any(m.supports_kind("stt") for m in models)
             has_embedding = any(m.supports_kind("embedding") for m in models)
             has_rerank = any(m.supports_kind("rerank") for m in models)
+            has_image_gen = any(m.supports_kind("image_gen") for m in models)
             summaries.append(
                 ConfiguredProviderSummary(
                     provider_id=meta.provider_id,
@@ -70,6 +72,7 @@ class AvailableModelsService:
                     has_stt=has_stt,
                     has_embedding=has_embedding,
                     has_rerank=has_rerank,
+                    has_image_gen=has_image_gen,
                 )
             )
         return sorted(summaries, key=lambda s: s.provider_id)

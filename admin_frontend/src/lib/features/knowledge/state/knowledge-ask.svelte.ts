@@ -3,7 +3,8 @@ import {
   isAnswerCompareData,
   type KnowledgeAnswerCompareData,
   type KnowledgeAnswerData,
-  type KnowledgeGraphMode
+  type KnowledgeGraphMode,
+  type KnowledgeGraphTemporal
 } from '$lib/api/knowledge';
 import {
   buildAskFilters,
@@ -59,6 +60,10 @@ export function createKnowledgeAskModel(deps: {
   // side-by-side. Persisted across browser sessions so the user's preference
   // sticks. Default 'off' preserves existing behavior.
   let graphMode = $state<KnowledgeGraphMode>(readPersistedKnowledgeGraphMode());
+  // Per-query temporal lens override (§7): overrides the admin graph.temporal_default
+  // for THIS query only. 'default' defers to the admin pref. Transient by design (not
+  // persisted) — it's a per-query lens, not a sticky setting.
+  let graphTemporal = $state<KnowledgeGraphTemporal>('default');
   // Seed the query box from whichever result is "active" given the current mode.
   let query = $state(
     untrack(() =>
@@ -111,7 +116,8 @@ export function createKnowledgeAskModel(deps: {
         }),
         askExplain,
         askRewrite,
-        graphMode
+        graphMode,
+        graphTemporal
       );
       // Server returns one of two shapes depending on graph_mode — use the type
       // guard to populate the right slot. The opposite-slot cache stays so
@@ -134,6 +140,10 @@ export function createKnowledgeAskModel(deps: {
     if (mode === graphMode) return;
     graphMode = mode;
     writePersistedKnowledgeGraphMode(mode);
+  }
+
+  function setGraphTemporal(temporal: KnowledgeGraphTemporal) {
+    graphTemporal = temporal;
   }
 
   function handleAskOwnerKindChange() {
@@ -277,6 +287,10 @@ export function createKnowledgeAskModel(deps: {
       return graphMode;
     },
     setGraphMode,
+    get graphTemporal() {
+      return graphTemporal;
+    },
+    setGraphTemporal,
     get askDocumentScope() {
       return askDocumentScope;
     },

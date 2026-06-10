@@ -25,7 +25,9 @@ export function createActiveProvidersStore() {
   let selectedProvider = $state<ActiveProviderRow | null>(null);
   let addForm = $state({
     provider_id: '',
-    api_key: ''
+    api_key: '',
+    // Cloudflare-style vendors need a non-secret account id alongside the API key.
+    account_id: ''
   });
 
   const counts = $derived(
@@ -49,6 +51,7 @@ export function createActiveProvidersStore() {
     if (provider.has_stt) kinds.push('stt');
     if (provider.has_embedding) kinds.push('embedding');
     if (provider.has_rerank) kinds.push('rerank');
+    if (provider.has_image_gen) kinds.push('image');
     return kinds.length ? kinds.join(', ') : '-';
   }
 
@@ -93,7 +96,8 @@ export function createActiveProvidersStore() {
       addableProviders = payload.data;
       addForm = {
         provider_id: addableProviders[0]?.id ?? '',
-        api_key: ''
+        api_key: '',
+        account_id: ''
       };
       if (addableProviders.length === 0) {
         notify('info', 'All cloud catalog providers are already configured.');
@@ -111,7 +115,7 @@ export function createActiveProvidersStore() {
   async function submitAddProvider(notify: Notify) {
     busy = true;
     try {
-      await addProviderApiKey(addForm.provider_id, addForm.api_key);
+      await addProviderApiKey(addForm.provider_id, addForm.api_key, addForm.account_id);
       notify('success', `Stored API key for ${addForm.provider_id}.`);
       dialog = null;
       await load({ silent: true });
@@ -219,7 +223,7 @@ export function createActiveProvidersStore() {
     get addForm() {
       return addForm;
     },
-    set addForm(value: { provider_id: string; api_key: string }) {
+    set addForm(value: { provider_id: string; api_key: string; account_id: string }) {
       addForm = value;
     },
     providerKindLabel,

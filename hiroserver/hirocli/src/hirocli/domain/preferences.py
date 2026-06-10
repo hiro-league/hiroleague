@@ -248,13 +248,58 @@ def default_tuning_profiles() -> dict[str, TuningProfile]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Image generation profiles (image-world analog of TuningProfile)
+# ---------------------------------------------------------------------------
+
+
+class ImageProfile(BaseModel):
+    """Named image-generation recipe: model + diffusion params + prompt scaffolding.
+
+    The scaffolding fields (``style_prefix`` / ``style_suffix``) wrap the caller's prompt
+    so a profile is a reusable *recipe*, not just numbers — the image analog of
+    ``tts_instructions``. ``size`` is a hint; fixed-resolution providers (flux-1-schnell:
+    1024x1024) ignore it. Hard limits (max steps, prompt length) live in the catalog and
+    are clamped by the provider implementation.
+    """
+
+    label: str = Field(default="", min_length=1)
+    locked: bool = False
+    # Canonical catalog id (``cloudflare:flux-1-schnell``); None → llm.default_image_gen.
+    model: str | None = None
+    steps: int = Field(default=4, ge=1, le=8)
+    # "WIDTHxHEIGHT" hint — providers may ignore (flux-1-schnell is fixed 1024x1024).
+    size: str | None = None
+    style_prefix: str = ""
+    style_suffix: str = ""
+    # None = random seed per call; pin for reproducibility experiments.
+    seed: int | None = None
+
+
+DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID = "image_playground"
+
+
+def default_image_profiles() -> dict[str, ImageProfile]:
+    return {
+        DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID: ImageProfile(
+            label="Playground",
+            locked=True,
+            # No scaffolding — the Image Lab default is a transparent pass-through so the
+            # user sees exactly what their prompt produces before promoting a recipe.
+            steps=4,
+        ),
+    }
+
+
 class LLMPreferences(BaseModel):
     """Which catalog models to use when the workspace has credentials for them."""
 
     default_chat: str | None = None
     default_stt: str | None = None
     default_tts: str | None = None
+    default_image_gen: str | None = None
     default_tuning_profile: str = DEFAULT_CHAT_TUNING_PROFILE_ID
+    default_image_profile: str = DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +720,7 @@ class WorkspacePreferences(BaseModel):
     graph: GraphPreferences = Field(default_factory=GraphPreferences)
     chat: ChatPreferences = Field(default_factory=ChatPreferences)
     tuning_profiles: dict[str, TuningProfile] = Field(default_factory=default_tuning_profiles)
+    image_profiles: dict[str, ImageProfile] = Field(default_factory=default_image_profiles)
 
     @model_validator(mode="after")
     def _validate_tuning_profiles(self) -> "WorkspacePreferences":
@@ -707,6 +753,24 @@ class WorkspacePreferences(BaseModel):
                 raise ValueError(
                     f"Unknown graph tuning profile: {graph_profile_id}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_image_profiles(self) -> "WorkspacePreferences":
+        # Mirror of _validate_tuning_profiles: seeded defaults are always present + locked.
+        defaults = default_image_profiles()
+        for profile_id, default_profile in defaults.items():
+            current = self.image_profiles.get(profile_id)
+            if current is None:
+                self.image_profiles[profile_id] = default_profile
+            else:
+                current.locked = True
+                if not current.label.strip():
+                    current.label = default_profile.label
+        if self.llm.default_image_profile not in self.image_profiles:
+            raise ValueError(
+                f"Unknown llm.default_image_profile: {self.llm.default_image_profile}"
+            )
         return self
 
 
@@ -876,6 +940,85 @@ def resolve_llm(
         max_tokens=tuning.max_tokens,
         thinking=tuning.thinking,
     )
+
+
+@dataclass(frozen=True)
+class ResolvedImageGen:
+    """Resolved image-generation call parameters: profile values + per-call overrides."""
+
+    model_id: str
+    profile_id: str
+    steps: int
+    size: str | None
+    style_prefix: str
+    style_suffix: str
+    seed: int | None
+
+
+def resolve_image_gen(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    profile_id: str | None = None,
+    model_override: str | None = None,
+    steps_override: int | None = None,
+    seed_override: int | None = None,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedImageGen | None:
+    """Resolve the image-gen model + params for a call.
+
+    Resolution order (design doc): call overrides > named image profile >
+    ``llm.default_image_gen`` > catalog/credential availability. Returns None when no
+    image_gen model is selected or its provider has no credentials — same contract as
+    :func:`resolve_llm`.
+    """
+    from .available_models import AvailableModelsService
+    from .model_catalog import get_model_catalog
+    from .workspace import workspace_id_for_path
+
+    pid = (profile_id or "").strip() or prefs.llm.default_image_profile
+    profile = prefs.image_profiles.get(pid)
+    if profile is None:
+        raise ValueError(f"Unknown image profile: {pid}")
+
+    model_id = (model_override or "").strip() or profile.model or prefs.llm.default_image_gen
+    if not model_id:
+        return None
+
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind("image_gen"):
+        return None
+
+    if credential_store is not None:
+        store = credential_store
+    else:
+        wid = workspace_id or workspace_id_for_path(workspace_path)
+        if wid is None:
+            logger.debug("resolve_image_gen: workspace path not in registry — %s", workspace_path)
+            return None
+        store = CredentialStore(workspace_path, wid)
+
+    ams = AvailableModelsService(cat, store)
+    if not ams.is_model_available(model_id):
+        return None
+
+    return ResolvedImageGen(
+        model_id=model_id,
+        profile_id=pid,
+        steps=steps_override if steps_override is not None else profile.steps,
+        size=profile.size,
+        style_prefix=profile.style_prefix,
+        style_suffix=profile.style_suffix,
+        seed=seed_override if seed_override is not None else profile.seed,
+    )
+
+
+def compose_image_prompt(resolved: ResolvedImageGen, prompt: str) -> str:
+    """Wrap the caller's prompt with the profile's style scaffolding."""
+    parts = [resolved.style_prefix.strip(), prompt.strip(), resolved.style_suffix.strip()]
+    return ", ".join(p for p in parts if p)
 
 
 def knowledge_answering_model_source(prefs: WorkspacePreferences) -> str | None:

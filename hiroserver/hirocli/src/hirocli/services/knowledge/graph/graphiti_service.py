@@ -82,31 +82,6 @@ if TYPE_CHECKING:
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI")
 
 
-# region agent log
-def _dbg(hyp: str, loc: str, msg: str, **data: Any) -> None:
-    try:
-        import json as _j
-        import time as _t
-
-        with open(r"d:/projects/hiroleague/debug-4c5bfb.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                _j.dumps(
-                    {
-                        "sessionId": "4c5bfb",
-                        "hypothesisId": hyp,
-                        "location": loc,
-                        "message": msg,
-                        "data": data,
-                        "timestamp": int(_t.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-# endregion
-
-
 # Reranker ``top_n`` for the cross-encoder: rank ALL candidate facts Graphiti hands it
 # (the final cut is Graphiti's ``SearchConfig.limit``). Generous so we never pre-trim.
 _RERANK_CANDIDATE_CAP = 512
@@ -710,10 +685,6 @@ class GraphitiMemoryService:
 
         if not group_ids or not self._db_path.exists():
             return []
-        # region agent log
-        _dbg("A", "graphiti_service.py:list_facts:enter",
-             "list_facts — about to read", group_ids=group_ids)
-        # endregion
         async with _snapshot_read_driver(self._db_path) as read_driver:
             try:
                 edges = await EntityEdge.get_by_group_ids(read_driver, group_ids, limit=limit)
@@ -726,10 +697,6 @@ class GraphitiMemoryService:
                     exc_info=True,
                 )
                 raise
-            # region agent log
-            _dbg("A", "graphiti_service.py:list_facts:after_edges",
-                 "list_facts — edges read", group_ids=group_ids, edge_count=len(edges or []))
-            # endregion
             try:
                 nodes = await EntityNode.get_by_group_ids(read_driver, group_ids, limit=limit)
             except GroupsNodesNotFoundError:
@@ -993,16 +960,6 @@ async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
     our hold; the registry closes the shared driver only if we were the last holder.
     """
     key = _registry_key(path)
-    # region agent log
-    _dbg(
-        "E",
-        "graphiti_service.py:_snapshot_read_driver:enter",
-        "snapshot read driver — before acquire",
-        key=key,
-        write_lock_locked=kuzu_registry.write_lock(key).locked(),
-        refcount=kuzu_registry._refcount(key),
-    )
-    # endregion
     driver = kuzu_registry.acquire(
         key, lambda: KuzuDriver(str(path), max_concurrent_queries=1)
     )
@@ -1010,15 +967,6 @@ async def _snapshot_read_driver(path: Path) -> AsyncIterator[Any]:
     read_driver.client = kuzu.AsyncConnection(
         driver.db, max_concurrent_queries=_SNAPSHOT_READ_POOL
     )
-    # region agent log
-    _dbg(
-        "E",
-        "graphiti_service.py:_snapshot_read_driver:acquired",
-        "snapshot read driver — acquired + read connection opened",
-        key=key,
-        write_lock_locked=kuzu_registry.write_lock(key).locked(),
-    )
-    # endregion
     try:
         yield read_driver
     finally:
@@ -1066,27 +1014,15 @@ async def read_graph_snapshot(
         # Default to the named knowledge group (kb_main) when no explicit selection is made
         # (docs/graph-group-policy-design.md §7) — never graphiti's empty default group.
         gids = [g for g in (group_ids or []) if g] or [KNOWLEDGE_GROUP_ID]
-        # region agent log
-        _dbg("A", "graphiti_service.py:read_graph_snapshot:before_nodes",
-             "snapshot — about to read nodes", gids=gids)
-        # endregion
         # The get_by_group_ids helpers RAISE (not return []) on an empty graph.
         try:
             nodes = await EntityNode.get_by_group_ids(read_driver, gids, limit=node_limit)
         except GroupsNodesNotFoundError:
             nodes = []
-        # region agent log
-        _dbg("A", "graphiti_service.py:read_graph_snapshot:after_nodes",
-             "snapshot — nodes read", gids=gids, node_count=len(nodes or []))
-        # endregion
         try:
             edges = await EntityEdge.get_by_group_ids(read_driver, gids, limit=edge_limit)
         except GroupsEdgesNotFoundError:
             edges = []
-        # region agent log
-        _dbg("A", "graphiti_service.py:read_graph_snapshot:after_edges",
-             "snapshot — edges read", gids=gids, edge_count=len(edges or []))
-        # endregion
         # Episodes carry document_id in ``source_description`` (set at ingest); map
         # chunk_id (episode uuid) → document_id for node/edge document_ids provenance.
         try:

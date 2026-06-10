@@ -12,10 +12,12 @@
     addableProviders: AddableProviderRow[];
     providerId: string;
     apiKey: string;
+    accountId: string;
     onClose: () => void;
     onSubmit: () => void;
     onProviderIdChange: (value: string) => void;
     onApiKeyChange: (value: string) => void;
+    onAccountIdChange: (value: string) => void;
   };
 
   let {
@@ -25,11 +27,18 @@
     addableProviders,
     providerId,
     apiKey,
+    accountId,
     onClose,
     onSubmit,
     onProviderIdChange,
-    onApiKeyChange
+    onApiKeyChange,
+    onAccountIdChange
   }: Props = $props();
+
+  // Cloudflare-style vendors embed a non-secret account id in their REST URL.
+  const requiresAccountId = $derived(
+    addableProviders.find((provider) => provider.id === providerId)?.requires_account_id ?? false
+  );
 </script>
 
 <Dialog.Root {open} onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -63,11 +72,31 @@
             />
           {/snippet}
         </FormField>
+        {#if requiresAccountId}
+          <FormField
+            label="Account ID"
+            hint="Non-secret vendor account identifier (part of the API URL) — e.g. the Cloudflare account id from the dashboard."
+          >
+            {#snippet children()}
+              <input
+                type="text"
+                value={accountId}
+                oninput={(event) => onAccountIdChange((event.currentTarget as HTMLInputElement).value)}
+                placeholder="Paste the provider account id"
+              />
+            {/snippet}
+          </FormField>
+        {/if}
       </div>
     {/if}
     <Dialog.Footer>
       <Button variant="outline" onclick={onClose}>Cancel</Button>
-      <Button disabled={busy || !providerId || !apiKey.trim()} onclick={onSubmit}>Save</Button>
+      <Button
+        disabled={busy || !providerId || !apiKey.trim() || (requiresAccountId && !accountId.trim())}
+        onclick={onSubmit}
+      >
+        Save
+      </Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

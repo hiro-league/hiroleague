@@ -13,6 +13,7 @@ export const navItems: NavItem[] = [
   { group: 'Communication', label: 'Chat channels', path: '/chats/', icon: 'message' },
   { group: 'Operations', label: 'Knowledge', path: '/knowledge/', icon: 'database' },
   { group: 'Operations', label: 'Memories', path: '/memories/', icon: 'brain' },
+  { group: 'Operations', label: 'Image Lab', path: '/image-lab/', icon: 'image' },
   { group: 'Operations', label: 'Eval', path: '/eval/', icon: 'flask' },
   // Configuration moved to the end of the sidebar; Logs moved to the end of this group.
   { group: 'Configuration', label: 'Providers/Models', path: '/catalog/', icon: 'book' },

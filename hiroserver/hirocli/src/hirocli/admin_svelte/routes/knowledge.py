@@ -802,11 +802,6 @@ async def graph_export(
     from hirocli.services.knowledge.graph.group_scope import GroupPolicyError, validate_group_id
     from hirocli.tools.knowledge_graph import graph_snapshot_payload
 
-    # region agent log
-    from hirocli.services.knowledge.graph.graphiti_service import _dbg as _dbg
-    _dbg("C", "knowledge.py:graph_export:enter", "graph_export HTTP handler entered",
-         group_ids=body.group_ids)
-    # endregion
     try:
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path).resolve()
@@ -830,10 +825,6 @@ async def graph_export(
             edge_limit=body.edge_limit,
             group_ids=validated_groups,
         )
-        # region agent log
-        _dbg("C", "knowledge.py:graph_export:done", "graph_export returning payload",
-             group_ids=validated_groups, counts=payload.get("counts"))
-        # endregion
         return _success(payload)
     except Exception as exc:
         # With the shared driver, in-process opens no longer collide; a lock error here

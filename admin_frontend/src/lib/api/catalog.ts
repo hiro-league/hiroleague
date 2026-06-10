@@ -80,11 +80,14 @@ export type ActiveProviderRow = {
   has_stt: boolean;
   has_embedding: boolean;
   has_rerank: boolean;
+  has_image_gen: boolean;
 };
 
 export type AddableProviderRow = {
   id: string;
   display_name: string;
+  /** Cloudflare-style: the add dialog must also collect the (non-secret) account id. */
+  requires_account_id?: boolean;
 };
 
 export type CatalogReloadData = {
@@ -178,10 +181,14 @@ export async function listAddableProviders(): Promise<ApiResponse<AddableProvide
   return apiRequest<AddableProviderRow[]>('/providers/addable');
 }
 
-export async function addProviderApiKey(providerId: string, apiKey: string) {
+export async function addProviderApiKey(providerId: string, apiKey: string, accountId?: string) {
   return apiRequest<null>('/providers', {
     method: 'POST',
-    body: { provider_id: providerId, api_key: apiKey }
+    body: {
+      provider_id: providerId,
+      api_key: apiKey,
+      account_id: accountId?.trim() ? accountId.trim() : null
+    }
   });
 }
 

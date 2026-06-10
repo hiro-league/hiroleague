@@ -55,6 +55,12 @@ class ProviderAddApiKeyTool(Tool):
     params = {
         "provider_id": ToolParam(str, "Catalog provider id, e.g. openai, google, anthropic"),
         "api_key": ToolParam(str, "The API key string"),
+        "account_id": ToolParam(
+            str,
+            "Vendor account id (non-secret) — required for providers like cloudflare "
+            "whose REST URL embeds it",
+            required=False,
+        ),
         "workspace": ToolParam(str, "Workspace name or id", required=False),
     }
 
@@ -62,6 +68,7 @@ class ProviderAddApiKeyTool(Tool):
         self,
         provider_id: str,
         api_key: str,
+        account_id: str | None = None,
         workspace: str | None = None,
     ) -> ProviderAddApiKeyResult:
         wid, path, ws_name = _resolve_ws(workspace)
@@ -70,7 +77,7 @@ class ProviderAddApiKeyTool(Tool):
         if not pid or not key:
             raise ValueError("provider_id and api_key are required")
         store = CredentialStore(path, wid)
-        store.set_api_key(pid, key)
+        store.set_api_key(pid, key, account_id=account_id)
         return ProviderAddApiKeyResult(provider_id=pid, workspace=ws_name, stored=True)
 
 

@@ -77,6 +77,8 @@ _LAZY_EXPORTS: dict[str, str] = {
     # media
     "DescribeImageTool": ".media",
     "TranscribeTool": ".media",
+    # image generation
+    "GenerateImageTool": ".image_gen",
     # memory
     "MemoryClearTool": ".memory",
     "MemoryListTool": ".memory",
@@ -183,6 +185,7 @@ def all_tools() -> list[Tool]:
         GatewayStopTool,
         GatewayTeardownTool,
     )
+    from .image_gen import GenerateImageTool
     from .knowledge import (
         KnowledgeAnswerTool,
         KnowledgeCreateCategoryTool,
@@ -284,6 +287,7 @@ def all_tools() -> list[Tool]:
         GatewayTeardownTool(),
         TranscribeTool(),
         DescribeImageTool(),
+        GenerateImageTool(),
         MemoryListTool(),
         MemoryClearTool(),
         KnowledgeScanFolderTool(),
@@ -374,6 +378,7 @@ if TYPE_CHECKING:  # pragma: no cover
         KnowledgeSearchTool,
         KnowledgeUpdateDocumentMetadataTool,
     )
+    from .image_gen import GenerateImageTool  # noqa: F401
     from .knowledge_eval import KnowledgeL3EvalRunTool  # noqa: F401
     from .knowledge_graph import (  # noqa: F401
         KnowledgeGraphExportTool,

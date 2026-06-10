@@ -72,10 +72,20 @@ class GatewayRemoveRequest(BaseModel):
 class ProviderAddApiKeyRequest(BaseModel):
     provider_id: str
     api_key: str
+    # Non-secret vendor account id — required by providers with requires_account_id (cloudflare).
+    account_id: str | None = None
 
 
 class PreferencesPatchRequest(BaseModel):
     edits: dict[str, Any]
+
+
+class ImageLabGenerateRequest(BaseModel):
+    prompt: str
+    profile_id: str | None = None
+    model: str | None = None
+    steps: int | None = None
+    seed: int | None = None
 
 
 class CharacterSaveRequest(BaseModel):

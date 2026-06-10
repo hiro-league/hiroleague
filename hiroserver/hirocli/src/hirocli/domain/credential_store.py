@@ -65,6 +65,9 @@ class ProviderMetadata(BaseModel):
     created_at: str
     updated_at: str
     base_url: str | None = None
+    # Non-secret vendor account identifier (e.g. Cloudflare account id, part of the REST
+    # URL). Secrets stay in the keyring; this is metadata only.
+    account_id: str | None = None
     verified_at: str | None = None
     token_expires_at: str | None = None
     oauth_scopes: list[str] | None = None
@@ -202,10 +205,39 @@ class CredentialStore:
                 return val
         return None
 
-    def set_api_key(self, provider_id: str, api_key: str) -> None:
+    def _account_id_from_env(self, provider_id: str) -> str | None:
         cat = get_model_catalog()
-        if cat.get_provider(provider_id) is None:
+        prov = cat.get_provider(provider_id)
+        if prov is None:
+            return None
+        for env_name in prov.account_env_keys:
+            val = os.environ.get(env_name)
+            if val:
+                return val
+        return None
+
+    def set_api_key(
+        self,
+        provider_id: str,
+        api_key: str,
+        *,
+        account_id: str | None = None,
+    ) -> None:
+        cat = get_model_catalog()
+        prov = cat.get_provider(provider_id)
+        if prov is None:
             raise ValueError(f"Unknown catalog provider_id: {provider_id}")
+        normalized_account = (account_id or "").strip() or None
+        # Providers like Cloudflare embed the account id in the REST URL — refuse a key-only
+        # configuration that would fail on first call, unless one is already stored
+        # (key rotation) or an env fallback covers it.
+        if prov.requires_account_id and normalized_account is None:
+            if self.get_account_id(provider_id) is None:
+                env_hint = ", ".join(prov.account_env_keys) or "an account env var"
+                raise ValueError(
+                    f"Provider {provider_id!r} requires an account id in addition to the API "
+                    f"key. Pass account_id, or set {env_hint} in the environment."
+                )
         now = _utc_now_iso()
         try:
             self._set_password(provider_id, api_key)
@@ -230,12 +262,16 @@ class CredentialStore:
                     auth_method="api_key",
                     created_at=now,
                     updated_at=now,
+                    account_id=normalized_account,
                 )
             )
         else:
             existing.auth_method = "api_key"
             existing.updated_at = now
             existing.base_url = None
+            # Re-adding a key without an account id keeps the stored one (no silent unset).
+            if normalized_account is not None:
+                existing.account_id = normalized_account
         self._save_doc()
 
     def set_local_endpoint(self, provider_id: str, base_url: str) -> None:
@@ -317,13 +353,22 @@ class CredentialStore:
                 if not val:
                     continue
                 try:
-                    self.set_api_key(p.id, val)
+                    # Account-id-requiring providers (Cloudflare) import both values from env.
+                    self.set_api_key(p.id, val, account_id=self._account_id_from_env(p.id))
                     imported += 1
                 except RuntimeError:
                     logger.warning(
                         "⚠️ Env key found but keyring store failed — HiroServer · provider · %s",
                         p.id,
                         env_key=env_name,
+                    )
+                except ValueError as exc:
+                    # e.g. API token in env but the required account id is not — skip, don't crash scan-env.
+                    logger.warning(
+                        "⚠️ Env key found but provider config incomplete — HiroServer · provider · %s",
+                        p.id,
+                        env_key=env_name,
+                        error=str(exc),
                     )
                 break
         return imported
@@ -336,3 +381,10 @@ class CredentialStore:
         if key:
             return key
         return self._api_key_from_env(provider_id)
+
+    def get_account_id(self, provider_id: str) -> str | None:
+        """Non-secret vendor account id: providers.json metadata, else catalog env fallback."""
+        meta = self._meta_for(provider_id)
+        if meta is not None and meta.account_id:
+            return meta.account_id
+        return self._account_id_from_env(provider_id)

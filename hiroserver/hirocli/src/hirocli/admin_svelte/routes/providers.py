@@ -39,6 +39,7 @@ def _local_active_provider(workspace_id: str | None) -> dict[str, Any]:
         "has_stt": False,
         "has_embedding": "embedding" in kinds,
         "has_rerank": "rerank" in kinds,
+        "has_image_gen": False,
     }
 
 
@@ -76,6 +77,7 @@ async def add_provider_api_key(
         workspace_id,
         body.provider_id,
         body.api_key,
+        body.account_id,
     )
     return _api_from_result(result)
 

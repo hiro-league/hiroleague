@@ -29,7 +29,7 @@ class ProvidersPageService:
             return Result.failure(str(exc))
         return Result.success(list(raw.providers))
 
-    def list_addable_cloud_providers(self, workspace_id: str | None) -> Result[list[dict[str, str]]]:
+    def list_addable_cloud_providers(self, workspace_id: str | None) -> Result[list[dict[str, Any]]]:
         """Cloud catalog providers not yet configured (for Add API key dropdown)."""
         if not workspace_id:
             return Result.failure("No workspace selected.")
@@ -38,10 +38,17 @@ class ProvidersPageService:
             store = CredentialStore(Path(entry.path), entry.id)
             configured = {p.provider_id for p in store.list_configured()}
             cat = get_model_catalog()
-            addable: list[dict[str, str]] = []
+            addable: list[dict[str, Any]] = []
             for p in cat.list_providers(hosting="cloud"):
                 if p.id not in configured:
-                    addable.append({"id": p.id, "display_name": p.display_name})
+                    addable.append(
+                        {
+                            "id": p.id,
+                            "display_name": p.display_name,
+                            # Cloudflare-style: the add dialog shows an extra account-id input.
+                            "requires_account_id": p.requires_account_id,
+                        }
+                    )
             return Result.success(sorted(addable, key=lambda x: x["id"]))
         except Exception as exc:
             return Result.failure(str(exc))
@@ -51,6 +58,7 @@ class ProvidersPageService:
         workspace_id: str | None,
         provider_id: str,
         api_key: str,
+        account_id: str | None = None,
     ) -> Result[None]:
         if not workspace_id:
             return Result.failure("No workspace selected.")
@@ -62,6 +70,7 @@ class ProvidersPageService:
             ProviderAddApiKeyTool().execute(
                 provider_id=pid,
                 api_key=key,
+                account_id=account_id,
                 workspace=workspace_id,
             )
         except Exception as exc:

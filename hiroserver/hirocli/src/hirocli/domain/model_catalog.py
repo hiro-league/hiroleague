@@ -78,6 +78,13 @@ class PricingBlock(BaseModel):
     per_character: float | None = None
     per_second: float | None = None
     per_image: float | None = None
+    per_step: float | None = Field(
+        default=None,
+        description=(
+            "Image gen (diffusion): USD per inference step. Pairs with per_image, which then "
+            "carries the fixed per-image component (e.g. Cloudflare's resolution-tile charge)."
+        ),
+    )
     estimated_usd_per_1k_chars_speech: float | None = Field(
         default=None,
         description=(
@@ -113,6 +120,11 @@ class Provider(BaseModel):
     display_name: str
     hosting: Hosting
     credential_env_keys: list[str] = Field(default_factory=list)
+    # Cloudflare-style vendors need a non-secret account identifier in addition to the API
+    # token (it is part of the REST URL). When true, provider-add surfaces require account_id.
+    requires_account_id: bool = False
+    # Env var names that may carry the account identifier (setup / scan-env fallback).
+    account_env_keys: list[str] = Field(default_factory=list)
     docs_url: str | None = None
     default_base_url: str | None = None
     # Phase 3c: editorial defaults per model kind for onboarding (kind -> canonical id).
@@ -544,6 +556,45 @@ class ModelCatalog:
             pricing_available=False,
             reason="rerank_pricing_missing",
         )
+
+    def estimate_image_gen_cost(
+        self,
+        *,
+        model_id: str,
+        steps: int = 1,
+    ) -> CostEstimate:
+        """Estimate diffusion image cost: ``per_image`` (fixed component) + ``steps × per_step``.
+
+        Vendors price either a flat per-image rate (``per_image`` alone) or a fixed
+        resolution component plus a per-step rate (Cloudflare Workers AI). Either field
+        alone is enough for an estimate.
+        """
+        spec = self.get_model(model_id)
+        if spec is None:
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_in_catalog",
+            )
+        if not spec.supports_kind("image_gen"):
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="model_not_image_gen",
+            )
+        pricing = spec.pricing
+        if pricing is None or (pricing.per_image is None and pricing.per_step is None):
+            return CostEstimate(
+                currency="USD",
+                estimated_total=0.0,
+                pricing_available=False,
+                reason="image_pricing_missing",
+            )
+        n_steps = max(1, int(steps))
+        total = (pricing.per_image or 0.0) + n_steps * (pricing.per_step or 0.0)
+        return CostEstimate(currency="USD", estimated_total=total, pricing_available=True)
 
     def estimate_tts_usage_cost(
         self,
