@@ -21,7 +21,7 @@
   const isMemory = $derived(track === 'memory');
   const what = $derived(isMemory ? 'memory graph' : 'entity graph');
   // The checkbox that triggered this confirm — its label + the verb differ per track.
-  const toggle = $derived(isMemory ? 'Clear graph first' : 'Rebuild graph');
+  const toggle = $derived(isMemory ? 'Clear Graph' : 'Rebuild graph');
   const verb = $derived(isMemory ? 'Clear' : 'Rebuild');
 </script>
 
@@ -31,9 +31,9 @@
       <Dialog.Title class="break-words">{verb} graph for “{corpusName}”?</Dialog.Title>
       <Dialog.Description>
         This corpus already has a {what}. Running with “{toggle}” on will
-        <strong>wipe the existing graph</strong> before {isMemory ? 'remembering' : 'rebuilding'} —
+        <strong>wipe the existing graph</strong> before {isMemory ? 'ingesting' : 'rebuilding'} —
         incurring LLM and embedder cost to rebuild. {isMemory
-          ? 'To APPEND another batch to the existing graph instead, cancel and uncheck “Clear graph first”.'
+          ? 'To APPEND another batch to the existing graph instead, cancel and uncheck “Clear Graph”.'
           : 'To reuse the existing graph instead, cancel and uncheck “Rebuild graph”.'}
       </Dialog.Description>
     </Dialog.Header>

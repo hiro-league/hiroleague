@@ -679,7 +679,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     // that's how a large corpus gets built in monitored chunks before any recall.
     const setupOnly = track === 'memory' && (ingestSynthetic || clearBefore);
     if (selected.size === 0 && !setupOnly) {
-      deps.setError('Select at least one question, or enable Remember / Clear for a setup-only batch.');
+      deps.setError('Select at least one question, or enable Ingest / Clear for a setup-only batch.');
       return;
     }
     // Fresh slate every run — last run's table doesn't bleed into this one.
@@ -723,6 +723,10 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
+      // Auto-disarm the Clear Graph wipe as soon as the run is accepted: the next batch
+      // (e.g. ingest episodes 101–200 after this one ingested 1–100) must NOT silently
+      // wipe the graph we just built. The flag is per-run; users opt in again per wipe.
+      if (track === 'memory' && clearBefore) clearBefore = false;
     } catch (err) {
       status = 'failed';
       failureMessage = err instanceof Error ? err.message : 'Failed to start eval run.';

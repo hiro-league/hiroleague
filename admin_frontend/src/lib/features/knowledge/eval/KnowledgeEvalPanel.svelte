@@ -485,7 +485,7 @@
   const runTitle = $derived(
     eval_.selectedCount === 0
       ? setupOnlyMemory
-        ? 'Run a setup-only batch (remember / clear — no questions)'
+        ? 'Run a setup-only batch (ingest / clear — no questions)'
         : 'Select at least one question'
       : 'Run the eval'
   );
@@ -783,14 +783,11 @@
       <label
         class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
         title={isMemory
-          ? 'Remember this episode range into the memory graph (APPENDS — does not wipe). Leave off to recall the existing graph (e.g. re-run a question subset).'
+          ? 'Ingest Episodes before answering any questions'
           : 'Wipe this corpus’s eval docs (chunks + graph), then re-ingest from scratch. Leave off to reuse the existing index.'}
       >
         <input type="checkbox" class="size-4" bind:checked={eval_.ingestSynthetic} disabled={isBusy} />
-        <!-- Memory label aligned to the rest of the UI: these items are "episodes" everywhere
-             else (corpus card, dropdown, batch window), and this mirrors the knowledge track's
-             "Ingest corpus first". The old "Remember turns" used a word ("turns") found nowhere else. -->
-        <span>{isMemory ? 'Ingest episodes first' : 'Ingest corpus first'}</span>
+        <span>{isMemory ? 'Ingest Episodes' : 'Ingest corpus first'}</span>
       </label>
       {#if !isMemory}
         <label
@@ -822,15 +819,6 @@
           </div>
         </div>
       {:else}
-        <!-- Clear graph first — explicit, decoupled wipe. Off by default so batched remember
-             APPENDS; check it only for a from-scratch rebuild (first batch). -->
-        <label
-          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
-          title="Wipe this set’s memory graph BEFORE remembering. Use for a from-scratch rebuild (first batch only); leave OFF to append more episode batches to the existing graph."
-        >
-          <input type="checkbox" class="size-4" bind:checked={eval_.clearBefore} disabled={isBusy} />
-          <span>Clear graph first</span>
-        </label>
         <!-- Episode batch window — only meaningful while ingesting. 1-based, INCLUSIVE episode
              numbers (episode 1 = the first turn): ingest episodes From..To this run. To = 0 means
              "to the end". Build a large corpus in monitored chunks; the window auto-advances after
@@ -862,21 +850,28 @@
             />
           </div>
         {/if}
-        <span
-          class="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/5 px-2 py-1 font-sans text-xs text-primary"
-          title="Conversation memory recall — the single engine the memory track exercises"
+        <!-- Clear Graph — explicit, decoupled wipe. Off by default so batched ingest APPENDS;
+             check it only for a from-scratch rebuild (first batch). Auto-resets after the run
+             starts so the next batch doesn't accidentally wipe the freshly ingested episodes. -->
+        <label
+          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
+          title="Clear Graph before Ingesting Episodes or answering questions (WARNING this will delete any previously ingested episodes on this Corpus)"
         >
-          <span class="size-1.5 rounded-full bg-primary"></span> Recall
-        </span>
+          <input type="checkbox" class="size-4" bind:checked={eval_.clearBefore} disabled={isBusy} />
+          <span>Clear Graph</span>
+        </label>
       {/if}
-      <!-- Optional LLM judge — grades each answer vs the ideal (reuses the answering model). -->
-      <label
-        class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
-        title="Grade the model's answer against the ideal answer (extra LLM call per question). Off = answers only, no marks."
-      >
-        <input type="checkbox" class="size-4" bind:checked={eval_.judge} disabled={isBusy} />
-        <span>Judge answers</span>
-      </label>
+      <!-- Optional LLM judge — grades each answer vs the ideal (reuses the answering model).
+           Hidden in setup-only batches (no questions selected): there are no answers to grade. -->
+      {#if eval_.selectedCount > 0}
+        <label
+          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
+          title="Use LLM Judge or Recall Results only."
+        >
+          <input type="checkbox" class="size-4" bind:checked={eval_.judge} disabled={isBusy} />
+          <span>LLM Judge Answers</span>
+        </label>
+      {/if}
       </div>
     </div>
   </AdminPageStickyToolbar>
