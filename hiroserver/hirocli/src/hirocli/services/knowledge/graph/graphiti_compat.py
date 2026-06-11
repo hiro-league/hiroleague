@@ -81,6 +81,15 @@ _EXPECTED_SIGNATURES: dict[str, list[str]] = {
     "get_embeddings_for_nodes": ["driver", "nodes"],
     # Episode lane.
     "episode_fulltext_search": ["driver", "query", "_search_filter", "group_ids", "limit"],
+    # Internals used by graphiti_bfs (the SHORTEST-path BFS rewrite that replaces
+    # the vendored edge/node BFS legs — see graphiti_bfs.py). All are re-exported
+    # into the search_utils namespace by its own imports, so we probe them here.
+    "edge_search_filter_query_constructor": ["filters", "provider"],
+    "node_search_filter_query_constructor": ["filters", "provider"],
+    "get_entity_edge_return_query": ["provider"],
+    "get_entity_node_return_query": ["provider"],
+    "get_entity_edge_from_record": ["record", "provider"],
+    "get_entity_node_from_record": ["record", "provider"],
 }
 
 

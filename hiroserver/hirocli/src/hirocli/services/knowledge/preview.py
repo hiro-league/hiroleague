@@ -78,7 +78,9 @@ def read_file_preview(path: Path, *, loader_registry: LoaderRegistry) -> FilePre
         data = data[:PREVIEW_MAX_BYTES]
 
     try:
-        text = data.decode("utf-8-sig")
+        # Normalize CRLF/CR to LF so the preview shows logical text and
+        # character/token counts stay platform-independent (Windows files carry \r\n).
+        text = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
     except UnicodeDecodeError as exc:
         return FilePreviewResult(
             path=str(file_path),

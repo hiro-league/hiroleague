@@ -30,19 +30,27 @@ from graphiti_core.search.search_config import (
     NodeSearchMethod,
 )
 from graphiti_core.search.search_utils import (
-    edge_bfs_search,
     edge_fulltext_search,
     edge_similarity_search,
     episode_fulltext_search,
     get_embeddings_for_edges,
     get_embeddings_for_nodes,
     maximal_marginal_relevance,
-    node_bfs_search,
     node_fulltext_search,
     node_similarity_search,
     rrf,
 )
 from hiro_commons.log import Logger
+
+# BFS legs come from our SHORTEST-path rewrite, NOT graphiti's search_utils: the
+# vendored Kuzu fallbacks enumerate all paths up to the hop bound (~degree^depth
+# through hubs) and exhausted the Kuzu buffer pool at k_hop=3 on the LoCoMo eval.
+# Aliased to the vendored names so the call sites and trace labels stay identical;
+# result sets are proven equal by test_graphiti_bfs.py parity tests.
+from .graphiti_bfs import (
+    edge_bfs_search_shortest as edge_bfs_search,
+    node_bfs_search_shortest as node_bfs_search,
+)
 
 from .retrieval_trace import (
     RetrievalCapture,
