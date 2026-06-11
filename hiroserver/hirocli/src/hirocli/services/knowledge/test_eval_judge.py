@@ -41,11 +41,19 @@ class _FakeModel:
     """Minimal chat model: returns a canned answer + a canned judge verdict."""
 
     def __init__(
-        self, *, answer: str = "Otto.", verdict: str = "pass", recall_sufficient: bool = True
+        self,
+        *,
+        answer: str = "Otto.",
+        verdict: str = "pass",
+        recall_sufficient: bool = True,
+        evidence: str = "",
     ) -> None:
         self._answer = answer
         self._verdict = verdict
         self._recall_sufficient = recall_sufficient
+        # Evidence the fake judge "quotes": the backstop only keeps recall_sufficient=True when this
+        # is a real substring of the recalled context (judge_answer._evidence_supported).
+        self._evidence = evidence
         # Capture the messages the judge/answer was actually invoked with (for prompt assertions).
         self.last_messages: list = []
 
@@ -60,6 +68,7 @@ class _FakeModel:
                 grounded=True,
                 reason="ok",
                 recall_sufficient=self._recall_sufficient,
+                evidence=self._evidence,
             ),
             owner=self,
         )
@@ -189,12 +198,22 @@ async def test_judge_reports_recall_sufficient() -> None:
     )
     assert v_miss.mark == MARK_FAIL and v_miss.recall_sufficient is False
 
+    # recall_sufficient=True holds only when the judge quotes a real context line in `evidence`.
     v_ok = await judge_answer(
-        _FakeModel(verdict="pass"), "fake:model",
+        _FakeModel(verdict="pass", evidence="Otto is the mascot"), "fake:model",
         question="q", answer="Otto.", expected_answer="Otto",
         context=[{"kind": "fact", "memory": "Otto is the mascot"}], sink=None,
     )
     assert v_ok.recall_sufficient is True
+
+    # Backstop: a judge that CLAIMS recall_sufficient but quotes nothing in the context is overridden
+    # to False (kills ungrounded sufficiency — the locomo conv-43 false positives).
+    v_ungrounded = await judge_answer(
+        _FakeModel(verdict="pass", recall_sufficient=True, evidence="a fact never recalled"),
+        "fake:model", question="q", answer="Otto.", expected_answer="Otto",
+        context=[{"kind": "fact", "memory": "Otto is the mascot"}], sink=None,
+    )
+    assert v_ungrounded.recall_sufficient is False
 
 
 @pytest.mark.asyncio

@@ -198,6 +198,11 @@ export function editsForSave(
     draft.graph.eval.memory_answer_prompt
   );
   add(
+    'graph.eval.judge_prompt',
+    baseline.graph.eval.judge_prompt,
+    draft.graph.eval.judge_prompt
+  );
+  add(
     'graph.view.large_type_threshold',
     baseline.graph.view.large_type_threshold,
     draft.graph.view.large_type_threshold

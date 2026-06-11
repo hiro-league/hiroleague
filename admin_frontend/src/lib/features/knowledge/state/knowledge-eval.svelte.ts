@@ -89,6 +89,8 @@ export type EvalRow = {
   delta: string;
   gold: string; // the ideal answer (shown as "Ideal")
   cost_usd: number; // whole-question cost (LLM + reranker), for the live running total
+  is_negative_control: boolean; // abstaining is the correct outcome (drives abstain-is-correct)
+  answered_at: string; // ISO-8601 UTC timestamp this question finished evaluating ('' if unknown)
 };
 
 function rowFromPayload(p: EvalQuestionPayload): EvalRow {
@@ -105,7 +107,9 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     legs: p.legs ?? {},
     delta: p.delta ?? '0',
     gold: p.gold ?? '',
-    cost_usd: p.cost_usd ?? 0
+    cost_usd: p.cost_usd ?? 0,
+    is_negative_control: p.is_negative_control ?? false,
+    answered_at: p.answered_at ?? ''
   };
 }
 
@@ -176,6 +180,15 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   // abstain, or '' when answered-but-judge-off; ABSENT id = not-run). Kept independent of
   // the live `rows` so badges reflect saved coverage even mid-run or after a Clear.
   let savedStatusById = $state<Record<string, string>>({});
+
+  // Memory track: per-question SAVED recall-sufficiency (judge-reported) for the recall leg —
+  // only set for JUDGED rows (mark present), so an entry's absence means "not judged / unknown".
+  // Drives the Questions table's recall-sufficiency flag.
+  let savedRecallSufficientById = $state<Record<string, boolean>>({});
+
+  // Memory track: per-question SAVED eval timestamp (ISO-8601) — when each question last finished
+  // evaluating. Drives the Questions table's "Time" column.
+  let savedAnsweredAtById = $state<Record<string, string>>({});
 
   // Ingested-episode progress for the selected memory corpus (which turns are in the graph) —
   // drives the Corpus header's "ingested …" readout. Refreshed by loadResults; reset to empty on
@@ -338,12 +351,16 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   async function loadResults(applyView = true) {
     if (track !== 'memory') {
       savedStatusById = {};
+      savedRecallSufficientById = {};
+      savedAnsweredAtById = {};
       ingested = EMPTY_INGESTED;
       return;
     }
     const corpus = selectedCorpus();
     if (!corpus) {
       savedStatusById = {};
+      savedRecallSufficientById = {};
+      savedAnsweredAtById = {};
       ingested = EMPTY_INGESTED;
       return;
     }
@@ -351,8 +368,18 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       const res = await listEvalResults('memory', corpus.id, corpus.questions_path);
       const data = res.data;
       const map: Record<string, string> = {};
-      for (const r of data.rows) map[r.id] = r.legs?.recall?.mark ?? '';
+      const rsMap: Record<string, boolean> = {};
+      const aaMap: Record<string, string> = {};
+      for (const r of data.rows) {
+        const leg = r.legs?.recall;
+        map[r.id] = leg?.mark ?? '';
+        // Recall-sufficiency is only meaningful once judged (mark present); default true.
+        if (leg?.mark) rsMap[r.id] = leg.recall_sufficient ?? true;
+        if (r.answered_at) aaMap[r.id] = r.answered_at;
+      }
       savedStatusById = map;
+      savedRecallSufficientById = rsMap;
+      savedAnsweredAtById = aaMap;
       // Ingested-range readout always refreshes (independent of the view guards below), so the
       // Corpus header stays accurate even mid-run or after a failed run.
       ingested = data.ingested ?? EMPTY_INGESTED;
@@ -442,6 +469,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     // it. scanCorpuses → loadQuestions → loadResults then repopulates for the new track.
     resetRunState();
     savedStatusById = {};
+      savedRecallSufficientById = {};
+      savedAnsweredAtById = {};
     void scanCorpuses();
   }
 
@@ -763,6 +792,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
         }
       }
       savedStatusById = {};
+      savedRecallSufficientById = {};
+      savedAnsweredAtById = {};
     }
     resetRunState();
   }
@@ -925,6 +956,10 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     // Saved (persisted) per-question status for the checklist coverage badges (memory).
     // Returns the judge mark glyph, '' (answered, judge off), or undefined (not run).
     savedStatus: (id: string): string | undefined => savedStatusById[id],
+    // Saved recall-sufficiency (judge-reported) for the recall leg — undefined when not judged.
+    savedRecallSufficient: (id: string): boolean | undefined => savedRecallSufficientById[id],
+    // Saved eval timestamp (ISO-8601) for a question — '' / undefined when not yet run.
+    savedAnsweredAt: (id: string): string | undefined => savedAnsweredAtById[id],
     get savedCount() {
       return Object.keys(savedStatusById).length;
     },

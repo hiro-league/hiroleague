@@ -107,6 +107,36 @@ function questionLines(r: EvalRow): ActivityLine[] {
   return lines;
 }
 
+/** The single line shown in the COLLAPSED Activity header — the live "current" item, not the
+ *  rolled-up counter. While in-flight it's the most recent processed line: the last question once
+ *  any have completed, else the latest ingestion/setup line (so the ingest phase shows the current
+ *  episode), else "preparing…". Terminal runs show the outcome (verdict / cancelled / failed). */
+export function activityHeaderLine(input: ActivityLinesInput): string {
+  const {
+    setupEvents,
+    rows,
+    status,
+    summaryGate = null,
+    summaryElapsedMs = null,
+    failureMessage = null
+  } = input;
+  if (status === 'completed' && summaryGate) {
+    const ms = summaryElapsedMs ? ` · ${summaryElapsedMs}ms` : '';
+    if (summaryGate === 'proceed') return `✅ PROCEED${ms}`;
+    if (summaryGate === 'pivot') return `❌ PIVOT${ms}`;
+    return `ℹ️ done${ms}`;
+  }
+  if (status === 'cancelled') return '🛑 run cancelled';
+  if (status === 'failed') return `❌ failed${failureMessage ? `: ${failureMessage}` : ''}`;
+  // In-flight: the live current item.
+  if (rows.length > 0) {
+    const last = [...rows].sort((a, b) => a.index - b.index)[rows.length - 1];
+    return questionLines(last)[0].text.trim();
+  }
+  if (setupEvents.length > 0) return setupLine(setupEvents[setupEvents.length - 1]).text.trim();
+  return status === 'starting' ? 'preparing…' : '';
+}
+
 export function buildActivityLines(input: ActivityLinesInput): ActivityLine[] {
   const {
     setupEvents,

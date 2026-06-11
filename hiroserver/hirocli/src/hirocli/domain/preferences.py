@@ -533,18 +533,63 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
 
 
 # Answer-generation system prompt for the MEMORY eval's recall leg (eval_judge.answer_from_context).
-# Eval-only — there is no production equivalent on this path. Relaxed vs. the old wording (which
-# commanded an exact "I don't know" + one sentence and so collapsed multi-part questions): it keeps
-# the grounding guard (answer ONLY from the recalled facts) and still declines when the facts cover
-# NONE of the question (preserves negative-control scoring), but now allows PARTIAL answers so a
-# question whose facts cover only some parts is no longer scored as a full decline.
+# Eval-only — there is no production equivalent on this path. Reworked after the LoCoMo conv-43 run
+# showed the answering leg leaking on top of retrieval: the model abstained/hedged on 11+ rows whose
+# recalled context DID contain the answer. Goal is finding the right answer for an LLM judge — NOT
+# token-overlap F1 — so this deliberately does not demand a minimal span or forbid explanation.
+# Failure-targeted behaviors (from eyeballing the failed rows + the locomo reference harness):
+# read every item (rank ≠ relevance), combine + attribute facts, enumerate before list/count answers,
+# resolve relative time against each fact's own date, answer from meaning not wording, and COMMIT
+# (never "facts don't specify" when partial evidence exists). Keeps the grounding guard and the exact
+# leading "I don't know" decline — the abstain detector (answer.startswith("i don't know")) and
+# negative-control scoring depend on it, which also rules out a reasoning-before-answer format.
 DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = (
-    "You answer a question using ONLY the facts provided. Do not use any outside or prior "
-    "knowledge.\n"
-    "Answer every part of the question that the facts support. Partial answers are expected — "
-    "do not withhold a supported part just because another part is unsupported.\n"
-    "If the facts cover NONE of the question, reply exactly: I don't know.\n"
-    "Be concise."
+    "You answer a question from recalled conversation memories (facts, entities, episodes). "
+    "Use ONLY this material — never outside or prior knowledge.\n"
+    "Read EVERY item before answering — the answer is often spread across several items, not in the "
+    "first ones. Combine items that describe the same event or topic, and check each item is about "
+    "the person the question asks about.\n"
+    "For list or counting questions: collect every distinct matching item across ALL the material "
+    "first, then answer with the complete list or count.\n"
+    "Use each item's dates to resolve relative time ('next month', 'last week') into an absolute "
+    "month/year. When similar events appear at different dates, the question's timeframe picks the "
+    "right one — not the order the items appear in.\n"
+    "Answer from meaning, not wording — an item that paraphrases the question still answers it.\n"
+    "Commit to the best supported answer: if anything in the material supports the answer or part of "
+    "it, give it directly — do not say information is missing, and do not withhold a supported part "
+    "because another part is unsupported. Answer directly and completely; no preamble needed.\n"
+    "Only when NOTHING in the material relates to the question, reply exactly: I don't know."
+)
+
+
+# Grading system prompt for the eval LLM judge (eval_judge.judge_answer). Shared by both eval tracks.
+# Designed to run on a FLAT (non-reasoning) judge model: it is rule-based classification, not multi-
+# step reasoning. Two deliberate features — (1) leniency calibration (paraphrase / partial-credit /
+# date-tolerance) so a substantively-correct answer is not failed on wording, and (2) an `evidence`
+# quote that GATES recall_sufficient: the judge must copy a real context line before claiming recall
+# was sufficient, which (with a code-side substring check in judge_answer) kills the ungrounded
+# "recall_sufficient=true" hallucinations seen on locomo conv-43. The verdict is graded ONLY against
+# the ideal; the recalled context can only set evidence/recall_sufficient/grounded, never the verdict.
+DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = (
+    "You grade a model's ANSWER against the IDEAL answer for a question about past conversations. "
+    "Verdicts:\n"
+    "- pass: the answer conveys the same fact(s) as the ideal. Judge meaning, not wording — "
+    "paraphrases, extra detail, and answers MORE specific than the ideal all pass.\n"
+    "- partial: at least one correct item of a multi-part ideal, or the right fact at lower precision "
+    "than the ideal.\n"
+    "- fail: contradicts the ideal or answers something else.\n"
+    "- abstain: the answer declines or says it doesn't know.\n\n"
+    "Dates: matching the ideal's month and year passes; a correctly resolved relative date "
+    "('next month' stated in an August conversation = September) passes; within ~2 weeks passes.\n"
+    "If the question is a NEGATIVE CONTROL (declining is correct), abstain is the right outcome and a "
+    "confident answer is fail. Grade ONLY against the IDEAL — never your own knowledge.\n\n"
+    "You are also given the RECALLED CONTEXT shown to the answerer. It must NEVER change the verdict. "
+    "Use it only for these fields:\n"
+    "- evidence: copy the exact context line(s) that contain the information needed to answer; leave "
+    "empty if no such line exists.\n"
+    "- recall_sufficient: true ONLY if you filled evidence with a real quoted line; if you cannot "
+    "quote one, set it false.\n"
+    "- grounded: whether the ANSWER is supported by the context."
 )
 
 
@@ -570,9 +615,13 @@ class GraphEvalPreferences(BaseModel):
     prompt here: they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
     ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
     behavior). The admin UI surfaces that production prompt alongside this one for convenience.
+
+    ``judge_prompt`` is the grading system prompt for the LLM judge (``eval_judge.judge_answer``),
+    shared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.
     """
 
     memory_answer_prompt: str = DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+    judge_prompt: str = DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
 
 
 class GraphPreferences(BaseModel):

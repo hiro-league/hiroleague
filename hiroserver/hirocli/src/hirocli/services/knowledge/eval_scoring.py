@@ -85,6 +85,31 @@ def score_answer(
     return _score_fragments(answer_text, expected_fragments, no_results=no_results)
 
 
+def is_correct(mark: str, *, is_negative_control: bool) -> bool:
+    """Whether a judge mark counts as CORRECT for aggregate scoring.
+
+    A pass is always correct. An abstain (🛇) is correct ONLY on a negative-control row
+    (where declining is the right outcome) — on a normal question an abstain is a
+    recall/answering miss, NOT a pass. This is the fix for the old bug where any abstain
+    was counted as correct regardless of whether the question was a negative control.
+    Partial and fail are never "correct" (partial scores half via :func:`answer_score`)."""
+    if mark == MARK_PASS:
+        return True
+    if mark == MARK_ABSTAIN:
+        return is_negative_control
+    return False
+
+
+def answer_score(mark: str, *, is_negative_control: bool) -> float:
+    """Graded score for one mark: 1.0 if correct (see :func:`is_correct`), 0.5 for a
+    partial, 0.0 otherwise. Drives the "Score %" metric (partial = half point)."""
+    if is_correct(mark, is_negative_control=is_negative_control):
+        return 1.0
+    if mark == MARK_PARTIAL:
+        return 0.5
+    return 0.0
+
+
 def delta_mark(off: Score, on: Score) -> str:
     """Signed delta between two scores' ranks. ``"+N"`` if graph won, ``"-N"``
     if graph lost, ``"0"`` on tie. Used for the side-by-side table column."""
@@ -104,6 +129,8 @@ __all__ = [
     "MARK_PASS",
     "MARK_RANK",
     "Score",
+    "answer_score",
     "delta_mark",
+    "is_correct",
     "score_answer",
 ]

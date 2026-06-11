@@ -211,7 +211,7 @@ def judge_on(monkeypatch):
     monkeypatch.setattr(er, "build_answer_model", lambda ws: (object(), "fake:model"))
 
     async def _fake_judge(model, model_id, *, question, answer, expected_answer,
-                          is_negative_control=False, sink=None):
+                          context=None, is_negative_control=False, sink=None, system_prompt=""):
         return ej.JudgeVerdict(mark=(MARK_PASS if str(answer).strip() else MARK_FAIL), reason="fake")
 
     monkeypatch.setattr(ej, "judge_answer", _fake_judge)
@@ -261,7 +261,12 @@ async def test_run_eval_publishes_started_per_question_and_completed_in_order(
 
     summary = await run_eval(fake, tmp_path, questions=questions, run_id="rid-1", judge=True)
 
-    types = [e.type for e in event_capture]
+    # Filter to the eval-contract events: a fresh tmp workspace makes load_preferences write a
+    # default prefs file once, emitting an incidental ``preferences.saved`` the UI ignores (in
+    # production the file already exists, so it never fires). The eval sequence must still be exact.
+    eval_types = (KNOWLEDGE_EVAL_STARTED, KNOWLEDGE_EVAL_QUESTION_COMPLETED, KNOWLEDGE_EVAL_COMPLETED)
+    eval_events = [e for e in event_capture if e.type in eval_types]
+    types = [e.type for e in eval_events]
     assert types == [
         KNOWLEDGE_EVAL_STARTED,
         KNOWLEDGE_EVAL_QUESTION_COMPLETED,
@@ -269,17 +274,17 @@ async def test_run_eval_publishes_started_per_question_and_completed_in_order(
         KNOWLEDGE_EVAL_COMPLETED,
     ]
     # Started payload — carries the selected legs so the UI renders columns up front.
-    assert event_capture[0].payload["run_id"] == "rid-1"
-    assert event_capture[0].payload["total_questions"] == 2
-    assert event_capture[0].payload["modes"] == ["flat", "graphiti"]
+    assert eval_events[0].payload["run_id"] == "rid-1"
+    assert eval_events[0].payload["total_questions"] == 2
+    assert eval_events[0].payload["modes"] == ["flat", "graphiti"]
     # Question events carry index/total + per-leg marks under ``legs``.
-    qc1 = event_capture[1].payload
+    qc1 = eval_events[1].payload
     assert qc1["index"] == 0 and qc1["total"] == 2 and qc1["id"] == "a"
     assert qc1["legs"]["flat"]["mark"] == MARK_FAIL
     assert qc1["legs"]["graphiti"]["mark"] == MARK_PASS
     assert qc1["delta"] == "+3"  # best graph leg vs flat
     # Summary payload matches what run_eval returned
-    completed_payload = event_capture[-1].payload
+    completed_payload = eval_events[-1].payload
     assert completed_payload["run_id"] == "rid-1"
     assert completed_payload["modes"] == ["flat", "graphiti"]
     # Q1 graphiti passes + Q2 all pass → graphiti passes 2, flat passes 1.
@@ -373,6 +378,42 @@ async def test_run_eval_publishes_failed_event_on_exception(
 
 
 @pytest.mark.asyncio
+async def test_run_eval_cooperative_cancel_stops_before_next_question(
+    event_capture, tmp_path
+) -> None:
+    """Cancel must halt the loop even if ``task.cancel()``'s CancelledError is swallowed
+    downstream: the runner polls the registry's ``cancel_requested`` at the top of each
+    question (``_raise_if_cancelled``). Here a cancel is 'requested' after Q1 answers — Q2
+    must never start, and the run raises CancelledError (the route turns that into the
+    terminal ``cancelled`` event)."""
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
+
+    reg = get_eval_registry()
+    run_id = "rid-cancel"
+    dummy = asyncio.create_task(asyncio.sleep(0))
+    state = reg.begin_run(
+        tmp_path, run_id, corpus_source="c", modes=["flat"], task=dummy, track="knowledge"
+    )
+    state.status = "running"
+
+    class CancelOnFirstAnswer(FakeService):
+        async def answer_legs(self, query, **kw):
+            # Simulate the cancel route firing mid-run: it flips the flag the runner polls.
+            state.cancel_requested = True
+            return await super().answer_legs(query, **kw)
+
+    fake = CancelOnFirstAnswer(script={"Q1?": ("ok", "ok"), "Q2?": ("ok", "ok")})
+    questions = [_q("q1", "Q1?", expected=["ok"]), _q("q2", "Q2?", expected=["ok"])]
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_eval(fake, tmp_path, questions=questions, run_id=run_id)
+
+    # Q1 ran (and set the flag); the top-of-loop check then fired before Q2 could start.
+    assert len(fake.legs_calls) == 1
+    await dummy
+
+
+@pytest.mark.asyncio
 async def test_event_payload_workspace_path_matches_call_arg(
     event_capture, tmp_path
 ) -> None:
@@ -401,10 +442,12 @@ def test_question_result_to_payload_shape() -> None:
     assert set(p["legs"].keys()) == {"flat", "graphiti"}
     assert set(p["legs"]["flat"].keys()) == {
         "mode", "mark", "elapsed_ms", "answer_preview", "answer", "run_id", "reason",
-        "recalled", "cost_usd"
+        "recalled", "cost_usd", "grounded", "recall_sufficient", "evidence"
     }
     # Per-question total cost is surfaced for the live running total in the UI.
     assert "cost_usd" in p
+    # Negative-control flag rides the payload so the merged read scores abstains correctly.
+    assert p["is_negative_control"] is False
     assert p["legs"]["flat"]["answer"] == "flat"
     assert p["legs"]["graphiti"]["answer"] == "graph"
     assert p["legs"]["flat"]["run_id"] == "knowledge-flat-abc"

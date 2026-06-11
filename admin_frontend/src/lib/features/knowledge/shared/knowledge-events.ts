@@ -76,6 +76,12 @@ export type EvalQuestionLeg = {
   reason?: string; // judge's one-line justification
   recalled?: RecalledFact[]; // memory: the recalled facts (for the fold/detail table)
   cost_usd?: number; // this leg's folded cost (LLM + reranker; embeddings unpriced)
+  // Judge extras (shown in the Judge section): answer grounded in the context, whether the recalled
+  // context held what was needed (false ⇒ recall-miss not answering-miss), and the verified recalled
+  // line(s) the judge quoted as supporting the answer ("" when none / knowledge legs pass no context).
+  grounded?: boolean;
+  recall_sufficient?: boolean;
+  evidence?: string;
 };
 
 /** Payload shape of ``knowledge.eval.question_completed`` events (unified).
@@ -96,10 +102,26 @@ export type EvalQuestionPayload = {
   delta?: string; // best graph leg vs flat (knowledge)
   gold?: string; // the ideal answer (judge reference / display)
   cost_usd?: number; // whole-question cost (sum of leg runs + judge run)
+  // Negative control (expected_kind: abstain) — abstaining is the correct outcome here. Drives
+  // the abstain-is-correct rule in the report's Correct %/Score % (an abstain on a normal
+  // question is a miss, not a pass).
+  is_negative_control?: boolean;
+  // ISO-8601 UTC timestamp when this question finished evaluating (for the "Time" column).
+  answered_at?: string;
 };
 
-/** Per-category passing counts, keyed by leg (the per-category results table). */
-export type EvalCategoryStat = { total: number; pass: Record<string, number> };
+/** Per-bucket breakdown, keyed by leg (the per-category / per-difficulty report tables).
+ *  ``groups`` is the raw mark distribution; ``correct`` applies the negative-control rule
+ *  (pass + correct-abstain); ``score`` gives a partial half a point. */
+export type EvalMarkGroups = { pass: number; partial: number; fail: number; abstain: number };
+export type EvalCategoryStat = {
+  total: number;
+  groups: Record<string, EvalMarkGroups>;
+  correct: Record<string, number>;
+  score: Record<string, number>;
+  // Judged rows the judge flagged recall-sufficient (the recalled context held the answer).
+  recall_ok: Record<string, number>;
+};
 
 /** Payload shape of ``knowledge.eval.completed`` events (aggregate summary).
  *  Knowledge fields (passing/by_category/gate) and memory fields
@@ -113,12 +135,15 @@ export type EvalCompletedPayload = {
   judged?: boolean; // whether the LLM judge ran (marks present)
   elapsed_ms: number;
   // Knowledge track.
-  passing?: Record<string, number>;
+  passing?: Record<string, number>; // CORRECT count per leg (pass + correct-abstain)
   requires_graph_total?: number;
   requires_graph_passing?: Record<string, number>;
   by_category?: Record<string, EvalCategoryStat>;
   // Same shape as by_category, bucketed by authored difficulty (medium/hard/very_hard/unspecified).
   by_difficulty?: Record<string, EvalCategoryStat>;
+  // Overall per-leg mark distribution + graded score (partial = ½ pt) — the summary card metrics.
+  groups?: Record<string, EvalMarkGroups>;
+  scoring?: Record<string, number>;
   // Memory track.
   remembered_turns?: number;
   recalled_for?: number;

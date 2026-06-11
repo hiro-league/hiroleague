@@ -31,6 +31,7 @@ from hiro_commons.log import Logger
 
 from hirocli.domain.events import DomainEvent, get_domain_event_bus
 from hirocli.runtime.agent_graph.tracing import traced_run
+from hirocli.services.knowledge.converters import utc_now_iso
 from hirocli.services.knowledge.graph.group_scope import (
     eval_memory_group_id,
     slug_group_part,
@@ -45,13 +46,24 @@ from hirocli.services.knowledge.constants import (
 )
 from hirocli.services.knowledge.eval_scoring import (
     MARK_ABSTAIN,
+    MARK_FAIL,
+    MARK_PARTIAL,
     MARK_PASS,
     MARK_RANK,
+    answer_score,
+    is_correct,
 )
 
-# A row "passes" for aggregate counting when it's correct (pass) or correctly
-# abstained (the right outcome on negative-control / abstention rows).
-_PASSING_MARKS = (MARK_PASS, MARK_ABSTAIN)
+# Answer-mark groups, in display order — the per-mark breakdown ("✓ ◐ ✗ 🛇") shown in the
+# report tables. A row is CORRECT (see eval_scoring.is_correct) when it's a pass, or an abstain
+# on a negative-control row; correctness is NOT the same as the raw mark group (an abstain on a
+# normal question is a miss, not a pass).
+_MARK_GROUPS: tuple[tuple[str, str], ...] = (
+    ("pass", MARK_PASS),
+    ("partial", MARK_PARTIAL),
+    ("fail", MARK_FAIL),
+    ("abstain", MARK_ABSTAIN),
+)
 
 log = Logger.get("SVC.KNOWLEDGE.EVAL")
 
@@ -129,6 +141,13 @@ class LegResult:
     reason: str = ""   # judge's one-line justification
     recalled: tuple[Any, ...] = ()  # memory: the recalled facts (structured rows for the table)
     cost_usd: float = 0.0  # this leg's folded LLM+reranker cost (read from its run; 0 if unknown)
+    # Judge extras (shown on the highlighted judge line): was the answer grounded in the context,
+    # and did the recalled context actually contain what was needed (recall-miss vs answering-miss).
+    grounded: bool = True
+    recall_sufficient: bool = True
+    # The recalled line(s) the judge quoted as supporting the answer (verified present; "" otherwise).
+    # Surfaced in the eval UI's Judge section. Memory recall leg only — knowledge legs pass no context.
+    evidence: str = ""
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -141,6 +160,9 @@ class LegResult:
             "reason": self.reason,
             "recalled": list(self.recalled),
             "cost_usd": self.cost_usd,
+            "grounded": self.grounded,
+            "recall_sufficient": self.recall_sufficient,
+            "evidence": self.evidence,
         }
 
 
@@ -164,6 +186,11 @@ class QuestionResult:
     gold: str = ""
     # Whole-question cost (sum of leg runs + judge run) — what the UI sums for the live total.
     cost_usd: float = 0.0
+    # Negative control (expected_kind: abstain) — abstaining is the correct outcome here, so the
+    # scoring helpers count an abstain as correct ONLY when this is true.
+    is_negative_control: bool = False
+    # ISO-8601 UTC timestamp when this question finished evaluating (for the "Time" column).
+    answered_at: str = ""
 
     def to_payload(self, *, index: int, total: int) -> dict[str, Any]:
         """Event payload shape consumed by the Eval Batch UI. ``legs`` is keyed by leg name
@@ -180,6 +207,8 @@ class QuestionResult:
             "track": self.track,
             "gold": self.gold,
             "cost_usd": self.cost_usd,
+            "is_negative_control": self.is_negative_control,
+            "answered_at": self.answered_at,
             "legs": {mode: leg.to_payload() for mode, leg in self.legs.items()},
             "delta": self.delta,
         }
@@ -192,7 +221,7 @@ class EvalSummary:
     run_id: str
     total_questions: int
     modes: list[str]
-    # leg name → number of passing rows (pass or correct-abstain).
+    # leg name → number of CORRECT rows (pass, or abstain on a negative control).
     passing: dict[str, int]
     requires_graph_total: int
     # leg name → passing rows within the requires_graph subset.
@@ -205,8 +234,12 @@ class EvalSummary:
     questions: list[QuestionResult] = field(default_factory=list)
     # category → {total, pass: {leg: count}} — the per-category × N-leg table.
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # difficulty → {total, pass: {leg: count}} — same shape, bucketed by authored difficulty.
+    # difficulty → {total, groups/correct/score per leg} — same shape, bucketed by difficulty.
     by_difficulty: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Overall per-leg answer-mark distribution {leg: {pass, partial, fail, abstain}} and the
+    # graded score {leg: float} (correct + 0.5·partial) — drive the summary card's metrics.
+    groups: dict[str, dict[str, int]] = field(default_factory=dict)
+    scoring: dict[str, float] = field(default_factory=dict)
     # Cost (LLM + reranker; embeddings unpriced). Knowledge ingest cost is deferred (multi-run)
     # so ``ingest_cost_usd`` stays 0 here; ``questions_cost_usd`` = sum of per-question costs.
     questions_cost_usd: float = 0.0
@@ -226,6 +259,8 @@ class EvalSummary:
             "elapsed_ms": self.elapsed_ms,
             "by_category": self.by_category,
             "by_difficulty": self.by_difficulty,
+            "groups": self.groups,
+            "scoring": self.scoring,
             "questions_cost_usd": self.questions_cost_usd,
             "ingest_cost_usd": self.ingest_cost_usd,
             "total_cost_usd": self.questions_cost_usd + self.ingest_cost_usd,
@@ -453,6 +488,10 @@ async def run_eval(
 
     sink = LedgerSink(workspace_path)
     judged = model is not None
+    # Editable judge grading prompt (graph.eval.judge_prompt); blank → default in eval_judge.
+    from hirocli.domain.preferences import load_preferences
+
+    judge_prompt = load_preferences(workspace_path).graph.eval.judge_prompt
 
     _publish(
         bus,
@@ -482,6 +521,9 @@ async def run_eval(
     ):
         try:
             for index, q in enumerate(questions):
+                # Cooperative cancel: bail before starting the next question if a Cancel was
+                # requested, even if task.cancel()'s CancelledError got swallowed downstream.
+                _raise_if_cancelled(workspace_path, rid)
                 # Per-question child span — answer legs (each its own knowledge_answer run)
                 # and the judge call attach here, so a question reads as one subtree.
                 with traced_run(
@@ -505,6 +547,7 @@ async def run_eval(
                         judge=judged,
                         sink=sink,
                         run_id=rid,
+                        judge_system_prompt=judge_prompt,
                     )
                 rows.append(result)
                 # run_id on every event so the per-workspace registry can attribute
@@ -778,6 +821,7 @@ async def _memory_question(
     model_id: str = "",
     judge: bool = False,
     answer_system_prompt: str = "",
+    judge_system_prompt: str = "",
 ) -> dict[str, Any]:
     """One memory question, all in ONE Graph Run: **recall** (graph search) → **answer**
     (grounded only in the recalled facts) → optional **judge** (vs the ideal answer).
@@ -805,10 +849,11 @@ async def _memory_question(
 
     facts: list[str] = []
     recalled_rows: list[dict[str, Any]] = []
-    answer, mark, reason = "", "", ""
+    answer, mark, reason, evidence = "", "", "", ""
     # Judge-reported: did the recalled context contain what was needed to answer? Defaults True
     # (judge off / not asked) so it never falsely flags a recall miss when unjudged.
     recall_sufficient = True
+    grounded = True
     cost_usd = 0.0
     t0 = time.perf_counter()
     try:
@@ -879,9 +924,12 @@ async def _memory_question(
                 context=recalled_rows,
                 is_negative_control=is_control,
                 sink=sink,
+                system_prompt=judge_system_prompt,
             )
             mark, reason = verdict.mark, verdict.reason
             recall_sufficient = verdict.recall_sufficient
+            grounded = verdict.grounded
+            evidence = verdict.evidence
         if sink is not None and acc is not None:
             sink.write_run_row(
                 acc,
@@ -911,6 +959,11 @@ async def _memory_question(
         "gold": gold,
         "delta": "0",
         "cost_usd": cost_usd,
+        # Negative control (expected_kind: abstain) — abstaining is correct here. Persisted in
+        # row_json so the merged read-path summary scores abstains correctly too.
+        "is_negative_control": is_control,
+        # When this question finished evaluating (for the "Time" column). Persisted in row_json.
+        "answered_at": utc_now_iso(),
         "legs": {
             "recall": {
                 "mode": "recall",
@@ -922,6 +975,8 @@ async def _memory_question(
                 "run_id": (acc.run_id if acc is not None else None),
                 "recalled": recalled_rows,
                 "recall_sufficient": recall_sufficient,
+                "grounded": grounded,
+                "evidence": evidence,
                 "cost_usd": cost_usd,
             }
         },
@@ -977,10 +1032,12 @@ async def run_memory_eval(
     sink = LedgerSink(workspace_path)
     # Answer step uses the workspace answering model (reused). The judge (optional) grades it.
     model, model_id = build_answer_model(workspace_path)
-    # Editable memory-eval answer prompt (graph.eval.memory_answer_prompt); blank → relaxed default.
+    # Editable eval prompts (graph.eval.*); blank → relaxed defaults in eval_judge.
     from hirocli.domain.preferences import load_preferences
 
-    memory_answer_prompt = load_preferences(workspace_path).graph.eval.memory_answer_prompt
+    _eval_prefs = load_preferences(workspace_path).graph.eval
+    memory_answer_prompt = _eval_prefs.memory_answer_prompt
+    judge_prompt = _eval_prefs.judge_prompt
     judged = judge and model is not None
 
     _publish(
@@ -1134,6 +1191,9 @@ async def run_memory_eval(
             metadata={"total_questions": total, "set": set_id},
         ):
             for index, q in enumerate(questions):
+                # Cooperative cancel: bail before starting the next question if a Cancel was
+                # requested, even if task.cancel()'s CancelledError got swallowed downstream.
+                _raise_if_cancelled(workspace_path, rid)
                 # Align the eval_question span id with THIS question's per-question Graph Run row
                 # (same formula _memory_question uses) so "open in LangSmith" links from the row.
                 q_run_id = (
@@ -1159,6 +1219,7 @@ async def run_memory_eval(
                         model_id=model_id,
                         judge=judged,
                         answer_system_prompt=memory_answer_prompt,
+                        judge_system_prompt=judge_prompt,
                     )
                 rows.append(row)
                 _publish(
@@ -1233,6 +1294,7 @@ async def _run_one_question(
     judge: bool = False,
     sink: Any | None = None,
     run_id: str = "",
+    judge_system_prompt: str = "",
 ) -> QuestionResult:
     """One knowledge question → N-leg fan-out (answer per leg) → optional LLM judge → one row.
 
@@ -1277,7 +1339,8 @@ async def _run_one_question(
             if res is None:
                 continue
             answer = res.answer or ""
-            mark, reason = "", ""
+            mark, reason, evidence = "", "", ""
+            grounded, recall_sufficient = True, True
             if judging:
                 verdict = await judge_answer(
                     model,
@@ -1287,8 +1350,11 @@ async def _run_one_question(
                     expected_answer=gold,
                     is_negative_control=is_control,
                     sink=sink,
+                    system_prompt=judge_system_prompt,
                 )
                 mark, reason = verdict.mark, verdict.reason
+                grounded, recall_sufficient = verdict.grounded, verdict.recall_sufficient
+                evidence = verdict.evidence
             marks[mode] = mark
             legs[mode] = LegResult(
                 mode=mode,
@@ -1298,6 +1364,9 @@ async def _run_one_question(
                 run_id=getattr(res, "run_id", None),
                 reason=reason,
                 cost_usd=float(leg_costs.get(str(getattr(res, "run_id", "") or ""), 0.0)),
+                grounded=grounded,
+                recall_sufficient=recall_sufficient,
+                evidence=evidence,
             )
         if judging:
             sink.write_run_row(
@@ -1329,6 +1398,8 @@ async def _run_one_question(
         track="knowledge",
         gold=gold,
         cost_usd=question_cost,
+        is_negative_control=is_control,
+        answered_at=utc_now_iso(),
     )
 
 
@@ -1350,6 +1421,46 @@ def _best_graph_delta_marks(marks: dict[str, str]) -> str:
     return "0"
 
 
+# Mark glyph → group name (pass/partial/fail/abstain) for the per-mark breakdown tally.
+_MARK_TO_GROUP: dict[str, str] = {glyph: name for name, glyph in _MARK_GROUPS}
+
+
+def _empty_breakdown_bucket(modes: list[str]) -> dict[str, Any]:
+    """A fresh per-field bucket: total + per-leg group counts, correct count, graded score, and
+    recall-sufficient count (judged rows the judge said had enough recalled context to answer)."""
+    return {
+        "total": 0,
+        "groups": {m: {name: 0 for name, _ in _MARK_GROUPS} for m in modes},
+        "correct": {m: 0 for m in modes},
+        "score": {m: 0.0 for m in modes},
+        "recall_ok": {m: 0 for m in modes},
+    }
+
+
+def _tally_leg(
+    bucket: dict[str, Any],
+    mode: str,
+    mark: str,
+    *,
+    is_negative_control: bool,
+    recall_sufficient: bool = True,
+) -> None:
+    """Fold one leg's mark into a breakdown bucket: bump its group, correct count, score, and
+    (for judged rows) the recall-sufficient count.
+
+    Correct/score apply the negative-control rule (an abstain is correct only on a control row);
+    the raw group tally just bins the mark as-is. Unjudged ("") marks count toward total only —
+    and never toward recall_ok (recall_sufficient is only meaningful once the judge has run)."""
+    group = _MARK_TO_GROUP.get(mark)
+    if group is not None:
+        bucket["groups"][mode][group] += 1
+        if recall_sufficient:
+            bucket["recall_ok"][mode] += 1
+    if is_correct(mark, is_negative_control=is_negative_control):
+        bucket["correct"][mode] += 1
+    bucket["score"][mode] += answer_score(mark, is_negative_control=is_negative_control)
+
+
 def field_breakdown(
     rows: list[QuestionResult],
     modes: list[str],
@@ -1357,20 +1468,25 @@ def field_breakdown(
     field: str = "category",
     fallback: str = "uncategorized",
 ) -> dict[str, dict[str, Any]]:
-    """Per-``field`` × N-leg passing counts — drives the per-category / per-difficulty tables.
+    """Per-``field`` × N-leg breakdown — drives the per-category / per-difficulty report tables.
 
-    Shape: ``{key: {"total": int, "pass": {leg: count}}}``, keyed by the named
-    ``QuestionResult`` attribute (``category`` or ``difficulty``). Pure so tests can
-    reuse it. Empty attribute → ``fallback``."""
+    Shape: ``{key: {"total", "groups": {leg: {pass,partial,fail,abstain}}, "correct": {leg},
+    "score": {leg}}}``, keyed by the named ``QuestionResult`` attribute (``category`` or
+    ``difficulty``). Pure so tests can reuse it. Empty attribute → ``fallback``."""
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = getattr(r, field, "") or fallback
-        bucket = out.setdefault(key, {"total": 0, "pass": {m: 0 for m in modes}})
+        bucket = out.setdefault(key, _empty_breakdown_bucket(modes))
         bucket["total"] += 1
+        neg = bool(getattr(r, "is_negative_control", False))
         for mode in modes:
             leg = r.legs.get(mode)
-            if leg is not None and leg.mark in _PASSING_MARKS:
-                bucket["pass"][mode] += 1
+            if leg is not None:
+                _tally_leg(
+                    bucket, mode, leg.mark,
+                    is_negative_control=neg,
+                    recall_sufficient=bool(getattr(leg, "recall_sufficient", True)),
+                )
     return out
 
 
@@ -1381,20 +1497,24 @@ def field_breakdown_rows(
     field: str = "category",
     fallback: str = "uncategorized",
 ) -> dict[str, dict[str, Any]]:
-    """Per-``field`` × leg passing counts over **dict** rows (the memory track's payloads).
+    """Per-``field`` × leg breakdown over **dict** rows (the memory track's payloads).
 
-    Mirrors :func:`field_breakdown` but reads ``row[field]`` and ``row['legs'][mode]['mark']``
-    from the dict shape the memory runner emits. Empty value → ``fallback``."""
+    Mirrors :func:`field_breakdown` but reads ``row[field]``, ``row['is_negative_control']`` and
+    ``row['legs'][mode]['mark']`` from the dict shape the memory runner emits. Empty → ``fallback``."""
     out: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = str(r.get(field) or "") or fallback
-        bucket = out.setdefault(key, {"total": 0, "pass": {m: 0 for m in modes}})
+        bucket = out.setdefault(key, _empty_breakdown_bucket(modes))
         bucket["total"] += 1
+        neg = bool(r.get("is_negative_control"))
         legs = r.get("legs") or {}
         for mode in modes:
             leg = legs.get(mode) or {}
-            if leg.get("mark") in _PASSING_MARKS:
-                bucket["pass"][mode] += 1
+            _tally_leg(
+                bucket, mode, str(leg.get("mark") or ""),
+                is_negative_control=neg,
+                recall_sufficient=bool(leg.get("recall_sufficient", True)),
+            )
     return out
 
 
@@ -1419,9 +1539,17 @@ def summarize_memory_rows(
     if judged is None:
         # Merged read can't know the original judge flag → infer from the marks.
         judged = any(_memory_recall_leg(r).get("mark") for r in rows)
-    passing_recall = sum(
-        1 for r in rows if _memory_recall_leg(r).get("mark") in _PASSING_MARKS
-    )
+    # Overall correctness + per-mark groups + graded score for the single recall leg, applying the
+    # negative-control rule (an abstain is correct only on a control row — the bug fix).
+    overall = _empty_breakdown_bucket(["recall"])
+    for r in rows:
+        overall["total"] += 1
+        leg = _memory_recall_leg(r)
+        _tally_leg(
+            overall, "recall", str(leg.get("mark") or ""),
+            is_negative_control=bool(r.get("is_negative_control")),
+            recall_sufficient=bool(leg.get("recall_sufficient", True)),
+        )
     questions_cost_usd = sum(float(r.get("cost_usd") or 0.0) for r in rows)
     return {
         "run_id": run_id,
@@ -1430,8 +1558,11 @@ def summarize_memory_rows(
         "modes": ["recall"],
         "judged": judged,
         "recalled_for": sum(1 for r in rows if _memory_recall_leg(r).get("recalled")),
-        # Judge pass-count for the single recall leg (0 when the judge was off).
-        "passing": {"recall": passing_recall},
+        # Correct-count for the single recall leg (pass + correct-abstain; 0 when judge was off).
+        "passing": {"recall": overall["correct"]["recall"]},
+        # Per-mark distribution + graded score (partial = ½ pt) for the summary card.
+        "groups": {"recall": overall["groups"]["recall"]},
+        "scoring": {"recall": overall["score"]["recall"]},
         # No flat/graph legs → the PROCEED/PIVOT gate is undefined for the memory track.
         "gate": "n/a",
         "by_category": field_breakdown_rows(rows, ["recall"], field="category"),
@@ -1459,11 +1590,14 @@ def _summarize(
     """Compute the gate + per-leg aggregate counts the UI/CLI surfaces."""
 
     def _passing(subset: list[QuestionResult]) -> dict[str, int]:
+        # A leg is CORRECT when pass, or abstain on a negative control (eval_scoring.is_correct) —
+        # the fix for counting every abstain as a pass.
         return {
             m: sum(
                 1
                 for r in subset
-                if (leg := r.legs.get(m)) is not None and leg.mark in _PASSING_MARKS
+                if (leg := r.legs.get(m)) is not None
+                and is_correct(leg.mark, is_negative_control=r.is_negative_control)
             )
             for m in modes
         }
@@ -1471,6 +1605,17 @@ def _summarize(
     requires = [r for r in rows if r.requires_graph]
     passing = _passing(rows)
     req_passing = _passing(requires)
+    # Overall per-mark groups + graded score across all legs (for the summary card).
+    overall = _empty_breakdown_bucket(modes)
+    for r in rows:
+        for m in modes:
+            leg = r.legs.get(m)
+            if leg is not None:
+                _tally_leg(
+                    overall, m, leg.mark,
+                    is_negative_control=r.is_negative_control,
+                    recall_sufficient=leg.recall_sufficient,
+                )
     # Gate: a graph leg must MEASURABLY beat flat on the requires_graph subset. Needs the
     # judge on (marks exist) AND flat + a graph leg; otherwise undefined → "n/a".
     graph_modes = [m for m in modes if m != "flat"]
@@ -1492,6 +1637,8 @@ def _summarize(
         questions=list(rows),
         by_category=field_breakdown(rows, modes, field="category"),
         by_difficulty=field_breakdown(rows, modes, field="difficulty", fallback="unspecified"),
+        groups=overall["groups"],
+        scoring=overall["score"],
         # LLM + reranker cost summed across questions (knowledge ingest cost deferred → 0).
         questions_cost_usd=sum(float(r.cost_usd or 0.0) for r in rows),
     )
@@ -1510,6 +1657,24 @@ def _publish(
         )
     except Exception:
         log.warning("⚠️ knowledge.eval — event publish failed", event_type=event_type, exc_info=True)
+
+
+def _raise_if_cancelled(workspace_path: Path, run_id: str) -> None:
+    """Cooperative cancel — stop the run between questions even when ``task.cancel()``'s
+    ``CancelledError`` was swallowed deep in the async stack (graphiti/litellm/LangChain).
+
+    The cancel route flips ``cancel_requested`` on the registry's run state (and also calls
+    ``task.cancel()``); we poll that flag at the top of each question and raise
+    ``CancelledError`` ourselves so the route's terminal-cancel path emits
+    ``knowledge.eval.cancelled``. Before this, the loops relied solely on the *one-shot*
+    ``task.cancel()`` exception surviving every ``await`` — if any layer absorbed it, the run
+    sailed on to completion (see ``eval_registry.request_cancel``)."""
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
+
+    state = get_eval_registry().get_run(workspace_path)
+    if state is not None and state.run_id == run_id and state.cancel_requested:
+        log.info("🛑 knowledge.eval — cooperative cancel honored · run_id=%s", run_id)
+        raise asyncio.CancelledError()
 
 
 def _preview(text: str, limit: int) -> str:

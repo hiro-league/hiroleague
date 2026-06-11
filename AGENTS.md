@@ -18,6 +18,11 @@ A new preference is not done when the backend model has it — it must be **repr
 
 Run `npm run check` (admin_frontend) and the preferences tests after, and remember a backend field change needs a **server restart** to take effect.
 
+## Inspecting a workspace (DBs, ledger, traces)
+
+- **Kuzu graph DB** (`<workspace>/knowledge/graph/graphiti_kuzu.db`) is **exclusively locked while the server runs** — can't open or even copy it. To query: `hiro stop`, inspect, then `hiro start` (admin flag).
+- Readable **while the server runs** (no lock): eval results `<workspace>/knowledge/eval_results.db` (SQLite; per-question `row_json` has recalled facts/answer/judge), the Graph Runs ledger `<workspace>/logs/graph.log` (CSV), and per-stage retrieval/ingest traces `<workspace>/logs/retrieval_trace/*.jsonl`. Live settings are in `<workspace>/preferences.json`. Eval corpora live in the repo at `eval/`.
+
 # Architecture Documentation Index
 
 This mirrors the `Architecture` tab in `../hiro-docs/mintdocs/docs.json`; use it to choose the right document before making architecture-sensitive changes.

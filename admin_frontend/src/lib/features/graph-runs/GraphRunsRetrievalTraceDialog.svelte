@@ -36,7 +36,9 @@
     idealAnswer?: string;
     llmAnswer?: string;
     extraTabLabel?: string;
-    extraTab?: import('svelte').Snippet;
+    // Receives the dialog's top-search text so the extra (corpus) tab filters off the same input
+    // instead of carrying its own search box.
+    extraTab?: import('svelte').Snippet<[string]>;
   } = $props();
 
   // Sentinel lane key for the optional extra (caller-provided) tab.
@@ -44,12 +46,14 @@
   const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
   // Per-stage collapse state, keyed by the stage's index in `trace.stages` (stable across
-  // the lane grouping). Reset whenever a different trace opens so it starts fully expanded.
+  // the lane grouping). Every stage starts COLLAPSED (all tables in all tabs folded by default);
+  // re-seeded whenever a different trace opens.
   let collapsed = $state<Set<number>>(new Set());
 
   // When on, rows NOT in their lane's final result set (the last stage) are struck through —
-  // so candidate/hop/rank rows that didn't survive to the result are visually demoted.
-  let strikeDropped = $state(false);
+  // so candidate/hop/rank rows that didn't survive to the result are visually demoted. On by
+  // default so dropped rows read as dropped without first toggling.
+  let strikeDropped = $state(true);
 
   // Free-text filter highlight: typed text is <mark>-ed wherever it appears in a stage table
   // (and the stage labels), and each tab shows how many distinct items in its lane match.
@@ -65,8 +69,9 @@
 
   $effect(() => {
     void trace;
-    collapsed = new Set();
-    strikeDropped = false;
+    // Seed every stage index as collapsed → all tables fold by default on open.
+    collapsed = new Set(trace ? trace.stages.map((_, i) => i) : []);
+    strikeDropped = true;
     search = '';
     settingsOpen = false;
     expandedCells = new Set();
@@ -617,9 +622,9 @@
       </div>
 
       {#if hasExtraTab && activeTab === EXTRA_TAB}
-        <!-- Caller-provided tab (eval: the searchable source corpus). -->
+        <!-- Caller-provided tab (eval: the source corpus) — driven by the dialog's top search. -->
         <div class="trace-lanes">
-          <div class="p-4">{@render extraTab?.()}</div>
+          <div class="p-4">{@render extraTab?.(search)}</div>
         </div>
       {:else if activeLane}
         {@const lane = activeLane}

@@ -17,6 +17,8 @@ function memoryRow(): EvalRow {
     delta: '0',
     gold: 'Nora.',
     cost_usd: 0.0042,
+    is_negative_control: false,
+    answered_at: '2026-06-11T16:35:00Z',
     legs: {
       recall: {
         mode: 'recall',
@@ -95,6 +97,8 @@ describe('formatEvalRowForAI — knowledge track', () => {
       delta: '+1',
       gold: 'Shipped in v2.3 on Feb 14.',
       cost_usd: 0.01,
+      is_negative_control: false,
+    answered_at: '2026-06-11T16:35:00Z',
       legs: {
         flat: { mode: 'flat', mark: '✗', elapsed_ms: 900, answer_preview: '', answer: 'No info.', run_id: 'knowledge_answer-r1-q1-flat', reason: 'missed it', cost_usd: 0.004 },
         graphiti: { mode: 'graphiti', mark: '✓', elapsed_ms: 1500, answer_preview: '', answer: 'Yes, v2.3.', run_id: 'knowledge_answer-r1-q1-graphiti', reason: 'grounded', cost_usd: 0.006 }

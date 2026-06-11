@@ -332,8 +332,8 @@
     </SectionCardMuted>
 
     <SectionCardMuted
-      title="Eval answering"
-      description="System prompts used when the eval harness generates answers from recalled/retrieved context. Relaxing these lets multi-part questions earn partial credit instead of a blanket decline. Eval-only — does not affect production chat."
+      title="Eval prompts"
+      description="System prompts the eval harness uses to generate answers from recalled/retrieved context and to grade them. Relaxing these lets multi-part questions earn partial credit instead of a blanket decline. Eval-only — does not affect production chat."
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngineEval}
     >
@@ -348,6 +348,20 @@
         Drives the memory eval's <span class="font-medium">recall</span> leg. Blank uses the relaxed
         default: answer the parts the recalled facts support, and reply exactly "I don't know" only
         when the facts cover none of the question (so negative-control questions still score).
+      </p>
+
+      <MarkdownEditorPreview
+        editorLabel="Eval judge prompt editor"
+        previewLabel="Preview"
+        ariaLabel="Eval judge prompt (markdown)"
+        bind:value={ctrl.draft.graph.eval.judge_prompt}
+        onInput={ctrl.markDirty}
+      />
+      <p class="text-xs text-muted-foreground">
+        Grades each answer against the ideal (both tracks). Blank uses the default: lenient on
+        paraphrase/partial/dates, and <span class="font-medium">recall_sufficient</span> only holds
+        when the judge quotes a real recalled line (verified server-side, so ungrounded "sufficient"
+        claims are dropped). Shown for reference — verdict is always measured against the ideal.
       </p>
 
       <MarkdownEditorPreview

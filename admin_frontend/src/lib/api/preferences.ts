@@ -119,10 +119,11 @@ export type GraphPreferences = {
     min_relevance: number;
     device: string | null;
   };
-  // Eval-only answering knobs surfaced under the Graphiti engine settings. memory_answer_prompt
-  // drives the memory-eval recall leg; blank → relaxed backend default (partial answers allowed).
+  // Eval-only prompts surfaced under the Graphiti engine settings. memory_answer_prompt drives the
+  // memory-eval recall leg; judge_prompt grades both tracks' answers. Blank → relaxed backend default.
   eval: {
     memory_answer_prompt: string;
+    judge_prompt: string;
   };
   // Admin graph-viz DISPLAY knobs (the shared Knowledge/Memories Graph tab's per-type node
   // filter). Frontend-only — the graph engine ignores these.
@@ -237,7 +238,8 @@ export const DEFAULT_GRAPH: GraphPreferences = {
     device: null
   },
   eval: {
-    memory_answer_prompt: ''
+    memory_answer_prompt: '',
+    judge_prompt: ''
   },
   view: {
     large_type_threshold: 200

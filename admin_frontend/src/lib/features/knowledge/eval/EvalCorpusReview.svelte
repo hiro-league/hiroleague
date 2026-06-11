@@ -19,9 +19,21 @@
     /** Search term — bindable so a parent can own the input (e.g. the panel's Corpus header). */
     search = $bindable(''),
     /** Render the built-in search bar. Off when the parent supplies its own input. */
-    showSearch = true
-  }: { episodes: EvalEpisode[]; compact?: boolean; search?: string; showSearch?: boolean } =
-    $props();
+    showSearch = true,
+    /** Show a standalone "N of M match" count line — used when the search input lives elsewhere
+        (e.g. the trace dialog's top search drives this list, so the count surfaces here). */
+    showCount = false,
+    /** Bound the transcript with an inner scroll (`max-h-96`). Off ⇒ the list grows with the page
+        (the panel's Corpus tab wants the page to own the scroll, not a nested box). */
+    scroll = true
+  }: {
+    episodes: EvalEpisode[];
+    compact?: boolean;
+    search?: string;
+    showSearch?: boolean;
+    showCount?: boolean;
+    scroll?: boolean;
+  } = $props();
 
   const filtered = $derived.by(() => {
     const term = search.trim().toLowerCase();
@@ -60,7 +72,14 @@
       {/if}
     </div>
   {/if}
-  <div class="overflow-y-auto rounded-md border {compact ? 'max-h-[60vh]' : 'max-h-96'}">
+  {#if showCount}
+    <span class="font-sans text-xs text-muted-foreground">
+      {#if search.trim()}{filtered.length} of {episodes.length} match{:else}{episodes.length} episodes{/if}
+    </span>
+  {/if}
+  <!-- Compact (trace-dialog tab) or scroll=false (Corpus tab): no inner scroll — an outer region
+       owns the scroll, so there's a single scrollbar instead of a nested one. -->
+  <div class="rounded-md border {compact || !scroll ? '' : 'max-h-96 overflow-y-auto'}">
     {#if filtered.length === 0}
       <p class="px-3 py-2 font-sans text-xs text-muted-foreground">No episodes match “{search}”.</p>
     {:else}

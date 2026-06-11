@@ -16,7 +16,11 @@
   import { base } from '$app/paths';
   import {
     Check,
+    ChevronDown,
     ChevronRight,
+    ChevronUp,
+    ChevronsDownUp,
+    ChevronsUpDown,
     Circle,
     CircleCheck,
     CircleDashed,
@@ -26,6 +30,7 @@
     Copy,
     Download,
     ExternalLink,
+    Flag,
     FolderSearch,
     LoaderCircle,
     Microscope,
@@ -33,16 +38,20 @@
     RefreshCw,
     Settings2,
     Square,
-    Trash2
+    Trash2,
+    X
   } from '@lucide/svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
+  import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
+  import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import KnowledgeEvalTerminal from '$lib/features/knowledge/eval/KnowledgeEvalTerminal.svelte';
   import EvalCorpusReview from '$lib/features/knowledge/eval/EvalCorpusReview.svelte';
   import KnowledgeEvalRebuildConfirmDialog from '$lib/features/knowledge/eval/KnowledgeEvalRebuildConfirmDialog.svelte';
-  import { buildActivityLines } from '$lib/features/knowledge/eval/eval-activity';
+  import { activityHeaderLine, buildActivityLines } from '$lib/features/knowledge/eval/eval-activity';
   import { formatEvalRowForAI } from '$lib/features/knowledge/eval/eval-clipboard';
   import type { EvalRow } from '$lib/features/knowledge/state/knowledge-eval.svelte';
   import GraphRunsRetrievalTraceDialog from '$lib/features/graph-runs/GraphRunsRetrievalTraceDialog.svelte';
@@ -56,7 +65,11 @@
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
   import { exportEvalResultsLocomo, type EvalQuestionItem } from '$lib/api/knowledge';
-  import type { EvalCompletedPayload, RecalledFact } from '$lib/features/knowledge/shared/knowledge-events';
+  import type {
+    EvalCategoryStat,
+    EvalCompletedPayload,
+    RecalledFact
+  } from '$lib/features/knowledge/shared/knowledge-events';
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import {
     EVAL_ALL_LEGS,
@@ -94,11 +107,63 @@
     }
   }
 
+  // --- Sticky sub-tabs (Control / Corpus / Questions / Answer Details) -----------------------
+  // Section navigation as sticky underline sub-tabs under the run-controls toolbar. Local state
+  // (not URL/session) — inner navigation, per the admin sub-tab pattern. Default to Questions
+  // (the first thing you act on); the validity effect snaps back if the active tab disappears
+  // (e.g. Corpus is memory-only and vanishes on the knowledge track).
+  type EvalSubtab = 'control' | 'corpus' | 'questions' | 'answers';
+  let activeSubtab = $state<EvalSubtab>('questions');
+  const subtabs = $derived<AdminSubtabDescriptor<EvalSubtab>[]>([
+    { id: 'control', label: 'Control' },
+    ...(isMemory ? [{ id: 'corpus' as const, label: 'Corpus' }] : []),
+    { id: 'questions', label: 'Questions' },
+    { id: 'answers', label: 'Answer Details' }
+  ]);
+  $effect(() => {
+    if (!subtabs.some((t) => t.id === activeSubtab)) activeSubtab = 'questions';
+  });
+
+  // When the run-controls toolbar pins on scroll, collapse it to just its first line (corpus +
+  // run controls) — the second line (run options) is setup config you don't need while scrolling.
+  // Tied to the same scroll threshold the page header compacts at, so the chrome moves coherently.
+  let toolbarStuck = $state(false);
+  // Sticky sub-tab bar element — its height is published as a CSS var so the Results table's
+  // sticky thead can offset beneath it (mirrors AdminPageStickyToolbar's own var).
+  let subtabsEl = $state<HTMLDivElement | null>(null);
+
   onMount(() => {
     // Model lifecycle (subscribe + replay run state + corpus scan, then teardown)
     // is owned by the host Eval page. The panel just loads the read-only engine
     // params strip shown at the top.
     void loadPrefs();
+
+    const onScroll = () => {
+      toolbarStuck = window.scrollY > 80;
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    // Publish the sub-tab bar height so the results table's sticky thead aligns below it.
+    const section = subtabsEl?.closest('section') ?? null;
+    let published = -1;
+    const publish = () => {
+      if (!subtabsEl || !section) return;
+      const h = Math.round(subtabsEl.getBoundingClientRect().height);
+      if (h !== published) {
+        published = h;
+        section.style.setProperty('--admin-eval-subtabs-h', `${h}px`);
+      }
+    };
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(publish) : null;
+    if (subtabsEl && ro) ro.observe(subtabsEl);
+    publish();
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      ro?.disconnect();
+      section?.style.removeProperty('--admin-eval-subtabs-h');
+    };
   });
 
   // The shared knowledge SSE is paused while this browser tab is hidden (to free the
@@ -187,28 +252,119 @@
   });
   const filteredIds = $derived(filteredQuestions.map((q) => q.id));
 
-  // Group the (filtered) question bank by category for the checklist.
-  const groups = $derived.by(() => {
-    const map = new Map<string, EvalQuestionItem[]>();
-    for (const q of filteredQuestions) {
-      const arr = map.get(q.category) ?? [];
-      arr.push(q);
-      map.set(q.category, arr);
-    }
-    return [...map.entries()];
+  // Stable 1-based question number = the question's position in the full bank (independent of the
+  // active filter), shown in the "#" column of the Questions table.
+  const questionNumber = $derived.by(() => {
+    const m = new Map<string, number>();
+    eval_.questions.forEach((q, i) => m.set(q.id, i + 1));
+    return m;
   });
 
-  function categoryAllSelected(items: EvalQuestionItem[]): boolean {
-    return items.length > 0 && items.every((q) => eval_.isSelected(q.id));
+  // Short name for the saved answering state (memory track), paired with savedBadge's icon/tooltip
+  // in the Questions table's State column. '' / undefined ⇒ answered-without-grade / not-run.
+  function savedStateName(id: string): string {
+    if (!isMemory) return '';
+    const s = eval_.savedStatus(id);
+    if (s === undefined) return 'Not run';
+    switch (s) {
+      case '✓': return 'Pass';
+      case '◐': return 'Partial';
+      case '✗': return 'Fail';
+      case '🛇': return 'Abstain';
+      default: return 'Answered';
+    }
   }
+
+  // Column count for the Questions table's full-width rows. Knowledge: select + type + # +
+  // question + difficulty + time = 6. Memory adds State + the recall-sufficiency flag = 8.
+  const qColspan = $derived(isMemory ? 8 : 6);
+
+  // --- Questions table sorting ----------------------------------------------------------------
+  type QSortKey = 'category' | 'state' | 'recall' | 'number' | 'question' | 'difficulty' | 'time';
+  let qSortKey = $state<QSortKey>('number');
+  let qSortDir = $state<'asc' | 'desc'>('asc');
+  function toggleSort(key: QSortKey) {
+    if (qSortKey === key) qSortDir = qSortDir === 'asc' ? 'desc' : 'asc';
+    else {
+      qSortKey = key;
+      qSortDir = 'asc';
+    }
+  }
+  // Difficulty ramp + saved-state order used as sort keys (lower sorts first ascending).
+  const _DIFF_SORT: Record<string, number> = { medium: 0, hard: 1, very_hard: 2 };
+  const _STATE_SORT: Record<string, number> = { '✓': 0, '◐': 1, '✗': 2, '🛇': 3, '': 4 };
+  function stateRank(id: string): number {
+    const s = eval_.savedStatus(id);
+    return s === undefined ? 5 : (_STATE_SORT[s] ?? 4);
+  }
+  // Recall-sufficiency sort: misses first (0), sufficient (1), unknown/not-judged last (2).
+  function recallRank(id: string): number {
+    const s = eval_.savedRecallSufficient(id);
+    return s === undefined ? 2 : s ? 1 : 0;
+  }
+  // Sorted view of the filtered questions. Sorting changes ONLY display order, not membership,
+  // so the Select/Clear-shown buttons (which act on `filteredIds`) are unaffected.
+  const sortedQuestions = $derived.by(() => {
+    const dir = qSortDir === 'asc' ? 1 : -1;
+    const num = (q: EvalQuestionItem) => questionNumber.get(q.id) ?? 0;
+    const cmp = (a: EvalQuestionItem, b: EvalQuestionItem): number => {
+      switch (qSortKey) {
+        case 'category':
+          return (a.category || '').localeCompare(b.category || '') || num(a) - num(b);
+        case 'question':
+          return a.question.localeCompare(b.question);
+        case 'difficulty':
+          return (
+            (_DIFF_SORT[a.difficulty || ''] ?? 3) - (_DIFF_SORT[b.difficulty || ''] ?? 3) ||
+            num(a) - num(b)
+          );
+        case 'state':
+          return stateRank(a.id) - stateRank(b.id) || num(a) - num(b);
+        case 'recall':
+          return recallRank(a.id) - recallRank(b.id) || num(a) - num(b);
+        case 'time':
+          return timeMs(eval_.savedAnsweredAt(a.id)) - timeMs(eval_.savedAnsweredAt(b.id)) || num(a) - num(b);
+        default:
+          return num(a) - num(b);
+      }
+    };
+    return [...filteredQuestions].sort((a, b) => dir * cmp(a, b));
+  });
+
+  // Questions controls line (sticky filters/buttons bar) — measure its height so the table's
+  // sticky head can pin directly beneath it. Conditionally mounted (only on the Questions tab),
+  // so an $effect (re)observes whenever the bound element appears/disappears.
+  let qControlsEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    const el = qControlsEl;
+    if (!el) return;
+    const section = el.closest('section');
+    if (!section) return;
+    const publish = () =>
+      section.style.setProperty(
+        '--admin-eval-qcontrols-h',
+        `${Math.round(el.getBoundingClientRect().height)}px`
+      );
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(publish) : null;
+    ro?.observe(el);
+    // Republish on scroll too: it's the only moment the offset matters, and it self-heals if a
+    // reflow (e.g. the toolbar collapsing on pin, which rewraps this bar) outpaces the observer.
+    window.addEventListener('scroll', publish, { passive: true });
+    publish();
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('scroll', publish);
+      section.style.removeProperty('--admin-eval-qcontrols-h');
+    };
+  });
 
 
   // Difficulty buckets render as a fixed curve (easiest→hardest), not summary-dict order, so
   // the by-difficulty table reads top-to-bottom as a difficulty ramp.
   const DIFFICULTY_ORDER = ['medium', 'hard', 'very_hard', 'unspecified'];
   function orderedDifficulty(
-    bd: Record<string, { total: number; pass: Record<string, number> }>
-  ): Record<string, { total: number; pass: Record<string, number> }> {
+    bd: Record<string, EvalCategoryStat>
+  ): Record<string, EvalCategoryStat> {
     const rank = (k: string) => {
       const i = DIFFICULTY_ORDER.indexOf(k);
       return i === -1 ? DIFFICULTY_ORDER.length : i;
@@ -310,18 +466,19 @@
   // The live activity feed lines (built once here, shared with the terminal and the
   // collapsed Activity header). `currentActivityLine` is the latest line — shown in
   // the section header while collapsed so the feed still reports where it's at.
-  const activityLines = $derived(
-    buildActivityLines({
-      setupEvents: eval_.setupEvents,
-      rows: eval_.rows,
-      status: eval_.status,
-      totalQuestions: eval_.totalQuestions,
-      summaryGate: eval_.summary?.gate ?? null,
-      summaryElapsedMs: eval_.summary?.elapsed_ms ?? null,
-      failureMessage: eval_.failureMessage
-    })
-  );
-  const currentActivityLine = $derived(activityLines.at(-1)?.text.trim() ?? '');
+  const activityInput = $derived({
+    setupEvents: eval_.setupEvents,
+    rows: eval_.rows,
+    status: eval_.status,
+    totalQuestions: eval_.totalQuestions,
+    summaryGate: eval_.summary?.gate ?? null,
+    summaryElapsedMs: eval_.summary?.elapsed_ms ?? null,
+    failureMessage: eval_.failureMessage
+  });
+  const activityLines = $derived(buildActivityLines(activityInput));
+  // Collapsed Activity header = the live current line (current episode during ingest, current
+  // question during the Q phase), not the rolled-up "X/Y questions" counter.
+  const currentActivityLine = $derived(activityHeaderLine(activityInput));
 
   // Questions-card header summary: selection count out of the corpus total (no cap;
   // a non-empty selection is required to run).
@@ -350,59 +507,48 @@
   };
   const dash = (v: string | null | undefined) => (v && String(v).trim() ? String(v) : '—');
   const onOff = (b: boolean) => (b ? 'on' : 'off');
-  const engineParams = $derived.by<Param[]>(() => {
+
+  // One model's tuning-profile params, compact (e.g. "temp 0.2 · max 1600 · think low"). Empty
+  // string when the model has no tuning profile (embedders) or the profile id isn't found.
+  function tuningChips(profileId: string | undefined): string {
+    const p = profileId ? prefs?.tuning_profiles?.[profileId] : undefined;
+    if (!p) return '';
+    const bits = [`temp ${p.temperature}`, `max ${p.max_tokens}`];
+    if (p.thinking) bits.push(`think ${p.thinking}`);
+    return bits.join(' · ');
+  }
+
+  // Settings, organised for the (non-collapsible) Control tab:
+  //  • MODELS — one line per model with its id + tuning-profile params (graph backend dropped:
+  //    it's the standard now). Embedder has no tuning profile.
+  //  • INGESTION knobs — knowledge chunking (only while "Ingest corpus first" is on).
+  //  • ANSWER & RECALL knobs — retrieval + answering at question time.
+  // Model lines (id + tuning-profile params), tagged by which Settings column they belong to:
+  // ingestion models build the graph (extraction/small/embedder); the answer model drives recall.
+  type ModelLine = { label: string; model: string; tuning: string; group: 'ingest' | 'recall' };
+  const modelLines = $derived.by<ModelLine[]>(() => {
     if (!prefs) return [];
     const g = prefs.graph;
     const a = prefs.knowledge.answering;
-
-    // Models. Answer model (what the judge grades) drives both tracks; the Graphiti
-    // small/sub-step model is surfaced on the memory tab per request.
-    const models: Param[] = [
-      { label: 'Graph backend', value: g.backend },
-      { label: 'Extraction model', value: dash(g.extraction_model) }
+    const out: ModelLine[] = [
+      { label: 'Extraction', model: dash(g.extraction_model), tuning: tuningChips(g.extraction_tuning_profile), group: 'ingest' }
     ];
-    if (isMemory) models.push({ label: 'Small model', value: dash(g.small_model) });
-    models.push({ label: 'Embedder', value: dash(g.embedder_model) });
-    models.push({ label: 'Answer model', value: dash(a.model_resolved ?? a.model) });
-
-    // Shared Graphiti graph-engine knobs (memory recall + knowledge graphiti leg).
-    const graphEngine: Param[] = [
-      ...models,
-      { label: 'Temporal lens', value: TEMPORAL_LENS_LABEL[g.temporal_default] ?? g.temporal_default },
-      { label: 'Expansion hops', value: String(g.k_hop) },
-      { label: 'Search recipe', value: g.search_recipe },
-      { label: 'Search scope', value: g.search_scope },
-      { label: 'Candidate sim floor', value: String(g.sim_min_score) }
-    ];
-    // Fact reranker only kicks in on the cross-encoder recipe.
-    if (g.search_recipe === 'cross_encoder') {
-      graphEngine.push({ label: 'Graph reranker', value: dash(g.reranker.model_id) });
-      graphEngine.push({ label: 'Rerank floor', value: String(g.reranker.min_relevance) });
-    }
-    graphEngine.push({ label: 'Graph observability', value: g.observability });
-
-    if (isMemory) {
-      return [...graphEngine, { label: 'Recall top-k', value: String(prefs.memory.search.top_k) }];
-    }
-
-    // Knowledge flat (Qdrant dense + BM25 hybrid) leg knobs.
-    const r = prefs.knowledge.retrieval;
-    const flat: Param[] = [
-      { label: 'Retrieval top-k', value: String(r.top_k) },
-      { label: 'Flat min score', value: String(r.min_score) },
-      { label: 'Hybrid', value: onOff(r.hybrid) },
-      { label: 'Prefetch', value: String(r.prefetch_limit) }
-    ];
-    if (r.reranker.enabled) {
-      flat.push({ label: 'Flat reranker', value: dash(r.reranker.model_id) });
-      flat.push({ label: 'Rerank top-n', value: String(r.reranker.top_n) });
-    }
-    return [...graphEngine, ...flat];
+    if (isMemory)
+      out.push({ label: 'Small', model: dash(g.small_model), tuning: tuningChips(g.small_tuning_profile), group: 'ingest' });
+    out.push({ label: 'Embedder', model: dash(g.embedder_model), tuning: '', group: 'ingest' });
+    out.push({
+      label: 'Answer',
+      model: dash(a.model_resolved ?? a.model),
+      tuning: tuningChips(prefs.knowledge.default_tuning_profile),
+      group: 'recall'
+    });
+    return out;
   });
+  const ingestModels = $derived(modelLines.filter((m) => m.group === 'ingest'));
+  const recallModels = $derived(modelLines.filter((m) => m.group === 'recall'));
 
-  // Ingest-time knobs (knowledge chunking) — only relevant, and only shown, while
-  // "Ingest corpus first" is checked (they shape the index build, not run-time recall).
-  const ingestParams = $derived.by<Param[]>(() => {
+  // Non-model ingestion knobs (knowledge chunking only; empty on the memory track).
+  const ingestKnobs = $derived.by<Param[]>(() => {
     if (!prefs || isMemory || !eval_.ingestSynthetic) return [];
     const c = prefs.knowledge.chunking;
     return [
@@ -410,6 +556,37 @@
       { label: 'Chunk overlap', value: String(c.chunk_overlap) },
       { label: 'Structural ctx', value: onOff(c.embed_structural_context) }
     ];
+  });
+
+  const recallKnobs = $derived.by<Param[]>(() => {
+    if (!prefs) return [];
+    const g = prefs.graph;
+    const out: Param[] = [
+      { label: 'Temporal lens', value: TEMPORAL_LENS_LABEL[g.temporal_default] ?? g.temporal_default },
+      { label: 'Hops', value: String(g.k_hop) },
+      { label: 'Recipe', value: g.search_recipe },
+      { label: 'Scope', value: g.search_scope },
+      { label: 'Sim floor', value: String(g.sim_min_score) }
+    ];
+    if (g.search_recipe === 'cross_encoder') {
+      out.push({ label: 'Graph reranker', value: dash(g.reranker.model_id) });
+      out.push({ label: 'Rerank floor', value: String(g.reranker.min_relevance) });
+    }
+    if (isMemory) {
+      out.push({ label: 'Recall top-k', value: String(prefs.memory.search.top_k) });
+    } else {
+      const r = prefs.knowledge.retrieval;
+      out.push({ label: 'Retrieval top-k', value: String(r.top_k) });
+      out.push({ label: 'Flat min score', value: String(r.min_score) });
+      out.push({ label: 'Hybrid', value: onOff(r.hybrid) });
+      out.push({ label: 'Prefetch', value: String(r.prefetch_limit) });
+      if (r.reranker.enabled) {
+        out.push({ label: 'Flat reranker', value: dash(r.reranker.model_id) });
+        out.push({ label: 'Rerank top-n', value: String(r.reranker.top_n) });
+      }
+    }
+    out.push({ label: 'Observability', value: g.observability });
+    return out;
   });
 
   // Results-card header summary: the gate verdict once complete, otherwise live progress.
@@ -423,6 +600,17 @@
     }
     if (eval_.rows.length > 0) return `${eval_.rows.length}/${eval_.totalQuestions}`;
     return '';
+  });
+
+  // Report-card header summary: overall correct count + correct% / score% across all legs
+  // (graded runs only). For the multi-leg knowledge track this uses the best leg's correct count.
+  const reportSummary = $derived.by(() => {
+    const s = eval_.summary;
+    if (!s || s.judged === false || !s.passing) return '';
+    const total = s.total_questions || 0;
+    const best = Math.max(0, ...Object.values(s.passing));
+    const bestScore = s.scoring ? Math.max(0, ...Object.values(s.scoring)) : best;
+    return `correct ${best}/${total} · ${pct(best, total)} · score ${pct(bestScore, total)}`;
   });
 
   // Cost (LLM + reranker; embeddings unpriced). Questions cost accumulates live from rows;
@@ -518,6 +706,43 @@
     return 'Not judged (judge was off)';
   }
 
+  /** Short verdict word for the judge line badge. */
+  function markLabel(mark: string): string {
+    if (mark === '✓') return 'Pass';
+    if (mark === '◐') return 'Partial';
+    if (mark === '✗') return 'Fail';
+    if (mark === '🛇') return 'Abstain';
+    return 'Not judged';
+  }
+
+  /** Whole-number percentage for the report tables (n/total ⇒ "0"–"100"); "—" when total is 0. */
+  function pct(n: number, total: number): string {
+    if (!total || total <= 0) return '—';
+    return `${Math.round((n / total) * 100)}%`;
+  }
+
+  /** Score can be fractional (partial = ½ pt); show one decimal only when needed (e.g. 12.5, 13). */
+  function fmtScore(n: number): string {
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  }
+
+  // Eval-time helpers for the "Time" column: clock-only display, full date in the tooltip, and an
+  // epoch-ms key for sorting (so we display the time but order by the actual date).
+  function fmtTime(iso: string | undefined): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  function fmtDateTime(iso: string | undefined): string {
+    if (!iso) return 'Not run yet';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+  function timeMs(iso: string | undefined): number {
+    const t = iso ? Date.parse(iso) : NaN;
+    return Number.isNaN(t) ? 0 : t;
+  }
+
   function deltaVariant(delta: string): 'success' | 'warning' | 'secondary' {
     if (delta.startsWith('+')) return 'success';
     if (delta.startsWith('-')) return 'warning';
@@ -532,9 +757,71 @@
   const legColumns = $derived(eval_.runModes);
   // Δ (best graph leg vs flat) only makes sense on the knowledge track (multi-leg compare).
   const showDelta = $derived(!isMemory);
-  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, <N legs>, [Δ].
+  // Memory shows a sortable recall-sufficiency flag column (before the recall answer).
+  const showRecallCol = $derived(isMemory);
+  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, [recall flag], <N legs>, [Δ], Time.
   // (Trace/recall links moved out of the main row into the expanded fold.)
-  const resultsColspan = $derived(5 + legColumns.length + (showDelta ? 1 : 0));
+  const resultsColspan = $derived(
+    5 + legColumns.length + (showDelta ? 1 : 0) + (showRecallCol ? 1 : 0) + 1
+  );
+
+  // Answer-details sort (within each category group), by the recall flag or the eval time. Per
+  // column: click cycles none→asc→desc; ``none`` keeps the natural question-index order.
+  type AnsSortKey = 'none' | 'recall' | 'time';
+  let ansSortKey = $state<AnsSortKey>('none');
+  let ansSortDir = $state<'asc' | 'desc'>('asc');
+  function cycleAnsSort(key: 'recall' | 'time') {
+    if (ansSortKey !== key) {
+      ansSortKey = key;
+      ansSortDir = 'asc';
+    } else if (ansSortDir === 'asc') {
+      ansSortDir = 'desc';
+    } else {
+      ansSortKey = 'none';
+      ansSortDir = 'asc';
+    }
+  }
+  // Recall rank for a row's recall leg: miss (0), sufficient (1), unknown/not-judged (2).
+  function rowRecallRank(r: EvalRow): number {
+    const leg = r.legs?.recall;
+    if (!leg?.mark) return 2;
+    return leg.recall_sufficient === false ? 0 : 1;
+  }
+  // Apply the active sort to a group's rows (stable on index); identity when sort is off.
+  function sortGroupRows(rows: EvalRow[]): EvalRow[] {
+    if (ansSortKey === 'none') return rows;
+    const dir = ansSortDir === 'asc' ? 1 : -1;
+    const key = ansSortKey === 'recall' ? rowRecallRank : (r: EvalRow) => timeMs(r.answered_at);
+    return [...rows].sort((a, b) => dir * (key(a) - key(b)) || a.index - b.index);
+  }
+
+  // --- Results grouped by type (category) ----------------------------------------------------
+  // Rows grouped by category in first-seen order, ordered by question index within each group.
+  // Each group is collapsible; expand/collapse-all act on every group.
+  const resultGroups = $derived.by<[string, EvalRow[]][]>(() => {
+    const map = new Map<string, EvalRow[]>();
+    for (const r of eval_.rows) {
+      const cat = r.category || '—';
+      const arr = map.get(cat) ?? [];
+      arr.push(r);
+      map.set(cat, arr);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.index - b.index);
+    return [...map.entries()];
+  });
+  let collapsedResultGroups = $state<Set<string>>(new Set());
+  function toggleResultGroup(cat: string) {
+    const next = new Set(collapsedResultGroups);
+    if (next.has(cat)) next.delete(cat);
+    else next.add(cat);
+    collapsedResultGroups = next;
+  }
+  function expandAllResultGroups() {
+    collapsedResultGroups = new Set();
+  }
+  function collapseAllResultGroups() {
+    collapsedResultGroups = new Set(resultGroups.map(([cat]) => cat));
+  }
 
   // Graphiti retrieval trace — opens the SAME rich pipeline-trace dialog the Graph Runs page uses
   // (candidate→rank→temporal stage tables, with scores), loaded by the leg's ledger run_id. Only
@@ -662,12 +949,45 @@
     }
   }
 
-  // One-line settings summary for the collapsed Settings card header.
-  const settingsSummary = $derived.by(() => {
-    if (!prefs) return '';
-    const g = prefs.graph;
-    return `${g.backend} · ${g.search_recipe} · hops ${g.k_hop} · sim ${g.sim_min_score}`;
-  });
+  // Answer-mark groups for the report tables: colored icon + name (reuses the savedBadge icons).
+  const MARK_GROUP_META = [
+    { key: 'pass', name: 'Pass', Icon: CircleCheck, cls: 'text-emerald-600 dark:text-emerald-400' },
+    { key: 'partial', name: 'Partial', Icon: CircleDashed, cls: 'text-amber-600 dark:text-amber-400' },
+    { key: 'fail', name: 'Fail', Icon: CircleX, cls: 'text-rose-600 dark:text-rose-400' },
+    { key: 'abstain', name: 'Abstain', Icon: CircleSlash, cls: 'text-muted-foreground' }
+  ] as const;
+
+  // Sum all per-bucket rows of a breakdown into one totals row (the table's "Total" line).
+  function breakdownTotals(
+    bc: Record<string, EvalCategoryStat>,
+    cols: string[]
+  ): EvalCategoryStat {
+    const t: EvalCategoryStat = {
+      total: 0,
+      groups: Object.fromEntries(
+        cols.map((m) => [m, { pass: 0, partial: 0, fail: 0, abstain: 0 }])
+      ),
+      correct: Object.fromEntries(cols.map((m) => [m, 0])),
+      score: Object.fromEntries(cols.map((m) => [m, 0])),
+      recall_ok: Object.fromEntries(cols.map((m) => [m, 0]))
+    };
+    for (const st of Object.values(bc)) {
+      t.total += st.total;
+      for (const m of cols) {
+        const g = st.groups?.[m];
+        if (g) {
+          t.groups[m].pass += g.pass;
+          t.groups[m].partial += g.partial;
+          t.groups[m].fail += g.fail;
+          t.groups[m].abstain += g.abstain;
+        }
+        t.correct[m] += st.correct?.[m] ?? 0;
+        t.score[m] += st.score?.[m] ?? 0;
+        t.recall_ok[m] += st.recall_ok?.[m] ?? 0;
+      }
+    }
+    return t;
+  }
 
 </script>
 
@@ -778,7 +1098,9 @@
       </div>
       </div>
 
-      <!-- Row 2: run options (ingest / legs / batch window / judge). -->
+      <!-- Row 2: run options (ingest / legs / batch window / judge). Hidden once the toolbar
+           pins on scroll — only the first line (corpus + run controls) stays. -->
+      {#if !toolbarStuck}
       <div class="flex flex-wrap items-center gap-3">
       <label
         class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
@@ -873,86 +1195,97 @@
         </label>
       {/if}
       </div>
+      {/if}
     </div>
   </AdminPageStickyToolbar>
 
-  <!-- Engine settings that drive this run (read-only) — collapsed by default; the gear jumps
-       to the Graph engine preferences and stays visible while collapsed. A one-line summary
-       keeps the key knobs glanceable when collapsed. Sits under the run controls. -->
-  {#if engineParams.length > 0}
-    <KnowledgeCollapsibleSectionCard
-      title="Settings"
-      bodyId="knowledge-eval-settings"
-      defaultExpanded={false}
-      collapsedSummary={settingsSummary}
-    >
-      {#snippet headerActions()}
-        <a
-          href={preferenceTabHref('graph-engine', base)}
-          class="inline-flex items-center gap-1 rounded border px-2 py-0.5 font-sans text-xs text-primary hover:bg-primary/5"
-          title="Change these in the Graph engine settings"
-        >
-          <Settings2 size={12} aria-hidden="true" /> Settings
-        </a>
-      {/snippet}
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 font-sans text-xs">
-        {#each engineParams as p (p.label)}
-          <span class="text-muted-foreground">
-            {p.label}: <span class="font-mono text-foreground">{p.value}</span>
-          </span>
-        {/each}
-        {#if ingestParams.length > 0}
-          <span
-            class="font-semibold uppercase tracking-wide text-muted-foreground"
-            title="Ingest-time settings — apply because “Ingest corpus first” is on"
-          >· Ingest</span>
-          {#each ingestParams as p (p.label)}
-            <span class="text-muted-foreground">
-              {p.label}: <span class="font-mono text-foreground">{p.value}</span>
-            </span>
-          {/each}
-        {/if}
-      </div>
-    </KnowledgeCollapsibleSectionCard>
-  {/if}
-
-  <!-- Failure banner (transport / setup). Per-question failures show as ✗ in the table. -->
+  <!-- Error banners — kept ABOVE the sub-tabs so transport/scan failures stay visible whatever
+       section is open. -->
   {#if eval_.status === 'failed' && eval_.failureMessage}
     <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive">
       Eval run failed: {eval_.failureMessage}
     </div>
   {/if}
-
-  <!-- Corpus / questions errors (scan + bank). -->
   {#if eval_.corpusesError}
     <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 font-sans text-sm text-destructive">
       {eval_.corpusesError}
     </div>
   {/if}
 
+  <!-- Sticky section sub-tabs — pin directly under the run-controls toolbar; each section's
+       summaries / buttons / filters render right under the bar (inside the matching pane). -->
+  <div
+    bind:this={subtabsEl}
+    class="sticky z-10 bg-background/95 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85 {ADMIN_SHELL_STICKY_BLEED}"
+    style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px));"
+  >
+    <AdminSubtabStrip
+      ariaLabel="Eval section"
+      tabs={subtabs}
+      active={activeSubtab}
+      onSelect={(id) => (activeSubtab = id)}
+    />
+  </div>
+
+  <!-- ===== Control pane: Settings · Cost · Activity · Report ===== -->
+  <!-- Read-only settings that drive this run (NOT collapsible). Two columns: Ingestion (graph-build
+       models + chunking) and Answer & recall (answer model + retrieval knobs). Models render one per
+       line with their tuning-profile params; the non-model knobs follow as a dense chip row. -->
+  {#if activeSubtab === 'control' && prefs}
+    <div class="rounded-md border bg-muted/10 px-3 py-2">
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <span class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Settings</span>
+        <a
+          href={preferenceTabHref('graph-engine', base)}
+          class="inline-flex items-center gap-1 rounded border px-2 py-0.5 font-sans text-xs text-primary hover:bg-primary/5"
+          title="Change these in the Graph engine settings"
+        >
+          <Settings2 size={12} aria-hidden="true" /> Edit
+        </a>
+      </div>
+      <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+        {#each [{ label: 'Ingestion', models: ingestModels, knobs: ingestKnobs }, { label: 'Answer & recall', models: recallModels, knobs: recallKnobs }] as col (col.label)}
+          <div class="min-w-0">
+            <p class="mb-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{col.label}</p>
+            <!-- Models — one line each: id + tuning-profile params. -->
+            <div class="grid gap-y-0.5 font-sans text-xs">
+              {#each col.models as m (m.label)}
+                <div class="flex flex-wrap items-baseline gap-x-2">
+                  <span class="w-20 shrink-0 text-muted-foreground">{m.label}</span>
+                  <span class="font-mono text-foreground">{m.model}</span>
+                  {#if m.tuning}<span class="text-muted-foreground">· {m.tuning}</span>{/if}
+                </div>
+              {/each}
+            </div>
+            <!-- Non-model knobs for this column. -->
+            {#if col.knobs.length > 0}
+              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-sans text-xs">
+                {#each col.knobs as p (p.label)}
+                  <span class="text-muted-foreground">{p.label}: <span class="font-mono text-foreground">{p.value}</span></span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- ===== Corpus pane (memory track) ===== -->
   <!-- Corpus review (memory track) — a human-readable look at the turn corpus the questions
        probe: stats header (episode count / date span / question count + per-category breakdown)
        then the full episode transcript. Collapsed by default; sits above the questions. -->
-  {#if isMemory && eval_.selectedCorpus}
-    <KnowledgeCollapsibleSectionCard
-      title="Corpus"
-      bodyId="knowledge-eval-corpus"
-      defaultExpanded={false}
-      summary={corpusHeaderSummary}
-    >
-      {#snippet headerActions()}
-        {#if eval_.corpusLoading}
-          <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
-        {/if}
-      {/snippet}
+  {#if activeSubtab === 'corpus' && isMemory && eval_.selectedCorpus}
       {#if eval_.corpusError}
         <p class="text-xs text-destructive">{eval_.corpusError}</p>
       {:else if eval_.corpusEpisodes.length === 0 && !eval_.corpusLoading}
         <p class="text-xs text-muted-foreground">No episodes loaded.</p>
       {:else}
-        <!-- Top line: corpus stats + episode search (filters + highlights the transcript below). -->
+        <!-- Single stats + search line — sticky directly under the corpus sub-tab so the corpus
+             facts + episode search stay in view while scrolling the (full-page) transcript. -->
         <div
-          class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs"
+          class="sticky z-10 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border bg-background px-3 py-2 font-sans text-xs backdrop-blur supports-[backdrop-filter]:bg-background/90"
+          style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px));"
         >
           <span class="text-muted-foreground">
             Episodes: <span class="font-mono text-foreground">{eval_.corpusMeta?.episode_count ?? 0}</span>
@@ -963,39 +1296,64 @@
           <span class="text-muted-foreground">
             Questions: <span class="font-mono text-foreground">{eval_.questions.length}</span>
           </span>
+          <span class="text-muted-foreground">
+            Ingested: <span class="font-mono text-foreground">{ingestedLabel.replace(/^ingested /, '')}</span>
+          </span>
+          {#if eval_.corpusLoading}
+            <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
+          {/if}
           <div class="ml-auto flex items-center gap-2">
-            <input
-              class="h-7 w-56 rounded-md border bg-background px-2 font-sans text-xs"
-              placeholder="Search episodes…"
-              bind:value={corpusSearch}
-            />
-            {#if corpusSearch.trim()}
-              <span class="text-muted-foreground">{corpusMatchCount} of {eval_.corpusEpisodes.length} match</span>
-              <button
-                type="button"
-                class="rounded border px-2 py-0.5 hover:bg-muted"
-                onclick={() => (corpusSearch = '')}
-              >
-                Clear
-              </button>
-            {/if}
+            <!-- Search with an inline clear (×) inside the box. -->
+            <div class="relative">
+              <input
+                class="h-7 w-56 rounded-md border bg-background pl-2 pr-7 font-sans text-xs"
+                placeholder="Search episodes…"
+                bind:value={corpusSearch}
+              />
+              {#if corpusSearch.trim()}
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-1.5 my-auto flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  onclick={() => (corpusSearch = '')}
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  <X size={12} aria-hidden="true" />
+                </button>
+              {/if}
+            </div>
+            <!-- Fixed-width match readout so the search box doesn't shift when it appears. -->
+            <span class="w-24 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+              {#if corpusSearch.trim()}{corpusMatchCount}/{eval_.corpusEpisodes.length}{/if}
+            </span>
           </div>
         </div>
-        <!-- Episode transcript with highlight; search owned by the stats line above. -->
-        <EvalCorpusReview episodes={eval_.corpusEpisodes} bind:search={corpusSearch} showSearch={false} />
+        <!-- Episode transcript — grows with the page (no inner scroll); search owned above. -->
+        <EvalCorpusReview
+          episodes={eval_.corpusEpisodes}
+          bind:search={corpusSearch}
+          showSearch={false}
+          scroll={false}
+        />
       {/if}
-    </KnowledgeCollapsibleSectionCard>
   {/if}
 
+  <!-- ===== Questions pane ===== -->
   <!-- Questions section — pick the questions to run (required; no implicit "run all"). -->
-  {#if eval_.selectedCorpus}
-    <KnowledgeCollapsibleSectionCard
-      title="Questions"
-      bodyId="knowledge-eval-questions"
-      defaultExpanded={true}
-      summary={questionsSummary}
+  {#if activeSubtab === 'questions'}
+    {#if !eval_.selectedCorpus}
+      <p class="rounded-md border bg-muted/20 px-3 py-6 text-center font-sans text-sm text-muted-foreground">
+        Pick a corpus above to load its questions.
+      </p>
+    {:else}
+    <!-- Filters / buttons / stats — sticky directly under the sub-tab bar so they stay reachable
+         while scrolling the (un-scrolled, full-page) question list. -->
+    <div
+      bind:this={qControlsEl}
+      class="sticky z-10 flex flex-wrap items-center gap-2 bg-background py-2"
+      style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px));"
     >
-      {#snippet headerActions()}
+        <span class="mr-auto font-sans text-xs text-muted-foreground">{questionsSummary}</span>
         {#if eval_.questionsLoading}
           <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
         {/if}
@@ -1053,25 +1411,8 @@
             </button>
           {/if}
         {/if}
-        <!-- Select all / Clear act on the FILTERED set (so e.g. "select all failed" works). -->
-        <button
-          type="button"
-          class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
-          disabled={allSelected || filteredQuestions.length === 0 || isBusy}
-          onclick={() => eval_.setCategorySelected(filteredIds, true)}
-          title={qFiltered ? 'Select all questions matching the filters' : 'Select all questions'}
-        >
-          {qFiltered ? 'Select shown' : 'Select all'}
-        </button>
-        <button
-          type="button"
-          class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
-          disabled={!filteredQuestions.some((q) => eval_.isSelected(q.id)) || isBusy}
-          onclick={() => eval_.setCategorySelected(filteredIds, false)}
-          title={qFiltered ? 'Deselect the questions matching the filters' : 'Clear the selection'}
-        >
-          {qFiltered ? 'Clear shown' : 'Clear selection'}
-        </button>
+        <!-- Selection is driven by the table's header checkbox (all shown) + per-row checkboxes;
+             no separate select/clear buttons needed. -->
         <button
           type="button"
           class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
@@ -1080,98 +1421,110 @@
         >
           Reload
         </button>
-      {/snippet}
+    </div>
       {#if eval_.questionsError}
         <p class="text-xs text-destructive">{eval_.questionsError}</p>
       {:else if eval_.questions.length === 0 && !eval_.questionsLoading}
         <p class="text-xs text-muted-foreground">No questions loaded.</p>
       {:else}
-        <div class="max-h-96 overflow-y-auto rounded-md border px-3 py-2">
-          {#if groups.length === 0}
-            <p class="py-2 font-sans text-xs text-muted-foreground">No questions match the filters.</p>
-          {/if}
-          {#each groups as [category, items] (category)}
-            <div class="mb-2">
-              <label
-                class="flex select-none items-center gap-2 py-1 font-sans text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                <input
-                  type="checkbox"
-                  class="size-3.5"
-                  checked={categoryAllSelected(items)}
-                  disabled={isBusy}
-                  onchange={(e) =>
-                    eval_.setCategorySelected(
-                      items.map((q) => q.id),
-                      e.currentTarget.checked
-                    )}
-                />
-                {category}
-                <span class="font-normal normal-case">({items.length})</span>
-              </label>
-              <div class="grid gap-0.5 pl-5">
-                {#each items as q, qi (q.id)}
-                  {@const dm = difficultyMeta(q.difficulty ?? '')}
-                  <label class="flex cursor-pointer select-none items-start gap-2 py-0.5 font-sans text-sm">
+        <!-- Flat sortable question table — one row per question: select · type · state · # ·
+             question · difficulty. Sticky head (pins below the sticky filters bar); sortable
+             columns. Select-all (head) + the Select/Clear-shown buttons act on the visible set.
+             No overflow wrapper — that would trap the sticky head against a scroll box. -->
+        <div class="mt-2 rounded-md border">
+          <table class="w-full border-collapse font-sans text-sm">
+            <thead
+              class="bg-muted text-xs uppercase tracking-wide text-muted-foreground [&_th]:sticky [&_th]:top-[calc(4rem+var(--admin-page-header-h,0px)+var(--admin-page-sticky-toolbar-h,0px)+var(--admin-eval-subtabs-h,0px)+var(--admin-eval-qcontrols-h,0px))] [&_th]:z-10 [&_th]:border-b [&_th]:bg-muted"
+            >
+              <tr>
+                <th class="px-2 py-1.5 text-left">
+                  <input
+                    type="checkbox"
+                    class="size-3.5 align-middle"
+                    checked={allSelected}
+                    disabled={filteredQuestions.length === 0 || isBusy}
+                    onchange={(e) => eval_.setCategorySelected(filteredIds, e.currentTarget.checked)}
+                    title="Select / deselect all shown"
+                    aria-label="Select all shown"
+                  />
+                </th>
+                {@render sortHeader('category', 'Type')}
+                {#if isMemory}{@render sortHeader('state', 'State')}{/if}
+                {#if isMemory}{@render sortHeader('recall', 'Recall sufficiency', false, Flag, 'Judge recall-sufficiency — sort')}{/if}
+                {@render sortHeader('number', '#', true)}
+                {@render sortHeader('question', 'Question')}
+                {@render sortHeader('difficulty', 'Difficulty')}
+                {#if isMemory}{@render sortHeader('time', 'Time', true)}{/if}
+              </tr>
+            </thead>
+            <tbody>
+              {#if sortedQuestions.length === 0}
+                <tr>
+                  <td colspan={qColspan} class="px-2 py-3 text-center font-sans text-xs text-muted-foreground">
+                    No questions match the filters.
+                  </td>
+                </tr>
+              {/if}
+              {#each sortedQuestions as q (q.id)}
+                {@const dm = difficultyMeta(q.difficulty ?? '')}
+                {@const sb = savedBadge(q.id)}
+                {@const SavedIcon = sb?.Icon}
+                <tr class="border-t align-top hover:bg-muted/40 {eval_.isSelected(q.id) ? 'bg-primary/5' : ''}">
+                  <td class="px-2 py-1.5">
                     <input
                       type="checkbox"
-                      class="mt-0.5 size-3.5"
+                      class="size-3.5 align-middle"
                       checked={eval_.isSelected(q.id)}
                       disabled={isBusy}
                       onchange={() => eval_.toggleQuestion(q.id)}
+                      aria-label="Select question"
                     />
-                    <!-- Per-category number (1..N within this category). -->
-                    <span class="mt-px w-5 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{qi + 1}.</span>
-                    <span class="min-w-0">
-                      {#if dm}
-                        <span
-                          class="mr-1 inline-block rounded px-1 py-px align-[1px] text-[10px] font-medium uppercase tracking-wide {dm.cls}"
-                        >
-                          {dm.label}
+                  </td>
+                  <td class="px-2 py-1.5 text-xs text-muted-foreground">{q.category || '—'}</td>
+                  {#if isMemory}
+                    <td class="px-2 py-1.5">
+                      {#if sb && SavedIcon}
+                        <span class="inline-flex items-center gap-1 {sb.cls}" title={sb.title} aria-label={sb.title}>
+                          <SavedIcon size={14} class="shrink-0" aria-hidden="true" />
+                          <span class="text-xs">{savedStateName(q.id)}</span>
                         </span>
+                      {:else}
+                        <span class="text-xs text-muted-foreground">—</span>
                       {/if}
-                      {q.question}
-                      {#if q.subcategory}
-                        <span class="text-xs text-muted-foreground"> · {q.subcategory}</span>
-                      {/if}
-                      {#if savedBadge(q.id)}
-                        {@const sb = savedBadge(q.id)}
-                        {@const SavedIcon = sb?.Icon}
-                        {#if SavedIcon}
-                          <!-- Tooltip lives on a wrapping <span>: a `title` attr on the lucide
-                               <svg> itself isn't shown as a hover tooltip by browsers. -->
-                          <span
-                            class="ml-1 inline-flex align-[-2px] {sb?.cls}"
-                            title={sb?.title}
-                            aria-label={sb?.title}
-                            role="img"
-                          >
-                            <SavedIcon size={13} class="shrink-0" aria-hidden="true" />
-                          </span>
-                        {/if}
-                      {/if}
-                    </span>
-                  </label>
-                {/each}
-              </div>
-            </div>
-          {/each}
+                    </td>
+                    <!-- Judge recall-sufficiency flag (no text). -->
+                    <td class="px-2 py-1.5 text-center">{@render recallFlag(eval_.savedRecallSufficient(q.id))}</td>
+                  {/if}
+                  <td class="px-2 py-1.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    {questionNumber.get(q.id) ?? ''}
+                  </td>
+                  <td class="px-2 py-1.5">
+                    {q.question}
+                    {#if q.subcategory}<span class="text-xs text-muted-foreground"> · {q.subcategory}</span>{/if}
+                  </td>
+                  <td class="px-2 py-1.5">
+                    {#if dm}
+                      <span
+                        class="inline-block rounded px-1.5 py-px text-[10px] font-medium uppercase tracking-wide {dm.cls}"
+                      >{dm.label}</span>
+                    {:else}
+                      <span class="text-xs text-muted-foreground">—</span>
+                    {/if}
+                  </td>
+                  {#if isMemory}
+                    <!-- Eval time — clock only; full date on hover; sorts on the underlying date. -->
+                    <td
+                      class="whitespace-nowrap px-2 py-1.5 text-right font-mono text-xs tabular-nums text-muted-foreground"
+                      title={fmtDateTime(eval_.savedAnsweredAt(q.id))}
+                    >{fmtTime(eval_.savedAnsweredAt(q.id))}</td>
+                  {/if}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
       {/if}
-    </KnowledgeCollapsibleSectionCard>
-  {/if}
-
-  <!-- Activity section — only once processing starts (or has data to replay). Persists
-       across navigation via the server-side run registry (GET /knowledge/eval/state). -->
-  {#if isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0}
-    <KnowledgeCollapsibleSectionCard
-      title="Activity"
-      bodyId="knowledge-eval-activity"
-      defaultExpanded={false}
-      collapsedSummary={currentActivityLine}
-    >
-      <KnowledgeEvalTerminal lines={activityLines} />
-    </KnowledgeCollapsibleSectionCard>
+    {/if}
   {/if}
 
   <!-- Cost — its own strip (NOT nested in Results) so it shows during ingestion too: the memory
@@ -1179,7 +1532,7 @@
        a Results-gated cost box reported nothing while ingesting. Ingest cost streams in on the
        'remember_done' setup event; questions accumulate live; total folds both (LLM + reranker;
        embeddings unpriced). Knowledge ingest cost is deferred (multi-run), shown as “—”. -->
-  {#if totalCost > 0 || isBusy}
+  {#if activeSubtab === 'control' && (totalCost > 0 || isBusy)}
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
       <span class="font-semibold uppercase tracking-wide text-muted-foreground">Cost</span>
       <span class="font-mono text-foreground">≈ {fmtCost(totalCost)}</span>
@@ -1218,16 +1571,52 @@
     </div>
   {/if}
 
-  <!-- Results — unified across tracks: Question, Ideal, Model answer(s) at a glance;
-       fold for recalled facts / judge reason / full answers / run links. -->
-  {#if eval_.rows.length > 0 || eval_.summary}
+  <!-- Activity section — only once processing starts (or has data to replay). Persists across
+       navigation via the server-side run registry (GET /knowledge/eval/state). Shown below Cost. -->
+  {#if activeSubtab === 'control' && (isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0)}
     <KnowledgeCollapsibleSectionCard
-      title="Results"
-      bodyId="knowledge-eval-results"
-      defaultExpanded={true}
-      summary={resultsSummary}
+      title="Activity"
+      bodyId="knowledge-eval-activity"
+      defaultExpanded={false}
+      collapsedSummary={currentActivityLine}
     >
-      {#snippet headerActions()}
+      <KnowledgeEvalTerminal lines={activityLines} />
+    </KnowledgeCollapsibleSectionCard>
+  {/if}
+
+  <!-- ===== Answer Details pane ===== -->
+  <!-- Per-question answers, grouped by type: Question, Ideal, Model answer(s) at a glance;
+       fold for recalled facts / judge reason / full answers / run links. -->
+  {#if activeSubtab === 'answers'}
+    {#if !(eval_.rows.length > 0 || eval_.summary)}
+      <p class="rounded-md border bg-muted/20 px-3 py-6 text-center font-sans text-sm text-muted-foreground">
+        No answers yet — run an eval to see per-question results here.
+      </p>
+    {:else}
+    <!-- Actions / stats directly under the sub-tab (no card); the table keeps its sticky head. -->
+    <div class="flex flex-wrap items-center gap-2">
+        <span class="mr-auto font-sans text-xs text-muted-foreground">{resultsSummary}</span>
+        <!-- Expand / collapse all result type-groups (icons only). -->
+        {#if resultGroups.length > 0}
+          <button
+            type="button"
+            class="rounded border p-1 hover:bg-muted"
+            onclick={expandAllResultGroups}
+            title="Expand all groups"
+            aria-label="Expand all groups"
+          >
+            <ChevronsUpDown size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="rounded border p-1 hover:bg-muted"
+            onclick={collapseAllResultGroups}
+            title="Collapse all groups"
+            aria-label="Collapse all groups"
+          >
+            <ChevronsDownUp size={14} aria-hidden="true" />
+          </button>
+        {/if}
         {#if isMemory}
           <Button
             type="button"
@@ -1245,20 +1634,29 @@
             Export to LoCoMo
           </Button>
         {/if}
-      {/snippet}
+    </div>
       {#if eval_.rows.length > 0 || eval_.status === 'running'}
         {@render resultsTable()}
       {/if}
-      {#if eval_.summary}
-        {@render summaryCard(eval_.summary)}
-      {/if}
-      {#if eval_.summary?.by_category && Object.keys(eval_.summary.by_category).length > 0}
-        <p class="mb-1 mt-3 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+    {/if}
+  {/if}
+
+  <!-- Report (Control pane) — the aggregate breakdown: per-category, then per-difficulty (each
+       with the answer-type distribution + Recall Accuracy / Score / Correct metrics + a Total row). -->
+  {#if activeSubtab === 'control' && eval_.summary}
+    <KnowledgeCollapsibleSectionCard
+      title="Report"
+      bodyId="knowledge-eval-report"
+      defaultExpanded={true}
+      summary={reportSummary}
+    >
+      {#if eval_.summary.by_category && Object.keys(eval_.summary.by_category).length > 0}
+        <p class="mb-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Results by category
         </p>
         {@render breakdownTable(eval_.summary.by_category, eval_.summary.modes, 'Category')}
       {/if}
-      {#if eval_.summary?.by_difficulty && Object.keys(eval_.summary.by_difficulty).length > 0}
+      {#if eval_.summary.by_difficulty && Object.keys(eval_.summary.by_difficulty).length > 0}
         <p class="mb-1 mt-3 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Results by difficulty
         </p>
@@ -1314,10 +1712,20 @@
     {ingestTraceError}
   </div>
 {/if}
-<!-- Shared corpus tab content for both trace dialogs (memory track): the searchable source
-     transcript, so a recalled/ingested fact can be traced back to its episode in-context. -->
+<!-- Corpus tab for the ingest trace dialog: built-in search box (that dialog has no top search). -->
 {#snippet corpusTab()}
   <EvalCorpusReview episodes={eval_.corpusEpisodes} compact />
+{/snippet}
+<!-- Corpus tab for the retrieval trace dialog: filtering is driven by the dialog's top search
+     (passed in), so there's no second search box here — just the match count + transcript. -->
+{#snippet corpusTabWired(dialogSearch: string)}
+  <EvalCorpusReview
+    episodes={eval_.corpusEpisodes}
+    search={dialogSearch}
+    showSearch={false}
+    showCount
+    compact
+  />
 {/snippet}
 <GraphRunsRetrievalTraceDialog
   trace={activeTrace}
@@ -1325,7 +1733,7 @@
   llmAnswer={activeTraceAnswer}
   onClose={() => (activeTrace = null)}
   extraTabLabel={corpusTabLabel}
-  extraTab={corpusTabLabel ? corpusTab : undefined}
+  extraTab={corpusTabLabel ? corpusTabWired : undefined}
 />
 <!-- Ingest (graph-build) pipeline trace — opened from the Cost strip's "Ingest pipeline" button;
      same Corpus tab so the source transcript is reachable while inspecting the build. -->
@@ -1347,6 +1755,51 @@
   }}
 />
 
+<!-- Judge recall-sufficiency flag — a single colored flag (no text): green = the recalled context
+     held what was needed, rose = a recall miss. Renders nothing when unknown (not judged). -->
+{#snippet recallFlag(sufficient: boolean | undefined)}
+  {#if sufficient !== undefined}
+    <span
+      class="inline-flex {sufficient
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : 'text-rose-600 dark:text-rose-400'}"
+      title={sufficient
+        ? 'Recall sufficient — the recalled facts/entities/episodes contained what was needed to answer'
+        : 'Recall miss — the needed fact was not in the recalled context'}
+      role="img"
+      aria-label={sufficient ? 'Recall sufficient' : 'Recall insufficient'}
+    >
+      <Flag size={13} aria-hidden="true" />
+    </span>
+  {/if}
+{/snippet}
+
+<!-- Sortable header cell for the Questions table: click to sort (toggles asc/desc); shows the
+     active direction, or a faded both-ways glyph to signal the column is sortable. -->
+{#snippet sortHeader(
+  key: QSortKey,
+  label: string,
+  alignRight = false,
+  IconCmp: Component<{ size?: number; class?: string }> | null = null,
+  titleText = ''
+)}
+  <th class="px-2 py-1.5 {IconCmp ? 'text-center' : alignRight ? 'text-right' : 'text-left'}">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground {alignRight && !IconCmp ? 'flex-row-reverse' : ''}"
+      onclick={() => toggleSort(key)}
+      title={titleText || `Sort by ${label}`}
+    >
+      {#if IconCmp}<IconCmp size={12} />{:else}{label}{/if}
+      {#if qSortKey === key}
+        {#if qSortDir === 'asc'}<ChevronUp size={12} aria-hidden="true" />{:else}<ChevronDown size={12} aria-hidden="true" />{/if}
+      {:else}
+        <ChevronsUpDown size={12} class="opacity-30" aria-hidden="true" />
+      {/if}
+    </button>
+  </th>
+{/snippet}
+
 <!-- Unified results table: Question, Ideal, per-leg [mark + model answer]; fold for details. -->
 {#snippet resultsTable()}
   <!-- No overflow wrapper: a scroll container would trap the sticky header. The thead pins to
@@ -1354,7 +1807,7 @@
   <div class="rounded-md border">
     <table class="w-full border-collapse font-sans text-sm">
       <thead
-        class="text-xs uppercase tracking-wide text-muted-foreground [&_th]:sticky [&_th]:top-[calc(4rem+var(--admin-page-header-h,0px)+var(--admin-page-sticky-toolbar-h,0px))] [&_th]:z-10 [&_th]:border-b [&_th]:bg-muted"
+        class="text-xs uppercase tracking-wide text-muted-foreground [&_th]:sticky [&_th]:top-[calc(4rem+var(--admin-page-header-h,0px)+var(--admin-page-sticky-toolbar-h,0px)+var(--admin-eval-subtabs-h,0px))] [&_th]:z-10 [&_th]:border-b [&_th]:bg-muted"
       >
         <tr>
           <th class="px-2 py-1.5 text-left">#</th>
@@ -1362,16 +1815,67 @@
           <th class="px-2 py-1.5 text-left">Type</th>
           <th class="px-2 py-1.5 text-left">Difficulty</th>
           <th class="px-2 py-1.5 text-left">Ideal</th>
+          {#if showRecallCol}
+            <!-- Sortable recall-sufficiency flag column (before the recall answer). -->
+            <th class="px-2 py-1.5 text-center">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-foreground"
+                onclick={() => cycleAnsSort('recall')}
+                title="Judge recall-sufficiency — click to sort{ansSortKey === 'recall' ? ` (${ansSortDir})` : ''}"
+              >
+                <Flag size={12} aria-hidden="true" />
+                {#if ansSortKey === 'recall'}{#if ansSortDir === 'asc'}<ChevronUp size={12} aria-hidden="true" />{:else}<ChevronDown size={12} aria-hidden="true" />{/if}{:else}<ChevronsUpDown size={12} class="opacity-30" aria-hidden="true" />{/if}
+              </button>
+            </th>
+          {/if}
           {#each legColumns as mode (mode)}
             <th class="px-2 py-1.5 text-left">{legLabel(mode)} answer</th>
           {/each}
           {#if showDelta}<th class="px-2 py-1.5 text-center" title="best graph leg vs flat">&#916;</th>{/if}
+          <!-- Eval time (sortable, last column) — clock only; full date on hover; sorts on date. -->
+          <th class="px-2 py-1.5 text-right">
+            <button
+              type="button"
+              class="inline-flex flex-row-reverse items-center gap-1 uppercase tracking-wide hover:text-foreground"
+              onclick={() => cycleAnsSort('time')}
+              title="Eval time — click to sort{ansSortKey === 'time' ? ` (${ansSortDir})` : ''}"
+            >
+              Time
+              {#if ansSortKey === 'time'}{#if ansSortDir === 'asc'}<ChevronUp size={12} aria-hidden="true" />{:else}<ChevronDown size={12} aria-hidden="true" />{/if}{:else}<ChevronsUpDown size={12} class="opacity-30" aria-hidden="true" />{/if}
+            </button>
+          </th>
         </tr>
       </thead>
       <tbody>
-        {#each eval_.rows as r (r.id)}
+        {#each resultGroups as [groupCat, groupRows] (groupCat)}
+          {@const groupCollapsed = collapsedResultGroups.has(groupCat)}
+          <!-- Type (category) group header — collapsible, spans the full table width. -->
+          <tr class="border-t bg-muted/40">
+            <td colspan={resultsColspan} class="px-2 py-1">
+              <button
+                type="button"
+                class="flex w-full items-center gap-1.5 text-left font-sans text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                aria-expanded={!groupCollapsed}
+                onclick={() => toggleResultGroup(groupCat)}
+                title={groupCollapsed ? 'Expand group' : 'Collapse group'}
+              >
+                <ChevronRight
+                  size={13}
+                  class="shrink-0 transition-transform {groupCollapsed ? '' : 'rotate-90'}"
+                  aria-hidden="true"
+                />
+                {groupCat}
+                <span class="font-normal normal-case">({groupRows.length})</span>
+              </button>
+            </td>
+          </tr>
+          {#if !groupCollapsed}
+            {@const sortedRows = sortGroupRows(groupRows)}
+            {#each sortedRows as r, gi (r.id)}
           <tr class="border-t align-top">
-            <td class="px-2 py-1.5 font-mono tabular-nums text-xs text-muted-foreground">{r.index + 1}/{r.total}</td>
+            <!-- Per-category position (n of this category's rows), not out of the whole run. -->
+            <td class="px-2 py-1.5 font-mono tabular-nums text-xs text-muted-foreground">{gi + 1}/{sortedRows.length}</td>
             <td class="px-2 py-1.5">
               <button
                 type="button"
@@ -1406,6 +1910,13 @@
             <td class="px-2 py-1.5 text-xs text-muted-foreground">
               <span class="line-clamp-2" title={r.gold || ''}>{r.gold || '—'}</span>
             </td>
+            {#if showRecallCol}
+              <!-- Recall-sufficiency flag — its own (sortable) column, before the recall answer. -->
+              {@const rleg = r.legs?.recall}
+              <td class="px-2 py-1.5 text-center">
+                {@render recallFlag(rleg?.mark ? (rleg.recall_sufficient ?? true) : undefined)}
+              </td>
+            {/if}
             {#each legColumns as mode (mode)}
               <td class="px-2 py-1.5">
                 {#if r.legs[mode]}
@@ -1424,6 +1935,11 @@
                 <Badge variant={deltaVariant(r.delta)} class="font-mono">{r.delta}</Badge>
               </td>
             {/if}
+            <!-- Eval time — clock only; full date on hover; sorts on the underlying date. -->
+            <td
+              class="whitespace-nowrap px-2 py-1.5 text-right font-mono text-xs tabular-nums text-muted-foreground"
+              title={fmtDateTime(r.answered_at)}
+            >{fmtTime(r.answered_at)}</td>
           </tr>
           <!-- Fold: per-leg judge verdict + recalled facts (expanded). Question/ideal/answer are
                already in the row above, so we don't repeat them here — only the diagnostic detail. -->
@@ -1494,11 +2010,60 @@
                           {/if}
                         </div>
                       </div>
-                      <!-- Judge verdict — its own line, above the recalled-memory sections. -->
-                      {#if leg.reason}
-                        <p class="rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
-                          <span class="font-semibold text-foreground">Judge:</span> {leg.reason}
-                        </p>
+                      <!-- Judge — its own collapsible colored section (matches the recalled-memory
+                           sections below): verdict + recall sufficiency + grounded + reason + the
+                           recalled line(s) the judge quoted (evidence). Recall + evidence are
+                           memory-only (knowledge legs pass no context to the judge). -->
+                      {#if leg.mark || leg.reason}
+                        <details open class="overflow-hidden rounded-md border">
+                          <summary class="cursor-pointer select-none px-2 py-1 font-sans text-[11px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                            Judge
+                          </summary>
+                          <div class="grid gap-2 border-t px-2.5 py-2 text-xs leading-5">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <span class="min-w-[64px] text-muted-foreground">Verdict</span>
+                              {#if leg.mark}
+                                <Badge variant={markVariant(leg.mark)} class="font-mono" title={markTitle(leg.mark)}>{leg.mark} {markLabel(leg.mark)}</Badge>
+                              {:else}
+                                <span class="text-muted-foreground">—</span>
+                              {/if}
+                            </div>
+                            {#if mode === 'recall'}
+                              <div class="flex flex-wrap items-center gap-2">
+                                <span class="min-w-[64px] text-muted-foreground">Recall</span>
+                                {#if leg.recall_sufficient === false}
+                                  <Badge variant="destructive" title="The recalled context did NOT contain what was needed — a recall miss, not an answering miss.">recall miss</Badge>
+                                {:else}
+                                  <Badge variant="success" title="The recalled facts/entities/episodes contained what was needed to answer.">sufficient</Badge>
+                                {/if}
+                              </div>
+                            {/if}
+                            <div class="flex flex-wrap items-center gap-2">
+                              <span class="min-w-[64px] text-muted-foreground">Grounded</span>
+                              {#if leg.grounded === false}
+                                <Badge variant="warning" title="The answer was not grounded in the provided context.">ungrounded</Badge>
+                              {:else}
+                                <Badge variant="success" title="The answer is supported by the provided context.">grounded</Badge>
+                              {/if}
+                            </div>
+                            {#if leg.reason}
+                              <div class="flex flex-wrap gap-2">
+                                <span class="min-w-[64px] text-muted-foreground">Reason</span>
+                                <span class="flex-1 text-foreground">{leg.reason}</span>
+                              </div>
+                            {/if}
+                            {#if mode === 'recall'}
+                              <div class="flex flex-wrap gap-2">
+                                <span class="min-w-[64px] text-muted-foreground">Evidence</span>
+                                {#if leg.evidence}
+                                  <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500">{leg.evidence}</span>
+                                {:else}
+                                  <span class="italic text-muted-foreground">— none quoted</span>
+                                {/if}
+                              </div>
+                            {/if}
+                          </div>
+                        </details>
                       {/if}
                       <!-- Recalled memories: separate collapsible Facts / Entities / Episodes. -->
                       {@render recalledTable(leg.recalled ?? [])}
@@ -1508,6 +2073,8 @@
               </div>
             </td>
           </tr>
+            {/each}
+          {/if}
         {/each}
         {#if eval_.status === 'running' && eval_.totalQuestions > eval_.rows.length}
           <tr class="border-t bg-muted/10">
@@ -1652,82 +2219,86 @@
   {@render recalledSection('Recalled episodes', episodes.length, 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200', body)}
 {/snippet}
 
-<!-- Summary: knowledge PROCEED/PIVOT gate or memory recall counts; both note when judge is off. -->
-{#snippet summaryCard(s: EvalCompletedPayload)}
-  {@const judged = s.judged ?? true}
-  <div
-    class="grid gap-2 rounded-md border px-3 py-3 font-sans text-sm {s.gate === 'proceed'
-      ? 'border-emerald-500/40 bg-emerald-500/5'
-      : s.gate === 'pivot'
-        ? 'border-amber-500/40 bg-amber-500/5'
-        : 'border-border bg-muted/20'}"
-  >
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="text-base font-semibold">
-        {s.gate === 'proceed' ? '✅ PROCEED' : s.gate === 'pivot' ? '❌ PIVOT' : s.track === 'memory' ? '🧠 Recall results' : 'ℹ️ Results'}
-      </span>
-      {#if s.track !== 'memory'}
-        <span class="text-xs text-muted-foreground">legs: {s.modes.map(legLabel).join(' · ')}</span>
-      {/if}
-      <Badge variant="outline" class="font-mono">{s.elapsed_ms}ms</Badge>
-      {#if (s.total_cost_usd ?? 0) > 0}
-        <Badge variant="outline" class="font-mono" title="LLM + reranker; embeddings not priced">{fmtCost(s.total_cost_usd)}</Badge>
-      {/if}
-      {#if !judged}<Badge variant="secondary">answers only &middot; judge off</Badge>{/if}
-    </div>
-    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-      {#if s.track === 'memory'}
-        <span>Recalled for: <span class="font-mono">{s.recalled_for ?? 0}/{s.total_questions}</span></span>
-      {/if}
-      {#if judged}
-        <span>
-          Passing (all {s.total_questions}):
-          {#each s.modes as mode (mode)}<span class="ml-1 font-mono">{legLabel(mode)}={s.passing?.[mode] ?? 0}</span>{/each}
-        </span>
-        {#if s.track !== 'memory'}
-          <span>
-            On <code class="font-mono">requires_graph</code> ({s.requires_graph_total ?? 0}):
-            {#each s.modes as mode (mode)}<span class="ml-1 font-mono">{legLabel(mode)}={s.requires_graph_passing?.[mode] ?? 0}</span>{/each}
+<!-- Per-bucket × leg breakdown. Two visual groups per leg: the ANSWER-TYPE distribution (named,
+     colored icons: Pass/Partial/Fail/Abstain) then the METRICS group (Recall Accuracy, Score x/y +
+     %, Correct x/y + %), separated by a divider. A colored Total row sums all buckets. ``header``
+     labels the first column; ``cols`` are the legs (memory = single ``recall``). -->
+{#snippet breakdownTable(bc: Record<string, EvalCategoryStat>, cols: string[], header: string)}
+  {@const multi = cols.length > 1}
+  {@const totals = breakdownTotals(bc, cols)}
+  {#snippet legHead()}
+    {#each cols as mode (mode)}
+      {#each MARK_GROUP_META as grp, gi (grp.key)}
+        {@const Icon = grp.Icon}
+        <th class="px-1.5 py-1 text-center {gi === 0 && multi ? 'border-l' : ''}">
+          <span class="inline-flex items-center gap-1 {grp.cls}">
+            <Icon size={12} aria-hidden="true" />{grp.name}
           </span>
-        {/if}
-      {/if}
-    </div>
-    {#if !judged}
-      <p class="text-xs text-muted-foreground">
-        Judge was off &mdash; answers shown without marks. Enable &ldquo;Judge answers&rdquo; to grade
-        each answer against the ideal answer.
-      </p>
-    {/if}
-  </div>
-{/snippet}
-
-<!-- Per-bucket x leg passing counts (judge marks). ``header`` labels the first column
-     (Category or Difficulty); ``cols`` are the legs. -->
-{#snippet breakdownTable(
-  bc: Record<string, { total: number; pass: Record<string, number> }>,
-  cols: string[],
-  header: string
-)}
+        </th>
+      {/each}
+      <th class="border-l-2 border-border px-1.5 py-1 text-center" title="Recall Accuracy — the recalled facts/entities/episodes include the items required to answer correctly (of judged rows)">Recall&nbsp;Accuracy</th>
+      <th class="px-1.5 py-1 text-center" title="Score — pass = 1 point, partial answer = ½ point, fail/abstain when an answer exists = 0 points">Score</th>
+      <th class="px-1.5 py-1 text-center" title="Score % (of total)">Score&nbsp;%</th>
+      <th class="px-1.5 py-1 text-center" title="Correct Answers — Pass = 1 point, anything else = 0 points (more restrictive than Score)">Correct&nbsp;Answers</th>
+      <th class="px-1.5 py-1 text-center" title="Correct Answers % (of total)">Correct&nbsp;%</th>
+    {/each}
+  {/snippet}
+  {#snippet bdCells(st: EvalCategoryStat, flatCorrect: number, isTotal = false)}
+    {@const tone = isTotal ? 'text-foreground font-semibold' : 'text-muted-foreground'}
+    {#each cols as mode (mode)}
+      {@const g = st.groups?.[mode] ?? { pass: 0, partial: 0, fail: 0, abstain: 0 }}
+      {@const judged = g.pass + g.partial + g.fail + g.abstain}
+      {@const correct = st.correct?.[mode] ?? 0}
+      {@const score = st.score?.[mode] ?? 0}
+      {@const recallOk = st.recall_ok?.[mode] ?? 0}
+      {@const win = mode !== 'flat' && correct > flatCorrect}
+      {@const winCls = win ? 'font-semibold text-emerald-600' : isTotal ? 'text-foreground font-semibold' : 'text-foreground'}
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone} {multi ? 'border-l' : ''}">{g.pass}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{g.partial}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{g.fail}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{g.abstain}</td>
+      <td class="border-l-2 border-border px-1.5 py-1.5 text-center font-mono tabular-nums {tone}" title="{recallOk}/{judged} judged">{pct(recallOk, judged)}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{fmtScore(score)}/{st.total}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{pct(score, st.total)}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{correct}/{st.total}</td>
+      <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {winCls}">{pct(correct, st.total)}</td>
+    {/each}
+  {/snippet}
   <div class="overflow-x-auto rounded-md border">
     <table class="w-full border-collapse font-sans text-sm">
       <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-        <tr>
-          <th class="px-2 py-1.5 text-left">{header}</th>
-          {#each cols as mode (mode)}<th class="px-2 py-1.5 text-center">{legLabel(mode)}</th>{/each}
-        </tr>
+        {#if multi}
+          <!-- Leg-name grouping row above the per-leg sub-columns. -->
+          <tr>
+            <th class="px-2 py-1.5 text-left" rowspan="2">{header}</th>
+            <th class="px-2 py-1.5 text-center" rowspan="2">Total</th>
+            {#each cols as mode (mode)}
+              <th class="border-l px-2 py-1 text-center" colspan="9">{legLabel(mode)}</th>
+            {/each}
+          </tr>
+          <tr>{@render legHead()}</tr>
+        {:else}
+          <tr>
+            <th class="px-2 py-1.5 text-left">{header}</th>
+            <th class="px-2 py-1.5 text-center">Total</th>
+            {@render legHead()}
+          </tr>
+        {/if}
       </thead>
       <tbody>
         {#each Object.entries(bc) as [cat, st] (cat)}
-          {@const flatPass = st.pass?.flat ?? 0}
           <tr class="border-t">
             <td class="px-2 py-1.5">{cat}</td>
-            {#each cols as mode (mode)}
-              <td class="px-2 py-1.5 text-center font-mono tabular-nums {mode !== 'flat' && (st.pass?.[mode] ?? 0) > flatPass ? 'font-semibold text-emerald-600' : 'text-muted-foreground'}">
-                {st.pass?.[mode] ?? 0}/{st.total}
-              </td>
-            {/each}
+            <td class="px-2 py-1.5 text-center font-mono tabular-nums text-muted-foreground">{st.total}</td>
+            {@render bdCells(st, st.correct?.flat ?? 0)}
           </tr>
         {/each}
+        <!-- Totals across all buckets — distinct color, every value bold. -->
+        <tr class="border-t-2 border-primary/40 bg-primary/10 font-semibold text-foreground">
+          <td class="px-2 py-1.5">Total</td>
+          <td class="px-2 py-1.5 text-center font-mono tabular-nums">{totals.total}</td>
+          {@render bdCells(totals, totals.correct.flat ?? 0, true)}
+        </tr>
       </tbody>
     </table>
   </div>

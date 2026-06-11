@@ -12,7 +12,14 @@ from hirocli.services.knowledge.eval_store import (
 )
 
 
-def _row(qid: str, mark: str, answer: str = "a", cost: float = 0.01) -> dict:
+def _row(
+    qid: str,
+    mark: str,
+    answer: str = "a",
+    cost: float = 0.01,
+    *,
+    negative_control: bool = False,
+) -> dict:
     """A minimal question_completed-shaped row for the store."""
     return {
         "id": qid,
@@ -23,6 +30,7 @@ def _row(qid: str, mark: str, answer: str = "a", cost: float = 0.01) -> dict:
         "gold": "g",
         "track": "memory",
         "cost_usd": cost,
+        "is_negative_control": negative_control,
         "legs": {"recall": {"mode": "recall", "mark": mark, "answer": answer, "cost_usd": cost}},
     }
 
@@ -175,17 +183,26 @@ def test_coalesce_ingested_ranges_merges_and_keeps_gaps() -> None:
 
 
 def test_summarize_memory_rows_merged_snapshot() -> None:
-    """The merged read recomputes pass-count + infers judged from the marks."""
+    """The merged read recomputes correct-count + infers judged from the marks."""
     from hirocli.services.knowledge.eval_runner import summarize_memory_rows
 
-    rows = [_row("q1", "✓"), _row("q2", "✗"), _row("q3", "🛇")]
+    # q3 abstains on a NORMAL question (miss); q4 abstains on a negative control (correct).
+    rows = [
+        _row("q1", "✓"),
+        _row("q2", "✗"),
+        _row("q3", "🛇"),
+        _row("q4", "🛇", negative_control=True),
+    ]
     s = summarize_memory_rows(rows, run_id="saved-adam")
     assert s["track"] == "memory"
-    assert s["total_questions"] == 3
+    assert s["total_questions"] == 4
     assert s["gate"] == "n/a"
     assert s["judged"] is True  # marks present → judged inferred
-    # ✓ and 🛇 (abstain) are the passing marks; ✗ is not.
+    # Correct = ✓ + correct-abstain (the control). The non-control 🛇 is NOT correct (bug fix).
     assert s["passing"]["recall"] == 2
+    # Raw mark distribution still bins both abstains under 'abstain'.
+    assert s["groups"]["recall"] == {"pass": 1, "partial": 0, "fail": 1, "abstain": 2}
+    assert s["scoring"]["recall"] == 2.0
 
 
 def test_summarize_memory_rows_judge_off_inference() -> None:

@@ -26,7 +26,10 @@ from typing import Any
 from hiro_commons.log import Logger
 from pydantic import BaseModel, Field
 
-from hirocli.domain.preferences import DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+from hirocli.domain.preferences import (
+    DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
+    DEFAULT_MEMORY_EVAL_JUDGE_PROMPT,
+)
 
 from hirocli.services.knowledge.eval_scoring import (
     MARK_ABSTAIN,
@@ -59,22 +62,42 @@ class JudgeVerdict:
     reason: str
     grounded: bool = True
     recall_sufficient: bool = True
+    # The context line(s) the judge quoted as supporting the answer — surfaced in the eval UI's
+    # Judge section. Only set when the quote was verified present in the context (else ""), so a
+    # displayed quote is always a real recalled line, never a judge hallucination.
+    evidence: str = ""
+    # The context line(s) the judge quoted as supporting the answer (surfaced in the eval UI's
+    # Judge section). Empty when the judge quoted nothing / no context was shown.
+    evidence: str = ""
 
 
 class _JudgeOutput(BaseModel):
-    """Structured judge response (LLM-filled)."""
+    """Structured judge response (LLM-filled).
 
-    verdict: str = Field(description="one of: pass, partial, fail, abstain")
-    grounded: bool = Field(description="true if the answer is supported by the provided context")
-    reason: str = Field(description="one short sentence justifying the verdict")
+    Field order is deliberate: structured output is generated top-to-bottom, so the judge quotes
+    its evidence and writes its reason BEFORE committing the verdict — a built-in look-before-you-
+    grade step that lets a FLAT (non-reasoning) judge model gather grounds first."""
+
+    evidence: str = Field(
+        default="",
+        description=(
+            "the exact line(s) copied verbatim from the RECALLED CONTEXT that supply the answer; "
+            "empty if the context contains no such line. Required to justify recall_sufficient=true."
+        ),
+    )
     recall_sufficient: bool = Field(
         default=True,
         description=(
-            "true if the RECALLED CONTEXT contained the information needed to answer; false when "
-            "the needed fact was simply not recalled (so a wrong/declined answer is a recall miss, "
-            "not an answering miss). If no context was provided, leave true."
+            "true ONLY if `evidence` quotes a real line from the recalled context that supplies the "
+            "answer; false when the needed fact was not recalled (a recall miss, not an answering "
+            "miss). If no context was provided, leave true."
         ),
     )
+    grounded: bool = Field(
+        default=True, description="true if the answer is supported by the provided context"
+    )
+    reason: str = Field(description="one short sentence justifying the verdict")
+    verdict: str = Field(description="one of: pass, partial, fail, abstain")
 
 
 # Per-kind section order + heading for the recalled-context prompt (facts → entities → episodes).
@@ -250,22 +273,24 @@ async def answer_from_context(
     )
 
 
-_JUDGE_SYSTEM = (
-    "You are a strict grader. Compare a model's ANSWER to the IDEAL answer for a question and "
-    "return a verdict:\n"
-    "- pass: the answer matches the ideal (same facts).\n"
-    "- partial: partially correct or incomplete.\n"
-    "- fail: wrong.\n"
-    "- abstain: the answer declines / says it doesn't know.\n"
-    "If the question is a NEGATIVE CONTROL (declining is correct), then 'abstain' is the right "
-    "outcome and a confident answer is 'fail'. Judge the verdict ONLY against the IDEAL — never "
-    "your own knowledge.\n"
-    "You are ALSO given the RECALLED CONTEXT that was shown to the answering model (the same facts "
-    "/ entities / episodes it saw). Use it ONLY to set ``recall_sufficient``: true if that context "
-    "contained the information needed to answer, false if the needed fact was simply not recalled "
-    "(so a wrong/declined answer is a recall miss, not an answering miss). The recalled context "
-    "must NOT change the pass/partial/fail/abstain verdict, which stays measured against the IDEAL."
-)
+def _normalize_text(text: str) -> str:
+    """Lowercase + collapse whitespace, for a forgiving evidence/context substring match."""
+    return " ".join((text or "").lower().split())
+
+
+def _evidence_supported(evidence: str, context: "list[dict[str, Any]] | None") -> bool:
+    """Whether the judge's quoted ``evidence`` actually occurs in the recalled ``context``.
+
+    Whitespace/case-insensitive substring match against both the rendered context block AND each
+    recalled item's ``memory`` text (a flat judge may quote one item rather than the whole block).
+    Empty evidence ⇒ unsupported. This is the deterministic backstop that stops the judge from
+    claiming ``recall_sufficient`` without grounding (the locomo conv-43 false positives)."""
+    ev = _normalize_text(evidence)
+    if not ev:
+        return False
+    if ev in _normalize_text(format_recall_context(context)):
+        return True
+    return any(ev in _normalize_text(str(h.get("memory") or "")) for h in (context or []))
 
 
 async def judge_answer(
@@ -278,6 +303,7 @@ async def judge_answer(
     context: "list[dict[str, Any]] | None" = None,
     is_negative_control: bool = False,
     sink: Any | None = None,
+    system_prompt: str | None = None,
 ) -> JudgeVerdict:
     """Grade ``answer`` against the ideal ``expected_answer`` → :class:`JudgeVerdict`.
 
@@ -286,10 +312,16 @@ async def judge_answer(
     measured against the IDEAL). ``None`` (e.g. the knowledge track) ⇒ no context section,
     ``recall_sufficient`` defaults true.
 
+    ``system_prompt`` is the editable ``graph.eval.judge_prompt`` pref; blank falls back to
+    ``DEFAULT_MEMORY_EVAL_JUDGE_PROMPT``. When context IS present, ``recall_sufficient`` is then
+    backstopped: the judge must quote a context line in ``evidence`` (verified by substring) or it
+    is forced to ``False`` — killing ungrounded sufficiency claims.
+
     Ledgered as an ``eval_judge`` node. Falls back to a ``fail`` verdict (not an exception) if the
     judge call errors, so one bad grade never aborts the run."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    sys_prompt = (system_prompt or "").strip() or DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
     control = "YES — declining is the correct outcome." if is_negative_control else "no"
     recalled = format_recall_context(context)
     context_block = f"RECALLED CONTEXT (shown to the answerer):\n{recalled}\n\n" if recalled else ""
@@ -306,7 +338,7 @@ async def judge_answer(
         # ``run_name`` labels this LLM call as ``eval_judge`` in LangSmith, so the grading step
         # is distinguishable from the answering step under the same ``eval_question`` span.
         raw = await structured.ainvoke(
-            [SystemMessage(_JUDGE_SYSTEM), HumanMessage(human)],
+            [SystemMessage(sys_prompt), HumanMessage(human)],
             config={"run_name": "eval_judge"},
         )
         parsed: _JudgeOutput | None = raw.get("parsed") if isinstance(raw, dict) else raw
@@ -316,8 +348,25 @@ async def judge_answer(
         reason = str(getattr(parsed, "reason", "") or "").strip()
         grounded = bool(getattr(parsed, "grounded", True))
         recall_sufficient = bool(getattr(parsed, "recall_sufficient", True))
+        # Verify the judge's quote is a real recalled line. Only a verified-present quote is kept as
+        # `evidence` (so the UI never shows a hallucinated quote); an unverifiable quote is dropped.
+        evidence_raw = str(getattr(parsed, "evidence", "") or "").strip()
+        evidence = evidence_raw if (context and _evidence_supported(evidence_raw, context)) else ""
+        # Backstop: recall_sufficient may only stand if that quote checked out — catches flat-model
+        # false positives that CLAIM the context was sufficient without grounding (locomo conv-43).
+        # Only when context was shown; the knowledge track passes none, so its default-true stands.
+        if recall_sufficient and context and not evidence:
+            log.info(
+                "⚠️ knowledge.eval.judge — ungrounded recall_sufficient → False · q=%s",
+                question[:80],
+            )
+            recall_sufficient = False
         verdict = JudgeVerdict(
-            mark=mark, reason=reason, grounded=grounded, recall_sufficient=recall_sufficient
+            mark=mark,
+            reason=reason,
+            grounded=grounded,
+            recall_sufficient=recall_sufficient,
+            evidence=evidence,
         )
         # Decision detail carries the verdict word so the ledger row reads at a glance (e.g. graded/pass).
         return verdict, ai, f"{mark} {reason[:120]}", ("graded", verdict_word or "fail")
