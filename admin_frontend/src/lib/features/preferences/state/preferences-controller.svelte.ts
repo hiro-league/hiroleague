@@ -43,6 +43,10 @@ export function createPreferencesController(notify: Notify) {
   let catalogReloadBusy = $state(false);
   let error = $state<string | null>(null);
   let sections = $state<PreferenceSection[]>([]);
+  // Built-in default texts for the editable system prompts (dotted path → text), from the
+  // preferences payload. Powers the "Restore default" button: a cleared prompt persists "" and
+  // the backend default only fills absent keys, so the UI can't recover the text on its own.
+  let promptDefaults = $state<Record<string, string>>({});
   let baseline = $state<WorkspacePreferences | null>(null);
   let draft = $state<WorkspacePreferences | null>(null);
   let forceClean = $state(false);
@@ -338,6 +342,7 @@ export function createPreferencesController(notify: Notify) {
         listCatalogProviders()
       ]);
       sections = prefsPayload.data.sections ?? [];
+      promptDefaults = prefsPayload.data.prompt_defaults ?? {};
       const prefs = prefsPayload.data.preferences;
       setDraftFromServer(prefs);
       rerankCatalogOptions = rerankPayload.data.models;
@@ -391,6 +396,7 @@ export function createPreferencesController(notify: Notify) {
     try {
       const payload = await patchPreferences(edits);
       sections = payload.data.sections ?? [];
+      promptDefaults = payload.data.prompt_defaults ?? promptDefaults;
       setDraftFromServer(payload.data.preferences);
       notify('success', 'Workspace preferences saved.');
     } catch (err) {
@@ -427,6 +433,9 @@ export function createPreferencesController(notify: Notify) {
     },
     get draft() {
       return draft;
+    },
+    get promptDefaults() {
+      return promptDefaults;
     },
     get dirty() {
       return dirty;

@@ -11,6 +11,7 @@ import pytest
 
 from hirocli.domain.memory import MemoryAddResult
 from hirocli.services.knowledge.eval_judge import (
+    MEMORY_EVAL_ANSWER_SYSTEM_PROMPT,
     _JudgeOutput,
     answer_from_context,
     format_recall_context,
@@ -85,6 +86,28 @@ async def test_answer_from_context_returns_model_text() -> None:
         sink=None,
     )
     assert ans == "The drone is Otto."
+
+
+@pytest.mark.asyncio
+async def test_answer_from_context_message_layout() -> None:
+    """System = hardcoded role; user message = instructions, then ## User Question, then
+    ## Recalled Memory Elements (question BEFORE context — the conv-43 prompt rework)."""
+    m = _FakeModel(answer="Otto.")
+    await answer_from_context(
+        m,
+        "fake:model",
+        question="Which drone?",
+        context=[{"kind": "fact", "fact": "Otto is the mascot drone"}],
+        sink=None,
+        instructions="## Objective\nAnswer from elements only.",
+    )
+    system, human = m.last_messages[0].content, m.last_messages[-1].content
+    assert system == MEMORY_EVAL_ANSWER_SYSTEM_PROMPT
+    assert human.startswith("## Objective")
+    assert "## User Question\nWhich drone?" in human
+    assert "## Recalled Memory Elements" in human
+    assert human.index("## User Question") < human.index("## Recalled Memory Elements")
+    assert "Otto is the mascot drone" in human
 
 
 @pytest.mark.asyncio
@@ -164,7 +187,8 @@ async def test_memory_question_judge_off_has_answer_no_mark() -> None:
 
 
 def test_format_recall_context_sections_with_metadata_no_score() -> None:
-    """Structured hits → Facts/Entities/Episodes sections with metadata; retrieval score excluded."""
+    """Structured hits → markdown Relevant Facts/Entities/Messages sections with metadata;
+    retrieval score excluded."""
     out = format_recall_context(
         [
             {
@@ -175,7 +199,9 @@ def test_format_recall_context_sections_with_metadata_no_score() -> None:
             {"kind": "episode", "memory": "I started at Cedar Labs.", "valid_at": "2024-08-12", "score": 0.7},
         ]
     )
-    assert "Facts:" in out and "Entities:" in out and "Episodes:" in out
+    assert "### Relevant Facts" in out
+    assert "### Relevant Entities" in out
+    assert "### Relevant Messages" in out
     assert "Adam works at Cedar Labs [WORKS_AT · valid 2024-08 → present]" in out
     assert "Adam (Person): an engineer" in out
     assert "[2024-08-12] I started at Cedar Labs." in out
@@ -218,11 +244,14 @@ async def test_judge_reports_recall_sufficient() -> None:
 
 @pytest.mark.asyncio
 async def test_judge_prompt_includes_recalled_context() -> None:
-    """When context is passed, the judge's human prompt carries the recalled context block."""
+    """When context is passed, the judge's human prompt carries the recalled elements block —
+    AFTER the Model Answer (the verdict is Answer-vs-Ideal; elements are auxiliary)."""
     m = _FakeModel(verdict="pass")
     await judge_answer(
         m, "fake:model", question="drone?", answer="Otto.", expected_answer="Otto",
         context=[{"kind": "fact", "fact": "Otto is the mascot drone", "name": "IS"}], sink=None,
     )
     human = m.last_messages[-1].content
-    assert "RECALLED CONTEXT" in human and "Otto is the mascot drone" in human
+    assert "## Recalled Memory Elements" in human and "Otto is the mascot drone" in human
+    assert "## Model Answer" in human
+    assert human.index("## Model Answer") < human.index("## Recalled Memory Elements")

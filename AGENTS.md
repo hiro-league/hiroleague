@@ -7,6 +7,10 @@
 
 # Conventions
 
+## Admin UI during development
+
+Check the admin UI from the **Vite dev site at `http://localhost:5173`** (usually running), **not** the served admin UI at port `18083` — the latter is rebuilt infrequently and is usually stale.
+
 ## Adding a `preferences.json` field
 
 A new preference is not done when the backend model has it — it must be **representable and editable in the Preferences admin UI**, and it must actually **persist on Save**. Do the whole round-trip, in order:

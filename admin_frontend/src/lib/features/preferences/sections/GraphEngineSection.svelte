@@ -333,7 +333,7 @@
 
     <SectionCardMuted
       title="Eval prompts"
-      description="System prompts the eval harness uses to generate answers from recalled/retrieved context and to grade them. Relaxing these lets multi-part questions earn partial credit instead of a blanket decline. Eval-only — does not affect production chat."
+      description="Prompts the eval harness uses to generate answers from recalled/retrieved context and to grade them. The answer prompt is an instruction block sent in the user message ahead of the question and recalled elements (the system prompt is a fixed role). Eval-only — does not affect production chat."
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngineEval}
     >
@@ -342,12 +342,14 @@
         previewLabel="Preview"
         ariaLabel="Memory eval answer prompt (markdown)"
         bind:value={ctrl.draft.graph.eval.memory_answer_prompt}
+        defaultValue={ctrl.promptDefaults['graph.eval.memory_answer_prompt']}
         onInput={ctrl.markDirty}
       />
       <p class="text-xs text-muted-foreground">
-        Drives the memory eval's <span class="font-medium">recall</span> leg. Blank uses the relaxed
-        default: answer the parts the recalled facts support, and reply exactly "I don't know" only
-        when the facts cover none of the question (so negative-control questions still score).
+        Drives the memory eval's <span class="font-medium">recall</span> leg. Blank uses the
+        structured default (support gates, calibrator examples, absolute-date rules), declining
+        with exactly "No information available." when no recalled element supports an answer —
+        the abstain detector recognizes that phrase and the legacy "I don't know".
       </p>
 
       <MarkdownEditorPreview
@@ -355,13 +357,16 @@
         previewLabel="Preview"
         ariaLabel="Eval judge prompt (markdown)"
         bind:value={ctrl.draft.graph.eval.judge_prompt}
+        defaultValue={ctrl.promptDefaults['graph.eval.judge_prompt']}
         onInput={ctrl.markDirty}
       />
       <p class="text-xs text-muted-foreground">
         Grades each answer against the ideal (both tracks). Blank uses the default: lenient on
         paraphrase/partial/dates, and <span class="font-medium">recall_sufficient</span> only holds
         when the judge quotes a real recalled line (verified server-side, so ungrounded "sufficient"
-        claims are dropped). Shown for reference — verdict is always measured against the ideal.
+        claims are dropped). Verdict is always measured against the ideal. Keep the
+        <span class="font-medium">Output Fields</span> section if you customize — on thinking-mode
+        models the judge runs in JSON mode and that section is the only schema the model sees.
       </p>
 
       <MarkdownEditorPreview
@@ -369,6 +374,7 @@
         previewLabel="Preview"
         ariaLabel="Knowledge answering prompt (markdown)"
         bind:value={ctrl.draft.knowledge.answering.prompt}
+        defaultValue={ctrl.promptDefaults['knowledge.answering.prompt']}
         onInput={ctrl.markDirty}
       />
       <p class="text-xs text-muted-foreground">

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -75,7 +76,18 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     admin_app = FastAPI(title="Hiro Admin")
     admin_app.state.ctx = ctx
     include_admin_svelte_api(admin_app)
-    mount_admin_svelte_static(admin_app)
+
+    # Dev "external UI" mode (HIRO_ADMIN_UI_EXTERNAL=1, set by dev-sync-fast.sh --external-ui):
+    # the Svelte UI is served live by a separately-started vite dev server (proxying /api back
+    # here), so the server serves only the API and skips the packaged static bundle entirely —
+    # no Svelte build needed, and a missing/stale static dir is not an error.
+    if os.environ.get("HIRO_ADMIN_UI_EXTERNAL", "").strip().lower() in {"1", "true", "yes"}:
+        log.info(
+            "Hiro Admin UI served externally (vite dev server); skipping packaged static mount",
+            vite_url="http://127.0.0.1:5173/",
+        )
+    else:
+        mount_admin_svelte_static(admin_app)
 
     uv_config = uvicorn.Config(
         app=ShutdownCancellationGuard(admin_app, ctx.stop_event),

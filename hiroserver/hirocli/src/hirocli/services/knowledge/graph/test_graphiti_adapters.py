@@ -97,6 +97,62 @@ async def test_structured_output_returns_dict_and_reports_usage() -> None:
     assert fakes["openai:gpt-medium"].structured_calls == [(_Foo, True)]
 
 
+class _FakeDeepSeek:
+    """DeepSeek stub — class name is overridden to ``ChatDeepSeek`` below so the compat
+    wrapper (which keys on the class name) treats it as the real client. Records the
+    ``method`` kwarg passed to ``with_structured_output`` so the json_mode fallback is testable."""
+
+    def __init__(self, parsed: object, *, thinking_enabled: bool) -> None:
+        self._parsed = parsed
+        self.extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+        self.structured_calls: list[dict] = []
+
+    def with_structured_output(self, response_model: type, include_raw: bool = False, **kwargs):
+        self.structured_calls.append(
+            {"response_model": response_model, "include_raw": include_raw, **kwargs}
+        )
+        raw = AIMessage(content="{}", usage_metadata={"input_tokens": 3, "output_tokens": 5, "total_tokens": 8})
+        return _FakeStructured(self._parsed, raw)
+
+    async def ainvoke(self, _messages: object) -> AIMessage:
+        return AIMessage(content="plain", usage_metadata={"input_tokens": 3, "output_tokens": 5, "total_tokens": 8})
+
+
+# The compat wrapper checks ``__class__.__name__ == "ChatDeepSeek"``; rename so the stub matches.
+_FakeDeepSeek.__name__ = "ChatDeepSeek"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_thinking_uses_json_mode_structured_output() -> None:
+    """DeepSeek thinking mode 400s on the forced tool_choice, so the adapter must route
+    structured output through method=json_mode (graphiti injects the JSON schema into the prompt)."""
+    model = _FakeDeepSeek(_Foo(name="m"), thinking_enabled=True)
+    client = GraphitiLLMClient(
+        medium=GraphitiModelSpec("deepseek:deepseek-v4-flash", _tuning()),
+        model_builder=lambda spec: model,
+    )
+
+    out = await client._generate_response(_msgs(), response_model=_Foo, model_size=ModelSize.medium)
+
+    assert out == {"name": "m"}
+    assert model.structured_calls[0]["method"] == "json_mode"
+    assert model.structured_calls[0]["include_raw"] is True
+
+
+@pytest.mark.asyncio
+async def test_deepseek_nonthinking_keeps_default_method() -> None:
+    """Non-thinking DeepSeek supports the default function_calling method — no json_mode override."""
+    model = _FakeDeepSeek(_Foo(name="m"), thinking_enabled=False)
+    client = GraphitiLLMClient(
+        medium=GraphitiModelSpec("deepseek:deepseek-v4-flash", _tuning()),
+        model_builder=lambda spec: model,
+    )
+
+    await client._generate_response(_msgs(), response_model=_Foo, model_size=ModelSize.medium)
+
+    assert "method" not in model.structured_calls[0]
+
+
 @pytest.mark.asyncio
 async def test_model_size_routes_to_small_model() -> None:
     usages: list = []

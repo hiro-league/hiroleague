@@ -195,6 +195,33 @@ retrieval legs). It gets its **own runner** (`run_memory_eval`) + event types, p
 6. **Graph tab** — `eval_mem_{set}` classifies as **eval** (label `Eval · Memory · {set}`), so it
    shows + labels itself via the existing selector, visibly separate from real memory.
 
+### 8.1 Parallel question phase (`question_concurrency`)
+
+The **question phase** of `run_memory_eval` runs as an `asyncio.TaskGroup` gated by one shared
+`Semaphore(question_concurrency)` — each question's recall→answer→judge legs are a task; the cap
+(1 = serial, the default) comes from the eval UI's **Parallel** stepper and is clamped server-side
+to `MAX_QUESTION_CONCURRENCY` (8). Slot-per-index keeps **bank order** in the summary however
+completion interleaves; `question_completed` events carry the bank `index`, so the table/persisted
+rows key correctly out of order.
+
+Boundaries and caveats:
+
+- **Only questions parallelize.** The remember phase stays strictly serial — chronological
+  supersession and the Kuzu write lock both require it.
+- **Kuzu bounds the win.** Recall's graph queries serialize on the shared driver's single
+  `AsyncConnection` slot (`max_concurrent_queries=1`, a graphiti write-safety invariant — do not
+  raise it). The speedup comes from overlapping the answer/judge **LLM calls**: expect ~2–3× at
+  cap 4, not 4×.
+- **Per-question `elapsed_ms` includes queueing** at caps > 1 — the Time column isn't comparable
+  across runs with different caps.
+- **Cancellation:** question tasks raise a *sentinel* exception on the cooperative cancel flag
+  (TaskGroup ignores cancelled children, so raising `CancelledError` inside a child would let the
+  run finish as a bogus `completed`); `run_memory_eval` translates it back to `CancelledError` for
+  the route's terminal-cancel path. Real child failures are unwrapped from the `ExceptionGroup` so
+  the FAILED event carries the original message.
+- **Higher caps multiply concurrent LLM calls** → provider rate-limit exposure; the low ceiling is
+  deliberate.
+
 ---
 
 ## 9. Phases 2–3 — Knowledge track (in scope)

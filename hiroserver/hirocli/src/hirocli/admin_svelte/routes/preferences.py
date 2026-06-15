@@ -12,6 +12,7 @@ from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.schemas import PreferencesPatchRequest
 from hirocli.domain.preferences import (
     PREFERENCE_SECTIONS,
+    PROMPT_DEFAULTS,
     knowledge_answering_model_source,
     resolve_knowledge_answering_llm,
 )
@@ -81,6 +82,10 @@ async def get_preferences(
             "data": {
                 "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
+                # Built-in default texts for the editable system prompts, so the UI can offer
+                # "Restore default" (a cleared prompt persists "" and the pydantic default never
+                # re-applies — the default text is otherwise unrecoverable from the admin UI).
+                "prompt_defaults": dict(PROMPT_DEFAULTS),
             },
         }
     except Exception as exc:
@@ -103,6 +108,8 @@ async def patch_preferences(
                 "changed": sorted(str(path).strip() for path in body.edits),
                 "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
+                # Same map as GET — the controller refreshes its state from the PATCH response.
+                "prompt_defaults": dict(PROMPT_DEFAULTS),
             },
         }
     except PreferencePathError as exc:

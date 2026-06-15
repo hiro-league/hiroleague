@@ -63,6 +63,8 @@ export const PREF_KEYS = {
   knowledgeEvalCorpus: 'hiro.admin.knowledge.evalCorpus',
   /** Eval: run the optional LLM judge (grade answers vs ideal). */
   knowledgeEvalJudge: 'hiro.admin.knowledge.evalJudge',
+  /** Eval (memory track): max questions evaluated concurrently (1 = serial). */
+  knowledgeEvalQuestionConcurrency: 'hiro.admin.knowledge.evalQuestionConcurrency',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
   knowledgeGraphOptions: 'hiro.admin.knowledge.graphOptions',
   /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */

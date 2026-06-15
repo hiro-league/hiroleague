@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from langchain_core.embeddings import Embeddings
 
+from hiro_commons.log import Logger
+
 from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
 from hirocli.services.knowledge.constants import (
     DEFAULT_EMBEDDING_MODEL,
@@ -22,6 +24,40 @@ from hirocli.services.knowledge.embedding_backends import (
 
 if TYPE_CHECKING:
     from hirocli.domain.credential_store import CredentialStore
+
+log = Logger.get("SVC.KNOWLEDGE.EMBED")
+
+
+def _log_embed_http_failure(exc: Exception, model_id: str) -> None:
+    """Post-mortem for cloud-embedding HTTP failures: log the FAILED request's header sizes.
+
+    Added for the eval-run ``431 request_headers_too_large`` investigation: the repro harness
+    (test_embedder_431_repro.py) showed the client stack keeps headers flat (~600B) under the
+    eval's exact concurrency, so the next real 431 must carry its own evidence. openai's
+    ``APIStatusError.response`` is the ``httpx.Response`` whose ``.request`` holds the exact
+    headers that were on the wire — names + per-header SIZES only (values redacted: the
+    Authorization key must never reach the logs). Best-effort: never masks the original error."""
+    response = getattr(exc, "response", None)
+    request = getattr(response, "request", None)
+    if request is None:
+        return
+    try:
+        headers = list(request.headers.items())
+        per_header = dict(
+            sorted(((k, len(v)) for k, v in headers), key=lambda kv: -kv[1])
+        )
+        total = sum(len(k) + len(v) + 4 for k, v in headers)  # +4 ≈ ": " + CRLF per line
+        log.error(
+            "❌ knowledge.embed — embeddings HTTP %s · model=%s · header_total=%dB · per-header(B)=%s",
+            getattr(response, "status_code", "?"),
+            model_id,
+            total,
+            per_header,
+        )
+    except Exception:
+        log.warning(
+            "⚠️ knowledge.embed — could not introspect failed embed request", exc_info=True
+        )
 
 
 class CatalogEmbeddingsBackend:
@@ -42,7 +78,13 @@ class CatalogEmbeddingsBackend:
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
-        return self._embeddings.embed_documents(list(texts))
+        # try/except added for the 431 investigation: surface the failed request's actual
+        # header sizes (see _log_embed_http_failure) before the error propagates unchanged.
+        try:
+            return self._embeddings.embed_documents(list(texts))
+        except Exception as exc:
+            _log_embed_http_failure(exc, self.model_id)
+            raise
 
 
 def resolve_knowledge_embedder(

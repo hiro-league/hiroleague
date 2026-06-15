@@ -16,6 +16,7 @@ from hirocli.domain.preferences import (
     MemoryPreferences,
     ModalityFlags,
     PREFERENCE_SECTIONS,
+    PROMPT_DEFAULTS,
     TuningProfile,
     WorkspacePreferences,
     knowledge_answering_model_source,
@@ -136,6 +137,19 @@ def test_preference_sections_are_first_level_only() -> None:
         "graph",
         "chat",
     ]
+
+
+def test_prompt_defaults_match_model_defaults() -> None:
+    # PROMPT_DEFAULTS feeds the admin UI's "Restore default" affordance for prompt editors;
+    # each dotted path must resolve on a default WorkspacePreferences to the exact same text,
+    # otherwise restore would write a stale copy of the default instead of the real one.
+    prefs = WorkspacePreferences()
+    for path, default_text in PROMPT_DEFAULTS.items():
+        node: object = prefs
+        for part in path.split("."):
+            node = getattr(node, part)
+        assert node == default_text, f"PROMPT_DEFAULTS out of sync for {path}"
+        assert isinstance(default_text, str) and default_text.strip()
 
 
 def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None:

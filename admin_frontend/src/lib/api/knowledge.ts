@@ -385,6 +385,9 @@ export type EvalRunRequest = {
   episode_offset?: number;
   episode_limit?: number | null;
   judge?: boolean; // run the optional LLM judge (grade answers vs the ideal)
+  // Memory track — max questions running recall→answer→judge at once (1 = serial).
+  // Clamped server-side to [1, 8]; ignored on the knowledge track.
+  question_concurrency?: number;
   // REQUIRED, non-empty — the UI forces an explicit question selection (no "run all").
   question_ids?: string[];
   // Knowledge only — legs to compare, subset of ['flat','graphiti']. Empty/undefined = both.

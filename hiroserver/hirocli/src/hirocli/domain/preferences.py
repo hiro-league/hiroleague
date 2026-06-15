@@ -400,7 +400,17 @@ DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
     "translate or 'correct' a name.\n\n"
     "Set `knowledge_needed` to false when the message is just a greeting, farewell, thanks, "
     "acknowledgement, or small talk and clearly does not ask for stored information; otherwise "
-    "true. Do not invent facts or answer the question."
+    "true. Do not invent facts or answer the question.\n\n"
+    # The output shape is spelled out in the prompt (not left to the schema alone) because some
+    # providers — e.g. DeepSeek thinking mode — fall back to JSON-mode structured output, which
+    # never sees the pydantic field descriptions; the model knows the fields only from this text.
+    "Respond with a JSON object containing exactly these fields:\n"
+    "- `standalone_query` (string): the rewritten standalone search query.\n"
+    "- `keywords` (array of strings): proper nouns, names, dates, and identifiers copied verbatim.\n"
+    "- `knowledge_needed` (boolean): false only for greetings/thanks/small talk, otherwise true.\n"
+    "- `entities` (array of strings): named entities the question asks about (people, places, "
+    "organizations) and qualified relational mentions like 'my sister' or 'mom'; empty when the "
+    "question references no specific entity (e.g. 'what is photosynthesis?')."
 )
 
 
@@ -532,65 +542,196 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     device: str | None = None
 
 
-# Answer-generation system prompt for the MEMORY eval's recall leg (eval_judge.answer_from_context).
-# Eval-only — there is no production equivalent on this path. Reworked after the LoCoMo conv-43 run
-# showed the answering leg leaking on top of retrieval: the model abstained/hedged on 11+ rows whose
-# recalled context DID contain the answer. Goal is finding the right answer for an LLM judge — NOT
-# token-overlap F1 — so this deliberately does not demand a minimal span or forbid explanation.
-# Failure-targeted behaviors (from eyeballing the failed rows + the locomo reference harness):
-# read every item (rank ≠ relevance), combine + attribute facts, enumerate before list/count answers,
-# resolve relative time against each fact's own date, answer from meaning not wording, and COMMIT
-# (never "facts don't specify" when partial evidence exists). Keeps the grounding guard and the exact
-# leading "I don't know" decline — the abstain detector (answer.startswith("i don't know")) and
-# negative-control scoring depend on it, which also rules out a reasoning-before-answer format.
-DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = (
-    "You answer a question from recalled conversation memories (facts, entities, episodes). "
-    "Use ONLY this material — never outside or prior knowledge.\n"
-    "Read EVERY item before answering — the answer is often spread across several items, not in the "
-    "first ones. Combine items that describe the same event or topic, and check each item is about "
-    "the person the question asks about.\n"
-    "For list or counting questions: collect every distinct matching item across ALL the material "
-    "first, then answer with the complete list or count.\n"
-    "Use each item's dates to resolve relative time ('next month', 'last week') into an absolute "
-    "month/year. When similar events appear at different dates, the question's timeframe picks the "
-    "right one — not the order the items appear in.\n"
-    "Answer from meaning, not wording — an item that paraphrases the question still answers it.\n"
-    "Commit to the best supported answer: if anything in the material supports the answer or part of "
-    "it, give it directly — do not say information is missing, and do not withhold a supported part "
-    "because another part is unsupported. Answer directly and completely; no preamble needed.\n"
-    "Only when NOTHING in the material relates to the question, reply exactly: I don't know."
-)
+# Answering INSTRUCTIONS for the MEMORY eval's recall leg (eval_judge.answer_from_context).
+# Eval-only — there is no production equivalent on this path. Markdown-structured (Objective / Core
+# Instructions / Calibrators / Formatting Rules / Validation) and placed in the USER message:
+# answer_from_context appends "## User Question" + "## Recalled Memory Elements" after it (the
+# system prompt is a hardcoded two-line role there, MEMORY_EVAL_ANSWER_SYSTEM_PROMPT).
+# Failure-targeted, from the row-by-row LoCoMo conv-43 analysis (docs/locomo-conv43-eval-analysis.md):
+# the support gate + negative calibrators N1/N3/N4 close the cross-person / premise-transfer
+# failures (P1, 53 rows — the prior "decline only when NOTHING relates" + unconditional commit pair
+# logically forced answering with the other person's fact), and the absolute-date rules + N2 close
+# the unresolved-relative-date failures (P4). Positive calibrators license derived dates and partial
+# commit, guarding against an abstain relapse (the round-1 failure mode). Calibrator examples are
+# SYNTHETIC by policy — never lift benchmark rows into the prompt (train-on-test leakage).
+# Temporal re-optimization (conv-43 round 3): P4's absolute-date rule had collapsed the temporal
+# partials into pass-or-abstain — the model declined recallable dates whenever the exact day was not
+# written out (5 over-decline rows with the answer in context; F1 fell to 0.289 while evidence
+# recall stayed 0.702). The fix LOOSENS the date-precision gate while KEEPING the entity gate: the
+# decline trigger is relevance-only (missing person/thing), relative/derived dates are explicitly
+# grounded, and answers may be given at the coarsest supported granularity. Stated as generic
+# principles (no benchmark-shaped phrasings) + two synthetic calibrators (P3/P4).
+# The decline phrase "No information available." is load-bearing: the abstain detector in
+# answer_from_context and LoCoMo's negative-control convention key on the answer's leading text,
+# so declines must stay bare (no preamble before the phrase).
+DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = """\
+## Objective
+Answer the **User Question** using ONLY the **Recalled Memory Elements** below — never outside or \
+prior knowledge. Decline only when no element concerns the person and thing asked (see Formatting \
+Rules); an unstated, relative, or low-precision date is never itself a reason to decline.
+
+The Recalled Memory Elements come in three kinds:
+* **Relevant Facts** — statements distilled from the conversation, each carrying the date(s) it \
+was true ("as of" / valid range).
+* **Relevant Entities** — the people, places, and things related to or surrounding the Relevant \
+Facts, each with a summary.
+* **Relevant Messages** — the original timestamped conversation messages from which the facts and \
+entities were extracted.
+
+## Core Instructions
+- Read every element before answering — answers are often spread across several elements, not the \
+first ones. Combine elements about the same event; a paraphrase of the question still answers it.
+- An element supports an answer about a person only if it shows THAT person doing, having, or \
+experiencing the thing asked — and states the specific thing asked, not a related one.
+- Resolve relative or implicit time against the date the element itself carries, and give the \
+result — a date you derive this way is grounded. A date that is relative, implicit, or needs a \
+step of reasoning is never a reason to decline; only a missing person or thing is.
+- Give the most precise time the elements actually support, and no finer — a day if one is \
+pinned, otherwise the month, season, or year. Match times by meaning, not wording: an element \
+answers when its own date or validity period coincides with what's asked. A well-supported \
+coarse answer beats a guessed-precise one or a decline.
+- When similar events occur at different dates, the question's timeframe picks the right one — \
+not the order elements appear in.
+- For list or count questions, collect every matching element across ALL the material before \
+answering.
+- If any element passes the support checks, commit: give the supported part(s) directly, even \
+when other parts are unsupported.
+
+## Positive Calibrators
+Ex P1 — computed dates are grounded
+q: When did Maya start pottery?
+r1 (fact): Maya has been doing pottery for five years. (as of 2024-06-20)
+a: 2019.
+behavior: a date computed from the element's own date is a grounded answer, not invention.
+
+Ex P2 — commit to the supported part
+q: Where and when did Alex get his dog?
+r1 (fact): Alex adopted his dog from a shelter. (as of 2024-04-15)
+a: From a shelter.
+behavior: the "where" is supported, so it is answered — an unsupported "when" is no reason to \
+decline everything.
+
+Ex P3 — relative date resolved, not declined
+q: When is Maya moving?
+r1 (fact): Maya plans to move next month. [valid 2024-03-10 → present]
+a: April 2024.
+behavior: resolve the relative phrase against the element's own date — a derived date is grounded, \
+never grounds to decline.
+
+Ex P4 — answer at the supported granularity
+q: When did Maya live abroad?
+r1 (fact): Maya was on an exchange program in Lisbon. [valid 2022-09-01 → 2023-06-30]
+a: September 2022 to June 2023.
+behavior: give exactly what the validity period supports — coarser-but-correct beats over-precision \
+or a decline.
+
+## Negative Calibrators
+Ex N1 — cross-person transfer
+q: Which company did Alex join?
+r1 (fact): Sara joined Acme Corp as a designer. (as of 2024-05-02)
+✗ a: Acme Corp.   ✗ a: Sara joined Acme Corp.
+✓ a: No information available.
+behavior: the only joining fact is Sara's — reusing it for Alex, or hiding the mismatch by \
+leaving the name out, are both wrong.
+
+Ex N2 — relative time echoed verbatim
+q: When is Maya moving to Berlin?
+r1 (fact): Maya plans to move to Berlin next month. (as of 2024-03-12)
+✗ a: Next month.
+✓ a: April 2024.
+behavior: relative wording is resolved against the element's own date, never echoed.
+
+Ex N3 — related fact bent to the question
+q: What band did Alex start?
+r1 (fact): Alex joined a weekly jazz jam group. (as of 2024-02-10)
+✗ a: A jazz jam group.
+✓ a: No information available.
+behavior: joining a jam group is not starting a band — a related fact is not reshaped to fit the \
+question's wording.
+
+Ex N4 — asking is not doing
+q: How did Sara's marathon go?
+r1 (message): [2024-05-12] Sara: That's awesome! How was your marathon?
+✗ a: It went well — she pushed through and finished strong.
+✓ a: No information available.
+behavior: Sara only asked about a marathon; a person's question or reaction is never their own \
+experience.
+
+## Formatting Rules
+- Answer directly and completely; no preamble.
+- Name the person the answer is about.
+- Dates: absolute only — exact date, else month + year; "the week of <date>" for week questions.
+- To decline, reply exactly: No information available.
+
+## Validation
+Before finalizing, verify:
+- every claim traces to an element about the right person and the right thing;
+- no relative time wording remains in the answer;
+- list/count answers include every matching element found."""
 
 
-# Grading system prompt for the eval LLM judge (eval_judge.judge_answer). Shared by both eval tracks.
-# Designed to run on a FLAT (non-reasoning) judge model: it is rule-based classification, not multi-
-# step reasoning. Two deliberate features — (1) leniency calibration (paraphrase / partial-credit /
-# date-tolerance) so a substantively-correct answer is not failed on wording, and (2) an `evidence`
-# quote that GATES recall_sufficient: the judge must copy a real context line before claiming recall
-# was sufficient, which (with a code-side substring check in judge_answer) kills the ungrounded
-# "recall_sufficient=true" hallucinations seen on locomo conv-43. The verdict is graded ONLY against
-# the ideal; the recalled context can only set evidence/recall_sufficient/grounded, never the verdict.
-DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = (
-    "You grade a model's ANSWER against the IDEAL answer for a question about past conversations. "
-    "Verdicts:\n"
-    "- pass: the answer conveys the same fact(s) as the ideal. Judge meaning, not wording — "
-    "paraphrases, extra detail, and answers MORE specific than the ideal all pass.\n"
-    "- partial: at least one correct item of a multi-part ideal, or the right fact at lower precision "
-    "than the ideal.\n"
-    "- fail: contradicts the ideal or answers something else.\n"
-    "- abstain: the answer declines or says it doesn't know.\n\n"
-    "Dates: matching the ideal's month and year passes; a correctly resolved relative date "
-    "('next month' stated in an August conversation = September) passes; within ~2 weeks passes.\n"
-    "If the question is a NEGATIVE CONTROL (declining is correct), abstain is the right outcome and a "
-    "confident answer is fail. Grade ONLY against the IDEAL — never your own knowledge.\n\n"
-    "You are also given the RECALLED CONTEXT shown to the answerer. It must NEVER change the verdict. "
-    "Use it only for these fields:\n"
-    "- evidence: copy the exact context line(s) that contain the information needed to answer; leave "
-    "empty if no such line exists.\n"
-    "- recall_sufficient: true ONLY if you filled evidence with a real quoted line; if you cannot "
-    "quote one, set it false.\n"
-    "- grounded: whether the ANSWER is supported by the context."
-)
+# Grading system prompt for the eval LLM judge (eval_judge.judge_answer). Shared by both eval
+# tracks. Markdown-structured like the answer prompt (Objective / Verdicts / Core Instructions /
+# Output Fields / Validation); the human message presents Question / Ideal Answer / Negative
+# Control / Model Answer, then the recalled elements LAST (the verdict is Answer-vs-Ideal; the
+# elements only feed evidence/recall_sufficient/grounded). Deliberate features — (1) leniency
+# calibration (paraphrase / partial-credit / date-tolerance) so a substantively-correct answer is
+# not failed on wording; (2) the `evidence` quote GATES recall_sufficient (code-side substring
+# check in judge_answer kills the ungrounded "recall_sufficient=true" hallucinations seen on
+# locomo conv-43); (3) the "## Output Fields" section is LOAD-BEARING for DeepSeek thinking mode:
+# with_structured_output_compat falls back to json_mode there, where pydantic field descriptions
+# never reach the model — this section is the only schema it sees. Abstain keys on the answer
+# prompt's decline phrase "No information available." (plus any other refusal).
+DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = """\
+## Objective
+Grade a model's Answer to a question about past conversations against the Ideal Answer, and
+report the result as a single JSON object (see Output Fields). Grade ONLY against the Ideal
+Answer — never your own knowledge.
+
+## Verdicts
+- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording —
+  paraphrases, extra detail, and answers MORE specific than the Ideal all pass.
+- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision
+  than the Ideal.
+- fail: contradicts the Ideal or answers something else.
+- abstain: the Answer declines — "No information available." or any other refusal to answer.
+
+## Core Instructions
+- Dates: matching the Ideal's month and year passes; a correctly resolved relative date ("next
+  month" stated in an August conversation = September) passes; within ~2 weeks passes.
+- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the
+  right result, and a confident Answer is fail.
+- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict —
+  use them only to fill evidence, recall_sufficient, and grounded.
+
+## Output Fields
+Reply with one JSON object containing exactly these fields, in this order:
+- "evidence" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that
+  contain the information needed to answer; "" if no such line exists.
+- "recall_sufficient" (boolean): true only if evidence quotes a real line that supplies the
+  answer; false otherwise.
+- "grounded" (boolean): whether the Answer is supported by the Recalled Memory Elements.
+- "reason" (string): one short sentence justifying the verdict.
+- "verdict" (string): one of "pass", "partial", "fail", "abstain".
+
+## Validation
+- evidence is checked by exact substring match against the shown elements — an inexact or
+  invented quote counts as no evidence and forces recall_sufficient to false.
+- If no Recalled Memory Elements section was shown, set evidence "" and recall_sufficient true.
+- The verdict depends only on Answer vs Ideal."""
+
+
+# Dotted preference path → built-in default text for every editable system prompt. Exposed in the
+# admin /preferences payload so the UI can offer "Restore default" on prompt editors: once a prompt
+# is saved as "" the pydantic default never re-applies (defaults only fill ABSENT JSON keys), so the
+# engine silently falls back at runtime while the admin UI shows blank with no way to recover the
+# default text. Keep in sync with the prompt fields on the models below (guarded by a domain test).
+PROMPT_DEFAULTS: dict[str, str] = {
+    "knowledge.answering.prompt": DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
+    "knowledge.rewrite.prompt": DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
+    "graph.eval.memory_answer_prompt": DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
+    "graph.eval.judge_prompt": DEFAULT_MEMORY_EVAL_JUDGE_PROMPT,
+}
 
 
 class GraphViewPreferences(BaseModel):
@@ -610,8 +751,10 @@ class GraphViewPreferences(BaseModel):
 class GraphEvalPreferences(BaseModel):
     """Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
 
-    ``memory_answer_prompt`` is the system prompt for the memory-eval recall leg
-    (``eval_judge.answer_from_context``). The knowledge-eval legs intentionally have no separate
+    ``memory_answer_prompt`` is the answering INSTRUCTION block for the memory-eval recall leg
+    (``eval_judge.answer_from_context`` places it in the user message ahead of the question and
+    the recalled elements; the system prompt there is a hardcoded two-line role).
+    The knowledge-eval legs intentionally have no separate
     prompt here: they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
     ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
     behavior). The admin UI surfaces that production prompt alongside this one for convenience.

@@ -296,6 +296,182 @@ def test_discover_corpuses_pairs_by_stem(tmp_path) -> None:
     assert discover_corpuses(tmp_path / "nope", "memory") == []
 
 
+# ---------------------------------------------------------------------------
+# Parallel question phase (TaskGroup + Semaphore; question_concurrency cap)
+# ---------------------------------------------------------------------------
+
+
+class _SlowMemory(_FakeMemory):
+    """A fake whose recalls sleep per-query, tracking peak in-flight searches —
+    the observable for "the semaphore really capped the question phase"."""
+
+    def __init__(self, recall: dict, delays: dict[str, float] | None = None) -> None:
+        super().__init__(recall)
+        self.delays = delays or {}
+        self.in_flight = 0
+        self.peak_in_flight = 0
+        self.fail_queries: set[str] = set()  # queries whose recall raises
+
+    async def search(self, query, *, user_id, character_id, limit=None, **kwargs):
+        import asyncio
+
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            if query in self.fail_queries:
+                raise RuntimeError(f"recall blew up for {query!r}")
+            await asyncio.sleep(self.delays.get(query, 0.01))
+        finally:
+            self.in_flight -= 1
+        return await super().search(
+            query, user_id=user_id, character_id=character_id, limit=limit, **kwargs
+        )
+
+
+def _capture_publishes(monkeypatch) -> list[tuple[str, dict]]:
+    """Swap eval_runner._publish for a synchronous recorder (no event-bus timing in tests)."""
+    from hirocli.services.knowledge import eval_runner as er
+
+    captured: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        er, "_publish", lambda bus, ws, etype, payload: captured.append((etype, dict(payload)))
+    )
+    return captured
+
+
+_FOUR_QUESTIONS = [
+    {
+        "id": f"q{i}",
+        "category": "direct",
+        "question": f"question {i}?",
+        "requires_graph": False,
+        "expected_answer": f"answer {i}",
+    }
+    for i in range(4)
+]
+
+
+@pytest.mark.asyncio
+async def test_parallel_questions_respect_concurrency_cap(tmp_path) -> None:
+    # cap=2 over 4 questions: the two leading recalls must overlap (peak == 2), and the
+    # semaphore must never admit a third (peak ≤ cap is the safety half of the assertion).
+    mem = _SlowMemory({}, delays={q["question"]: 0.05 for q in _FOUR_QUESTIONS})
+    summary = await run_memory_eval(
+        mem,
+        tmp_path,
+        set_id="adam",
+        questions=_FOUR_QUESTIONS,
+        episodes=[],
+        run_id="p1",
+        remember=False,
+        question_concurrency=2,
+    )
+    assert mem.peak_in_flight == 2
+    assert summary["total_questions"] == 4
+    assert sorted(mem.searched) == sorted(q["question"] for q in _FOUR_QUESTIONS)
+
+
+@pytest.mark.asyncio
+async def test_parallel_questions_default_is_serial(tmp_path) -> None:
+    # question_concurrency defaults to 1 → behavior identical to the old serial loop
+    # (recalls never overlap), keeping existing runs/comparisons unchanged.
+    mem = _SlowMemory({}, delays={q["question"]: 0.02 for q in _FOUR_QUESTIONS[:3]})
+    await run_memory_eval(
+        mem,
+        tmp_path,
+        set_id="adam",
+        questions=_FOUR_QUESTIONS[:3],
+        episodes=[],
+        run_id="p2",
+        remember=False,
+    )
+    assert mem.peak_in_flight == 1
+    # Serial also means bank order start-to-finish.
+    assert mem.searched == [q["question"] for q in _FOUR_QUESTIONS[:3]]
+
+
+@pytest.mark.asyncio
+async def test_parallel_questions_keep_bank_index_out_of_order(tmp_path, monkeypatch) -> None:
+    # q0 is slow, q1 fast, cap=2 → q1 COMPLETES first. Its event must still carry index=1
+    # (slot-per-index), so the UI table / persisted rows key correctly however completion
+    # interleaves.
+    captured = _capture_publishes(monkeypatch)
+    mem = _SlowMemory(
+        {}, delays={_FOUR_QUESTIONS[0]["question"]: 0.1, _FOUR_QUESTIONS[1]["question"]: 0.01}
+    )
+    await run_memory_eval(
+        mem,
+        tmp_path,
+        set_id="adam",
+        questions=_FOUR_QUESTIONS[:2],
+        episodes=[],
+        run_id="p3",
+        remember=False,
+        question_concurrency=2,
+    )
+    rows = [p for etype, p in captured if etype.endswith("question_completed")]
+    # Completion order: fast q1 first — but each event's index matches its BANK position.
+    assert [r["id"] for r in rows] == ["q1", "q0"]
+    assert [(r["id"], r["index"]) for r in rows] == [("q1", 1), ("q0", 0)]
+    assert all(r["total"] == 2 for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_parallel_question_failure_unwraps_and_fails_run(tmp_path, monkeypatch) -> None:
+    # One question's recall raising must fail the run with the ORIGINAL exception (not
+    # TaskGroup's ExceptionGroup wrapper) so the FAILED event/log carry a readable message.
+    captured = _capture_publishes(monkeypatch)
+    mem = _SlowMemory({}, delays={_FOUR_QUESTIONS[1]["question"]: 0.2})
+    mem.fail_queries = {_FOUR_QUESTIONS[0]["question"]}
+    with pytest.raises(RuntimeError) as excinfo:
+        await run_memory_eval(
+            mem,
+            tmp_path,
+            set_id="adam",
+            questions=_FOUR_QUESTIONS[:2],
+            episodes=[],
+            run_id="p4",
+            remember=False,
+            question_concurrency=2,
+        )
+    assert not isinstance(excinfo.value, BaseExceptionGroup)
+    failed = [p for etype, p in captured if etype.endswith(".failed")]
+    assert len(failed) == 1 and "recall blew up" in failed[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_parallel_questions_honor_cooperative_cancel(tmp_path, monkeypatch) -> None:
+    # The cancel route's flag (not task.cancel) must still stop the run: question tasks
+    # raise the sentinel, which run_memory_eval translates back to CancelledError so the
+    # route's terminal-cancel path is unchanged. No FAILED event, no question events.
+    import asyncio
+
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
+
+    captured = _capture_publishes(monkeypatch)
+    dummy = asyncio.create_task(asyncio.sleep(0))
+    state = get_eval_registry().begin_run(
+        tmp_path, "p5", corpus_source="adam", modes=["recall"], task=dummy, track="memory"
+    )
+    state.cancel_requested = True
+    mem = _SlowMemory({})
+    with pytest.raises(asyncio.CancelledError):
+        await run_memory_eval(
+            mem,
+            tmp_path,
+            set_id="adam",
+            questions=_FOUR_QUESTIONS[:2],
+            episodes=[],
+            run_id="p5",
+            remember=False,
+            question_concurrency=2,
+        )
+    await dummy
+    assert mem.searched == []  # no question ever started
+    assert [e for e, _ in captured if e.endswith("question_completed")] == []
+    assert [e for e, _ in captured if e.endswith(".failed")] == []  # cancelled ≠ failed
+
+
 @pytest.mark.asyncio
 async def test_memory_question_row_shape(tmp_path) -> None:
     # No answering model in a bare tmp workspace → answer/judge are skipped (model is None);

@@ -212,6 +212,10 @@ class EvalRunBody(BaseModel):
     # Optional LLM judge step: grade the model's answer against the ideal answer. When off, the
     # eval generates answers but assigns no marks (and no PROCEED/PIVOT gate).
     judge: bool = False
+    # Memory track — max questions running their recall→answer→judge legs at once (1 = serial).
+    # Clamped server-side to [1, MAX_QUESTION_CONCURRENCY] rather than 422-ing an out-of-range
+    # value. Ignored on the knowledge track (its leg loop is still serial — named follow-up).
+    question_concurrency: int = 1
     # Selected question ids — REQUIRED and non-empty (the UI forces an explicit selection;
     # there is no implicit "run all").
     question_ids: list[str] | None = None
@@ -1020,6 +1024,7 @@ async def eval_run(
     # Local imports keep the module's top-level deps thin — eval is a niche path.
     from hirocli.services.knowledge.eval_registry import get_eval_registry
     from hirocli.services.knowledge.eval_runner import (
+        MAX_QUESTION_CONCURRENCY,
         eval_kb_tag,
         ingest_synthetic_corpus_via_service,
         load_questions,
@@ -1095,15 +1100,21 @@ async def eval_run(
                     memory = create_eval_memory_service(
                         workspace_path, prefs, set_id=corpus_id
                     )
+                    # Clamp (don't reject) the question-phase cap — a stale/edited client
+                    # value should degrade to the nearest legal cap, not fail the run.
+                    concurrency = max(
+                        1, min(int(body.question_concurrency or 1), MAX_QUESTION_CONCURRENCY)
+                    )
                     try:
                         log.info(
                             "⬇️ knowledge.eval — memory track · corpus=%s · remember=%s · "
-                            "clear=%s · range=[%s:%s] · run_id=%s",
+                            "clear=%s · range=[%s:%s] · concurrency=%d · run_id=%s",
                             corpus_id,
                             body.ingest_synthetic,
                             body.clear_before,
                             body.episode_offset,
                             body.episode_limit,
+                            concurrency,
                             run_id,
                         )
                         await run_memory_eval(
@@ -1118,6 +1129,7 @@ async def eval_run(
                             episode_offset=body.episode_offset,
                             episode_limit=body.episode_limit,
                             judge=body.judge,
+                            question_concurrency=concurrency,
                         )
                     finally:
                         await memory.close()
@@ -1480,6 +1492,25 @@ async def eval_results(
             row["index"] = index
             row["total"] = total
             merged.append(row)
+        # Evidence recall (LoCoMo corpora only): per question, how many gold evidence episodes the
+        # recalled context covered (X/Y in the table + per-episode matched/missed in the fold).
+        # Read-path enrichment computed from the saved `recalled` + the corpus sidecar — works on
+        # already-saved results with no re-run. Best-effort: never let it break the results read.
+        if qpath is not None:
+            try:
+                from hirocli.services.knowledge.eval_locomo import compute_evidence_recall_map
+
+                ev_map = compute_evidence_recall_map(
+                    corpus_id=cid, questions_path=qpath, rows=merged
+                )
+                for row in merged:
+                    ev = ev_map.get(str(row.get("id") or ""))
+                    if ev is not None:
+                        row["evidence_recall"] = ev
+            except Exception as exc:
+                log.warning(
+                    "knowledge eval evidence-recall enrichment failed · %s", str(exc), exc_info=True
+                )
         summary = summarize_memory_rows(merged, run_id=f"saved-{cid}")
         # The merged snapshot spans many runs, so summarize_memory_rows can't know a single ingest
         # cost (it leaves ingest_cost_usd=0). Override with the persisted CUMULATIVE ingest spend so

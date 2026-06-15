@@ -227,6 +227,26 @@ def build_chat_model_from_tuning(
     raise ValueError(f"Model factory does not support provider {pid!r} yet.")
 
 
+def with_structured_output_compat(model: Any, schema: type, *, include_raw: bool = True) -> Any:
+    """``with_structured_output`` that survives provider quirks; use instead of calling it raw.
+
+    DeepSeek thinking mode rejects the forced tool_choice that langchain's default
+    function_calling method sends (API 400: "Thinking mode does not support this tool_choice").
+    Dual-mode DeepSeek models built with thinking enabled (``build_chat_model_from_tuning`` sets
+    ``extra_body.thinking.type='enabled'``) therefore fall back to ``method='json_mode'`` —
+    verified working against the live API. json_mode only guarantees valid JSON, NOT the schema:
+    the caller's prompt MUST describe the expected JSON fields (field descriptions on the pydantic
+    schema never reach the model in this mode). Every other provider/mode keeps langchain's
+    default method. Class-name check (not isinstance) so langchain_deepseek stays a lazy import.
+    """
+    if model.__class__.__name__ == "ChatDeepSeek":
+        extra = getattr(model, "extra_body", None)
+        thinking = (extra.get("thinking") or {}).get("type") if isinstance(extra, dict) else None
+        if thinking == "enabled":
+            return model.with_structured_output(schema, include_raw=include_raw, method="json_mode")
+    return model.with_structured_output(schema, include_raw=include_raw)
+
+
 def _openai_reasoning_effort(thinking: ThinkingLevel | None) -> str | None:
     if thinking in (None, "off"):
         return None

@@ -15,7 +15,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import StreamWriter
 
 from hirocli.domain.model_catalog import get_model_catalog
-from hirocli.domain.model_factory import create_chat_model
+from hirocli.domain.model_factory import create_chat_model, with_structured_output_compat
 from hirocli.domain.preferences import (
     DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
     DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
@@ -377,14 +377,20 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         messages = [SystemMessage(content=prompt), HumanMessage(content=human_text)]
         estimate = count_tokens_approximately(messages)
         try:
-            model = create_chat_model(
+            base_model = create_chat_model(
                 model_id,
                 workspace_path=self._workspace_path,
                 workspace_id=self._workspace_id,
                 temperature=resolved.temperature,
                 max_tokens=resolved.max_tokens,
                 thinking=resolved.thinking,
-            ).with_structured_output(QueryRewrite, include_raw=True)
+            )
+            # Use the compat wrapper so DeepSeek thinking mode doesn't 400 on the forced
+            # tool_choice (it falls back to json_mode). Unlike the graphiti adapter, this node
+            # builds its own messages and never injects the schema, so the rewrite prompt itself
+            # describes the JSON fields (see DEFAULT_KNOWLEDGE_REWRITE_PROMPT) — json_mode never
+            # sees the pydantic field descriptions.
+            model = with_structured_output_compat(base_model, QueryRewrite, include_raw=True)
             result = await model.ainvoke(messages)
         except Exception as exc:
             log.warning(

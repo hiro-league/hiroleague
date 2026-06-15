@@ -9,6 +9,13 @@
         "autoAttachChildProcesses": false
       },
       {
+        "name": "Server only - External Vite UI, no gateway (fastest)",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh --no-gateway --external-ui",
+        "autoAttachChildProcesses": false
+      },
+      {
         "name": "Bash startup (Windows Terminal) — no Flutter",
         "type": "node-terminal",
         "request": "launch",
@@ -167,6 +174,13 @@
       },
     ],
     "compounds": [
+      {
+        "name": "Fastest: Server (external Vite UI) + Vite Dev Server",
+        "configurations": [
+          "Server only - External Vite UI, no gateway (fastest)",
+          "Admin Frontend Dev Server"
+        ]
+      },
       {
         "name": "Server + Gateway - Start",
         "configurations": [

@@ -94,6 +94,18 @@ category), or (b) relax grounding for that category only (reintroduces the hallu
 
 ### 6.1 Answer-prompt revision (targets P1–P4, ~85 rows; one edit, no re-ingest)
 
+> **IMPLEMENTED 2026-06-12 (P1 + P4 + 6.2).** Deep re-analysis of all 53 P1 rows split them into
+> 27 cross-person transfers, ~18 same-person premise-upgrades, ~7 conversational-role inflations —
+> with 39/53 answers stripping the subject to hide the mismatch; root cause was the prompt's own
+> "decline only when NOTHING relates" + unconditional-commit pair. All 8 P4 rows had the anchor
+> date on the same line as the relative phrase (pure answer-stage). The default answer prompt is
+> now a markdown instruction block (Objective / Core / Positive+Negative Calibrators / Formatting /
+> Validation) with support gates, absolute-date rules, and SYNTHETIC calibrator examples (never
+> benchmark rows), placed in the USER message followed by `## User Question` and
+> `## Recalled Memory Elements` (### Relevant Facts / Entities / Messages); the system prompt is a
+> hardcoded two-line role. Decline phrase is now "No information available." and the abstain
+> detector accepts both phrases (6.2 done). P2's list re-scan and 6.3/6.4 remain open.
+
 Current prompt already *says* "resolve relative time" and "collect every item" — demonstrably too
 soft. Make the rules hard:
 
@@ -116,6 +128,16 @@ not the round-1 blanket decline.
 Switch decline string to "No information available." in the prompt **and** update the abstain
 detector in `eval_judge.answer_from_context` to recognize both phrases. Same semantics, LoCoMo
 convention, keeps the ledger decision correct.
+
+> **Judge updates 2026-06-12.** (a) DeepSeek THINKING mode 400s on the forced tool_choice that
+> langchain's default `with_structured_output` sends ("Thinking mode does not support this
+> tool_choice"); fixed via `model_factory.with_structured_output_compat`, which falls back to
+> `method="json_mode"` for DeepSeek-thinking models (verified live). json_mode never sees pydantic
+> field descriptions, so the judge prompt's `## Output Fields` section is load-bearing.
+> (b) `DEFAULT_MEMORY_EVAL_JUDGE_PROMPT` rewritten in the same markdown structure as the answer
+> prompt (Objective / Verdicts / Core Instructions / Output Fields / Validation); the judge human
+> message is now Question / Ideal Answer / Negative Control / Model Answer, with the recalled
+> elements LAST; abstain wording keys on "No information available.".
 
 ### 6.3 Judge quote-and-verify (makes validation trustworthy; no score impact)
 
@@ -148,3 +170,10 @@ upgrade (errors were grounding, not grading).
 - Graph ground truth: `knowledge/graph/graphiti_kuzu.db`, group `eval_mem_locomo_conv_43`
   (server must be stopped; tables: `Episodic`, `Entity`, `RelatesToNode_`).
 - Corpus: `eval/locomo_conv_43.episodes.jsonl` (+ `.questions.yaml`); first line is a `#` comment.
+- **Evidence recall (UI, since 2026-06-12):** the Answer Details table shows an `Ev` column = X/Y gold
+  evidence episodes the recall covered (LoCoMo calculation — a gold episode counts if any recalled
+  item maps to it via `chunk_id`/`episode_id`/`source_episode_id`/`uuid`, i.e. raw episode OR a
+  derived fact/entity), and the expanded fold lists each gold episode (text + matched/missed + via).
+  Computed on the read path (`GET /knowledge/eval/results`) from saved `recalled` + the
+  `.locomo.yaml` sidecar — no re-run needed; aggregate over the round-2 saved set = **213/343 ≈
+  62%** (vs the external harness's round-1 37.9%). Code: `eval_locomo.compute_evidence_recall_map`.

@@ -8,6 +8,7 @@ import pytest
 from hirocli.services.knowledge.eval_locomo import (
     LocomoExportError,
     build_locomo_results_export,
+    compute_evidence_recall_map,
 )
 
 
@@ -147,3 +148,81 @@ def test_build_locomo_results_export_requires_sidecar(tmp_path: Path) -> None:
             questions_path=questions,
             stored_rows={"q1": _saved_row("q1", "A")},
         )
+
+
+# --- evidence recall (read-path metric) ------------------------------------------------------
+
+
+def _episode_hit(uuid: str, score: float | None = None) -> dict:
+    """A recalled RAW EPISODE hit (carries the corpus episode id as its uuid)."""
+    hit: dict = {"memory": "raw turn text", "kind": "episode", "uuid": uuid}
+    if score is not None:
+        hit["score"] = score
+    return hit
+
+
+def test_compute_evidence_recall_matches_fact_and_counts(tmp_path: Path) -> None:
+    qpath = _write_locomo_files(tmp_path)
+    rows = [
+        # q001: a recalled FACT derived from the gold episode → matched via 'fact'.
+        _saved_row("locomo_conv_43_q001_c1", "...", "locomo_conv_43_d1_9"),
+        # q002: nothing relevant recalled → missed.
+        _saved_row("locomo_conv_43_q002_c2", "..."),
+    ]
+    ev = compute_evidence_recall_map(corpus_id="locomo_conv_43", questions_path=qpath, rows=rows)
+
+    q1 = ev["locomo_conv_43_q001_c1"]
+    assert (q1["matched"], q1["total"]) == (1, 1)
+    item = q1["items"][0]
+    assert item["matched"] is True
+    assert item["matched_via"] == "fact"
+    assert item["episode_id"] == "locomo_conv_43_d1_9"
+    assert item["short_id"] == "d1_9"
+    assert item["dia_id"] == "D1:9"
+
+    q2 = ev["locomo_conv_43_q002_c2"]
+    assert (q2["matched"], q2["total"]) == (0, 1)
+    assert q2["items"][0]["matched"] is False
+    assert q2["items"][0]["matched_via"] == ""
+
+
+def test_compute_evidence_recall_matches_raw_episode_uuid(tmp_path: Path) -> None:
+    qpath = _write_locomo_files(tmp_path)
+    # The gold episode surfaced as a RAW EPISODE hit (uuid == episode id), not a fact.
+    rows = [
+        {
+            "id": "locomo_conv_43_q002_c2",
+            "track": "memory",
+            "legs": {"recall": {"recalled": [_episode_hit("locomo_conv_43_d2_1", score=0.7)]}},
+        }
+    ]
+    ev = compute_evidence_recall_map(corpus_id="locomo_conv_43", questions_path=qpath, rows=rows)
+    item = ev["locomo_conv_43_q002_c2"]["items"][0]
+    assert item["matched"] is True
+    assert item["matched_via"] == "episode"
+    assert item["score"] == 0.7
+
+
+def test_compute_evidence_recall_enriches_text_from_episodes_file(tmp_path: Path) -> None:
+    qpath = _write_locomo_files(tmp_path)
+    # An episodes.jsonl sibling supplies the gold episode's body/speaker/when for the fold.
+    (tmp_path / "locomo_conv_43.episodes.jsonl").write_text(
+        '{"id": "locomo_conv_43_d1_9", "timestamp": "2023-05-21T19:48:00Z", '
+        '"speaker": "John", "body": "My goal is a championship."}\n',
+        encoding="utf-8",
+    )
+    rows = [_saved_row("locomo_conv_43_q001_c1", "...", "locomo_conv_43_d1_9")]
+    ev = compute_evidence_recall_map(corpus_id="locomo_conv_43", questions_path=qpath, rows=rows)
+    item = ev["locomo_conv_43_q001_c1"]["items"][0]
+    assert item["speaker"] == "John"
+    assert item["text"] == "My goal is a championship."
+    assert item["when"].startswith("2023-05-21")
+
+
+def test_compute_evidence_recall_no_sidecar_returns_empty(tmp_path: Path) -> None:
+    questions = tmp_path / "locomo_conv_43.questions.yaml"
+    questions.write_text("- id: q1\n  question: Q?\n  expected_answer: A\n", encoding="utf-8")
+    rows = [_saved_row("q1", "A", "locomo_conv_43_d1_9")]
+    assert compute_evidence_recall_map(
+        corpus_id="locomo_conv_43", questions_path=questions, rows=rows
+    ) == {}

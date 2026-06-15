@@ -664,6 +664,12 @@ DEFAULT_MEMORY_EVAL_SET = "adam_year"
 # negative sentinel keeps it from ever colliding with a real (positive) data.db user id.
 MEMORY_EVAL_USER_ID = -1
 
+# Ceiling for the memory track's parallel question phase (the route clamps the request,
+# the UI stepper tops out here). Bounded low on purpose: recall's Kuzu queries serialize
+# on the shared driver's single AsyncConnection slot regardless, so wider fan-out only
+# multiplies concurrent answer/judge LLM calls — i.e. provider rate-limit failures.
+MAX_QUESTION_CONCURRENCY = 8
+
 
 def load_adam_questions(path: Path | None = None) -> list[dict[str, Any]]:
     """Load the Adam question bank (same validation as ``load_questions``)."""
@@ -820,7 +826,9 @@ async def _memory_question(
     model: Any | None = None,
     model_id: str = "",
     judge: bool = False,
-    answer_system_prompt: str = "",
+    # Renamed from answer_system_prompt: the answering instructions now ride in the USER message
+    # (eval_judge.answer_from_context); the system prompt there is a hardcoded role.
+    answer_instructions: str = "",
     judge_system_prompt: str = "",
 ) -> dict[str, Any]:
     """One memory question, all in ONE Graph Run: **recall** (graph search) → **answer**
@@ -909,8 +917,8 @@ async def _memory_question(
                 question=q["question"],
                 context=recalled_rows,
                 sink=sink,
-                # Editable graph.eval.memory_answer_prompt (blank → relaxed default in eval_judge).
-                system_prompt=answer_system_prompt,
+                # Editable graph.eval.memory_answer_prompt (blank → structured default in eval_judge).
+                instructions=answer_instructions,
             )
         # 3) judge — vs the ideal answer (optional step). Gets the SAME recalled context so it can
         # set recall_sufficient (recall-miss vs answering-miss), not just grade vs the ideal.
@@ -983,6 +991,105 @@ async def _memory_question(
     }
 
 
+class _CancelRequestedInQuestion(Exception):
+    """Cooperative-cancel sentinel raised inside a parallel question task.
+
+    Deliberately NOT ``CancelledError``: ``asyncio.TaskGroup`` *ignores* cancelled
+    children (that's how its quiet sibling-cancellation works), so a child raising
+    ``CancelledError`` would let the run sail on to a bogus ``completed``. A plain
+    ``Exception`` aborts the group; ``run_memory_eval`` translates it back to
+    ``CancelledError`` so the route's terminal-cancel path is unchanged."""
+
+
+def _unwrap_question_failure(eg: BaseExceptionGroup) -> BaseException:
+    """Translate a question-phase ``TaskGroup`` failure into what the run's terminal
+    paths expect.
+
+    A cooperative-cancel sentinel anywhere in the group wins → ``CancelledError`` (the
+    route then emits ``knowledge.eval.cancelled``; cancel beats reporting a coincident
+    failure the user no longer cares about). Otherwise unwrap to the first real child
+    exception so the FAILED event carries its message instead of the group's opaque
+    "unhandled errors in a TaskGroup"."""
+    matched, rest = eg.split(_CancelRequestedInQuestion)
+    if matched is not None:
+        return asyncio.CancelledError()
+    inner: BaseException = rest if rest is not None else eg
+    while isinstance(inner, BaseExceptionGroup):
+        inner = inner.exceptions[0]
+    return inner
+
+
+async def _memory_question_task(
+    memory: Any,
+    q: dict[str, Any],
+    *,
+    index: int,
+    total: int,
+    sem: asyncio.Semaphore,
+    slots: list[dict[str, Any] | None],
+    workspace_path: Path,
+    rid: str,
+    set_id: str,
+    user_id: int,
+    character_id: str,
+    sink: Any,
+    model: Any | None,
+    model_id: str,
+    judged: bool,
+    memory_answer_prompt: str,
+    judge_prompt: str,
+    bus: Any,
+) -> None:
+    """One question of the parallel phase: gate on the concurrency cap, run
+    recall→answer→judge via ``_memory_question`` (unchanged — its per-question Graph Run
+    accumulator and ledger contextvars are task-local, so parallel questions can't
+    cross-attribute cost), store the row in its bank-order slot, and publish
+    ``question_completed``. Runs under the ``asyncio.TaskGroup`` in ``run_memory_eval``."""
+    async with sem:
+        # Cooperative cancel, checked as each question STARTS — queued questions never
+        # run after a Cancel, mirroring the old serial loop's between-questions check.
+        # Sentinel, not CancelledError: see _CancelRequestedInQuestion.
+        if _cancel_requested(workspace_path, rid):
+            log.info("🛑 knowledge.eval — cooperative cancel honored · run_id=%s", rid)
+            raise _CancelRequestedInQuestion()
+        # Align the eval_question span id with THIS question's per-question Graph Run row
+        # (same formula _memory_question uses) so "open in LangSmith" links from the row.
+        q_run_id = (
+            f"memory_eval_q-{slug_group_part(set_id)}-{rid}-"
+            f"{slug_group_part(str(q.get('id') or ''))}"
+        )
+        with traced_run(
+            "eval_question",
+            ledger_run_id=q_run_id,
+            tags=["eval", "memory", str(q.get("category") or "")],
+            metadata={"id": q.get("id")},
+            inputs={"question": q.get("question", "")},
+        ):
+            row = await _memory_question(
+                memory,
+                q,
+                user_id=user_id,
+                character_id=character_id,
+                sink=sink,
+                run_id=rid,
+                set_id=set_id,
+                model=model,
+                model_id=model_id,
+                judge=judged,
+                answer_instructions=memory_answer_prompt,
+                judge_system_prompt=judge_prompt,
+            )
+    # Outside the semaphore: the slot write + event are cheap and must not hold a
+    # concurrency ticket another question could be using.
+    slots[index] = row
+    _publish(
+        bus,
+        workspace_path,
+        KNOWLEDGE_EVAL_QUESTION_COMPLETED,
+        {"run_id": rid, "index": index, "total": total, **row},
+    )
+
+
 async def run_memory_eval(
     memory: Any,
     workspace_path: Path,
@@ -997,6 +1104,7 @@ async def run_memory_eval(
     episode_offset: int = 0,
     episode_limit: int | None = None,
     judge: bool = False,
+    question_concurrency: int = 1,
     eval_user_id: int = MEMORY_EVAL_USER_ID,
 ) -> dict[str, Any]:
     """Run the memory-eval track: remember a turn corpus, then recall per question.
@@ -1011,6 +1119,11 @@ async def run_memory_eval(
     built across appended batches). ``episode_offset``/``episode_limit`` bound the remember phase
     to a contiguous slice of the (chronological) corpus, so a large corpus is built in monitored
     chunks. ``questions`` may be empty for a setup-only (remember/clear) batch.
+
+    ``question_concurrency`` caps how many questions run their recall→answer→judge legs at
+    once (1 = serial, the default; the route clamps to ``MAX_QUESTION_CONCURRENCY``). Only
+    the QUESTION phase parallelizes — the remember phase stays strictly serial (chronological
+    supersession + the Kuzu write lock both require it).
 
     Returns the summary payload (also published as ``knowledge.eval.completed``)."""
     from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
@@ -1190,44 +1303,45 @@ async def run_memory_eval(
             tags=["eval", "memory", "questions", f"set:{set_id}", f"judge:{judged}"],
             metadata={"total_questions": total, "set": set_id},
         ):
-            for index, q in enumerate(questions):
-                # Cooperative cancel: bail before starting the next question if a Cancel was
-                # requested, even if task.cancel()'s CancelledError got swallowed downstream.
-                _raise_if_cancelled(workspace_path, rid)
-                # Align the eval_question span id with THIS question's per-question Graph Run row
-                # (same formula _memory_question uses) so "open in LangSmith" links from the row.
-                q_run_id = (
-                    f"memory_eval_q-{slug_group_part(set_id)}-{rid}-"
-                    f"{slug_group_part(str(q.get('id') or ''))}"
-                )
-                with traced_run(
-                    "eval_question",
-                    ledger_run_id=q_run_id,
-                    tags=["eval", "memory", str(q.get("category") or "")],
-                    metadata={"id": q.get("id")},
-                    inputs={"question": q.get("question", "")},
-                ):
-                    row = await _memory_question(
-                        memory,
-                        q,
-                        user_id=eval_user_id,
-                        character_id=character_id,
-                        sink=sink,
-                        run_id=rid,
-                        set_id=set_id,
-                        model=model,
-                        model_id=model_id,
-                        judge=judged,
-                        answer_system_prompt=memory_answer_prompt,
-                        judge_system_prompt=judge_prompt,
-                    )
-                rows.append(row)
-                _publish(
-                    bus,
-                    workspace_path,
-                    KNOWLEDGE_EVAL_QUESTION_COMPLETED,
-                    {"run_id": rid, "index": index, "total": total, **row},
-                )
+            # Parallel question phase (replaces the serial loop; no-backward-compat mode —
+            # question_concurrency=1 reproduces it exactly). Every question is a task gated
+            # by ONE shared semaphore; slot-per-index keeps bank order however completion
+            # interleaves, so the summary/report tables are stable across caps. Tasks copy
+            # their contextvars, so the eval_question spans still nest under the root above
+            # and each question's Graph Run accumulator stays isolated.
+            slots: list[dict[str, Any] | None] = [None] * total
+            sem = asyncio.Semaphore(max(1, int(question_concurrency)))
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    for index, q in enumerate(questions):
+                        tg.create_task(
+                            _memory_question_task(
+                                memory,
+                                q,
+                                index=index,
+                                total=total,
+                                sem=sem,
+                                slots=slots,
+                                workspace_path=workspace_path,
+                                rid=rid,
+                                set_id=set_id,
+                                user_id=eval_user_id,
+                                character_id=character_id,
+                                sink=sink,
+                                model=model,
+                                model_id=model_id,
+                                judged=judged,
+                                memory_answer_prompt=memory_answer_prompt,
+                                judge_prompt=judge_prompt,
+                                bus=bus,
+                            )
+                        )
+            except BaseExceptionGroup as eg:
+                # Re-raise as the single exception the terminal paths below expect
+                # (CancelledError on cooperative cancel; the first real child error
+                # otherwise) — never the group's opaque "unhandled errors" wrapper.
+                raise _unwrap_question_failure(eg) from eg
+            rows.extend(r for r in slots if r is not None)
     except Exception as exc:
         # CancelledError is a BaseException (not Exception) → it propagates past this
         # handler to the route's cancel path, exactly as run_eval relies on.
@@ -1659,6 +1773,15 @@ def _publish(
         log.warning("⚠️ knowledge.eval — event publish failed", event_type=event_type, exc_info=True)
 
 
+def _cancel_requested(workspace_path: Path, run_id: str) -> bool:
+    """True when the cancel route flipped ``cancel_requested`` for this run (see
+    ``_raise_if_cancelled`` for why the flag exists alongside ``task.cancel()``)."""
+    from hirocli.services.knowledge.eval_registry import get_eval_registry
+
+    state = get_eval_registry().get_run(workspace_path)
+    return state is not None and state.run_id == run_id and state.cancel_requested
+
+
 def _raise_if_cancelled(workspace_path: Path, run_id: str) -> None:
     """Cooperative cancel — stop the run between questions even when ``task.cancel()``'s
     ``CancelledError`` was swallowed deep in the async stack (graphiti/litellm/LangChain).
@@ -1669,10 +1792,7 @@ def _raise_if_cancelled(workspace_path: Path, run_id: str) -> None:
     ``knowledge.eval.cancelled``. Before this, the loops relied solely on the *one-shot*
     ``task.cancel()`` exception surviving every ``await`` — if any layer absorbed it, the run
     sailed on to completion (see ``eval_registry.request_cancel``)."""
-    from hirocli.services.knowledge.eval_registry import get_eval_registry
-
-    state = get_eval_registry().get_run(workspace_path)
-    if state is not None and state.run_id == run_id and state.cancel_requested:
+    if _cancel_requested(workspace_path, run_id):
         log.info("🛑 knowledge.eval — cooperative cancel honored · run_id=%s", run_id)
         raise asyncio.CancelledError()
 
@@ -1750,6 +1870,7 @@ __all__ = [
     "EVAL_SYNTHETIC_TAG",
     "EVAL_KB_TAG_PREFIX",
     "eval_kb_tag",
+    "MAX_QUESTION_CONCURRENCY",
     "MEMORY_EVAL_USER_ID",
     "discover_corpuses",
     "EvalSummary",

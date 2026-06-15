@@ -19,7 +19,8 @@ function memoryRow(index: number, question: string, mark = ''): EvalRow {
     gold: 'g',
     cost_usd: 0,
     is_negative_control: false,
-    answered_at: ''
+    answered_at: '',
+    evidence_recall: null
   };
 }
 

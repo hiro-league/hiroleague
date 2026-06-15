@@ -32,6 +32,7 @@
    *    pixel constants live on consumers.
    */
   import { onMount, type Snippet } from 'svelte';
+  import { setAdminPageHeaderContext } from './admin-page-header-context';
   import { cubicInOut, cubicOut } from 'svelte/easing';
   import { crossfade, slide } from 'svelte/transition';
   import { ArrowUp } from '@lucide/svelte';
@@ -122,12 +123,40 @@
   let scrolled = $state(false);
 
   /**
+   * Height compensation for borderline-height pages. Compacting the pinned
+   * header shrinks the document; if the page barely scrolls, the browser then
+   * clamps `scrollY` (each clamp is irreversible, so it accumulates across the
+   * collapse animation) until it falls below PINNED_EXIT_SCROLL_Y, which
+   * un-pins the header, which re-grows the page… an endless pin/unpin
+   * oscillation (seen on Eval). While pinned we park height in a spacer at the
+   * end of the page so the document never shrinks. The spacer is reserved
+   * *synchronously at pin time* — reactive (ResizeObserver) tracking lags the
+   * animation by a layout pass and still lets the clamp erode `scrollY` — so
+   * we overshoot with the full expanded header height, then trim to the exact
+   * released height once the morph settles.
+   */
+  let spacerPx = $state(0);
+  /** Document height captured at the instant we pin (header still expanded). */
+  let docHeightAtPin = -1;
+  let spacerTrimTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
    * Hysteresis band for pinned/compact mode. Without it, toggling layout at the
    * sticky threshold shifts document height and scrollY, causing flicker.
    */
   const PINNED_ENTER_SCROLL_Y = 80;
   const PINNED_EXIT_SCROLL_Y = 4;
   const BACK_TO_TOP_THRESHOLD_PX = 480;
+  /** Must exceed the longest header morph (TITLE_MORPH_MS) so we trim at rest. */
+  const SPACER_TRIM_DELAY_MS = 400;
+  /**
+   * Extra pin-time spacer on top of the header's own height: descendant chrome
+   * collapsing off the `pinned` context signal (e.g. the Eval run-controls
+   * toolbar hiding its second row) shrinks the document in the same flush, and
+   * the overshoot must cover that too or scrollY still gets clamped. Trimmed
+   * away with the rest once the morph settles.
+   */
+  const SPACER_SIBLING_OVERSHOOT_PX = 160;
 
   const TITLE_MORPH_MS = 280;
   const SUBTITLE_SLIDE_MS = 220;
@@ -160,9 +189,30 @@
   function updateScrollState() {
     const y = window.scrollY;
     if (y >= PINNED_ENTER_SCROLL_Y) {
+      if (!pinned && headerEl) {
+        // Reserve the spacer *before* the compact layout renders, overshooting
+        // with the full expanded header height so the document can't dip (and
+        // clamp scrollY) at any frame of the collapse animation. Once the
+        // morph settles, trim to whatever restores the pre-pin document
+        // height — measured on the document, not the header rect, because
+        // margin collapse can shrink layout below the header too.
+        docHeightAtPin = document.scrollingElement?.scrollHeight ?? -1;
+        spacerPx =
+          Math.round(headerEl.getBoundingClientRect().height) + SPACER_SIBLING_OVERSHOOT_PX;
+        clearTimeout(spacerTrimTimer);
+        spacerTrimTimer = setTimeout(() => {
+          const docH = document.scrollingElement?.scrollHeight;
+          if (pinned && docH && docHeightAtPin > 0) {
+            spacerPx = Math.max(0, docHeightAtPin - (docH - spacerPx));
+          }
+        }, SPACER_TRIM_DELAY_MS);
+      }
       pinned = true;
     } else if (y <= PINNED_EXIT_SCROLL_Y) {
       pinned = false;
+      // At the top the document may safely shrink; drop the compensation.
+      clearTimeout(spacerTrimTimer);
+      spacerPx = 0;
     }
     scrolled = y > BACK_TO_TOP_THRESHOLD_PX;
   }
@@ -196,6 +246,7 @@
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener('scroll', onScroll);
+      clearTimeout(spacerTrimTimer);
     };
   });
 
@@ -208,6 +259,15 @@
   // `forceCompact` pins the header without any scrolling (used by Graph tab).
   const compact = $derived(pinned || forceCompact);
   const showCompactTitle = $derived(sticky && compact);
+
+  // Descendant chrome (e.g. a sticky toolbar hiding its secondary row) must
+  // collapse off this signal — not its own scrollY listener — so it inherits
+  // the hysteresis and the pin-time height compensation above.
+  setAdminPageHeaderContext({
+    get pinned() {
+      return compact;
+    }
+  });
 </script>
 
 <section bind:this={wrapperEl} class={cn(wrapperClass ?? ADMIN_PAGE_MAX_W, className)}>
@@ -327,5 +387,12 @@
 
   {#if children}
     {@render children()}
+  {/if}
+
+  {#if sticky && spacerPx > 0}
+    <!-- Reserves the height the compacted header released so the document
+         doesn't shrink below the scroll threshold while pinned (anti pin/unpin
+         oscillation on borderline-height pages). -->
+    <div aria-hidden="true" style:height="{spacerPx}px"></div>
   {/if}
 </section>

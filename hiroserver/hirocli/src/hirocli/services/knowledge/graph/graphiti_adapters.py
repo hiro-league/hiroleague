@@ -46,7 +46,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from hirocli.domain.credential_store import CredentialStore
-from hirocli.domain.model_factory import build_chat_model_from_tuning
+from hirocli.domain.model_factory import build_chat_model_from_tuning, with_structured_output_compat
 from hirocli.domain.preferences import ModelTuning
 
 from .ingest_trace import current_ingest_capture, make_llm_stage
@@ -506,7 +506,11 @@ class GraphitiLLMClient(LLMClient):
 
         try:
             if response_model is not None:
-                structured = model.with_structured_output(response_model, include_raw=True)
+                # Use the compat wrapper so DeepSeek thinking mode doesn't 400 on the forced
+                # tool_choice (it falls back to json_mode). json_mode needs the JSON shape in
+                # the prompt, which graphiti_core's base generate_response already injects via
+                # model_json_schema() before this override runs — so no prompt change is needed.
+                structured = with_structured_output_compat(model, response_model, include_raw=True)
                 result = await structured.ainvoke(lc_messages)
                 raw = result.get("raw") if isinstance(result, dict) else None
                 parsed = result.get("parsed") if isinstance(result, dict) else None

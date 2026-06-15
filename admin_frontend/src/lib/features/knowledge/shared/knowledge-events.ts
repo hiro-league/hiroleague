@@ -62,6 +62,30 @@ export type RecalledFact = {
   summary?: string;
 };
 
+/** One gold evidence episode for a question (from the LoCoMo sidecar) + whether the recalled
+ *  context covered it. ``matched_via`` is the kind of recalled item that covered it
+ *  ('episode' | 'fact' | 'entity'), '' when missed. ``text``/``speaker``/``when`` are best-effort
+ *  (blank if the corpus episodes file wasn't readable). */
+export type EvidenceRecallItem = {
+  episode_id: string; // full corpus episode id (e.g. locomo_conv_43_d6_15)
+  short_id: string; // corpus prefix trimmed (e.g. d6_15)
+  dia_id?: string; // LoCoMo dialogue id (e.g. D6:15) when the sidecar maps one
+  speaker?: string;
+  text?: string; // the episode body
+  when?: string; // ISO timestamp of the episode
+  matched: boolean; // recalled context covered this gold episode
+  matched_via?: string; // 'episode' | 'fact' | 'entity' — how it matched; '' when missed
+  score?: number | null; // best matching recalled item's score
+};
+
+/** Per-question evidence recall (LoCoMo calculation): X of Y gold evidence episodes covered by the
+ *  recalled context. Absent on non-LoCoMo corpora (no sidecar). */
+export type EvidenceRecall = {
+  matched: number; // X — gold evidence episodes the recall covered
+  total: number; // Y — total gold evidence episodes for the question
+  items: EvidenceRecallItem[];
+};
+
 /** Per-leg result inside a ``knowledge.eval.question_completed`` event (unified across tracks).
  *  ``mode`` is ``flat``/``graphiti`` (knowledge) or ``recall`` (memory). ``mark`` is the LLM-judge
  *  verdict glyph, or ``""`` when the judge was off (answers only). ``recalled`` carries the memory
@@ -108,6 +132,9 @@ export type EvalQuestionPayload = {
   is_negative_control?: boolean;
   // ISO-8601 UTC timestamp when this question finished evaluating (for the "Time" column).
   answered_at?: string;
+  // Evidence recall (LoCoMo corpora) — read-path enrichment, so present on saved-results reads but
+  // not on live question_completed events (which fill it in on the post-run results refresh).
+  evidence_recall?: EvidenceRecall | null;
 };
 
 /** Per-bucket breakdown, keyed by leg (the per-category / per-difficulty report tables).

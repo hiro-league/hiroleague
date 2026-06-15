@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Button from '$lib/components/ui/button.svelte';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { cn } from '$lib/utils';
 
@@ -7,20 +8,51 @@
     previewLabel,
     ariaLabel,
     value = $bindable(''),
+    defaultValue,
     onInput
   }: {
     editorLabel: string;
     previewLabel: string;
     ariaLabel: string;
     value?: string;
+    /**
+     * Built-in default text for this prompt. When provided, a "Restore default" button fills the
+     * editor with it — needed because a cleared prompt persists "" and the backend default only
+     * applies to absent keys, so the UI otherwise shows blank forever with no way back.
+     */
+    defaultValue?: string;
     /** Called after each keystroke so parents can mark the form dirty. */
     onInput?: () => void;
   } = $props();
+
+  const isAtDefault = $derived(defaultValue !== undefined && value === defaultValue);
+
+  function restoreDefault() {
+    if (defaultValue === undefined) return;
+    value = defaultValue;
+    // Restore is an edit like any other — let the parent mark the form dirty so Save persists it.
+    onInput?.();
+  }
 </script>
 
 <div class="grid gap-3">
   <div class="grid gap-2 lg:grid-cols-2 lg:items-end lg:gap-6">
-    <span class="font-sans text-[0.9375rem] font-semibold text-foreground">{editorLabel}</span>
+    <div class="flex items-center justify-between gap-3">
+      <span class="font-sans text-[0.9375rem] font-semibold text-foreground">{editorLabel}</span>
+      {#if defaultValue !== undefined}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isAtDefault}
+          title={isAtDefault
+            ? 'Editor already matches the built-in default.'
+            : 'Replace the editor content with the built-in default prompt. Takes effect on Save.'}
+          onclick={restoreDefault}
+        >
+          Restore default
+        </Button>
+      {/if}
+    </div>
     <span class="font-sans text-[0.9375rem] font-semibold text-foreground">{previewLabel}</span>
   </div>
   <div class="grid gap-4 lg:grid-cols-2 lg:items-start">

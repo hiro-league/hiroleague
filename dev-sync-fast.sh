@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Faster variant of dev-sync.sh: skips npm install / Svelte build / uv tool installs
 # when their inputs (package manifests, source trees, pyproject.toml, etc.) are unchanged.
-# Run from the repo root: ./dev-sync-fast.sh   (use --force / -f to bypass all caches)
+# Run from the repo root: ./dev-sync-fast.sh
+#   --force / -f    bypass all fingerprint caches and reinstall everything.
+#   --no-gateway    skip the gateway entirely (no stop / reinstall / start) — server only.
+#   --external-ui   skip building the Svelte UI into the server; serve it from a separately
+#                   started vite dev server on http://127.0.0.1:5173 (start it yourself).
+# Flags combine, e.g. `./dev-sync-fast.sh --no-gateway --external-ui` for the fastest server-only loop.
 # If anything looks off, fall back to ./dev-sync.sh which always does a full rebuild.
 
 set -e
@@ -29,10 +34,30 @@ if [ -n "${SSLKEYLOGFILE:-}" ] && ! ( : >> "$SSLKEYLOGFILE" ) 2>/dev/null; then
   unset SSLKEYLOGFILE
 fi
 
-# --force bypasses all fingerprint caches and reinstalls everything.
+# Flags (any order):
+#   --force / -f     bypass all fingerprint caches and reinstall everything.
+#   --no-gateway     don't touch the gateway at all (skip its stop / reinstall / start).
+#                    Use when you're iterating on the server only and the gateway is
+#                    already running (or you don't need it).
+#   --external-ui    don't npm-install or build/package the Svelte admin UI into the
+#                    server. Instead the UI is served by a separately-started vite dev
+#                    server on http://127.0.0.1:5173 (NOT managed by this script — start it
+#                    yourself via `npm --prefix admin_frontend run dev`). Sets
+#                    HIRO_ADMIN_UI_EXTERNAL=1 so the server serves only /api.
 FORCE_SYNC=0
-if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ]; then
-  FORCE_SYNC=1
+MANAGE_GATEWAY=1
+PACKAGE_UI=1
+for arg in "$@"; do
+  case "$arg" in
+    --force|-f) FORCE_SYNC=1 ;;
+    --no-gateway) MANAGE_GATEWAY=0 ;;
+    --external-ui) PACKAGE_UI=0 ;;
+    *) echo "==> Unknown flag '$arg' (supported: --force/-f, --no-gateway, --external-ui)" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$PACKAGE_UI" = "0" ]; then
+  export HIRO_ADMIN_UI_EXTERNAL=1
 fi
 
 REPO_ROOT="$(pwd)"
@@ -71,13 +96,17 @@ hirocli stop 2>/dev/null || true
 echo "==> Stopping hiro-channel-devices (if running)..."
 stop_orphaned_hiro_channel_devices
 
-echo "==> Stopping hirogate (if running)..."
-# Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogate.exe before reinstalling.
-hirogate stop 2>/dev/null || true
-# Remove pre-rename dev binaries that can otherwise hold Windows file locks.
-MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hirogate.exe 2>/dev/null || true
+if [ "$MANAGE_GATEWAY" = "1" ]; then
+  echo "==> Stopping hirogate (if running)..."
+  # Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogate.exe before reinstalling.
+  hirogate stop 2>/dev/null || true
+  # Remove pre-rename dev binaries that can otherwise hold Windows file locks.
+  MSYS2_ARG_CONV_EXCL='*' taskkill.exe /F /T /IM hirogate.exe 2>/dev/null || true
+else
+  echo "==> --no-gateway: leaving hirogate untouched"
+fi
 
-if [ -f admin_frontend/package.json ]; then
+if [ "$PACKAGE_UI" = "1" ] && [ -f admin_frontend/package.json ]; then
   # npm install: only re-run when manifest/lockfile or node_modules changed.
   npm_fp=$(printf '%s\0' admin_frontend/package.json admin_frontend/package-lock.json | fingerprint_files)
   if cache_check admin_frontend.npm "$npm_fp" && [ -d admin_frontend/node_modules ]; then
@@ -108,6 +137,8 @@ if [ -f admin_frontend/package.json ]; then
     HIRO_FAST_BUILD=1 npm --prefix admin_frontend run package:python
     cache_store admin_frontend.build "$svelte_fp"
   fi
+elif [ "$PACKAGE_UI" = "0" ]; then
+  echo "==> --external-ui: skipping npm install + Svelte build; serve UI via vite (npm --prefix admin_frontend run dev) on http://127.0.0.1:5173"
 fi
 
 echo "==> Syncing hiroserver workspace dependencies..."
@@ -153,7 +184,11 @@ install_tool_if_changed() {
 
 install_tool_if_changed hirocli hirocli
 install_tool_if_changed hiro-channel-devices channels/hiro-channel-devices
-install_tool_if_changed hirogate gateway
+if [ "$MANAGE_GATEWAY" = "1" ]; then
+  install_tool_if_changed hirogate gateway
+else
+  echo "==> --no-gateway: skipping hirogate reinstall"
+fi
 
 echo ""
 echo "Done. All tool binaries are up to date."
@@ -162,5 +197,7 @@ echo "  hiro-channel-devices -> run: hiro-channel-devices --help"
 echo "  hirogate             -> run: hirogate --help"
 
 # Foreground gateway in a shell background job so Hiro can keep the terminal (both use -f).
-hirogate start -f &
+if [ "$MANAGE_GATEWAY" = "1" ]; then
+  hirogate start -f &
+fi
 hiro start --admin -f

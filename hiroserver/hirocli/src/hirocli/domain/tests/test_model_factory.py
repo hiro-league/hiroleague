@@ -9,7 +9,12 @@ import yaml
 
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
-from hirocli.domain.model_factory import catalog_embedding_dimensions, create_chat_model, create_embedding_model
+from hirocli.domain.model_factory import (
+    catalog_embedding_dimensions,
+    create_chat_model,
+    create_embedding_model,
+    with_structured_output_compat,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -215,6 +220,47 @@ def test_deepseek_off_disables_thinking_and_keeps_temperature(
     assert model.temperature == 0.2
     assert model.extra_body == {"thinking": {"type": "disabled"}}
     assert model.reasoning_effort is None
+
+
+def test_with_structured_output_compat_deepseek_thinking_uses_json_mode() -> None:
+    """DeepSeek THINKING models get method=json_mode (forced tool_choice 400s in thinking mode);
+    non-thinking DeepSeek and every other model class keep langchain's default method."""
+
+    class ChatDeepSeek:  # noqa: N801 — the helper keys on this class name.
+        def __init__(self, extra_body: dict | None) -> None:
+            self.extra_body = extra_body
+            self.calls: list[dict] = []
+
+        def with_structured_output(self, schema, include_raw=False, **kwargs):  # noqa: ANN001
+            self.calls.append({"schema": schema, "include_raw": include_raw, **kwargs})
+            return "structured"
+
+    thinking = ChatDeepSeek({"thinking": {"type": "enabled"}})
+    assert with_structured_output_compat(thinking, dict) == "structured"
+    assert thinking.calls[0]["method"] == "json_mode"
+    assert thinking.calls[0]["include_raw"] is True
+
+    flat = ChatDeepSeek({"thinking": {"type": "disabled"}})
+    with_structured_output_compat(flat, dict)
+    assert "method" not in flat.calls[0]
+
+    class OtherModel(ChatDeepSeek):  # different class name → default method even if "thinking"
+        pass
+
+    other = OtherModel({"thinking": {"type": "enabled"}})
+    with_structured_output_compat(other, dict)
+    assert "method" not in other.calls[0]
+
+    # A DeepSeek model built without extra_body (None) must not crash and keeps the default method.
+    no_extra = ChatDeepSeek(None)
+    with_structured_output_compat(no_extra, dict)
+    assert "method" not in no_extra.calls[0]
+
+    # include_raw=False is forwarded verbatim (not silently overridden to True).
+    explicit = ChatDeepSeek({"thinking": {"type": "enabled"}})
+    with_structured_output_compat(explicit, dict, include_raw=False)
+    assert explicit.calls[0]["include_raw"] is False
+    assert explicit.calls[0]["method"] == "json_mode"
 
 
 def test_create_embedding_model_openai(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

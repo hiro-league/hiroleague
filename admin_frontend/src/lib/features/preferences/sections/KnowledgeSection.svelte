@@ -327,6 +327,7 @@
         previewLabel="Preview"
         ariaLabel="Knowledge query rewrite prompt (markdown)"
         bind:value={ctrl.draft.knowledge.rewrite.prompt}
+        defaultValue={ctrl.promptDefaults['knowledge.rewrite.prompt']}
         onInput={ctrl.markDirty}
       />
       <p class="text-xs text-muted-foreground">
@@ -372,6 +373,7 @@
         previewLabel="Preview"
         ariaLabel="Knowledge answering prompt (markdown)"
         bind:value={ctrl.draft.knowledge.answering.prompt}
+        defaultValue={ctrl.promptDefaults['knowledge.answering.prompt']}
         onInput={ctrl.markDirty}
       />
       <p class="text-xs text-muted-foreground">

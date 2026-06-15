@@ -1,4 +1,4 @@
-"""LoCoMo export helpers for persisted memory-eval results."""
+"""LoCoMo export helpers + per-question evidence-recall metric for persisted memory-eval results."""
 
 from __future__ import annotations
 
@@ -9,10 +9,19 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from hiro_commons.log import Logger
 
 from hirocli.services.knowledge.eval_runner import load_questions
 
+log = Logger.get("SVC.KNOWLEDGE.EVAL.LOCOMO")
+
 _PREDICTION_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Keys on a recalled item that can carry its SOURCE episode id, in priority order: a fact links to
+# its origin episode via chunk_id/source, while a raw episode hit carries the episode id as its own
+# uuid. Shared by the LoCoMo export (recalled → dia-id) and the evidence-recall metric (recalled →
+# episode-id) so both decide "was this gold episode recalled?" identically (the LoCoMo calculation).
+_EPISODE_LINK_KEYS = ("chunk_id", "episode_id", "source_episode_id", "uuid")
 
 
 class LocomoExportError(ValueError):
@@ -47,20 +56,187 @@ def _dedupe(values: list[str]) -> list[str]:
     return out
 
 
+def _recalled_episode_id(item: Any, valid_ids: "set[str]") -> str | None:
+    """The corpus episode id a recalled item came from — its first link key (see
+    ``_EPISODE_LINK_KEYS``) that names a real corpus episode — or ``None``. ``valid_ids`` guards
+    against a non-episode uuid (a fact/entity graph uuid) coincidentally being treated as one."""
+    if not isinstance(item, dict):
+        return None
+    for key in _EPISODE_LINK_KEYS:
+        raw = str(item.get(key) or "").strip()
+        if raw and raw in valid_ids:
+            return raw
+    return None
+
+
 def _context_dia_ids(row: dict[str, Any], episode_to_dia: dict[str, str]) -> list[str]:
     recalled = ((row.get("legs") or {}).get("recall") or {}).get("recalled") or []
     if not isinstance(recalled, list):
         return []
+    valid_ids = set(episode_to_dia)
     ids: list[str] = []
     for item in recalled:
-        if not isinstance(item, dict):
-            continue
-        for key in ("chunk_id", "episode_id", "source_episode_id", "uuid"):
-            raw = str(item.get(key) or "").strip()
-            if raw in episode_to_dia:
-                ids.append(episode_to_dia[raw])
-                break
+        eid = _recalled_episode_id(item, valid_ids)
+        if eid is not None:
+            ids.append(episode_to_dia[eid])
     return _dedupe(ids)
+
+
+def _short_episode_id(episode_id: str, corpus_id: str) -> str:
+    """Trim the corpus prefix for compact display (``locomo_conv_43_d6_15`` → ``d6_15``)."""
+    prefix = f"{corpus_id}_"
+    return episode_id[len(prefix):] if episode_id.startswith(prefix) else episode_id
+
+
+def _episodes_path(corpus_id: str, questions_path: Path) -> Path:
+    """Sibling ``*.episodes.jsonl`` for a corpus, mirroring ``_sidecar_path`` discovery."""
+    candidates = [questions_path.with_name(f"{corpus_id}.episodes.jsonl")]
+    name = questions_path.name
+    if name.endswith(".questions.yaml"):
+        candidates.append(
+            questions_path.with_name(f"{name[:-len('.questions.yaml')]}.episodes.jsonl")
+        )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def _load_episode_bodies(corpus_id: str, questions_path: Path) -> dict[str, dict[str, str]]:
+    """``{episode_id: {speaker, text, when}}`` from the corpus episodes.jsonl, for evidence display.
+
+    Best-effort text enrichment only: a missing/unreadable/invalid episodes file degrades the
+    evidence section to ids-without-text rather than breaking the results read, so it is logged and
+    swallowed (not raised)."""
+    path = _episodes_path(corpus_id, questions_path)
+    if not path.exists():
+        return {}
+    # Lazy import: parse_episodes_jsonl pulls in graphiti_core; keep it off eval_locomo's import path.
+    from hirocli.services.knowledge.graph.graphiti_corpus import parse_episodes_jsonl
+
+    try:
+        episodes = parse_episodes_jsonl(
+            path.read_text(encoding="utf-8"), default_document_id=corpus_id
+        )
+    except (OSError, ValueError):
+        log.warning(
+            "⚠️ knowledge.eval — evidence episode bodies unreadable · corpus=%s · path=%s",
+            corpus_id,
+            path,
+            exc_info=True,
+        )
+        return {}
+    bodies: dict[str, dict[str, str]] = {}
+    for ep in episodes:
+        when = ep.reference_time.isoformat() if ep.reference_time else ""
+        bodies[ep.chunk_id] = {"speaker": ep.speaker or "", "text": ep.text or "", "when": when}
+    return bodies
+
+
+def compute_evidence_recall_map(
+    *,
+    corpus_id: str,
+    questions_path: Path,
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Per-question evidence recall: for each question whose LoCoMo sidecar lists gold evidence
+    episodes, how many of those episodes the recalled context covered — matched the SAME way as the
+    LoCoMo export (``_recalled_episode_id``), so a gold turn counts whether it surfaced as a raw
+    episode or as a fact/entity derived from it.
+
+    Returns ``{qid: {matched, total, items}}`` where each item carries the episode id (+ short id /
+    dia id), the episode text/speaker/when (best-effort), and whether/how it matched (kind + score).
+    Returns ``{}`` for corpora without a sidecar (non-LoCoMo). Pure read-path enrichment — does not
+    touch persisted rows."""
+    sidecar = _sidecar_path(corpus_id, questions_path)
+    if not sidecar.exists():
+        return {}
+    try:
+        raw_sidecar = yaml.safe_load(sidecar.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        log.warning(
+            "⚠️ knowledge.eval — evidence sidecar unreadable · corpus=%s · path=%s",
+            corpus_id,
+            sidecar,
+            exc_info=True,
+        )
+        return {}
+    if not isinstance(raw_sidecar, dict):
+        return {}
+    sidecar_questions = raw_sidecar.get("questions")
+    if not isinstance(sidecar_questions, dict):
+        return {}
+    sidecar_episodes = raw_sidecar.get("episodes")
+    episode_to_dia = {
+        str(eid): str(meta.get("dia_id"))
+        for eid, meta in (sidecar_episodes.items() if isinstance(sidecar_episodes, dict) else [])
+        if isinstance(meta, dict) and meta.get("dia_id")
+    }
+
+    # Gold evidence episode ids per question (in sidecar order, for stable display).
+    gold_by_q: dict[str, list[str]] = {}
+    all_gold: set[str] = set()
+    for qid, meta in sidecar_questions.items():
+        if not isinstance(meta, dict):
+            continue
+        evidence = meta.get("evidence") if isinstance(meta.get("evidence"), dict) else {}
+        episode_ids = [str(v) for v in (evidence.get("episode_ids") or []) if str(v).strip()]
+        if episode_ids:
+            gold_by_q[str(qid)] = episode_ids
+            all_gold.update(episode_ids)
+    if not gold_by_q:
+        return {}
+
+    bodies = _load_episode_bodies(corpus_id, questions_path)
+    # Validity guard for episode-id matching: every id the corpus actually knows about.
+    valid_ids = set(episode_to_dia) | all_gold | set(bodies)
+
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        qid = str(row.get("id") or "")
+        gold = gold_by_q.get(qid)
+        if not gold:
+            continue
+        recalled = ((row.get("legs") or {}).get("recall") or {}).get("recalled") or []
+        gold_set = set(gold)
+        # eid → (kind, score) of the best (highest-scoring) recalled item that covers it.
+        best: dict[str, tuple[str, float | None]] = {}
+        if isinstance(recalled, list):
+            for item in recalled:
+                eid = _recalled_episode_id(item, valid_ids)
+                if eid is None or eid not in gold_set:
+                    continue
+                kind = str((item.get("kind") if isinstance(item, dict) else "") or "fact")
+                raw_score = item.get("score") if isinstance(item, dict) else None
+                score = float(raw_score) if isinstance(raw_score, (int, float)) else None
+                prev = best.get(eid)
+                if prev is None or (score if score is not None else -1.0) > (
+                    prev[1] if prev[1] is not None else -1.0
+                ):
+                    best[eid] = (kind, score)
+        items: list[dict[str, Any]] = []
+        for eid in gold:
+            body = bodies.get(eid, {})
+            match = best.get(eid)
+            items.append(
+                {
+                    "episode_id": eid,
+                    "short_id": _short_episode_id(eid, corpus_id),
+                    "dia_id": episode_to_dia.get(eid, ""),
+                    "speaker": body.get("speaker", ""),
+                    "text": body.get("text", ""),
+                    "when": body.get("when", ""),
+                    "matched": match is not None,
+                    "matched_via": match[0] if match else "",
+                    "score": match[1] if match else None,
+                }
+            )
+        out[qid] = {
+            "matched": sum(1 for it in items if it["matched"]),
+            "total": len(items),
+            "items": items,
+        }
+    return out
 
 
 def build_locomo_results_export(

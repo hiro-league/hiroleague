@@ -42,6 +42,7 @@
     X
   } from '@lucide/svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import { getAdminPageHeaderContext } from '$lib/components/page/admin-page-header-context';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
@@ -51,7 +52,9 @@
   import KnowledgeEvalTerminal from '$lib/features/knowledge/eval/KnowledgeEvalTerminal.svelte';
   import EvalCorpusReview from '$lib/features/knowledge/eval/EvalCorpusReview.svelte';
   import KnowledgeEvalRebuildConfirmDialog from '$lib/features/knowledge/eval/KnowledgeEvalRebuildConfirmDialog.svelte';
+  import KnowledgeEvalClearResultsConfirmDialog from '$lib/features/knowledge/eval/KnowledgeEvalClearResultsConfirmDialog.svelte';
   import { activityHeaderLine, buildActivityLines } from '$lib/features/knowledge/eval/eval-activity';
+  import { highlightSegments } from '$lib/features/knowledge/eval/eval-highlight';
   import { formatEvalRowForAI } from '$lib/features/knowledge/eval/eval-clipboard';
   import type { EvalRow } from '$lib/features/knowledge/state/knowledge-eval.svelte';
   import GraphRunsRetrievalTraceDialog from '$lib/features/graph-runs/GraphRunsRetrievalTraceDialog.svelte';
@@ -68,6 +71,7 @@
   import type {
     EvalCategoryStat,
     EvalCompletedPayload,
+    EvidenceRecall,
     RecalledFact
   } from '$lib/features/knowledge/shared/knowledge-events';
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
@@ -109,11 +113,12 @@
 
   // --- Sticky sub-tabs (Control / Corpus / Questions / Answer Details) -----------------------
   // Section navigation as sticky underline sub-tabs under the run-controls toolbar. Local state
-  // (not URL/session) — inner navigation, per the admin sub-tab pattern. Default to Questions
-  // (the first thing you act on); the validity effect snaps back if the active tab disappears
-  // (e.g. Corpus is memory-only and vanishes on the knowledge track).
+  // (not URL/session) — inner navigation, per the admin sub-tab pattern. Default to Control
+  // (the run setup/report overview — requested over Questions on page load/refresh); the validity
+  // effect snaps back if the active tab disappears (e.g. Corpus is memory-only and vanishes on
+  // the knowledge track).
   type EvalSubtab = 'control' | 'corpus' | 'questions' | 'answers';
-  let activeSubtab = $state<EvalSubtab>('questions');
+  let activeSubtab = $state<EvalSubtab>('control');
   const subtabs = $derived<AdminSubtabDescriptor<EvalSubtab>[]>([
     { id: 'control', label: 'Control' },
     ...(isMemory ? [{ id: 'corpus' as const, label: 'Corpus' }] : []),
@@ -121,13 +126,16 @@
     { id: 'answers', label: 'Answer Details' }
   ]);
   $effect(() => {
-    if (!subtabs.some((t) => t.id === activeSubtab)) activeSubtab = 'questions';
+    if (!subtabs.some((t) => t.id === activeSubtab)) activeSubtab = 'control';
   });
 
   // When the run-controls toolbar pins on scroll, collapse it to just its first line (corpus +
   // run controls) — the second line (run options) is setup config you don't need while scrolling.
-  // Tied to the same scroll threshold the page header compacts at, so the chrome moves coherently.
-  let toolbarStuck = $state(false);
+  // Driven by the page header's pinned signal (not a raw scrollY threshold): the header applies
+  // hysteresis + document-height compensation when it pins, so hiding the second row can't shrink
+  // the page below the scroll threshold and flap open/closed on borderline-height pages.
+  const headerCtx = getAdminPageHeaderContext();
+  const toolbarStuck = $derived(headerCtx?.pinned ?? false);
   // Sticky sub-tab bar element — its height is published as a CSS var so the Results table's
   // sticky thead can offset beneath it (mirrors AdminPageStickyToolbar's own var).
   let subtabsEl = $state<HTMLDivElement | null>(null);
@@ -137,12 +145,6 @@
     // is owned by the host Eval page. The panel just loads the read-only engine
     // params strip shown at the top.
     void loadPrefs();
-
-    const onScroll = () => {
-      toolbarStuck = window.scrollY > 80;
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
 
     // Publish the sub-tab bar height so the results table's sticky thead aligns below it.
     const section = subtabsEl?.closest('section') ?? null;
@@ -160,7 +162,6 @@
     publish();
 
     return () => {
-      window.removeEventListener('scroll', onScroll);
       ro?.disconnect();
       section?.style.removeProperty('--admin-eval-subtabs-h');
     };
@@ -355,6 +356,31 @@
       ro?.disconnect();
       window.removeEventListener('scroll', publish);
       section.style.removeProperty('--admin-eval-qcontrols-h');
+    };
+  });
+
+  // Answer Details controls line (sticky filters/search bar) — same measure-and-publish pattern as
+  // the Questions bar, so the results table's sticky thead can pin directly beneath it. Conditionally
+  // mounted (only on the Answers tab), so the $effect (re)observes when the bound element appears.
+  let aControlsEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    const el = aControlsEl;
+    if (!el) return;
+    const section = el.closest('section');
+    if (!section) return;
+    const publish = () =>
+      section.style.setProperty(
+        '--admin-eval-acontrols-h',
+        `${Math.round(el.getBoundingClientRect().height)}px`
+      );
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(publish) : null;
+    ro?.observe(el);
+    window.addEventListener('scroll', publish, { passive: true });
+    publish();
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('scroll', publish);
+      section.style.removeProperty('--admin-eval-acontrols-h');
     };
   });
 
@@ -688,6 +714,15 @@
     else void eval_.start();
   }
 
+  // Clear guard: the memory-track clear PERMANENTLY deletes saved results from disk
+  // (eval_.clear → clearEvalResults), so it's gated behind a confirm. The knowledge-track "Clear"
+  // only resets the in-view run state (non-destructive) and clears straight away.
+  let clearConfirmOpen = $state(false);
+  function requestClear() {
+    if (isMemory) clearConfirmOpen = true;
+    else void eval_.clear();
+  }
+
   /** Color the mark chip. Negative-control abstain (🛇) reads as neutral, not green. */
   function markVariant(mark: string): 'success' | 'warning' | 'destructive' | 'secondary' {
     if (mark === '✓') return 'success';
@@ -713,6 +748,15 @@
     if (mark === '✗') return 'Fail';
     if (mark === '🛇') return 'Abstain';
     return 'Not judged';
+  }
+
+  /** Color the evidence-recall X/Y chip: all gold episodes recalled → green, some → amber, none →
+   *  red. ``total === 0`` shouldn't reach a badge (caller renders a dash), but is neutral if it does. */
+  function evidenceVariant(matched: number, total: number): 'success' | 'warning' | 'destructive' | 'secondary' {
+    if (total <= 0) return 'secondary';
+    if (matched >= total) return 'success';
+    if (matched > 0) return 'warning';
+    return 'destructive';
   }
 
   /** Whole-number percentage for the report tables (n/total ⇒ "0"–"100"); "—" when total is 0. */
@@ -759,10 +803,20 @@
   const showDelta = $derived(!isMemory);
   // Memory shows a sortable recall-sufficiency flag column (before the recall answer).
   const showRecallCol = $derived(isMemory);
-  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, [recall flag], <N legs>, [Δ], Time.
-  // (Trace/recall links moved out of the main row into the expanded fold.)
+  // Memory also shows an evidence-recall column (X/Y gold evidence episodes covered) — populated
+  // only for LoCoMo corpora; other corpora render a dash.
+  const showEvidenceCol = $derived(isMemory);
+  // Full-width row colspan: #, Question, Type, Difficulty, Ideal, [recall flag], [evidence],
+  // [answer type], <N legs>, [Δ], Time. (Trace/recall links moved out of the main row into the
+  // expanded fold; the answer-type column is memory-only — the verdict split out of the answer cell.)
   const resultsColspan = $derived(
-    5 + legColumns.length + (showDelta ? 1 : 0) + (showRecallCol ? 1 : 0) + 1
+    5 +
+      legColumns.length +
+      (showDelta ? 1 : 0) +
+      (showRecallCol ? 1 : 0) +
+      (showEvidenceCol ? 1 : 0) +
+      (isMemory ? 1 : 0) +
+      1
   );
 
   // Answer-details sort (within each category group), by the recall flag or the eval time. Per
@@ -795,12 +849,116 @@
     return [...rows].sort((a, b) => dir * (key(a) - key(b)) || a.index - b.index);
   }
 
+  // --- Answer Details filters (search + type + difficulty + recall flag + answer type) --------
+  // View-only filters over the answer rows, mirroring the Questions-tab filter bar. The search
+  // matches EVERYTHING the row carries — including the folded detail (judge reason/evidence and
+  // the recalled facts/entities/episodes) — so a recalled fact's text finds its question.
+  type AnsFlag = 'all' | 'sufficient' | 'miss' | 'unknown';
+  type AnsMark = 'all' | 'pass' | 'partial' | 'fail' | 'abstain' | 'not_judged';
+  let ansSearch = $state('');
+  // Whether the search also looks inside the recalled facts/entities/episodes (the folded memory
+  // detail). Off by default — recall dumps are large and noisy, so the search stays on the answer
+  // surface (question/ideal/answer/judge) unless the user opts in.
+  let ansSearchRecalled = $state(false);
+  let ansCategory = $state<string>('all');
+  let ansDifficulty = $state<QDifficulty>('all');
+  let ansFlag = $state<AnsFlag>('all');
+  let ansMark = $state<AnsMark>('all');
+  // Term used to highlight inside the recalled tables — empty (no highlight) unless recalled search
+  // is enabled, so recalled rows only light up when they're actually part of the search scope.
+  const recalledTerm = $derived(ansSearchRecalled ? ansSearch : '');
+  const ansFiltered = $derived(
+    ansSearch.trim() !== '' ||
+      ansCategory !== 'all' ||
+      ansDifficulty !== 'all' ||
+      ansFlag !== 'all' ||
+      ansMark !== 'all'
+  );
+  function resetAnswerFilters() {
+    ansSearch = '';
+    ansSearchRecalled = false;
+    ansCategory = 'all';
+    ansDifficulty = 'all';
+    ansFlag = 'all';
+    ansMark = 'all';
+  }
+  // Distinct categories among the answer rows (first-seen order) for the type filter dropdown.
+  const ansCategoryOptions = $derived.by(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of eval_.rows) {
+      const c = r.category || '';
+      if (c && !seen.has(c)) {
+        seen.add(c);
+        out.push(c);
+      }
+    }
+    return out;
+  });
+  // Judge-mark glyph → answer-type filter key ('' / unknown glyph ⇒ not judged).
+  const MARK_FILTER_KEY: Record<string, AnsMark> = {
+    '✓': 'pass',
+    '◐': 'partial',
+    '✗': 'fail',
+    '🛇': 'abstain'
+  };
+  // Answer-type match: ANY leg with the selected verdict counts (memory has one recall leg;
+  // knowledge legs are an at-a-glance OR — per-leg filtering isn't worth the extra controls).
+  function rowMatchesMark(r: EvalRow): boolean {
+    if (ansMark === 'all') return true;
+    return Object.values(r.legs).some(
+      (leg) => (MARK_FILTER_KEY[leg.mark] ?? 'not_judged') === ansMark
+    );
+  }
+  // Recall-sufficiency flag match (memory only) — reuses rowRecallRank's miss/ok/unknown buckets.
+  function rowMatchesFlag(r: EvalRow): boolean {
+    if (ansFlag === 'all') return true;
+    const rank = rowRecallRank(r);
+    return ansFlag === 'miss' ? rank === 0 : ansFlag === 'sufficient' ? rank === 1 : rank === 2;
+  }
+  // Searchable text on a row: question/ideal/ids + per-leg answer, verdict word, judge reason +
+  // quoted evidence. The recalled facts/entities/episodes are folded in ONLY when the user enabled
+  // recalled search (``ansSearchRecalled``) — that detail is large/noisy, so it's opt-in.
+  function rowHaystack(r: EvalRow): string {
+    const parts: string[] = [r.id, r.category, r.subcategory, r.difficulty, r.question, r.gold];
+    for (const leg of Object.values(r.legs)) {
+      parts.push(leg.answer, markLabel(leg.mark), leg.reason ?? '', leg.evidence ?? '');
+      if (ansSearchRecalled) {
+        for (const f of leg.recalled ?? []) {
+          parts.push(
+            f.memory,
+            f.fact ?? '',
+            f.name ?? '',
+            f.summary ?? '',
+            f.entity_type ?? '',
+            f.valid_at ?? '',
+            f.invalid_at ?? ''
+          );
+        }
+      }
+    }
+    return parts.join(' ').toLowerCase();
+  }
+  const filteredAnswerRows = $derived.by(() => {
+    const term = ansSearch.trim().toLowerCase();
+    return eval_.rows.filter((r) => {
+      if (ansCategory !== 'all' && (r.category || '') !== ansCategory) return false;
+      if (ansDifficulty !== 'all' && (r.difficulty || 'unspecified') !== ansDifficulty)
+        return false;
+      if (isMemory && !rowMatchesFlag(r)) return false;
+      if (!rowMatchesMark(r)) return false;
+      if (term && !rowHaystack(r).includes(term)) return false;
+      return true;
+    });
+  });
+
   // --- Results grouped by type (category) ----------------------------------------------------
-  // Rows grouped by category in first-seen order, ordered by question index within each group.
-  // Each group is collapsible; expand/collapse-all act on every group.
+  // FILTERED rows grouped by category in first-seen order, ordered by question index within each
+  // group; groups emptied by the Answer Details filters disappear. Each group is collapsible;
+  // expand/collapse-all act on every group.
   const resultGroups = $derived.by<[string, EvalRow[]][]>(() => {
     const map = new Map<string, EvalRow[]>();
-    for (const r of eval_.rows) {
+    for (const r of filteredAnswerRows) {
       const cat = r.category || '—';
       const arr = map.get(cat) ?? [];
       arr.push(r);
@@ -1064,7 +1222,7 @@
           <Button
             variant="outline"
             disabled={isBusy}
-            onclick={() => void eval_.clear()}
+            onclick={requestClear}
             title={isMemory
               ? 'Delete this corpus’s saved results from disk (ingested memory is kept)'
               : "Clear the last run's results"}
@@ -1193,6 +1351,26 @@
           <input type="checkbox" class="size-4" bind:checked={eval_.judge} disabled={isBusy} />
           <span>LLM Judge Answers</span>
         </label>
+        <!-- Memory track — parallel-question cap. 1 = serial (the safe default); higher overlaps
+             each question's answer/judge LLM calls. Note: per-question times then include
+             queueing, so the Time column isn't comparable across different caps. -->
+        {#if isMemory}
+          <div
+            class="flex items-center gap-1.5 font-sans text-sm"
+            title="Questions evaluated in parallel (1 = one at a time). Higher is faster but per-question times include waiting, and aggressive caps can hit LLM provider rate limits."
+          >
+            <span class="text-muted-foreground">Parallel</span>
+            <input
+              type="number"
+              min="1"
+              max={eval_.questionConcurrencyMax}
+              class="h-8 w-16 rounded-md border bg-background px-2 text-sm"
+              value={eval_.questionConcurrency}
+              oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
+              disabled={isBusy}
+            />
+          </div>
+        {/if}
       {/if}
       </div>
       {/if}
@@ -1593,9 +1771,102 @@
         No answers yet — run an eval to see per-question results here.
       </p>
     {:else}
-    <!-- Actions / stats directly under the sub-tab (no card); the table keeps its sticky head. -->
-    <div class="flex flex-wrap items-center gap-2">
-        <span class="mr-auto font-sans text-xs text-muted-foreground">{resultsSummary}</span>
+    <!-- Actions / filters / stats — sticky directly under the sub-tab bar so the search + filters
+         stay reachable while scrolling the (full-page) results table. The table's sticky thead pins
+         beneath this bar via the --admin-eval-acontrols-h offset it publishes. -->
+    <div
+      bind:this={aControlsEl}
+      class="sticky z-10 flex flex-wrap items-center gap-2 bg-background py-2"
+      style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px));"
+    >
+        <span class="mr-auto font-sans text-xs text-muted-foreground">
+          {resultsSummary}{#if ansFiltered}
+            · {filteredAnswerRows.length}/{eval_.rows.length} shown{/if}
+        </span>
+        <!-- Filters: deep search (folded detail included) + type + difficulty + flag + answer type. -->
+        <div class="relative">
+          <input
+            class="h-7 w-48 rounded-md border bg-background pl-2 pr-7 font-sans text-xs"
+            placeholder="Search answers…"
+            bind:value={ansSearch}
+            title="Searches the answer surface — question, ideal, answers, judge reason/evidence. Enable “Recalled” to also search the recalled facts/entities/episodes."
+          />
+          {#if ansSearch.trim()}
+            <button
+              type="button"
+              class="absolute inset-y-0 right-1.5 my-auto flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+              onclick={() => (ansSearch = '')}
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          {/if}
+        </div>
+        <!-- Opt-in: also search the recalled facts/entities/episodes (folded memory detail). Off by
+             default — that detail is large/noisy. When on, matching recalled rows also highlight. -->
+        <label
+          class="flex cursor-pointer select-none items-center gap-1.5 font-sans text-xs text-muted-foreground"
+          title="Also search inside the recalled facts/entities/episodes (the folded memory detail)"
+        >
+          <input type="checkbox" class="size-3.5" bind:checked={ansSearchRecalled} />
+          Recalled
+        </label>
+        <select
+          class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+          bind:value={ansCategory}
+          title="Filter by question type"
+        >
+          <option value="all">All types</option>
+          {#each ansCategoryOptions as c (c)}
+            <option value={c}>{c}</option>
+          {/each}
+        </select>
+        <select
+          class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+          bind:value={ansDifficulty}
+          title="Filter by difficulty"
+        >
+          <option value="all">All difficulties</option>
+          <option value="medium">medium</option>
+          <option value="hard">hard</option>
+          <option value="very_hard">very hard</option>
+          <option value="unspecified">unspecified</option>
+        </select>
+        {#if isMemory}
+          <select
+            class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+            bind:value={ansFlag}
+            title="Filter by judge recall-sufficiency flag"
+          >
+            <option value="all">All flags</option>
+            <option value="sufficient">Sufficient</option>
+            <option value="miss">Recall miss</option>
+            <option value="unknown">Not judged</option>
+          </select>
+        {/if}
+        <select
+          class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
+          bind:value={ansMark}
+          title="Filter by answer type (judge verdict)"
+        >
+          <option value="all">All answer types</option>
+          <option value="pass">Pass</option>
+          <option value="partial">Partial</option>
+          <option value="fail">Fail</option>
+          <option value="abstain">Abstain</option>
+          <option value="not_judged">Not judged</option>
+        </select>
+        {#if ansFiltered}
+          <button
+            type="button"
+            class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted"
+            onclick={resetAnswerFilters}
+            title="Clear all filters"
+          >
+            Reset
+          </button>
+        {/if}
         <!-- Expand / collapse all result type-groups (icons only). -->
         {#if resultGroups.length > 0}
           <button
@@ -1755,6 +2026,17 @@
   }}
 />
 
+<!-- Clear-results confirm — gates the memory track's destructive on-disk delete of saved results. -->
+<KnowledgeEvalClearResultsConfirmDialog
+  bind:open={clearConfirmOpen}
+  corpusName={eval_.selectedCorpus?.name ?? ''}
+  savedCount={eval_.savedCount}
+  onConfirm={() => {
+    clearConfirmOpen = false;
+    void eval_.clear();
+  }}
+/>
+
 <!-- Judge recall-sufficiency flag — a single colored flag (no text): green = the recalled context
      held what was needed, rose = a recall miss. Renders nothing when unknown (not judged). -->
 {#snippet recallFlag(sufficient: boolean | undefined)}
@@ -1800,6 +2082,14 @@
   </th>
 {/snippet}
 
+<!-- Highlight the active Answer Details search term inside a text span (no {@html} — segments are
+     plain text wrapped in <mark>, so corpus content can't inject). Identity render when no search. -->
+{#snippet hl(text: string)}{#each highlightSegments(text ?? '', ansSearch) as seg}{#if seg.hit}<mark class="rounded bg-amber-200 text-inherit dark:bg-amber-500/40">{seg.text}</mark>{:else}{seg.text}{/if}{/each}{/snippet}
+
+<!-- Highlight inside the recalled tables — gated on ``recalledTerm`` (empty unless recalled search
+     is enabled), so recalled text only lights up when it's part of the search scope. -->
+{#snippet hlR(text: string)}{#each highlightSegments(text ?? '', recalledTerm) as seg}{#if seg.hit}<mark class="rounded bg-amber-200 text-inherit dark:bg-amber-500/40">{seg.text}</mark>{:else}{seg.text}{/if}{/each}{/snippet}
+
 <!-- Unified results table: Question, Ideal, per-leg [mark + model answer]; fold for details. -->
 {#snippet resultsTable()}
   <!-- No overflow wrapper: a scroll container would trap the sticky header. The thead pins to
@@ -1807,7 +2097,7 @@
   <div class="rounded-md border">
     <table class="w-full border-collapse font-sans text-sm">
       <thead
-        class="text-xs uppercase tracking-wide text-muted-foreground [&_th]:sticky [&_th]:top-[calc(4rem+var(--admin-page-header-h,0px)+var(--admin-page-sticky-toolbar-h,0px)+var(--admin-eval-subtabs-h,0px))] [&_th]:z-10 [&_th]:border-b [&_th]:bg-muted"
+        class="text-xs uppercase tracking-wide text-muted-foreground [&_th]:sticky [&_th]:top-[calc(4rem+var(--admin-page-header-h,0px)+var(--admin-page-sticky-toolbar-h,0px)+var(--admin-eval-subtabs-h,0px)+var(--admin-eval-acontrols-h,0px))] [&_th]:z-10 [&_th]:border-b [&_th]:bg-muted"
       >
         <tr>
           <th class="px-2 py-1.5 text-left">#</th>
@@ -1829,7 +2119,16 @@
               </button>
             </th>
           {/if}
+          {#if showEvidenceCol}
+            <!-- Evidence recall — gold evidence episodes covered by the recall (X/Y). LoCoMo only. -->
+            <th class="px-2 py-1.5 text-center" title="Evidence recall — gold evidence episodes the recall covered (LoCoMo corpora)">Ev</th>
+          {/if}
           {#each legColumns as mode (mode)}
+            {#if isMemory}
+              <!-- Answer type (judge verdict) — split out of the recall-answer cell into its own
+                   column so the verdict scans/filters independently of the answer text. -->
+              <th class="px-2 py-1.5 text-left">Answer type</th>
+            {/if}
             <th class="px-2 py-1.5 text-left">{legLabel(mode)} answer</th>
           {/each}
           {#if showDelta}<th class="px-2 py-1.5 text-center" title="best graph leg vs flat">&#916;</th>{/if}
@@ -1848,6 +2147,14 @@
         </tr>
       </thead>
       <tbody>
+        {#if resultGroups.length === 0 && eval_.rows.length > 0}
+          <!-- Rows exist but the Answer Details filters matched none of them. -->
+          <tr>
+            <td colspan={resultsColspan} class="px-2 py-3 text-center font-sans text-xs text-muted-foreground">
+              No answers match the filters.
+            </td>
+          </tr>
+        {/if}
         {#each resultGroups as [groupCat, groupRows] (groupCat)}
           {@const groupCollapsed = collapsedResultGroups.has(groupCat)}
           <!-- Type (category) group header — collapsible, spans the full table width. -->
@@ -1889,7 +2196,7 @@
                   class="mt-0.5 shrink-0 text-muted-foreground transition-transform {expandedRows.has(r.index) ? 'rotate-90' : ''}"
                   aria-hidden="true"
                 />
-                <span class="line-clamp-2" title={r.question}>{r.question}</span>
+                <span class="line-clamp-2" title={r.question}>{@render hl(r.question)}</span>
               </button>
             </td>
             <!-- Type = the question's category (e.g. direct_recall, temporal). -->
@@ -1908,7 +2215,7 @@
               {/if}
             </td>
             <td class="px-2 py-1.5 text-xs text-muted-foreground">
-              <span class="line-clamp-2" title={r.gold || ''}>{r.gold || '—'}</span>
+              <span class="line-clamp-2" title={r.gold || ''}>{#if r.gold}{@render hl(r.gold)}{:else}—{/if}</span>
             </td>
             {#if showRecallCol}
               <!-- Recall-sufficiency flag — its own (sortable) column, before the recall answer. -->
@@ -1917,14 +2224,49 @@
                 {@render recallFlag(rleg?.mark ? (rleg.recall_sufficient ?? true) : undefined)}
               </td>
             {/if}
+            {#if showEvidenceCol}
+              <!-- Evidence recall X/Y — gold evidence episodes the recall covered (LoCoMo only). -->
+              <td class="px-2 py-1.5 text-center">
+                {#if r.evidence_recall && r.evidence_recall.total > 0}
+                  {@const ev = r.evidence_recall}
+                  <Badge
+                    variant={evidenceVariant(ev.matched, ev.total)}
+                    class="font-mono tabular-nums"
+                    title="{ev.matched} of {ev.total} gold evidence episodes were recalled"
+                  >
+                    {ev.matched}/{ev.total}
+                  </Badge>
+                {:else}
+                  <span class="text-xs text-muted-foreground">—</span>
+                {/if}
+              </td>
+            {/if}
             {#each legColumns as mode (mode)}
+              {#if isMemory}
+                <!-- Answer type — the judge verdict alone (split from the recall answer). -->
+                <td class="whitespace-nowrap px-2 py-1.5">
+                  {#if r.legs[mode]}
+                    {@const leg = r.legs[mode]}
+                    <Badge variant={markVariant(leg.mark)} class="font-mono" title={markTitle(leg.mark)}>
+                      {leg.mark ? `${leg.mark} ${markLabel(leg.mark)}` : '—'}
+                    </Badge>
+                  {:else}
+                    <span class="text-xs text-muted-foreground">—</span>
+                  {/if}
+                </td>
+              {/if}
               <td class="px-2 py-1.5">
                 {#if r.legs[mode]}
                   {@const leg = r.legs[mode]}
-                  <div class="flex items-start gap-1.5">
-                    <Badge variant={markVariant(leg.mark)} class="mt-0.5 font-mono" title={markTitle(leg.mark)}>{leg.mark || '—'}</Badge>
-                    <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{leg.answer || '— (no answer)'}</span>
-                  </div>
+                  {#if isMemory}
+                    <!-- Memory: answer text only — the verdict lives in the Answer type column. -->
+                    <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{#if leg.answer}{@render hl(leg.answer)}{:else}— (no answer){/if}</span>
+                  {:else}
+                    <div class="flex items-start gap-1.5">
+                      <Badge variant={markVariant(leg.mark)} class="mt-0.5 font-mono" title={markTitle(leg.mark)}>{leg.mark || '—'}</Badge>
+                      <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{#if leg.answer}{@render hl(leg.answer)}{:else}— (no answer){/if}</span>
+                    </div>
+                  {/if}
                 {:else}
                   <span class="text-xs text-muted-foreground">—</span>
                 {/if}
@@ -2049,14 +2391,14 @@
                             {#if leg.reason}
                               <div class="flex flex-wrap gap-2">
                                 <span class="min-w-[64px] text-muted-foreground">Reason</span>
-                                <span class="flex-1 text-foreground">{leg.reason}</span>
+                                <span class="flex-1 text-foreground">{@render hl(leg.reason)}</span>
                               </div>
                             {/if}
                             {#if mode === 'recall'}
                               <div class="flex flex-wrap gap-2">
                                 <span class="min-w-[64px] text-muted-foreground">Evidence</span>
                                 {#if leg.evidence}
-                                  <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500">{leg.evidence}</span>
+                                  <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500">{@render hl(leg.evidence)}</span>
                                 {:else}
                                   <span class="italic text-muted-foreground">— none quoted</span>
                                 {/if}
@@ -2064,6 +2406,12 @@
                             {/if}
                           </div>
                         </details>
+                      {/if}
+                      <!-- Evidence recall (memory/recall leg, LoCoMo corpora): the gold evidence
+                           episodes for this question and which the recall covered. Below the Judge
+                           section, above the recalled memories. -->
+                      {#if mode === 'recall' && r.evidence_recall && r.evidence_recall.total > 0}
+                        {@render evidenceSection(r.evidence_recall)}
                       {/if}
                       <!-- Recalled memories: separate collapsible Facts / Entities / Episodes. -->
                       {@render recalledTable(leg.recalled ?? [])}
@@ -2108,6 +2456,57 @@
   {/if}
 {/snippet}
 
+<!-- Evidence recall (LoCoMo): the gold evidence episodes for the question, each marked matched or
+     missed against the recalled context. Own collapsible section (indigo header) below the Judge
+     section. Header carries the X/Y count; per-row badges show matched/missed + how (kind). -->
+{#snippet evidenceSection(ev: EvidenceRecall)}
+  <details open class="overflow-hidden rounded-md border">
+    <summary class="cursor-pointer select-none px-2 py-1 font-sans text-[11px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200">
+      Evidence recall ({ev.matched}/{ev.total})
+    </summary>
+    <div class="overflow-x-auto border-t">
+      <table class="w-full border-collapse font-sans text-xs">
+        <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th class="px-2 py-1 text-left">Status</th>
+            <th class="px-2 py-1 text-left">Evidence</th>
+            <th class="px-2 py-1 text-left">When</th>
+            <th class="px-2 py-1 text-left">Via</th>
+            <th class="px-2 py-1 text-right">Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each ev.items as it, i (it.episode_id || i)}
+            <tr class="border-t align-top">
+              <td class="whitespace-nowrap px-2 py-1">
+                {#if it.matched}
+                  <Badge variant="success">matched</Badge>
+                {:else}
+                  <Badge variant="destructive">missed</Badge>
+                {/if}
+              </td>
+              <td class="max-w-[32rem] px-2 py-1">
+                <!-- dia/short id (monospace) over the episode text snippet; speaker prefixed. -->
+                <span class="font-mono text-[11px] text-muted-foreground">{it.dia_id || it.short_id || it.episode_id}</span>
+                {#if it.text}
+                  <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold">{it.speaker}:</span> {/if}{it.text}</span>
+                {:else}
+                  <span class="block italic text-muted-foreground">(episode text unavailable)</span>
+                {/if}
+              </td>
+              <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{it.when ? fmtEpisodeDate(it.when) : '—'}</td>
+              <td class="px-2 py-1">
+                {#if it.matched_via}<Badge variant="outline" class="font-sans normal-case">{it.matched_via}</Badge>{:else}<span class="text-muted-foreground">—</span>{/if}
+              </td>
+              <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">{it.score != null ? it.score.toFixed(3) : '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </details>
+{/snippet}
+
 <!-- Reusable collapsible section: a <details> with a COLOR-CODED summary header (so Facts /
      Entities / Episodes are visually distinct and clearly separated) wrapping a scrollable table.
      Open by default; the disclosure triangle signals it collapses. ``headerCls`` is the per-kind
@@ -2141,9 +2540,9 @@
       {#each facts as f, i (i)}
         <tr class="border-t align-top">
           <td class="max-w-[24rem] px-2 py-1">
-            <span class="line-clamp-3" title={f.fact || f.memory}>{f.fact || f.memory}</span>
+            <span class="line-clamp-3" title={f.fact || f.memory}>{@render hlR(f.fact || f.memory)}</span>
           </td>
-          <td class="px-2 py-1 font-mono text-[11px] text-muted-foreground">{f.name || '—'}</td>
+          <td class="px-2 py-1 font-mono text-[11px] text-muted-foreground">{#if f.name}{@render hlR(f.name)}{:else}—{/if}</td>
           <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.valid_at || '—'}</td>
           <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.invalid_at || '—'}</td>
           <td class="px-2 py-1">
@@ -2177,8 +2576,8 @@
         <tr class="border-t align-top">
           <td class="max-w-[28rem] px-2 py-1">
             <!-- Entity name (bold) over its attribute summary; both clamped with full text on hover. -->
-            {#if e.name}<span class="font-semibold">{e.name}</span>{/if}
-            <span class="line-clamp-2 text-muted-foreground" title={e.summary || e.memory}>{e.summary || e.memory}</span>
+            {#if e.name}<span class="font-semibold">{@render hlR(e.name)}</span>{/if}
+            <span class="line-clamp-2 text-muted-foreground" title={e.summary || e.memory}>{@render hlR(e.summary || e.memory)}</span>
           </td>
           <td class="px-2 py-1">
             {#if e.entity_type}<Badge variant="outline" class="font-sans normal-case">{e.entity_type}</Badge>{:else}<span class="text-muted-foreground">—</span>{/if}
@@ -2206,7 +2605,7 @@
       {#each episodes as ep, i (i)}
         <tr class="border-t align-top">
           <td class="max-w-[32rem] px-2 py-1">
-            <span class="line-clamp-3" title={ep.memory}>{ep.memory}</span>
+            <span class="line-clamp-3" title={ep.memory}>{@render hlR(ep.memory)}</span>
           </td>
           <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{ep.valid_at ? fmtEpisodeDate(ep.valid_at) : '—'}</td>
           <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">

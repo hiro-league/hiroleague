@@ -25,6 +25,7 @@ import {
   type EvalLeg,
   type EvalQuestionLeg,
   type EvalQuestionPayload,
+  type EvidenceRecall,
   type EvalRunStateData,
   type EvalSetupProgressPayload,
   type EvalStartedPayload
@@ -91,6 +92,9 @@ export type EvalRow = {
   cost_usd: number; // whole-question cost (LLM + reranker), for the live running total
   is_negative_control: boolean; // abstaining is the correct outcome (drives abstain-is-correct)
   answered_at: string; // ISO-8601 UTC timestamp this question finished evaluating ('' if unknown)
+  // Evidence recall (LoCoMo corpora) — null on non-LoCoMo corpora and on live rows until the
+  // post-run results refresh (it's computed on the read path, not emitted by live events).
+  evidence_recall: EvidenceRecall | null;
 };
 
 function rowFromPayload(p: EvalQuestionPayload): EvalRow {
@@ -109,7 +113,8 @@ function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     gold: p.gold ?? '',
     cost_usd: p.cost_usd ?? 0,
     is_negative_control: p.is_negative_control ?? false,
-    answered_at: p.answered_at ?? ''
+    answered_at: p.answered_at ?? '',
+    evidence_recall: p.evidence_recall ?? null
   };
 }
 
@@ -126,6 +131,15 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   let buildGraph = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false));
   // Optional LLM judge step (grades the model's answer vs the ideal). Off = answers only.
   let judge = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeEvalJudge, false));
+  // Memory track — max questions evaluated concurrently (1 = serial). Mirrors the server's
+  // MAX_QUESTION_CONCURRENCY ceiling; the server clamps anyway, this just keeps the control honest.
+  const QUESTION_CONCURRENCY_MAX = 8;
+  let questionConcurrency = $state<number>(
+    Math.min(
+      QUESTION_CONCURRENCY_MAX,
+      Math.max(1, readEvalInt(PREF_KEYS.knowledgeEvalQuestionConcurrency, 1))
+    )
+  );
 
   // Memory track — explicit graph wipe BEFORE remembering. Decoupled from `ingestSynthetic`
   // (Remember) so a corpus can be built across appended batches without each wiping the last.
@@ -749,6 +763,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
         req.clear_before = clearBefore;
         req.episode_offset = Math.max(0, episodeFrom - 1);
         req.episode_limit = episodeTo > 0 ? Math.max(0, episodeTo - episodeFrom + 1) : null;
+        req.question_concurrency = questionConcurrency;
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
@@ -850,6 +865,20 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     set judge(v: boolean) {
       judge = v;
       writeLocalBoolean(PREF_KEYS.knowledgeEvalJudge, v);
+    },
+    // Memory track — parallel-question cap (1 = serial). Clamped to the server ceiling here
+    // too so a hand-typed value never round-trips just to be clamped server-side.
+    get questionConcurrency() {
+      return questionConcurrency;
+    },
+    set questionConcurrency(v: number) {
+      questionConcurrency = Number.isFinite(v)
+        ? Math.min(QUESTION_CONCURRENCY_MAX, Math.max(1, Math.floor(v)))
+        : 1;
+      writeLocalString(PREF_KEYS.knowledgeEvalQuestionConcurrency, String(questionConcurrency));
+    },
+    get questionConcurrencyMax() {
+      return QUESTION_CONCURRENCY_MAX;
     },
     get status() {
       return status;

@@ -326,6 +326,10 @@ export type PreferenceSection = {
 export type PreferencesPayload = {
   preferences: WorkspacePreferences;
   sections: PreferenceSection[];
+  // Dotted preference path → built-in default text for the editable system prompts. Powers the
+  // "Restore default" button on prompt editors: a cleared prompt persists "" and the backend
+  // pydantic default only fills ABSENT keys, so the default text is otherwise unrecoverable here.
+  prompt_defaults: Record<string, string>;
 };
 
 export type PreferencesPatchPayload = PreferencesPayload & {
