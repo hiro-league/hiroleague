@@ -82,6 +82,35 @@ async def test_question_rows_upsert_by_index(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_memory_row_keeps_evidence_recall_live_but_strips_it_on_disk(tmp_path: Path) -> None:
+    """Live evidence_recall (LoCoMo) rides the question_completed event for the EV column, so the
+    in-memory replay row keeps it — but it must NOT be persisted (the results read recomputes it
+    from the sidecar; its `items` carry full episode text we don't want duplicated in row_json)."""
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    reg = EvalRunRegistry()
+    t = asyncio.create_task(asyncio.sleep(0))
+    reg.begin_run(tmp_path, "rid", corpus_source="loco", modes=["recall"], task=t, track="memory")
+    await t
+    await reg._on_event(_ev(KNOWLEDGE_EVAL_STARTED, tmp_path, {"run_id": "rid", "track": "memory", "total_questions": 1}))
+    ev = {"matched": 1, "total": 1, "items": [{"episode_id": "e1", "text": "big body", "matched": True}]}
+    row = {
+        "run_id": "rid", "index": 0, "total": 1, "id": "q0", "cost_usd": 0.0,
+        "legs": {"recall": {"mode": "recall", "mark": "✓", "recalled": []}},
+        "evidence_recall": ev,
+    }
+    await reg._on_event(_ev(KNOWLEDGE_EVAL_QUESTION_COMPLETED, tmp_path, row))
+
+    state = reg.get_run(tmp_path)
+    assert state is not None
+    # In-memory replay row carries it (so a mid-run reconnect shows the EV column).
+    assert state.rows[0]["evidence_recall"] == ev
+    # Persisted row drops it (recomputed on read).
+    saved = get_eval_result_store(tmp_path).read_corpus("loco")
+    assert "evidence_recall" not in saved["q0"]
+
+
+@pytest.mark.asyncio
 async def test_stale_run_events_ignored(tmp_path: Path) -> None:
     reg = EvalRunRegistry()
     t = asyncio.create_task(asyncio.sleep(0))

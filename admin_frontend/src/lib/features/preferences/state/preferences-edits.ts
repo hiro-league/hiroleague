@@ -163,6 +163,16 @@ export function editsForSave(
     draft.graph.search_scope
   );
   add(
+    'graph.entity_ontology',
+    baseline.graph.entity_ontology,
+    draft.graph.entity_ontology
+  );
+  add(
+    'graph.custom_extraction_instructions',
+    baseline.graph.custom_extraction_instructions,
+    draft.graph.custom_extraction_instructions
+  );
+  add(
     'graph.sim_min_score',
     baseline.graph.sim_min_score,
     draft.graph.sim_min_score
@@ -201,6 +211,43 @@ export function editsForSave(
     'graph.eval.judge_prompt',
     baseline.graph.eval.judge_prompt,
     draft.graph.eval.judge_prompt
+  );
+  // Separated eval answer + judge models / tuning profiles (null model → fall back to the
+  // answering model). Each enumerated so a UI edit actually persists.
+  add(
+    'graph.eval.answer_model',
+    baseline.graph.eval.answer_model,
+    draft.graph.eval.answer_model || null
+  );
+  add(
+    'graph.eval.answer_tuning_profile',
+    baseline.graph.eval.answer_tuning_profile,
+    draft.graph.eval.answer_tuning_profile
+  );
+  add(
+    'graph.eval.judge_model',
+    baseline.graph.eval.judge_model,
+    draft.graph.eval.judge_model || null
+  );
+  add(
+    'graph.eval.judge_tuning_profile',
+    baseline.graph.eval.judge_tuning_profile,
+    draft.graph.eval.judge_tuning_profile
+  );
+  add(
+    'graph.eval.show_event_time',
+    baseline.graph.eval.show_event_time,
+    draft.graph.eval.show_event_time
+  );
+  add(
+    'graph.eval.show_expired_at',
+    baseline.graph.eval.show_expired_at,
+    draft.graph.eval.show_expired_at
+  );
+  add(
+    'graph.eval.show_superseded',
+    baseline.graph.eval.show_superseded,
+    draft.graph.eval.show_superseded
   );
   add(
     'graph.view.large_type_threshold',

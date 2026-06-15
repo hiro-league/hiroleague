@@ -511,6 +511,13 @@ KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
 #   "edges_and_nodes"       → + EntityNode.summary  (closes the "Misho turned 50" gap)
 #   "edges_nodes_episodes"  → + EpisodicNode bodies (last-resort BM25 recall over raw turn text)
 KnowledgeGraphSearchScope = Literal["edges", "edges_and_nodes", "edges_nodes_episodes"]
+# Entity-extraction ontology at INGEST (built into the graph, so a change needs a re-ingest):
+#   "open"  → pass no entity_types to Graphiti; it extracts freely (everything → base ``Entity``).
+#             Broadest recall — captures activities/interests/media/preferences the typed list omits
+#             (e.g. "surfing", "fantasy genre", a book title). Matches the Zep/Graphiti LoCoMo setup.
+#   "typed" → pin the 5-type personal-KG vocabulary (Person/Place/Organization/Event/Object); precise
+#             but drops first-person activity/preference facts that don't fit those types.
+KnowledgeGraphEntityOntology = Literal["open", "typed"]
 # Graph observability tier for graph ingest + retrieval (docs §12.2). Single dial, supersets:
 #   "off"    → no graphiti ledger rows / tracer / usage sinks (spare CPU; graphiti cost NOT folded).
 #   "ledger" → ONE priced roll-up row per episode (ingest) + per search (rerank); cost folds. PROD.
@@ -765,6 +772,25 @@ class GraphEvalPreferences(BaseModel):
 
     memory_answer_prompt: str = DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
     judge_prompt: str = DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
+    # Answer + judge each get their OWN model + tuning profile (split from the single shared
+    # answering model the eval used before). ``*_model`` of ``None`` falls back through
+    # ``knowledge.answering.model`` → ``llm.default_chat`` (the prior behavior), so an unset
+    # workspace is unchanged. The defaults reuse the ``knowledge_answering`` tuning profile —
+    # set them apart to tune the answer step and the judge independently. The memory-eval answer
+    # step uses ``answer_*``; the LLM judge (both tracks) uses ``judge_*``.
+    answer_model: str | None = None
+    answer_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    judge_model: str | None = None
+    judge_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
+    # line carries, and whether episodes keep their [date] prefix. ``show_event_time`` (valid_at,
+    # labeled "event_time") also governs the episode [date]; ``show_expired_at`` (invalid_at) and
+    # ``show_superseded`` annotate supersession. Defaults = a single timestamp per fact (Zep-style):
+    # event_time on, the rest off. Applied identically to the answer, judge, and evidence-check
+    # renders of a question (see eval_judge.RecallRenderOptions).
+    show_event_time: bool = True
+    show_expired_at: bool = False
+    show_superseded: bool = False
 
 
 class GraphPreferences(BaseModel):
@@ -797,6 +823,24 @@ class GraphPreferences(BaseModel):
     # miss; precision suffers. See :meth:`_validate_search_scope_recipe` for the MMR×episodes
     # incompatibility (graphiti-core's ``EpisodeReranker`` has no MMR).
     search_scope: KnowledgeGraphSearchScope = "edges"
+    # Extraction ontology at ingest. "open" (default) extracts freely (broadest recall — captures
+    # activities/interests/media/preferences); "typed" pins the 5-type vocabulary (precise, but
+    # drops facts that don't fit). Changing this needs a re-ingest to rebuild the graph.
+    entity_ontology: KnowledgeGraphEntityOntology = "open"
+    # Domain-generic extra instructions injected verbatim into Graphiti's node + edge extraction
+    # prompts (graphiti-core's ``custom_extraction_instructions`` slot — a first-class add_episode
+    # param, not a prompt hack). Defaults to a nudge for the no-edge class we keep dropping —
+    # first-person preferences/goals/activities — phrased generically (true for any personal-memory
+    # corpus, not LoCoMo-specific). Clear it to disable. Applied at ingest, so changing it needs a
+    # re-ingest to take effect. Bounded so a runaway string can't blow the extraction token budget.
+    custom_extraction_instructions: str = Field(
+        default=(
+            "Capture first-person preferences, goals, habits and activities as facts "
+            "even when only the speaker is named; treat the activity/topic/object as "
+            "the second entity."
+        ),
+        max_length=2000,
+    )
     # Cosine *candidate* floor for the fact-search leg (maps to Graphiti
     # ``EdgeSearchConfig.sim_min_score``). A fact only becomes a search candidate if its
     # embedding similarity to the query clears this. Graphiti hardcodes 0.6 — too strict
@@ -948,6 +992,8 @@ class WorkspacePreferences(BaseModel):
         for graph_profile_id in (
             self.graph.extraction_tuning_profile,
             self.graph.small_tuning_profile,
+            self.graph.eval.answer_tuning_profile,
+            self.graph.eval.judge_tuning_profile,
         ):
             if graph_profile_id not in self.tuning_profiles:
                 raise ValueError(
@@ -1449,6 +1495,45 @@ def resolve_graphiti_small_model(
         workspace_path,
         explicit_model=explicit,
         tuning_profile_id=prefs.graph.small_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_eval_answer_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the memory-eval ANSWER model — its own model override + tuning profile, separate
+    from the judge. Model chain: ``graph.eval.answer_model`` → ``knowledge.answering.model`` →
+    ``llm.default_chat`` (mirrors the graphiti tiers)."""
+    return _resolve_graphiti_model(
+        prefs,
+        workspace_path,
+        explicit_model=prefs.graph.eval.answer_model,
+        tuning_profile_id=prefs.graph.eval.answer_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_eval_judge_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the eval JUDGE model (both tracks) — its own model override + tuning profile,
+    separate from the answer. Same fallback chain as :func:`resolve_eval_answer_llm`."""
+    return _resolve_graphiti_model(
+        prefs,
+        workspace_path,
+        explicit_model=prefs.graph.eval.judge_model,
+        tuning_profile_id=prefs.graph.eval.judge_tuning_profile,
         workspace_id=workspace_id,
         credential_store=credential_store,
     )

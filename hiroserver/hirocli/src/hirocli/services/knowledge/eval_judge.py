@@ -69,6 +69,22 @@ class JudgeVerdict:
     evidence: str = ""
 
 
+@dataclass(frozen=True)
+class RecallRenderOptions:
+    """Which per-fact temporal annotations the recalled-context renderer emits.
+
+    Mirrors the ``graph.eval.show_*`` prefs. Each fact's ``event_time`` (valid_at), ``expired_at``
+    (invalid_at), and ``SUPERSEDED`` flag is independently shown/hidden; ``show_event_time`` ALSO
+    governs the episode ``[date]`` prefix (decision: one date toggle covers both kinds). Field
+    names match the labels the answerer prompt references (Zep-style ``event_time``/``expired_at``,
+    not the old ``valid → invalid`` range). Defaults = the pref defaults: event_time on, expired_at
+    and superseded off (a single timestamp per fact)."""
+
+    show_event_time: bool = True
+    show_expired_at: bool = False
+    show_superseded: bool = False
+
+
 class _JudgeOutput(BaseModel):
     """Structured judge response (LLM-filled).
 
@@ -116,12 +132,12 @@ _RECALL_SECTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _format_recall_item(hit: dict[str, Any]) -> str:
+def _format_recall_item(hit: dict[str, Any], render: RecallRenderOptions) -> str:
     """One recalled item → a prompt line WITH useful metadata, but NOT the retrieval score.
 
     Score is a ranking artifact that doesn't help the model answer (and can bias it), so it stays
     in the ledger/UI only. Metadata kept: relationship + temporal validity (facts), type (entities),
-    timestamp (episodes)."""
+    timestamp (episodes). ``render`` toggles which temporal annotations appear (graph.eval.show_*)."""
     kind = str(hit.get("kind") or "fact")
     if kind == "entity":
         name = str(hit.get("name") or "").strip()
@@ -132,7 +148,9 @@ def _format_recall_item(hit: dict[str, Any]) -> str:
     if kind == "episode":
         when = str(hit.get("valid_at") or "").strip()
         body = str(hit.get("memory") or "").strip()
-        return f"[{when}] {body}" if when else body
+        # The episode [date] prefix is governed by the same show_event_time toggle as a fact's
+        # event_time (decision: one date toggle for both kinds).
+        return f"[{when}] {body}" if (when and render.show_event_time) else body
     # fact (default): raw fact + relationship + temporal validity/supersession.
     fact = str(hit.get("fact") or hit.get("memory") or "").strip()
     rel = str(hit.get("name") or "").strip()
@@ -141,17 +159,27 @@ def _format_recall_item(hit: dict[str, Any]) -> str:
     bits: list[str] = []
     if rel:
         bits.append(rel)
-    if valid_at or invalid_at:
-        bits.append(f"valid {valid_at or '?'} → {invalid_at or 'present'}")
-    if hit.get("superseded"):
+    # Temporal annotations are independently toggleable (graph.eval.show_*), and renamed from the
+    # old "valid X → Y" range to event_time/expired_at so the labels match the answerer prompt.
+    if render.show_event_time and valid_at:
+        bits.append(f"event_time: {valid_at}")
+    if render.show_expired_at and invalid_at:
+        bits.append(f"expired_at: {invalid_at}")
+    if render.show_superseded and hit.get("superseded"):
         bits.append("SUPERSEDED")
     return f"{fact} [{' · '.join(bits)}]" if bits else fact
 
 
-def format_recall_context(hits: "list[dict[str, Any]] | None") -> str:
+def format_recall_context(
+    hits: "list[dict[str, Any]] | None", render: RecallRenderOptions | None = None
+) -> str:
     """Render recalled hits into markdown sections (Relevant Facts / Entities / Messages) — only
     the kinds that exist, each item with metadata (no score). Shared by the answer + judge prompts
-    so both see the SAME structured context. Empty ⇒ ``""`` (callers supply their own fallback)."""
+    so both see the SAME structured context. ``render`` (graph.eval.show_*) toggles the temporal
+    annotations and MUST be the same across the answer, judge, and evidence-check calls of one
+    question, or the judge's evidence substring check no longer matches what the model saw. Empty
+    ⇒ ``""`` (callers supply their own fallback)."""
+    render = render or RecallRenderOptions()
     items = list(hits or [])
     if not items:
         return ""
@@ -163,7 +191,7 @@ def format_recall_context(hits: "list[dict[str, Any]] | None") -> str:
         rows = by_kind.get(kind)
         if not rows:
             continue
-        lines = "\n".join(f"- {_format_recall_item(h)}" for h in rows)
+        lines = "\n".join(f"- {_format_recall_item(h, render)}" for h in rows)
         # Headings are markdown ("### Relevant Facts") — no trailing colon.
         sections.append(f"{heading}\n{lines}")
     return "\n\n".join(sections)
@@ -240,6 +268,7 @@ async def answer_from_context(
     context: "list[dict[str, Any]]",
     sink: Any | None = None,
     instructions: str | None = None,
+    render: RecallRenderOptions | None = None,
 ) -> str:
     """Brief answer to ``question`` grounded ONLY in ``context`` — the recalled hits as STRUCTURED
     rows (``{kind, memory, …metadata}``), rendered into Relevant Facts / Entities / Messages
@@ -258,7 +287,7 @@ async def answer_from_context(
     from hirocli.runtime.agent_graph.base import _normalize_reply_content
 
     instr = (instructions or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-    recalled = format_recall_context(context) or "(no elements recalled)"
+    recalled = format_recall_context(context, render) or "(no elements recalled)"
     human = (
         f"{instr}\n\n"
         f"## User Question\n{question}\n\n"
@@ -294,17 +323,22 @@ def _normalize_text(text: str) -> str:
     return " ".join((text or "").lower().split())
 
 
-def _evidence_supported(evidence: str, context: "list[dict[str, Any]] | None") -> bool:
+def _evidence_supported(
+    evidence: str,
+    context: "list[dict[str, Any]] | None",
+    render: RecallRenderOptions | None = None,
+) -> bool:
     """Whether the judge's quoted ``evidence`` actually occurs in the recalled ``context``.
 
     Whitespace/case-insensitive substring match against both the rendered context block AND each
     recalled item's ``memory`` text (a flat judge may quote one item rather than the whole block).
     Empty evidence ⇒ unsupported. This is the deterministic backstop that stops the judge from
-    claiming ``recall_sufficient`` without grounding (the locomo conv-43 false positives)."""
+    claiming ``recall_sufficient`` without grounding (the locomo conv-43 false positives).
+    ``render`` MUST match what the judge saw so the block-level match uses the same annotations."""
     ev = _normalize_text(evidence)
     if not ev:
         return False
-    if ev in _normalize_text(format_recall_context(context)):
+    if ev in _normalize_text(format_recall_context(context, render)):
         return True
     return any(ev in _normalize_text(str(h.get("memory") or "")) for h in (context or []))
 
@@ -320,6 +354,7 @@ async def judge_answer(
     is_negative_control: bool = False,
     sink: Any | None = None,
     system_prompt: str | None = None,
+    render: RecallRenderOptions | None = None,
 ) -> JudgeVerdict:
     """Grade ``answer`` against the ideal ``expected_answer`` → :class:`JudgeVerdict`.
 
@@ -344,7 +379,7 @@ async def judge_answer(
 
     sys_prompt = (system_prompt or "").strip() or DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
     control = "YES — declining is the correct outcome." if is_negative_control else "no"
-    recalled = format_recall_context(context)
+    recalled = format_recall_context(context, render)
     # Model Answer BEFORE the recalled elements: the verdict is Answer-vs-Ideal, so the judge
     # meets the graded material first; the elements are auxiliary (evidence/recall_sufficient).
     context_block = (
@@ -376,7 +411,9 @@ async def judge_answer(
         # Verify the judge's quote is a real recalled line. Only a verified-present quote is kept as
         # `evidence` (so the UI never shows a hallucinated quote); an unverifiable quote is dropped.
         evidence_raw = str(getattr(parsed, "evidence", "") or "").strip()
-        evidence = evidence_raw if (context and _evidence_supported(evidence_raw, context)) else ""
+        evidence = (
+            evidence_raw if (context and _evidence_supported(evidence_raw, context, render)) else ""
+        )
         # Backstop: recall_sufficient may only stand if that quote checked out — catches flat-model
         # false positives that CLAIM the context was sufficient without grounding (locomo conv-43).
         # Only when context was shown; the knowledge track passes none, so its default-true stands.
@@ -408,6 +445,7 @@ async def judge_answer(
 __all__ = [
     "JudgeVerdict",
     "MEMORY_EVAL_ANSWER_SYSTEM_PROMPT",
+    "RecallRenderOptions",
     "answer_from_context",
     "format_recall_context",
     "judge_answer",

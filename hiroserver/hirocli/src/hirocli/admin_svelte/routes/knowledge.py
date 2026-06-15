@@ -1122,6 +1122,10 @@ async def eval_run(
                             workspace_path,
                             set_id=corpus_id,
                             corpus_path=Path(corpus_path),
+                            # questions_path lets the runner load the LoCoMo sidecar and emit
+                            # per-question evidence recall LIVE (EV column / fold) instead of only
+                            # on the post-run results refresh. Empty on a setup-only batch.
+                            questions_path=Path(questions_path) if questions_path else None,
                             questions=questions,
                             run_id=run_id,
                             remember=body.ingest_synthetic,

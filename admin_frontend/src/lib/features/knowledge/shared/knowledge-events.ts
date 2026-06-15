@@ -148,6 +148,11 @@ export type EvalCategoryStat = {
   score: Record<string, number>;
   // Judged rows the judge flagged recall-sufficient (the recalled context held the answer).
   recall_ok: Record<string, number>;
+  // Evidence recall (memory / LoCoMo): gold-evidence episodes matched / total, summed over this
+  // bucket's rows. Single recall-leg concept (not per-leg). Absent / 0 on the knowledge track and
+  // on non-LoCoMo memory corpora.
+  evidence_matched?: number;
+  evidence_total?: number;
 };
 
 /** Payload shape of ``knowledge.eval.completed`` events (aggregate summary).

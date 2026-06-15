@@ -208,7 +208,7 @@ def judge_on(monkeypatch):
     import hirocli.services.knowledge.eval_runner as er
     from hirocli.services.knowledge.eval_scoring import MARK_FAIL, MARK_PASS
 
-    monkeypatch.setattr(er, "build_answer_model", lambda ws: (object(), "fake:model"))
+    monkeypatch.setattr(er, "build_eval_judge_model", lambda ws: (object(), "fake:model"))
 
     async def _fake_judge(model, model_id, *, question, answer, expected_answer,
                           context=None, is_negative_control=False, sink=None, system_prompt=""):

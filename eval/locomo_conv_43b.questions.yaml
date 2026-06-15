@@ -1,0 +1,1589 @@
+# LoCoMo conv-43 question bank converted for Hiro memory eval.
+# Source metadata lives in locomo_conv_43b.locomo.yaml and is keyed by question id.
+- id: locomo_conv_43b_q001_c1
+  category: multi_hop
+  difficulty: hard
+  question: what are John's goals with regards to his basketball career?
+  expected_answer: improve shooting percentage, win a championship
+  requires:
+  - graph
+- id: locomo_conv_43b_q002_c1
+  category: multi_hop
+  difficulty: hard
+  question: What are John's goals for his career that are not related to his basketball skills?
+  expected_answer: get endorsements, build his brand, do charity work
+  requires:
+  - graph
+- id: locomo_conv_43b_q003_c1
+  category: multi_hop
+  difficulty: hard
+  question: What items does John collect?
+  expected_answer: sneakers, fantasy movie DVDs, jerseys
+  requires:
+  - graph
+- id: locomo_conv_43b_q004_c3
+  category: open_domain
+  difficulty: hard
+  question: Would Tim enjoy reading books by C. S. Lewis or John Greene?
+  expected_answer: C. S.Lewis
+  requires:
+  - world
+- id: locomo_conv_43b_q005_c1
+  category: multi_hop
+  difficulty: hard
+  question: What books has Tim read?
+  expected_answer: Harry Potter, Game of Thrones, the Name of the Wind, The Alchemist, The Hobbit, A Dance with Dragons, and the Wheel of Time.
+  requires:
+  - graph
+- id: locomo_conv_43b_q006_c3
+  category: open_domain
+  difficulty: hard
+  question: Based on Tim's collections, what is a shop that he would enjoy visiting in New York city?
+  expected_answer: House of MinaLima
+  requires:
+  - world
+- id: locomo_conv_43b_q007_c2
+  category: temporal
+  difficulty: hard
+  question: In which month's game did John achieve a career-high score in points?
+  expected_answer: June 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q008_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which geographical locations has Tim been to?
+  expected_answer: California, London, the Smoky Mountains
+  requires:
+  - graph
+- id: locomo_conv_43b_q009_c3
+  category: open_domain
+  difficulty: hard
+  question: Which outdoor gear company likely signed up John for an endorsement deal?
+  expected_answer: Under Armour
+  requires:
+  - world
+- id: locomo_conv_43b_q010_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which endorsement deals has John been offered?
+  expected_answer: basketball shoes and gear deal with Nike, potential sponsorship with Gatorade, Moxie a popular beverage company, outdoor gear company
+  requires:
+  - graph
+- id: locomo_conv_43b_q011_c2
+  category: temporal
+  difficulty: hard
+  question: When was John in Seattle for a game?
+  expected_answer: early August, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q012_c1
+  category: multi_hop
+  difficulty: hard
+  question: What sports does John like besides basketball?
+  expected_answer: surfing
+  requires:
+  - graph
+- id: locomo_conv_43b_q013_c2
+  category: temporal
+  difficulty: hard
+  question: What year did John start surfing?
+  expected_answer: '2018'
+  requires:
+  - temporal
+- id: locomo_conv_43b_q014_c1
+  category: multi_hop
+  difficulty: hard
+  question: What does Tim do to escape reality?
+  expected_answer: Read fantasy books.
+  requires:
+  - graph
+- id: locomo_conv_43b_q015_c1
+  category: multi_hop
+  difficulty: hard
+  question: What kind of writing does Tim do?
+  expected_answer: comments on favorite books in a fantasy literature forum, articles on fantasy novels, studying characters, themes, and making book recommendations, writing a fantasy novel
+  requires:
+  - graph
+- id: locomo_conv_43b_q016_c3
+  category: open_domain
+  difficulty: hard
+  question: Who is Anthony?
+  expected_answer: likely John's friend, colleague or family
+  requires:
+  - world
+- id: locomo_conv_43b_q017_c2
+  category: temporal
+  difficulty: hard
+  question: After how many weeks did Tim reconnect with the fellow Harry Potter fan from California?
+  expected_answer: three weeks
+  requires:
+  - temporal
+- id: locomo_conv_43b_q018_c1
+  category: multi_hop
+  difficulty: hard
+  question: How many games has John mentioned winning?
+  expected_answer: '6'
+  requires:
+  - graph
+- id: locomo_conv_43b_q019_c1
+  category: multi_hop
+  difficulty: hard
+  question: What authors has Tim read books from?
+  expected_answer: J.K. Rowling, R.R. Martin, Patrick Rothfuss, Paulo Coelho, and J. R. R. Tolkien.
+  requires:
+  - graph
+- id: locomo_conv_43b_q020_c3
+  category: open_domain
+  difficulty: hard
+  question: What is a prominent charity organization that John might want to work with and why?
+  expected_answer: Good Sports, because they work with Nike, Gatorade, and Under Armour and they aim toprovide youth sports opportunities for kids ages 3-18 in high-need communities.
+  requires:
+  - world
+- id: locomo_conv_43b_q021_c2
+  category: temporal
+  difficulty: hard
+  question: Which city was John in before traveling to Chicago?
+  expected_answer: Seattle
+  requires:
+  - temporal
+- id: locomo_conv_43b_q022_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which US cities does John mention visiting to Tim?
+  expected_answer: Seattle, Chicago, New York
+  requires:
+  - graph
+- id: locomo_conv_43b_q023_c2
+  category: temporal
+  difficulty: hard
+  question: When did John meet with his teammates after returning from Chicago?
+  expected_answer: August 15, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q024_c2
+  category: temporal
+  difficulty: hard
+  question: When is Tim attending a book conference?
+  expected_answer: September 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q025_c2
+  category: temporal
+  difficulty: hard
+  question: Where was John between August 11 and August 15 2023?
+  expected_answer: Chicago
+  requires:
+  - temporal
+- id: locomo_conv_43b_q026_c1
+  category: multi_hop
+  difficulty: hard
+  question: What similar sports collectible do Tim and John own?
+  expected_answer: signed basketball
+  requires:
+  - graph
+- id: locomo_conv_43b_q027_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which TV series does Tim mention watching?
+  expected_answer: That, Wheel of Time
+  requires:
+  - graph
+- id: locomo_conv_43b_q028_c3
+  category: open_domain
+  difficulty: hard
+  question: Which popular time management technique does Tim use to prepare for exams?
+  expected_answer: Pomodoro technique
+  requires:
+  - world
+- id: locomo_conv_43b_q029_c3
+  category: open_domain
+  difficulty: hard
+  question: Which popular music composer's tunes does Tim enjoy playing on the piano?
+  expected_answer: John Williams
+  requires:
+  - world
+- id: locomo_conv_43b_q030_c1
+  category: multi_hop
+  difficulty: hard
+  question: What schools did John play basketball in and how many years was he with his team during high school?
+  expected_answer: Middle school, high school, and college and he was with his high school team for 4 years.
+  requires:
+  - graph
+- id: locomo_conv_43b_q031_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which cities has John been to?
+  expected_answer: Seattle, Chicago, New York, and Paris.
+  requires:
+  - graph
+- id: locomo_conv_43b_q032_c2
+  category: temporal
+  difficulty: hard
+  question: What month did Tim plan on going to Universal Studios?
+  expected_answer: September, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q033_c3
+  category: open_domain
+  difficulty: hard
+  question: Which US states might Tim be in during September 2023 based on his plans of visiting Universal Studios?
+  expected_answer: California or Florida
+  requires:
+  - world
+- id: locomo_conv_43b_q034_c2
+  category: temporal
+  difficulty: hard
+  question: When does John plan on traveling with his team on a team trip?
+  expected_answer: October, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q035_c3
+  category: open_domain
+  difficulty: hard
+  question: What could John do after his basketball career?
+  expected_answer: become a basketball coach since he likes giving back and leadership
+  requires:
+  - world
+- id: locomo_conv_43b_q036_c1
+  category: multi_hop
+  difficulty: hard
+  question: What outdoor activities does John enjoy?
+  expected_answer: Hiking, surfing
+  requires:
+  - graph
+- id: locomo_conv_43b_q037_c1
+  category: multi_hop
+  difficulty: hard
+  question: Who is Tim and John's favorite basketball player?
+  expected_answer: LeBron James
+  requires:
+  - graph
+- id: locomo_conv_43b_q038_c2
+  category: temporal
+  difficulty: hard
+  question: Which week did Tim visit the UK for the Harry Potter Conference?
+  expected_answer: The week before October 13th, 2023.
+  requires:
+  - temporal
+- id: locomo_conv_43b_q039_c1
+  category: multi_hop
+  difficulty: hard
+  question: which country has Tim visited most frequently in his travels?
+  expected_answer: UK
+  requires:
+  - graph
+- id: locomo_conv_43b_q040_c2
+  category: temporal
+  difficulty: hard
+  question: What year did Tim go to the Smoky Mountains?
+  expected_answer: '2022'
+  requires:
+  - temporal
+- id: locomo_conv_43b_q041_c2
+  category: temporal
+  difficulty: hard
+  question: Has Tim been to North Carolina and/or Tennesee states in the US?
+  expected_answer: 'Yes'
+  requires:
+  - temporal
+- id: locomo_conv_43b_q042_c1
+  category: multi_hop
+  difficulty: hard
+  question: What kind of fiction stories does Tim write?
+  expected_answer: Fantasy stories with plot twists
+  requires:
+  - graph
+- id: locomo_conv_43b_q043_c1
+  category: multi_hop
+  difficulty: hard
+  question: What has John cooked?
+  expected_answer: Soup, a slow cooker meal, and honey garlic chicken with roasted veg.
+  requires:
+  - graph
+- id: locomo_conv_43b_q044_c1
+  category: multi_hop
+  difficulty: hard
+  question: What does John like about Lebron James?
+  expected_answer: His heart, determination, skills, and leadership.
+  requires:
+  - graph
+- id: locomo_conv_43b_q045_c2
+  category: temporal
+  difficulty: hard
+  question: When did John and his wife go on a European vacation?
+  expected_answer: November, 2023.
+  requires:
+  - temporal
+- id: locomo_conv_43b_q046_c2
+  category: temporal
+  difficulty: hard
+  question: Which country was Tim visiting in the second week of November?
+  expected_answer: UK
+  requires:
+  - temporal
+- id: locomo_conv_43b_q047_c2
+  category: temporal
+  difficulty: hard
+  question: Where was Tim in the week before 16 November 2023?
+  expected_answer: UK
+  requires:
+  - temporal
+- id: locomo_conv_43b_q048_c2
+  category: temporal
+  difficulty: hard
+  question: When did John get married at a greenhouse?
+  expected_answer: last week of September 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q049_c1
+  category: multi_hop
+  difficulty: hard
+  question: When did John get an ankle injury in 2023?
+  expected_answer: around November 16, 2023
+  requires:
+  - graph
+- id: locomo_conv_43b_q050_c1
+  category: multi_hop
+  difficulty: hard
+  question: How many times has John injured his ankle?
+  expected_answer: two times
+  requires:
+  - graph
+- id: locomo_conv_43b_q051_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which book was John reading during his recovery from an ankle injury?
+  expected_answer: The Alchemist
+  requires:
+  - graph
+- id: locomo_conv_43b_q052_c3
+  category: open_domain
+  difficulty: hard
+  question: What kind of yoga for building core strength might John benefit from?
+  expected_answer: Hatha Yoga
+  requires:
+  - world
+- id: locomo_conv_43b_q053_c1
+  category: multi_hop
+  difficulty: hard
+  question: What does John do to supplement his basketball training?
+  expected_answer: Yoga, strength training
+  requires:
+  - graph
+- id: locomo_conv_43b_q054_c3
+  category: open_domain
+  difficulty: hard
+  question: What other exercises can help John with his basketball performance?
+  expected_answer: Sprinting, long-distance running, and boxing.
+  requires:
+  - world
+- id: locomo_conv_43b_q055_c2
+  category: temporal
+  difficulty: hard
+  question: When did John take a trip to the Rocky Mountains?
+  expected_answer: '2022'
+  requires:
+  - temporal
+- id: locomo_conv_43b_q056_c2
+  category: temporal
+  difficulty: hard
+  question: When did John start playing professionally?
+  expected_answer: May, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q057_c2
+  category: temporal
+  difficulty: hard
+  question: When did Tim start playing the violin?
+  expected_answer: August 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q058_c1
+  category: multi_hop
+  difficulty: hard
+  question: What instruments does Tim play?
+  expected_answer: piano, violin
+  requires:
+  - graph
+- id: locomo_conv_43b_q059_c2
+  category: temporal
+  difficulty: hard
+  question: When did John attend the Harry Potter trivia?
+  expected_answer: August 2023.
+  requires:
+  - temporal
+- id: locomo_conv_43b_q060_c1
+  category: multi_hop
+  difficulty: hard
+  question: Which career-high performances did John achieve in 2023?
+  expected_answer: highest point score, highest assist
+  requires:
+  - graph
+- id: locomo_conv_43b_q061_c2
+  category: temporal
+  difficulty: hard
+  question: When did John achieve a career-high assist performance?
+  expected_answer: December 11, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q062_c1
+  category: multi_hop
+  difficulty: hard
+  question: What books has John read?
+  expected_answer: inpsiring book on dreaming big, The Alchemist, fantasy series, non-fiction books on personal development, Dune
+  requires:
+  - graph
+- id: locomo_conv_43b_q063_c1
+  category: multi_hop
+  difficulty: hard
+  question: What does John do to share his knowledge?
+  expected_answer: gives seminars, mentors younger players.
+  requires:
+  - graph
+- id: locomo_conv_43b_q064_c2
+  category: temporal
+  difficulty: hard
+  question: When did John organize a basketball camp for kids?
+  expected_answer: summer 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q065_c2
+  category: temporal
+  difficulty: hard
+  question: Which month was John in Italy?
+  expected_answer: December, 2023
+  requires:
+  - temporal
+- id: locomo_conv_43b_q066_c1
+  category: multi_hop
+  difficulty: hard
+  question: What fantasy movies does Tim like?
+  expected_answer: Lord of the Rings, Harry Potter, and Star Wars.
+  requires:
+  - graph
+- id: locomo_conv_43b_q067_c3
+  category: open_domain
+  difficulty: hard
+  question: What is a Star Wars book that Tim might enjoy?
+  expected_answer: 'Star Wars: Jedi Apprentice by Judy Blundell and David Farland. It is a highly rated and immersive series about his favorite movies.'
+  requires:
+  - world
+- id: locomo_conv_43b_q068_c3
+  category: open_domain
+  difficulty: hard
+  question: What would be a good hobby related to his travel dreams for Tim to pick up?
+  expected_answer: Writing a travel blog.
+  requires:
+  - world
+- id: locomo_conv_43b_q069_c2
+  category: temporal
+  difficulty: hard
+  question: What day did Tim get into his study abroad program?
+  expected_answer: Januarty 5, 2024
+  requires:
+  - temporal
+- id: locomo_conv_43b_q070_c2
+  category: temporal
+  difficulty: hard
+  question: When will Tim leave for Ireland?
+  expected_answer: February, 2024
+  requires:
+  - temporal
+- id: locomo_conv_43b_q071_c3
+  category: open_domain
+  difficulty: hard
+  question: Which Star Wars-related locations would Tim enjoy during his visit to Ireland?
+  expected_answer: Skellig Michael, Malin Head, Loop Head, Ceann Sibéal, and Brow Head because they are Star Wars filming locations.
+  requires:
+  - world
+- id: locomo_conv_43b_q072_c4
+  category: single_hop
+  difficulty: medium
+  question: Which team did John sign with on 21 May, 2023?
+  expected_answer: The Minnesota Wolves
+  requires: []
+- id: locomo_conv_43b_q073_c4
+  category: single_hop
+  difficulty: medium
+  question: What is John's position on the team he signed with?
+  expected_answer: shooting guard
+  requires: []
+- id: locomo_conv_43b_q074_c4
+  category: single_hop
+  difficulty: medium
+  question: What challenge did John encounter during pre-season training?
+  expected_answer: fitting into the new team's style of play
+  requires: []
+- id: locomo_conv_43b_q075_c4
+  category: single_hop
+  difficulty: medium
+  question: What aspects of the Harry Potter universe will be discussed in John's fan project collaborations?
+  expected_answer: characters, spells, magical creatures
+  requires: []
+- id: locomo_conv_43b_q076_c4
+  category: single_hop
+  difficulty: medium
+  question: What forum did Tim join recently?
+  expected_answer: fantasy literature forum
+  requires: []
+- id: locomo_conv_43b_q077_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of picture did Tim share as part of their Harry Potter book collection?
+  expected_answer: MinaLima's creation from the Harry Potter films
+  requires: []
+- id: locomo_conv_43b_q078_c4
+  category: single_hop
+  difficulty: medium
+  question: What was the highest number of points John scored in a game recently?
+  expected_answer: 40 points
+  requires: []
+- id: locomo_conv_43b_q079_c4
+  category: single_hop
+  difficulty: medium
+  question: What did John celebrate at a restaurant with teammates?
+  expected_answer: a tough win
+  requires: []
+- id: locomo_conv_43b_q080_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of deals did John sign with Nike and Gatorade?
+  expected_answer: basketball shoe and gear deal with Nike, potential sponsorship deal with Gatorade
+  requires: []
+- id: locomo_conv_43b_q081_c4
+  category: single_hop
+  difficulty: medium
+  question: Which city is John excited to have a game at?
+  expected_answer: Seattle
+  requires: []
+- id: locomo_conv_43b_q082_c4
+  category: single_hop
+  difficulty: medium
+  question: How long has John been surfing?
+  expected_answer: five years
+  requires: []
+- id: locomo_conv_43b_q083_c4
+  category: single_hop
+  difficulty: medium
+  question: How does John feel while surfing?
+  expected_answer: super exciting and free-feeling
+  requires: []
+- id: locomo_conv_43b_q084_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of articles has Tim been writing about for the online magazine?
+  expected_answer: different fantasy novels, characters, themes, and book recommendations
+  requires: []
+- id: locomo_conv_43b_q085_c4
+  category: single_hop
+  difficulty: medium
+  question: Which two fantasy novels does Tim particularly enjoy writing about?
+  expected_answer: Harry Potter and Game of Thrones
+  requires: []
+- id: locomo_conv_43b_q086_c4
+  category: single_hop
+  difficulty: medium
+  question: What did Anthony and John end up playing during the charity event?
+  expected_answer: an intense Harry Potter trivia contest
+  requires: []
+- id: locomo_conv_43b_q087_c4
+  category: single_hop
+  difficulty: medium
+  question: What did John share with the person he skyped about?
+  expected_answer: Characters from Harry Potter
+  requires: []
+- id: locomo_conv_43b_q088_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John describe the team bond?
+  expected_answer: Awesome
+  requires: []
+- id: locomo_conv_43b_q089_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John get introduced to basketball?
+  expected_answer: Dad signed him up for a local league
+  requires: []
+- id: locomo_conv_43b_q090_c4
+  category: single_hop
+  difficulty: medium
+  question: What is John's number one goal in his basketball career?
+  expected_answer: Winning a championship
+  requires: []
+- id: locomo_conv_43b_q091_c4
+  category: single_hop
+  difficulty: medium
+  question: What organization is John teaming up with for his charity work?
+  expected_answer: A local organization helping disadvantaged kids with sports and school
+  requires: []
+- id: locomo_conv_43b_q092_c4
+  category: single_hop
+  difficulty: medium
+  question: When did John meet back up with his teammates after his trip in August 2023?
+  expected_answer: Aug 15th
+  requires: []
+- id: locomo_conv_43b_q093_c4
+  category: single_hop
+  difficulty: medium
+  question: What did John's teammates give him when they met on Aug 15th?
+  expected_answer: a basketball with autographs on it
+  requires: []
+- id: locomo_conv_43b_q094_c4
+  category: single_hop
+  difficulty: medium
+  question: Why did John's teammates sign the basketball they gave him?
+  expected_answer: to show their friendship and appreciation
+  requires: []
+- id: locomo_conv_43b_q095_c4
+  category: single_hop
+  difficulty: medium
+  question: What is the main intention behind Tim wanting to attend the book conference?
+  expected_answer: to learn more about literature and create a stronger bond to it
+  requires: []
+- id: locomo_conv_43b_q096_c4
+  category: single_hop
+  difficulty: medium
+  question: What new activity has Tim started learning in August 2023?
+  expected_answer: play the piano
+  requires: []
+- id: locomo_conv_43b_q097_c4
+  category: single_hop
+  difficulty: medium
+  question: Which movie's theme is Tim's favorite to play on the piano?
+  expected_answer: '"Harry Potter and the Philosopher''s Stone"'
+  requires: []
+- id: locomo_conv_43b_q098_c4
+  category: single_hop
+  difficulty: medium
+  question: What special memory does "Harry Potter and the Philosopher's Stone" bring to Tim?
+  expected_answer: Watching it with his family
+  requires: []
+- id: locomo_conv_43b_q099_c4
+  category: single_hop
+  difficulty: medium
+  question: Which movie does Tim mention they enjoy watching during Thanksgiving?
+  expected_answer: '"Home Alone"'
+  requires: []
+- id: locomo_conv_43b_q100_c4
+  category: single_hop
+  difficulty: medium
+  question: What tradition does Tim mention they love during Thanksgiving?
+  expected_answer: Prepping the feast and talking about what they're thankful for
+  requires: []
+- id: locomo_conv_43b_q101_c4
+  category: single_hop
+  difficulty: medium
+  question: How long did John and his high school basketball teammates play together?
+  expected_answer: Four years
+  requires: []
+- id: locomo_conv_43b_q102_c4
+  category: single_hop
+  difficulty: medium
+  question: How was John's experience in New York City?
+  expected_answer: Amazing
+  requires: []
+- id: locomo_conv_43b_q103_c4
+  category: single_hop
+  difficulty: medium
+  question: What did John say about NYC, enticing Tim to visit?
+  expected_answer: It's got so much to check out - the culture, food - you won't regret it.
+  requires: []
+- id: locomo_conv_43b_q104_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of soup did John make recently?
+  expected_answer: tasty soup with sage
+  requires: []
+- id: locomo_conv_43b_q105_c4
+  category: single_hop
+  difficulty: medium
+  question: What spice did John add to the soup for flavor?
+  expected_answer: sage
+  requires: []
+- id: locomo_conv_43b_q106_c4
+  category: single_hop
+  difficulty: medium
+  question: What is Tim excited to see at Universal Studios?
+  expected_answer: The Harry Potter stuff
+  requires: []
+- id: locomo_conv_43b_q107_c4
+  category: single_hop
+  difficulty: medium
+  question: Where are John and his teammates planning to explore on a team trip?
+  expected_answer: a new city
+  requires: []
+- id: locomo_conv_43b_q108_c4
+  category: single_hop
+  difficulty: medium
+  question: What city did Tim suggest to John for the team trip next month?
+  expected_answer: Edinburgh, Scotland
+  requires: []
+- id: locomo_conv_43b_q109_c4
+  category: single_hop
+  difficulty: medium
+  question: What does John want to do after his basketball career?
+  expected_answer: positively influence and inspire others, potentially start a foundation and engage in charity work
+  requires: []
+- id: locomo_conv_43b_q110_c4
+  category: single_hop
+  difficulty: medium
+  question: What advice did Tim give John about picking endorsements?
+  expected_answer: Ensure they align with values and brand, look for companies that share the desire to make a change and help others, make sure the endorsement feels authentic
+  requires: []
+- id: locomo_conv_43b_q111_c4
+  category: single_hop
+  difficulty: medium
+  question: What book recommendation did Tim give to John for the trip?
+  expected_answer: A fantasy novel by Patrick Rothfuss
+  requires: []
+- id: locomo_conv_43b_q112_c4
+  category: single_hop
+  difficulty: medium
+  question: What type of venue did John and his girlfriend choose for their wedding ceremony?
+  expected_answer: Greenhouse
+  requires: []
+- id: locomo_conv_43b_q113_c4
+  category: single_hop
+  difficulty: medium
+  question: What was the setting for John and his wife's first dance?
+  expected_answer: Cozy restaurant
+  requires: []
+- id: locomo_conv_43b_q114_c4
+  category: single_hop
+  difficulty: medium
+  question: Which basketball team does Tim support?
+  expected_answer: The Wolves
+  requires: []
+- id: locomo_conv_43b_q115_c4
+  category: single_hop
+  difficulty: medium
+  question: What passion does Tim mention connects him with people from all over the world?
+  expected_answer: passion for fantasy stuff
+  requires: []
+- id: locomo_conv_43b_q116_c4
+  category: single_hop
+  difficulty: medium
+  question: How does John describe the game season for his team?
+  expected_answer: intense with tough losses and great wins
+  requires: []
+- id: locomo_conv_43b_q117_c4
+  category: single_hop
+  difficulty: medium
+  question: How does John say his team handles tough opponents?
+  expected_answer: by backing each other up and not quitting
+  requires: []
+- id: locomo_conv_43b_q118_c4
+  category: single_hop
+  difficulty: medium
+  question: What motivates John's team to get better, according to John?
+  expected_answer: facing tough opponents
+  requires: []
+- id: locomo_conv_43b_q119_c4
+  category: single_hop
+  difficulty: medium
+  question: What did John's team win at the end of the season?
+  expected_answer: a trophy
+  requires: []
+- id: locomo_conv_43b_q120_c4
+  category: single_hop
+  difficulty: medium
+  question: Where did Tim capture the photography of the sunset over the mountain range?
+  expected_answer: Smoky Mountains
+  requires: []
+- id: locomo_conv_43b_q121_c4
+  category: single_hop
+  difficulty: medium
+  question: How does John feel about being seen as a mentor by some of the younger players?
+  expected_answer: It feels great
+  requires: []
+- id: locomo_conv_43b_q122_c4
+  category: single_hop
+  difficulty: medium
+  question: What does John find rewarding about mentoring the younger players?
+  expected_answer: Seeing their growth, improvement, and confidence
+  requires: []
+- id: locomo_conv_43b_q123_c4
+  category: single_hop
+  difficulty: medium
+  question: What has John been able to help the younger players achieve?
+  expected_answer: reach their goals
+  requires: []
+- id: locomo_conv_43b_q124_c4
+  category: single_hop
+  difficulty: medium
+  question: What genre is the novel that Tim is writing?
+  expected_answer: Fantasy
+  requires: []
+- id: locomo_conv_43b_q125_c4
+  category: single_hop
+  difficulty: medium
+  question: Who is one of Tim's sources of inspiration for writing?
+  expected_answer: J.K. Rowling
+  requires: []
+- id: locomo_conv_43b_q126_c4
+  category: single_hop
+  difficulty: medium
+  question: What J.K. Rowling quote does Tim resonate with?
+  expected_answer: '"Turn on the light - happiness hides in the darkest of times."'
+  requires: []
+- id: locomo_conv_43b_q127_c4
+  category: single_hop
+  difficulty: medium
+  question: What does John write on the whiteboard to help him stay motivated?
+  expected_answer: motivational quotes and strategies
+  requires: []
+- id: locomo_conv_43b_q128_c4
+  category: single_hop
+  difficulty: medium
+  question: What hobby is a therapy for John when away from the court?
+  expected_answer: Cooking
+  requires: []
+- id: locomo_conv_43b_q129_c4
+  category: single_hop
+  difficulty: medium
+  question: What type of meal does John often cook using a slow cooker?
+  expected_answer: honey garlic chicken with roasted veg
+  requires: []
+- id: locomo_conv_43b_q130_c4
+  category: single_hop
+  difficulty: medium
+  question: How will John share the honey garlic chicken recipe with the other person?
+  expected_answer: write it down and mail it
+  requires: []
+- id: locomo_conv_43b_q131_c4
+  category: single_hop
+  difficulty: medium
+  question: What was Tim's huge writing issue last week,as mentioned on November 6, 2023?
+  expected_answer: He got stuck on a plot twist
+  requires: []
+- id: locomo_conv_43b_q132_c4
+  category: single_hop
+  difficulty: medium
+  question: What does Tim have that serves as a reminder of hard work and is his prized possession?
+  expected_answer: a basketball signed by his favorite player
+  requires: []
+- id: locomo_conv_43b_q133_c4
+  category: single_hop
+  difficulty: medium
+  question: Why do Tim and John find LeBron inspiring?
+  expected_answer: LeBron's determination and the epic block in Game 7 of the '16 Finals
+  requires: []
+- id: locomo_conv_43b_q134_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John describe the views during their road trip out on the European coastline?
+  expected_answer: Spectacular
+  requires: []
+- id: locomo_conv_43b_q135_c4
+  category: single_hop
+  difficulty: medium
+  question: What is one of Tim's favorite fantasy TV shows, as mentioned on November 11, 2023?
+  expected_answer: '"That"'
+  requires: []
+- id: locomo_conv_43b_q136_c4
+  category: single_hop
+  difficulty: medium
+  question: How does Tim stay motivated during difficult study sessions?
+  expected_answer: Visualizing goals and success
+  requires: []
+- id: locomo_conv_43b_q137_c4
+  category: single_hop
+  difficulty: medium
+  question: What did Tim say about his injury on 16 November, 2023?
+  expected_answer: The doctor said it's not too serious
+  requires: []
+- id: locomo_conv_43b_q138_c4
+  category: single_hop
+  difficulty: medium
+  question: What was the setback Tim faced in his writing project on 21 November, 2023?
+  expected_answer: Story based on experiences in the UK didn't go as planned
+  requires: []
+- id: locomo_conv_43b_q139_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John overcome his ankle injury from last season?
+  expected_answer: stayed focused on recovery and worked hard to strengthen his body
+  requires: []
+- id: locomo_conv_43b_q140_c4
+  category: single_hop
+  difficulty: medium
+  question: What motivated Tim to keep pushing himself to get better in writing and reading?
+  expected_answer: Love for writing and reading
+  requires: []
+- id: locomo_conv_43b_q141_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John overcome a mistake he made during a big game in basketball?
+  expected_answer: Worked hard to get better and focused on growth
+  requires: []
+- id: locomo_conv_43b_q142_c4
+  category: single_hop
+  difficulty: medium
+  question: What book did John recently finish rereading that left him feeling inspired and hopeful about following dreams?
+  expected_answer: The Alchemist
+  requires: []
+- id: locomo_conv_43b_q143_c4
+  category: single_hop
+  difficulty: medium
+  question: How did "The Alchemist" impact John's perspective on following dreams?
+  expected_answer: made him think again about following dreams and searching for personal legends
+  requires: []
+- id: locomo_conv_43b_q144_c4
+  category: single_hop
+  difficulty: medium
+  question: What is John trying out to improve his strength and flexibility after recovery from ankle injury?
+  expected_answer: yoga
+  requires: []
+- id: locomo_conv_43b_q145_c4
+  category: single_hop
+  difficulty: medium
+  question: How long does John usually hold the yoga pose he shared with Tim?
+  expected_answer: 30-60 seconds
+  requires: []
+- id: locomo_conv_43b_q146_c4
+  category: single_hop
+  difficulty: medium
+  question: Where was the forest picture shared by John on December 1,2023 taken?
+  expected_answer: near his hometown
+  requires: []
+- id: locomo_conv_43b_q147_c4
+  category: single_hop
+  difficulty: medium
+  question: What did Tim recently start learning in addition to being part of a travel club and working on studies?
+  expected_answer: an instrument
+  requires: []
+- id: locomo_conv_43b_q148_c4
+  category: single_hop
+  difficulty: medium
+  question: What instrument is Tim learning to play in December 2023?
+  expected_answer: violin
+  requires: []
+- id: locomo_conv_43b_q149_c4
+  category: single_hop
+  difficulty: medium
+  question: How long has Tim been playing the piano for, as of December 2023?
+  expected_answer: about four months
+  requires: []
+- id: locomo_conv_43b_q150_c4
+  category: single_hop
+  difficulty: medium
+  question: What book did Tim just finish reading on 8th December, 2023?
+  expected_answer: '"A Dance with Dragons"'
+  requires: []
+- id: locomo_conv_43b_q151_c4
+  category: single_hop
+  difficulty: medium
+  question: Which book did Tim recommend to John as a good story on 8th December, 2023?
+  expected_answer: '"A Dance with Dragons"'
+  requires: []
+- id: locomo_conv_43b_q152_c4
+  category: single_hop
+  difficulty: medium
+  question: What is the topic of discussion between John and Tim on 11 December, 2023?
+  expected_answer: Academic achievements and sports successes
+  requires: []
+- id: locomo_conv_43b_q153_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of game did John have a career-high in assists in?
+  expected_answer: basketball
+  requires: []
+- id: locomo_conv_43b_q154_c4
+  category: single_hop
+  difficulty: medium
+  question: What was John's way of dealing with doubts and stress when he was younger?
+  expected_answer: practicing basketball outside for hours
+  requires: []
+- id: locomo_conv_43b_q155_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John feel about the atmosphere during the big game against the rival team?
+  expected_answer: electric and intense
+  requires: []
+- id: locomo_conv_43b_q156_c4
+  category: single_hop
+  difficulty: medium
+  question: How did John feel after being able to jog without pain?
+  expected_answer: It was a huge success.
+  requires: []
+- id: locomo_conv_43b_q157_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of deal did John get in December?
+  expected_answer: Deal with a renowned outdoor gear company
+  requires: []
+- id: locomo_conv_43b_q158_c4
+  category: single_hop
+  difficulty: medium
+  question: Where was the photoshoot done for John's gear deal?
+  expected_answer: In a gorgeous forest
+  requires: []
+- id: locomo_conv_43b_q159_c4
+  category: single_hop
+  difficulty: medium
+  question: In which area has John's team seen the most growth during training?
+  expected_answer: Communication and bonding
+  requires: []
+- id: locomo_conv_43b_q160_c4
+  category: single_hop
+  difficulty: medium
+  question: What type of seminars is John conducting?
+  expected_answer: Sports and marketing seminars
+  requires: []
+- id: locomo_conv_43b_q161_c4
+  category: single_hop
+  difficulty: medium
+  question: What activity did Tim do after reading the stories about the Himalayan trek?
+  expected_answer: visited a travel agency
+  requires: []
+- id: locomo_conv_43b_q162_c4
+  category: single_hop
+  difficulty: medium
+  question: What is one cause that John supports with his influence and resources?
+  expected_answer: youth sports and fair chances in sports
+  requires: []
+- id: locomo_conv_43b_q163_c4
+  category: single_hop
+  difficulty: medium
+  question: What new fantasy TV series is Tim excited about?
+  expected_answer: '"The Wheel of Time"'
+  requires: []
+- id: locomo_conv_43b_q164_c4
+  category: single_hop
+  difficulty: medium
+  question: Which language is Tim learning?
+  expected_answer: German
+  requires: []
+- id: locomo_conv_43b_q165_c4
+  category: single_hop
+  difficulty: medium
+  question: What language does Tim know besides German?
+  expected_answer: Spanish
+  requires: []
+- id: locomo_conv_43b_q166_c4
+  category: single_hop
+  difficulty: medium
+  question: What book did Tim get in Italy that inspired him to cook?
+  expected_answer: a cooking book
+  requires: []
+- id: locomo_conv_43b_q167_c4
+  category: single_hop
+  difficulty: medium
+  question: What is John's favorite book series?
+  expected_answer: Harry Potter
+  requires: []
+- id: locomo_conv_43b_q168_c4
+  category: single_hop
+  difficulty: medium
+  question: According to John, who is his favorite character from Lord of the Rings?
+  expected_answer: Aragorn
+  requires: []
+- id: locomo_conv_43b_q169_c4
+  category: single_hop
+  difficulty: medium
+  question: Why does John like Aragorn from Lord of the Rings?
+  expected_answer: brave, selfless, down-to-earth attitude
+  requires: []
+- id: locomo_conv_43b_q170_c4
+  category: single_hop
+  difficulty: medium
+  question: What kind of painting does John have in his room as a reminder?
+  expected_answer: a painting of Aragorn
+  requires: []
+- id: locomo_conv_43b_q171_c4
+  category: single_hop
+  difficulty: medium
+  question: What is the painting of Aragorn a reminder for John to be in everything he does?
+  expected_answer: be a leader
+  requires: []
+- id: locomo_conv_43b_q172_c4
+  category: single_hop
+  difficulty: medium
+  question: What map does Tim show to his friend John?
+  expected_answer: a map of Middle-earth from LOTR
+  requires: []
+- id: locomo_conv_43b_q173_c4
+  category: single_hop
+  difficulty: medium
+  question: Where will Tim be going for a semester abroad?
+  expected_answer: Ireland
+  requires: []
+- id: locomo_conv_43b_q174_c4
+  category: single_hop
+  difficulty: medium
+  question: Which city in Ireland will Tim be staying in during his semester abroad?
+  expected_answer: Galway
+  requires: []
+- id: locomo_conv_43b_q175_c4
+  category: single_hop
+  difficulty: medium
+  question: What charity event did John organize recently in 2024?
+  expected_answer: benefit basketball game
+  requires: []
+- id: locomo_conv_43b_q176_c4
+  category: single_hop
+  difficulty: medium
+  question: What achievement did John share with Tim in January 2024?
+  expected_answer: endorsement with a popular beverage company
+  requires: []
+- id: locomo_conv_43b_q177_c4
+  category: single_hop
+  difficulty: medium
+  question: What was Johns's reaction to sealing the deal with the beverage company?
+  expected_answer: crazy feeling, sense of accomplishment
+  requires: []
+- id: locomo_conv_43b_q178_c4
+  category: single_hop
+  difficulty: medium
+  question: Which city did John recommend to Tim in January 2024?
+  expected_answer: Barcelona
+  requires: []
+- id: locomo_conv_43b_q179_c5
+  category: adversarial
+  difficulty: hard
+  question: Which team did Tim sign with on 21 May, 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q180_c5
+  category: adversarial
+  difficulty: hard
+  question: What is Tim's position on the team he signed with?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q181_c5
+  category: adversarial
+  difficulty: hard
+  question: What challenge did Tim encounter during pre-season training?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q182_c5
+  category: adversarial
+  difficulty: hard
+  question: What cult did Tim join recently?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q183_c5
+  category: adversarial
+  difficulty: hard
+  question: What was the highest number of points Tim scored in a game recently?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q184_c5
+  category: adversarial
+  difficulty: hard
+  question: What did Tim celebrate at a restaurant with teammates?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q185_c5
+  category: adversarial
+  difficulty: hard
+  question: What kind of deals did Tim sign with Nike and Gatorade?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q186_c5
+  category: adversarial
+  difficulty: hard
+  question: How does Tim feel while surfing?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q187_c5
+  category: adversarial
+  difficulty: hard
+  question: What kind of articles has John been writing about for the online magazine?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q188_c5
+  category: adversarial
+  difficulty: hard
+  question: Which two mystery novels does Tim particularly enjoy writing about?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q189_c5
+  category: adversarial
+  difficulty: hard
+  question: What did Anthony and Tim end up playing during the charity event?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q190_c5
+  category: adversarial
+  difficulty: hard
+  question: How did Tim get introduced to basketball?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q191_c5
+  category: adversarial
+  difficulty: hard
+  question: What is Tim's number one goal in his basketball career?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q192_c5
+  category: adversarial
+  difficulty: hard
+  question: What organization is Tim teaming up with for his charity work?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q193_c5
+  category: adversarial
+  difficulty: hard
+  question: What did Tim's teammates give him when they met on Aug 15th?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q194_c5
+  category: adversarial
+  difficulty: hard
+  question: Why did John's teammates sign the football they gave him?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q195_c5
+  category: adversarial
+  difficulty: hard
+  question: What is the main intention behind John wanting to attend the book conference?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q196_c5
+  category: adversarial
+  difficulty: hard
+  question: What new activity has John started learning in August 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q197_c5
+  category: adversarial
+  difficulty: hard
+  question: What special memory does "Fifty Shades of Grey" bring to Tim?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q198_c5
+  category: adversarial
+  difficulty: hard
+  question: Which movie does John mention they enjoy watching during Thanksgiving?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q199_c5
+  category: adversarial
+  difficulty: hard
+  question: What tradition does Tim mention they love during Halloween?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q200_c5
+  category: adversarial
+  difficulty: hard
+  question: How long did Tim and his high school basketball teammates play together?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q201_c5
+  category: adversarial
+  difficulty: hard
+  question: How was Tim's experience in New York City?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q202_c5
+  category: adversarial
+  difficulty: hard
+  question: What spice did Tim add to the soup for flavor?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q203_c5
+  category: adversarial
+  difficulty: hard
+  question: What is Tim excited to see at Disneyland?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q204_c5
+  category: adversarial
+  difficulty: hard
+  question: Where are John and his teammates planning to avoid on a team trip?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q205_c5
+  category: adversarial
+  difficulty: hard
+  question: What does Tim want to do after his basketball career?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q206_c5
+  category: adversarial
+  difficulty: hard
+  question: What type of venue did John and his girlfriend choose for their breakup?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q207_c5
+  category: adversarial
+  difficulty: hard
+  question: What passion does John mention connects him with people from all over the world?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q208_c5
+  category: adversarial
+  difficulty: hard
+  question: How does Tim say his team handles tough opponents?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q209_c5
+  category: adversarial
+  difficulty: hard
+  question: Where did Tim capture the painting of the sunset over the mountain range?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q210_c5
+  category: adversarial
+  difficulty: hard
+  question: What does Tim find rewarding about mentoring the younger players?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q211_c5
+  category: adversarial
+  difficulty: hard
+  question: What has Tim been able to help the younger players achieve?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q212_c5
+  category: adversarial
+  difficulty: hard
+  question: What genre is the novel that John is writing?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q213_c5
+  category: adversarial
+  difficulty: hard
+  question: Who is one of Tim's sources of inspiration for painting?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q214_c5
+  category: adversarial
+  difficulty: hard
+  question: What does Tim write on the whiteboard to help him stay motivated?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q215_c5
+  category: adversarial
+  difficulty: hard
+  question: What hobby is a therapy for Tim when away from the court?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q216_c5
+  category: adversarial
+  difficulty: hard
+  question: What type of meal does Tim often cook using a slow cooker?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q217_c5
+  category: adversarial
+  difficulty: hard
+  question: How will Tim share the honey garlic chicken recipe with the other person?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q218_c5
+  category: adversarial
+  difficulty: hard
+  question: What is one of Tim's favorite crime TV shows, as mentioned on November 11, 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q219_c5
+  category: adversarial
+  difficulty: hard
+  question: What was the setback Tim faced in his coding project on 21 November, 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q220_c5
+  category: adversarial
+  difficulty: hard
+  question: How did Tim overcome his ankle injury from last season?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q221_c5
+  category: adversarial
+  difficulty: hard
+  question: What motivated John to keep pushing himself to get better in writing and reading?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q222_c5
+  category: adversarial
+  difficulty: hard
+  question: How did Tim overcome a mistake he made during a big game in basketball?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q223_c5
+  category: adversarial
+  difficulty: hard
+  question: What is Tim trying out to improve his strength and flexibility after recovery from ankle injury?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q224_c5
+  category: adversarial
+  difficulty: hard
+  question: What did John recently start learning in addition to being part of a travel club and working on studies?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q225_c5
+  category: adversarial
+  difficulty: hard
+  question: What instrument is John learning to play in December 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q226_c5
+  category: adversarial
+  difficulty: hard
+  question: How long has John been playing the piano for, as of December 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q227_c5
+  category: adversarial
+  difficulty: hard
+  question: What movie did Tim just finish watching on 8th December, 2023?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q228_c5
+  category: adversarial
+  difficulty: hard
+  question: What kind of game did Tim have a career-high in assists in?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q229_c5
+  category: adversarial
+  difficulty: hard
+  question: What was Tim's way of dealing with doubts and stress when he was younger?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q230_c5
+  category: adversarial
+  difficulty: hard
+  question: Where was the photoshoot done for John's fragrance deal?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q231_c5
+  category: adversarial
+  difficulty: hard
+  question: In which area has Tim's team seen the most growth during training?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q232_c5
+  category: adversarial
+  difficulty: hard
+  question: What type of seminars is Tim conducting?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q233_c5
+  category: adversarial
+  difficulty: hard
+  question: What is one cause that John opposes with his influence and resources?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q234_c5
+  category: adversarial
+  difficulty: hard
+  question: What new fantasy TV series is John excited about?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q235_c5
+  category: adversarial
+  difficulty: hard
+  question: Which language is John learning?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q236_c5
+  category: adversarial
+  difficulty: hard
+  question: According to John, who is his least favorite character from Lord of the Rings?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q237_c5
+  category: adversarial
+  difficulty: hard
+  question: Why does Tim like Aragorn from Lord of the Rings?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q238_c5
+  category: adversarial
+  difficulty: hard
+  question: What kind of painting does Tim have in his room as a reminder?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q239_c5
+  category: adversarial
+  difficulty: hard
+  question: What is the sculpture of Aragorn a reminder for John to be in everything he does?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q240_c5
+  category: adversarial
+  difficulty: hard
+  question: Which city in Ireland will John be staying in during his semester abroad?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q241_c5
+  category: adversarial
+  difficulty: hard
+  question: What charity event did Tim organize recently in 2024?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain
+- id: locomo_conv_43b_q242_c5
+  category: adversarial
+  difficulty: hard
+  question: What was Tims's reaction to sealing the deal with the beverage company?
+  expected_answer: No information available in the conversation.
+  requires: []
+  expected_kind: abstain

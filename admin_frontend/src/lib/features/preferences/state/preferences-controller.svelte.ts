@@ -156,6 +156,20 @@ export function createPreferencesController(notify: Notify) {
     markDirty();
   }
 
+  // Eval answer + judge models are SEPARATE (each its own model + tuning profile). null = fall
+  // back to the knowledge answering model.
+  function setEvalAnswerModel(id: string | null) {
+    if (!draft) return;
+    draft.graph.eval.answer_model = id;
+    markDirty();
+  }
+
+  function setEvalJudgeModel(id: string | null) {
+    if (!draft) return;
+    draft.graph.eval.judge_model = id;
+    markDirty();
+  }
+
   function setKnowledgeGraphEmbedderModel(id: string | null) {
     if (!draft) return;
     draft.graph.embedder_model = id;
@@ -494,6 +508,8 @@ export function createPreferencesController(notify: Notify) {
     setKnowledgeGraphSmallModel,
     setKnowledgeGraphEmbedderModel,
     setKnowledgeGraphRerankerModel,
+    setEvalAnswerModel,
+    setEvalJudgeModel,
     downloadReranker,
     cancelReranker,
     setDefaultTuningProfile,

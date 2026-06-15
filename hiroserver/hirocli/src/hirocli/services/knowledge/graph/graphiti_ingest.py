@@ -325,6 +325,7 @@ async def ingest_episodes(
     entity_types: dict[str, type[BaseModel]] | None = None,
     edge_types: dict[str, type[BaseModel]] | None = None,
     edge_type_map: dict[tuple[str, str], list[str]] | None = None,
+    custom_extraction_instructions: str | None = None,
     event_sink: GraphEventSink | None = None,
     ledger_sink: LedgerSink | None = None,
     observability: str = "ledger",
@@ -525,6 +526,8 @@ async def ingest_episodes(
                                         entity_types=entity_types,
                                         edge_types=edge_types,
                                         edge_type_map=edge_type_map,
+                                        # graphiti's extraction-prompt slot (node + edge); None ⇒ "".
+                                        custom_extraction_instructions=custom_extraction_instructions,
                                     )
                             except Exception:
                                 # External model + DB call — log + re-raise (general-coding-rule).

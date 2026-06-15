@@ -41,8 +41,6 @@
     Trash2,
     X
   } from '@lucide/svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import { getAdminPageHeaderContext } from '$lib/components/page/admin-page-header-context';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
@@ -111,31 +109,26 @@
     }
   }
 
-  // --- Sticky sub-tabs (Control / Corpus / Questions / Answer Details) -----------------------
+  // --- Sticky sub-tabs (Control / Corpus / Questions / Answer Details / Report) ---------------
   // Section navigation as sticky underline sub-tabs under the run-controls toolbar. Local state
   // (not URL/session) — inner navigation, per the admin sub-tab pattern. Default to Control
-  // (the run setup/report overview — requested over Questions on page load/refresh); the validity
+  // (the run setup overview — requested over Questions on page load/refresh); the validity
   // effect snaps back if the active tab disappears (e.g. Corpus is memory-only and vanishes on
-  // the knowledge track).
-  type EvalSubtab = 'control' | 'corpus' | 'questions' | 'answers';
-  let activeSubtab = $state<EvalSubtab>('control');
+  // the knowledge track). Control holds the run options + read-only settings; Report (last tab)
+  // holds the aggregate breakdown tables.
+  type EvalSubtab = 'execute' | 'corpus' | 'questions' | 'answers' | 'report';
+  let activeSubtab = $state<EvalSubtab>('execute');
   const subtabs = $derived<AdminSubtabDescriptor<EvalSubtab>[]>([
-    { id: 'control', label: 'Control' },
+    { id: 'execute', label: 'Execute' },
     ...(isMemory ? [{ id: 'corpus' as const, label: 'Corpus' }] : []),
     { id: 'questions', label: 'Questions' },
-    { id: 'answers', label: 'Answer Details' }
+    { id: 'answers', label: 'Answer Details' },
+    { id: 'report', label: 'Report' }
   ]);
   $effect(() => {
-    if (!subtabs.some((t) => t.id === activeSubtab)) activeSubtab = 'control';
+    if (!subtabs.some((t) => t.id === activeSubtab)) activeSubtab = 'execute';
   });
 
-  // When the run-controls toolbar pins on scroll, collapse it to just its first line (corpus +
-  // run controls) — the second line (run options) is setup config you don't need while scrolling.
-  // Driven by the page header's pinned signal (not a raw scrollY threshold): the header applies
-  // hysteresis + document-height compensation when it pins, so hiding the second row can't shrink
-  // the page below the scroll threshold and flap open/closed on borderline-height pages.
-  const headerCtx = getAdminPageHeaderContext();
-  const toolbarStuck = $derived(headerCtx?.pinned ?? false);
   // Sticky sub-tab bar element — its height is published as a CSS var so the Results table's
   // sticky thead can offset beneath it (mirrors AdminPageStickyToolbar's own var).
   let subtabsEl = $state<HTMLDivElement | null>(null);
@@ -562,10 +555,22 @@
     if (isMemory)
       out.push({ label: 'Small', model: dash(g.small_model), tuning: tuningChips(g.small_tuning_profile), group: 'ingest' });
     out.push({ label: 'Embedder', model: dash(g.embedder_model), tuning: '', group: 'ingest' });
+    // Answer + judge now use SEPARATE eval models/tuning (graph.eval.answer_* / judge_*), each
+    // falling back to the knowledge answering model when unset. Memory answers with the eval
+    // answer model; the knowledge track answers with the production answering pipeline, so its
+    // Answer line shows that. The judge model grades both tracks.
+    const answering = a.model_resolved ?? a.model;
+    const ev = g.eval;
     out.push({
       label: 'Answer',
-      model: dash(a.model_resolved ?? a.model),
-      tuning: tuningChips(prefs.knowledge.default_tuning_profile),
+      model: dash(isMemory ? ev.answer_model || answering : answering),
+      tuning: tuningChips(isMemory ? ev.answer_tuning_profile : prefs.knowledge.default_tuning_profile),
+      group: 'recall'
+    });
+    out.push({
+      label: 'Judge',
+      model: dash(ev.judge_model || answering),
+      tuning: tuningChips(ev.judge_tuning_profile),
       group: 'recall'
     });
     return out;
@@ -573,15 +578,24 @@
   const ingestModels = $derived(modelLines.filter((m) => m.group === 'ingest'));
   const recallModels = $derived(modelLines.filter((m) => m.group === 'recall'));
 
-  // Non-model ingestion knobs (knowledge chunking only; empty on the memory track).
+  // Non-model ingestion knobs. Extraction ontology (open vs typed) governs what the graph build
+  // extracts, so it applies to BOTH tracks; knowledge chunking knobs are knowledge-only. Shown in
+  // the read-only Ingestion settings column — the Ingest button always describes what it will do.
   const ingestKnobs = $derived.by<Param[]>(() => {
-    if (!prefs || isMemory || !eval_.ingestSynthetic) return [];
-    const c = prefs.knowledge.chunking;
-    return [
-      { label: 'Chunk size', value: String(c.chunk_size) },
-      { label: 'Chunk overlap', value: String(c.chunk_overlap) },
-      { label: 'Structural ctx', value: onOff(c.embed_structural_context) }
+    if (!prefs) return [];
+    const g = prefs.graph;
+    const out: Param[] = [
+      { label: 'Extraction ontology', value: g.entity_ontology === 'typed' ? 'typed' : 'open' }
     ];
+    if (!isMemory) {
+      const c = prefs.knowledge.chunking;
+      out.push(
+        { label: 'Chunk size', value: String(c.chunk_size) },
+        { label: 'Chunk overlap', value: String(c.chunk_overlap) },
+        { label: 'Structural ctx', value: onOff(c.embed_structural_context) }
+      );
+    }
+    return out;
   });
 
   const recallKnobs = $derived.by<Param[]>(() => {
@@ -689,29 +703,47 @@
   );
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
-  // Setup-only memory batch: Remember a range and/or Clear, with no questions selected — the
-  // way a large corpus is built in monitored chunks before any recall. Lets Run fire with an
-  // empty question selection (which is otherwise required).
-  const setupOnlyMemory = $derived(isMemory && (eval_.ingestSynthetic || eval_.clearBefore));
-  const runDisabled = $derived(
-    !canRun || !eval_.selectedCorpus || (eval_.selectedCount === 0 && !setupOnlyMemory)
+  // Two explicit actions (one button each): Ingest builds the graph (needs only a corpus); Eval
+  // Questions answers the selection (needs a non-empty selection). Both are blocked while a run is
+  // in flight (canRun is false then) or before a corpus is picked.
+  const ingestDisabled = $derived(!canRun || !eval_.selectedCorpus);
+  const evalDisabled = $derived(!canRun || !eval_.selectedCorpus || eval_.selectedCount === 0);
+  const ingestTitle = $derived(
+    !eval_.selectedCorpus
+      ? 'Pick a corpus first'
+      : isMemory
+        ? 'Remember the chosen episode window into the graph (no questions)'
+        : 'Ingest the corpus (+ rebuild the graph if checked)'
   );
-  const runTitle = $derived(
-    eval_.selectedCount === 0
-      ? setupOnlyMemory
-        ? 'Run a setup-only batch (ingest / clear — no questions)'
-        : 'Select at least one question'
-      : 'Run the eval'
+  const evalTitle = $derived(
+    !eval_.selectedCorpus
+      ? 'Pick a corpus first'
+      : eval_.selectedCount === 0
+        ? 'Select at least one question to evaluate'
+        : 'Answer the selected questions against the existing graph'
   );
 
-  // Wipe guard: when the run will WIPE an existing graph — memory "Clear graph first", or the
-  // knowledge "Rebuild graph" (which still wipes on ingest) — Run opens a confirm dialog first
-  // (the wipe is destructive + costs money to rebuild). Nothing to wipe → run straight away.
+  // Which action is in flight (drives the spinner + Cancel placement). Set when each button fires;
+  // null for a run we only learned about via hydration (mid-run navigation) — Cancel then defaults
+  // to the Question-answering section.
+  let runningIntent = $state<'ingest' | 'questions' | null>(null);
+  $effect(() => {
+    if (!isBusy) runningIntent = null;
+  });
+
+  // Wipe guard: an INGEST run that will WIPE an existing graph — memory "Clear graph first", or the
+  // knowledge "Rebuild graph" — opens a confirm dialog first (the wipe is destructive + costs money
+  // to rebuild). Eval never ingests, so it never wipes → it runs straight away.
   let confirmOpen = $state(false);
-  function requestRun() {
+  function requestIngest() {
+    runningIntent = 'ingest';
     const wipes = isMemory ? eval_.clearBefore : eval_.rebuildChecked;
     if (wipes && eval_.selectedCorpusHasGraph) confirmOpen = true;
-    else void eval_.start();
+    else void eval_.start('ingest');
+  }
+  function requestEval() {
+    runningIntent = 'questions';
+    void eval_.start('questions');
   }
 
   // Clear guard: the memory-track clear PERMANENTLY deletes saved results from disk
@@ -806,6 +838,18 @@
   // Memory also shows an evidence-recall column (X/Y gold evidence episodes covered) — populated
   // only for LoCoMo corpora; other corpora render a dash.
   const showEvidenceCol = $derived(isMemory);
+  // Whether the report's evidence-recall metric column should show: memory track AND the summary
+  // actually carries gold-evidence totals (LoCoMo corpora only). Non-LoCoMo memory reports skip it
+  // rather than render a column of dashes.
+  const hasEvidenceReport = $derived.by(() => {
+    const s = eval_.summary;
+    if (!isMemory || !s) return false;
+    const buckets = [
+      ...Object.values(s.by_category ?? {}),
+      ...Object.values(s.by_difficulty ?? {})
+    ];
+    return buckets.some((b) => (b.evidence_total ?? 0) > 0);
+  });
   // Full-width row colspan: #, Question, Type, Difficulty, Ideal, [recall flag], [evidence],
   // [answer type], <N legs>, [Δ], Time. (Trace/recall links moved out of the main row into the
   // expanded fold; the answer-type column is memory-only — the verdict split out of the answer cell.)
@@ -819,12 +863,13 @@
       1
   );
 
-  // Answer-details sort (within each category group), by the recall flag or the eval time. Per
-  // column: click cycles none→asc→desc; ``none`` keeps the natural question-index order.
-  type AnsSortKey = 'none' | 'recall' | 'time';
+  // Answer-details sort (within each category group), by any sortable column. Per column: click
+  // cycles none→asc→desc; ``none`` keeps the natural question-index order. Sorting is intra-group
+  // (rows are grouped by type), so category isn't a sort key — type is constant within a group.
+  type AnsSortKey = 'none' | 'recall' | 'time' | 'difficulty' | 'evidence' | 'mark';
   let ansSortKey = $state<AnsSortKey>('none');
   let ansSortDir = $state<'asc' | 'desc'>('asc');
-  function cycleAnsSort(key: 'recall' | 'time') {
+  function cycleAnsSort(key: Exclude<AnsSortKey, 'none'>) {
     if (ansSortKey !== key) {
       ansSortKey = key;
       ansSortDir = 'asc';
@@ -841,11 +886,38 @@
     if (!leg?.mark) return 2;
     return leg.recall_sufficient === false ? 0 : 1;
   }
+  // Difficulty rank for sorting (medium < hard < very_hard < unspecified), reusing the questions
+  // ramp; unknown/unspecified sort last in ascending.
+  function rowDiffRank(r: EvalRow): number {
+    return _DIFF_SORT[r.difficulty || ''] ?? 3;
+  }
+  // Evidence-recall sort key: the matched/total fraction (lower = worse, sorts first ascending);
+  // rows with no gold evidence (total 0 / non-LoCoMo) get 2 so they sort LAST in ascending — same
+  // "n/a last" convention as the recall-sufficiency column.
+  function rowEvidenceRank(r: EvalRow): number {
+    const ev = r.evidence_recall;
+    if (!ev || ev.total <= 0) return 2;
+    return ev.matched / ev.total;
+  }
+  // Answer-type (judge mark) rank for the recall leg, reusing the saved-state order
+  // (✓ < ◐ < ✗ < 🛇 < not-judged). Memory-only column, so it reads the single recall leg.
+  function rowMarkRank(r: EvalRow): number {
+    return _STATE_SORT[r.legs?.recall?.mark ?? ''] ?? 4;
+  }
   // Apply the active sort to a group's rows (stable on index); identity when sort is off.
   function sortGroupRows(rows: EvalRow[]): EvalRow[] {
     if (ansSortKey === 'none') return rows;
     const dir = ansSortDir === 'asc' ? 1 : -1;
-    const key = ansSortKey === 'recall' ? rowRecallRank : (r: EvalRow) => timeMs(r.answered_at);
+    const key =
+      ansSortKey === 'recall'
+        ? rowRecallRank
+        : ansSortKey === 'time'
+          ? (r: EvalRow) => timeMs(r.answered_at)
+          : ansSortKey === 'difficulty'
+            ? rowDiffRank
+            : ansSortKey === 'evidence'
+              ? rowEvidenceRank
+              : rowMarkRank; // 'mark'
     return [...rows].sort((a, b) => dir * (key(a) - key(b)) || a.index - b.index);
   }
 
@@ -1127,10 +1199,15 @@
       ),
       correct: Object.fromEntries(cols.map((m) => [m, 0])),
       score: Object.fromEntries(cols.map((m) => [m, 0])),
-      recall_ok: Object.fromEntries(cols.map((m) => [m, 0]))
+      recall_ok: Object.fromEntries(cols.map((m) => [m, 0])),
+      evidence_matched: 0,
+      evidence_total: 0
     };
     for (const st of Object.values(bc)) {
       t.total += st.total;
+      // Evidence recall is a single (non-leg) concept — sum the bucket scalars directly.
+      t.evidence_matched = (t.evidence_matched ?? 0) + (st.evidence_matched ?? 0);
+      t.evidence_total = (t.evidence_total ?? 0) + (st.evidence_total ?? 0);
       for (const m of cols) {
         const g = st.groups?.[m];
         if (g) {
@@ -1152,231 +1229,6 @@
 <svelte:document onvisibilitychange={onVisibilityChange} />
 
 <section class="grid gap-4">
-  <!-- Corpus picker + run controls. Inputs disable while a run is in flight. -->
-  <AdminPageStickyToolbar>
-    <div class="flex flex-col gap-3">
-      <!-- Row 1: corpus selection (folder + corpus) + run controls. Run is the primary
-           action, so it stays on this line with the selection it acts on. -->
-      <div class="flex flex-wrap items-center gap-3">
-        <!-- Folder: text input + native pick (like Knowledge Add) + rescan. -->
-      <div class="flex items-center gap-1.5 font-sans text-sm">
-        <span class="text-muted-foreground">Folder</span>
-        <input
-          class="h-8 w-64 rounded-md border bg-background px-2 text-sm"
-          placeholder="Folder to scan for corpuses"
-          value={eval_.folder}
-          oninput={(e) => eval_.setFolder(e.currentTarget.value)}
-          onchange={() => void eval_.scanCorpuses()}
-          disabled={isBusy}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          class="h-8"
-          onclick={() => void eval_.browseFolder()}
-          disabled={isBusy || eval_.pickingFolder}
-          title="Pick a folder"
-        >
-          {#if eval_.pickingFolder}
-            <LoaderCircle size={14} class="animate-spin" />
-          {:else}
-            <FolderSearch size={14} />
-          {/if}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          class="h-8"
-          onclick={() => void eval_.scanCorpuses()}
-          disabled={isBusy || eval_.corpusesLoading}
-          title="Rescan folder"
-        >
-          <RefreshCw size={14} class={eval_.corpusesLoading ? 'animate-spin' : ''} />
-        </Button>
-      </div>
-
-      <!-- Corpus dropdown — the corpuses found in the folder for this track. -->
-      <label class="flex select-none items-center gap-2 font-sans text-sm">
-        <span class="text-muted-foreground">Corpus</span>
-        <select
-          class="h-8 min-w-48 rounded-md border bg-background px-2 text-sm disabled:opacity-50"
-          value={eval_.selectedCorpusId}
-          onchange={(e) => eval_.selectCorpus(e.currentTarget.value)}
-          disabled={isBusy || eval_.corpuses.length === 0}
-        >
-          {#if eval_.corpuses.length === 0}
-            <option value="">No corpuses found</option>
-          {:else}
-            {#each eval_.corpuses as c (c.id)}
-              <option value={c.id}>
-                {c.name} ({c.item_count} {isMemory ? 'episodes' : 'docs'} · {c.question_count} Qs)
-              </option>
-            {/each}
-          {/if}
-        </select>
-      </label>
-
-      <!-- Run controls — kept on the selection row; Run is the primary action. -->
-      <div class="ml-auto flex gap-2">
-        {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage || (isMemory && eval_.savedCount > 0)}
-          <Button
-            variant="outline"
-            disabled={isBusy}
-            onclick={requestClear}
-            title={isMemory
-              ? 'Delete this corpus’s saved results from disk (ingested memory is kept)'
-              : "Clear the last run's results"}
-          >
-            <Trash2 size={14} /> {isMemory ? 'Clear results' : 'Clear'}
-          </Button>
-        {/if}
-        {#if isBusy}
-          <Button
-            variant="destructive"
-            disabled={eval_.cancelling}
-            onclick={() => void eval_.cancel()}
-            title="Stop the running eval"
-          >
-            {#if eval_.cancelling}
-              <LoaderCircle size={14} class="animate-spin" />
-            {:else}
-              <Square size={14} />
-            {/if}
-            {eval_.cancelling ? 'Cancelling…' : 'Cancel'}
-          </Button>
-        {/if}
-        <Button disabled={runDisabled} onclick={requestRun} title={runTitle}>
-          {#if isBusy}
-            <LoaderCircle size={14} class="animate-spin" />
-          {:else}
-            <Play size={14} />
-          {/if}
-          {setupOnlyMemory && eval_.selectedCount === 0 ? 'Run batch' : 'Run eval'}
-        </Button>
-      </div>
-      </div>
-
-      <!-- Row 2: run options (ingest / legs / batch window / judge). Hidden once the toolbar
-           pins on scroll — only the first line (corpus + run controls) stays. -->
-      {#if !toolbarStuck}
-      <div class="flex flex-wrap items-center gap-3">
-      <label
-        class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
-        title={isMemory
-          ? 'Ingest Episodes before answering any questions'
-          : 'Wipe this corpus’s eval docs (chunks + graph), then re-ingest from scratch. Leave off to reuse the existing index.'}
-      >
-        <input type="checkbox" class="size-4" bind:checked={eval_.ingestSynthetic} disabled={isBusy} />
-        <span>{isMemory ? 'Ingest Episodes' : 'Ingest corpus first'}</span>
-      </label>
-      {#if !isMemory}
-        <label
-          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
-          title="Wipe this corpus's prior graph, then rebuild it from the ingested chunks. Leave off to reuse the existing graph."
-        >
-          <input type="checkbox" class="size-4" bind:checked={eval_.buildGraph} disabled={isBusy} />
-          <span>Rebuild graph</span>
-        </label>
-        <div class="flex items-center gap-2 font-sans text-sm">
-          <span class="text-muted-foreground">Legs</span>
-          <div class="flex gap-1" role="group" aria-label="Legs to compare">
-            {#each EVAL_ALL_LEGS as mode (mode)}
-              <button
-                type="button"
-                class="rounded-md border px-2 py-1 text-xs {eval_.isModeSelected(mode)
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted'}"
-                aria-pressed={eval_.isModeSelected(mode)}
-                disabled={isBusy}
-                title={mode === 'graphiti'
-                  ? 'Graph facts only (by-id passages, no query hybrid)'
-                  : 'No graph — flat Qdrant hybrid'}
-                onclick={() => eval_.toggleMode(mode)}
-              >
-                {legLabel(mode)}
-              </button>
-            {/each}
-          </div>
-        </div>
-      {:else}
-        <!-- Episode batch window — only meaningful while ingesting. 1-based, INCLUSIVE episode
-             numbers (episode 1 = the first turn): ingest episodes From..To this run. To = 0 means
-             "to the end". Build a large corpus in monitored chunks; the window auto-advances after
-             each batch. (Controller converts to the backend's 0-based offset/count.) -->
-        {#if eval_.ingestSynthetic}
-          <div
-            class="flex items-center gap-1.5 font-sans text-sm"
-            title="Ingest episodes From..To this run (1-based, inclusive — episode 1 is the first turn). To = 0 means to the end. Auto-advances after each batch."
-          >
-            <span class="text-muted-foreground">Episodes</span>
-            <input
-              type="number"
-              min="1"
-              class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
-              value={eval_.episodeFrom}
-              oninput={(e) => (eval_.episodeFrom = e.currentTarget.valueAsNumber)}
-              disabled={isBusy}
-              title="From episode (1-based, inclusive)"
-            />
-            <span class="text-muted-foreground">to</span>
-            <input
-              type="number"
-              min="0"
-              class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
-              value={eval_.episodeTo}
-              oninput={(e) => (eval_.episodeTo = e.currentTarget.valueAsNumber)}
-              disabled={isBusy}
-              title="To episode (1-based, inclusive; 0 = to the end)"
-            />
-          </div>
-        {/if}
-        <!-- Clear Graph — explicit, decoupled wipe. Off by default so batched ingest APPENDS;
-             check it only for a from-scratch rebuild (first batch). Auto-resets after the run
-             starts so the next batch doesn't accidentally wipe the freshly ingested episodes. -->
-        <label
-          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
-          title="Clear Graph before Ingesting Episodes or answering questions (WARNING this will delete any previously ingested episodes on this Corpus)"
-        >
-          <input type="checkbox" class="size-4" bind:checked={eval_.clearBefore} disabled={isBusy} />
-          <span>Clear Graph</span>
-        </label>
-      {/if}
-      <!-- Optional LLM judge — grades each answer vs the ideal (reuses the answering model).
-           Hidden in setup-only batches (no questions selected): there are no answers to grade. -->
-      {#if eval_.selectedCount > 0}
-        <label
-          class="flex cursor-pointer select-none items-center gap-2 font-sans text-sm"
-          title="Use LLM Judge or Recall Results only."
-        >
-          <input type="checkbox" class="size-4" bind:checked={eval_.judge} disabled={isBusy} />
-          <span>LLM Judge Answers</span>
-        </label>
-        <!-- Memory track — parallel-question cap. 1 = serial (the safe default); higher overlaps
-             each question's answer/judge LLM calls. Note: per-question times then include
-             queueing, so the Time column isn't comparable across different caps. -->
-        {#if isMemory}
-          <div
-            class="flex items-center gap-1.5 font-sans text-sm"
-            title="Questions evaluated in parallel (1 = one at a time). Higher is faster but per-question times include waiting, and aggressive caps can hit LLM provider rate limits."
-          >
-            <span class="text-muted-foreground">Parallel</span>
-            <input
-              type="number"
-              min="1"
-              max={eval_.questionConcurrencyMax}
-              class="h-8 w-16 rounded-md border bg-background px-2 text-sm"
-              value={eval_.questionConcurrency}
-              oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
-              disabled={isBusy}
-            />
-          </div>
-        {/if}
-      {/if}
-      </div>
-      {/if}
-    </div>
-  </AdminPageStickyToolbar>
-
   <!-- Error banners — kept ABOVE the sub-tabs so transport/scan failures stay visible whatever
        section is open. -->
   {#if eval_.status === 'failed' && eval_.failureMessage}
@@ -1390,7 +1242,7 @@
     </div>
   {/if}
 
-  <!-- Sticky section sub-tabs — pin directly under the run-controls toolbar; each section's
+  <!-- Sticky section sub-tabs — pin directly under the page header; each section's
        summaries / buttons / filters render right under the bar (inside the matching pane). -->
   <div
     bind:this={subtabsEl}
@@ -1405,46 +1257,129 @@
     />
   </div>
 
-  <!-- ===== Control pane: Settings · Cost · Activity · Report ===== -->
-  <!-- Read-only settings that drive this run (NOT collapsible). Two columns: Ingestion (graph-build
-       models + chunking) and Answer & recall (answer model + retrieval knobs). Models render one per
-       line with their tuning-profile params; the non-model knobs follow as a dense chip row. -->
-  {#if activeSubtab === 'control' && prefs}
-    <div class="rounded-md border bg-muted/10 px-3 py-2">
-      <div class="mb-1 flex items-center justify-between gap-2">
-        <span class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Settings</span>
-        <a
-          href={preferenceTabHref('graph-engine', base)}
-          class="inline-flex items-center gap-1 rounded border px-2 py-0.5 font-sans text-xs text-primary hover:bg-primary/5"
-          title="Change these in the Graph engine settings"
-        >
-          <Settings2 size={12} aria-hidden="true" /> Edit
-        </a>
-      </div>
-      <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
-        {#each [{ label: 'Ingestion', models: ingestModels, knobs: ingestKnobs }, { label: 'Answer & recall', models: recallModels, knobs: recallKnobs }] as col (col.label)}
-          <div class="min-w-0">
-            <p class="mb-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{col.label}</p>
-            <!-- Models — one line each: id + tuning-profile params. -->
-            <div class="grid gap-y-0.5 font-sans text-xs">
-              {#each col.models as m (m.label)}
-                <div class="flex flex-wrap items-baseline gap-x-2">
-                  <span class="w-20 shrink-0 text-muted-foreground">{m.label}</span>
-                  <span class="font-mono text-foreground">{m.model}</span>
-                  {#if m.tuning}<span class="text-muted-foreground">· {m.tuning}</span>{/if}
-                </div>
-              {/each}
-            </div>
-            <!-- Non-model knobs for this column. -->
-            {#if col.knobs.length > 0}
-              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-sans text-xs">
-                {#each col.knobs as p (p.label)}
-                  <span class="text-muted-foreground">{p.label}: <span class="font-mono text-foreground">{p.value}</span></span>
-                {/each}
-              </div>
-            {/if}
+  <!-- ===== Execute pane ===== -->
+  <!-- One card with everything to configure + launch a run, split into three parts: (1) Corpus
+       scan + selection, (2) Ingestion (build options + read-only ingestion settings), (3) Question
+       answering (answer/recall options + read-only answer/recall settings). The run action bar
+       (selected-question count + Cancel + Run) sits at the top; Settings are editable via the
+       Graph engine link. -->
+  {#if activeSubtab === 'execute'}
+    <div class="grid gap-4 rounded-md border bg-muted/10 px-3 py-3">
+      <!-- Part 1 — Corpus: folder scan + corpus selection. -->
+      <div class="grid gap-2">
+        <p class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Corpus</p>
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Folder: text input + native pick (like Knowledge Add) + rescan. -->
+          <div class="flex items-center gap-1.5 font-sans text-sm">
+            <span class="text-muted-foreground">Folder</span>
+            <input
+              class="h-8 w-64 rounded-md border bg-background px-2 text-sm"
+              placeholder="Folder to scan for corpuses"
+              value={eval_.folder}
+              oninput={(e) => eval_.setFolder(e.currentTarget.value)}
+              onchange={() => void eval_.scanCorpuses()}
+              disabled={isBusy}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              class="h-8"
+              onclick={() => void eval_.browseFolder()}
+              disabled={isBusy || eval_.pickingFolder}
+              title="Pick a folder"
+            >
+              {#if eval_.pickingFolder}
+                <LoaderCircle size={14} class="animate-spin" />
+              {:else}
+                <FolderSearch size={14} />
+              {/if}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              class="h-8"
+              onclick={() => void eval_.scanCorpuses()}
+              disabled={isBusy || eval_.corpusesLoading}
+              title="Rescan folder"
+            >
+              <RefreshCw size={14} class={eval_.corpusesLoading ? 'animate-spin' : ''} />
+            </Button>
           </div>
-        {/each}
+          <!-- Corpus dropdown — the corpuses found in the folder for this track. -->
+          <label class="flex select-none items-center gap-2 font-sans text-sm">
+            <span class="text-muted-foreground">Corpus</span>
+            <select
+              class="h-8 min-w-48 rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+              value={eval_.selectedCorpusId}
+              onchange={(e) => eval_.selectCorpus(e.currentTarget.value)}
+              disabled={isBusy || eval_.corpuses.length === 0}
+            >
+              {#if eval_.corpuses.length === 0}
+                <option value="">No corpuses found</option>
+              {:else}
+                {#each eval_.corpuses as c (c.id)}
+                  <option value={c.id}>
+                    {c.name} ({c.item_count} {isMemory ? 'episodes' : 'docs'} · {c.question_count} Qs)
+                  </option>
+                {/each}
+              {/if}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <!-- Part 2 — Ingestion: two columns — left = build options + the Ingest button; right = the
+           read-only ingestion settings (models + chunking) with the gear to edit them. -->
+      <div class="grid gap-2 border-t pt-3">
+        <p class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ingestion</p>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+              {@render ingestionOptions()}
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <Button disabled={ingestDisabled} onclick={requestIngest} title={ingestTitle}>
+                {#if isBusy && runningIntent === 'ingest'}
+                  <LoaderCircle size={14} class="animate-spin" />
+                {:else}
+                  <Download size={14} />
+                {/if}
+                Ingest
+              </Button>
+              {#if isBusy && runningIntent === 'ingest'}{@render cancelButton()}{/if}
+            </div>
+          </div>
+          {@render settingsColumn(ingestModels, ingestKnobs)}
+        </div>
+      </div>
+
+      <!-- Part 3 — Question answering: two columns — left = answer/recall options + the selected
+           count and the Eval Questions button; right = the read-only answer/recall settings. -->
+      <div class="grid gap-2 border-t pt-3">
+        <p class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Question answering</p>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+              {@render answeringOptions()}
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-sans text-xs text-muted-foreground" title="Questions selected to evaluate">
+                <span class="font-mono tabular-nums text-foreground">{eval_.selectedCount}</span>
+                {eval_.selectedCount === 1 ? 'question' : 'questions'} selected
+              </span>
+              <Button disabled={evalDisabled} onclick={requestEval} title={evalTitle}>
+                {#if isBusy && runningIntent !== 'ingest'}
+                  <LoaderCircle size={14} class="animate-spin" />
+                {:else}
+                  <Play size={14} />
+                {/if}
+                Eval Questions
+              </Button>
+              {#if isBusy && runningIntent !== 'ingest'}{@render cancelButton()}{/if}
+            </div>
+          </div>
+          {@render settingsColumn(recallModels, recallKnobs)}
+        </div>
       </div>
     </div>
   {/if}
@@ -1710,7 +1645,7 @@
        a Results-gated cost box reported nothing while ingesting. Ingest cost streams in on the
        'remember_done' setup event; questions accumulate live; total folds both (LLM + reranker;
        embeddings unpriced). Knowledge ingest cost is deferred (multi-run), shown as “—”. -->
-  {#if activeSubtab === 'control' && (totalCost > 0 || isBusy)}
+  {#if activeSubtab === 'execute' && (totalCost > 0 || isBusy)}
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
       <span class="font-semibold uppercase tracking-wide text-muted-foreground">Cost</span>
       <span class="font-mono text-foreground">≈ {fmtCost(totalCost)}</span>
@@ -1751,7 +1686,7 @@
 
   <!-- Activity section — only once processing starts (or has data to replay). Persists across
        navigation via the server-side run registry (GET /knowledge/eval/state). Shown below Cost. -->
-  {#if activeSubtab === 'control' && (isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0)}
+  {#if activeSubtab === 'execute' && (isBusy || eval_.setupEvents.length > 0 || eval_.rows.length > 0)}
     <KnowledgeCollapsibleSectionCard
       title="Activity"
       bodyId="knowledge-eval-activity"
@@ -1912,17 +1847,42 @@
     {/if}
   {/if}
 
-  <!-- Report (Control pane) — the aggregate breakdown: per-category, then per-difficulty (each
-       with the answer-type distribution + Recall Accuracy / Score / Correct metrics + a Total row). -->
-  {#if activeSubtab === 'control' && eval_.summary}
-    <KnowledgeCollapsibleSectionCard
-      title="Report"
-      bodyId="knowledge-eval-report"
-      defaultExpanded={true}
-      summary={reportSummary}
-    >
+  <!-- Clear-results action for the Report header — wipes ALL report data + answer details for this
+       corpus (memory: a destructive on-disk delete, gated by the confirm dialog; knowledge: an
+       in-view reset). Lives on the Report header line since that's the data it clears. -->
+  {#snippet reportHeaderActions()}
+    {#if eval_.rows.length > 0 || eval_.summary || eval_.failureMessage || (isMemory && eval_.savedCount > 0)}
+      <Button
+        variant="outline"
+        class="h-7"
+        disabled={isBusy}
+        onclick={requestClear}
+        title={isMemory
+          ? 'Delete this corpus’s saved results from disk — wipes the report + answer details (ingested memory is kept)'
+          : "Clear this run's report + answer details"}
+      >
+        <Trash2 size={14} /> {isMemory ? 'Clear results' : 'Clear'}
+      </Button>
+    {/if}
+  {/snippet}
+
+  <!-- ===== Report pane ===== -->
+  <!-- Aggregate breakdown — per-category, then per-difficulty (answer-type distribution + Recall
+       Accuracy / Score / Correct / Evidence recall + a Total row). Its own sub-tab (last); rendered
+       directly under the tab (no collapsible card). A header line carries the run summary + the
+       Clear-results action (which wipes the report + answer details). -->
+  {#if activeSubtab === 'report'}
+    {#if !eval_.summary}
+      <p class="rounded-md border bg-muted/20 px-3 py-6 text-center font-sans text-sm text-muted-foreground">
+        No report yet — run an eval to see the aggregate breakdown here.
+      </p>
+    {:else}
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="mr-auto font-sans text-xs text-muted-foreground">{reportSummary}</span>
+        {@render reportHeaderActions()}
+      </div>
       {#if eval_.summary.by_category && Object.keys(eval_.summary.by_category).length > 0}
-        <p class="mb-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p class="mb-1 mt-2 font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Results by category
         </p>
         {@render breakdownTable(eval_.summary.by_category, eval_.summary.modes, 'Category')}
@@ -1937,7 +1897,7 @@
           'Difficulty'
         )}
       {/if}
-    </KnowledgeCollapsibleSectionCard>
+    {/if}
   {/if}
 </section>
 
@@ -2015,14 +1975,15 @@
   extraTab={corpusTabLabel ? corpusTab : undefined}
 />
 
-<!-- Rebuild-graph wipe confirm — gates Run when "Rebuild graph" is checked on a graphed corpus. -->
+<!-- Rebuild-graph wipe confirm — gates the Ingest button when a wipe (Clear graph / Rebuild graph)
+     is armed on a graphed corpus. Only an ingest run wipes, so it always resumes as 'ingest'. -->
 <KnowledgeEvalRebuildConfirmDialog
   bind:open={confirmOpen}
   track={eval_.track}
   corpusName={eval_.selectedCorpus?.name ?? ''}
   onConfirm={() => {
     confirmOpen = false;
-    void eval_.start();
+    void eval_.start('ingest');
   }}
 />
 
@@ -2036,6 +1997,195 @@
     void eval_.clear();
   }}
 />
+
+<!-- Read-only settings block (models one-per-line + a dense knob chip row), rendered ALONG its
+     matching Execute part — ingestion settings under Ingestion, answer/recall under Question
+     answering. Editable via the Graph engine link in the Execute action bar. -->
+{#snippet settingsBlock(models: ModelLine[], knobs: Param[])}
+  <div class="grid gap-y-0.5 font-sans text-xs">
+    {#each models as m (m.label)}
+      <div class="flex flex-wrap items-baseline gap-x-2">
+        <span class="w-20 shrink-0 text-muted-foreground">{m.label}</span>
+        <span class="font-mono text-foreground">{m.model}</span>
+        {#if m.tuning}<span class="text-muted-foreground">· {m.tuning}</span>{/if}
+      </div>
+    {/each}
+  </div>
+  {#if knobs.length > 0}
+    <div class="flex flex-wrap gap-x-3 gap-y-0.5 font-sans text-xs">
+      {#each knobs as p (p.label)}
+        <span class="text-muted-foreground">{p.label}: <span class="font-mono text-foreground">{p.value}</span></span>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
+
+<!-- Right-hand settings column for an Execute part: a "Settings" label + a gear-only link to edit
+     them in Graph engine, over the read-only settings block. Renders a hint when prefs aren't loaded. -->
+{#snippet settingsColumn(models: ModelLine[], knobs: Param[])}
+  <div class="min-w-0">
+    <div class="mb-1 flex items-center justify-between gap-2">
+      <span class="font-sans text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">Settings</span>
+      <a
+        href={preferenceTabHref('graph-engine', base)}
+        title="Edit these settings in Graph engine"
+        aria-label="Edit settings"
+        class="inline-flex items-center rounded border p-1 text-primary hover:bg-primary/5"
+      >
+        <Settings2 size={14} aria-hidden="true" />
+      </a>
+    </div>
+    {#if prefs}
+      {@render settingsBlock(models, knobs)}
+    {:else}
+      <p class="font-sans text-xs text-muted-foreground">Settings unavailable.</p>
+    {/if}
+  </div>
+{/snippet}
+
+<!-- Cancel control for an in-flight run — shown in whichever Execute section's button row owns the
+     running action (Ingest vs Eval). Cancel is global (one run at a time), so either placement stops it. -->
+{#snippet cancelButton()}
+  <Button
+    variant="destructive"
+    disabled={eval_.cancelling}
+    onclick={() => void eval_.cancel()}
+    title="Stop the running job"
+  >
+    {#if eval_.cancelling}
+      <LoaderCircle size={14} class="animate-spin" />
+    {:else}
+      <Square size={14} />
+    {/if}
+    {eval_.cancelling ? 'Cancelling…' : 'Cancel'}
+  </Button>
+{/snippet}
+
+<!-- Ingestion options — the knobs the Ingest button acts on (memory: episode window + Clear Graph;
+     knowledge: Rebuild graph). The old "Ingest Episodes / Ingest corpus first" checkbox is gone —
+     the Ingest button IS the ingest action. Caller wraps in a flex row; inputs disable while busy. -->
+{#snippet ingestionOptions()}
+  {#if !isMemory}
+    <label
+      class="flex select-none items-center gap-2 font-sans text-sm {isBusy ? 'opacity-50' : 'cursor-pointer'}"
+      title="Wipe this corpus's prior graph, then rebuild it from the ingested chunks. Leave off to reuse the existing graph."
+    >
+      <input type="checkbox" class="size-4" bind:checked={eval_.buildGraph} disabled={isBusy} />
+      <span>Rebuild graph</span>
+    </label>
+  {:else}
+    <!-- Episode batch window — 1-based, INCLUSIVE episode numbers (episode 1 = the first turn):
+         Ingest episodes From..To this run. To = 0 means "to the end". Build a large corpus in
+         monitored chunks; the window auto-advances after each batch. (Controller converts to the
+         backend's 0-based offset/count.) -->
+    <div
+      class="flex items-center gap-1.5 font-sans text-sm {isBusy ? 'opacity-50' : ''}"
+      title="Ingest episodes From..To this run (1-based, inclusive — episode 1 is the first turn). To = 0 means to the end. Auto-advances after each batch."
+    >
+      <span class="text-muted-foreground">Episodes</span>
+      <input
+        type="number"
+        min="1"
+        class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
+        value={eval_.episodeFrom}
+        oninput={(e) => (eval_.episodeFrom = e.currentTarget.valueAsNumber)}
+        disabled={isBusy}
+        title="From episode (1-based, inclusive)"
+      />
+      <span class="text-muted-foreground">to</span>
+      <input
+        type="number"
+        min="0"
+        class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
+        value={eval_.episodeTo}
+        oninput={(e) => (eval_.episodeTo = e.currentTarget.valueAsNumber)}
+        disabled={isBusy}
+        title="To episode (1-based, inclusive; 0 = to the end)"
+      />
+    </div>
+    <!-- Clear Graph — explicit, decoupled wipe. VISIBLE but DIMMED when there's no graph to clear
+         (nothing to wipe yet) or while a run is in flight. Off by default so a batched ingest
+         APPENDS; the controller auto-resets it after an ingest starts so the next batch can't
+         silently wipe the episodes just built. -->
+    <label
+      class="flex select-none items-center gap-2 font-sans text-sm {isBusy || !eval_.selectedCorpusHasGraph ? 'opacity-50' : 'cursor-pointer'}"
+      title={eval_.selectedCorpusHasGraph
+        ? 'Clear the graph before ingesting (WARNING: deletes every previously ingested episode for this corpus)'
+        : 'No graph to clear yet — ingest first'}
+    >
+      <input
+        type="checkbox"
+        class="size-4"
+        bind:checked={eval_.clearBefore}
+        disabled={isBusy || !eval_.selectedCorpusHasGraph}
+      />
+      <span>Clear Graph</span>
+    </label>
+  {/if}
+{/snippet}
+
+<!-- Answering options — the knobs the Eval Questions button acts on: which legs to compare
+     (knowledge), the optional LLM judge, and the parallel-question cap (memory). Judge + parallel
+     only matter once questions are selected, so they're VISIBLE but DIMMED until then. -->
+{#snippet answeringOptions()}
+  {#if !isMemory}
+    <div class="flex items-center gap-2 font-sans text-sm">
+      <span class="text-muted-foreground">Legs</span>
+      <div class="flex gap-1" role="group" aria-label="Legs to compare">
+        {#each EVAL_ALL_LEGS as mode (mode)}
+          <button
+            type="button"
+            class="rounded-md border px-2 py-1 text-xs {eval_.isModeSelected(mode)
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-muted'}"
+            aria-pressed={eval_.isModeSelected(mode)}
+            disabled={isBusy}
+            title={mode === 'graphiti'
+              ? 'Graph facts only (by-id passages, no query hybrid)'
+              : 'No graph — flat Qdrant hybrid'}
+            onclick={() => eval_.toggleMode(mode)}
+          >
+            {legLabel(mode)}
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+  <label
+    class="flex select-none items-center gap-2 font-sans text-sm {isBusy || eval_.selectedCount === 0 ? 'opacity-50' : 'cursor-pointer'}"
+    title={eval_.selectedCount === 0
+      ? 'Select questions to enable the LLM judge'
+      : 'Grade each answer against the ideal with the LLM judge (off = recall results only)'}
+  >
+    <input
+      type="checkbox"
+      class="size-4"
+      bind:checked={eval_.judge}
+      disabled={isBusy || eval_.selectedCount === 0}
+    />
+    <span>LLM Judge Answers</span>
+  </label>
+  <!-- Memory track — parallel-question cap. 1 = serial (the safe default); higher overlaps each
+       question's answer/judge LLM calls. Note: per-question times then include queueing, so the
+       Time column isn't comparable across different caps. -->
+  {#if isMemory}
+    <div
+      class="flex items-center gap-1.5 font-sans text-sm {isBusy || eval_.selectedCount === 0 ? 'opacity-50' : ''}"
+      title="Questions evaluated in parallel (1 = one at a time). Higher is faster but per-question times include waiting, and aggressive caps can hit LLM provider rate limits."
+    >
+      <span class="text-muted-foreground">Parallel</span>
+      <input
+        type="number"
+        min="1"
+        max={eval_.questionConcurrencyMax}
+        class="h-8 w-16 rounded-md border bg-background px-2 text-sm"
+        value={eval_.questionConcurrency}
+        oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
+        disabled={isBusy || eval_.selectedCount === 0}
+      />
+    </div>
+  {/if}
+{/snippet}
 
 <!-- Judge recall-sufficiency flag — a single colored flag (no text): green = the recalled context
      held what was needed, rose = a recall miss. Renders nothing when unknown (not judged). -->
@@ -2082,6 +2232,34 @@
   </th>
 {/snippet}
 
+<!-- Sortable header cell for the Answer Details table: click cycles none→asc→desc (cycleAnsSort);
+     shows the active direction, or a faded both-ways glyph to signal the column is sortable. Mirrors
+     the Questions table's sortHeader but drives the answer-row sort. ``align`` positions the cell;
+     pass an ``IconCmp`` for an icon-only header (e.g. the recall flag). -->
+{#snippet ansSortHeader(
+  key: Exclude<AnsSortKey, 'none'>,
+  label: string,
+  align: 'left' | 'center' | 'right' = 'left',
+  IconCmp: Component<{ size?: number; class?: string }> | null = null,
+  titleText = ''
+)}
+  <th class="px-2 py-1.5 {align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground {align === 'right' ? 'flex-row-reverse' : ''}"
+      onclick={() => cycleAnsSort(key)}
+      title="{titleText || `Sort by ${label}`}{ansSortKey === key ? ` (${ansSortDir})` : ''}"
+    >
+      {#if IconCmp}<IconCmp size={12} />{:else}{label}{/if}
+      {#if ansSortKey === key}
+        {#if ansSortDir === 'asc'}<ChevronUp size={12} aria-hidden="true" />{:else}<ChevronDown size={12} aria-hidden="true" />{/if}
+      {:else}
+        <ChevronsUpDown size={12} class="opacity-30" aria-hidden="true" />
+      {/if}
+    </button>
+  </th>
+{/snippet}
+
 <!-- Highlight the active Answer Details search term inside a text span (no {@html} — segments are
      plain text wrapped in <mark>, so corpus content can't inject). Identity render when no search. -->
 {#snippet hl(text: string)}{#each highlightSegments(text ?? '', ansSearch) as seg}{#if seg.hit}<mark class="rounded bg-amber-200 text-inherit dark:bg-amber-500/40">{seg.text}</mark>{:else}{seg.text}{/if}{/each}{/snippet}
@@ -2103,47 +2281,27 @@
           <th class="px-2 py-1.5 text-left">#</th>
           <th class="px-2 py-1.5 text-left">Question</th>
           <th class="px-2 py-1.5 text-left">Type</th>
-          <th class="px-2 py-1.5 text-left">Difficulty</th>
+          {@render ansSortHeader('difficulty', 'Difficulty')}
           <th class="px-2 py-1.5 text-left">Ideal</th>
           {#if showRecallCol}
             <!-- Sortable recall-sufficiency flag column (before the recall answer). -->
-            <th class="px-2 py-1.5 text-center">
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 hover:text-foreground"
-                onclick={() => cycleAnsSort('recall')}
-                title="Judge recall-sufficiency — click to sort{ansSortKey === 'recall' ? ` (${ansSortDir})` : ''}"
-              >
-                <Flag size={12} aria-hidden="true" />
-                {#if ansSortKey === 'recall'}{#if ansSortDir === 'asc'}<ChevronUp size={12} aria-hidden="true" />{:else}<ChevronDown size={12} aria-hidden="true" />{/if}{:else}<ChevronsUpDown size={12} class="opacity-30" aria-hidden="true" />{/if}
-              </button>
-            </th>
+            {@render ansSortHeader('recall', '', 'center', Flag, 'Judge recall-sufficiency')}
           {/if}
           {#if showEvidenceCol}
             <!-- Evidence recall — gold evidence episodes covered by the recall (X/Y). LoCoMo only. -->
-            <th class="px-2 py-1.5 text-center" title="Evidence recall — gold evidence episodes the recall covered (LoCoMo corpora)">Ev</th>
+            {@render ansSortHeader('evidence', 'Ev', 'center', null, 'Evidence recall — gold evidence episodes the recall covered (LoCoMo corpora)')}
           {/if}
           {#each legColumns as mode (mode)}
             {#if isMemory}
               <!-- Answer type (judge verdict) — split out of the recall-answer cell into its own
-                   column so the verdict scans/filters independently of the answer text. -->
-              <th class="px-2 py-1.5 text-left">Answer type</th>
+                   sortable column so the verdict scans/sorts independently of the answer text. -->
+              {@render ansSortHeader('mark', 'Answer type')}
             {/if}
             <th class="px-2 py-1.5 text-left">{legLabel(mode)} answer</th>
           {/each}
           {#if showDelta}<th class="px-2 py-1.5 text-center" title="best graph leg vs flat">&#916;</th>{/if}
           <!-- Eval time (sortable, last column) — clock only; full date on hover; sorts on date. -->
-          <th class="px-2 py-1.5 text-right">
-            <button
-              type="button"
-              class="inline-flex flex-row-reverse items-center gap-1 uppercase tracking-wide hover:text-foreground"
-              onclick={() => cycleAnsSort('time')}
-              title="Eval time — click to sort{ansSortKey === 'time' ? ` (${ansSortDir})` : ''}"
-            >
-              Time
-              {#if ansSortKey === 'time'}{#if ansSortDir === 'asc'}<ChevronUp size={12} aria-hidden="true" />{:else}<ChevronDown size={12} aria-hidden="true" />{/if}{:else}<ChevronsUpDown size={12} class="opacity-30" aria-hidden="true" />{/if}
-            </button>
-          </th>
+          {@render ansSortHeader('time', 'Time', 'right', null, 'Eval time')}
         </tr>
       </thead>
       <tbody>
@@ -2640,6 +2798,11 @@
       <th class="px-1.5 py-1 text-center" title="Score % (of total)">Score&nbsp;%</th>
       <th class="px-1.5 py-1 text-center" title="Correct Answers — Pass = 1 point, anything else = 0 points (more restrictive than Score)">Correct&nbsp;Answers</th>
       <th class="px-1.5 py-1 text-center" title="Correct Answers % (of total)">Correct&nbsp;%</th>
+      {#if hasEvidenceReport}
+        <!-- Evidence recall (LoCoMo): gold-evidence episodes the recall covered, summed across the
+             bucket, as matched/total + %. Memory single-leg only (hasEvidenceReport ⇒ isMemory). -->
+        <th class="border-l-2 border-border px-1.5 py-1 text-center" title="Evidence recall — gold evidence episodes the recall covered (matched / total + %), summed across this bucket (LoCoMo corpora)">Evidence&nbsp;recall</th>
+      {/if}
     {/each}
   {/snippet}
   {#snippet bdCells(st: EvalCategoryStat, flatCorrect: number, isTotal = false)}
@@ -2661,6 +2824,14 @@
       <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{pct(score, st.total)}</td>
       <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{correct}/{st.total}</td>
       <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {winCls}">{pct(correct, st.total)}</td>
+      {#if hasEvidenceReport}
+        {@const em = st.evidence_matched ?? 0}
+        {@const et = st.evidence_total ?? 0}
+        <td
+          class="border-l-2 border-border px-1.5 py-1.5 text-center font-mono tabular-nums {tone}"
+          title="{em}/{et} gold evidence episodes recalled across this {isTotal ? 'report' : 'bucket'}"
+        >{#if et > 0}{em}/{et} · {pct(em, et)}{:else}—{/if}</td>
+      {/if}
     {/each}
   {/snippet}
   <div class="overflow-x-auto rounded-md border">

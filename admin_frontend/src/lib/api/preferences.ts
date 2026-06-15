@@ -104,6 +104,12 @@ export type GraphPreferences = {
   // raw conversation text via BM25 — last-resort recall, noisier. mmr × episodes is rejected
   // by the backend cross-field validator.
   search_scope: 'edges' | 'edges_and_nodes' | 'edges_nodes_episodes';
+  // Ingest-time extraction ontology. 'open' = no entity types (Graphiti extracts freely, broadest
+  // recall); 'typed' = pin the 5-type vocabulary (precise, drops off-type facts). Re-ingest to apply.
+  entity_ontology: 'open' | 'typed';
+  // Domain-generic extra guidance injected into Graphiti's node + edge extraction prompts
+  // (custom_extraction_instructions slot). '' = none. Re-ingest to apply.
+  custom_extraction_instructions: string;
   // Cosine candidate floor (Graphiti EdgeSearchConfig.sim_min_score). Low = recall.
   sim_min_score: number;
   // Hard ceiling (seconds) on any single Kuzu query (writer + snapshot reads). Bounds the
@@ -124,6 +130,19 @@ export type GraphPreferences = {
   eval: {
     memory_answer_prompt: string;
     judge_prompt: string;
+    // Eval answer + judge each have their OWN model + tuning profile (separated from the single
+    // shared answering model). null model = fall back to the knowledge answering model → default
+    // chat. answer_* drives the memory-eval answer step; judge_* grades both tracks.
+    answer_model: string | null;
+    answer_tuning_profile: string;
+    judge_model: string | null;
+    judge_tuning_profile: string;
+    // Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
+    // line carries. show_event_time (valid_at, labeled "event_time") also governs the episode
+    // [date] prefix; show_expired_at = invalid_at; show_superseded = the SUPERSEDED tag.
+    show_event_time: boolean;
+    show_expired_at: boolean;
+    show_superseded: boolean;
   };
   // Admin graph-viz DISPLAY knobs (the shared Knowledge/Memories Graph tab's per-type node
   // filter). Frontend-only — the graph engine ignores these.
@@ -229,6 +248,9 @@ export const DEFAULT_GRAPH: GraphPreferences = {
   k_hop: 1,
   search_recipe: 'rrf',
   search_scope: 'edges',
+  entity_ontology: 'open',
+  custom_extraction_instructions:
+    'Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity.',
   sim_min_score: 0.3,
   query_timeout_s: 60,
   observability: 'ledger',
@@ -239,7 +261,14 @@ export const DEFAULT_GRAPH: GraphPreferences = {
   },
   eval: {
     memory_answer_prompt: '',
-    judge_prompt: ''
+    judge_prompt: '',
+    answer_model: null,
+    answer_tuning_profile: 'knowledge_answering',
+    judge_model: null,
+    judge_tuning_profile: 'knowledge_answering',
+    show_event_time: true,
+    show_expired_at: false,
+    show_superseded: false
   },
   view: {
     large_type_threshold: 200

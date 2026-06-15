@@ -36,16 +36,46 @@
   </div>
 
   {#if ctrl.draft}
+    <!-- Everything that builds the graph at ingest, in one section. -->
     <SectionCardMuted
-      title="Graph engine (Graphiti)"
-      description="Temporal entity/fact graph over the workspace. Models read each chunk/turn and pull out entities + dated facts; the graph search ranks those facts at retrieval time."
+      title="Graph Extraction"
+      description="Everything that builds the graph at ingest — the entity ontology, the heavy extraction model, the cheaper sub-step model, and the embedder. Changing any of these needs a re-ingest to rebuild the graph."
       collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngine}
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphExtraction}
     >
+      <FormField
+        label="Extraction ontology"
+        hint="Which entity types extraction may use. Open = no predefined types; the model extracts freely (everything becomes a generic Entity) — broadest recall, captures activities, interests, media, and preferences. Typed = pin the 5-type vocabulary (Person / Place / Organization / Event / Object) — more precise, but drops first-person facts that don't fit those types. Changing this rebuilds the graph at the next ingest, so a re-ingest is required to take effect."
+        class="max-w-md"
+      >
+        <select
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.entity_ontology}
+          onchange={ctrl.markDirty}
+        >
+          <option value="open">Open (no predefined types)</option>
+          <option value="typed">Typed (Person / Place / Organization / Event / Object)</option>
+        </select>
+      </FormField>
+
+      <FormField
+        label="Extraction instructions"
+        hint="Optional domain-generic guidance injected verbatim into Graphiti's entity + fact extraction prompts. Use it to steer what gets captured — e.g. capture first-person preferences, goals, habits and activities as facts even when only the speaker is named, treating the activity / topic / object as the second entity. Keep it generic (no dataset-specific rules). Blank = none. Applied at ingest, so a re-ingest is required to take effect."
+      >
+        <textarea
+          class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          rows="4"
+          maxlength="2000"
+          placeholder="e.g. Capture first-person preferences, goals, habits, and activities as facts even when only the speaker is named; treat the activity, topic, or object as the second entity."
+          bind:value={ctrl.draft.graph.custom_extraction_instructions}
+          oninput={ctrl.markDirty}
+        ></textarea>
+      </FormField>
+
       <SingleModelPicker
         embedded
         labelled
-        label="Graph extraction model"
+        label="Extraction model"
         hint="The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat."
         selectedId={ctrl.draft.graph.extraction_model}
         catalogModels={ctrl.chatOptions}
@@ -59,7 +89,7 @@
         onChange={ctrl.markDirty}
       />
       <FormField
-        label="Graph extraction profile"
+        label="Extraction profile"
         hint="Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs."
         class="max-w-md"
       >
@@ -77,8 +107,8 @@
       <SingleModelPicker
         embedded
         labelled
-        label="Graph small-step model"
-        hint="Cheaper model for dedupe / summaries / timestamps. Null falls back to the extraction model."
+        label="Smaller extraction model"
+        hint="Cheaper model for Graphiti's sub-steps — node dedupe, entity summaries, timestamps. Null falls back to the extraction model."
         selectedId={ctrl.draft.graph.small_model}
         catalogModels={ctrl.chatOptions}
         catalogAllProviders={ctrl.catalogAllProviders}
@@ -91,8 +121,8 @@
         onChange={ctrl.markDirty}
       />
       <FormField
-        label="Graph small-step profile"
-        hint="Tuning profile for the cheaper small-step model (dedupe / summaries / timestamps)."
+        label="Smaller extraction profile"
+        hint="Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps)."
         class="max-w-md"
       >
         <select
@@ -109,7 +139,7 @@
       <SingleModelPicker
         embedded
         labelled
-        label="Graph embedder"
+        label="Embedder model"
         hint="Embeds entity names + facts into the graph. Null shares the knowledge embedding model. Shared across memory + knowledge graph data — changing it re-indexes everything."
         selectedId={ctrl.draft.graph.embedder_model}
         catalogModels={ctrl.embeddingOptions}
@@ -122,7 +152,86 @@
         onSelect={ctrl.setKnowledgeGraphEmbedderModel}
         onChange={ctrl.markDirty}
       />
+    </SectionCardMuted>
 
+    <SectionCardMuted
+      title="Evaluation Models"
+      description="Models + profiles the eval harness uses — the answer step (memory track) and the judge (both tracks). Eval-only; the knowledge track answers with the production pipeline, not the answer model here."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEvalModels}
+    >
+      <SingleModelPicker
+        embedded
+        labelled
+        label="Eval answer model"
+        hint="Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)"
+        selectedId={ctrl.draft.graph.eval.answer_model}
+        catalogModels={ctrl.chatOptions}
+        catalogAllProviders={ctrl.catalogAllProviders}
+        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
+        workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
+        busy={ctrl.busy}
+        emptyProviders="No chat providers in catalog."
+        emptyModelsForProvider="No chat models for this provider."
+        onSelect={ctrl.setEvalAnswerModel}
+        onChange={ctrl.markDirty}
+      />
+      <FormField
+        label="Eval answer profile"
+        hint="Tuning profile (temperature / max-tokens / thinking) for the eval answer model."
+        class="max-w-md"
+      >
+        <select
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.eval.answer_tuning_profile}
+          onchange={ctrl.markDirty}
+        >
+          {#each ctrl.profileEntries as [id, profile] (id)}
+            <option value={id}>{profile.label}</option>
+          {/each}
+        </select>
+      </FormField>
+
+      <SingleModelPicker
+        embedded
+        labelled
+        label="Eval judge model"
+        hint="Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat."
+        selectedId={ctrl.draft.graph.eval.judge_model}
+        catalogModels={ctrl.chatOptions}
+        catalogAllProviders={ctrl.catalogAllProviders}
+        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
+        workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
+        busy={ctrl.busy}
+        emptyProviders="No chat providers in catalog."
+        emptyModelsForProvider="No chat models for this provider."
+        onSelect={ctrl.setEvalJudgeModel}
+        onChange={ctrl.markDirty}
+      />
+      <FormField
+        label="Eval judge profile"
+        hint="Tuning profile for the judge model. Lower temperature = more repeatable grading."
+        class="max-w-md"
+      >
+        <select
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.eval.judge_tuning_profile}
+          onchange={ctrl.markDirty}
+        >
+          {#each ctrl.profileEntries as [id, profile] (id)}
+            <option value={id}>{profile.label}</option>
+          {/each}
+        </select>
+      </FormField>
+    </SectionCardMuted>
+
+    <!-- Retrieval/ranking knobs + observability + the eval recalled-context format. -->
+    <SectionCardMuted
+      title="Graph search & indexing"
+      description="The retrieval/ranking knobs the graph search uses, the observability tier, and the eval recalled-context format. These apply to both Agent Memory and Knowledge."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngine}
+    >
       <div class="grid gap-3 md:grid-cols-2">
         <FormField
           label="Temporal lens (default)"
@@ -245,28 +354,61 @@
           <option value="trace">Trace (+ deep per-stage sidecars)</option>
         </select>
       </FormField>
-    </SectionCardMuted>
 
-    <SectionCardMuted
-      title="Graph view (display)"
-      description="Display-only settings for the shared Knowledge / Memories Graph tab. These tune the in-browser graph view and do not affect extraction, search, or retrieval."
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.graphView}
-    >
-      <FormField
-        label="Large node-type warning threshold"
-        hint="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only."
-        class="max-w-md"
-      >
-        <input
-          type="number"
-          min="10"
-          max="10000"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.view.large_type_threshold}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
+      <fieldset class="grid gap-2 border-0 p-0">
+        <legend class="font-sans text-sm font-medium">Eval recalled-context format</legend>
+        <p class="text-xs text-muted-foreground">
+          Which temporal annotations each recalled <span class="font-medium">fact</span> line carries
+          in the answer + judge context — e.g.
+          <code>Maya lives in Berlin [LIVES_IN · event_time: 2022-01-01]</code>. Eval-only; applied
+          identically to the answer, judge, and evidence-check renders.
+        </p>
+        <label class="flex items-start gap-3 rounded-md border border-border/50 bg-card/45 px-3 py-2.5">
+          <input
+            type="checkbox"
+            class="mt-0.5"
+            bind:checked={ctrl.draft.graph.eval.show_event_time}
+            onchange={ctrl.markDirty}
+          />
+          <span class="grid gap-0.5">
+            <span class="font-sans text-sm font-medium">Show event_time (valid date)</span>
+            <span class="font-sans text-xs text-muted-foreground">
+              Adds <code>event_time: &lt;valid_at&gt;</code> to each fact. Also governs the
+              <span class="font-medium">[date]</span> prefix on recalled messages (episodes).
+            </span>
+          </span>
+        </label>
+        <label class="flex items-start gap-3 rounded-md border border-border/50 bg-card/45 px-3 py-2.5">
+          <input
+            type="checkbox"
+            class="mt-0.5"
+            bind:checked={ctrl.draft.graph.eval.show_expired_at}
+            onchange={ctrl.markDirty}
+          />
+          <span class="grid gap-0.5">
+            <span class="font-sans text-sm font-medium">Show expired_at (invalid date)</span>
+            <span class="font-sans text-xs text-muted-foreground">
+              Adds <code>expired_at: &lt;invalid_at&gt;</code> when a fact has been invalidated —
+              the upper bound of its validity window.
+            </span>
+          </span>
+        </label>
+        <label class="flex items-start gap-3 rounded-md border border-border/50 bg-card/45 px-3 py-2.5">
+          <input
+            type="checkbox"
+            class="mt-0.5"
+            bind:checked={ctrl.draft.graph.eval.show_superseded}
+            onchange={ctrl.markDirty}
+          />
+          <span class="grid gap-0.5">
+            <span class="font-sans text-sm font-medium">Show SUPERSEDED flag</span>
+            <span class="font-sans text-xs text-muted-foreground">
+              Tags facts that a newer fact has replaced. Only visible when the retrieval temporal
+              lens is set to include historical facts.
+            </span>
+          </span>
+        </label>
+      </fieldset>
     </SectionCardMuted>
 
     <SectionCardMuted
@@ -331,11 +473,12 @@
       </fieldset>
     </SectionCardMuted>
 
+    <!-- Prompts, one section each. -->
     <SectionCardMuted
-      title="Eval prompts"
-      description="Prompts the eval harness uses to generate answers from recalled/retrieved context and to grade them. The answer prompt is an instruction block sent in the user message ahead of the question and recalled elements (the system prompt is a fixed role). Eval-only — does not affect production chat."
+      title="Mem Eval Answer Prompt"
+      description="Instruction block the memory-eval answer step places in the user message ahead of the question + recalled elements (the system prompt is a fixed role). Eval-only."
       collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngineEval}
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEvalMemAnswerPrompt}
     >
       <MarkdownEditorPreview
         editorLabel="Memory eval answer prompt editor"
@@ -351,7 +494,14 @@
         with exactly "No information available." when no recalled element supports an answer —
         the abstain detector recognizes that phrase and the legacy "I don't know".
       </p>
+    </SectionCardMuted>
 
+    <SectionCardMuted
+      title="Mem Eval Judge Prompt"
+      description="Grading system prompt for the LLM judge that scores answers against the ideal (both tracks). Eval-only."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEvalJudgePrompt}
+    >
       <MarkdownEditorPreview
         editorLabel="Eval judge prompt editor"
         previewLabel="Preview"
@@ -368,7 +518,14 @@
         <span class="font-medium">Output Fields</span> section if you customize — on thinking-mode
         models the judge runs in JSON mode and that section is the only schema the model sees.
       </p>
+    </SectionCardMuted>
 
+    <SectionCardMuted
+      title="Knowledge Eval Answer Prompt"
+      description="The PRODUCTION Knowledge answering prompt — the knowledge eval legs run the real answering pipeline, so they are graded against this. Editing here also changes production Ask (it is the same value as Knowledge → Answering)."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphEvalKnowledgePrompt}
+    >
       <MarkdownEditorPreview
         editorLabel="Knowledge eval answer prompt editor"
         previewLabel="Preview"
@@ -383,6 +540,28 @@
         the same value as Knowledge → Answering (editing it here changes production Ask too). Kept
         shared on purpose so the knowledge eval measures real behavior.
       </p>
+    </SectionCardMuted>
+
+    <SectionCardMuted
+      title="Graph view (display)"
+      description="Display-only settings for the shared Knowledge / Memories Graph tab. These tune the in-browser graph view and do not affect extraction, search, or retrieval."
+      collapsible
+      bodyId={PREFERENCES_SECTION_BODY_IDS.graphView}
+    >
+      <FormField
+        label="Large node-type warning threshold"
+        hint="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only."
+        class="max-w-md"
+      >
+        <input
+          type="number"
+          min="10"
+          max="10000"
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.view.large_type_threshold}
+          oninput={ctrl.markDirty}
+        />
+      </FormField>
     </SectionCardMuted>
   {/if}
 </div>

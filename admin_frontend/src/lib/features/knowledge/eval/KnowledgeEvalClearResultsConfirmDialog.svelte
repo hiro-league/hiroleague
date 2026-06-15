@@ -29,8 +29,9 @@
       <Dialog.Title class="break-words">Clear saved results for “{corpusName}”?</Dialog.Title>
       <Dialog.Description>
         This <strong>permanently deletes {countLabel}</strong> for this corpus from disk and
-        <strong>cannot be undone</strong>. Ingested memory (the graph) is kept, so you can re-run the
-        eval without re-ingesting.
+        <strong>cannot be undone</strong>. All <strong>Report data and Answer Details</strong> for
+        this corpus will be wiped. Ingested memory (the graph) is kept, so you can re-run the eval
+        without re-ingesting.
       </Dialog.Description>
     </Dialog.Header>
 

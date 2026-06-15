@@ -23,9 +23,13 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from hirocli.services.knowledge.eval_judge import RecallRenderOptions
+    from hirocli.services.knowledge.eval_locomo import EvidenceRecallContext
 
 from hiro_commons.log import Logger
 
@@ -413,21 +417,24 @@ def discover_corpuses(folder: Path | str, track: str) -> list[dict[str, Any]]:
     return out
 
 
-def build_answer_model(workspace_path: Path) -> tuple[Any | None, str]:
-    """Resolve + build the workspace **answering model** for the eval answer/judge steps
-    (reused, not a separate eval model). Returns ``(model, model_id)`` or ``(None, "")`` when
-    no answering model is configured — callers then skip answer/judge gracefully."""
+def _build_eval_model(workspace_path: Path, *, which: str) -> tuple[Any | None, str]:
+    """Resolve + build an eval chat model. ``which`` picks the role — ``'answer'`` (the memory-eval
+    answer step) or ``'judge'`` (the LLM judge, both tracks) — each with its OWN model + tuning
+    profile preference (``graph.eval.answer_*`` / ``graph.eval.judge_*``). Returns ``(model,
+    model_id)`` or ``(None, "")`` when unconfigured/unavailable so callers skip that step gracefully."""
     try:
         from hirocli.domain.model_factory import create_chat_model
         from hirocli.domain.preferences import (
             load_preferences,
-            resolve_knowledge_answering_llm,
+            resolve_eval_answer_llm,
+            resolve_eval_judge_llm,
         )
 
         prefs = load_preferences(workspace_path)
-        spec = resolve_knowledge_answering_llm(prefs, workspace_path)
+        resolver = resolve_eval_answer_llm if which == "answer" else resolve_eval_judge_llm
+        spec = resolver(prefs, workspace_path)
         if spec is None:
-            log.warning("⚠️ knowledge.eval — no answering model configured; skipping answer/judge")
+            log.warning("⚠️ knowledge.eval — no eval %s model configured; skipping it", which)
             return None, ""
         model = create_chat_model(
             spec.model_id,
@@ -438,8 +445,18 @@ def build_answer_model(workspace_path: Path) -> tuple[Any | None, str]:
         )
         return model, spec.model_id
     except Exception:
-        log.warning("⚠️ knowledge.eval — answering model unavailable for answer/judge", exc_info=True)
+        log.warning("⚠️ knowledge.eval — eval %s model unavailable", which, exc_info=True)
         return None, ""
+
+
+def build_eval_answer_model(workspace_path: Path) -> tuple[Any | None, str]:
+    """The memory-eval ANSWER model (``graph.eval.answer_model`` + tuning). See ``_build_eval_model``."""
+    return _build_eval_model(workspace_path, which="answer")
+
+
+def build_eval_judge_model(workspace_path: Path) -> tuple[Any | None, str]:
+    """The eval JUDGE model (``graph.eval.judge_model`` + tuning). See ``_build_eval_model``."""
+    return _build_eval_model(workspace_path, which="judge")
 
 
 async def run_eval(
@@ -478,10 +495,11 @@ async def run_eval(
     eval_filters: dict[str, Any] = dict(filters or {})
     eval_filters.setdefault("tags", [EVAL_SYNTHETIC_TAG])
 
-    # Optional LLM judge: build the answering model + a ledger sink (so judge calls show as
-    # priced Graph Runs). When the judge is off — or no model is configured — legs carry the
-    # answer but no mark, and the gate is n/a.
-    model, model_id = (build_answer_model(workspace_path) if judge else (None, ""))
+    # Optional LLM judge: build the eval JUDGE model + a ledger sink (so judge calls show as
+    # priced Graph Runs). The knowledge legs ANSWER with the production KnowledgeAgentGraph (not an
+    # eval model), so only the judge model is eval-configurable here. Judge off / no model → legs
+    # carry the answer but no mark, and the gate is n/a.
+    model, model_id = (build_eval_judge_model(workspace_path) if judge else (None, ""))
     # Always create the sink — even judge-off — so per-leg cost can be read back from the
     # ledger (cost is NOT judge-dependent). Judge rows are only written when judging.
     from hirocli.runtime.agent_graph.ledger import LedgerSink
@@ -823,13 +841,18 @@ async def _memory_question(
     sink: Any | None = None,
     run_id: str = "",
     set_id: str = "",
-    model: Any | None = None,
-    model_id: str = "",
+    # Answer + judge use SEPARATE eval models (each its own model + tuning profile). Either may be
+    # None (unconfigured/unavailable) → that step is skipped.
+    answer_model: Any | None = None,
+    answer_model_id: str = "",
+    judge_model: Any | None = None,
+    judge_model_id: str = "",
     judge: bool = False,
     # Renamed from answer_system_prompt: the answering instructions now ride in the USER message
     # (eval_judge.answer_from_context); the system prompt there is a hardcoded role.
     answer_instructions: str = "",
     judge_system_prompt: str = "",
+    render: "RecallRenderOptions | None" = None,
 ) -> dict[str, Any]:
     """One memory question, all in ONE Graph Run: **recall** (graph search) → **answer**
     (grounded only in the recalled facts) → optional **judge** (vs the ideal answer).
@@ -838,8 +861,14 @@ async def _memory_question(
     ``eval_judge`` node — all priced. Returns the unified row (``legs={'recall': {...}}`` with the
     model answer + verdict mark + recalled facts, plus ``gold``)."""
     from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_entry, current_run
-    from hirocli.services.knowledge.eval_judge import answer_from_context, judge_answer
+    from hirocli.services.knowledge.eval_judge import (
+        RecallRenderOptions,
+        answer_from_context,
+        judge_answer,
+    )
     from hirocli.services.knowledge.ledger_runner import preview_answer, preview_query
+
+    render = render or RecallRenderOptions()
 
     gold = q.get("expected_answer", "")
     is_control = str(q.get("expected_kind") or "") == "abstain"
@@ -910,22 +939,24 @@ async def _memory_question(
                     "episodes": sum(1 for h in recalled_rows if h.get("kind") == "episode"),
                 }
         # 2) answer — grounded ONLY in the recalled context (structured: facts/entities/episodes).
-        if model is not None:
+        if answer_model is not None:
             answer = await answer_from_context(
-                model,
-                model_id,
+                answer_model,
+                answer_model_id,
                 question=q["question"],
                 context=recalled_rows,
                 sink=sink,
                 # Editable graph.eval.memory_answer_prompt (blank → structured default in eval_judge).
                 instructions=answer_instructions,
+                render=render,
             )
         # 3) judge — vs the ideal answer (optional step). Gets the SAME recalled context so it can
-        # set recall_sufficient (recall-miss vs answering-miss), not just grade vs the ideal.
-        if judge and model is not None:
+        # set recall_sufficient (recall-miss vs answering-miss), not just grade vs the ideal. Uses
+        # the SEPARATE judge model (not the answer model).
+        if judge and judge_model is not None:
             verdict = await judge_answer(
-                model,
-                model_id,
+                judge_model,
+                judge_model_id,
                 question=q["question"],
                 answer=answer,
                 expected_answer=gold,
@@ -933,6 +964,7 @@ async def _memory_question(
                 is_negative_control=is_control,
                 sink=sink,
                 system_prompt=judge_system_prompt,
+                render=render,
             )
             mark, reason = verdict.mark, verdict.reason
             recall_sufficient = verdict.recall_sufficient
@@ -1033,18 +1065,27 @@ async def _memory_question_task(
     user_id: int,
     character_id: str,
     sink: Any,
-    model: Any | None,
-    model_id: str,
+    answer_model: Any | None,
+    answer_model_id: str,
+    judge_model: Any | None,
+    judge_model_id: str,
     judged: bool,
     memory_answer_prompt: str,
     judge_prompt: str,
+    render: "RecallRenderOptions",
     bus: Any,
+    evidence_ctx: "EvidenceRecallContext | None" = None,
 ) -> None:
     """One question of the parallel phase: gate on the concurrency cap, run
     recall→answer→judge via ``_memory_question`` (unchanged — its per-question Graph Run
     accumulator and ledger contextvars are task-local, so parallel questions can't
     cross-attribute cost), store the row in its bank-order slot, and publish
-    ``question_completed``. Runs under the ``asyncio.TaskGroup`` in ``run_memory_eval``."""
+    ``question_completed``. Runs under the ``asyncio.TaskGroup`` in ``run_memory_eval``.
+
+    When ``evidence_ctx`` is set (LoCoMo corpus), score this question's evidence recall from its
+    recalled context and attach it to the row, so the EV column + evidence fold populate LIVE
+    instead of only on the post-run results refresh (the value matches the read path's, which
+    recomputes it from the same sidecar)."""
     async with sem:
         # Cooperative cancel, checked as each question STARTS — queued questions never
         # run after a Cancel, mirroring the old serial loop's between-questions check.
@@ -1073,11 +1114,30 @@ async def _memory_question_task(
                 sink=sink,
                 run_id=rid,
                 set_id=set_id,
-                model=model,
-                model_id=model_id,
+                answer_model=answer_model,
+                answer_model_id=answer_model_id,
+                judge_model=judge_model,
+                judge_model_id=judge_model_id,
                 judge=judged,
                 answer_instructions=memory_answer_prompt,
                 judge_system_prompt=judge_prompt,
+                render=render,
+            )
+    # Evidence recall (LoCoMo corpora): score X/Y gold-evidence coverage from THIS question's
+    # recalled context and inline it on the row, so the live event carries it (EV column + fold
+    # populate as rows stream, not only after the post-run refresh). Best-effort — a scoring
+    # hiccup must never abort the question; the read path will still compute it later.
+    if evidence_ctx is not None:
+        try:
+            recalled = ((row.get("legs") or {}).get("recall") or {}).get("recalled") or []
+            ev = evidence_ctx.for_recalled(str(q.get("id") or ""), recalled)
+            if ev is not None:
+                row["evidence_recall"] = ev
+        except Exception:
+            log.warning(
+                "⚠️ knowledge.eval — live evidence-recall scoring failed · qid=%s",
+                q.get("id"),
+                exc_info=True,
             )
     # Outside the semaphore: the slot write + event are cheap and must not hold a
     # concurrency ticket another question could be using.
@@ -1098,6 +1158,7 @@ async def run_memory_eval(
     questions: list[dict[str, Any]] | None = None,
     episodes: "list[Any] | None" = None,
     corpus_path: Path | None = None,
+    questions_path: Path | None = None,
     run_id: str | None = None,
     remember: bool = True,
     clear_before: bool = False,
@@ -1143,15 +1204,28 @@ async def run_memory_eval(
     from hirocli.runtime.agent_graph.ledger import LedgerSink, RunAccumulator, current_run
 
     sink = LedgerSink(workspace_path)
-    # Answer step uses the workspace answering model (reused). The judge (optional) grades it.
-    model, model_id = build_answer_model(workspace_path)
+    # Answer + judge each use their OWN eval model/tuning (separated — graph.eval.answer_* vs
+    # graph.eval.judge_*). The judge is only built when requested.
+    answer_model, answer_model_id = build_eval_answer_model(workspace_path)
+    judge_model, judge_model_id = (
+        build_eval_judge_model(workspace_path) if judge else (None, "")
+    )
     # Editable eval prompts (graph.eval.*); blank → relaxed defaults in eval_judge.
     from hirocli.domain.preferences import load_preferences
 
     _eval_prefs = load_preferences(workspace_path).graph.eval
     memory_answer_prompt = _eval_prefs.memory_answer_prompt
     judge_prompt = _eval_prefs.judge_prompt
-    judged = judge and model is not None
+    # Recalled-context render toggles (graph.eval.show_*) — built once and shared by every
+    # question's answer/judge/evidence renders so they stay consistent within the run.
+    from hirocli.services.knowledge.eval_judge import RecallRenderOptions
+
+    render = RecallRenderOptions(
+        show_event_time=_eval_prefs.show_event_time,
+        show_expired_at=_eval_prefs.show_expired_at,
+        show_superseded=_eval_prefs.show_superseded,
+    )
+    judged = judge and judge_model is not None
 
     _publish(
         bus,
@@ -1309,6 +1383,25 @@ async def run_memory_eval(
             # interleaves, so the summary/report tables are stable across caps. Tasks copy
             # their contextvars, so the eval_question spans still nest under the root above
             # and each question's Graph Run accumulator stays isolated.
+            # Evidence-recall context (LoCoMo corpora): load the sidecar + episode bodies ONCE here
+            # so each question can be scored as it completes and emit its X/Y live. None for a
+            # non-LoCoMo corpus or when no questions_path was passed → questions emit no evidence
+            # recall (the read path computes it post-run, as before). Best-effort: a load failure
+            # must never abort the run.
+            evidence_ctx = None
+            if questions_path is not None and questions:
+                try:
+                    from hirocli.services.knowledge.eval_locomo import (
+                        load_evidence_recall_context,
+                    )
+
+                    evidence_ctx = load_evidence_recall_context(set_id, Path(questions_path))
+                except Exception:
+                    log.warning(
+                        "⚠️ knowledge.eval — evidence-recall context load failed · set=%s",
+                        set_id,
+                        exc_info=True,
+                    )
             slots: list[dict[str, Any] | None] = [None] * total
             sem = asyncio.Semaphore(max(1, int(question_concurrency)))
             try:
@@ -1328,12 +1421,16 @@ async def run_memory_eval(
                                 user_id=eval_user_id,
                                 character_id=character_id,
                                 sink=sink,
-                                model=model,
-                                model_id=model_id,
+                                answer_model=answer_model,
+                                answer_model_id=answer_model_id,
+                                judge_model=judge_model,
+                                judge_model_id=judge_model_id,
                                 judged=judged,
                                 memory_answer_prompt=memory_answer_prompt,
                                 judge_prompt=judge_prompt,
+                                render=render,
                                 bus=bus,
+                                evidence_ctx=evidence_ctx,
                             )
                         )
             except BaseExceptionGroup as eg:
@@ -1548,6 +1645,12 @@ def _empty_breakdown_bucket(modes: list[str]) -> dict[str, Any]:
         "correct": {m: 0 for m in modes},
         "score": {m: 0.0 for m in modes},
         "recall_ok": {m: 0 for m in modes},
+        # Evidence recall (memory / LoCoMo): gold-evidence episodes the recall COVERED (matched)
+        # of the total gold episodes, summed across this bucket's rows. NOT per-leg — it's a single
+        # recall-leg concept — so two scalars, not a per-mode map. Stays 0/0 on the knowledge track
+        # and on non-LoCoMo memory corpora (no evidence_recall on the rows).
+        "evidence_matched": 0,
+        "evidence_total": 0,
     }
 
 
@@ -1629,6 +1732,13 @@ def field_breakdown_rows(
                 is_negative_control=neg,
                 recall_sufficient=bool(leg.get("recall_sufficient", True)),
             )
+        # Evidence recall (LoCoMo): fold this row's X/Y gold-evidence coverage into the bucket so
+        # the report can show a per-category / per-difficulty evidence total. Absent on non-LoCoMo
+        # rows (left as 0/0). See EvidenceRecallContext / compute_evidence_recall_map.
+        ev = r.get("evidence_recall")
+        if isinstance(ev, dict):
+            bucket["evidence_matched"] += int(ev.get("matched") or 0)
+            bucket["evidence_total"] += int(ev.get("total") or 0)
     return out
 
 

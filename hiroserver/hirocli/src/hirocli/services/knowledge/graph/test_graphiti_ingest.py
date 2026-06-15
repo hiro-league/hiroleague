@@ -272,6 +272,10 @@ async def test_service_ingest_chunks_delegates_and_inits() -> None:
     svc._observability = "ledger"  # type: ignore[attr-defined]
     svc._sim_min_score = 0.3  # type: ignore[attr-defined]  # read by initialize() dedup-floor align
 
+    # "typed" ontology → the pinned 5-type vocabulary is forwarded to add_episode.
+    svc._entity_ontology = "typed"  # type: ignore[attr-defined]
+    # Extraction-instructions pref → forwarded verbatim to add_episode's slot.
+    svc._custom_extraction_instructions = "capture first-person preferences"  # type: ignore[attr-defined]
     stats = await svc.ingest_chunks(
         [GraphitiEpisodeInput(chunk_id="c1", document_id="d", text="hi")],
         source_role="user_document",
@@ -282,7 +286,16 @@ async def test_service_ingest_chunks_delegates_and_inits() -> None:
     assert fake.calls[0]["group_id"] == "kb_main"
     assert fake.calls[0]["entity_types"] is not None  # pinned ontology passed
     assert "Person" in fake.calls[0]["entity_types"]
+    assert fake.calls[0]["custom_extraction_instructions"] == "capture first-person preferences"
     assert stats.episodes_processed == 1
+
+    # "open" ontology (the default) → NO entity_types passed, so Graphiti extracts freely.
+    svc._entity_ontology = "open"  # type: ignore[attr-defined]
+    await svc.ingest_chunks(
+        [GraphitiEpisodeInput(chunk_id="c2", document_id="d", text="hi again")],
+        source_role="user_document",
+    )
+    assert fake.calls[1]["entity_types"] is None
 
 
 @pytest.mark.asyncio
@@ -299,6 +312,8 @@ async def test_service_ingest_chunks_group_override() -> None:
     svc._db_path = "test.db"  # type: ignore[attr-defined]
     svc._registry_key = "test-key"  # type: ignore[attr-defined]
     svc._observability = "ledger"  # type: ignore[attr-defined]
+    svc._entity_ontology = "open"  # type: ignore[attr-defined]
+    svc._custom_extraction_instructions = ""  # type: ignore[attr-defined]
 
     await svc.ingest_chunks(
         [GraphitiEpisodeInput(chunk_id="m1", document_id="conv:7", text="hi")],

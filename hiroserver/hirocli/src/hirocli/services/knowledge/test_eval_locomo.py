@@ -9,6 +9,7 @@ from hirocli.services.knowledge.eval_locomo import (
     LocomoExportError,
     build_locomo_results_export,
     compute_evidence_recall_map,
+    load_evidence_recall_context,
 )
 
 
@@ -226,3 +227,43 @@ def test_compute_evidence_recall_no_sidecar_returns_empty(tmp_path: Path) -> Non
     assert compute_evidence_recall_map(
         corpus_id="locomo_conv_43", questions_path=questions, rows=rows
     ) == {}
+
+
+# --- live evidence recall (per-question, emitted on question_completed) -----------------------
+
+
+def test_evidence_recall_context_scores_one_question_live(tmp_path: Path) -> None:
+    """The live path (``EvidenceRecallContext.for_recalled``) must score a single question's
+    recalled context identically to the bulk read-path map — that's what lets the runner emit the
+    same X/Y mid-run that the post-run refresh would compute."""
+    qpath = _write_locomo_files(tmp_path)
+    ctx = load_evidence_recall_context("locomo_conv_43", qpath)
+    assert ctx is not None
+
+    # A recalled FACT derived from the gold episode → matched (mirrors the read-path test).
+    recalled = [{"memory": "supporting fact", "kind": "fact", "chunk_id": "locomo_conv_43_d1_9"}]
+    ev = ctx.for_recalled("locomo_conv_43_q001_c1", recalled)
+    assert ev is not None
+    assert (ev["matched"], ev["total"]) == (1, 1)
+    assert ev["items"][0]["matched_via"] == "fact"
+
+    # Same input scored through the bulk map yields the same value (live == read-path).
+    row = _saved_row("locomo_conv_43_q001_c1", "...", "locomo_conv_43_d1_9")
+    bulk = compute_evidence_recall_map(corpus_id="locomo_conv_43", questions_path=qpath, rows=[row])
+    assert bulk["locomo_conv_43_q001_c1"] == ev
+
+
+def test_evidence_recall_context_none_for_question_without_gold(tmp_path: Path) -> None:
+    """A question the sidecar lists no gold evidence for scores ``None`` — the runner then emits
+    no evidence_recall for it (the EV column stays blank), rather than a misleading 0/0."""
+    qpath = _write_locomo_files(tmp_path)
+    ctx = load_evidence_recall_context("locomo_conv_43", qpath)
+    assert ctx is not None
+    assert ctx.for_recalled("unknown_question_id", []) is None
+
+
+def test_evidence_recall_context_none_without_sidecar(tmp_path: Path) -> None:
+    """No sidecar (non-LoCoMo corpus) → no context, so the runner skips live evidence recall."""
+    questions = tmp_path / "plain.questions.yaml"
+    questions.write_text("- id: q1\n  question: Q?\n  expected_answer: A\n", encoding="utf-8")
+    assert load_evidence_recall_context("plain", questions) is None

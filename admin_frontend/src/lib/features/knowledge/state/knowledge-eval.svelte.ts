@@ -576,6 +576,17 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
         return;
       }
       applyServerState(state);
+      // BUGFIX: applyServerState replays only the server's LAST RUN. On the memory track a
+      // subset run is a SINGLE category (and "—" recall when the judge was off), so a bare
+      // hydrate leaves the Report/Results collapsed to just the last-evaled category. `init`
+      // hides this because scanCorpuses→loadQuestions→loadResults merges the full on-disk
+      // snapshot afterwards — but `resync` (tab-refocus / visibilitychange) calls hydrate
+      // ALONE, so the view stayed stuck on the subset until a hard refresh. Reconcile here
+      // whenever a corpus is already selected: that's the resync path (init's first hydrate
+      // runs before a corpus is picked, so this is skipped there and scanCorpuses does the
+      // merge). loadResults guards live runs, so a mid-run resync still lets the stream own
+      // the table.
+      if (track === 'memory' && selectedCorpusId) void loadResults(true);
     } catch (err) {
       // Replay is best-effort — a failed hydrate just means no history to show;
       // live events still flow. Surface nothing (the panel isn't broken).
@@ -710,19 +721,24 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     if (track === 'memory') void loadResults(true);
   }
 
-  async function start() {
+  /** Launch a run. ``intent`` splits the old single Run into the two explicit actions the UI now
+   *  surfaces as separate buttons:
+   *   - ``'ingest'``  — ingest/remember the corpus (+ build/clear per the ingestion options), with
+   *     NO questions (a setup-only batch). This is how the graph gets built (in monitored chunks).
+   *   - ``'questions'`` — answer the SELECTED questions against the EXISTING graph (never ingests),
+   *     so a question subset re-runs without rebuilding.
+   *  The Ingest button drives ingestion; the Eval Questions button drives evaluation. */
+  async function start(intent: 'ingest' | 'questions' = 'questions') {
     if (status === 'starting' || status === 'running') return;
     const corpus = selectedCorpus();
-    // Guard: explicit corpus + explicit, non-empty question selection (no "run all").
     if (!corpus) {
       deps.setError('Pick a corpus before running the eval.');
       return;
     }
-    // Setup-only batches (memory: remember a range / clear, with no questions) are allowed —
-    // that's how a large corpus gets built in monitored chunks before any recall.
-    const setupOnly = track === 'memory' && (ingestSynthetic || clearBefore);
-    if (selected.size === 0 && !setupOnly) {
-      deps.setError('Select at least one question, or enable Ingest / Clear for a setup-only batch.');
+    const ingesting = intent === 'ingest';
+    // Eval needs an explicit, non-empty question selection (no "run all"); Ingest needs none.
+    if (!ingesting && selected.size === 0) {
+      deps.setError('Select at least one question to evaluate.');
       return;
     }
     // Fresh slate every run — last run's table doesn't bleed into this one.
@@ -747,30 +763,31 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
         corpus_id: corpus.id,
         corpus_path: corpus.corpus_path,
         questions_path: corpus.questions_path,
-        ingest_synthetic: ingestSynthetic,
+        // The Ingest button drives ingestion; the Eval button reuses the existing graph.
+        ingest_synthetic: ingesting,
         judge,
-        question_ids: [...selected]
+        // Ingest is a setup-only batch (no questions); Eval runs the selected questions.
+        question_ids: ingesting ? [] : [...selected]
       };
       if (track === 'knowledge') {
-        req.build_graph = buildGraph;
+        // Rebuild the entity graph only on an ingest run (the "Rebuild graph" option).
+        req.build_graph = ingesting ? buildGraph : false;
         req.modes = [...selectedModes];
       } else {
-        // Memory track — explicit wipe + remember-phase episode window. Convert the user-facing
-        // 1-based INCLUSIVE from/to to the backend's 0-based offset + count: offset = from-1;
-        // count = to-from+1 (≥0). `to` of 0 = "to the end" → null count (remember every remaining
-        // episode). This is the layer that kills the off-by-one — the user types real episode
-        // numbers, never a 0-based index.
-        req.clear_before = clearBefore;
+        // Memory track — explicit wipe + remember-phase episode window apply to ingest only.
+        // Convert the user-facing 1-based INCLUSIVE from/to to the backend's 0-based offset +
+        // count: offset = from-1; count = to-from+1 (≥0). `to` of 0 = "to the end" → null count.
+        req.clear_before = ingesting ? clearBefore : false;
         req.episode_offset = Math.max(0, episodeFrom - 1);
         req.episode_limit = episodeTo > 0 ? Math.max(0, episodeTo - episodeFrom + 1) : null;
         req.question_concurrency = questionConcurrency;
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
-      // Auto-disarm the Clear Graph wipe as soon as the run is accepted: the next batch
+      // Auto-disarm the Clear Graph wipe as soon as an ingest run is accepted: the next batch
       // (e.g. ingest episodes 101–200 after this one ingested 1–100) must NOT silently
       // wipe the graph we just built. The flag is per-run; users opt in again per wipe.
-      if (track === 'memory' && clearBefore) clearBefore = false;
+      if (track === 'memory' && ingesting && clearBefore) clearBefore = false;
     } catch (err) {
       status = 'failed';
       failureMessage = err instanceof Error ? err.message : 'Failed to start eval run.';

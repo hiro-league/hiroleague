@@ -18,8 +18,46 @@ from hirocli.services.knowledge.eval_runner import (
     MEMORY_EVAL_USER_ID,
     _memory_question,
     discover_corpuses,
+    field_breakdown_rows,
     run_memory_eval,
+    summarize_memory_rows,
 )
+
+
+def _ev_row(qid: str, category: str, matched: int, total: int) -> dict:
+    """A memory-track question row carrying evidence_recall, for the report-aggregation tests."""
+    return {
+        "id": qid,
+        "category": category,
+        "track": "memory",
+        "legs": {"recall": {"mode": "recall", "mark": "✓", "recall_sufficient": True}},
+        "evidence_recall": {"matched": matched, "total": total, "items": []},
+    }
+
+
+def test_field_breakdown_rows_sums_evidence_recall_per_bucket() -> None:
+    """Evidence recall folds into the per-category report bucket as matched/total sums; a row
+    without evidence_recall contributes nothing (stays 0/0)."""
+    rows = [
+        _ev_row("q1", "temporal", matched=1, total=2),
+        _ev_row("q2", "temporal", matched=2, total=2),
+        # No evidence_recall key → must not bump the bucket's evidence totals.
+        {"id": "q3", "category": "single_hop", "legs": {"recall": {"mark": "✓"}}},
+    ]
+    bd = field_breakdown_rows(rows, ["recall"], field="category")
+    assert (bd["temporal"]["evidence_matched"], bd["temporal"]["evidence_total"]) == (3, 4)
+    assert (bd["single_hop"]["evidence_matched"], bd["single_hop"]["evidence_total"]) == (0, 0)
+
+
+def test_summarize_memory_rows_carries_evidence_into_report() -> None:
+    """The summary's by_category breakdown exposes the evidence sums so the report can show them."""
+    rows = [
+        _ev_row("q1", "temporal", matched=1, total=2),
+        _ev_row("q2", "single_hop", matched=0, total=1),
+    ]
+    summary = summarize_memory_rows(rows, run_id="test")
+    assert summary["by_category"]["temporal"]["evidence_total"] == 2
+    assert summary["by_category"]["single_hop"]["evidence_matched"] == 0
 
 
 def _ep(text: str, *, cid: str, speaker: str = "User", ts: str | None = None) -> SimpleNamespace:

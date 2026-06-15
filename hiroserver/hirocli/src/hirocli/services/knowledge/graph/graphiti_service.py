@@ -355,6 +355,8 @@ class GraphitiMemoryService:
         reranker_min_score: float = 0.0,
         sim_min_score: float = 0.3,
         query_timeout_s: int = 60,
+        entity_ontology: str = "open",
+        custom_extraction_instructions: str = "",
     ) -> None:
         # Observability tier (off / ledger / trace) — the single dial that gates the ledger
         # roll-up rows, the tracer, the usage sinks, and the deep trace sidecars (docs §12.2).
@@ -367,6 +369,12 @@ class GraphitiMemoryService:
         # see the invalid mmr×episodes combo here.
         self._search_scope = search_scope
         self._k_hop = k_hop
+        # Ingest-time extraction ontology: "typed" pins GRAPHITI_ENTITY_TYPES, "open" passes
+        # entity_types=None so Graphiti extracts freely (broader recall — see graphiti_ontology).
+        self._entity_ontology = entity_ontology
+        # Extra extraction-prompt guidance (graphiti's custom_extraction_instructions slot), threaded
+        # into every add_episode. Empty ⇒ graphiti renders the slot as "" (a no-op).
+        self._custom_extraction_instructions = custom_extraction_instructions
         self._reranker_min_score = reranker_min_score
         # Cosine candidate floor (graphiti's EdgeSearchConfig.sim_min_score). See
         # graphiti_search._build_search_config — lowering this fixes empty fact searches.
@@ -533,7 +541,10 @@ class GraphitiMemoryService:
             episodes,
             source_role=source_role,
             group_id=target_group,
-            entity_types=GRAPHITI_ENTITY_TYPES,
+            # "open" → no ontology (Graphiti extracts freely); "typed" → pinned 5-type vocabulary.
+            entity_types=(GRAPHITI_ENTITY_TYPES if self._entity_ontology == "typed" else None),
+            # Domain-generic extraction nudge (graph.custom_extraction_instructions pref); "" ⇒ no-op.
+            custom_extraction_instructions=self._custom_extraction_instructions,
             event_sink=event_sink,
             ledger_sink=effective_sink,
             observability=self._observability,
@@ -1013,6 +1024,8 @@ class GraphitiMemoryService:
             reranker_min_score=reranker_min_score,
             sim_min_score=graph.sim_min_score,
             query_timeout_s=graph.query_timeout_s,
+            entity_ontology=graph.entity_ontology,
+            custom_extraction_instructions=graph.custom_extraction_instructions,
         )
 
 

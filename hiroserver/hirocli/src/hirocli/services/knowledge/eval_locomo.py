@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -133,24 +134,79 @@ def _load_episode_bodies(corpus_id: str, questions_path: Path) -> dict[str, dict
     return bodies
 
 
-def compute_evidence_recall_map(
-    *,
-    corpus_id: str,
-    questions_path: Path,
-    rows: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Per-question evidence recall: for each question whose LoCoMo sidecar lists gold evidence
-    episodes, how many of those episodes the recalled context covered — matched the SAME way as the
-    LoCoMo export (``_recalled_episode_id``), so a gold turn counts whether it surfaced as a raw
-    episode or as a fact/entity derived from it.
+@dataclass(frozen=True)
+class EvidenceRecallContext:
+    """Pre-loaded LoCoMo sidecar state for scoring per-question evidence recall.
 
-    Returns ``{qid: {matched, total, items}}`` where each item carries the episode id (+ short id /
-    dia id), the episode text/speaker/when (best-effort), and whether/how it matched (kind + score).
-    Returns ``{}`` for corpora without a sidecar (non-LoCoMo). Pure read-path enrichment — does not
-    touch persisted rows."""
+    Built ONCE (``load_evidence_recall_context``) so a run can score each question's evidence
+    recall the moment it completes — emitting it live on ``question_completed`` instead of only
+    on the post-run read path. ``compute_evidence_recall_map`` (the bulk read-path enrichment)
+    is now a thin wrapper over this. Holds the gold-evidence episode ids per question, the
+    episode→dia-id map, the episode bodies (best-effort text), and the valid-id guard set."""
+
+    corpus_id: str
+    gold_by_q: dict[str, list[str]]
+    episode_to_dia: dict[str, str]
+    bodies: dict[str, dict[str, str]]
+    valid_ids: set[str]
+
+    def for_recalled(self, qid: str, recalled: Any) -> dict[str, Any] | None:
+        """Evidence recall for ONE question's recalled context: ``{matched, total, items}``,
+        matched the SAME way as the LoCoMo export (``_recalled_episode_id``) so a gold turn counts
+        whether it surfaced as a raw episode or a fact/entity derived from it. ``None`` when this
+        question has no gold evidence (a non-LoCoMo question), so the caller leaves the column blank."""
+        gold = self.gold_by_q.get(str(qid))
+        if not gold:
+            return None
+        gold_set = set(gold)
+        # eid → (kind, score) of the best (highest-scoring) recalled item that covers it.
+        best: dict[str, tuple[str, float | None]] = {}
+        if isinstance(recalled, list):
+            for item in recalled:
+                eid = _recalled_episode_id(item, self.valid_ids)
+                if eid is None or eid not in gold_set:
+                    continue
+                kind = str((item.get("kind") if isinstance(item, dict) else "") or "fact")
+                raw_score = item.get("score") if isinstance(item, dict) else None
+                score = float(raw_score) if isinstance(raw_score, (int, float)) else None
+                prev = best.get(eid)
+                if prev is None or (score if score is not None else -1.0) > (
+                    prev[1] if prev[1] is not None else -1.0
+                ):
+                    best[eid] = (kind, score)
+        items: list[dict[str, Any]] = []
+        for eid in gold:
+            body = self.bodies.get(eid, {})
+            match = best.get(eid)
+            items.append(
+                {
+                    "episode_id": eid,
+                    "short_id": _short_episode_id(eid, self.corpus_id),
+                    "dia_id": self.episode_to_dia.get(eid, ""),
+                    "speaker": body.get("speaker", ""),
+                    "text": body.get("text", ""),
+                    "when": body.get("when", ""),
+                    "matched": match is not None,
+                    "matched_via": match[0] if match else "",
+                    "score": match[1] if match else None,
+                }
+            )
+        return {
+            "matched": sum(1 for it in items if it["matched"]),
+            "total": len(items),
+            "items": items,
+        }
+
+
+def load_evidence_recall_context(
+    corpus_id: str, questions_path: Path
+) -> EvidenceRecallContext | None:
+    """Load the LoCoMo sidecar + episode bodies once for ``corpus_id`` so per-question evidence
+    recall can be scored live (and in bulk on the read path). ``None`` for a corpus with no sidecar
+    (non-LoCoMo) or a sidecar that lists no gold evidence — callers then skip evidence recall."""
     sidecar = _sidecar_path(corpus_id, questions_path)
     if not sidecar.exists():
-        return {}
+        return None
     try:
         raw_sidecar = yaml.safe_load(sidecar.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
@@ -160,12 +216,12 @@ def compute_evidence_recall_map(
             sidecar,
             exc_info=True,
         )
-        return {}
+        return None
     if not isinstance(raw_sidecar, dict):
-        return {}
+        return None
     sidecar_questions = raw_sidecar.get("questions")
     if not isinstance(sidecar_questions, dict):
-        return {}
+        return None
     sidecar_episodes = raw_sidecar.get("episodes")
     episode_to_dia = {
         str(eid): str(meta.get("dia_id"))
@@ -185,57 +241,46 @@ def compute_evidence_recall_map(
             gold_by_q[str(qid)] = episode_ids
             all_gold.update(episode_ids)
     if not gold_by_q:
-        return {}
+        return None
 
     bodies = _load_episode_bodies(corpus_id, questions_path)
     # Validity guard for episode-id matching: every id the corpus actually knows about.
     valid_ids = set(episode_to_dia) | all_gold | set(bodies)
+    return EvidenceRecallContext(
+        corpus_id=corpus_id,
+        gold_by_q=gold_by_q,
+        episode_to_dia=episode_to_dia,
+        bodies=bodies,
+        valid_ids=valid_ids,
+    )
 
+
+def compute_evidence_recall_map(
+    *,
+    corpus_id: str,
+    questions_path: Path,
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Per-question evidence recall: for each question whose LoCoMo sidecar lists gold evidence
+    episodes, how many of those episodes the recalled context covered — matched the SAME way as the
+    LoCoMo export (``_recalled_episode_id``), so a gold turn counts whether it surfaced as a raw
+    episode or as a fact/entity derived from it.
+
+    Returns ``{qid: {matched, total, items}}`` where each item carries the episode id (+ short id /
+    dia id), the episode text/speaker/when (best-effort), and whether/how it matched (kind + score).
+    Returns ``{}`` for corpora without a sidecar (non-LoCoMo). Pure read-path enrichment — does not
+    touch persisted rows. The live runner uses ``EvidenceRecallContext.for_recalled`` directly so it
+    can emit the same value per question as it completes."""
+    ctx = load_evidence_recall_context(corpus_id, questions_path)
+    if ctx is None:
+        return {}
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
         qid = str(row.get("id") or "")
-        gold = gold_by_q.get(qid)
-        if not gold:
-            continue
         recalled = ((row.get("legs") or {}).get("recall") or {}).get("recalled") or []
-        gold_set = set(gold)
-        # eid → (kind, score) of the best (highest-scoring) recalled item that covers it.
-        best: dict[str, tuple[str, float | None]] = {}
-        if isinstance(recalled, list):
-            for item in recalled:
-                eid = _recalled_episode_id(item, valid_ids)
-                if eid is None or eid not in gold_set:
-                    continue
-                kind = str((item.get("kind") if isinstance(item, dict) else "") or "fact")
-                raw_score = item.get("score") if isinstance(item, dict) else None
-                score = float(raw_score) if isinstance(raw_score, (int, float)) else None
-                prev = best.get(eid)
-                if prev is None or (score if score is not None else -1.0) > (
-                    prev[1] if prev[1] is not None else -1.0
-                ):
-                    best[eid] = (kind, score)
-        items: list[dict[str, Any]] = []
-        for eid in gold:
-            body = bodies.get(eid, {})
-            match = best.get(eid)
-            items.append(
-                {
-                    "episode_id": eid,
-                    "short_id": _short_episode_id(eid, corpus_id),
-                    "dia_id": episode_to_dia.get(eid, ""),
-                    "speaker": body.get("speaker", ""),
-                    "text": body.get("text", ""),
-                    "when": body.get("when", ""),
-                    "matched": match is not None,
-                    "matched_via": match[0] if match else "",
-                    "score": match[1] if match else None,
-                }
-            )
-        out[qid] = {
-            "matched": sum(1 for it in items if it["matched"]),
-            "total": len(items),
-            "items": items,
-        }
+        ev = ctx.for_recalled(qid, recalled)
+        if ev is not None:
+            out[qid] = ev
     return out
 
 
