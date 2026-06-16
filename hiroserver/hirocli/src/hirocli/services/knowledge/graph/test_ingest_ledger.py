@@ -138,6 +138,9 @@ async def test_ingest_writes_run_and_per_operation_nodes(tmp_path: Path) -> None
     assert episode["input_tokens"] == "260"  # 100+50+80+30 rolled onto the one episode row
     assert episode["output_tokens"] == "50"  # 20+10+15+5
     assert episode["input_preview"].startswith("episode 1/1 · chunk ep_001")
+    # decision_detail now carries the readable turn id so the single-run table is scannable
+    # by turn (the table renders this column but not input_preview).
+    assert episode["decision_detail"] == "ep_001"
     assert "entities=3" in episode["output_preview"]
     assert "facts=1" in episode["output_preview"]
     assert "llm=4 calls" in episode["output_preview"]

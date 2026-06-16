@@ -47,7 +47,13 @@
     onOpenRetrievalTrace,
     onCloseRetrievalTrace,
     onOpenIngestTrace,
-    onCloseIngestTrace
+    onCloseIngestTrace,
+    ingestTraceHasPrev,
+    ingestTraceHasNext,
+    ingestTraceNavIndex,
+    ingestTraceNavTotal,
+    onPrevIngestTrace,
+    onNextIngestTrace
   }: {
     activePane: ActivePane;
     runDetailCardsExpanded: boolean;
@@ -77,6 +83,12 @@
     onCloseRetrievalTrace: () => void;
     onOpenIngestTrace: (row: GraphLedgerRow) => void;
     onCloseIngestTrace: () => void;
+    ingestTraceHasPrev: boolean;
+    ingestTraceHasNext: boolean;
+    ingestTraceNavIndex: number;
+    ingestTraceNavTotal: number;
+    onPrevIngestTrace: () => void;
+    onNextIngestTrace: () => void;
   } = $props();
 
   const detailHidden = $derived(!isRunDetailPane(activePane));
@@ -156,7 +168,16 @@
 
 <GraphRunsRetrievalTraceDialog trace={activeRetrievalTrace} onClose={onCloseRetrievalTrace} />
 
-<GraphRunsIngestTraceDialog trace={activeIngestTrace} onClose={onCloseIngestTrace} />
+<GraphRunsIngestTraceDialog
+  trace={activeIngestTrace}
+  onClose={onCloseIngestTrace}
+  hasPrev={ingestTraceHasPrev}
+  hasNext={ingestTraceHasNext}
+  navIndex={ingestTraceNavIndex}
+  navTotal={ingestTraceNavTotal}
+  onPrev={onPrevIngestTrace}
+  onNext={onNextIngestTrace}
+/>
 
 <style>
   /* Child slices use their own scoped classes; `:global` keeps flex + collapse rules on the flow host. */

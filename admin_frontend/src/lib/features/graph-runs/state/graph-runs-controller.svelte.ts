@@ -297,6 +297,26 @@ export function createGraphRunsPageController() {
     return ingestTraceByStep.get(ingestTraceStep) ?? null;
   });
 
+  /** Episode steps with an ingest trace, ascending — the order the dialog's arrow-nav walks. */
+  const ingestTraceStepsSorted = $derived.by((): number[] =>
+    [...ingestTraceByStep.keys()].sort((a, b) => a - b)
+  );
+  const ingestTraceHasPrev = $derived.by(
+    (): boolean => ingestTraceStep !== null && ingestTraceStepsSorted.indexOf(ingestTraceStep) > 0
+  );
+  const ingestTraceHasNext = $derived.by((): boolean => {
+    if (ingestTraceStep === null) return false;
+    const i = ingestTraceStepsSorted.indexOf(ingestTraceStep);
+    return i >= 0 && i < ingestTraceStepsSorted.length - 1;
+  });
+  // 1-based position of the open trace in the run's episode list + total — the dialog's "N/total"
+  // label. The per-trace episode_index/total is 1/1 for these per-turn remember ingests, so the
+  // real run position is this index, not that field.
+  const ingestTraceNavIndex = $derived.by((): number =>
+    ingestTraceStep === null ? 0 : ingestTraceStepsSorted.indexOf(ingestTraceStep) + 1
+  );
+  const ingestTraceNavTotal = $derived.by((): number => ingestTraceStepsSorted.length);
+
   /* Narrowing character filter makes the selected channel invalid — clear channel so the table doesn’t go empty silently. */
   $effect(() => {
     const cid = filterCharacterId.trim();
@@ -517,6 +537,16 @@ export function createGraphRunsPageController() {
 
   function closeIngestTrace() {
     ingestTraceStep = null;
+  }
+
+  /** Move the open ingest-trace dialog to the prev/next episode that has a trace (arrow-nav). */
+  function stepIngestTrace(delta: number) {
+    if (ingestTraceStep === null) return;
+    const steps = ingestTraceStepsSorted;
+    const i = steps.indexOf(ingestTraceStep);
+    if (i === -1) return;
+    const j = i + delta;
+    if (j >= 0 && j < steps.length) ingestTraceStep = steps[j];
   }
 
   function refreshMain() {
@@ -752,6 +782,18 @@ export function createGraphRunsPageController() {
     get activeIngestTrace() {
       return activeIngestTrace;
     },
+    get ingestTraceHasPrev() {
+      return ingestTraceHasPrev;
+    },
+    get ingestTraceHasNext() {
+      return ingestTraceHasNext;
+    },
+    get ingestTraceNavIndex() {
+      return ingestTraceNavIndex;
+    },
+    get ingestTraceNavTotal() {
+      return ingestTraceNavTotal;
+    },
     RUNS_TAB,
     mount,
     dispose,
@@ -768,6 +810,8 @@ export function createGraphRunsPageController() {
     closeRetrievalTrace,
     openIngestTrace,
     closeIngestTrace,
+    prevIngestTrace: () => stepIngestTrace(-1),
+    nextIngestTrace: () => stepIngestTrace(1),
     runTabDisplayLabel,
     runTabTooltip
   };

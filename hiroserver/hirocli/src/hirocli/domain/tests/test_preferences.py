@@ -162,6 +162,34 @@ def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None
     assert prefs.chat.max_messages == 6
 
 
+def test_save_preferences_prunes_default_prompts(tmp_path: Path) -> None:
+    # A prompt left at its built-in default must NOT be persisted: the key stays absent so the code
+    # constant re-applies on load (a true reset that tracks future default edits). See Option E.
+    import json as _json
+
+    ws = tmp_path / "ws"
+    save_preferences(ws, WorkspacePreferences())
+    raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
+    assert "memory_answer_prompt" not in raw["graph"]["eval"]
+    assert "prompt" not in raw["knowledge"]["answering"]
+    # Absent key still resolves to the default constant on load.
+    reloaded = load_preferences(ws)
+    assert reloaded.graph.eval.memory_answer_prompt == PROMPT_DEFAULTS["graph.eval.memory_answer_prompt"]
+
+
+def test_save_preferences_keeps_edited_prompt(tmp_path: Path) -> None:
+    # An edited prompt differs from the default, so it must persist verbatim.
+    import json as _json
+
+    ws = tmp_path / "ws"
+    prefs = WorkspacePreferences()
+    prefs.graph.eval.memory_answer_prompt = "Custom answering instructions."
+    save_preferences(ws, prefs)
+    raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
+    assert raw["graph"]["eval"]["memory_answer_prompt"] == "Custom answering instructions."
+    assert load_preferences(ws).graph.eval.memory_answer_prompt == "Custom answering instructions."
+
+
 def test_resolve_llm_with_default_and_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -184,6 +184,12 @@
       onCloseRetrievalTrace={runsCtrl.closeRetrievalTrace}
       onOpenIngestTrace={runsCtrl.openIngestTrace}
       onCloseIngestTrace={runsCtrl.closeIngestTrace}
+      ingestTraceHasPrev={runsCtrl.ingestTraceHasPrev}
+      ingestTraceHasNext={runsCtrl.ingestTraceHasNext}
+      ingestTraceNavIndex={runsCtrl.ingestTraceNavIndex}
+      ingestTraceNavTotal={runsCtrl.ingestTraceNavTotal}
+      onPrevIngestTrace={runsCtrl.prevIngestTrace}
+      onNextIngestTrace={runsCtrl.nextIngestTrace}
     />
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />

@@ -289,7 +289,9 @@ async def ledger_episode(
     # Carry the step index onto the collector so the caller can anchor the ingest-trace
     # sidecar to this episode row (the trace dialog opens from it).
     collector.step_index = int(getattr(entry, "step_index", 0) or 0)
-    entry.set_decision("episode", "")
+    # Put the readable turn id (e.g. "d3_3") in the episode row's decision_detail so the
+    # single-run table — which renders that column but not input_preview — is scannable by turn.
+    entry.set_decision("episode", _short_turn_label(chunk_id))
     entry.set_input_preview(
         _episode_input_preview(
             episode_index=episode_index,
@@ -383,6 +385,24 @@ def _stamp_episode_rollup(entry: LedgerEntry, collector: EpisodeLedger) -> None:
     )
 
 
+def _short_turn_label(chunk_id: str) -> str:
+    """Distinguishing short label for an episode/turn in ledger previews + the
+    episode row's ``decision_detail`` column.
+
+    Readable corpus ids (e.g. ``locomo_conv_43b_d3_3``) share a long common
+    prefix, so ``chunk_id[:8]`` collapses every turn to the same string
+    (``locomo_c``) and the run table can only tell rows apart by step index. Show
+    the last two underscore-delimited segments instead (``d3_3``) so episode rows
+    are scannable. Uuid-style chunk ids (no underscore) keep the first-8 short
+    hash, unchanged.
+    """
+    if not chunk_id:
+        return "?"
+    if "_" in chunk_id:
+        return "_".join(chunk_id.split("_")[-2:])
+    return chunk_id[:8]
+
+
 def _episode_input_preview(
     *,
     episode_index: int,
@@ -393,7 +413,9 @@ def _episode_input_preview(
     text: str = "",
 ) -> str:
     label = (title or "").strip() or "<untitled>"
-    cid = chunk_id[:8] if chunk_id else "?"
+    # Distinguishing turn label (not chunk_id[:8], which is identical for all turns of a
+    # readable-id corpus) so the chunk shown in the preview/header actually identifies the turn.
+    cid = _short_turn_label(chunk_id)
     ref = ""
     if reference_time is not None:
         try:

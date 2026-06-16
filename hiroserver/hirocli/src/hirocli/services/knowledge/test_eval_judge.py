@@ -202,42 +202,46 @@ def test_format_recall_context_sections_with_metadata_no_score() -> None:
     assert "### Relevant Facts" in out
     assert "### Relevant Entities" in out
     assert "### Relevant Messages" in out
-    # Default render = event_time only (expired_at + superseded off); the episode keeps its [date].
-    assert "Adam works at Cedar Labs [WORKS_AT · event_time: 2024-08]" in out
+    # Default render = as-of only (until + superseded off); no stated on this fact → no leading date.
+    assert "Adam works at Cedar Labs [WORKS_AT · as of: 2024-08]" in out
     assert "Adam (Person): an engineer" in out
+    # A message's leading bare [DATE] is its statement date — always shown.
     assert "[2024-08-12] I started at Cedar Labs." in out
     # The retrieval score is a ranking artifact — it must NOT leak into the prompt.
     assert "0.91" not in out and "score" not in out.lower()
 
 
 def test_format_recall_context_render_toggles() -> None:
-    """RecallRenderOptions toggles each temporal annotation; show_event_time also gates episodes."""
+    """show_* toggles gate the EVENT dates (as of / until / SUPERSEDED); the `stated` date and the
+    message timestamp are always shown (the answerer's anchor — never gated)."""
     from hirocli.services.knowledge.eval_judge import RecallRenderOptions
 
     hits = [
         {
             "kind": "fact", "fact": "Maya lives in Berlin", "name": "LIVES_IN",
-            "valid_at": "2022-01-01", "invalid_at": "2024-03-01", "superseded": True,
+            "stated": "2021-12-31", "valid_at": "2022-01-01", "invalid_at": "2024-03-01",
+            "superseded": True,
         },
         {"kind": "episode", "memory": "Moved to Berlin.", "valid_at": "2022-01-01"},
     ]
-    # All on → event_time + expired_at + SUPERSEDED, episode keeps [date].
+    # All on → leading [stated] date + as of + until + SUPERSEDED; message keeps its leading date.
     all_on = format_recall_context(
         hits, RecallRenderOptions(show_event_time=True, show_expired_at=True, show_superseded=True)
     )
     assert (
-        "Maya lives in Berlin [LIVES_IN · event_time: 2022-01-01 · expired_at: 2024-03-01 · SUPERSEDED]"
+        "[2021-12-31] Maya lives in Berlin [LIVES_IN · as of: 2022-01-01 · until: 2024-03-01 · SUPERSEDED]"
         in all_on
     )
     assert "[2022-01-01] Moved to Berlin." in all_on
-    # event_time off → no event_time on the fact AND the episode loses its [date] prefix.
+    # All event-date toggles off → as of/until/SUPERSEDED drop, but the leading stated date survives
+    # (not gated), and the message timestamp is still shown.
     no_dates = format_recall_context(
         hits,
         RecallRenderOptions(show_event_time=False, show_expired_at=False, show_superseded=False),
     )
-    assert "Maya lives in Berlin [LIVES_IN]" in no_dates
-    assert "event_time" not in no_dates and "expired_at" not in no_dates
-    assert "- Moved to Berlin." in no_dates and "[2022-01-01]" not in no_dates
+    assert "[2021-12-31] Maya lives in Berlin [LIVES_IN]" in no_dates
+    assert "as of" not in no_dates and "until" not in no_dates and "SUPERSEDED" not in no_dates
+    assert "[2022-01-01] Moved to Berlin." in no_dates
 
 
 def test_format_recall_context_empty_is_blank() -> None:

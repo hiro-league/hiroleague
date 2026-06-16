@@ -989,13 +989,16 @@
     return ansFlag === 'miss' ? rank === 0 : ansFlag === 'sufficient' ? rank === 1 : rank === 2;
   }
   // Searchable text on a row: question/ideal/ids + per-leg answer, verdict word, judge reason +
-  // quoted evidence. The recalled facts/entities/episodes are folded in ONLY when the user enabled
-  // recalled search (``ansSearchRecalled``) — that detail is large/noisy, so it's opt-in.
+  // quoted evidence. The folded memory detail (recalled facts/entities/episodes AND the evidence-
+  // recall table) is included ONLY when the user enabled recalled search (``ansSearchRecalled``) —
+  // that detail is large/noisy, so it's opt-in. When opted in, EVERY folded table is searched so a
+  // term in any of them finds its question (previously the evidence-recall table was skipped).
   function rowHaystack(r: EvalRow): string {
     const parts: string[] = [r.id, r.category, r.subcategory, r.difficulty, r.question, r.gold];
     for (const leg of Object.values(r.legs)) {
       parts.push(leg.answer, markLabel(leg.mark), leg.reason ?? '', leg.evidence ?? '');
       if (ansSearchRecalled) {
+        // Recalled facts / entities / episodes (the episodes table renders ``memory``/``valid_at``).
         for (const f of leg.recalled ?? []) {
           parts.push(
             f.memory,
@@ -1007,6 +1010,21 @@
             f.invalid_at ?? ''
           );
         }
+      }
+    }
+    // Evidence-recall table (per-row, LoCoMo) — the gold evidence episodes. Folded into the search
+    // alongside the recalled tables so a term in an evidence episode also surfaces the question.
+    if (ansSearchRecalled) {
+      for (const it of r.evidence_recall?.items ?? []) {
+        parts.push(
+          it.episode_id,
+          it.short_id ?? '',
+          it.dia_id ?? '',
+          it.speaker ?? '',
+          it.text ?? '',
+          it.when ?? '',
+          it.matched_via ?? ''
+        );
       }
     }
     return parts.join(' ').toLowerCase();
@@ -1090,6 +1108,12 @@
   // Opened from the "Ingest pipeline" button when the run's ingest Graph Run id is known. Shows
   // the searchable source corpus as an extra tab (same as the retrieval trace).
   let activeIngestTrace = $state<IngestTraceRecord | null>(null);
+  // Full per-episode trace list for the open run + current index, so the dialog's prev/next arrows
+  // (and ←/→) can step through every episode of the remember run. Each eval turn is its own
+  // single-episode ingest, so a trace's own episode_index/total is always 1/1 — the real run
+  // position is this index, fed to the dialog as navIndex/navTotal.
+  let ingestTraces = $state<IngestTraceRecord[]>([]);
+  let ingestTraceIndex = $state(0);
   let ingestTraceLoading = $state(false);
   let ingestTraceError = $state<string | null>(null);
   async function openIngestTrace(runId: string) {
@@ -1099,8 +1123,10 @@
       const res = await getGraphRunIngestTrace(runId);
       const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
       if (traces.length > 0) {
-        // The remember run ingests many episodes → many per-episode traces; open the first.
-        // The Corpus tab shows the full (searchable) corpus regardless of which episode is shown.
+        // Keep the WHOLE list (not just traces[0]) so arrow-nav can walk every episode. The Corpus
+        // tab shows the full (searchable) corpus regardless of which episode is shown.
+        ingestTraces = traces;
+        ingestTraceIndex = 0;
         activeIngestTrace = traces[0];
       } else {
         ingestTraceError = 'No ingest trace recorded for this run (graph tracing may have been off).';
@@ -1109,6 +1135,15 @@
       ingestTraceError = err instanceof Error ? err.message : 'Failed to load ingest trace.';
     } finally {
       ingestTraceLoading = false;
+    }
+  }
+
+  /** Step the open ingest-trace dialog to the prev/next episode of the run (arrow-nav). */
+  function stepIngestTrace(delta: number) {
+    const j = ingestTraceIndex + delta;
+    if (j >= 0 && j < ingestTraces.length) {
+      ingestTraceIndex = j;
+      activeIngestTrace = ingestTraces[j];
     }
   }
 
@@ -1524,8 +1559,20 @@
             </button>
           {/if}
         {/if}
-        <!-- Selection is driven by the table's header checkbox (all shown) + per-row checkboxes;
-             no separate select/clear buttons needed. -->
+        <!-- Selection is driven by the table's header checkbox (all shown) + per-row checkboxes.
+             Clear selection (filters-bar button) drops *all* selected questions regardless of
+             the active filters — added so a large selection can be reset without un-filtering. -->
+        {#if eval_.selectedCount > 0}
+          <button
+            type="button"
+            class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
+            disabled={isBusy}
+            onclick={() => eval_.clearSelection()}
+            title="Clear all selected questions"
+          >
+            Clear selection
+          </button>
+        {/if}
         <button
           type="button"
           class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted disabled:opacity-50"
@@ -1724,7 +1771,7 @@
             class="h-7 w-48 rounded-md border bg-background pl-2 pr-7 font-sans text-xs"
             placeholder="Search answers…"
             bind:value={ansSearch}
-            title="Searches the answer surface — question, ideal, answers, judge reason/evidence. Enable “Recalled” to also search the recalled facts/entities/episodes."
+            title="Searches the answer surface — question, ideal, answers, judge reason/evidence. Enable “Recalled” to also search every folded table: recalled facts/entities/episodes and the evidence-recall episodes."
           />
           {#if ansSearch.trim()}
             <button
@@ -1738,11 +1785,12 @@
             </button>
           {/if}
         </div>
-        <!-- Opt-in: also search the recalled facts/entities/episodes (folded memory detail). Off by
-             default — that detail is large/noisy. When on, matching recalled rows also highlight. -->
+        <!-- Opt-in: also search every folded table — recalled facts/entities/episodes AND the
+             evidence-recall episodes. Off by default — that detail is large/noisy. When on,
+             matching rows in those tables also highlight. -->
         <label
           class="flex cursor-pointer select-none items-center gap-1.5 font-sans text-xs text-muted-foreground"
-          title="Also search inside the recalled facts/entities/episodes (the folded memory detail)"
+          title="Also search inside every folded table: the recalled facts/entities/episodes and the evidence-recall episodes"
         >
           <input type="checkbox" class="size-3.5" bind:checked={ansSearchRecalled} />
           Recalled
@@ -1970,7 +2018,17 @@
      same Corpus tab so the source transcript is reachable while inspecting the build. -->
 <GraphRunsIngestTraceDialog
   trace={activeIngestTrace}
-  onClose={() => (activeIngestTrace = null)}
+  onClose={() => {
+    activeIngestTrace = null;
+    ingestTraces = [];
+    ingestTraceIndex = 0;
+  }}
+  hasPrev={ingestTraceIndex > 0}
+  hasNext={ingestTraceIndex < ingestTraces.length - 1}
+  onPrev={() => stepIngestTrace(-1)}
+  onNext={() => stepIngestTrace(1)}
+  navIndex={ingestTraces.length ? ingestTraceIndex + 1 : 0}
+  navTotal={ingestTraces.length}
   extraTabLabel={corpusTabLabel}
   extraTab={corpusTabLabel ? corpusTab : undefined}
 />
@@ -2510,6 +2568,24 @@
                           {/if}
                         </div>
                       </div>
+                      <!-- Full question + answer — the row above clamps both (line-clamp-2); here we
+                           show them in full, below the leg header and above the Judge table, so long
+                           questions/answers are readable without truncation. Question is the same
+                           across legs; the answer is this leg's. -->
+                      <div class="grid gap-1.5 text-xs leading-5">
+                        <div class="flex flex-wrap gap-2">
+                          <span class="min-w-[64px] text-muted-foreground">Question</span>
+                          <span class="flex-1 whitespace-pre-wrap text-foreground">{@render hl(r.question)}</span>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                          <span class="min-w-[64px] text-muted-foreground">Answer</span>
+                          {#if leg.answer}
+                            <span class="flex-1 whitespace-pre-wrap text-foreground">{@render hl(leg.answer)}</span>
+                          {:else}
+                            <span class="flex-1 italic text-muted-foreground">— (no answer)</span>
+                          {/if}
+                        </div>
+                      </div>
                       <!-- Judge — its own collapsible colored section (matches the recalled-memory
                            sections below): verdict + recall sufficiency + grounded + reason + the
                            recalled line(s) the judge quoted (evidence). Recall + evidence are
@@ -2645,9 +2721,9 @@
               </td>
               <td class="max-w-[32rem] px-2 py-1">
                 <!-- dia/short id (monospace) over the episode text snippet; speaker prefixed. -->
-                <span class="font-mono text-[11px] text-muted-foreground">{it.dia_id || it.short_id || it.episode_id}</span>
+                <span class="font-mono text-[11px] text-muted-foreground">{@render hlR(it.dia_id || it.short_id || it.episode_id)}</span>
                 {#if it.text}
-                  <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold">{it.speaker}:</span> {/if}{it.text}</span>
+                  <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold">{@render hlR(it.speaker)}:</span> {/if}{@render hlR(it.text)}</span>
                 {:else}
                   <span class="block italic text-muted-foreground">(episode text unavailable)</span>
                 {/if}

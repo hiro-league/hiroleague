@@ -9,6 +9,7 @@ Storage: ``<workspace>/preferences.json`` — Pydantic model serialised to JSON.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -573,102 +574,136 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
 # so declines must stay bare (no preamble before the phrase).
 DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = """\
 ## Objective
-Answer the **User Question** using ONLY the **Recalled Memory Elements** below — never outside or \
-prior knowledge. Decline only when no element concerns the person and thing asked (see Formatting \
-Rules); an unstated, relative, or low-precision date is never itself a reason to decline.
+Answer the User Question using the Recalled Memory Elements below — context from past
+conversations. Keep facts grounded in that memory, but draw on general world knowledge to reason
+or recommend when memory alone doesn't reach the answer.
 
-The Recalled Memory Elements come in three kinds:
-* **Relevant Facts** — statements distilled from the conversation, each carrying the date(s) it \
-was true ("as of" / valid range).
-* **Relevant Entities** — the people, places, and things related to or surrounding the Relevant \
-Facts, each with a summary.
-* **Relevant Messages** — the original timestamped conversation messages from which the facts and \
-entities were extracted.
+## The three dates (any may be missing)
+- **stated** — when it was said; shown as a leading [DATE]. The ONLY date you resolve relative
+  time phrases against.
+- **as of** — when the fact became TRUE. Already absolute.
+- **until** — when the fact stopped being true. Already absolute.
 
-## Core Instructions
-- Read every element before answering — answers are often spread across several elements, not the \
-first ones. Combine elements about the same event; a paraphrase of the question still answers it.
-- An element supports an answer about a person only if it shows THAT person doing, having, or \
-experiencing the thing asked — and states the specific thing asked, not a related one.
-- Resolve relative or implicit time against the date the element itself carries, and give the \
-result — a date you derive this way is grounded. A date that is relative, implicit, or needs a \
-step of reasoning is never a reason to decline; only a missing person or thing is.
-- Give the most precise time the elements actually support, and no finer — a day if one is \
-pinned, otherwise the month, season, or year. Match times by meaning, not wording: an element \
-answers when its own date or validity period coincides with what's asked. A well-supported \
-coarse answer beats a guessed-precise one or a decline.
-- When similar events occur at different dates, the question's timeframe picks the right one — \
-not the order elements appear in.
-- For list or count questions, collect every matching element across ALL the material before \
-answering.
-- If any element passes the support checks, commit: give the supported part(s) directly, even \
-when other parts are unsupported.
+## Element formats
+- Relevant Facts — "[stated] fact text [RELATION · as of: D · until: D]" (only the dates that
+  exist are shown).
+- Relevant Entities — "NAME (TYPE): SUMMARY". The summary fuses many details and the answer is
+  often there.
+- Relevant Messages — "[stated] TEXT".
+
+## Core rule
+- Resolve a relative phrase ("five years ago", "next month") ONLY against the **stated** [DATE];
+  report the absolute value, never the phrase.
+- **as of** / **until** are already resolved — when asked when a fact began or ended, report them
+  directly; never re-apply a relative phrase to them.
+- Read every provided element — facts, and any entities or messages present. The answer is often
+  spread across several, including chains through another person, place, or thing; combine them.
+- An element supports an answer about a person only if it shows THAT person doing, having, or
+  experiencing the thing asked — and the specific thing asked, not a related one.
+- When similar events occur at different dates, the question's timeframe picks the right one — not
+  the order elements appear in. Prefer the LATEST **as of** when facts directly conflict.
+- For list or count questions, scan ALL elements — facts, entity summaries, and messages — and
+  include every DISTINCT match before answering. A partial list is a wrong answer.
+- If any element passes the support checks, commit: give the supported part(s) directly, even when
+  other parts are unsupported.
+- Give the most precise time the dates support (day if pinned, else month/year). A missing,
+  relative, or low-precision date is NEVER itself a reason to decline.
 
 ## Positive Calibrators
-Ex P1 — computed dates are grounded
+P1 — computed dates are grounded
+
 q: When did Maya start pottery?
-r1 (fact): Maya has been doing pottery for five years. (as of 2024-06-20)
+
+r: [2024-06-20] Maya has been doing pottery for five years.
+
 a: 2019.
-behavior: a date computed from the element's own date is a grounded answer, not invention.
 
-Ex P2 — commit to the supported part
+behavior: no **as of**, so resolve "five years" against the stated date (2024 − 5); a computed
+date is grounded, not invented.
+
+P2 — commit to the supported part
+
 q: Where and when did Alex get his dog?
-r1 (fact): Alex adopted his dog from a shelter. (as of 2024-04-15)
+
+r: [2024-04-15] Alex adopted his dog from a shelter.
+
 a: From a shelter.
-behavior: the "where" is supported, so it is answered — an unsupported "when" is no reason to \
-decline everything.
 
-Ex P3 — relative date resolved, not declined
-q: When is Maya moving?
-r1 (fact): Maya plans to move next month. [valid 2024-03-10 → present]
-a: April 2024.
-behavior: resolve the relative phrase against the element's own date — a derived date is grounded, \
-never grounds to decline.
+behavior: "where" is supported; an unsupported "when" is no reason to decline everything.
 
-Ex P4 — answer at the supported granularity
+P3 — answer at the supported granularity
+
 q: When did Maya live abroad?
-r1 (fact): Maya was on an exchange program in Lisbon. [valid 2022-09-01 → 2023-06-30]
+
+r: Maya was on an exchange program in Lisbon. [as of: 2022-09-01 · until: 2023-06-30]
+
 a: September 2022 to June 2023.
-behavior: give exactly what the validity period supports — coarser-but-correct beats over-precision \
-or a decline.
+
+behavior: report the as of → until window directly — coarser-but-correct beats over-precision or
+a decline.
 
 ## Negative Calibrators
-Ex N1 — cross-person transfer
-q: Which company did Alex join?
-r1 (fact): Sara joined Acme Corp as a designer. (as of 2024-05-02)
-✗ a: Acme Corp.   ✗ a: Sara joined Acme Corp.
-✓ a: No information available.
-behavior: the only joining fact is Sara's — reusing it for Alex, or hiding the mismatch by \
-leaving the name out, are both wrong.
+N1 — already-resolved date, not re-subtracted
 
-Ex N2 — relative time echoed verbatim
+q: What year did John start surfing?
+
+r: [2023-07-16] John started surfing five years ago. [STARTED · as of: 2018-07-16]
+
+✗ 2013   ✓ 2018
+
+behavior: **as of** is the resolved event date — report it; do NOT re-apply "five years ago" to it.
+
+N2 — relative time echoed verbatim
+
 q: When is Maya moving to Berlin?
-r1 (fact): Maya plans to move to Berlin next month. (as of 2024-03-12)
-✗ a: Next month.
-✓ a: April 2024.
-behavior: relative wording is resolved against the element's own date, never echoed.
 
-Ex N3 — related fact bent to the question
+r: [2024-03-12] Maya plans to move to Berlin next month.
+
+✗ Next month   ✓ April 2024
+
+behavior: resolve relative wording against the stated date; never echo it.
+
+N3 — cross-person transfer
+
+q: Which company did Alex join?
+
+r: [2024-05-02] Sara joined Acme Corp as a designer.
+
+✗ Acme Corp   ✗ Sara joined Acme Corp   ✓ No information available.
+
+behavior: the only joining fact is Sara's — reusing it for Alex, or dropping the name to hide the
+mismatch, are both wrong.
+
+N4 — related fact bent to the question
+
 q: What band did Alex start?
-r1 (fact): Alex joined a weekly jazz jam group. (as of 2024-02-10)
-✗ a: A jazz jam group.
-✓ a: No information available.
-behavior: joining a jam group is not starting a band — a related fact is not reshaped to fit the \
-question's wording.
 
-Ex N4 — asking is not doing
+r: [2024-02-10] Alex joined a weekly jazz jam group.
+
+✗ A jazz jam group   ✓ No information available.
+
+behavior: joining a jam group is not starting a band; a related fact is not reshaped to fit the
+question.
+
+N5 — asking is not doing
+
 q: How did Sara's marathon go?
-r1 (message): [2024-05-12] Sara: That's awesome! How was your marathon?
-✗ a: It went well — she pushed through and finished strong.
-✓ a: No information available.
-behavior: Sara only asked about a marathon; a person's question or reaction is never their own \
-experience.
 
-## Formatting Rules
-- Answer directly and completely; no preamble.
+r: [2024-05-12] Sara: That's awesome! How was your marathon?
+
+✗ It went well…   ✓ No information available.
+
+behavior: Sara only asked; a question or reaction is never the person's own experience.
+
+## Formatting
+- Answer directly; no preamble. For a single-fact question, be terse (a short phrase or value).
+  For list / count / "which / what … (all)" questions, completeness outranks brevity — list every
+  matching element; do not stop at the first few.
+- Dates: absolute only — exact day if pinned, else month + year; "the week of {date}" for week
+  questions.
 - Name the person the answer is about.
-- Dates: absolute only — exact date, else month + year; "the week of <date>" for week questions.
-- To decline, reply exactly: No information available.
+- Decline (reply exactly: No information available.) only when neither the memory nor related
+  world knowledge can answer.
 
 ## Validation
 Before finalizing, verify:
@@ -1046,6 +1081,25 @@ def load_preferences(workspace_path: Path) -> WorkspacePreferences:
     return prefs
 
 
+def _prune_default_prompts(data: dict[str, Any]) -> None:
+    """Drop any editable prompt field whose value still equals its built-in default, in-place.
+
+    Keeps a prompt left at (or restored to) default absent from preferences.json so it re-applies
+    the code constant on load (a real reset that tracks future default edits). Only the known
+    ``PROMPT_DEFAULTS`` paths are considered; a missing parent or non-default value is left alone."""
+    for path, default_text in PROMPT_DEFAULTS.items():
+        parts = path.split(".")
+        node: Any = data
+        for part in parts[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+            if not isinstance(node, dict):
+                break
+        else:
+            leaf = parts[-1]
+            if isinstance(node, dict) and node.get(leaf) == default_text:
+                node.pop(leaf, None)
+
+
 def save_preferences(
     workspace_path: Path,
     prefs: WorkspacePreferences,
@@ -1077,8 +1131,14 @@ def save_preferences(
     effective_changes = compute_effective_changes(previous, prefs)
     _validate_pre_save_transition(workspace_path, effective_changes)
 
+    # Prune editable prompt fields still at their built-in default so they stay ABSENT from the
+    # file and re-apply the code constant on every load — a true reset that auto-tracks future
+    # default edits, instead of "Restore default" persisting a pinned copy (model_dump_json would
+    # otherwise materialize every field). Only PROMPT_DEFAULTS paths are touched; all else dumps full.
+    data = prefs.model_dump(mode="json")
+    _prune_default_prompts(data)
     preferences_file(workspace_path).write_text(
-        prefs.model_dump_json(indent=2), encoding="utf-8",
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8",
     )
     _notify_preferences_saved(
         workspace_path, prefs, effective_changes=effective_changes,

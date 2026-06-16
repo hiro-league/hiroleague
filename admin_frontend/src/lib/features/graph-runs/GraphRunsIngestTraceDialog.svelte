@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { ChevronsDownUp, ChevronsUpDown, Settings2 } from '@lucide/svelte';
+  import {
+    ChevronLeft,
+    ChevronRight,
+    ChevronsDownUp,
+    ChevronsUpDown,
+    Settings2
+  } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import type {
@@ -15,6 +21,17 @@
   let {
     trace,
     onClose,
+    // Prev/next episode navigation (header arrows + ←/→ keys). Optional so the generic
+    // graph-runs caller can omit them; disabled at the ends via hasPrev/hasNext.
+    hasPrev = false,
+    hasNext = false,
+    onPrev,
+    onNext,
+    // Position of the current trace within the run's episode list (1-based) — shown between the
+    // arrows. The per-trace episode_index/total is 1/1 for the eval's single-episode ingests, so
+    // the caller supplies the real run position here; falls back to episode_index/total when unset.
+    navIndex = 0,
+    navTotal = 0,
     // Optional extra tab (eval: the searchable source corpus) — decoupled via a snippet so this
     // Graph-Runs component stays generic. Both props must be set for the tab to appear.
     extraTabLabel = '',
@@ -22,6 +39,12 @@
   }: {
     trace: IngestTraceRecord | null;
     onClose: () => void;
+    hasPrev?: boolean;
+    hasNext?: boolean;
+    onPrev?: () => void;
+    onNext?: () => void;
+    navIndex?: number;
+    navTotal?: number;
     extraTabLabel?: string;
     extraTab?: import('svelte').Snippet;
   } = $props();
@@ -47,14 +70,31 @@
   // header gear so the header stays compact — mirrors the recall (retrieval) trace dialog.
   let settingsOpen = $state(false);
 
+  // Reset transient view state on a new trace, but PRESERVE the active tab so arrow-nav between
+  // episodes keeps you on the same tab (the tabKeys effect below re-validates / initialises it).
   $effect(() => {
     void trace;
-    activeTab = phases[0]?.phase ?? RESULT_TAB;
     collapsed = new Set();
     promptOpen = new Set();
     jsonOpen = new Set();
     settingsOpen = false;
   });
+
+  // ←/→ navigate to the prev/next episode trace (mirrors the header arrows). Guarded so it never
+  // fires while typing in an input/textarea, when a modifier is held, or when the dialog is closed.
+  function onArrowNavKey(ev: KeyboardEvent): void {
+    if (trace === null) return;
+    if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const t = ev.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (ev.key === 'ArrowLeft' && hasPrev) {
+      ev.preventDefault();
+      onPrev?.();
+    } else if (ev.key === 'ArrowRight' && hasNext) {
+      ev.preventDefault();
+      onNext?.();
+    }
+  }
 
   function toggleStage(index: number): void {
     const next = new Set(collapsed);
@@ -599,6 +639,8 @@
   </div>
 {/snippet}
 
+<svelte:window onkeydown={onArrowNavKey} />
+
 <Dialog.Root open={trace !== null} onOpenChange={(next) => { if (!next) onClose(); }}>
   <Dialog.Content class="ingest-trace-content sm:max-w-[min(96vw,1200px)] flex flex-col h-[90vh]">
     <Dialog.Header>
@@ -606,6 +648,29 @@
         <Dialog.Title>Ingest pipeline trace</Dialog.Title>
         {#if trace}
           <div class="trace-head-actions">
+            <Button
+              variant="outline"
+              size="sm"
+              title="Previous episode (Left arrow)"
+              aria-label="Previous episode"
+              disabled={!hasPrev}
+              onclick={() => onPrev?.()}
+            >
+              <ChevronLeft size={14} aria-hidden="true" />
+            </Button>
+            <span class="trace-nav-pos" title="Episode position in this run">
+              {navTotal > 0 ? `${navIndex}/${navTotal}` : `${trace.episode_index}/${trace.total}`}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Next episode (Right arrow)"
+              aria-label="Next episode"
+              disabled={!hasNext}
+              onclick={() => onNext?.()}
+            >
+              <ChevronRight size={14} aria-hidden="true" />
+            </Button>
             {#if activePhaseObj}
               <Button
                 variant="outline"
@@ -1002,6 +1067,17 @@
     align-items: center;
     gap: 8px;
     flex: none;
+  }
+
+  /* Episode position between the prev/next arrows (e.g. "23/50"). */
+  .trace-nav-pos {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+    min-width: 2.75rem;
+    text-align: center;
+    white-space: nowrap;
   }
 
   .trace-tabs {

@@ -73,12 +73,12 @@ class JudgeVerdict:
 class RecallRenderOptions:
     """Which per-fact temporal annotations the recalled-context renderer emits.
 
-    Mirrors the ``graph.eval.show_*`` prefs. Each fact's ``event_time`` (valid_at), ``expired_at``
-    (invalid_at), and ``SUPERSEDED`` flag is independently shown/hidden; ``show_event_time`` ALSO
-    governs the episode ``[date]`` prefix (decision: one date toggle covers both kinds). Field
-    names match the labels the answerer prompt references (Zep-style ``event_time``/``expired_at``,
-    not the old ``valid → invalid`` range). Defaults = the pref defaults: event_time on, expired_at
-    and superseded off (a single timestamp per fact)."""
+    Mirrors the ``graph.eval.show_*`` prefs. These gate the already-resolved *event* dates only:
+    ``show_event_time`` → the ``as of`` label (valid_at), ``show_expired_at`` → ``until``
+    (invalid_at), plus the ``SUPERSEDED`` flag. The ``stated`` date (the statement/source-episode
+    time) is NOT gated here — it is the answerer's anchor for resolving relative phrasing, so it is
+    always shown for both facts and messages. Labels (``stated``/``as of``/``until``) match the
+    answerer prompt. Defaults = the pref defaults: as-of on, until and superseded off."""
 
     show_event_time: bool = True
     show_expired_at: bool = False
@@ -117,9 +117,9 @@ class _JudgeOutput(BaseModel):
 # Hardcoded answering role (NOT a preference): the editable graph.eval.memory_answer_prompt is the
 # INSTRUCTION block placed in the user message, so the system prompt stays a stable two-line role.
 MEMORY_EVAL_ANSWER_SYSTEM_PROMPT = (
-    "You are a professional memory analyst. You answer user questions strictly from recalled "
-    "conversation-memory elements provided to you, with precise attribution of who did what and "
-    "exact resolution of dates."
+    "You are a professional memory analyst. You answer user questions grounded in recalled "
+    "conversation-memory elements, reasoning with general knowledge when memory alone falls short, "
+    "with precise attribution of who did what and exact resolution of dates."
 )
 
 # Per-kind section order + heading for the recalled-context prompt (facts → entities → messages).
@@ -148,26 +148,32 @@ def _format_recall_item(hit: dict[str, Any], render: RecallRenderOptions) -> str
     if kind == "episode":
         when = str(hit.get("valid_at") or "").strip()
         body = str(hit.get("memory") or "").strip()
-        # The episode [date] prefix is governed by the same show_event_time toggle as a fact's
-        # event_time (decision: one date toggle for both kinds).
-        return f"[{when}] {body}" if (when and render.show_event_time) else body
-    # fact (default): raw fact + relationship + temporal validity/supersession.
+        # A message's leading [DATE] IS its statement date (the episode reference_time) — the
+        # anchor for resolving relative phrasing. ALWAYS shown, independent of show_event_time
+        # (the as-of/until toggles gate event dates, not the statement date the answerer needs).
+        return f"[{when}] {body}" if when else body
+    # fact (default): "[stated] fact [RELATION · as of: D · until: D]".
     fact = str(hit.get("fact") or hit.get("memory") or "").strip()
     rel = str(hit.get("name") or "").strip()
+    stated = str(hit.get("stated") or "").strip()
     valid_at = str(hit.get("valid_at") or "").strip()
     invalid_at = str(hit.get("invalid_at") or "").strip()
     bits: list[str] = []
     if rel:
         bits.append(rel)
-    # Temporal annotations are independently toggleable (graph.eval.show_*), and renamed from the
-    # old "valid X → Y" range to event_time/expired_at so the labels match the answerer prompt.
+    # `as of` (valid_at) / `until` (invalid_at) are already-resolved event dates and stay
+    # independently toggleable (graph.eval.show_*). Labels match the answerer prompt; resolving a
+    # relative phrase against them would double-count, so the prompt reports them directly.
     if render.show_event_time and valid_at:
-        bits.append(f"event_time: {valid_at}")
+        bits.append(f"as of: {valid_at}")
     if render.show_expired_at and invalid_at:
-        bits.append(f"expired_at: {invalid_at}")
+        bits.append(f"until: {invalid_at}")
     if render.show_superseded and hit.get("superseded"):
         bits.append("SUPERSEDED")
-    return f"{fact} [{' · '.join(bits)}]" if bits else fact
+    body = f"{fact} [{' · '.join(bits)}]" if bits else fact
+    # `stated` (when it was SAID) leads as a bare [DATE] timestamp — the sole anchor for relative
+    # phrases — so it reads like a timestamp and is ALWAYS shown, never behind a toggle.
+    return f"[{stated}] {body}" if stated else body
 
 
 def format_recall_context(

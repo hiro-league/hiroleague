@@ -241,6 +241,36 @@ def _fact_with_date(fact: str, valid_at: str, invalid_at: str) -> str:
     return fact
 
 
+async def _episode_stated_dates(graphiti: Any, episode_uuids: list[str]) -> dict[str, str]:
+    """Map source-episode uuid → its STATEMENT date (ISO ``YYYY-MM-DD``) via the LIVE graph driver.
+
+    The statement date is the episode's ``reference_time`` (when the turn was *said*), surfaced so
+    the answerer can resolve relative phrasing ("five years ago") against it. It is deliberately NOT
+    the edge's ``created_at`` (ingest wall-clock), which would print ≈today and reintroduce the wrong
+    dates the temporal eval was failing on. Reuses the already-open driver (no second Kuzu
+    connection, so no lock fight); best-effort — a lookup hiccup returns ``{}`` and facts simply
+    render without a stated date rather than failing the whole search."""
+    ids = [u for u in dict.fromkeys(episode_uuids) if u]  # dedupe, preserve order
+    driver = getattr(graphiti, "driver", None)
+    if not ids or driver is None:
+        return {}
+    try:
+        from graphiti_core.nodes import EpisodicNode
+
+        episodes = await EpisodicNode.get_by_uuids(driver, ids)
+    except Exception:
+        log.warning(
+            "⚠️ graphiti.search — episode stated-date lookup failed · count=%d", len(ids), exc_info=True
+        )
+        return {}
+    out: dict[str, str] = {}
+    for ep in episodes or []:
+        uuid = str(getattr(ep, "uuid", "") or "")
+        if uuid:
+            out[uuid] = _iso(getattr(ep, "valid_at", None))
+    return out
+
+
 async def _traced_search(
     graphiti: Any,
     query: str,
@@ -527,6 +557,15 @@ async def search_chunk_ids(
                     "score": score,
                 }
             )
+
+    # Statement date per fact = its source episode's reference_time (when the turn was SAID).
+    # The answerer resolves relative phrases ("five years ago") against THIS date; valid_at/
+    # invalid_at are already-resolved event dates, so anchoring a relative phrase to them
+    # double-counts (the temporal-eval bug this fixes). One batched lookup over the source
+    # episodes (chunk_id == episodes[0]) on the live driver.
+    stated_by_ep = await _episode_stated_dates(graphiti, [r["chunk_id"] for r in fact_rows])
+    for r in fact_rows:
+        r["stated"] = stated_by_ep.get(r["chunk_id"], "")
 
     # Scope-widened legs — only populated when the recipe mounted them. ``SearchResults``
     # always has the fields (defaulted to ``[]``), so unmounted legs naturally return empty.
