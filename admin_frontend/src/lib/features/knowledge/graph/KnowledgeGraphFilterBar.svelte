@@ -53,8 +53,11 @@
   {/if}
 
   {#if edgeOptions.length}
+    <!-- "Relations" (not "Edges"): this dropdown lists distinct relation TYPES; its summary
+         ("all 505") is a TYPE count, which read as a filtered EDGE count next to the canvas's
+         "1269 edges". Label it for what it filters so the two numbers aren't conflated. -->
     <KnowledgeGraphFilterDropdown
-      label="Edges"
+      label="Relations"
       options={edgeOptions}
       selected={visibleEdgeTypes}
       weightNoun="edge"

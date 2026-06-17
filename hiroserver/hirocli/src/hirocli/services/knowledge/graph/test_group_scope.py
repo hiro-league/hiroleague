@@ -22,6 +22,7 @@ from hirocli.services.knowledge.graph.group_scope import (
     group_label,
     is_eval_group_id,
     is_knowledge_group_id,
+    is_kuzu_only_chunk_group_id,
     is_memory_group_id,
     knowledge_group_id,
     memory_group_id,
@@ -58,6 +59,17 @@ def test_eval_group_grammar() -> None:
     # ... yet are disjoint from real mem_/kb_ (an eval_mem_ group never matches the mem_ prefix).
     assert not eval_memory_group_id("adam").startswith(MEMORY_PREFIX)
     assert not eval_knowledge_group_id("adam").startswith(KNOWLEDGE_PREFIX)
+
+
+def test_kuzu_only_chunk_groups_cover_memory_and_eval_memory() -> None:
+    # Chunk TEXT lives only in Kuzu for both real memory AND eval-memory — the graph
+    # chunk-detail resolver must read EpisodicNode.content for both, never Qdrant.
+    assert is_kuzu_only_chunk_group_id(memory_group_id(1, "hiro"))
+    assert is_kuzu_only_chunk_group_id(eval_memory_group_id("beam128k_13"))
+    # Knowledge (kb_) and eval-knowledge (eval_kb_) keep their text in Qdrant → NOT Kuzu-only.
+    assert not is_kuzu_only_chunk_group_id(knowledge_group_id())
+    assert not is_kuzu_only_chunk_group_id(eval_knowledge_group_id("adam"))
+    assert not is_kuzu_only_chunk_group_id("")
 
 
 def test_prefixes_are_disjoint() -> None:

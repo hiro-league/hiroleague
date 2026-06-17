@@ -10,6 +10,9 @@
   import { cn } from '$lib/utils';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import KnowledgeGraphFilterBar from './KnowledgeGraphFilterBar.svelte';
+  import MultiSelectFilter, {
+    type MultiSelectOption
+  } from '$lib/components/ui/multi-select-filter.svelte';
 
   interface Props {
     graph: KnowledgeGraphModel;
@@ -32,6 +35,24 @@
   function onClear(): void {
     onSearchReframe(); // clearing reframes (full set if 'hide' was relaying out)
     graph.clearSearch();
+  }
+
+  // Episode multi-select options, in corpus order (backend sorts by chunk_id). The episode ID
+  // is the label — it's the stable identifier you actually select by (no numbering: one
+  // timestamp can hold several episodes, so a positional "#n" would be misleading). The text
+  // snippet stays searchable via `keywords`. `count` = graph items the episode contributes, so
+  // graphless episodes visibly read 0.
+  const episodeOptions = $derived<MultiSelectOption[]>(
+    graph.episodes().map((ep) => ({
+      value: ep.id,
+      label: ep.id,
+      keywords: ep.snippet,
+      count: graph.episodeItemCount(ep.id)
+    }))
+  );
+  function onEpisodesChange(ids: string[]): void {
+    onSearchReframe(); // changing the episode filter reframes onto the new subgraph
+    graph.setSelectedEpisodes(ids);
   }
 </script>
 
@@ -65,6 +86,19 @@
         {/each}
       </select>
     {/if}
+    {#if episodeOptions.length > 0}
+      <!-- Episode filter: a scoping control (sibling of the partition selector). Selecting
+           episodes feeds their chunk_ids into the SAME highlight/dim/hide focus pipeline as
+           search, so it respects the current view setting. Shown only when the partition has
+           episodes. -->
+      <MultiSelectFilter
+        label="Episodes"
+        options={episodeOptions}
+        selected={graph.selectedEpisodeIds()}
+        onSelectedChange={onEpisodesChange}
+        searchPlaceholder="Search episode id / text…"
+      />
+    {/if}
     {#if graph.nodes().length > 0}
       <!-- Unified search: highlights matching nodes/edges (by name/alias, relation/fact, or
            chunk text) with an amber ring and frames them in view — never hides the rest. -->
@@ -82,7 +116,9 @@
           aria-label="Search nodes, edges, and chunk text"
           class="h-8 w-44 rounded-md border bg-background pl-7 pr-16 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:w-52 [&::-webkit-search-cancel-button]:hidden"
         />
-        {#if graph.searchActive()}
+        <!-- Count + clear belong to the TEXT box, so gate on the query (not searchActive, which
+             is also true on an episode-only selection — that would show a no-op X here). -->
+        {#if graph.searchQuery().trim().length > 0}
           <div class="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
             <span
               class="tabular-nums text-[10px] font-medium {graph.matchCount() > 0

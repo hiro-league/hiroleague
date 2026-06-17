@@ -109,6 +109,18 @@ def is_memory_group_id(group_id: str) -> bool:
     return bool(group_id) and group_id.startswith(MEMORY_PREFIX)
 
 
+def is_kuzu_only_chunk_group_id(group_id: str) -> bool:
+    """True for partitions whose episode TEXT lives ONLY in Kuzu (never Qdrant): real
+    conversation memory (``mem_``) AND memory-eval corpora (``eval_mem_``). Both write only a
+    Graphiti episode, so their chunk text must come from ``EpisodicNode.content``. (Bug fix:
+    the graph chunk-detail resolver used ``is_memory_group_id`` here, which matches only
+    ``mem_`` — so ``eval_mem_`` chunks were misrouted to Qdrant, found nothing, and the panel
+    showed no chunks for eval-memory graphs.)"""
+    return bool(group_id) and (
+        group_id.startswith(MEMORY_PREFIX) or group_id.startswith(EVAL_MEMORY_PREFIX)
+    )
+
+
 def is_knowledge_group_id(group_id: str) -> bool:
     """``kb_{space}`` — the document-knowledge partition."""
     return bool(group_id) and group_id.startswith(KNOWLEDGE_PREFIX)
@@ -200,6 +212,7 @@ __all__ = [
     "character_from_group",
     "group_label",
     "is_memory_group_id",
+    "is_kuzu_only_chunk_group_id",
     "is_knowledge_group_id",
     "is_eval_group_id",
     "classify_group",

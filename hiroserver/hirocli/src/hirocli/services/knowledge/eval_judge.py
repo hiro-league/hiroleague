@@ -114,8 +114,9 @@ class _JudgeOutput(BaseModel):
     verdict: str = Field(description="one of: pass, partial, fail, abstain")
 
 
-# Hardcoded answering role (NOT a preference): the editable graph.eval.memory_answer_prompt is the
-# INSTRUCTION block placed in the user message, so the system prompt stays a stable two-line role.
+# Hardcoded answering role (NOT a preference): the editable answer-prompt profile
+# (graph.eval.answer_prompts, picked per run) is the INSTRUCTION block placed in the user message,
+# so the system prompt stays a stable two-line role.
 MEMORY_EVAL_ANSWER_SYSTEM_PROMPT = (
     "You are a professional memory analyst. You answer user questions grounded in recalled "
     "conversation-memory elements, reasoning with general knowledge when memory alone falls short, "
@@ -281,8 +282,8 @@ async def answer_from_context(
     sections so the model sees each kind with its metadata (relationship, temporal validity, type).
 
     Message layout (the conv-43 P1/P4 prompt rework): the system prompt is the hardcoded two-line
-    ``MEMORY_EVAL_ANSWER_SYSTEM_PROMPT`` role; ``instructions`` (the editable
-    ``graph.eval.memory_answer_prompt`` pref, blank ⇒ ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT``) goes
+    ``MEMORY_EVAL_ANSWER_SYSTEM_PROMPT`` role; ``instructions`` (the run's chosen
+    ``graph.eval.answer_prompts`` profile text, blank ⇒ ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT``) goes
     in the USER message, followed by "## User Question" and "## Recalled Memory Elements" — the
     question precedes the context so the model reads the elements knowing the target.
 

@@ -385,6 +385,9 @@ export type EvalRunRequest = {
   episode_offset?: number;
   episode_limit?: number | null;
   judge?: boolean; // run the optional LLM judge (grade answers vs the ideal)
+  // Memory track — named answer-prompt profile (graph.eval.answer_prompts) for the answer step.
+  // '' = the locked default profile. Ignored on the knowledge track.
+  answer_prompt_id?: string;
   // Memory track — max questions running recall→answer→judge at once (1 = serial).
   // Clamped server-side to [1, 8]; ignored on the knowledge track.
   question_concurrency?: number;
@@ -485,6 +488,37 @@ export type EvalCorpusData = {
 export function getEvalCorpus(path: string): Promise<ApiResponse<EvalCorpusData>> {
   return apiRequest<EvalCorpusData>(
     `/knowledge/eval/corpus?path=${encodeURIComponent(path)}`,
+    { method: 'GET', timeoutMs: 15000 }
+  );
+}
+
+/** One episode's at-ingest extraction summary — counts of entities/facts the ingestion produced,
+ *  plus where to find its ingest-pipeline trace (run_id + step_index). entity_count === fact_count
+ *  === 0 means the episode extracted nothing into the graph. */
+export type CorpusEpisodeExtraction = {
+  entity_count: number;
+  fact_count: number;
+  run_id: string;
+  step_index: number | '';
+};
+
+/** Per-episode extraction map for a corpus, keyed by episode id. Empty when the corpus was
+ *  ingested with graph tracing off (observability !== 'trace') or hasn't been remembered yet.
+ *  `group_id` is the eval graph partition (e.g. `eval_mem_beam128k_13`), for deep-linking an
+ *  episode into the graph view (group + chunk_id filter). */
+export type CorpusExtractionData = {
+  episodes: Record<string, CorpusEpisodeExtraction>;
+  group_id: string;
+};
+
+/** Per-episode at-ingest extraction counts for a memory corpus (by corpus id, e.g. `beam128k_13`),
+ *  read from its ingest-trace sidecars in the selected workspace. Drives the Corpus tab's
+ *  extracted/not badge + "ingest pipeline" button. */
+export function getCorpusIngestExtraction(
+  corpusId: string
+): Promise<ApiResponse<CorpusExtractionData>> {
+  return apiRequest<CorpusExtractionData>(
+    `/knowledge/eval/corpus-extraction?corpus_id=${encodeURIComponent(corpusId)}`,
     { method: 'GET', timeoutMs: 15000 }
   );
 }
@@ -791,6 +825,28 @@ export type KnowledgeGraphGroupsData = {
 /** List the graph's partitions (Knowledge + each conversation-memory group). */
 export function listKnowledgeGraphGroups(): Promise<ApiResponse<KnowledgeGraphGroupsData>> {
   return apiRequest<KnowledgeGraphGroupsData>('/knowledge/graph/groups', { timeoutMs: 30000 });
+}
+
+// One episode (== a citable chunk) for the Graph tab's episode filter. `id` IS the chunk_id
+// that node/edge `chunk_ids` carry, so selecting episodes filters the graph to the
+// entities/facts they produced. Ordered by id (== corpus episode order) by the backend.
+export type GraphEpisode = {
+  id: string;
+  snippet: string;
+  valid_at: string | null;
+  document_id: string;
+};
+export type KnowledgeGraphEpisodesData = { episodes: GraphEpisode[] };
+
+/** List a partition's episodes for the Graph tab's episode multi-select (ordered by id). */
+export function listKnowledgeGraphEpisodes(
+  groupId: string
+): Promise<ApiResponse<KnowledgeGraphEpisodesData>> {
+  return apiRequest<KnowledgeGraphEpisodesData>('/knowledge/graph/episodes', {
+    method: 'POST',
+    body: { group_id: groupId },
+    timeoutMs: 30000
+  });
 }
 
 

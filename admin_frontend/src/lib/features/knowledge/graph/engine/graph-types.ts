@@ -23,6 +23,12 @@ export interface FgNode {
   index?: number;
   /** Degree-radial target radius (see degreeRadial in graph-forces.ts). */
   __targetR?: number;
+  /** Hub-separation support: the node's connection count, stashed by the engine on each
+   *  relayout so the charge/collide force accessors can scale by degree without re-deriving it. */
+  __degree?: number;
+  /** Hub-separation collision radius (see degreeCollide in graph-forces.ts). 0 disables collision
+   *  for this node (the case when "Hub separation" is 0 → default behavior unchanged). */
+  __collideR?: number;
 }
 
 /** A plain mirror link fed to force-graph. `source`/`target` start as node ids and are
@@ -38,6 +44,13 @@ export interface FgLink {
   __curvature?: number;
   /** Bezier control points force-graph computes just before the 'after' paint. */
   __controlPoints?: number[] | null;
+  /** Set on the synthetic "N other relations" edge that stands in for the parallel edges a pair's
+   *  "Visible edges" cap collapsed (see collapseParallelLinks). Drawn solid + a touch thicker. */
+  aggregate?: boolean;
+  /** Ids of the edges the aggregate represents (length === the "N" shown in its label). */
+  collapsedIds?: string[];
+  /** True when the aggregate stands in for ALL the pair's relations ("X relations" vs "N other"). */
+  whole?: boolean;
 }
 
 /** Normalize a link endpoint (id string OR resolved node object) back to its id. */

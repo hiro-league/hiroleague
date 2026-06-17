@@ -10,8 +10,9 @@
   import KnowledgeGraphOptionsPanel from './KnowledgeGraphOptionsPanel.svelte';
   import KnowledgeGraphToolbar from './KnowledgeGraphToolbar.svelte';
   import { GraphCanvasEngine } from './engine/graph-canvas-engine';
-  import { capParallelLinks } from './engine/graph-links';
+  import { collapseParallelLinks } from './engine/graph-links';
   import { linkEndId } from './engine/graph-types';
+  import { VISIBLE_EDGES_CAP } from '../state/knowledge-graph.svelte';
   import {
     CENTER_STRENGTH_MAX,
     CHARGE_STRENGTH_MAX,
@@ -19,11 +20,16 @@
     EDGE_LABEL_MAX_MAX,
     EDGE_LABEL_MAX_MIN,
     GRAPH_OPTION_DEFAULTS,
+    HUB_SEPARATION_MAX,
+    HUB_SEPARATION_MIN,
+    HUB_SPACING_MAX,
+    HUB_SPACING_MIN,
+    NODE_SIZE_BOUND_MAX,
+    NODE_SIZE_BOUND_MIN,
     LABEL_FONT_BOUND_MAX,
     LABEL_FONT_BOUND_MIN,
     LABEL_ZOOM_BOUND_MAX,
     LABEL_ZOOM_BOUND_MIN,
-    MAX_LINKS_CAP,
     RADIAL_RING_MAX,
     RADIAL_RING_MIN,
     readGraphOptions,
@@ -52,8 +58,11 @@
   let centerStrength = $state(savedOptions.centerStrength); // d3 center pull: reels in drifting nodes/groups
   let radialRing = $state(savedOptions.radialRing); // outer-ring radius for least-connected/disconnected nodes
   let curveAmount = $state(savedOptions.curveAmount); // max bow for fanned parallel edges (0 = straight)
-  let maxLinksPerPair = $state(savedOptions.maxLinksPerPair); // parallel edges per pair; MAX = all
   let chargeStrength = $state(savedOptions.chargeStrength); // d3 charge (node repulsion); negative
+  let hubSeparation = $state(savedOptions.hubSeparation); // pushes high-degree hubs apart (0 = off)
+  let hubSpacing = $state(savedOptions.hubSpacing); // how far hubs spread (multiplier; inert at sep 0)
+  let nodeSizeMin = $state(savedOptions.nodeSizeMin); // degree-based node radius: least-connected
+  let nodeSizeMax = $state(savedOptions.nodeSizeMax); // most-connected (font scales with size too)
   // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
   let searchFocusMode = $state(savedOptions.searchFocusMode);
   // Selected-node focus: 'all' (off) | 'dim' others | 'hide' others. Search wins when both active.
@@ -90,6 +99,27 @@
     panelSide = detailSide === 'left' ? 'right' : 'left';
   }
 
+  // Detail-panel "click a connection" → select it AND slide the camera to centre it (an edge
+  // centres on its two endpoints). The graph stays put on a normal canvas click; only panel
+  // navigation recentres, so the thing you just jumped to is brought into view.
+  function navigateToSelection(sel: { kind: 'node' | 'edge'; id: string }): void {
+    if (sel.kind === 'node') {
+      graph.selectNode(sel.id);
+      engine?.centerOn([sel.id]);
+    } else {
+      graph.selectEdge(sel.id);
+      const e = graph.links().find((l) => l.id === sel.id);
+      engine?.centerOn(e ? [String(e.source), String(e.target)] : []);
+    }
+  }
+
+  // Detail-panel "hover a connection" → transiently ring it on the canvas (no selection). The
+  // panel clears it (null) on mouse-leave / teardown. The id may be an aggregate edge's id; the
+  // engine resolves it against its own mirror links.
+  function previewConnection(sel: { kind: 'node' | 'edge'; id: string } | null): void {
+    engine?.setPreview(sel);
+  }
+
   // Persist the dock-side preference whenever it changes (also runs once on mount).
   $effect(() => {
     writeGraphPanelSide(panelSide);
@@ -120,9 +150,18 @@
     }
   }
 
-  // The capped link set fed to the engine + the focus computation below. Recomputes when
-  // the visible links change OR the "Max links per pair" control changes.
-  const displayLinks = $derived(capParallelLinks(graph.visibleLinks(), maxLinksPerPair));
+  // The display link set fed to the engine + the focus computation below. Collapses each entity
+  // pair's parallel edges past the "Visible edges" cap into one "N other relations" aggregate edge
+  // (kept edges chosen by "Keep which connections"). Recomputes when the visible links change OR
+  // either of those model settings changes.
+  const displayLinks = $derived(
+    collapseParallelLinks(
+      graph.visibleLinks(),
+      graph.visibleEdgesPerPair(),
+      graph.maxConnBy(),
+      VISIBLE_EDGES_CAP
+    )
+  );
 
   // ── Search highlight aliases ────────────────────────────────────────────────
   // Local mirrors of the model's search state so the $effects below can track them.
@@ -173,7 +212,11 @@
       linkDistance,
       curveAmount,
       centerStrength,
-      radialRing
+      radialRing,
+      hubSeparation,
+      hubSpacing,
+      nodeSizeMin,
+      nodeSizeMax
     });
     // Resolve the partition list + active group FIRST (default = first in list, or the
     // remembered one), so the initial paint scopes to a group that actually has data rather
@@ -236,18 +279,33 @@
     const centerStrengthValue = centerStrength; // tracked
     const radialRingValue = radialRing; // tracked
     const chargeStrengthValue = chargeStrength; // tracked
+    const hubSeparationValue = hubSeparation; // tracked
+    const hubSpacingValue = hubSpacing; // tracked
     engine?.setForces({
       linkStrength: linkStrengthValue,
       linkDistance: linkDistanceValue,
       centerStrength: centerStrengthValue,
       radialRing: radialRingValue,
-      chargeStrength: chargeStrengthValue
+      chargeStrength: chargeStrengthValue,
+      hubSeparation: hubSeparationValue,
+      hubSpacing: hubSpacingValue
     });
   });
 
   // "Edge curvature" slider → re-fan the current edges (no reheat; render-only property).
   $effect(() => {
     engine?.setCurveAmount(curveAmount); // tracked
+  });
+
+  // "Node size" range → degree-based node + font sizing (render-only repaint, no relayout).
+  $effect(() => {
+    engine?.setNodeSizing({ minSize: nodeSizeMin, maxSize: nodeSizeMax }); // tracked
+  });
+
+  // Denoise 'dim' set → engine render-dims low-connection nodes/edges. (hide/only are structural,
+  // handled via the render subset + filterToken above.) Empty set unless lowConnMode === 'dim'.
+  $effect(() => {
+    engine?.setDenoiseDim(graph.lowConnDimIds()); // tracked
   });
 
   // Label sizing (View → font controls) → engine repaints labels at the new zoom/size mapping.
@@ -283,28 +341,49 @@
   const selectedNodeId = $derived(
     graph.selected()?.kind === 'node' ? (graph.selected() as { id: string }).id : null
   );
+  const selectedEdgeId = $derived(
+    graph.selected()?.kind === 'edge' ? (graph.selected() as { id: string }).id : null
+  );
   const neighborFocus = $derived.by(() => {
-    if (searchActive || selectionFocusMode === 'all' || !selectedNodeId) {
-      return { active: false, mode: 'dim' as const, selectedId: '', nodeIds: new Set<string>(), edgeIds: new Set<string>() };
+    const inactive = {
+      active: false,
+      mode: 'dim' as const,
+      selectedId: '',
+      nodeIds: new Set<string>(),
+      edgeIds: new Set<string>()
+    };
+    if (searchActive || selectionFocusMode === 'all') return inactive;
+    const mode = selectionFocusMode === 'hide' ? ('hide' as const) : ('dim' as const);
+    // Node selected → its ego network (the node + every edge touching it + those edges' endpoints).
+    if (selectedNodeId) {
+      const nodeIds = new Set<string>([selectedNodeId]);
+      const edgeIds = new Set<string>();
+      for (const l of displayLinks) {
+        const a = String(linkEndId(l.source));
+        const b = String(linkEndId(l.target));
+        if (a === selectedNodeId || b === selectedNodeId) {
+          edgeIds.add(l.id);
+          nodeIds.add(a);
+          nodeIds.add(b);
+        }
+      }
+      return { active: true, mode, selectedId: selectedNodeId, nodeIds, edgeIds };
     }
-    const nodeIds = new Set<string>([selectedNodeId]);
-    const edgeIds = new Set<string>();
-    for (const l of displayLinks) {
+    // Edge (or aggregate) selected → focus the edge itself + its two endpoint nodes, dim the rest.
+    if (selectedEdgeId) {
+      const l = displayLinks.find((x) => x.id === selectedEdgeId);
+      if (!l) return inactive;
       const a = String(linkEndId(l.source));
       const b = String(linkEndId(l.target));
-      if (a === selectedNodeId || b === selectedNodeId) {
-        edgeIds.add(l.id);
-        nodeIds.add(a);
-        nodeIds.add(b);
-      }
+      return {
+        active: true,
+        mode,
+        selectedId: selectedEdgeId,
+        nodeIds: new Set<string>([a, b]),
+        edgeIds: new Set<string>([selectedEdgeId])
+      };
     }
-    return {
-      active: true,
-      mode: selectionFocusMode === 'hide' ? ('hide' as const) : ('dim' as const),
-      selectedId: selectedNodeId,
-      nodeIds,
-      edgeIds
-    };
+    return inactive;
   });
   $effect(() => {
     engine?.setNeighborFocus(neighborFocus); // tracked
@@ -324,8 +403,11 @@
       centerStrength,
       radialRing,
       curveAmount,
-      maxLinksPerPair,
       chargeStrength,
+      hubSeparation,
+      hubSpacing,
+      nodeSizeMin,
+      nodeSizeMax,
       searchFocusMode,
       selectionFocusMode,
       edgeZoomMin,
@@ -348,8 +430,11 @@
     centerStrength = GRAPH_OPTION_DEFAULTS.centerStrength;
     radialRing = GRAPH_OPTION_DEFAULTS.radialRing;
     curveAmount = GRAPH_OPTION_DEFAULTS.curveAmount;
-    maxLinksPerPair = GRAPH_OPTION_DEFAULTS.maxLinksPerPair;
     chargeStrength = GRAPH_OPTION_DEFAULTS.chargeStrength;
+    hubSeparation = GRAPH_OPTION_DEFAULTS.hubSeparation;
+    hubSpacing = GRAPH_OPTION_DEFAULTS.hubSpacing;
+    nodeSizeMin = GRAPH_OPTION_DEFAULTS.nodeSizeMin;
+    nodeSizeMax = GRAPH_OPTION_DEFAULTS.nodeSizeMax;
     searchFocusMode = GRAPH_OPTION_DEFAULTS.searchFocusMode;
     selectionFocusMode = GRAPH_OPTION_DEFAULTS.selectionFocusMode;
     edgeZoomMin = GRAPH_OPTION_DEFAULTS.edgeZoomMin;
@@ -407,6 +492,23 @@
 
   const node = $derived(graph.selectedNode());
   const edge = $derived(graph.selectedEdge());
+  // A selected "N other relations" aggregate edge is synthetic (not a real GraphEdgeDTO), so
+  // selectedEdge() returns null for it. Resolve it from displayLinks (where collapse runs) and
+  // hand the detail panel its folded edge ids so it can show all the relations behind it.
+  const selectedAggregate = $derived.by(() => {
+    const sel = graph.selected();
+    if (sel?.kind !== 'edge' || node || edge) return null;
+    const agg = displayLinks.find((l) => 'aggregate' in l && l.aggregate && l.id === sel.id);
+    return agg && 'collapsedIds' in agg
+      ? {
+          id: agg.id,
+          source: String(linkEndId(agg.source)),
+          target: String(linkEndId(agg.target)),
+          collapsedIds: agg.collapsedIds,
+          whole: agg.whole
+        }
+      : null;
+  });
 </script>
 
 <svelte:window onresize={resize} onkeydown={onKeydown} />
@@ -529,8 +631,11 @@
             bind:centerStrength
             bind:radialRing
             bind:curveAmount
-            bind:maxLinksPerPair
             bind:chargeStrength
+            bind:hubSeparation
+            bind:hubSpacing
+            bind:nodeSizeMin
+            bind:nodeSizeMax
             bind:searchFocusMode
             bind:selectionFocusMode
             bind:edgeZoomMin
@@ -545,9 +650,14 @@
             centerStrengthMax={CENTER_STRENGTH_MAX}
             radialRingMin={RADIAL_RING_MIN}
             radialRingMax={RADIAL_RING_MAX}
-            maxLinksCap={MAX_LINKS_CAP}
             chargeMin={CHARGE_STRENGTH_MIN}
             chargeMax={CHARGE_STRENGTH_MAX}
+            hubSeparationMin={HUB_SEPARATION_MIN}
+            hubSeparationMax={HUB_SEPARATION_MAX}
+            hubSpacingMin={HUB_SPACING_MIN}
+            hubSpacingMax={HUB_SPACING_MAX}
+            nodeSizeBoundMin={NODE_SIZE_BOUND_MIN}
+            nodeSizeBoundMax={NODE_SIZE_BOUND_MAX}
             zoomBoundMin={LABEL_ZOOM_BOUND_MIN}
             zoomBoundMax={LABEL_ZOOM_BOUND_MAX}
             fontBoundMin={LABEL_FONT_BOUND_MIN}
@@ -623,6 +733,15 @@
     {/if}
 
     <!-- Selection / provenance detail panel (docks left or right; flip button in its header). -->
-    <KnowledgeGraphDetailPanel {node} {edge} {graph} side={detailSide} onFlipSide={flipPanelSide} />
+    <KnowledgeGraphDetailPanel
+      {node}
+      {edge}
+      aggregateEdge={selectedAggregate}
+      {graph}
+      side={detailSide}
+      onFlipSide={flipPanelSide}
+      onNavigate={navigateToSelection}
+      onPreview={previewConnection}
+    />
   </div>
 </div>

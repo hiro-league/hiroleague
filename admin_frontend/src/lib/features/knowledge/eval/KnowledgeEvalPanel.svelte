@@ -13,6 +13,8 @@
 -->
 <script lang="ts">
   import { onMount, type Component, type Snippet } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { seedGraphEpisodeFocus } from '$lib/features/knowledge/graph/knowledge-graph-prefs';
   import { base } from '$app/paths';
   import {
     Check,
@@ -472,15 +474,9 @@
     corpusSummary ? `${corpusSummary} · ${ingestedLabel}` : ingestedLabel
   );
 
-  // Episode search lives on the Corpus stats line (panel-owned, bound into EvalCorpusReview).
+  // Episode search — owned by the panel, bound into EvalCorpusReview (which renders the input on
+  // its sticky toolbar and shows its own match count).
   let corpusSearch = $state('');
-  const corpusMatchCount = $derived.by(() => {
-    const t = corpusSearch.trim().toLowerCase();
-    if (!t) return eval_.corpusEpisodes.length;
-    return eval_.corpusEpisodes.filter((ep) =>
-      `${ep.body} ${ep.speaker} ${ep.id}`.toLowerCase().includes(t)
-    ).length;
-  });
 
   // The live activity feed lines (built once here, shared with the terminal and the
   // collapsed Activity header). `currentActivityLine` is the latest line — shown in
@@ -578,6 +574,25 @@
   const ingestModels = $derived(modelLines.filter((m) => m.group === 'ingest'));
   const recallModels = $derived(modelLines.filter((m) => m.group === 'recall'));
 
+  // Answer-prompt picker options (memory track). The locked "default" profile is exposed as value
+  // '' so an unset run maps to it; the others by id. Authored in Preferences → Graph Engine.
+  const answerPromptOptions = $derived.by<{ id: string; label: string }[]>(() => {
+    const lib = prefs?.graph.eval.answer_prompts ?? {};
+    const def = lib['default'];
+    const out = [{ id: '', label: def ? def.label : 'Default' }];
+    for (const [id, p] of Object.entries(lib)) {
+      if (id === 'default') continue;
+      out.push({ id, label: p.label });
+    }
+    return out;
+  });
+  // The selected profile's label — the run's answer-prompt provenance, shown in the settings strip.
+  const answerPromptLabel = $derived(
+    answerPromptOptions.find((o) => o.id === eval_.answerPromptId)?.label ??
+      answerPromptOptions[0]?.label ??
+      'Default'
+  );
+
   // Non-model ingestion knobs. Extraction ontology (open vs typed) governs what the graph build
   // extracts, so it applies to BOTH tracks; knowledge chunking knobs are knowledge-only. Shown in
   // the read-only Ingestion settings column — the Ingest button always describes what it will do.
@@ -614,6 +629,8 @@
     }
     if (isMemory) {
       out.push({ label: 'Recall top-k', value: String(prefs.memory.search.top_k) });
+      // Provenance: which answer-prompt profile this run will use (label-tags the run).
+      out.push({ label: 'Answer prompt', value: answerPromptLabel });
     } else {
       const r = prefs.knowledge.retrieval;
       out.push({ label: 'Retrieval top-k', value: String(r.top_k) });
@@ -1138,6 +1155,47 @@
     }
   }
 
+  /** Open the ingest-pipeline dialog for ONE corpus episode (from the Corpus tab's "pipeline"
+   *  button). Loads that episode's remember run, then positions the dialog on the matching episode
+   *  (by chunk_id, falling back to step_index) so it opens straight to that turn's pipeline —
+   *  prev/next still walks the whole run, same as the run-level "Ingest pipeline" button. */
+  async function openIngestTraceForEpisode(info: {
+    id: string;
+    runId: string;
+    stepIndex: number | '';
+  }) {
+    ingestTraceError = null;
+    ingestTraceLoading = true;
+    try {
+      const res = await getGraphRunIngestTrace(info.runId);
+      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      if (traces.length === 0) {
+        ingestTraceError = 'No ingest trace recorded for this episode (graph tracing may have been off).';
+        return;
+      }
+      let idx = traces.findIndex((t) => t.chunk_id === info.id);
+      if (idx < 0 && info.stepIndex !== '') idx = traces.findIndex((t) => t.step_index === info.stepIndex);
+      ingestTraces = traces;
+      ingestTraceIndex = idx >= 0 ? idx : 0;
+      activeIngestTrace = traces[ingestTraceIndex];
+    } catch (err) {
+      ingestTraceError = err instanceof Error ? err.message : 'Failed to load ingest trace.';
+    } finally {
+      ingestTraceLoading = false;
+    }
+  }
+
+  /** Open the Knowledge Graph view (Memories page, Graph tab) focused on ONE corpus episode:
+   *  seed the active group + that episode's chunk_id into the graph's session state, then navigate.
+   *  The graph panel restores both on mount, landing pre-filtered to this episode's entities/facts.
+   *  No-op if the corpus's eval group isn't known yet (extraction not loaded / untraced corpus). */
+  function openGraphForEpisode(info: { id: string }) {
+    const group = eval_.corpusExtractionGroup;
+    if (!group) return;
+    seedGraphEpisodeFocus(group, info.id);
+    void goto('/memories?tab=graph');
+  }
+
   /** Step the open ingest-trace dialog to the prev/next episode of the run (arrow-nav). */
   function stepIngestTrace(delta: number) {
     const j = ingestTraceIndex + delta;
@@ -1429,12 +1487,9 @@
       {:else if eval_.corpusEpisodes.length === 0 && !eval_.corpusLoading}
         <p class="text-xs text-muted-foreground">No episodes loaded.</p>
       {:else}
-        <!-- Single stats + search line — sticky directly under the corpus sub-tab so the corpus
-             facts + episode search stay in view while scrolling the (full-page) transcript. -->
-        <div
-          class="sticky z-10 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border bg-background px-3 py-2 font-sans text-xs backdrop-blur supports-[backdrop-filter]:bg-background/90"
-          style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px));"
-        >
+        <!-- Corpus stats line — scrolls away normally (the search + filters live on the sticky
+             toolbar rendered by EvalCorpusReview below). -->
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
           <span class="text-muted-foreground">
             Episodes: <span class="font-mono text-foreground">{eval_.corpusMeta?.episode_count ?? 0}</span>
           </span>
@@ -1450,38 +1505,19 @@
           {#if eval_.corpusLoading}
             <LoaderCircle size={14} class="animate-spin text-muted-foreground" aria-hidden="true" />
           {/if}
-          <div class="ml-auto flex items-center gap-2">
-            <!-- Search with an inline clear (×) inside the box. -->
-            <div class="relative">
-              <input
-                class="h-7 w-56 rounded-md border bg-background pl-2 pr-7 font-sans text-xs"
-                placeholder="Search episodes…"
-                bind:value={corpusSearch}
-              />
-              {#if corpusSearch.trim()}
-                <button
-                  type="button"
-                  class="absolute inset-y-0 right-1.5 my-auto flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                  onclick={() => (corpusSearch = '')}
-                  title="Clear search"
-                  aria-label="Clear search"
-                >
-                  <X size={12} aria-hidden="true" />
-                </button>
-              {/if}
-            </div>
-            <!-- Fixed-width match readout so the search box doesn't shift when it appears. -->
-            <span class="w-24 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
-              {#if corpusSearch.trim()}{corpusMatchCount}/{eval_.corpusEpisodes.length}{/if}
-            </span>
-          </div>
         </div>
-        <!-- Episode transcript — grows with the page (no inner scroll); search owned above. -->
+        <!-- Episode transcript — grows with the page (no inner scroll). EvalCorpusReview renders the
+             sticky search + filters toolbar (stickyTop), the per-episode extracted/not badge, and the
+             graph + pipeline buttons. -->
         <EvalCorpusReview
           episodes={eval_.corpusEpisodes}
           bind:search={corpusSearch}
           showSearch={false}
           scroll={false}
+          extraction={eval_.corpusExtraction}
+          onOpenPipeline={openIngestTraceForEpisode}
+          onOpenGraph={openGraphForEpisode}
+          stickyTop="calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px))"
         />
       {/if}
   {/if}
@@ -2241,6 +2277,26 @@
         oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
         disabled={isBusy || eval_.selectedCount === 0}
       />
+    </div>
+  {/if}
+  <!-- Memory track — which named answer-prompt profile the recall leg's answer step uses. Authored
+       in Preferences → Graph Engine; sticky per corpus (last-used). '' ⇒ the locked default. -->
+  {#if isMemory}
+    <div
+      class="flex items-center gap-1.5 font-sans text-sm {isBusy ? 'opacity-50' : ''}"
+      title="Named answer-prompt profile driving the answer step (edit profiles in Preferences → Graph Engine). Remembered per corpus."
+    >
+      <span class="text-muted-foreground">Answer prompt</span>
+      <select
+        class="h-8 rounded-md border bg-background px-2 text-sm"
+        value={eval_.answerPromptId}
+        onchange={(e) => (eval_.answerPromptId = e.currentTarget.value)}
+        disabled={isBusy}
+      >
+        {#each answerPromptOptions as opt (opt.id)}
+          <option value={opt.id}>{opt.label}</option>
+        {/each}
+      </select>
     </div>
   {/if}
 {/snippet}

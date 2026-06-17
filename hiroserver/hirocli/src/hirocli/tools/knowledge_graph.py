@@ -34,6 +34,7 @@ from ..services.knowledge.graph import (
 from ..services.knowledge.graph.graphiti_ingest import GraphEventSink
 from ..services.knowledge.graph.graphiti_serialize import build_graph_dtos
 from ..services.knowledge.graph.graphiti_service import (
+    read_graph_episodes,
     read_graph_group_ids,
     read_graph_snapshot,
 )
@@ -106,14 +107,16 @@ async def graph_snapshot_payload(
     """
     node_limit = node_limit or _DEFAULT_NODE_LIMIT
     edge_limit = edge_limit or _DEFAULT_EDGE_LIMIT
-    nodes, edges, chunk_to_document = await read_graph_snapshot(
+    nodes, edges, chunk_to_document, episode_mentions = await read_graph_snapshot(
         graphiti_db_path(workspace_path),
         node_limit=node_limit,
         edge_limit=edge_limit,
         group_ids=group_ids,
     )
     truncated = len(nodes) >= node_limit or len(edges) >= edge_limit
-    dtos = build_graph_dtos(nodes, edges, chunk_to_document=chunk_to_document)
+    dtos = build_graph_dtos(
+        nodes, edges, chunk_to_document=chunk_to_document, episode_mentions=episode_mentions
+    )
     return {
         "nodes": dtos["nodes"],
         "edges": dtos["edges"],
@@ -145,6 +148,22 @@ async def graph_groups_payload(workspace_path: Path) -> dict[str, Any]:
     kind_rank = {"knowledge": 0, "memory": 1, "eval": 2, "other": 3}
     labeled.sort(key=lambda g: (kind_rank.get(g["kind"], 9), g["label"].lower()))
     return {"default_group_id": default_gid, "groups": labeled}
+
+
+async def graph_episodes_payload(
+    workspace_path: Path, group_id: str, *, limit: int = 2000
+) -> dict[str, Any]:
+    """List a graph partition's episodes for the admin Graph tab's episode filter.
+
+    Returns ``{"episodes": [{id, snippet, valid_at, document_id}]}`` ordered by chunk_id
+    (== corpus episode order). Each ``id`` is a chunk_id the client matches against node/edge
+    ``chunk_ids`` to filter the graph to those episodes. Empty when the group has no episodes
+    / no graph built yet.
+    """
+    episodes = await read_graph_episodes(
+        graphiti_db_path(workspace_path), group_id, limit=limit
+    )
+    return {"episodes": episodes}
 
 
 async def _gather_episodes(

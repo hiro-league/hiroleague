@@ -768,12 +768,50 @@ Reply with one JSON object containing exactly these fields, in this order:
 # is saved as "" the pydantic default never re-applies (defaults only fill ABSENT JSON keys), so the
 # engine silently falls back at runtime while the admin UI shows blank with no way to recover the
 # default text. Keep in sync with the prompt fields on the models below (guarded by a domain test).
+# Note: the mem-eval answer prompt is NOT here anymore — it became a named library
+# (``graph.eval.answer_prompts``), so its built-in default text is carried by the locked
+# ``default`` profile (see ``default_answer_prompts``), which doubles as the UI's "Restore default"
+# source. Pruning by flat path no longer applies to it (a dict is always materialized, like
+# ``tuning_profiles`` / ``image_profiles``).
 PROMPT_DEFAULTS: dict[str, str] = {
     "knowledge.answering.prompt": DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
     "knowledge.rewrite.prompt": DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
-    "graph.eval.memory_answer_prompt": DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
     "graph.eval.judge_prompt": DEFAULT_MEMORY_EVAL_JUDGE_PROMPT,
 }
+
+
+class AnswerPromptProfile(BaseModel):
+    """A named mem-eval answer-prompt recipe — the answer analog of ``ImageProfile`` / tuning
+    profiles. A run picks which profile's instruction block the memory-eval recall leg uses
+    (``eval_judge.answer_from_context`` places it in the user message ahead of the question +
+    recalled elements). Memory-track only — the knowledge track answers with the production
+    pipeline, so it has no answer-prompt library.
+
+    No structured-output contract applies (unlike the judge): the answer step is plain free-text
+    generation. The one soft convention — the decline phrase "No information available." — stays
+    EMBEDDED in each profile body (the abstain label detector + the judge key on it); an author
+    editing a duplicated profile is responsible for keeping it. Blank ``prompt`` ⇒ the runtime
+    falls back to ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT`` (see ``resolve_answer_prompt``)."""
+
+    label: str = Field(default="", min_length=1)
+    locked: bool = False
+    prompt: str = ""
+
+
+# Built-in answer-prompt id, always present (``default_answer_prompts`` + the frontend normalizer
+# seed it). It is locked and carries the full default text, so it doubles as the "Restore default"
+# source for the admin UI (the answer prompt no longer has a ``PROMPT_DEFAULTS`` entry).
+DEFAULT_ANSWER_PROMPT_ID = "default"
+
+
+def default_answer_prompts() -> dict[str, AnswerPromptProfile]:
+    return {
+        DEFAULT_ANSWER_PROMPT_ID: AnswerPromptProfile(
+            label="Default (grounded)",
+            locked=True,
+            prompt=DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
+        ),
+    }
 
 
 class GraphViewPreferences(BaseModel):
@@ -793,11 +831,12 @@ class GraphViewPreferences(BaseModel):
 class GraphEvalPreferences(BaseModel):
     """Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
 
-    ``memory_answer_prompt`` is the answering INSTRUCTION block for the memory-eval recall leg
-    (``eval_judge.answer_from_context`` places it in the user message ahead of the question and
-    the recalled elements; the system prompt there is a hardcoded two-line role).
-    The knowledge-eval legs intentionally have no separate
-    prompt here: they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
+    ``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval
+    recall leg (``eval_judge.answer_from_context`` places the chosen one in the user message ahead
+    of the question and the recalled elements; the system prompt there is a hardcoded two-line
+    role). A run selects one by id in the eval panel — see ``resolve_answer_prompt``.
+    The knowledge-eval legs intentionally have no answer-prompt library:
+    they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
     ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
     behavior). The admin UI surfaces that production prompt alongside this one for convenience.
 
@@ -805,7 +844,11 @@ class GraphEvalPreferences(BaseModel):
     shared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.
     """
 
-    memory_answer_prompt: str = DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+    # Named library of mem-eval answer-prompt recipes (replaces the former single
+    # ``memory_answer_prompt`` scalar — no-backward-compat, no migration). A run picks one by id
+    # in the eval panel; ``resolve_answer_prompt`` maps id → instruction text with a default
+    # fallback. The ``default`` profile is locked and carries the built-in default text.
+    answer_prompts: dict[str, AnswerPromptProfile] = Field(default_factory=default_answer_prompts)
     judge_prompt: str = DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
     # Answer + judge each get their OWN model + tuning profile (split from the single shared
     # answering model the eval used before). ``*_model`` of ``None`` falls back through
@@ -826,6 +869,19 @@ class GraphEvalPreferences(BaseModel):
     show_event_time: bool = True
     show_expired_at: bool = False
     show_superseded: bool = False
+
+    def resolve_answer_prompt(self, profile_id: str | None) -> tuple[str, str]:
+        """Resolve a mem-eval answer-prompt profile id → ``(label, instruction_text)``.
+
+        Falls back to the locked ``default`` profile when the id is unknown/blank, then to the
+        built-in constant when even that is missing or its text is blank. The runner uses this to
+        turn the run's ``answer_prompt_id`` into the instruction block + a provenance label."""
+        pid = (profile_id or "").strip()
+        profile = self.answer_prompts.get(pid) or self.answer_prompts.get(DEFAULT_ANSWER_PROMPT_ID)
+        if profile is None:
+            return (DEFAULT_ANSWER_PROMPT_ID, DEFAULT_MEMORY_EVAL_ANSWER_PROMPT)
+        text = (profile.prompt or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+        return (profile.label or pid or DEFAULT_ANSWER_PROMPT_ID, text)
 
 
 class GraphPreferences(BaseModel):

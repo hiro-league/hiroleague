@@ -212,6 +212,10 @@ class EvalRunBody(BaseModel):
     # Optional LLM judge step: grade the model's answer against the ideal answer. When off, the
     # eval generates answers but assigns no marks (and no PROCEED/PIVOT gate).
     judge: bool = False
+    # Memory track — which named answer-prompt profile (graph.eval.answer_prompts) drives the
+    # recall leg's answer step. "" = the locked default profile. Ignored on the knowledge track
+    # (it answers with the production pipeline, not a mem-eval answer prompt).
+    answer_prompt_id: str = ""
     # Memory track — max questions running their recall→answer→judge legs at once (1 = serial).
     # Clamped server-side to [1, MAX_QUESTION_CONCURRENCY] rather than 422-ing an out-of-range
     # value. Ignored on the knowledge track (its leg loop is still serial — named follow-up).
@@ -884,6 +888,55 @@ async def graph_groups(
         return envelope_failure(str(exc))
 
 
+class GraphEpisodesBody(BaseModel):
+    """Graph viz — list a partition's episodes for the Graph tab's episode multi-select."""
+
+    group_id: str | None = None
+    limit: int = 2000
+
+
+@knowledge_router.post("/knowledge/graph/episodes")
+async def graph_episodes(
+    body: GraphEpisodesBody,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """List a graph partition's episodes (id + snippet + valid_at) for the Graph tab's
+    episode multi-select filter. Each id is a chunk_id, so the client filters the graph to
+    an episode's entities/facts by matching node/edge ``chunk_ids``. Ordered by id (corpus
+    episode order). Read-only; empty when the group has no episodes. Defaults to the
+    knowledge group when none given."""
+    from hirocli.services.knowledge.graph.group_scope import (
+        KNOWLEDGE_GROUP_ID,
+        GroupPolicyError,
+        validate_group_id,
+    )
+    from hirocli.tools.knowledge_graph import graph_episodes_payload
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path).resolve()
+        # Same API-boundary scope guard as graph_export: never trust a raw client group_id.
+        group_id = (body.group_id or "").strip() or KNOWLEDGE_GROUP_ID
+        try:
+            validated = validate_group_id(group_id)
+        except GroupPolicyError as exc:
+            return envelope_failure(f"Invalid graph group: {exc}")
+        limit = max(1, min(int(body.limit or 2000), 5000))
+        payload = await graph_episodes_payload(workspace_path, validated, limit=limit)
+        return _success(payload)
+    except Exception as exc:
+        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+
+        if is_kuzu_lock_error(exc):
+            log.warning("⚠️ knowledge graph episodes — graph DB busy (external lock held)")
+            return envelope_failure(
+                "Graph database is busy (a build may be running in another process) — "
+                "try again shortly."
+            )
+        log.error("knowledge graph episodes failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
 class GraphRemoveDocumentBody(BaseModel):
     """Per-document graph delete — drops one document's episodes/entities/facts."""
 
@@ -1133,6 +1186,7 @@ async def eval_run(
                             episode_offset=body.episode_offset,
                             episode_limit=body.episode_limit,
                             judge=body.judge,
+                            answer_prompt_id=body.answer_prompt_id or None,
                             question_concurrency=concurrency,
                         )
                     finally:
@@ -1706,6 +1760,40 @@ async def eval_corpus(path: str = "") -> dict[str, Any]:
         )
     except Exception as exc:
         log.error("knowledge eval corpus load failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/eval/corpus-extraction")
+async def eval_corpus_extraction(
+    workspace_id: SelectedWorkspaceIdDep,
+    corpus_id: str = "",
+) -> dict[str, Any]:
+    """Per-episode at-ingest extraction summary for a memory corpus, for the Corpus-review tab.
+
+    Returns ``{episodes: {<episode_id>: {entity_count, fact_count, run_id, step_index}}}`` built
+    from the corpus's ingest-trace sidecars in the SELECTED workspace (where the eval ran). Lets the
+    tab show whether each turn extracted anything and link straight to its ingest-pipeline trace.
+    Empty ``{}`` when the corpus was ingested with graph tracing off (``observability != "trace"``)
+    or hasn't been remembered yet — the tab then just omits the per-episode counts/button."""
+    from hirocli.services.knowledge.graph.group_scope import eval_memory_group_id
+    from hirocli.services.knowledge.graph.ingest_trace import read_group_ingest_extraction
+
+    try:
+        cid = corpus_id.strip()
+        if not cid:
+            return envelope_failure("corpus_id is required")
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path).resolve()
+        group_id = eval_memory_group_id(cid)
+        # Sidecar scan is plain file IO (no Kuzu lock) — keep it off the event loop.
+        episodes = await run_in_threadpool(
+            read_group_ingest_extraction, workspace_path, group_id
+        )
+        # group_id is returned so the Corpus tab can deep-link an episode into the graph view
+        # (which filters by group + chunk_id) without re-deriving the eval-group naming client-side.
+        return _success({"episodes": episodes, "group_id": group_id})
+    except Exception as exc:
+        log.error("knowledge eval corpus extraction failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 

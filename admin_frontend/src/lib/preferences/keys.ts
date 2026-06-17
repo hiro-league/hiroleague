@@ -63,6 +63,8 @@ export const PREF_KEYS = {
   knowledgeEvalCorpus: 'hiro.admin.knowledge.evalCorpus',
   /** Eval: run the optional LLM judge (grade answers vs ideal). */
   knowledgeEvalJudge: 'hiro.admin.knowledge.evalJudge',
+  /** Eval (memory track): last-used answer-prompt profile id, per corpus (JSON map { corpusId }). */
+  knowledgeEvalAnswerPrompt: 'hiro.admin.knowledge.evalAnswerPrompt',
   /** Eval (memory track): max questions evaluated concurrently (1 = serial). */
   knowledgeEvalQuestionConcurrency: 'hiro.admin.knowledge.evalQuestionConcurrency',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
@@ -76,10 +78,16 @@ export const PREF_KEYS = {
   knowledgeGraphEdgeFilters: 'hiro.admin.knowledge.graphEdgeFilters',
   /** Graph tab: last-viewed partition group_id — sessionStorage; restored on next open. */
   knowledgeGraphActiveGroup: 'hiro.admin.knowledge.graphActiveGroup',
+  /** Graph tab: selected episode-filter ids, per partition — sessionStorage (survives refresh).
+   *  Stored as a JSON map of group_id → chunk_id[] so each partition keeps its own selection. */
+  knowledgeGraphEpisodeSel: 'hiro.admin.knowledge.graphEpisodeSel',
   /** Graph tab: which side the selection/detail aside docks on — 'auto' | 'left' | 'right'.
    *  'auto' (default) follows the chat overlay: left while chat is open (so it isn't
    *  covered), right otherwise. Left/right pin it explicitly. localStorage. */
-  knowledgeGraphPanelSide: 'hiro.admin.knowledge.graphPanelSide'
+  knowledgeGraphPanelSide: 'hiro.admin.knowledge.graphPanelSide',
+  /** Graph tab: collapsed/expanded state of the Graph-options sections (Filters/View/Physics) —
+   *  JSON blob, localStorage, so the panel reopens with the same sections folded. */
+  knowledgeGraphOptionSections: 'hiro.admin.knowledge.graphOptionSections'
 } as const;
 
 export type ThemePreference = 'light' | 'dark';

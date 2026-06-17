@@ -9,14 +9,23 @@
    */
   import { ChevronDown, RotateCcw, X } from '@lucide/svelte';
   import { cn } from '$lib/utils';
-  import { GRAPH_OPTION_DEFAULTS as D, type SearchFocusMode, type SelectionFocusMode } from './knowledge-graph-prefs';
+  import {
+    GRAPH_OPTION_DEFAULTS as D,
+    readGraphOptionSections,
+    writeGraphOptionSections,
+    type SearchFocusMode,
+    type SelectionFocusMode
+  } from './knowledge-graph-prefs';
   import GraphRangeSlider from './GraphRangeSlider.svelte';
   import {
+    LOW_CONN_THRESHOLD_MIN,
     MAX_CONN_PER_NODE_CAP,
+    VISIBLE_EDGES_CAP,
+    VISIBLE_EDGES_MIN,
     type EdgeValidity,
     type KnowledgeGraphModel,
-    type MaxConnBy,
-    type OrphanMode
+    type LowConnTreatment,
+    type MaxConnBy
   } from '../state/knowledge-graph.svelte';
 
   let {
@@ -26,8 +35,11 @@
     centerStrength = $bindable(),
     radialRing = $bindable(),
     curveAmount = $bindable(),
-    maxLinksPerPair = $bindable(),
     chargeStrength = $bindable(),
+    hubSeparation = $bindable(),
+    hubSpacing = $bindable(),
+    nodeSizeMin = $bindable(),
+    nodeSizeMax = $bindable(),
     searchFocusMode = $bindable(),
     selectionFocusMode = $bindable(),
     edgeZoomMin = $bindable(),
@@ -42,9 +54,14 @@
     centerStrengthMax,
     radialRingMin,
     radialRingMax,
-    maxLinksCap,
     chargeMin,
     chargeMax,
+    hubSeparationMin,
+    hubSeparationMax,
+    hubSpacingMin,
+    hubSpacingMax,
+    nodeSizeBoundMin,
+    nodeSizeBoundMax,
     zoomBoundMin,
     zoomBoundMax,
     fontBoundMin,
@@ -60,8 +77,11 @@
     centerStrength: number;
     radialRing: number;
     curveAmount: number;
-    maxLinksPerPair: number;
     chargeStrength: number;
+    hubSeparation: number;
+    hubSpacing: number;
+    nodeSizeMin: number;
+    nodeSizeMax: number;
     searchFocusMode: SearchFocusMode;
     selectionFocusMode: SelectionFocusMode;
     edgeZoomMin: number;
@@ -76,9 +96,14 @@
     centerStrengthMax: number;
     radialRingMin: number;
     radialRingMax: number;
-    maxLinksCap: number;
     chargeMin: number;
     chargeMax: number;
+    hubSeparationMin: number;
+    hubSeparationMax: number;
+    hubSpacingMin: number;
+    hubSpacingMax: number;
+    nodeSizeBoundMin: number;
+    nodeSizeBoundMax: number;
     zoomBoundMin: number;
     zoomBoundMax: number;
     fontBoundMin: number;
@@ -89,9 +114,15 @@
     onClose: () => void;
   } = $props();
 
-  let filtersOpen = $state(true);
-  let viewOpen = $state(true);
-  let physicsOpen = $state(true);
+  // Section collapse state, seeded from localStorage (the panel unmounts when closed, so without
+  // persistence each section reset to expanded on every reopen). Persisted by the $effect below.
+  const savedSections = readGraphOptionSections();
+  let filtersOpen = $state(savedSections.filters);
+  let viewOpen = $state(savedSections.view);
+  let physicsOpen = $state(savedSections.physics);
+  $effect(() => {
+    writeGraphOptionSections({ filters: filtersOpen, view: viewOpen, physics: physicsOpen });
+  });
 
   const FOCUS_MODES: { value: SearchFocusMode; label: string; title: string }[] = [
     { value: 'highlight', label: 'Ring', title: 'Ring matches only; leave the rest unchanged' },
@@ -108,10 +139,9 @@
     { value: 'valid', label: 'Valid', title: 'Only current facts (not invalidated or expired)' },
     { value: 'invalid', label: 'Invalid', title: 'Only superseded facts (invalid_at or expired_at set)' }
   ];
-  const ORPHAN_MODES: { value: OrphanMode; label: string; title: string }[] = [
-    { value: 'all', label: 'All', title: 'Show every node' },
-    { value: 'hide', label: 'Hide', title: 'Hide nodes with no visible connections' },
-    { value: 'only', label: 'Only', title: 'Show only nodes with no visible connections' }
+  const LOW_CONN_TREATMENTS: { value: LowConnTreatment; label: string; title: string }[] = [
+    { value: 'dim', label: 'Dim', title: 'Fade sparse nodes (layout unchanged)' },
+    { value: 'hide', label: 'Hide', title: 'Remove sparse nodes from the graph' }
   ];
   const MAX_BY_MODES: { value: MaxConnBy; label: string; title: string }[] = [
     { value: 'newest', label: 'Newest', title: 'Keep the most recent edges (by valid date)' },
@@ -138,6 +168,7 @@
     new Date(v).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const r1 = (v: number): number => Math.round(v * 10) / 10;
   const maxConnUnlimited = $derived(graph.maxConnPerNode() >= MAX_CONN_PER_NODE_CAP);
+  const visibleEdgesUnlimited = $derived(graph.visibleEdgesPerPair() >= VISIBLE_EDGES_CAP);
 </script>
 
 {#snippet resetDot(dirty: boolean, reset: () => void)}
@@ -186,13 +217,32 @@
             </div>
           </div>
 
+          <!-- Denoise sparse nodes: dim/hide nodes with fewer than N visible connections (0 = off).
+               A numeric field, NOT a slider — node degree ranges into the hundreds, far too many slider
+               steps to control. The Dim/Hide toggle picks the treatment. Dim is render-only; Hide relayouts. -->
           <div>
-            <div class="mb-1 flex items-center text-xs"><span class="flex items-center font-medium">Orphan nodes{@render resetDot(graph.orphanMode() !== 'all', () => graph.setOrphanMode('all'))}</span></div>
-            <div class="grid grid-cols-3 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Filter nodes with no visible connections">
-              {#each ORPHAN_MODES as mode (mode.value)}
-                {@const active = graph.orphanMode() === mode.value}
-                <button type="button" onclick={() => graph.setOrphanMode(mode.value)} class={cn('rounded px-1.5 py-1 text-xs font-medium transition-colors', active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={active} title={mode.title}>{mode.label}</button>
-              {/each}
+            <div class="mb-1 flex items-center justify-between text-xs">
+              <span class="flex items-center font-medium">Denoise sparse nodes{@render resetDot(graph.lowConnThreshold() > 0, () => graph.setLowConnThreshold(0))}</span>
+              <div class="grid grid-cols-2 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="How to treat sparse nodes">
+                {#each LOW_CONN_TREATMENTS as t (t.value)}
+                  {@const active = graph.lowConnTreatment() === t.value}
+                  <button type="button" onclick={() => graph.setLowConnTreatment(t.value)} class={cn('rounded px-2 py-0.5 text-xs font-medium transition-colors', active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={active} title={t.title}>{t.label}</button>
+                {/each}
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 text-xs">
+              <span class="text-muted-foreground">Fewer than</span>
+              <input
+                type="number"
+                min={LOW_CONN_THRESHOLD_MIN}
+                max={Math.max(1, graph.maxVisibleDegree())}
+                step="1"
+                value={graph.lowConnThreshold()}
+                oninput={(e) => graph.setLowConnThreshold(e.currentTarget.valueAsNumber || 0)}
+                class="h-7 w-14 rounded-md border border-input bg-background px-2 text-xs tabular-nums outline-hidden focus:border-primary"
+                aria-label="Connection count below which a node is dimmed or hidden (0 = off)"
+              />
+              <span class="text-muted-foreground">conn{graph.lowConnThreshold() > 0 ? ` · ${graph.lowConnCount()} nodes` : ' (0 = off)'}</span>
             </div>
           </div>
 
@@ -225,22 +275,26 @@
             <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>1</span><span>all</span></div>
           </label>
 
-          {#if !maxConnUnlimited}
-            <div>
-              <div class="mb-1 flex items-center text-xs"><span class="flex items-center font-medium">Keep which connections{@render resetDot(graph.maxConnBy() !== 'newest', () => graph.setMaxConnBy('newest'))}</span></div>
-              <div class="grid grid-cols-2 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Which connections to keep when capping">
-                {#each MAX_BY_MODES as mode (mode.value)}
-                  {@const active = graph.maxConnBy() === mode.value}
-                  <button type="button" onclick={() => graph.setMaxConnBy(mode.value)} class={cn('rounded px-1.5 py-1 text-xs font-medium transition-colors', active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={active} title={mode.title}>{mode.label}</button>
-                {/each}
-              </div>
+          <!-- "Keep which connections" governs BOTH caps below — which edges survive the per-node
+               cap AND which stay visible vs. fold into the "N other relations" aggregate per pair.
+               Shown always (no longer gated on the per-node cap being active). -->
+          <div>
+            <div class="mb-1 flex items-center text-xs"><span class="flex items-center font-medium">Keep which connections{@render resetDot(graph.maxConnBy() !== 'newest', () => graph.setMaxConnBy('newest'))}</span></div>
+            <div class="grid grid-cols-2 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Which connections to keep when capping">
+              {#each MAX_BY_MODES as mode (mode.value)}
+                {@const active = graph.maxConnBy() === mode.value}
+                <button type="button" onclick={() => graph.setMaxConnBy(mode.value)} class={cn('rounded px-1.5 py-1 text-xs font-medium transition-colors', active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={active} title={mode.title}>{mode.label}</button>
+              {/each}
             </div>
-          {/if}
+          </div>
 
+          <!-- Visible edges per entity pair. Below the chosen value a pair shows every edge; above
+               it, the extras fold into one "N other relations" aggregate edge (kept edges chosen by
+               "Keep which connections"). Max (VISIBLE_EDGES_CAP) === "All" (no aggregation). -->
           <label class="block">
-            <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Max links per pair{@render resetDot(maxLinksPerPair !== D.maxLinksPerPair, () => (maxLinksPerPair = D.maxLinksPerPair))}</span><span class="tabular-nums text-muted-foreground">{maxLinksPerPair >= maxLinksCap ? 'All' : maxLinksPerPair}</span></div>
-            <input type="range" min="1" max={maxLinksCap} step="1" bind:value={maxLinksPerPair} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Maximum number of edges shown between any two nodes" />
-            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>1</span><span>all</span></div>
+            <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Max visible edges between nodes{@render resetDot(!visibleEdgesUnlimited, () => graph.setVisibleEdgesPerPair(VISIBLE_EDGES_CAP))}</span><span class="tabular-nums text-muted-foreground">{visibleEdgesUnlimited ? 'All' : graph.visibleEdgesPerPair()}</span></div>
+            <input type="range" min={VISIBLE_EDGES_MIN} max={VISIBLE_EDGES_CAP} step="1" value={graph.visibleEdgesPerPair()} oninput={(e) => graph.setVisibleEdgesPerPair(e.currentTarget.valueAsNumber)} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Maximum edges shown per entity pair before the rest collapse into one aggregate edge" />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>{VISIBLE_EDGES_MIN}</span><span>all</span></div>
           </label>
         </div>
       {/if}
@@ -254,6 +308,14 @@
       </button>
       {#if viewOpen}
         <div class="space-y-3 p-2.5">
+          <!-- Node size: degree-based disc radius (and label size) from the least- to most-connected
+               node. Equal knobs = flat (uniform size). Render-only. -->
+          <div>
+            <div class="mb-1 flex items-center text-xs"><span class="flex items-center font-medium">Node size{@render resetDot(nodeSizeMin !== D.nodeSizeMin || nodeSizeMax !== D.nodeSizeMax, () => { nodeSizeMin = D.nodeSizeMin; nodeSizeMax = D.nodeSizeMax; })}</span></div>
+            <GraphRangeSlider min={nodeSizeBoundMin} max={nodeSizeBoundMax} step={1} value={[nodeSizeMin, nodeSizeMax]} format={(v) => Math.round(v) + 'px'} onChange={(lo, hi) => { nodeSizeMin = Math.round(lo); nodeSizeMax = Math.round(hi); }} />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>fewest links</span><span>most links</span></div>
+          </div>
+
           <label class="block">
             <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Edge curvature{@render resetDot(curveAmount !== D.curveAmount, () => (curveAmount = D.curveAmount))}</span><span class="tabular-nums text-muted-foreground">{curveAmount.toFixed(2)}</span></div>
             <input type="range" min="0" max="1" step="0.05" bind:value={curveAmount} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Curvature of edges between nodes" />
@@ -338,6 +400,20 @@
             <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Spread radius{@render resetDot(radialRing !== D.radialRing, () => (radialRing = D.radialRing))}</span><span class="tabular-nums text-muted-foreground">{radialRing}</span></div>
             <input type="range" min={radialRingMin} max={radialRingMax} step="5" bind:value={radialRing} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How far the least-connected and disconnected nodes sit from the center" />
             <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>tight</span><span>wide</span></div>
+          </label>
+          <!-- Hub separation: scales node repulsion + a collision bubble by degree so busy hubs
+               settle apart from each other (declutters dense graphs). 0 = off (default layout). -->
+          <label class="block">
+            <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Hub separation{@render resetDot(hubSeparation !== D.hubSeparation, () => (hubSeparation = D.hubSeparation))}</span><span class="tabular-nums text-muted-foreground">{hubSeparation.toFixed(2)}</span></div>
+            <input type="range" min={hubSeparationMin} max={hubSeparationMax} step="0.05" bind:value={hubSeparation} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How strongly high-connection hubs are pushed apart from each other" />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>off</span><span>spread hubs</span></div>
+          </label>
+          <!-- Hub spacing: HOW FAR the separated hubs settle (collide bubble + charge reach + band
+               multiplier). Inert while Hub separation is 0, so dim it then to signal that. -->
+          <label class={cn('block', hubSeparation === 0 && 'pointer-events-none opacity-40')}>
+            <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Hub spacing{@render resetDot(hubSpacing !== D.hubSpacing, () => (hubSpacing = D.hubSpacing))}</span><span class="tabular-nums text-muted-foreground">{hubSpacing.toFixed(2)}×</span></div>
+            <input type="range" min={hubSpacingMin} max={hubSpacingMax} step="0.25" bind:value={hubSpacing} disabled={hubSeparation === 0} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How far apart the separated hubs settle" />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>near</span><span>far</span></div>
           </label>
         </div>
       {/if}

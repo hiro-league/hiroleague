@@ -7,7 +7,12 @@
  * (URL stays shareable); these helpers cover only the options sliders.
  */
 import { PREF_KEYS, type GraphPanelSidePreference } from '$lib/preferences/keys';
-import { readLocalString, writeLocalString } from '$lib/preferences/storage';
+import {
+  readLocalString,
+  readSessionString,
+  writeLocalString,
+  writeSessionString
+} from '$lib/preferences/storage';
 import { CENTER_STRENGTH, CHARGE_STRENGTH, RADIAL_RING } from './engine/graph-forces';
 import {
   EDGE_FONT_MAX,
@@ -20,13 +25,26 @@ import {
   NODE_ZOOM_MIN
 } from './engine/graph-config';
 
-/** Cap on parallel edges per node pair that means "show all" — also the slider max. */
-export const MAX_LINKS_CAP = 10;
-
 /** Node-node repulsion ("charge") slider bounds. d3 charge is NEGATIVE (repulsion); more
  *  negative = nodes push apart harder (airier). 0 = no repulsion. Left = spread, right = clump. */
 export const CHARGE_STRENGTH_MIN = -600;
 export const CHARGE_STRENGTH_MAX = 0;
+
+/** "Hub separation" slider bounds. 0 = off (layout identical to before the feature); higher
+ *  pushes high-degree hubs apart from each other (charge/collide scaled by √degree). */
+export const HUB_SEPARATION_MIN = 0;
+export const HUB_SEPARATION_MAX = 1;
+
+/** "Hub spacing" slider bounds — the multiplier for HOW FAR hubs settle apart (collide bubble +
+ *  charge reach + inner band). 1 = the baseline spread; higher pushes hubs much further out. Only
+ *  has an effect while Hub separation > 0. */
+export const HUB_SPACING_MIN = 0.5;
+export const HUB_SPACING_MAX = 6;
+
+/** "Node size" 2-knob range bounds (drawn disc radius in graph units). The min/max knobs map the
+ *  least- and most-connected nodes; equal min/max = flat (every node the same). Default 8–22. */
+export const NODE_SIZE_BOUND_MIN = 4;
+export const NODE_SIZE_BOUND_MAX = 100;
 
 /** Bounds for the label-sizing range sliders (View → font controls). */
 export const LABEL_ZOOM_BOUND_MIN = 0.2; // zoom level at which a label first appears / clamps
@@ -62,10 +80,18 @@ export type GraphOptions = {
   radialRing: number;
   /** Max bow for fanned parallel edges: 0 straight … 1 very curved. */
   curveAmount: number;
-  /** Max parallel edges drawn per node pair; MAX_LINKS_CAP = show all. */
-  maxLinksPerPair: number;
   /** d3 charge (node-node repulsion); negative = repulsion. Live "Node repulsion" slider. */
   chargeStrength: number;
+  /** "Hub separation": 0 off … 1 max. Scales the per-node charge/collide forces by √degree so
+   *  high-degree hubs settle farther apart from one another (dense graphs read less clumped). */
+  hubSeparation: number;
+  /** "Hub spacing": multiplier for HOW FAR hubs spread (collide bubble + charge reach + band).
+   *  1 = baseline; higher pushes hubs much further. Inert while hubSeparation = 0. */
+  hubSpacing: number;
+  /** "Node size" range: drawn radius for the least-connected (min) → most-connected (max) node,
+   *  scaled by √degree. Equal min/max = flat (uniform size). Font scales with size too. */
+  nodeSizeMin: number;
+  nodeSizeMax: number;
   /** What a search does to non-matching nodes/edges (see SearchFocusMode). */
   searchFocusMode: SearchFocusMode;
   /** What a SELECTED node does to the rest of the graph (see SelectionFocusMode). */
@@ -98,8 +124,11 @@ export const GRAPH_OPTION_DEFAULTS: GraphOptions = {
   centerStrength: CENTER_STRENGTH,
   radialRing: RADIAL_RING,
   curveAmount: 0.15,
-  maxLinksPerPair: MAX_LINKS_CAP,
   chargeStrength: CHARGE_STRENGTH,
+  hubSeparation: 0, // off by default → identical to the pre-feature layout
+  hubSpacing: 1, // baseline spread when hub separation is enabled
+  nodeSizeMin: 8, // degree-based sizing ON by default (least-connected radius)
+  nodeSizeMax: 22, // most-connected radius
   searchFocusMode: 'highlight',
   selectionFocusMode: 'all',
   edgeZoomMin: EDGE_ZOOM_MIN,
@@ -140,15 +169,30 @@ export function readGraphOptions(): GraphOptions {
         RADIAL_RING_MAX
       ),
       curveAmount: clamp(num(p.curveAmount, GRAPH_OPTION_DEFAULTS.curveAmount), 0, 1),
-      maxLinksPerPair: clamp(
-        Math.round(num(p.maxLinksPerPair, GRAPH_OPTION_DEFAULTS.maxLinksPerPair)),
-        1,
-        MAX_LINKS_CAP
-      ),
       chargeStrength: clamp(
         num(p.chargeStrength, GRAPH_OPTION_DEFAULTS.chargeStrength),
         CHARGE_STRENGTH_MIN,
         CHARGE_STRENGTH_MAX
+      ),
+      hubSeparation: clamp(
+        num(p.hubSeparation, GRAPH_OPTION_DEFAULTS.hubSeparation),
+        HUB_SEPARATION_MIN,
+        HUB_SEPARATION_MAX
+      ),
+      hubSpacing: clamp(
+        num(p.hubSpacing, GRAPH_OPTION_DEFAULTS.hubSpacing),
+        HUB_SPACING_MIN,
+        HUB_SPACING_MAX
+      ),
+      nodeSizeMin: clamp(
+        num(p.nodeSizeMin, GRAPH_OPTION_DEFAULTS.nodeSizeMin),
+        NODE_SIZE_BOUND_MIN,
+        NODE_SIZE_BOUND_MAX
+      ),
+      nodeSizeMax: clamp(
+        num(p.nodeSizeMax, GRAPH_OPTION_DEFAULTS.nodeSizeMax),
+        NODE_SIZE_BOUND_MIN,
+        NODE_SIZE_BOUND_MAX
       ),
       searchFocusMode: SEARCH_FOCUS_MODES.includes(p.searchFocusMode as SearchFocusMode)
         ? (p.searchFocusMode as SearchFocusMode)
@@ -179,6 +223,31 @@ export function writeGraphOptions(opts: GraphOptions): void {
   writeLocalString(PREF_KEYS.knowledgeGraphOptions, JSON.stringify(opts));
 }
 
+// ── Graph-options section collapse state ───────────────────────────────────
+// Whether each Graph-options accordion section is expanded. Persisted so the panel reopens with
+// the same sections folded (the panel unmounts when closed, so without this it reset every open).
+export type GraphOptionSections = { filters: boolean; view: boolean; physics: boolean };
+const GRAPH_OPTION_SECTIONS_DEFAULT: GraphOptionSections = { filters: true, view: true, physics: true };
+
+export function readGraphOptionSections(): GraphOptionSections {
+  const raw = readLocalString(PREF_KEYS.knowledgeGraphOptionSections);
+  if (!raw) return { ...GRAPH_OPTION_SECTIONS_DEFAULT };
+  try {
+    const p = JSON.parse(raw) as Partial<GraphOptionSections>;
+    return {
+      filters: typeof p.filters === 'boolean' ? p.filters : true,
+      view: typeof p.view === 'boolean' ? p.view : true,
+      physics: typeof p.physics === 'boolean' ? p.physics : true
+    };
+  } catch {
+    return { ...GRAPH_OPTION_SECTIONS_DEFAULT };
+  }
+}
+
+export function writeGraphOptionSections(s: GraphOptionSections): void {
+  writeLocalString(PREF_KEYS.knowledgeGraphOptionSections, JSON.stringify(s));
+}
+
 // ── Detail-panel dock side ─────────────────────────────────────────────────
 // Which side the selection/detail aside docks on. 'auto' follows the chat overlay
 // (left while chat is open so the panel isn't covered, right otherwise); 'left'/'right'
@@ -194,4 +263,29 @@ export function readGraphPanelSide(): GraphPanelSidePreference {
 
 export function writeGraphPanelSide(side: GraphPanelSidePreference): void {
   writeLocalString(PREF_KEYS.knowledgeGraphPanelSide, side);
+}
+
+// ── Deep-link focus seeding ────────────────────────────────────────────────
+/**
+ * Seed sessionStorage so the Knowledge Graph view opens focused on ONE episode of ONE partition:
+ * sets the active group and that group's episode-filter selection to `[episodeId]` (merged into any
+ * existing per-group selections). The graph model restores both on mount (`loadGroups` →
+ * `activeGroupId`, `loadEpisodes` → `episodeChunkIds`), so a deep-link such as the eval Corpus tab's
+ * "graph" button (→ `/memories?tab=graph`) lands pre-filtered with NO graph-page change. Uses the
+ * SAME session keys + JSON-map format the graph model reads (`{ group_id: chunk_id[] }`).
+ */
+export function seedGraphEpisodeFocus(groupId: string, episodeId: string): void {
+  if (!groupId || !episodeId) return;
+  writeSessionString(PREF_KEYS.knowledgeGraphActiveGroup, groupId);
+  let map: Record<string, string[]> = {};
+  const raw = readSessionString(PREF_KEYS.knowledgeGraphEpisodeSel);
+  if (raw) {
+    try {
+      map = JSON.parse(raw) as Record<string, string[]>;
+    } catch {
+      map = {}; // corrupt blob → start fresh
+    }
+  }
+  map[groupId] = [episodeId];
+  writeSessionString(PREF_KEYS.knowledgeGraphEpisodeSel, JSON.stringify(map));
 }

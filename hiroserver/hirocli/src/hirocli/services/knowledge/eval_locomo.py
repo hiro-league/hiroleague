@@ -32,8 +32,15 @@ class LocomoExportError(ValueError):
 def _sidecar_path(corpus_id: str, questions_path: Path) -> Path:
     candidates = [questions_path.with_name(f"{corpus_id}.locomo.yaml")]
     name = questions_path.name
-    if name.endswith(".questions.yaml"):
-        candidates.append(questions_path.with_name(f"{name[:-len('.questions.yaml')]}.locomo.yaml"))
+    stem = name[: -len(".questions.yaml")] if name.endswith(".questions.yaml") else None
+    if stem is not None:
+        candidates.append(questions_path.with_name(f"{stem}.locomo.yaml"))
+    # BEAM corpora ship the same-schema sidecar (questions[*].evidence.episode_ids +
+    # episodes[*].dia_id) as `<stem>.beam.yaml`; accept it too so evidence-recall works for
+    # BEAM, not only LoCoMo. (Default fallback stays `.locomo.yaml` for the LoCoMo export path.)
+    candidates.append(questions_path.with_name(f"{corpus_id}.beam.yaml"))
+    if stem is not None:
+        candidates.append(questions_path.with_name(f"{stem}.beam.yaml"))
     for candidate in candidates:
         if candidate.exists():
             return candidate

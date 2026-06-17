@@ -18,6 +18,7 @@ Event types published (see ``constants.py``):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 import uuid
 from collections.abc import Iterable
@@ -1165,6 +1166,7 @@ async def run_memory_eval(
     episode_offset: int = 0,
     episode_limit: int | None = None,
     judge: bool = False,
+    answer_prompt_id: str | None = None,
     question_concurrency: int = 1,
     eval_user_id: int = MEMORY_EVAL_USER_ID,
 ) -> dict[str, Any]:
@@ -1214,7 +1216,12 @@ async def run_memory_eval(
     from hirocli.domain.preferences import load_preferences
 
     _eval_prefs = load_preferences(workspace_path).graph.eval
-    memory_answer_prompt = _eval_prefs.memory_answer_prompt
+    # Resolve the run's chosen answer-prompt profile (eval-panel pick) → instruction text + a
+    # provenance label; unknown/blank id falls back to the locked default profile, then the
+    # built-in constant. The id alone can later resolve to different text (profiles are editable),
+    # so a content hash is recorded on the run for reproducible "which prompt produced this".
+    answer_prompt_label, memory_answer_prompt = _eval_prefs.resolve_answer_prompt(answer_prompt_id)
+    answer_prompt_hash = hashlib.sha256(memory_answer_prompt.encode("utf-8")).hexdigest()[:8]
     judge_prompt = _eval_prefs.judge_prompt
     # Recalled-context render toggles (graph.eval.show_*) — built once and shared by every
     # question's answer/judge/evidence renders so they stay consistent within the run.
@@ -1238,6 +1245,14 @@ async def run_memory_eval(
             "modes": ["recall"],
             "judged": judged,
             "filters": {"set": set_id},
+            # Provenance: which answer-prompt profile drove this run's answers (label-tags the run
+            # so two runs of the same corpus under different prompts are distinguishable; the hash
+            # pins the exact text since profiles are editable). id="" ⇒ default profile used.
+            "answer_prompt": {
+                "id": (answer_prompt_id or "").strip(),
+                "label": answer_prompt_label,
+                "hash": answer_prompt_hash,
+            },
         },
     )
 

@@ -36,6 +36,7 @@ export type EvalTrack = 'knowledge' | 'memory';
 import {
   cancelKnowledgeEval,
   clearEvalResults,
+  getCorpusIngestExtraction,
   getEvalCorpus,
   getKnowledgeEvalState,
   listEvalCorpuses,
@@ -46,7 +47,8 @@ import {
   type EvalCorpus,
   type EvalEpisode,
   type EvalIngestedRanges,
-  type EvalQuestionItem
+  type EvalQuestionItem,
+  type CorpusEpisodeExtraction
 } from '$lib/api/knowledge';
 
 /** All selectable legs, in canonical column order. */
@@ -131,6 +133,9 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   let buildGraph = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeAskEvalBuildGraph, false));
   // Optional LLM judge step (grades the model's answer vs the ideal). Off = answers only.
   let judge = $state<boolean>(readLocalBoolean(PREF_KEYS.knowledgeEvalJudge, false));
+  // Memory track — which named answer-prompt profile (graph.eval.answer_prompts) this run uses.
+  // '' = the locked default profile. Sticky PER CORPUS (last-used), restored on corpus change.
+  let answerPromptId = $state<string>('');
   // Memory track — max questions evaluated concurrently (1 = serial). Mirrors the server's
   // MAX_QUESTION_CONCURRENCY ceiling; the server clamps anyway, this just keeps the control honest.
   const QUESTION_CONCURRENCY_MAX = 8;
@@ -186,6 +191,13 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
   } | null>(null);
   let corpusLoading = $state(false);
   let corpusError = $state<string | null>(null);
+  // Per-episode at-ingest extraction (entity/fact counts + ingest-trace pointer), keyed by episode
+  // id — drives the Corpus tab's extracted/not badge + "ingest pipeline" button. Empty when the
+  // corpus was remembered with graph tracing off (observability !== 'trace') or not yet ingested.
+  let corpusExtraction = $state<Record<string, CorpusEpisodeExtraction>>({});
+  // The corpus's eval graph partition (e.g. `eval_mem_beam128k_13`), from the extraction load —
+  // used to deep-link an episode into the graph view (group + chunk_id filter). '' until loaded.
+  let corpusExtractionGroup = $state<string>('');
   // Selected question ids — explicit; NO cap, and an empty set blocks the run.
   let selected = $state<Set<string>>(new Set());
 
@@ -262,6 +274,32 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     writeLocalString(PREF_KEYS.knowledgeEvalCorpus, JSON.stringify(map));
   }
 
+  // Per-corpus last-used answer-prompt profile (localStorage; JSON map { corpusId: profileId }).
+  // Keyed by corpus id (not track) so each corpus remembers the prompt it was last evaluated with.
+  function readAnswerPromptPref(corpusId: string): string {
+    if (!corpusId) return '';
+    try {
+      const raw = readLocalString(PREF_KEYS.knowledgeEvalAnswerPrompt);
+      if (!raw) return '';
+      return (JSON.parse(raw) as Record<string, string>)[corpusId] ?? '';
+    } catch {
+      return '';
+    }
+  }
+  function writeAnswerPromptPref(corpusId: string, id: string) {
+    if (!corpusId) return;
+    let map: Record<string, string> = {};
+    try {
+      const raw = readLocalString(PREF_KEYS.knowledgeEvalAnswerPrompt);
+      if (raw) map = JSON.parse(raw) as Record<string, string>;
+    } catch {
+      map = {};
+    }
+    if (id) map[corpusId] = id;
+    else delete map[corpusId];
+    writeLocalString(PREF_KEYS.knowledgeEvalAnswerPrompt, JSON.stringify(map));
+  }
+
   function isModeSelected(mode: EvalLeg): boolean {
     return selectedModes.includes(mode);
   }
@@ -293,6 +331,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       const keep = corpuses.find((c) => c.id === desired);
       selectedCorpusId = keep ? keep.id : (corpuses[0]?.id ?? '');
       if (selectedCorpusId) writeCorpusPref(track, selectedCorpusId);
+      // Restore this corpus's last-used answer prompt ('' ⇒ default profile).
+      answerPromptId = readAnswerPromptPref(selectedCorpusId);
       // Auto-set "Rebuild graph" from the (re)selected corpus's graph state.
       applyRebuildDefaultForCorpus();
       await loadQuestions();
@@ -334,6 +374,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     corpusEpisodes = [];
     corpusMeta = null;
     corpusError = null;
+    corpusExtraction = {};
+    corpusExtractionGroup = '';
     if (track !== 'memory') return;
     const corpus = selectedCorpus();
     if (!corpus || !corpus.corpus_path) return;
@@ -350,6 +392,28 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       corpusError = err instanceof Error ? err.message : 'Failed to load corpus episodes.';
     } finally {
       corpusLoading = false;
+    }
+    // Per-episode extraction is best-effort enrichment (separate ingest-trace source): a failure
+    // or an untraced corpus just leaves the counts/button off — never blocks the transcript.
+    void loadCorpusExtraction(corpus.id);
+  }
+
+  /** Load the corpus's per-episode at-ingest extraction counts (+ ingest-trace pointers) from its
+   *  ingest-trace sidecars. Best-effort: a failure clears the map rather than surfacing an error. */
+  async function loadCorpusExtraction(corpusId: string) {
+    try {
+      const res = await getCorpusIngestExtraction(corpusId);
+      // Only apply if the user hasn't switched corpus mid-flight (the episodes are this corpus's).
+      if (selectedCorpus()?.id === corpusId) {
+        corpusExtraction = res.data?.episodes ?? {};
+        corpusExtractionGroup = res.data?.group_id ?? '';
+      }
+    } catch (err) {
+      console.warn('eval corpus extraction load failed', err);
+      if (selectedCorpus()?.id === corpusId) {
+        corpusExtraction = {};
+        corpusExtractionGroup = '';
+      }
     }
   }
 
@@ -467,6 +531,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     }
     selectedCorpusId = id;
     writeCorpusPref(track, id);
+    // Restore the newly chosen corpus's last-used answer prompt ('' ⇒ default profile).
+    answerPromptId = readAnswerPromptPref(id);
     // Auto-set "Rebuild graph" from the newly chosen corpus's graph state.
     applyRebuildDefaultForCorpus();
     void loadQuestions();
@@ -476,6 +542,7 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     if (track === v) return;
     track = v;
     selectedCorpusId = '';
+    answerPromptId = '';
     selected = new Set();
     questions = [];
     // Clear the displayed run/results too — otherwise the previous track's snapshot (e.g. a
@@ -781,6 +848,8 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
         req.episode_offset = Math.max(0, episodeFrom - 1);
         req.episode_limit = episodeTo > 0 ? Math.max(0, episodeTo - episodeFrom + 1) : null;
         req.question_concurrency = questionConcurrency;
+        // Which named answer-prompt profile drives the answer step ('' ⇒ default profile).
+        req.answer_prompt_id = answerPromptId;
       }
       const res = await runKnowledgeEval(req);
       runId = res.data.run_id;
@@ -883,6 +952,14 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
       judge = v;
       writeLocalBoolean(PREF_KEYS.knowledgeEvalJudge, v);
     },
+    // Memory track — chosen answer-prompt profile id ('' ⇒ default). Sticky per corpus.
+    get answerPromptId() {
+      return answerPromptId;
+    },
+    set answerPromptId(v: string) {
+      answerPromptId = v;
+      writeAnswerPromptPref(selectedCorpusId, v);
+    },
     // Memory track — parallel-question cap (1 = serial). Clamped to the server ceiling here
     // too so a hand-typed value never round-trips just to be clamped server-side.
     get questionConcurrency() {
@@ -984,6 +1061,14 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     // the questions.
     get corpusEpisodes() {
       return corpusEpisodes;
+    },
+    // Per-episode at-ingest extraction (counts + ingest-trace pointer), keyed by episode id.
+    get corpusExtraction() {
+      return corpusExtraction;
+    },
+    // The corpus's eval graph partition id, for deep-linking an episode into the graph view.
+    get corpusExtractionGroup() {
+      return corpusExtractionGroup;
     },
     get corpusMeta() {
       return corpusMeta;

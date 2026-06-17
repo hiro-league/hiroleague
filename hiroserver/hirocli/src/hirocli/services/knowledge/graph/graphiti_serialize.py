@@ -101,15 +101,19 @@ def build_graph_dtos(
     edges: list[Any],
     *,
     chunk_to_document: dict[str, str] | None = None,
+    episode_mentions: dict[str, set[str]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Assemble the whole-graph viz payload with node provenance derived from edges.
 
-    Graphiti entity nodes don't carry episodes, so a node's ``chunk_ids`` are the union
-    of the supporting chunk_ids of every edge that touches it; ``document_ids`` map those
-    chunk_ids through ``chunk_to_document`` (episode uuid → ``source_description`` ==
-    document_id). ``chunk_to_document`` omitted → document_ids stay empty (chunk_ids still
-    populate). Returns ``{"nodes": [...], "edges": [...]}``."""
+    Graphiti entity nodes don't carry episodes, so a node's ``chunk_ids`` are the union of
+    (a) the supporting chunk_ids of every edge that touches it and (b) ``episode_mentions``
+    — the episodes that NAME the entity via the ``MENTIONS`` membership (entity uuid → episode
+    uuids). (b) is what lets the episode filter surface an entity created by a fact-less episode
+    (otherwise it would carry no chunk_id for that episode). ``document_ids`` map those chunk_ids
+    through ``chunk_to_document`` (episode uuid → ``source_description`` == document_id). Either
+    map omitted → that contribution is empty. Returns ``{"nodes": [...], "edges": [...]}``."""
     chunk_to_document = chunk_to_document or {}
+    episode_mentions = episode_mentions or {}
 
     def _docs(chunk_ids: list[str]) -> list[str]:
         out: list[str] = []
@@ -132,7 +136,11 @@ def build_graph_dtos(
 
     node_dtos = []
     for n in nodes:
-        chunks = sorted(node_chunks.get(getattr(n, "uuid", "") or "", set()))
+        nid = getattr(n, "uuid", "") or ""
+        # Union edge-derived provenance with the MENTIONS membership so fact-less episodes that
+        # merely name the entity still tag it (fixes "pick episode N → the entity it created isn't shown").
+        chunk_set = set(node_chunks.get(nid, set())) | episode_mentions.get(nid, set())
+        chunks = sorted(chunk_set)
         node_dtos.append(node_to_dto(n, chunk_ids=chunks, document_ids=_docs(chunks)))
 
     edge_dtos = []

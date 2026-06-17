@@ -914,22 +914,25 @@ class KnowledgeService:
         """
         from hirocli.services.knowledge.graph.graphiti_service import (
             graphiti_db_path,
-            is_memory_group_id,
             read_episode_chunks,
+        )
+        from hirocli.services.knowledge.graph.group_scope import (
+            is_kuzu_only_chunk_group_id,
         )
 
         ids = [str(p) for p in (point_ids or []) if p]
         if not ids:
             return []
-        # One Kuzu read covers BOTH legs: text+group_id+valid_at for memory chunks,
-        # group_id+valid_at for knowledge chunks (their text still comes from Qdrant).
+        # One Kuzu read covers BOTH legs: text+group_id+valid_at for Kuzu-only (memory /
+        # eval-memory) chunks, group_id+valid_at for knowledge chunks (their text still
+        # comes from Qdrant).
         episode_by_id = await read_episode_chunks(
             graphiti_db_path(self.workspace_path), ids
         )
         knowledge_ids = [
             pid
             for pid in ids
-            if not is_memory_group_id(episode_by_id.get(pid, {}).get("group_id", ""))
+            if not is_kuzu_only_chunk_group_id(episode_by_id.get(pid, {}).get("group_id", ""))
         ]
         # Only hit Qdrant for ids that aren't memory chunks — saves the round-trip and
         # the misleading "not found in Qdrant" warning for memory ids that were never
@@ -957,7 +960,7 @@ class KnowledgeService:
             episode = episode_by_id.get(pid, {})
             group_id = str(episode.get("group_id", "") or "")
             valid_at = episode.get("valid_at")
-            if is_memory_group_id(group_id):
+            if is_kuzu_only_chunk_group_id(group_id):
                 text = str(episode.get("text", "") or "")
                 if not text:
                     continue  # episode exists but has no body — skip

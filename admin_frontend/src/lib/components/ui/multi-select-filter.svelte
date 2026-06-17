@@ -14,8 +14,11 @@
   import { Combobox } from 'bits-ui';
   import { Check, ChevronsUpDown, Search } from '@lucide/svelte';
   import { cn } from '$lib/utils';
+  import { comboboxOpenAtTop } from './combobox-open-top';
 
-  export type MultiSelectOption = { value: string; label: string; count?: number };
+  // `keywords` (optional) extends the search match beyond the visible label — e.g. a full id
+  // when the label only shows a short form. Matched but not rendered.
+  export type MultiSelectOption = { value: string; label: string; count?: number; keywords?: string };
 
   let {
     label,
@@ -40,11 +43,19 @@
   // Anchor the dropdown to the summary button (Combobox anchors to its Input by
   // default; we keep the Input inside the dropdown as the search field instead).
   let triggerRef = $state<HTMLButtonElement | null>(null);
+  // Viewport node, so we can force the list to open at the top (bits-ui otherwise scrolls to the
+  // first selected item — see comboboxOpenAtTop).
+  let viewportRef = $state<HTMLElement | null>(null);
+  $effect(() => {
+    if (open && viewportRef) return comboboxOpenAtTop(viewportRef);
+  });
 
   const filtered = $derived(
     search.trim() === ''
       ? options
-      : options.filter((o) => o.label.toLowerCase().includes(search.trim().toLowerCase()))
+      : options.filter((o) =>
+          `${o.label} ${o.keywords ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())
+        )
   );
   const total = $derived(options.length);
   const summary = $derived(
@@ -123,7 +134,7 @@
       </div>
 
       <!-- Options -->
-      <Combobox.Viewport class="mt-1 max-h-64 overflow-auto">
+      <Combobox.Viewport bind:ref={viewportRef} class="mt-1 max-h-64 overflow-auto">
         {#each filtered as opt (opt.value)}
           <Combobox.Item
             value={opt.value}

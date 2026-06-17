@@ -1090,7 +1090,7 @@ async def read_graph_snapshot(
     node_limit: int | None = None,
     edge_limit: int | None = None,
     group_ids: list[str] | None = None,
-) -> tuple[list[Any], list[Any], dict[str, str]]:
+) -> tuple[list[Any], list[Any], dict[str, str], dict[str, set[str]]]:
     """Read all entity nodes + RELATES_TO facts for ``group_ids`` (read-only).
 
     ``group_ids`` defaults to the **knowledge** default group; pass a
@@ -1098,20 +1098,24 @@ async def read_graph_snapshot(
     graph instead — this is what the admin Graph tab's group filter selects.
 
     No LLM/embedder (and thus no provider key) is needed — a snapshot only touches the
-    graph. Returns ``([], [], {})`` when the DB file does not exist (nothing
+    graph. Returns ``([], [], {}, {})`` when the DB file does not exist (nothing
     graph-ingested yet) — never a side effect. The third element is a
     ``chunk_id → document_id`` map (episode uuid → ``source_description``) so the viz can
-    fill node/edge ``document_ids`` (§5.6). Reads run on a dedicated connection
-    (see :func:`_snapshot_read_driver`) so a Graph-tab load DURING an active build never
-    queues behind the writer.
+    fill node/edge ``document_ids`` (§5.6). The fourth element maps ``entity_uuid → {episode
+    uuids}`` from the ``MENTIONS`` membership, so node provenance includes episodes that NAME
+    an entity even when they produced no fact about it (e.g. a single-speaker preference turn
+    whose only relation was a dropped self-loop) — without it, such an entity carries no
+    chunk_id for that episode and the Graph tab's episode filter can never surface it. Reads
+    run on a dedicated connection (see :func:`_snapshot_read_driver`) so a Graph-tab load
+    DURING an active build never queues behind the writer.
     """
-    from graphiti_core.edges import EntityEdge
+    from graphiti_core.edges import EntityEdge, EpisodicEdge
     from graphiti_core.errors import GroupsEdgesNotFoundError, GroupsNodesNotFoundError
     from graphiti_core.nodes import EntityNode, EpisodicNode
 
     path = Path(db_path)
     if not path.exists():
-        return [], [], {}
+        return [], [], {}, {}
     nodes: list[Any] = []
     edges: list[Any] = []
     chunk_to_document: dict[str, str] = {}
@@ -1139,7 +1143,21 @@ async def read_graph_snapshot(
             doc = getattr(ep, "source_description", "") or ""
             if uuid and doc:
                 chunk_to_document[uuid] = doc
-    return list(nodes or []), list(edges or []), chunk_to_document
+        # Episode→entity provenance from the MENTIONS membership (Episodic -[:MENTIONS]-> Entity):
+        # source_node_uuid = episode (== chunk_id), target_node_uuid = the entity it names. An
+        # entity's chunk_ids are otherwise derived ONLY from the facts touching it, so an entity
+        # born from a fact-less episode would be invisible to the episode filter (see docstring).
+        episode_mentions: dict[str, set[str]] = {}
+        try:
+            mentions = await EpisodicEdge.get_by_group_ids(read_driver, gids, limit=edge_limit)
+        except GroupsEdgesNotFoundError:
+            mentions = []
+        for m in mentions or []:
+            episode_uuid = getattr(m, "source_node_uuid", "") or ""  # Episodic node == chunk_id
+            entity_uuid = getattr(m, "target_node_uuid", "") or ""
+            if episode_uuid and entity_uuid:
+                episode_mentions.setdefault(entity_uuid, set()).add(episode_uuid)
+    return list(nodes or []), list(edges or []), chunk_to_document, episode_mentions
 
 
 async def read_graph_group_ids(db_path: Path) -> tuple[list[str], str | None]:
@@ -1275,6 +1293,72 @@ async def read_episode_chunks(db_path: Path, uuids: list[str]) -> dict[str, dict
     return out
 
 
+async def read_graph_episodes(
+    db_path: Path, group_id: str, *, limit: int = 2000
+) -> list[dict[str, Any]]:
+    """List a group's episodes for the admin Graph tab's episode filter (read-only).
+
+    Backs the "Episodes" multi-select beside the partition selector. Each episode IS a
+    citable chunk (decision G6: ``EpisodicNode.uuid == chunk_id == Qdrant point_id``), so the
+    returned ``id`` is exactly what node/edge ``chunk_ids`` carry — selecting episodes filters
+    the graph to the entities/facts those episodes produced.
+
+    Ordered by ``uuid`` ascending: corpus episode ids are structured + zero-padded
+    (``..._m0002``, ``ep_001``), so a lexical sort reproduces the true 1-based corpus order
+    WITHOUT relying on ``valid_at`` (which is not unique across a session and would tie — the
+    reason a timestamp sort was rejected). Returns ``[{id, snippet, valid_at, document_id}]``,
+    or ``[]`` when the DB file doesn't exist / the group has no episodes.
+
+    Pages via ``uuid_cursor`` (``get_by_group_ids`` orders uuid DESC) so a large group can't
+    strand a tail behind the page limit. Read-only on a dedicated connection (lock-free; safe
+    during an active build) — same pattern as :func:`read_episode_chunks`.
+    """
+    from graphiti_core.errors import GroupsNodesNotFoundError
+    from graphiti_core.nodes import EpisodicNode
+
+    gid = (group_id or "").strip()
+    path = Path(db_path)
+    if not gid or not path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    async with _snapshot_read_driver(path, purpose="graph_episodes") as read_driver:
+        cursor: str | None = None
+        while len(out) < limit:
+            try:
+                batch = await EpisodicNode.get_by_group_ids(
+                    read_driver, [gid], limit=_EPISODE_WIPE_PAGE, uuid_cursor=cursor
+                )
+            except GroupsNodesNotFoundError:
+                break  # empty graph / no episodes in this group
+            if not batch:
+                break
+            for ep in batch:
+                uuid = getattr(ep, "uuid", "") or ""
+                if not uuid:
+                    continue
+                content = getattr(ep, "content", "") or ""
+                valid_at = getattr(ep, "valid_at", None)
+                out.append(
+                    {
+                        "id": uuid,
+                        "snippet": " ".join(content.split())[:120],
+                        "valid_at": valid_at.isoformat()
+                        if isinstance(valid_at, dt.datetime)
+                        else None,
+                        "document_id": getattr(ep, "source_description", "") or "",
+                    }
+                )
+            if len(batch) < _EPISODE_WIPE_PAGE:
+                break
+            cursor = getattr(batch[-1], "uuid", None)
+            if not cursor:
+                break
+    # Corpus order: lexical asc on the structured, zero-padded chunk_id (see docstring) — the
+    # 1-based episode number is then just the row position, deterministic and tie-free.
+    out.sort(key=lambda e: e["id"])
+    return out[:limit]
+
+
 # ``is_memory_group_id`` now lives in the shared group-ID policy module (group_scope) and is
 # imported above; re-exported here so existing ``from ...graphiti_service import is_memory_group_id``
 # callers keep working (docs/graph-group-policy-design.md).
@@ -1286,5 +1370,6 @@ __all__ = [
     "is_memory_group_id",
     "read_episode_chunks",
     "read_episode_valid_at",
+    "read_graph_episodes",
     "read_graph_snapshot",
 ]

@@ -11,6 +11,7 @@
    */
   import { Combobox } from 'bits-ui';
   import { ArrowDownAZ, ArrowDownWideNarrow, Check, ChevronsUpDown, Search, X } from '@lucide/svelte';
+  import { comboboxOpenAtTop } from '$lib/components/ui/combobox-open-top';
 
   export type GraphFilterOption = { value: string; label: string; weight: number };
 
@@ -47,6 +48,12 @@
   // Default = heaviest first ("weight"); the toggle flips to A–Z.
   let sortMode = $state<'weight' | 'alpha'>('weight');
   let triggerRef = $state<HTMLButtonElement | null>(null);
+  // Viewport node, so we can force the list to open at the top (bits-ui otherwise scrolls to the
+  // first selected item — see comboboxOpenAtTop).
+  let viewportRef = $state<HTMLElement | null>(null);
+  $effect(() => {
+    if (open && viewportRef) return comboboxOpenAtTop(viewportRef);
+  });
 
   const sorted = $derived(
     [...options].sort((a, b) =>
@@ -210,6 +217,7 @@
            (higher specificity than the app-wide thin default), so we override THIS instance with an
            important utility rather than a global rule that would touch every other combobox. -->
       <Combobox.Viewport
+        bind:ref={viewportRef}
         class="mt-1 max-h-64 overflow-y-auto [scrollbar-width:thin]! [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/40 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-2"
       >
         {#each filtered as opt (opt.value)}

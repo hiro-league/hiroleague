@@ -40,8 +40,14 @@ import {
   ALPHA_DECAY_DELTA,
   CHARGE_DISTANCE_MAX,
   CHARGE_STRENGTH,
+  degreeCollide,
   degreeRadial,
   GRAVITY_STRENGTH,
+  HUB_BAND_FRACTION,
+  HUB_BAND_FRACTION_MAX,
+  hubChargeStrength,
+  hubCollideRadius,
+  hubDistanceMax,
   RADIAL_STRENGTH,
   VELOCITY_DECAY_DEFAULT,
   VELOCITY_DECAY_DELTA
@@ -64,6 +70,11 @@ export interface RenderLink {
   /** Bi-temporal markers; an edge is "invalid" (superseded) when either is set. */
   invalid_at?: string | null;
   expired_at?: string | null;
+  /** Synthetic aggregate edge (see collapseParallelLinks) + the ids it folds. `whole` = it stands in
+   *  for ALL the pair's relations ("X relations"), else it's the leftover ("N other relations"). */
+  aggregate?: boolean;
+  collapsedIds?: string[];
+  whole?: boolean;
 }
 
 /** Neighbor focus: when a node is SELECTED (and no search is active), fade/hide everything
@@ -105,6 +116,13 @@ export interface SearchState {
   searchFocusMode: SearchFocusMode;
 }
 
+/** Aggregate-edge label: "X relations" when it folds the WHOLE pair (max visible edges = 1), else
+ *  "N other relations" when one or more real edges are shown alongside it. */
+function aggregateLabel(l: FgLink): string {
+  const n = l.collapsedIds?.length ?? 0;
+  return l.whole ? `${n} relations` : `${n} other relations`;
+}
+
 export class GraphCanvasEngine {
   private readonly callbacks: GraphCanvasCallbacks;
   private container: HTMLDivElement | null = null;
@@ -118,7 +136,8 @@ export class GraphCanvasEngine {
   private prevHiddenEdges: Set<string> | null = null;
   private prevFilterToken: string | null = null;
 
-  // Set when the visible node/link set changes so the next engine-stop auto-fits the view.
+  // Set on a relayout so the next engine-stop can reframe the SEARCH subset (onEngineStop). It no
+  // longer triggers a whole-graph zoom-to-fit on load/reload/filter — that snap was unwanted.
   private fitPending = false;
 
   // ── Camera ownership ──────────────────────────────────────────────────────────────────
@@ -154,11 +173,33 @@ export class GraphCanvasEngine {
   // The currently-selected node/edge (the one whose detail panel is open). Drawn with a blue
   // ring/line that overrides the amber search highlight. Null when nothing is selected.
   private selected: { kind: 'node' | 'edge'; id: string } | null = null;
+  // Transient hover-preview from the detail panel's Connections list (ring without selecting).
+  // previewNodeIds = the previewed node, OR a previewed edge's two endpoints. Renderer-only.
+  private preview: { kind: 'node' | 'edge'; id: string } | null = null;
+  private previewNodeIds = new Set<string>();
   private curveAmount = 0.45;
   // Live force params owned here so the draw/layout code reads plain values, not Svelte
   // proxies. Seeded in mount() from the persisted "Center pull"/"Spread radius" sliders.
   private centerStrength = 0.05; // d3 center-force strength (pull-to-middle for ALL nodes)
   private radialRing = 90; // outer-ring radius for degreeRadial; used by setData's outerRing
+  // Live "Hub separation" slider (0 = off → layout identical to before this feature). Scales the
+  // per-node charge/collide forces + the degreeRadial inner band by node degree (see graph-forces).
+  private hubSeparation = 0;
+  // Live "Hub spacing" slider (multiplier ≥ 0; default 1). HOW FAR hubs settle apart — scales the
+  // collide bubble, the charge distanceMax reach, and the inner band. Inert while hubSeparation = 0.
+  private hubSpacing = 1;
+  // Base charge ("Node repulsion" slider value, negative); seeded from CHARGE_STRENGTH and updated
+  // by setForces. Kept so retargets can rebuild the per-node charge accessor with the current base.
+  private chargeStrength = CHARGE_STRENGTH;
+  // Degree-based node sizing (View → "Node size" range): radiusForDegree maps a node's __degree to a
+  // radius in [nodeSizeMin, nodeSizeMax] via √degree against the current max degree. Equal min/max =
+  // flat (all nodes the same). Seeded in mount() from the persisted slider.
+  private nodeSizeMin = NODE_RADIUS;
+  private nodeSizeMax = NODE_RADIUS;
+  private degreeMax = 1; // largest __degree in the current set; refreshed with the degree map
+  // Denoise: node ids to render-DIM (low-connection 'dim' mode). Render-only; the structural
+  // hide/only modes are handled upstream in the model's visibleNodes, so they never reach here.
+  private denoiseDimIds = new Set<string>();
   // Live label sizing (View → font controls), seeded from graph-config defaults; the "Edge label
   // max" trims relation labels to this many characters. Updated via setLabelSizing().
   private edgeZoomMin = EDGE_ZOOM_MIN;
@@ -193,12 +234,20 @@ export class GraphCanvasEngine {
       curveAmount: number;
       centerStrength: number;
       radialRing: number;
+      hubSeparation: number;
+      hubSpacing: number;
+      nodeSizeMin: number;
+      nodeSizeMax: number;
     }
   ): Promise<void> {
     this.container = container;
     this.curveAmount = initial.curveAmount;
     this.centerStrength = initial.centerStrength;
     this.radialRing = initial.radialRing;
+    this.hubSeparation = initial.hubSeparation;
+    this.hubSpacing = initial.hubSpacing;
+    this.nodeSizeMin = initial.nodeSizeMin;
+    this.nodeSizeMax = initial.nodeSizeMax;
     const { default: ForceGraphCtor } = await import('force-graph');
     // force-graph v1.51 ships as a class but still supports the legacy factory form
     // `ForceGraph()(container)` at runtime; cast to that factory shape (the class type
@@ -211,10 +260,12 @@ export class GraphCanvasEngine {
       // Hover tooltip ONLY for edges whose on-canvas label was trimmed (humanized length exceeds
       // the edge-label-max) — shows the full relation. Non-truncated edges return '' (no tooltip).
       .linkLabel((l: FgLink) => {
+        if (l.aggregate) return aggregateLabel(l);
         const human = humanizeRelType(l.rel_type);
         return human.length > this.edgeLabelMax ? human : '';
       })
-      .nodeRelSize(NODE_RADIUS) // matches drawn radius → default hit-test region works
+      .nodeRelSize(NODE_RADIUS) // hit radius = √val · relSize; with nodeVal below this tracks the disc
+      .nodeVal((n: FgNode) => this.nodeValFor(n)) // per-node val so the click area matches the drawn size
       .linkColor((l: FgLink) => this.linkColor(l))
       .linkWidth((l: FgLink) => this.linkWidth(l))
       // FIX (two-click edge selection): force-graph hit-tests links on a shadow canvas with a
@@ -236,6 +287,8 @@ export class GraphCanvasEngine {
       .linkDirectionalArrowRelPos(0.92) // pull arrowhead inside the target disc
       .autoPauseRedraw(true) // PERF: idle when settled; we kick frames via keepRedrawing()
       .onNodeClick((n: FgNode) => this.callbacks.onNodeClick(n.id))
+      // Aggregate ("N other relations") edges ARE selectable now: clicking one opens the detail
+      // panel keyed by its synthetic id (KnowledgeGraphPanel resolves it to its folded edges).
       .onLinkClick((l: FgLink) => this.callbacks.onLinkClick(l.id))
       .onBackgroundClick(() => this.callbacks.onBackgroundClick())
       .nodeCanvasObjectMode(() => 'replace')
@@ -251,12 +304,19 @@ export class GraphCanvasEngine {
     // d3-force tuning. Optional-chain the force getters because some forces are created
     // lazily; d3ReheatSimulation kicks the cooled sim so the params take effect.
     fg.d3Force('link')?.distance(initial.linkDistance).strength(initial.linkStrength);
-    // distanceMax caps repulsion range so strays aren't pushed to infinity.
-    fg.d3Force('charge')?.strength(CHARGE_STRENGTH).distanceMax(CHARGE_DISTANCE_MAX);
+    // Charge is now a per-node accessor so hubs repel harder ("Hub separation"); distanceMax
+    // caps repulsion range (widened with the hub boost so it still reaches neighbouring hubs).
+    // setForces overwrites these with the live slider values right after mount.
+    fg.d3Force('charge')
+      ?.strength((n: FgNode) => hubChargeStrength(n.__degree ?? 0, this.chargeStrength, this.hubSeparation))
+      .distanceMax(hubDistanceMax(CHARGE_DISTANCE_MAX, this.hubSeparation, this.hubSpacing));
     fg.d3Force('center')?.strength(this.centerStrength); // live "Center pull" slider seed
     // Degree-based radial centrality (hubs centre, leaves out) — replaces plain gravity.
     void GRAVITY_STRENGTH; // retained for the tuning guide; radial uses RADIAL_STRENGTH
     fg.d3Force('gravity', degreeRadial(RADIAL_STRENGTH));
+    // Hub-separation collision: gives high-degree hubs a personal-space bubble so they can't
+    // sit on top of each other. Inert at hubSep=0 (every node's __collideR is then 0).
+    fg.d3Force('collide', degreeCollide());
     fg.onEngineStop(() => this.onEngineStop());
     // Detect a hand-driven pan/zoom so auto-fit yields to it (see userMovedCamera).
     fg.onZoom(() => {
@@ -319,6 +379,7 @@ export class GraphCanvasEngine {
       degree.set(b, (degree.get(b) ?? 0) + 1);
     }
     const maxDegree = Math.max(1, ...degree.values());
+    this.degreeMax = maxDegree; // node-sizing scale (radiusForDegree) tracks the current max
     const outerRing = this.radialRing * Math.max(1, Math.sqrt(fgNodes.length));
     assignLinkCurvatures(fgLinks, this.curveAmount); // fan out parallel edges before painting
 
@@ -329,6 +390,9 @@ export class GraphCanvasEngine {
       fg.d3VelocityDecay?.(VELOCITY_DECAY_DEFAULT);
       fg.d3AlphaDecay?.(ALPHA_DECAY_DEFAULT);
       fg.graphData({ nodes: fgNodes, links: fgLinks });
+      // fitPending only drives the SEARCH-subset reframe on settle now (onEngineStop). We do NOT
+      // auto zoom-to-fit the whole graph on load / reload / filter — that snap was unwanted; the
+      // camera stays put unless the user hits "Fit to view" or runs a search.
       this.fitPending = true;
       fg.d3ReheatSimulation?.();
       return;
@@ -363,17 +427,30 @@ export class GraphCanvasEngine {
     centerStrength: number;
     radialRing: number;
     chargeStrength: number;
+    hubSeparation: number;
+    hubSpacing: number;
   }): void {
     const fg = this.fg;
     if (!fg) return;
     fg.d3Force('link')?.strength(opts.linkStrength).distance(opts.linkDistance);
     fg.d3Force('center')?.strength(opts.centerStrength);
-    // Live "Node repulsion" slider — d3 charge (negative = repulsion); reach stays capped.
-    fg.d3Force('charge')?.strength(opts.chargeStrength).distanceMax(CHARGE_DISTANCE_MAX);
     this.centerStrength = opts.centerStrength;
-    if (opts.radialRing !== this.radialRing) {
+    this.chargeStrength = opts.chargeStrength;
+    const hubChanged =
+      opts.hubSeparation !== this.hubSeparation || opts.hubSpacing !== this.hubSpacing;
+    this.hubSeparation = opts.hubSeparation;
+    this.hubSpacing = opts.hubSpacing;
+    // Live "Node repulsion" × "Hub separation" × "Hub spacing": charge is a per-node accessor (hubs
+    // repel harder by degree), and distanceMax widens with hubSep×spacing so the push still reaches
+    // hubs even when spread far. Reheat re-initialises many-body, recomputing strengths from __degree.
+    fg.d3Force('charge')
+      ?.strength((n: FgNode) => hubChargeStrength(n.__degree ?? 0, this.chargeStrength, this.hubSeparation))
+      .distanceMax(hubDistanceMax(CHARGE_DISTANCE_MAX, this.hubSeparation, this.hubSpacing));
+    // The radial inner band AND every node's collide radius depend on hubSeparation, so a hub
+    // change needs a full retarget too (not just a ring change).
+    if (opts.radialRing !== this.radialRing || hubChanged) {
       this.radialRing = opts.radialRing;
-      this.retargetAllNodes(); // recompute every node's __targetR against the new outer ring
+      this.retargetAllNodes(); // recompute __targetR / __degree / __collideR for every node
     }
     fg.d3ReheatSimulation?.();
   }
@@ -403,6 +480,62 @@ export class GraphCanvasEngine {
     this.keepRedrawing(120); // paint the new sizing even when the sim is idle
   }
 
+  /** Degree-based node sizing (View → "Node size"). Render-only: refresh the hit-area accessor +
+   *  the collide bubble base, then repaint. No relayout (the collide change settles on the next one). */
+  setNodeSizing(opts: { minSize: number; maxSize: number }): void {
+    this.nodeSizeMin = opts.minSize;
+    this.nodeSizeMax = opts.maxSize;
+    if (!this.fg) return;
+    this.applyNodeVal(); // re-apply so force-graph recomputes cached node radii for hit-testing
+    this.recomputeCollideRadii(); // collide base = new drawn radius (matters only when hubs separate)
+    this.keepRedrawing(150);
+  }
+
+  /** Render-only denoise: the set of low-connection node ids to fade ('dim' mode). Structural
+   *  hide/only are applied upstream (model.visibleNodes), so this only ever carries the dim set. */
+  setDenoiseDim(ids: Set<string>): void {
+    this.denoiseDimIds = ids;
+    this.keepRedrawing(200);
+  }
+
+  /** Map a node's degree to its drawn radius in [nodeSizeMin, nodeSizeMax] via √degree against the
+   *  current max degree. Equal min/max → flat (every node nodeSizeMin). */
+  private radiusForDegree(degree: number): number {
+    if (this.nodeSizeMax <= this.nodeSizeMin) return this.nodeSizeMin;
+    const t = this.degreeMax > 0 ? Math.sqrt(Math.max(0, degree)) / Math.sqrt(this.degreeMax) : 0;
+    return this.nodeSizeMin + t * (this.nodeSizeMax - this.nodeSizeMin);
+  }
+
+  /** force-graph node "val" so the pointer hit-area (√val · nodeRelSize) equals the drawn radius. */
+  private nodeValFor(n: FgNode): number {
+    const ratio = this.radiusForDegree(n.__degree ?? 0) / NODE_RADIUS;
+    return ratio * ratio;
+  }
+
+  private applyNodeVal(): void {
+    this.fg?.nodeVal((n: FgNode) => this.nodeValFor(n));
+  }
+
+  /** Recompute every mirror node's collide bubble against the current sizing/hub params (no reheat —
+   *  setNodeSizing is render-only; the new radii take effect on the next natural settle/relayout). */
+  private recomputeCollideRadii(): void {
+    for (const n of this.fgNodeById.values()) {
+      const d = n.__degree ?? 0;
+      n.__collideR = hubCollideRadius(d, this.hubSeparation, this.hubSpacing, this.radiusForDegree(d));
+    }
+  }
+
+  /** Is this edge dimmed by the denoise filter (either endpoint low-connection)? Suppressed while a
+   *  search or neighbor focus owns the emphasis. */
+  private isDenoiseDimEdge(l: FgLink): boolean {
+    if (this.denoiseDimIds.size === 0 || this.search.searchActive || this.neighborFocus.active)
+      return false;
+    return (
+      this.denoiseDimIds.has(String(linkEndId(l.source))) ||
+      this.denoiseDimIds.has(String(linkEndId(l.target)))
+    );
+  }
+
   /** Recompute the degree-radial target ring for every current mirror node using the live
    *  radialRing (called when the "Spread radius" slider changes). Mirrors setData's degree
    *  math but over the full existing mirror set, since no data delta is involved. */
@@ -417,6 +550,7 @@ export class GraphCanvasEngine {
       degree.set(b, (degree.get(b) ?? 0) + 1);
     }
     const maxDegree = Math.max(1, ...degree.values());
+    this.degreeMax = maxDegree; // keep the node-sizing scale in sync on a retarget
     const outerRing = this.radialRing * Math.max(1, Math.sqrt(nodes.length));
     for (const n of nodes) this.assignTarget(n, degree, maxDegree, outerRing);
   }
@@ -443,6 +577,12 @@ export class GraphCanvasEngine {
     // an empty frame; yields to a hand-driven camera (markIntentionalReframe resets it).
     const focus = state.focusNodeIds;
     if (!focus || focus.size === 0 || this.userMovedCamera) return;
+    // A structural relayout is in flight (e.g. selecting an episode after the render subset
+    // had emptied — its nodes are freshly re-added with NO positions yet, clustered at the
+    // origin). Fitting now would frame that origin cluster and strand the camera top-left
+    // while the sim spreads the nodes off-screen ("hung, not movable"). Let onEngineStop's
+    // settle-fit frame the focus subset once positions resolve — it already handles searchActive.
+    if (this.fitPending) return;
     this.programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 80, (n: FgNode) => focus.has(n.id)));
   }
 
@@ -454,6 +594,24 @@ export class GraphCanvasEngine {
 
   /** The selected node/edge (detail panel open) — drawn with a blue ring/line that overrides the
    *  amber search highlight. Renderer-only repaint. */
+  /** Transient hover-preview from the detail panel's Connections list: ring the hovered
+   *  connection (and, for an edge, its two endpoints) WITHOUT selecting it. Renderer-only;
+   *  cleared on mouse-leave via setPreview(null). */
+  setPreview(sel: { kind: 'node' | 'edge'; id: string } | null): void {
+    this.preview = sel;
+    this.previewNodeIds = new Set();
+    if (sel?.kind === 'node') {
+      this.previewNodeIds.add(sel.id);
+    } else if (sel?.kind === 'edge') {
+      const l = this.fgLinkById.get(sel.id);
+      if (l) {
+        this.previewNodeIds.add(String(linkEndId(l.source)));
+        this.previewNodeIds.add(String(linkEndId(l.target)));
+      }
+    }
+    this.keepRedrawing(150);
+  }
+
   setSelection(sel: { kind: 'node' | 'edge'; id: string } | null): void {
     this.selected = sel;
     this.keepRedrawing(120);
@@ -487,6 +645,22 @@ export class GraphCanvasEngine {
     } else {
       this.programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 60));
     }
+  }
+
+  /** Slide the camera to centre the given nodes (keeping zoom) — backs the detail panel's
+   *  "click a connection → bring it into view". Pans to their centroid; no-op until they're
+   *  positioned. A panel-driven recentre is intentional, so it clears the user-moved flag. */
+  centerOn(nodeIds: string[]): void {
+    const fg = this.fg;
+    if (!fg) return;
+    const pts = nodeIds
+      .map((id) => this.fgNodeById.get(id))
+      .filter((n): n is FgNode => !!n && n.x != null && n.y != null);
+    if (pts.length === 0) return;
+    const cx = pts.reduce((s, n) => s + (n.x ?? 0), 0) / pts.length;
+    const cy = pts.reduce((s, n) => s + (n.y ?? 0), 0) / pts.length;
+    this.userMovedCamera = false;
+    this.programmaticFit(() => fg.centerAt?.(cx, cy, FIT_ANIM_MS));
   }
 
   /** Hand the camera back to auto-fit — call on intentional reframes (filter change, new
@@ -555,11 +729,23 @@ export class GraphCanvasEngine {
       let m = this.fgLinkById.get(l.id);
       if (!m) {
         // New mirror: endpoints as ids; force-graph resolves them to the mirror node objects.
-        m = { id: l.id, source: linkEndId(l.source), target: linkEndId(l.target), rel_type: l.rel_type, invalid };
+        m = {
+          id: l.id,
+          source: linkEndId(l.source),
+          target: linkEndId(l.target),
+          rel_type: l.rel_type,
+          invalid,
+          aggregate: l.aggregate,
+          collapsedIds: l.collapsedIds,
+          whole: l.whole
+        };
         this.fgLinkById.set(l.id, m);
       } else {
         m.rel_type = l.rel_type; // keep m.source/m.target (force-graph resolved them to nodes)
         m.invalid = invalid; // validity can flip on a provenance-merge pulse
+        m.aggregate = l.aggregate; // an aggregate's collapsed set changes as the cap/filters change
+        m.collapsedIds = l.collapsedIds;
+        m.whole = l.whole; // "X relations" vs "N other relations" can flip as the cap changes
       }
       fgLinks.push(m);
     }
@@ -575,7 +761,17 @@ export class GraphCanvasEngine {
     outerRing: number
   ): void {
     const d = degree.get(n.id) ?? 0;
-    n.__targetR = (1 - d / maxDegree) * outerRing;
+    n.__degree = d; // stash for the per-node charge/collide accessors (hub separation) + sizing
+    // Collide bubble base = the node's DRAWN radius (degree-based sizing), so bigger hubs keep their
+    // spacing. radiusForDegree needs this.degreeMax, set by the caller before this loop.
+    n.__collideR = hubCollideRadius(d, this.hubSeparation, this.hubSpacing, this.radiusForDegree(d));
+    // Soften the hub target: at hubSep>0 the busiest nodes aim at a small inner BAND instead of
+    // radius 0, so degreeRadial stops reeling every hub into the exact centre (which made them
+    // look clumped). The band grows with "Hub spacing" (capped) so the radial pull doesn't fight
+    // a large requested spread. innerBand is 0 at hubSep=0 → original "hubs to dead centre" behavior.
+    const bandFraction = Math.min(HUB_BAND_FRACTION * this.hubSpacing, HUB_BAND_FRACTION_MAX);
+    const innerBand = outerRing * bandFraction * this.hubSeparation;
+    n.__targetR = innerBand + (1 - d / maxDegree) * (outerRing - innerBand);
   }
 
   /** Seed each freshly-arrived node near the centroid of its already-placed neighbours so
@@ -635,23 +831,20 @@ export class GraphCanvasEngine {
     }, FIT_ANIM_MS + 150);
   }
 
-  /** Auto zoom-to-fit once a relayout settles, but only when the visible set changed
-   *  (gated by fitPending) and the user hasn't taken the camera. */
+  /** On settle, reframe ONLY the active-search matched subset (gated by fitPending + no user
+   *  camera). Load / reload / filter relayouts intentionally do NOT auto zoom-to-fit the whole
+   *  graph any more — the camera stays where it is; only "Fit to view" or a search reframes. */
   private onEngineStop(): void {
     const fg = this.fg;
     if (!fg || !this.fitPending) return;
     this.fitPending = false;
     if (this.userMovedCamera) return; // the user took the camera → don't snap it back
-    // During an active search the search-focus fit owns the frame (matched subset). Fitting
-    // to ALL here would yank the camera off the matches every time the sim cooled.
     if (this.search.searchActive) {
       const focus = this.search.focusNodeIds;
       if (focus && focus.size > 0) {
         this.programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 60, (n: FgNode) => focus.has(n.id)));
       }
-      return;
     }
-    this.programmaticFit(() => fg.zoomToFit?.(FIT_ANIM_MS, 60));
   }
 
   private keepRedrawing(ms: number): void {
@@ -686,6 +879,9 @@ export class GraphCanvasEngine {
     const s = this.search;
     // Selected edge → solid blue, overriding search/invalid styling (drawLink skips the dash too).
     if (this.selected?.kind === 'edge' && this.selected.id === l.id) return this.scheme.selectRing;
+    // Transient hover-preview edge (Connections list) → emphasised amber line (skip when invalid,
+    // so we don't double-draw over drawLink's dashed-red invalid line).
+    if (this.preview?.kind === 'edge' && this.preview.id === l.id && !l.invalid) return this.scheme.matchRing;
     if (s.searchActive && s.matchedEdgeIds.has(l.id)) return this.scheme.matchRing;
     // Invalid edges always hide the built-in solid line — drawLink draws their dashed red line
     // (and applies any dim/hide there), so we never double-draw a solid + dashed line.
@@ -693,15 +889,18 @@ export class GraphCanvasEngine {
     const { off, mode } = this.focusFor(this.edgeInFocus(l.id));
     if (off && mode === 'hide') return 'rgba(0,0,0,0)'; // invisible non-focus
     if (off && mode === 'dim') return this.scheme.linkColorDim;
+    if (this.isDenoiseDimEdge(l)) return this.scheme.linkColorDim; // low-connection edge faded
     return this.scheme.linkColor;
   }
 
   private linkWidth(l: FgLink): number {
     const s = this.search;
     if (this.selected?.kind === 'edge' && this.selected.id === l.id) return 3; // selected edge
+    if (this.preview?.kind === 'edge' && this.preview.id === l.id) return 2.5; // hover preview
     if (s.searchActive && s.matchedEdgeIds.has(l.id)) return 2.5;
     const { off, mode } = this.focusFor(this.edgeInFocus(l.id));
     if (off && mode === 'hide') return 0;
+    if (l.aggregate) return 2.2; // aggregate edge: one point thicker than a normal edge (req)
     return 1.2;
   }
 
@@ -709,7 +908,7 @@ export class GraphCanvasEngine {
   private drawNode(node: FgNode, ctx: CanvasRenderingContext2D, scale: number): void {
     const x = node.x ?? 0;
     const y = node.y ?? 0;
-    const radius = NODE_RADIUS;
+    const radius = this.radiusForDegree(node.__degree ?? 0); // degree-based size (halo/ring/icon/label all follow)
     const s = this.scheme;
     const search = this.search;
 
@@ -717,10 +916,14 @@ export class GraphCanvasEngine {
     // off-focus nodes, 'dim' fades them, 'none'/in-focus draws normally. Layout unchanged either way.
     const { off: offFocus, mode: focusMode } = this.focusFor(this.nodeInFocus(node.id));
     if (offFocus && focusMode === 'hide') return; // fully hidden (layout unchanged)
-    const dimmed = offFocus && focusMode === 'dim';
+    // Denoise dim (low-connection): render-only, lowest priority — suppressed while a search or
+    // neighbor focus is active (those own the emphasis). Faded less aggressively than a focus miss.
+    const denoiseDim =
+      !this.search.searchActive && !this.neighborFocus.active && this.denoiseDimIds.has(node.id);
+    const dimmed = (offFocus && focusMode === 'dim') || denoiseDim;
     if (dimmed) {
       ctx.save();
-      ctx.globalAlpha = 0.12; // faded non-match; restored at the end of this draw
+      ctx.globalAlpha = denoiseDim ? 0.25 : 0.12; // restored at the end of this draw
     }
 
     // 1. Flash for fresh/updated nodes (fades over GLOW_MS): a soft filled halo plus a
@@ -760,13 +963,28 @@ export class GraphCanvasEngine {
       ctx.stroke();
     }
 
+    // 2c. Transient hover preview (Connections list): a DASHED ring (distinct from the solid
+    //     selection/match ring) on the previewed node or a previewed edge's two endpoints.
+    if (this.previewNodeIds.has(node.id)) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 4.5, 0, 2 * Math.PI);
+      ctx.setLineDash([4 / scale, 3 / scale]);
+      ctx.strokeStyle = s.selectRing;
+      ctx.lineWidth = 2 / scale;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // 3. White Lucide icon inside.
     drawIcon(ctx, node.type, x, y, radius * 1.45, scale);
 
     // 4. Name label below the disc — wraps onto stacked lines; zoom-gated so a dense graph
     //    at low zoom isn't a mess of labels.
-    const fontSize = labelFontSize(scale, this.nodeZoomMin, this.nodeZoomMax, this.nodeFontMin, this.nodeFontMax);
-    if (fontSize !== null && node.name) {
+    const baseFont = labelFontSize(scale, this.nodeZoomMin, this.nodeZoomMax, this.nodeFontMin, this.nodeFontMax);
+    if (baseFont !== null && node.name) {
+      // Labels grow/shrink with the node's degree-based size, dampened (√ of the radius ratio) so a
+      // big hub doesn't get a billboard. Reduces to baseFont when sizing is flat (radius == NODE_RADIUS).
+      const fontSize = baseFont * Math.sqrt(radius / NODE_RADIUS);
       const lines = wrapLabel(node.name);
       const lineH = fontSize * 1.25;
       const top = y + radius + fontSize; // baseline of the first line
@@ -823,7 +1041,8 @@ export class GraphCanvasEngine {
     // the dashed-invalid line below AND the label; dimmed ones fade.
     const { off: edgeOffFocus, mode: edgeFocusMode } = this.focusFor(this.edgeInFocus(link.id));
     const edgeHidden = edgeOffFocus && edgeFocusMode === 'hide';
-    const edgeDim = edgeOffFocus && edgeFocusMode === 'dim';
+    // Denoise-dimmed edges (an endpoint is low-connection) fade their label + invalid dash too.
+    const edgeDim = (edgeOffFocus && edgeFocusMode === 'dim') || this.isDenoiseDimEdge(link);
 
     // Invalid (superseded) facts → dashed red line, drawn before the zoom-gated label so it shows
     // even when labels are hidden. Skipped when search-matched (keeps its amber highlight) or
@@ -873,10 +1092,16 @@ export class GraphCanvasEngine {
     const tx = tgt.x;
     const ty = tgt.y;
     if (sx == null || sy == null || tx == null || ty == null) return;
-    if (!link.rel_type) return;
-    // Humanize (USES_NAME_IN_STORES → "Uses Name In Stores") + trim to the configured length.
-    const human = humanizeRelType(link.rel_type);
-    const text = human.length > this.edgeLabelMax ? `${human.slice(0, this.edgeLabelMax - 1)}…` : human;
+    let text: string;
+    if (link.aggregate) {
+      // Aggregate label — "X relations" (whole pair) or "N other relations" (leftover). Never trimmed.
+      text = aggregateLabel(link);
+    } else {
+      if (!link.rel_type) return;
+      // Humanize (USES_NAME_IN_STORES → "Uses Name In Stores") + trim to the configured length.
+      const human = humanizeRelType(link.rel_type);
+      text = human.length > this.edgeLabelMax ? `${human.slice(0, this.edgeLabelMax - 1)}…` : human;
+    }
 
     const s = this.scheme;
     // Label anchor = bezier point at t=0.5 (the visual middle of the arc).

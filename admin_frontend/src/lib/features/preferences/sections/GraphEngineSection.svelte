@@ -11,6 +11,7 @@
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
+  import EvalAnswerPromptLibrary from '$lib/features/preferences/widgets/EvalAnswerPromptLibrary.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -475,24 +476,18 @@
 
     <!-- Prompts, one section each. -->
     <SectionCardMuted
-      title="Mem Eval Answer Prompt"
-      description="Instruction block the memory-eval answer step places in the user message ahead of the question + recalled elements (the system prompt is a fixed role). Eval-only."
+      title="Mem Eval Answer Prompts"
+      description="A library of named instruction blocks the memory-eval answer step can use (the system prompt is a fixed role). A run picks one in the eval panel. Eval-only; memory track only."
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.graphEvalMemAnswerPrompt}
     >
-      <MarkdownEditorPreview
-        editorLabel="Memory eval answer prompt editor"
-        previewLabel="Preview"
-        ariaLabel="Memory eval answer prompt (markdown)"
-        bind:value={ctrl.draft.graph.eval.memory_answer_prompt}
-        defaultValue={ctrl.promptDefaults['graph.eval.memory_answer_prompt']}
-        onInput={ctrl.markDirty}
-      />
+      <EvalAnswerPromptLibrary {ctrl} />
       <p class="text-xs text-muted-foreground">
-        Drives the memory eval's <span class="font-medium">recall</span> leg. Blank uses the
-        structured default (support gates, calibrator examples, absolute-date rules), declining
-        with exactly "No information available." when no recalled element supports an answer —
-        the abstain detector recognizes that phrase and the legacy "I don't know".
+        Drives the memory eval's <span class="font-medium">recall</span> leg. Each profile should
+        keep declining with exactly "No information available." when no recalled element supports an
+        answer — the abstain detector recognizes that phrase (and the legacy "I don't know"). The
+        locked default carries the structured default (support gates, calibrator examples,
+        absolute-date rules); duplicate it to customize.
       </p>
     </SectionCardMuted>
 

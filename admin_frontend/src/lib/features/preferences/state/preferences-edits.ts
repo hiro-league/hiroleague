@@ -202,11 +202,9 @@ export function editsForSave(
     baseline.graph.reranker.device,
     draft.graph.reranker.device || null
   );
-  add(
-    'graph.eval.memory_answer_prompt',
-    baseline.graph.eval.memory_answer_prompt,
-    draft.graph.eval.memory_answer_prompt
-  );
+  // Mem-eval answer-prompt library — sent as ONE path (whole dict), like tuning_profiles below;
+  // the schema-driven PATCH accepts a whole-object write here.
+  add('graph.eval.answer_prompts', baseline.graph.eval.answer_prompts, draft.graph.eval.answer_prompts);
   add(
     'graph.eval.judge_prompt',
     baseline.graph.eval.judge_prompt,

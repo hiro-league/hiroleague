@@ -18,6 +18,15 @@ export type TuningProfile = ModelTuning & {
   locked: boolean;
 };
 
+// Named mem-eval answer-prompt recipe (the answer analog of TuningProfile) — an editable
+// instruction block for the memory-eval recall leg. Edited in the Graph Engine prefs; picked
+// per run in the eval panel.
+export type AnswerPromptProfile = {
+  label: string;
+  locked: boolean;
+  prompt: string;
+};
+
 // Named image-generation recipe (image analog of TuningProfile) — model + diffusion
 // params + prompt scaffolding. Edited from the Image Lab page.
 export type ImageProfilePreference = {
@@ -125,10 +134,13 @@ export type GraphPreferences = {
     min_relevance: number;
     device: string | null;
   };
-  // Eval-only prompts surfaced under the Graphiti engine settings. memory_answer_prompt drives the
-  // memory-eval recall leg; judge_prompt grades both tracks' answers. Blank → relaxed backend default.
+  // Eval-only prompts surfaced under the Graphiti engine settings. answer_prompts is a named
+  // library the memory-eval recall leg picks from (per run, in the eval panel); judge_prompt grades
+  // both tracks' answers. Blank judge_prompt → relaxed backend default.
   eval: {
-    memory_answer_prompt: string;
+    // Named mem-eval answer-prompt library (id → recipe). The locked "default" profile carries the
+    // built-in default text. Saved as one path, like tuning_profiles.
+    answer_prompts: Record<string, AnswerPromptProfile>;
     judge_prompt: string;
     // Eval answer + judge each have their OWN model + tuning profile (separated from the single
     // shared answering model). null model = fall back to the knowledge answering model → default
@@ -260,7 +272,9 @@ export const DEFAULT_GRAPH: GraphPreferences = {
     device: null
   },
   eval: {
-    memory_answer_prompt: '',
+    // Seeded from the server payload (the locked default carries the full default text); this
+    // fallback only applies to very old payloads that predate the field.
+    answer_prompts: { default: { label: 'Default (grounded)', locked: true, prompt: '' } },
     judge_prompt: '',
     answer_model: null,
     answer_tuning_profile: 'knowledge_answering',

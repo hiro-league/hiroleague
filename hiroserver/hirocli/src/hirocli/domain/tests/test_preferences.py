@@ -11,6 +11,8 @@ from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+    DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
+    AnswerPromptProfile,
     LLMPreferences,
     MediaPreferences,
     MemoryPreferences,
@@ -170,24 +172,37 @@ def test_save_preferences_prunes_default_prompts(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     save_preferences(ws, WorkspacePreferences())
     raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
-    assert "memory_answer_prompt" not in raw["graph"]["eval"]
     assert "prompt" not in raw["knowledge"]["answering"]
-    # Absent key still resolves to the default constant on load.
+    assert "judge_prompt" not in raw["graph"]["eval"]
+    # The mem-eval answer prompt is now a named library (dict), always materialized like
+    # tuning_profiles — so it stays present, and its locked default profile reloads with the
+    # built-in default text via resolve_answer_prompt.
     reloaded = load_preferences(ws)
-    assert reloaded.graph.eval.memory_answer_prompt == PROMPT_DEFAULTS["graph.eval.memory_answer_prompt"]
+    _, default_text = reloaded.graph.eval.resolve_answer_prompt(None)
+    assert default_text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
 
 
-def test_save_preferences_keeps_edited_prompt(tmp_path: Path) -> None:
-    # An edited prompt differs from the default, so it must persist verbatim.
+def test_answer_prompt_library_roundtrips(tmp_path: Path) -> None:
+    # The answer-prompt library persists in full (a dict, like tuning_profiles); an added profile
+    # round-trips and resolve_answer_prompt returns its text by id, with an unknown id falling
+    # back to the locked default profile's text.
     import json as _json
 
     ws = tmp_path / "ws"
     prefs = WorkspacePreferences()
-    prefs.graph.eval.memory_answer_prompt = "Custom answering instructions."
+    prefs.graph.eval.answer_prompts["strict"] = AnswerPromptProfile(
+        label="Strict", prompt="Answer only from context."
+    )
     save_preferences(ws, prefs)
     raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
-    assert raw["graph"]["eval"]["memory_answer_prompt"] == "Custom answering instructions."
-    assert load_preferences(ws).graph.eval.memory_answer_prompt == "Custom answering instructions."
+    assert raw["graph"]["eval"]["answer_prompts"]["strict"]["prompt"] == "Answer only from context."
+    reloaded = load_preferences(ws)
+    assert reloaded.graph.eval.resolve_answer_prompt("strict") == (
+        "Strict",
+        "Answer only from context.",
+    )
+    _, default_text = reloaded.graph.eval.resolve_answer_prompt("nope")
+    assert default_text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
 
 
 def test_resolve_llm_with_default_and_credentials(

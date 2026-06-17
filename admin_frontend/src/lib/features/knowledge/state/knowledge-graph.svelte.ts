@@ -18,10 +18,12 @@
 
 import {
   exportKnowledgeGraph,
+  listKnowledgeGraphEpisodes,
   listKnowledgeGraphGroups,
   searchGraphChunks,
   type GraphEdgeDTO,
   type GraphEdgeEvent,
+  type GraphEpisode,
   type GraphGroup,
   type GraphIngestProgress,
   type GraphNodeDTO,
@@ -75,16 +77,30 @@ const DEFAULT_LARGE_TYPE_THRESHOLD = 200;
 /** Edge validity filter. Mirrors the codebase's "current fact" rule (graphiti_search): a fact is
  *  CURRENT/valid when invalid_at IS NULL AND expired_at IS NULL; INVALID when either is set. */
 export type EdgeValidity = 'all' | 'valid' | 'invalid';
-/** When capping connections per node, which edges to keep — newest or oldest by valid_at. */
+/** Which edges to keep when an edge cap kicks in — newest or oldest by valid_at. Shared by BOTH
+ *  the per-node connection cap AND the per-pair "Visible edges" collapse (one control, two uses). */
 export type MaxConnBy = 'newest' | 'oldest';
-/** Orphan = a node with NO visible connections (after all edge filters). 'all' = show every node ·
- *  'hide' = drop orphans · 'only' = show ONLY orphans (and thus no edges). */
-export type OrphanMode = 'all' | 'hide' | 'only';
+/** Denoise treatment for sparse (low-connection) nodes. 'dim' fades them (render-only, no relayout),
+ *  'hide' drops them (structural). Whether ANY node is sparse is governed by lowConnThreshold
+ *  (0 = off) — a node is sparse when its VISIBLE degree (after edge filters) is below the threshold. */
+export type LowConnTreatment = 'dim' | 'hide';
+/** Denoise threshold floor. 0 = off (nothing is sparse). The slider's MAX is data-driven (the
+ *  current graph's busiest node), so the range always reflects the real connection counts. */
+export const LOW_CONN_THRESHOLD_MIN = 0;
+export const LOW_CONN_THRESHOLD_DEFAULT = 0;
 /** Inclusive epoch-ms range for a date slider; null = inactive (full span, no filtering). */
 export type DateRange = { lo: number; hi: number } | null;
 
 /** Max-connections-per-node slider cap; this value === "show all" (no cap). */
 export const MAX_CONN_PER_NODE_CAP = 25;
+
+/** "Max visible edges between nodes" per entity pair — slider bounds. The MAX value === "show all"
+ *  (no aggregation). The MIN is 1: at 1 a multi-edge pair collapses ENTIRELY into one "X relations"
+ *  aggregate (X = the real relation count between the two nodes); at 2+ one or more real edges show
+ *  alongside an "N other relations" aggregate. A fixed 100 max avoids computing the true per-graph
+ *  maximum (per design). */
+export const VISIBLE_EDGES_CAP = 100;
+export const VISIBLE_EDGES_MIN = 1;
 
 /** Persisted edge-filter MODES (NOT the date ranges — those default to the data's full span). */
 type EdgeFilterModes = {
@@ -92,14 +108,18 @@ type EdgeFilterModes = {
   includeUndatedEdges: boolean;
   maxConnPerNode: number;
   maxConnBy: MaxConnBy;
-  orphanMode: OrphanMode;
+  visibleEdgesPerPair: number;
+  lowConnTreatment: LowConnTreatment;
+  lowConnThreshold: number;
 };
 const EDGE_FILTER_DEFAULTS: EdgeFilterModes = {
   edgeValidity: 'all',
   includeUndatedEdges: true,
   maxConnPerNode: MAX_CONN_PER_NODE_CAP, // === cap → no limit
   maxConnBy: 'newest',
-  orphanMode: 'all'
+  visibleEdgesPerPair: VISIBLE_EDGES_CAP, // === cap → no aggregation
+  lowConnTreatment: 'dim',
+  lowConnThreshold: LOW_CONN_THRESHOLD_DEFAULT // 0 = denoise off
 };
 
 function readEdgeFilterModes(): EdgeFilterModes {
@@ -108,6 +128,7 @@ function readEdgeFilterModes(): EdgeFilterModes {
   try {
     const p = JSON.parse(raw) as Partial<EdgeFilterModes>;
     const cap = Number(p.maxConnPerNode);
+    const vis = Number(p.visibleEdgesPerPair);
     return {
       edgeValidity: (['all', 'valid', 'invalid'] as const).includes(p.edgeValidity as EdgeValidity)
         ? (p.edgeValidity as EdgeValidity)
@@ -120,9 +141,13 @@ function readEdgeFilterModes(): EdgeFilterModes {
         ? Math.min(MAX_CONN_PER_NODE_CAP, Math.max(1, Math.round(cap)))
         : EDGE_FILTER_DEFAULTS.maxConnPerNode,
       maxConnBy: p.maxConnBy === 'oldest' ? 'oldest' : 'newest',
-      orphanMode: (['all', 'hide', 'only'] as const).includes(p.orphanMode as OrphanMode)
-        ? (p.orphanMode as OrphanMode)
-        : EDGE_FILTER_DEFAULTS.orphanMode
+      visibleEdgesPerPair: Number.isFinite(vis)
+        ? Math.min(VISIBLE_EDGES_CAP, Math.max(VISIBLE_EDGES_MIN, Math.round(vis)))
+        : EDGE_FILTER_DEFAULTS.visibleEdgesPerPair,
+      lowConnTreatment: p.lowConnTreatment === 'hide' ? 'hide' : 'dim',
+      lowConnThreshold: Number.isFinite(Number(p.lowConnThreshold))
+        ? Math.max(LOW_CONN_THRESHOLD_MIN, Math.round(Number(p.lowConnThreshold))) // no upper clamp: data-driven
+        : EDGE_FILTER_DEFAULTS.lowConnThreshold
     };
   } catch {
     return { ...EDGE_FILTER_DEFAULTS };
@@ -171,6 +196,37 @@ const SESSION_HIDE_EDGES = PREF_KEYS.knowledgeGraphHideEdges;
 // Last-viewed partition group_id — remembered across opens (design: default = first in list,
 // remember last). Restored in loadGroups() iff the group still exists.
 const SESSION_ACTIVE_GROUP = PREF_KEYS.knowledgeGraphActiveGroup;
+// Selected episode-filter ids, keyed by partition — sessionStorage so a refresh keeps the
+// selection. Stored as a JSON map { group_id: chunk_id[] } so each partition keeps its own.
+const SESSION_EPISODE_SEL = PREF_KEYS.knowledgeGraphEpisodeSel;
+
+function readEpisodeSel(groupId: string): string[] {
+  const raw = readSessionString(SESSION_EPISODE_SEL);
+  if (!raw) return [];
+  try {
+    const map = JSON.parse(raw) as Record<string, string[]>;
+    const ids = map[groupId];
+    return Array.isArray(ids) ? ids.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return []; // corrupt blob → treat as no saved selection
+  }
+}
+
+function writeEpisodeSel(groupId: string, ids: string[]): void {
+  const raw = readSessionString(SESSION_EPISODE_SEL);
+  let map: Record<string, string[]> = {};
+  if (raw) {
+    try {
+      map = JSON.parse(raw) as Record<string, string[]>;
+    } catch {
+      map = {};
+    }
+  }
+  if (ids.length > 0) map[groupId] = ids;
+  else delete map[groupId];
+  if (Object.keys(map).length > 0) writeSessionString(SESSION_EPISODE_SEL, JSON.stringify(map));
+  else removeSessionString(SESSION_EPISODE_SEL);
+}
 
 function readHidden(key: string): Set<string> {
   const raw = readSessionString(key);
@@ -237,7 +293,11 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   let includeUndatedEdges = $state(persistedFilters.includeUndatedEdges);
   let maxConnPerNode = $state(persistedFilters.maxConnPerNode);
   let maxConnBy = $state<MaxConnBy>(persistedFilters.maxConnBy);
-  let orphanMode = $state<OrphanMode>(persistedFilters.orphanMode);
+  // Per-pair "Visible edges" cap (collapse extras into one aggregate edge); === cap → no aggregation.
+  let visibleEdgesPerPair = $state(persistedFilters.visibleEdgesPerPair);
+  // Denoise: dim/hide nodes with fewer than `lowConnThreshold` visible connections (0 = off).
+  let lowConnTreatment = $state<LowConnTreatment>(persistedFilters.lowConnTreatment);
+  let lowConnThreshold = $state(persistedFilters.lowConnThreshold);
   // null = "full span" (slider sits at both ends, no filtering); set when the user drags a knob.
   let validRange = $state<DateRange>(null);
   let creationRange = $state<DateRange>(null);
@@ -245,7 +305,15 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   function persistEdgeFilterModes(): void {
     writeLocalString(
       PREF_KEYS.knowledgeGraphEdgeFilters,
-      JSON.stringify({ edgeValidity, includeUndatedEdges, maxConnPerNode, maxConnBy, orphanMode })
+      JSON.stringify({
+        edgeValidity,
+        includeUndatedEdges,
+        maxConnPerNode,
+        maxConnBy,
+        visibleEdgesPerPair,
+        lowConnTreatment,
+        lowConnThreshold
+      })
     );
   }
 
@@ -359,6 +427,7 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       creationRange = null;
       rebuildArrays();
       loadVersion += 1; // signal a structural reload to the renderer (full relayout + fit)
+      void loadEpisodes(); // refresh the episode picker for this partition (non-blocking)
     } catch (err) {
       loadError = err instanceof Error ? err.message : String(err);
       deps.setError(loadError);
@@ -385,6 +454,9 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   async function selectGroup(id: string | null): Promise<void> {
     if (id === activeGroupId) return;
     activeGroupId = id;
+    // In-memory reset only (NOT clearEpisodes, which would persist-empty and wipe the new
+    // group's saved selection); loadEpisodes() restores this partition's persisted selection.
+    episodeChunkIds = new Set();
     if (id) writeSessionString(SESSION_ACTIVE_GROUP, id);
     else removeSessionString(SESSION_ACTIVE_GROUP);
     await load();
@@ -602,22 +674,52 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   const edgeFilteredLinks = $derived(
     cappedEdgeIds ? baseVisibleLinks.filter((e) => cappedEdgeIds.has(e.id)) : baseVisibleLinks
   );
-  // Node ids that still carry ≥1 visible connection — the basis for the orphan filter. A node the
-  // per-node cap stripped of all its edges correctly counts as an orphan here ("no visible conn").
-  const connectedNodeIds = $derived.by<Set<string>>(() => {
-    const s = new Set<string>();
+  // Visible-degree SNAPSHOT: each node's connection count over the edge-filtered links, computed
+  // ONCE (before any low-connection hiding) so the denoise threshold doesn't cascade. A node the
+  // per-node cap stripped of all its edges correctly reads degree 0 here. Drives BOTH the denoise
+  // filter and (via the engine) the degree-based node sizing — so size reflects what's on screen.
+  const visibleDegree = $derived.by<Map<string, number>>(() => {
+    const d = new Map<string, number>();
     for (const e of edgeFilteredLinks) {
-      s.add(linkEndId(e.source));
-      s.add(linkEndId(e.target));
+      const a = linkEndId(e.source);
+      const b = linkEndId(e.target);
+      d.set(a, (d.get(a) ?? 0) + 1);
+      d.set(b, (d.get(b) ?? 0) + 1);
     }
+    return d;
+  });
+  // Busiest node's visible degree — the data-driven MAX for the denoise threshold slider, so its
+  // range always reflects the real connection counts in the current graph (not an arbitrary cap).
+  const maxVisibleDegree = $derived.by<number>(() => {
+    let m = 0;
+    for (const v of visibleDegree.values()) if (v > m) m = v;
+    return m;
+  });
+  // A node is "sparse" when its visible degree is below the threshold. threshold 0 ⇒ off (never sparse).
+  function isLowConn(id: string): boolean {
+    return lowConnThreshold > 0 && (visibleDegree.get(id) ?? 0) < lowConnThreshold;
+  }
+  // Membership pass: only 'hide' drops nodes; 'dim' keeps everyone (it's render-only). threshold 0
+  // makes isLowConn always false, so the graph is unfiltered regardless of treatment (off).
+  function lowConnPass(id: string): boolean {
+    return lowConnTreatment === 'hide' ? !isLowConn(id) : true;
+  }
+  const visibleNodes = $derived(nodes.filter((n) => isNodeVisible(n) && lowConnPass(n.id)));
+  // Ids the engine should DIM (render-only) — only in 'dim' treatment; 'hide' already dropped them.
+  const lowConnDimIds = $derived.by<Set<string>>(() => {
+    if (lowConnTreatment !== 'dim') return new Set<string>();
+    const s = new Set<string>();
+    for (const n of visibleNodes) if (isLowConn(n.id)) s.add(n.id);
     return s;
   });
-  function orphanPass(id: string): boolean {
-    if (orphanMode === 'hide') return connectedNodeIds.has(id); // drop the disconnected
-    if (orphanMode === 'only') return !connectedNodeIds.has(id); // keep ONLY the disconnected
-    return true;
-  }
-  const visibleNodes = $derived(nodes.filter((n) => isNodeVisible(n) && orphanPass(n.id)));
+  // Live "(N nodes)" badge: how many type-visible nodes are sparse, independent of dim-vs-hide so
+  // the count is the same either way (computed on the pre-hide snapshot).
+  const lowConnCount = $derived.by<number>(() => {
+    if (lowConnThreshold <= 0) return 0;
+    let c = 0;
+    for (const n of nodes) if (isNodeVisible(n) && (visibleDegree.get(n.id) ?? 0) < lowConnThreshold) c++;
+    return c;
+  });
   const visibleNodeIdSet = $derived(new Set(visibleNodes.map((n) => n.id)));
   // Drop any edge whose endpoint the orphan filter hid — so "only orphans" shows no edges (orphans
   // have none) and a hidden endpoint never leaves a dangling line.
@@ -634,15 +736,20 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
       validRange !== null ||
       creationRange !== null ||
       maxConnPerNode < MAX_CONN_PER_NODE_CAP ||
-      orphanMode !== 'all'
+      lowConnThreshold > 0
   );
   const hasActiveFilters = $derived(
     hiddenNodeIds.size > 0 || hiddenEdgeTypes.size > 0 || edgeFiltersActive
   );
+  // Only 'hide' (with a non-zero threshold) changes membership → relayout; 'dim' is render-only, so
+  // it's deliberately excluded from filterToken to avoid a needless relayout/fit on every change.
+  const denoiseStructuralToken = $derived(
+    lowConnTreatment === 'hide' && lowConnThreshold > 0 ? `hide:${lowConnThreshold}` : 'none'
+  );
   // A single token that changes whenever any edge filter changes — the renderer treats a change
   // as a STRUCTURAL update (relayout + fit), matching how the node/edge-type filters behave.
   const filterToken = $derived(
-    `${edgeValidity}|${includeUndatedEdges}|${maxConnPerNode}|${maxConnBy}|${orphanMode}|` +
+    `${edgeValidity}|${includeUndatedEdges}|${maxConnPerNode}|${maxConnBy}|${denoiseStructuralToken}|` +
       `${validRange ? `${validRange.lo}-${validRange.hi}` : 'x'}|` +
       `${creationRange ? `${creationRange.lo}-${creationRange.hi}` : 'x'}`
   );
@@ -658,6 +765,14 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
   // Qdrant point_ids whose chunk text matched the current query (== chunk_ids); cleared
   // when the query clears so a stale chunk match never outlives its text.
   let matchedChunkIds = $state<Set<string>>(new Set());
+  // ── Episode filter (a second source of matched chunk_ids, beside text search) ──
+  // The "Episodes" multi-select picks chunk_ids directly (each episode IS a chunk). Kept
+  // SEPARATE from matchedChunkIds: the text leg resets matchedChunkIds on every debounce/
+  // clear/abort, which would otherwise wipe an episode selection. Both feed the SAME
+  // matched-node/edge derivations (and thus the same highlight/dim/hide focus pipeline).
+  let episodes = $state<GraphEpisode[]>([]); // the active group's episodes, in corpus order
+  let episodesBusy = $state(false);
+  let episodeChunkIds = $state<Set<string>>(new Set()); // selected episode ids (== chunk_ids)
   // True while the debounced backend chunk-text leg is in flight (drives the spinner).
   let searchBusy = $state(false);
   let searchAbort: AbortController | null = null;
@@ -712,41 +827,88 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     searchBusy = false;
   }
 
-  const searchActive = $derived(searchQuery.trim().length > 0);
+  // ── Episode filter ──────────────────────────────────────────────────────────
+  // Fetch the active partition's episodes for the multi-select (corpus order). Non-fatal:
+  // a failure leaves an empty list so the picker just hides. Called from load() so the list
+  // stays in sync with the partition + freshly-ingested episodes.
+  async function loadEpisodes(): Promise<void> {
+    const gid = activeGroupId;
+    if (!gid) {
+      episodes = [];
+      return;
+    }
+    episodesBusy = true;
+    try {
+      const res = await listKnowledgeGraphEpisodes(gid);
+      episodes = res.ok && res.data ? res.data.episodes : [];
+      // Restore the persisted selection for this partition, dropping any saved ids that no
+      // longer exist (the episode list can change as the corpus is re-ingested).
+      const present = new Set(episodes.map((e) => e.id));
+      const restored = readEpisodeSel(gid).filter((id) => present.has(id));
+      episodeChunkIds = new Set(restored);
+    } catch (err) {
+      console.error('graph: failed to load episodes', err);
+      episodes = [];
+    } finally {
+      episodesBusy = false;
+    }
+  }
+  // Set the selected episodes (chunk_ids) and persist them per-partition (survives refresh).
+  // Feeds the SAME matched-node/edge derivations as text search, so the current focus mode
+  // (highlight/dim/hide) and match count just apply.
+  function setSelectedEpisodes(ids: string[]): void {
+    episodeChunkIds = new Set(ids);
+    if (activeGroupId) writeEpisodeSel(activeGroupId, ids);
+  }
+  function clearEpisodes(): void {
+    setSelectedEpisodes([]);
+  }
 
-  // Nodes matched by the query: name/alias substring, OR any chunk_id in matchedChunkIds.
+  // Active when there's a text query OR an episode selection — both drive the focus pipeline.
+  const searchActive = $derived(searchQuery.trim().length > 0 || episodeChunkIds.size > 0);
+  // A chunk_id is "matched" if the text leg found it OR it belongs to a selected episode.
+  const chunkMatched = (c: string): boolean => matchedChunkIds.has(c) || episodeChunkIds.has(c);
+
+  // Nodes matched: name/alias substring (text leg), OR any chunk_id matched (text or episode).
+  // The text legs stay gated on a non-empty q — ''.includes('') is true, so an empty query
+  // would otherwise substring-match every node. No query AND no chunk matches ⇒ none.
   const matchedNodeIds = $derived.by<Set<string>>(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return new Set();
+    if (!q && matchedChunkIds.size === 0 && episodeChunkIds.size === 0) return new Set();
     const out = new Set<string>();
     for (const n of nodes) {
-      if (
-        n.name.toLowerCase().includes(q) ||
-        n.aliases.some((a) => a.toLowerCase().includes(q)) ||
-        n.chunk_ids.some((c) => matchedChunkIds.has(c))
-      ) {
-        out.add(n.id);
-      }
+      const textHit =
+        !!q && (n.name.toLowerCase().includes(q) || n.aliases.some((a) => a.toLowerCase().includes(q)));
+      if (textHit || n.chunk_ids.some(chunkMatched)) out.add(n.id);
     }
     return out;
   });
-  // Edges matched by the query: rel_type/fact substring, OR any chunk_id in matchedChunkIds.
+  // Edges matched: rel_type/fact substring (text leg), OR any chunk_id matched (text or episode).
   const matchedEdgeIds = $derived.by<Set<string>>(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return new Set();
+    if (!q && matchedChunkIds.size === 0 && episodeChunkIds.size === 0) return new Set();
     const out = new Set<string>();
     for (const e of links) {
-      if (
-        e.rel_type.toLowerCase().includes(q) ||
-        (e.fact ?? '').toLowerCase().includes(q) ||
-        e.chunk_ids.some((c) => matchedChunkIds.has(c))
-      ) {
-        out.add(e.id);
-      }
+      const textHit =
+        !!q && (e.rel_type.toLowerCase().includes(q) || (e.fact ?? '').toLowerCase().includes(q));
+      if (textHit || e.chunk_ids.some(chunkMatched)) out.add(e.id);
     }
     return out;
   });
   const matchCount = $derived(matchedNodeIds.size + matchedEdgeIds.size);
+
+  // How many graph items (nodes + edges) each episode (chunk_id) contributes, for the episode
+  // picker's count badge. Makes "graphless" episodes (which produced no entities/facts, e.g. a
+  // chit-chat turn) visibly read 0 so selecting one explains the empty result.
+  const episodeItemCounts = $derived.by<Map<string, number>>(() => {
+    const m = new Map<string, number>();
+    const bump = (ids: string[]): void => {
+      for (const c of ids) m.set(c, (m.get(c) ?? 0) + 1);
+    };
+    for (const n of nodes) bump(n.chunk_ids);
+    for (const e of links) bump(e.chunk_ids);
+    return m;
+  });
 
   // Node instances are filtered per type via a multi-select dropdown that works in terms of
   // VISIBLE (checked) instance ids. We only touch THIS type's instances: hidden gains the type's
@@ -790,8 +952,17 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     maxConnBy = by;
     persistEdgeFilterModes();
   }
-  function setOrphanMode(m: OrphanMode): void {
-    orphanMode = m;
+  // Per-pair "Visible edges" cap. Clamp to [MIN, CAP]; CAP === "All" (no aggregation).
+  function setVisibleEdgesPerPair(n: number): void {
+    visibleEdgesPerPair = Math.min(VISIBLE_EDGES_CAP, Math.max(VISIBLE_EDGES_MIN, Math.round(n)));
+    persistEdgeFilterModes();
+  }
+  function setLowConnTreatment(t: LowConnTreatment): void {
+    lowConnTreatment = t;
+    persistEdgeFilterModes();
+  }
+  function setLowConnThreshold(n: number): void {
+    lowConnThreshold = Math.max(LOW_CONN_THRESHOLD_MIN, Math.round(n)); // data-driven max → floor only
     persistEdgeFilterModes();
   }
   // A range equal to (or wider than) the full data span is treated as "inactive" (null) so the
@@ -807,7 +978,9 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     includeUndatedEdges = EDGE_FILTER_DEFAULTS.includeUndatedEdges;
     maxConnPerNode = EDGE_FILTER_DEFAULTS.maxConnPerNode;
     maxConnBy = EDGE_FILTER_DEFAULTS.maxConnBy;
-    orphanMode = EDGE_FILTER_DEFAULTS.orphanMode;
+    visibleEdgesPerPair = EDGE_FILTER_DEFAULTS.visibleEdgesPerPair;
+    lowConnTreatment = EDGE_FILTER_DEFAULTS.lowConnTreatment;
+    lowConnThreshold = EDGE_FILTER_DEFAULTS.lowConnThreshold;
     validRange = null;
     creationRange = null;
     persistEdgeFilterModes();
@@ -866,7 +1039,12 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     includeUndatedEdges: () => includeUndatedEdges,
     maxConnPerNode: () => maxConnPerNode,
     maxConnBy: () => maxConnBy,
-    orphanMode: () => orphanMode,
+    visibleEdgesPerPair: () => visibleEdgesPerPair,
+    lowConnTreatment: () => lowConnTreatment,
+    lowConnThreshold: () => lowConnThreshold,
+    lowConnDimIds: () => lowConnDimIds,
+    lowConnCount: () => lowConnCount,
+    maxVisibleDegree: () => maxVisibleDegree,
     validRange: () => validRange,
     creationRange: () => creationRange,
     validAtSpan: () => validAtSpan,
@@ -875,7 +1053,9 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     setIncludeUndatedEdges,
     setMaxConnPerNode,
     setMaxConnBy,
-    setOrphanMode,
+    setVisibleEdgesPerPair,
+    setLowConnTreatment,
+    setLowConnThreshold,
     setValidRange,
     setCreationRange,
     resetEdgeFilters,
@@ -887,7 +1067,14 @@ export function createKnowledgeGraphModel(deps: KnowledgeGraphModelDeps) {
     searchActive: () => searchActive,
     matchedNodeIds: () => matchedNodeIds,
     matchedEdgeIds: () => matchedEdgeIds,
-    matchCount: () => matchCount
+    matchCount: () => matchCount,
+    // ── episode filter ──
+    episodes: () => episodes,
+    episodesBusy: () => episodesBusy,
+    episodeItemCount: (id: string) => episodeItemCounts.get(id) ?? 0,
+    selectedEpisodeIds: () => [...episodeChunkIds],
+    setSelectedEpisodes,
+    clearEpisodes
   };
 }
 

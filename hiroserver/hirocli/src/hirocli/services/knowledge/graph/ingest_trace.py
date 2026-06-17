@@ -366,6 +366,68 @@ def read_ingest_trace_sidecar(workspace_path: Path, run_id: str) -> list[dict[st
     return out
 
 
+def read_group_ingest_extraction(
+    workspace_path: Path, group_id: str
+) -> dict[str, dict[str, Any]]:
+    """Per-episode at-ingest extraction summary for one graph partition (``group_id``),
+    aggregated across every ingest-trace run sidecar that belongs to it.
+
+    A corpus is ingested in batches (one ``run_id`` / sidecar per batch), so the per-episode
+    counts the corpus-review tab wants are spread across several files. This walks the trace
+    directory, picks the sidecars whose episodes carry ``group_id`` (cheaply, by peeking the
+    first record — one sidecar == one group), and returns
+    ``{chunk_id: {entity_count, fact_count, run_id, step_index}}`` so the UI can show whether an
+    episode extracted anything and link straight to its ingest-pipeline trace.
+
+    Counts are the AT-INGEST ``persisted_nodes`` / ``persisted_edges`` lengths (the same data the
+    pipeline dialog renders), so the badge and the dialog always agree. Files are processed oldest
+    → newest so a re-ingested episode keeps its latest run. Returns ``{}`` when no sidecars match
+    (e.g. the run used ``observability != "trace"``). Best-effort: a bad file/line is skipped, not
+    fatal."""
+    directory = trace_dir(workspace_path)
+    if not directory.exists():
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        files = sorted(directory.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    except OSError:
+        log.warning("⚠️ ingest trace — extraction scan failed · group=%s", group_id, exc_info=True)
+        return {}
+    for path in files:
+        try:
+            with path.open(encoding="utf-8") as fh:
+                checked_group = False
+                for raw in fh:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        rec = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if not checked_group:
+                        checked_group = True
+                        # One sidecar == one run == one group: a first-record mismatch means the
+                        # whole file is another partition — skip it without parsing the rest.
+                        if rec.get("group_id") != group_id:
+                            break
+                    cid = str(rec.get("chunk_id") or "").strip()
+                    if not cid:
+                        continue
+                    out[cid] = {
+                        "entity_count": len(rec.get("persisted_nodes") or []),
+                        "fact_count": len(rec.get("persisted_edges") or []),
+                        "run_id": str(rec.get("run_id") or ""),
+                        "step_index": rec.get("step_index", ""),
+                    }
+        except OSError:
+            log.warning(
+                "⚠️ ingest trace — extraction sidecar read failed · path=%s", path, exc_info=True
+            )
+            continue
+    return out
+
+
 def _safe_run_id(run_id: str) -> str:
     """Filesystem-safe sidecar stem — keep alnum and a small punctuation set."""
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(run_id))
@@ -382,6 +444,7 @@ __all__ = [
     "build_episode_trace",
     "current_ingest_capture",
     "make_llm_stage",
+    "read_group_ingest_extraction",
     "read_ingest_trace_sidecar",
     "stage_label",
     "stage_node_for_operation",
