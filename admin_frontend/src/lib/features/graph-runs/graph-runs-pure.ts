@@ -1,5 +1,5 @@
 /**
- * Side-effect-free helpers for Graph Runs admin UI (ledger list, run detail, Memories pane).
+ * Side-effect-free helpers for Graph Runs admin UI (ledger list, run detail).
  * Kept separate from the Svelte components so formatting and parsing stay unit-testable.
  */
 import { base } from '$app/paths';
@@ -34,8 +34,8 @@ export function runStatusDataValue(status: string): string {
 }
 
 export const RUNS_TAB = 'runs' as const;
-export const MEMORIES_TAB = 'memories' as const;
-export type ActivePane = typeof RUNS_TAB | typeof MEMORIES_TAB | string;
+/** Either the ledger list (`RUNS_TAB`) or an opened run inspector keyed by its run id. */
+export type ActivePane = typeof RUNS_TAB | string;
 
 /** Standalone knowledge answer runs written by ``KnowledgeService.answer``. */
 export const KNOWLEDGE_RUN_ID_PREFIX = 'knowledge-';
@@ -81,26 +81,16 @@ export function isGraphNodeSubstep(nodeName: string): boolean {
   return node.startsWith('tools/') || node.startsWith('knowledge/');
 }
 
-/** A11y — primary pills: workspace (graph runs subtree) vs Memories pane. */
-export const GRAPH_RUNS_PRIMARY_TAB_IDS = {
-  runsWorkspace: 'graph-runs-tab-primary-runs',
-  memories: 'graph-runs-tab-primary-memories'
-} as const;
-
-/** Secondary strip: ledger list vs opened run inspectors (shown only inside graph runs workspace). */
+/** Secondary strip: ledger list vs opened run inspectors. */
 export const GRAPH_RUNS_SUBTAB_IDS = {
   browse: 'graph-runs-subtab-browse-list'
 } as const;
-
-export const GRAPH_RUNS_PRIMARY_TABLIST_LABEL =
-  'Switch between Graph runs and Memories';
 
 /** Second-level tabs under the subtitle (browse vs open run inspectors). */
 export const GRAPH_RUNS_SUBTAB_TABLIST_LABEL = 'Ledger and opened runs';
 
 export const GRAPH_RUNS_PANEL_IDS = {
   runs: 'graph-runs-panel-runs',
-  memories: 'graph-runs-panel-memories',
   detail: 'graph-runs-panel-detail'
 } as const;
 
@@ -119,18 +109,10 @@ export function graphRunPageUrl(runId: string): string {
   return `/logs/?tab=runs&run=${encodeURIComponent(trimmed)}`;
 }
 
-/** Run-detail tabs only — not the ledger list or Memories pane. */
+/** Run-detail panes only — not the ledger list. */
 export function isRunDetailPane(pane: ActivePane): boolean {
-  return pane !== RUNS_TAB && pane !== MEMORIES_TAB;
+  return pane !== RUNS_TAB;
 }
-
-const logDateShort = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
-const logTime12h = new Intl.DateTimeFormat(undefined, {
-  hour: 'numeric',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: true
-});
 
 /** Short column titles for ledger keys (dense tables). */
 export function fieldLabel(field: keyof GraphLedgerRow): string {
@@ -306,287 +288,6 @@ export function previewMultiline(text: string): string {
     .join('\n')
     .split(' · ')
     .join('\n');
-}
-
-export function memoryPrimaryText(m: Record<string, unknown>): string {
-  const raw = m.memory ?? m.text ?? m.content ?? m['data'];
-  if (typeof raw === 'string') return raw;
-  if (raw !== null && typeof raw === 'object') return JSON.stringify(raw);
-  return raw === null || raw === undefined ? '' : String(raw);
-}
-
-export function memoryStableKey(m: Record<string, unknown>, index: number): string {
-  const id = m.id ?? m.memory_id;
-  if (typeof id === 'string' && id.length > 0) return id;
-  if (typeof id === 'number' && Number.isFinite(id)) return String(id);
-  return `mem-${index}`;
-}
-
-export function memoryId(row: Record<string, unknown>): string {
-  const raw = row.id ?? row.memory_id;
-  return raw === null || raw === undefined ? '' : String(raw).trim();
-}
-
-export function memoryMetadata(row: Record<string, unknown>): Record<string, unknown> {
-  const metadata = row.metadata;
-  return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-    ? (metadata as Record<string, unknown>)
-    : {};
-}
-
-export function memoryField(row: Record<string, unknown>, ...keys: string[]): unknown {
-  const metadata = memoryMetadata(row);
-  for (const key of keys) {
-    const direct = row[key];
-    if (direct !== null && direct !== undefined && direct !== '') return direct;
-    const meta = metadata[key];
-    if (meta !== null && meta !== undefined && meta !== '') return meta;
-  }
-  return null;
-}
-
-export function parseMemoryDate(value: unknown): Date | null {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const ms = value > 10_000_000_000 ? value : value * 1000;
-    const d = new Date(ms);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const numeric = Number(trimmed);
-  if (Number.isFinite(numeric)) return parseMemoryDate(numeric);
-  const d = new Date(trimmed);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-export function memoryUpdatedRaw(row: Record<string, unknown>): unknown {
-  return memoryField(row, 'updated_at', 'updatedAt', 'updated');
-}
-
-export function memoryCreatedRaw(row: Record<string, unknown>): unknown {
-  return memoryField(row, 'created_at', 'createdAt', 'created');
-}
-
-export function memorySortSeconds(row: Record<string, unknown>): number {
-  const updated = parseMemoryDate(memoryUpdatedRaw(row));
-  const created = parseMemoryDate(memoryCreatedRaw(row));
-  return (updated ?? created)?.getTime() ?? 0;
-}
-
-export function memoryDateDisplay(value: unknown): { date: string; time: string; title: string } {
-  const d = parseMemoryDate(value);
-  if (!d) return { date: '—', time: '—', title: '' };
-  return {
-    date: logDateShort.format(d),
-    time: logTime12h.format(d),
-    title: d.toLocaleString()
-  };
-}
-
-export function memoryChannelId(row: Record<string, unknown>): number | null {
-  const raw = memoryField(row, 'channel_id', 'chat_channel_id');
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
-  if (typeof raw === 'string') {
-    const numeric = Number(raw.trim());
-    if (Number.isFinite(numeric) && numeric > 0) return numeric;
-  }
-  return null;
-}
-
-export function memoryChannel(
-  row: Record<string, unknown>,
-  channelById: Map<number, ChatChannelRow>
-): ChatChannelRow | undefined {
-  const id = memoryChannelId(row);
-  return id === null ? undefined : channelById.get(id);
-}
-
-export function memoryChannelName(
-  row: Record<string, unknown>,
-  channelById: Map<number, ChatChannelRow>
-): string {
-  const id = memoryChannelId(row);
-  if (id === null) return '—';
-  const name = channelById.get(id)?.name?.trim();
-  return name || `Channel ${id}`;
-}
-
-export function memoryAgentId(row: Record<string, unknown>): string {
-  return String(memoryField(row, 'agent_id', 'character_id') ?? '').trim();
-}
-
-export function memoryCharacter(
-  row: Record<string, unknown>,
-  characterMap: Record<string, CharacterRow>,
-  channelById: Map<number, ChatChannelRow>
-): { name: string; photo: string | null } {
-  const agentId = memoryAgentId(row);
-  const ch = memoryChannel(row, channelById);
-  const character = agentId ? characterMap[agentId] : undefined;
-  const name = character?.name?.trim() || ch?.character?.name?.trim() || (agentId || '—');
-  const photo = character?.photo_data_url || ch?.photo_data_url || null;
-  return { name, photo };
-}
-
-export function memorySharedLabel(row: Record<string, unknown>): string {
-  const raw = memoryField(row, 'shared');
-  if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
-  if (typeof raw === 'string') {
-    const lower = raw.trim().toLowerCase();
-    if (['true', '1', 'yes'].includes(lower)) return 'Yes';
-    if (['false', '0', 'no'].includes(lower)) return 'No';
-  }
-  return '—';
-}
-
-export function memorySourceLabel(row: Record<string, unknown>): string {
-  const source = String(memoryField(row, 'source') ?? '').trim();
-  return source || '—';
-}
-
-// ── Graph-structure accessors (Memories table columns) ──────────────────────
-// These expose the graph shape behind each remembered fact: its kind (relation edge vs
-// entity attribute summary), bi-temporal validity, the entities/relation it encodes, the
-// partition it lives in, and its provenance chunk_ids. All read fields the backend now
-// enriches onto each row (see graphiti_service._edge_to_memory/_node_to_memory).
-
-export type MemoryKind = 'relation' | 'summary' | '';
-
-/** 'relation' = a fact edge between two entities; 'summary' = an entity attribute summary. */
-export function memoryKind(row: Record<string, unknown>): MemoryKind {
-  const k = String(row.kind ?? '').trim().toLowerCase();
-  return k === 'relation' || k === 'summary' ? k : '';
-}
-
-export function memoryKindLabel(row: Record<string, unknown>): string {
-  const k = memoryKind(row);
-  if (k === 'relation') return 'Relation';
-  if (k === 'summary') return 'Summary';
-  return '—';
-}
-
-export type MemoryValidity = {
-  /** A fact is no longer current once it has an invalid_at (stopped being true) or expired_at. */
-  expired: boolean;
-  invalidAt: unknown;
-  expiredAt: unknown;
-  validAt: unknown;
-};
-
-/** Bi-temporal status of a fact. Summaries are always current (no invalid_at). */
-export function memoryValidity(row: Record<string, unknown>): MemoryValidity {
-  const invalidAt = memoryField(row, 'invalid_at', 'invalidAt');
-  const expiredAt = memoryField(row, 'expired_at', 'expiredAt');
-  const validAt = memoryCreatedRaw(row); // created_at IS the edge's valid_at
-  return { expired: invalidAt != null || expiredAt != null, invalidAt, expiredAt, validAt };
-}
-
-/** Truncate a node/edge uuid for display when an entity name is missing. */
-export function shortGraphId(id: string): string {
-  const s = String(id ?? '').trim();
-  return s.length > 8 ? `${s.slice(0, 8)}…` : s;
-}
-
-export type MemoryEntities =
-  | { kind: 'relation'; source: string; relation: string; target: string }
-  | { kind: 'summary'; entity: string; type: string }
-  | null;
-
-/** The structured entities/relation a fact encodes: `Source —[REL]→ Target` for relations,
- *  `Entity (Type)` for summaries. Endpoint names fall back to a short uuid when unresolved. */
-export function memoryEntities(row: Record<string, unknown>): MemoryEntities {
-  const k = memoryKind(row);
-  if (k === 'relation') {
-    const source =
-      String(memoryField(row, 'source_name') ?? '').trim() ||
-      shortGraphId(String(row.source_id ?? ''));
-    const target =
-      String(memoryField(row, 'target_name') ?? '').trim() ||
-      shortGraphId(String(row.target_id ?? ''));
-    const relation = String(memoryField(row, 'relation') ?? '').trim();
-    if (!source && !target && !relation) return null;
-    return { kind: 'relation', source, relation, target };
-  }
-  if (k === 'summary') {
-    const entity = String(memoryField(row, 'entity_name') ?? '').trim();
-    const type = String(memoryField(row, 'entity_type') ?? '').trim();
-    if (!entity && !type) return null;
-    return { kind: 'summary', entity, type };
-  }
-  return null;
-}
-
-export function memoryGroupId(row: Record<string, unknown>): string {
-  return String(memoryField(row, 'group_id', 'groupId') ?? '').trim();
-}
-
-/** Supporting episode/message ids (provenance) — the turns a fact was extracted from. */
-export function memoryChunkIds(row: Record<string, unknown>): string[] {
-  const raw = row.chunk_ids;
-  if (!Array.isArray(raw)) return [];
-  return raw.map((c) => String(c ?? '').trim()).filter(Boolean);
-}
-
-/** Case-insensitive substring match across common memory row fields (Memories tab search). */
-export function memoryRowMatchesSearchNeedle(
-  row: Record<string, unknown>,
-  needleLower: string,
-  characterMap: Record<string, CharacterRow>,
-  channelById: Map<number, ChatChannelRow>
-): boolean {
-  if (!needleLower) return true;
-  const primary = memoryPrimaryText(row).toLowerCase();
-  const id = memoryId(row).toLowerCase();
-  const src = String(memoryField(row, 'source') ?? '').toLowerCase();
-  const chName = memoryChannelName(row, channelById).toLowerCase();
-  const charName = memoryCharacter(row, characterMap, channelById).name.toLowerCase();
-  return (
-    primary.includes(needleLower) ||
-    id.includes(needleLower) ||
-    src.includes(needleLower) ||
-    chName.includes(needleLower) ||
-    charName.includes(needleLower)
-  );
-}
-
-export type MemoryRowFilterOpts = {
-  characterId: string;
-  sourceFilter: string;
-  searchNeedle: string;
-  // Date-range scope (ms epoch, NaN when unset) — also defines a delete scope on the pane.
-  dateFromMs: number;
-  dateToMs: number;
-  characterMap: Record<string, CharacterRow>;
-  channelById: Map<number, ChatChannelRow>;
-};
-
-export function memoryRowPassesFilters(row: Record<string, unknown>, opts: MemoryRowFilterOpts): boolean {
-  const charF = opts.characterId.trim();
-  if (charF && memoryAgentId(row) !== charF) return false;
-
-  // Date-range filter by the memory's effective timestamp (valid_at / created). Undated
-  // rows fall outside any explicit range so a date scope never silently deletes them.
-  if (Number.isFinite(opts.dateFromMs) || Number.isFinite(opts.dateToMs)) {
-    const ts = memorySortSeconds(row);
-    if (ts === 0) return false;
-    if (Number.isFinite(opts.dateFromMs) && ts < opts.dateFromMs) return false;
-    if (Number.isFinite(opts.dateToMs) && ts > opts.dateToMs) return false;
-  }
-
-  const srcF = opts.sourceFilter;
-  if (srcF === '__empty__') {
-    if (String(memoryField(row, 'source') ?? '').trim() !== '') return false;
-  } else if (srcF.trim()) {
-    const rowSrc = String(memoryField(row, 'source') ?? '').trim();
-    if (rowSrc !== srcF.trim()) return false;
-  }
-
-  if (opts.searchNeedle && !memoryRowMatchesSearchNeedle(row, opts.searchNeedle, opts.characterMap, opts.channelById)) {
-    return false;
-  }
-  return true;
 }
 
 export function formatCost(value: number | ''): string {

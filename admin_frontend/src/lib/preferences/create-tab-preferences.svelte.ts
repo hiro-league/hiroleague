@@ -22,6 +22,12 @@ export type TabPreferencesOptions<TTab extends string> = {
   /** Whitelist used to validate URL/session values; anything else is ignored. */
   allowed: readonly TTab[];
   /**
+   * URL query param this strip syncs. Defaults to `'tab'` (page-level tabs).
+   * A second-level strip on the same page uses a distinct param (e.g. `'sub'`)
+   * so it coexists with the page `?tab=` — `setActiveTab` preserves other params.
+   */
+  param?: string;
+  /**
    * Extra `?param`s owned by this page that should be cleared whenever the
    * tab changes (unless a caller passes a replacement in `extras`). Typical
    * use: tab-scoped filters such as `provider_id`, `model_kind`.
@@ -56,6 +62,7 @@ export function createTabPreferences<TTab extends string>(
 ): TabPreferences<TTab> {
   const allowedSet = new Set<string>(opts.allowed as readonly string[]);
   const omitDefault = opts.omitDefaultFromUrl ?? false;
+  const param = opts.param ?? 'tab';
 
   function normalise(raw: string | null): TTab | null {
     return raw !== null && allowedSet.has(raw) ? (raw as TTab) : null;
@@ -65,13 +72,13 @@ export function createTabPreferences<TTab extends string>(
 
   function initialize() {
     activeTab =
-      normalise(page.url.searchParams.get('tab')) ??
+      normalise(page.url.searchParams.get(param)) ??
       normalise(readSessionString(opts.storageKey)) ??
       opts.defaultTab;
   }
 
   function syncActiveTabFromUrl() {
-    const fromUrl = normalise(page.url.searchParams.get('tab'));
+    const fromUrl = normalise(page.url.searchParams.get(param));
     if (fromUrl !== null && fromUrl !== activeTab) {
       activeTab = fromUrl;
     }
@@ -83,9 +90,9 @@ export function createTabPreferences<TTab extends string>(
 
     const nextUrl = new URL(page.url);
     if (omitDefault && tab === opts.defaultTab) {
-      nextUrl.searchParams.delete('tab');
+      nextUrl.searchParams.delete(param);
     } else {
-      nextUrl.searchParams.set('tab', tab);
+      nextUrl.searchParams.set(param, tab);
     }
 
     if (opts.urlParamsToReset) {

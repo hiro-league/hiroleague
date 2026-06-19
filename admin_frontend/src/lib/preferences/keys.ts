@@ -26,6 +26,8 @@ export const PREF_KEYS = {
   memoriesActiveTab: 'hiro.admin.memories.activeTab',
   /** Primary tab on the Eval page: memory vs knowledge eval track. */
   evalActiveTab: 'hiro.admin.eval.activeTab',
+  /** Second-level section sub-tab on the Eval page: execute / corpus / answers / report (`?sub=`). */
+  evalSubtab: 'hiro.admin.eval.activeSubtab',
   /** Primary tab on the Logs page: live log feed vs the Graph runs ledger. */
   logsPrimaryActiveTab: 'hiro.admin.logs.activeTab',
   preferencesActiveTab: 'hiro.admin.preferences.activeTab',
@@ -49,24 +51,24 @@ export const PREF_KEYS = {
   // across reloads). The eval *run* itself is no longer cached client-side:
   // it's replayed from the server registry (GET /knowledge/eval/state) so the
   // run stays consistent across navigation and across origins (Vite vs packaged).
-  knowledgeAskEvalIngest: 'hiro.admin.knowledge.askEvalIngest',
-  knowledgeAskEvalBuildGraph: 'hiro.admin.knowledge.askEvalBuildGraph',
+  evalIngest: 'hiro.admin.eval.ingest',
+  evalBuildGraph: 'hiro.admin.eval.buildGraph',
   /** Eval (memory track) — remember-phase episode batch window as 1-based, INCLUSIVE episode
    *  numbers (From episode N to episode M; To = 0 ⇒ to the end). Persisted so manual batched
    *  builds keep their place across reloads. (Clear is never persisted — it must be opted into
    *  per run so a reload can't silently wipe the graph.) */
-  knowledgeEvalEpisodeFrom: 'hiro.admin.knowledge.evalEpisodeFrom',
-  knowledgeEvalEpisodeTo: 'hiro.admin.knowledge.evalEpisodeTo',
+  evalEpisodeFrom: 'hiro.admin.eval.episodeFrom',
+  evalEpisodeTo: 'hiro.admin.eval.episodeTo',
   /** Eval corpus-picker folder (the path scanned for corpuses). */
-  knowledgeEvalFolder: 'hiro.admin.knowledge.evalFolder',
+  evalFolder: 'hiro.admin.eval.folder',
   /** Eval last-selected corpus id, per track (JSON map { memory, knowledge }). */
-  knowledgeEvalCorpus: 'hiro.admin.knowledge.evalCorpus',
+  evalCorpus: 'hiro.admin.eval.corpus',
   /** Eval: run the optional LLM judge (grade answers vs ideal). */
-  knowledgeEvalJudge: 'hiro.admin.knowledge.evalJudge',
+  evalJudge: 'hiro.admin.eval.judge',
   /** Eval (memory track): last-used answer-prompt profile id, per corpus (JSON map { corpusId }). */
-  knowledgeEvalAnswerPrompt: 'hiro.admin.knowledge.evalAnswerPrompt',
+  evalAnswerPrompt: 'hiro.admin.eval.answerPrompt',
   /** Eval (memory track): max questions evaluated concurrently (1 = serial). */
-  knowledgeEvalQuestionConcurrency: 'hiro.admin.knowledge.evalQuestionConcurrency',
+  evalQuestionConcurrency: 'hiro.admin.eval.questionConcurrency',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
   knowledgeGraphOptions: 'hiro.admin.knowledge.graphOptions',
   /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */
@@ -100,6 +102,7 @@ export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type MemoriesTabPreference = 'memories' | 'graph';
 export type EvalTabPreference = 'memory' | 'knowledge';
+export type EvalSubtabPreference = 'execute' | 'corpus' | 'answers' | 'report';
 export type GraphPanelSidePreference = 'auto' | 'left' | 'right';
 export type LogsPrimaryTabPreference = 'logs' | 'runs';
 export type PreferencesTabPreference =

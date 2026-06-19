@@ -6,13 +6,13 @@
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import KnowledgeEvalPanel from '$lib/features/knowledge/eval/KnowledgeEvalPanel.svelte';
+  import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
   import { knowledgeEventStream } from '$lib/features/knowledge/shared/knowledge-event-stream.svelte';
   import { createEvalPreferences } from '$lib/preferences/eval-preferences.svelte';
   import {
-    createKnowledgeEvalModel,
+    createEvalModel,
     type EvalTrack
-  } from '$lib/features/knowledge/state/knowledge-eval.svelte';
+  } from '$lib/features/eval/state/eval-model.svelte';
 
   /**
    * Top-level Eval page. Thin composition root: it owns the shared error banner,
@@ -23,7 +23,7 @@
    */
   let error = $state<string | null>(null);
   const tabPrefs = createEvalPreferences();
-  const eval_ = createKnowledgeEvalModel({ setError: (msg) => (error = msg) });
+  const eval_ = createEvalModel({ setError: (msg) => (error = msg) });
 
   onMount(() => {
     tabPrefs.initialize();
@@ -99,5 +99,5 @@
     </div>
   {/if}
 
-  <KnowledgeEvalPanel {eval_} />
+  <EvalPanel {eval_} />
 </AdminPageHeader>

@@ -16,7 +16,7 @@
     IngestTraceRecord,
     IngestTraceStage
   } from '$lib/api/graph-runs';
-  import { shortGraphId } from './graph-runs-pure';
+  import { shortGraphId } from '$lib/format/short-graph-id';
 
   let {
     trace,

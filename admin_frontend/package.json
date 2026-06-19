@@ -8,7 +8,7 @@
     "build": "svelte-kit sync && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test:unit": "vitest run",
+    "test:unit": "node scripts/run-vitest.mjs run",
     "package:python": "npm run build"
   },
   "devDependencies": {

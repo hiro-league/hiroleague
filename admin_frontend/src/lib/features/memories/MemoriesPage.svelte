@@ -9,11 +9,9 @@
   import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import { createMemoriesPreferences } from '$lib/preferences/memories-preferences.svelte';
   import type { MemoriesTabPreference } from '$lib/preferences/keys';
-  // Memories is now its own page. It reuses the memory panel + dialogs that used
-  // to live under the Graph Runs page (they are already memory-only); relocating
-  // them into this slice is a deferred "enhance later" cleanup.
-  import GraphRunsMemoriesPanel from '$lib/features/graph-runs/GraphRunsMemoriesPanel.svelte';
-  import GraphRunsDialogs from '$lib/features/graph-runs/GraphRunsDialogs.svelte';
+  import MemoriesPanel from './MemoriesPanel.svelte';
+  import MemoriesDialogs from './MemoriesDialogs.svelte';
+  import { MEMORIES_A11Y } from './shared/memories-a11y';
   // The entity-graph viz moved here from the Knowledge page as a second tab. The
   // component still lives under features/knowledge/graph (it renders the
   // knowledge entity graph); the Memories controller owns its model + live SSE.
@@ -33,7 +31,14 @@
   });
 
   const tabDescriptors: readonly AdminTabDescriptor<MemoriesTabPreference>[] = [
-    { id: 'memories', label: 'Memories', kind: 'pane', icon: Brain },
+    {
+      id: 'memories',
+      label: 'Memories',
+      kind: 'pane',
+      icon: Brain,
+      htmlId: MEMORIES_A11Y.memoriesTab,
+      ariaControls: MEMORIES_A11Y.memoriesPanel
+    },
     { id: 'graph', label: 'Graph', kind: 'pane', icon: Share2 }
   ];
 </script>
@@ -68,7 +73,7 @@
   {#if tabPrefs.activeTab === 'graph'}
     <KnowledgeGraphPanel graph={ctl.graph} />
   {:else}
-    <GraphRunsMemoriesPanel
+    <MemoriesPanel
       bind:memorySearch={ctl.memorySearch}
       bind:memoryFilterGroupId={ctl.memoryFilterGroupId}
       bind:memoryFilterCharacterId={ctl.memoryFilterCharacterId}
@@ -96,7 +101,7 @@
   {/if}
 </AdminPageHeader>
 
-<GraphRunsDialogs
+<MemoriesDialogs
   memoryJsonRow={ctl.memoryJsonRow}
   memoryProvenanceRow={ctl.memoryProvenanceRow}
   memoryProvenanceChunks={ctl.memoryProvenanceChunks}

@@ -24,12 +24,8 @@ import {
   memoryId,
   memoryRowPassesFilters,
   memorySortSeconds
-} from '$lib/features/graph-runs/graph-runs-pure';
-import {
-  graphRunsClearAllMemories,
-  graphRunsDeleteMemories,
-  graphRunsLoadMemoriesList
-} from '$lib/features/graph-runs/state/graph-runs-memory-service';
+} from '../shared/memory-pure';
+import { clearAllMemories, deleteMemories, loadMemoriesList } from './memories-service';
 import { createKnowledgeGraphModel } from '$lib/features/knowledge/state/knowledge-graph.svelte';
 
 export function createMemoriesPageController() {
@@ -187,7 +183,7 @@ export function createMemoriesPageController() {
     memoriesLoading = true;
     try {
       // Scope to the selected partition when one is chosen; '' loads the page default.
-      const r = await graphRunsLoadMemoriesList(memoryFilterGroupId.trim() || undefined);
+      const r = await loadMemoriesList(memoryFilterGroupId.trim() || undefined);
       memoryEnabled = r.memoryEnabled;
       memoriesRows = r.memories;
       memoriesError = r.error;
@@ -266,9 +262,9 @@ export function createMemoriesPageController() {
       // exactly the shown rows by edge id.
       if (memoryFiltersActive) {
         const ids = visibleMemoriesRows.map((row) => memoryId(row)).filter(Boolean);
-        await graphRunsDeleteMemories(ids);
+        await deleteMemories(ids);
       } else {
-        await graphRunsClearAllMemories();
+        await clearAllMemories();
       }
       clearMemoriesConfirmOpen = false;
       await loadMemories();

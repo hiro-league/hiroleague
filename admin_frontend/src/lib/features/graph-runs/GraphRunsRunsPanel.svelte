@@ -7,9 +7,10 @@
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { FileText } from '@lucide/svelte';
-  import GraphRunsListCharacterCell from './GraphRunsListCharacterCell.svelte';
+  import { formatCompactDateTime } from '$lib/format/compact-datetime';
   import { GRAPH_RUNS_PREVIEW_HIGHLIGHT_MARK } from './shared/graph-runs-ui';
   import {
     graphRunsDateCellClass,
@@ -26,7 +27,6 @@
     highlightPreviewSegments,
     listRowChannelName,
     listRowCharacter,
-    memoryDateDisplay,
     GRAPH_RUNS_PANEL_IDS,
     GRAPH_RUNS_SUBTAB_IDS,
     trimRunIdForList,
@@ -169,13 +169,13 @@
         {@const outputPreviewTooltip = String(row.output_preview ?? '').trim()
           ? String(row.output_preview ?? '')
           : undefined}
-        {@const listTs = memoryDateDisplay(row.ts)}
+        {@const listTs = formatCompactDateTime(row.ts)}
         <tr class:muted-open={openRunIds.includes(row.run_id)}>
           <td class={graphRunsDateCellClass} title={listTs.title}>
             <span>{listTs.date}</span>
             <span>{listTs.time}</span>
           </td>
-          <GraphRunsListCharacterCell photo={listCh.photo} name={listCh.name} />
+          <AdminAvatarNameCell photo={listCh.photo} name={listCh.name} />
           <td class={graphRunsNameCellClass}>{listRowChannelName(row, channelById)}</td>
           <td class="font-mono" title={row.run_id}>{graphRunKindLabel(row.run_id)}</td>
           <td class="align-middle">
