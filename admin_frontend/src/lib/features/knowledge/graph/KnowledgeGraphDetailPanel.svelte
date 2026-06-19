@@ -226,6 +226,69 @@
   });
 </script>
 
+{#snippet detailHeader(accent: string, HeaderIcon: typeof Circle, typeLabel: string, name: string)}
+  <div
+    class="flex items-start gap-2.5 border-b p-3"
+    style="background-color: color-mix(in srgb, {accent} 14%, transparent);"
+  >
+    <span
+      class="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-md text-white"
+      style="background-color: {accent};"
+    >
+      <HeaderIcon size={16} aria-hidden="true" />
+    </span>
+    <div class="min-w-0 flex-1">
+      <div class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {typeLabel}
+      </div>
+      <div class="truncate font-semibold" title={name}>{name}</div>
+    </div>
+    <button
+      type="button"
+      onclick={onFlipSide}
+      class="rounded px-1 text-muted-foreground hover:bg-accent"
+      aria-label={side === 'left' ? 'Move panel to the right' : 'Move panel to the left'}
+      title={side === 'left' ? 'Move panel right' : 'Move panel left'}
+    >
+      {#if side === 'left'}
+        <PanelRight size={15} aria-hidden="true" />
+      {:else}
+        <PanelLeft size={15} aria-hidden="true" />
+      {/if}
+    </button>
+    <button
+      type="button"
+      onclick={() => graph.clearSelection()}
+      class="-mr-1 rounded px-1.5 text-muted-foreground hover:bg-accent"
+      aria-label="Close details">✕</button
+    >
+  </div>
+{/snippet}
+
+{#snippet summaryBlock()}
+  {#if summaryText}
+    {@const long = summaryText.length > SUMMARY_SNIPPET_CHARS}
+    {@const shown =
+      summaryShowFull || !long ? summaryText : summaryText.slice(0, SUMMARY_SNIPPET_CHARS) + '…'}
+    <div class={cn('rounded-md bg-muted/40 p-2 text-xs text-muted-foreground', edge && 'italic')}>
+      {#if edge}“{/if}<GraphDetailHighlight text={shown} {search} />{#if edge}”{/if}
+      {#if long}
+        <button
+          type="button"
+          onclick={() => (summaryExpanded = !summaryShowFull)}
+          class="ml-1 font-medium text-primary not-italic hover:underline"
+        >
+          {summaryShowFull ? 'Show less' : 'Show more'}
+        </button>
+      {/if}
+    </div>
+  {:else if aggregateEdge}
+    <div class="text-xs text-muted-foreground">
+      {graph.nodeName(aggregateEdge.source)} ↔ {graph.nodeName(aggregateEdge.target)}
+    </div>
+  {/if}
+{/snippet}
+
 {#if node || edge || aggregateEdge}
   {@const accent = node ? colorFor(node.type) : 'rgb(100,116,139)'}
   {@const HeaderIcon = node ? nodeIcon(node.type) : Spline}
@@ -235,42 +298,7 @@
       side === 'left' ? 'left-0 border-r' : 'right-0 border-l'
     )}
   >
-    <div
-      class="flex items-start gap-2.5 border-b p-3"
-      style="background-color: color-mix(in srgb, {accent} 14%, transparent);"
-    >
-      <span
-        class="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-md text-white"
-        style="background-color: {accent};"
-      >
-        <HeaderIcon size={16} aria-hidden="true" />
-      </span>
-      <div class="min-w-0 flex-1">
-        <div class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {headerType}
-        </div>
-        <div class="truncate font-semibold" title={headerName}>{headerName}</div>
-      </div>
-      <button
-        type="button"
-        onclick={onFlipSide}
-        class="rounded px-1 text-muted-foreground hover:bg-accent"
-        aria-label={side === 'left' ? 'Move panel to the right' : 'Move panel to the left'}
-        title={side === 'left' ? 'Move panel right' : 'Move panel left'}
-      >
-        {#if side === 'left'}
-          <PanelRight size={15} aria-hidden="true" />
-        {:else}
-          <PanelLeft size={15} aria-hidden="true" />
-        {/if}
-      </button>
-      <button
-        type="button"
-        onclick={() => graph.clearSelection()}
-        class="-mr-1 rounded px-1.5 text-muted-foreground hover:bg-accent"
-        aria-label="Close details">✕</button
-      >
-    </div>
+    {@render detailHeader(accent, HeaderIcon, headerType, headerName)}
 
     <div class="flex flex-none flex-col gap-2 border-b p-3">
       <div class="relative">
@@ -305,27 +333,7 @@
         </div>
       {/if}
 
-      {#if summaryText}
-        {@const long = summaryText.length > SUMMARY_SNIPPET_CHARS}
-        {@const shown =
-          summaryShowFull || !long ? summaryText : summaryText.slice(0, SUMMARY_SNIPPET_CHARS) + '…'}
-        <div class={cn('rounded-md bg-muted/40 p-2 text-xs text-muted-foreground', edge && 'italic')}>
-          {#if edge}“{/if}<GraphDetailHighlight text={shown} {search} />{#if edge}”{/if}
-          {#if long}
-            <button
-              type="button"
-              onclick={() => (summaryExpanded = !summaryShowFull)}
-              class="ml-1 font-medium text-primary not-italic hover:underline"
-            >
-              {summaryShowFull ? 'Show less' : 'Show more'}
-            </button>
-          {/if}
-        </div>
-      {:else if aggregateEdge}
-        <div class="text-xs text-muted-foreground">
-          {graph.nodeName(aggregateEdge.source)} ↔ {graph.nodeName(aggregateEdge.target)}
-        </div>
-      {/if}
+      {@render summaryBlock()}
     </div>
 
     <div class="flex flex-none gap-1 border-b px-2 pt-2" role="tablist">

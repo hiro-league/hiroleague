@@ -23,6 +23,14 @@ import {
   withRenderKeys,
   type RenderLogRow
 } from '../shared/logs-ui';
+import {
+  computeScopeMsgChipStripeByRowKey,
+  createScopeMsgOrdinalState,
+  getScopeMsgOrdinal as lookupScopeMsgOrdinal,
+  resetScopeMsgOrdinalState,
+  syncScopeMsgOrdinalsFromRows,
+  type ScopeMsgOrdinalState
+} from '../shared/logs-ordinal';
 
 const INITIAL_TAIL_LINES = 500;
 
@@ -76,8 +84,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   let searchFetchGeneration = 0;
 
   /** Per page visit: stable 1,2,3… per distinct ``scope_msg_id`` (survives row filters; see sync effect). */
-  const scopeMsgOrdinalMap = new Map<string, number>();
-  let scopeMsgOrdinalSeq = 1;
+  const scopeMsgOrdinalState: ScopeMsgOrdinalState = createScopeMsgOrdinalState();
   let scopeMsgOrdinalVersion = $state(0);
 
   const availableSources = $derived.by<LogSourceFilter[]>(() => sourcesForLayout(layout));
@@ -113,46 +120,15 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     activeRowKey ? visibleRows.find((row) => row._rowKey === activeRowKey) ?? null : null
   );
 
-  /**
-   * Chip color A/B alternates when the message ordinal changes between consecutive visible rows
-   * (rows without a scope column are skipped so the stripe does not flip on blank lines).
-   */
   const scopeMsgChipStripeByRowKey = $derived.by(() => {
     void scopeMsgOrdinalVersion;
-    const out = new Map<string, boolean>();
-    let alt = false;
-    let lastOrd: number | null = null;
-    for (const row of visibleRows) {
-      const id = row.scope_msg_id?.trim();
-      if (!id) continue;
-      const ord = scopeMsgOrdinalMap.get(id) ?? null;
-      if (ord == null) continue;
-      if (lastOrd !== null && ord !== lastOrd) alt = !alt;
-      lastOrd = ord;
-      out.set(row._rowKey, alt);
-    }
-    return out;
+    return computeScopeMsgChipStripeByRowKey(scopeMsgOrdinalState, visibleRows);
   });
 
-  /** Assign next ordinal on first chronological sighting of each ``scope_msg_id`` in loaded rows. */
-  function syncScopeMsgOrdinalsFromRows(allRows: RenderLogRow[]) {
-    if (allRows.length === 0) return;
-    const sorted = [...allRows].sort((a, b) => a.timestamp - b.timestamp);
-    let added = false;
-    for (const row of sorted) {
-      const id = row.scope_msg_id?.trim();
-      if (!id) continue;
-      if (!scopeMsgOrdinalMap.has(id)) {
-        scopeMsgOrdinalMap.set(id, scopeMsgOrdinalSeq++);
-        added = true;
-      }
-    }
-    if (added) scopeMsgOrdinalVersion++;
-  }
-
   $effect(() => {
-    rows;
-    syncScopeMsgOrdinalsFromRows(rows);
+    if (syncScopeMsgOrdinalsFromRows(scopeMsgOrdinalState, rows)) {
+      scopeMsgOrdinalVersion++;
+    }
   });
 
   $effect(() => {
@@ -496,16 +472,13 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       window.clearTimeout(searchTimer);
       searchTimer = null;
     }
-    scopeMsgOrdinalMap.clear();
-    scopeMsgOrdinalSeq = 1;
+    resetScopeMsgOrdinalState(scopeMsgOrdinalState);
     scopeMsgOrdinalVersion++;
   }
 
   function getScopeMsgOrdinal(msgId: string | null | undefined): number | null {
     scopeMsgOrdinalVersion;
-    const id = msgId?.trim();
-    if (!id) return null;
-    return scopeMsgOrdinalMap.get(id) ?? null;
+    return lookupScopeMsgOrdinal(scopeMsgOrdinalState, msgId);
   }
 
   function getScopeMsgChipStripeAlt(rowKey: string): boolean {

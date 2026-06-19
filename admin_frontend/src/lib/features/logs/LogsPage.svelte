@@ -1,11 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
-  import { FolderOpen, List, Workflow } from '@lucide/svelte';
+  import { FolderOpen } from '@lucide/svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import type { LogsPrimaryTabPreference } from '$lib/preferences/keys';
   import { ADMIN_HEADER_INTRO, ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import ToastHost from '$lib/ui/ToastHost.svelte';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
@@ -20,6 +18,7 @@
   import GraphRunsDetailPanel from '$lib/features/graph-runs/GraphRunsDetailPanel.svelte';
   import GraphRunsSubtabNav from '$lib/features/graph-runs/GraphRunsSubtabNav.svelte';
   import { createGraphRunsPageController } from '$lib/features/graph-runs/state/graph-runs-controller.svelte';
+  import { LOGS_TAB_DESCRIPTORS } from './shared/logs-page-config';
 
   // Logs feed (first tab) — controller + filter prefs owned here so the shared
   // header chrome (folder button, counts, collapse chevron) can read them.
@@ -35,15 +34,6 @@
 
   const isRunsTab = $derived(tabPrefs.activeTab === 'runs');
   const pageTitle = $derived(isRunsTab ? 'Graph runs' : 'Logs');
-
-  const tabDescriptors: readonly AdminTabDescriptor<LogsPrimaryTabPreference>[] = [
-    { id: 'logs', label: 'Logs', kind: 'pane', icon: List },
-    { id: 'runs', label: 'Graph runs', kind: 'pane', icon: Workflow }
-  ];
-
-  function openLogsFolder() {
-    void logsCtrl.openLogsFolder(notify);
-  }
 
   onMount(() => {
     tabPrefs.initialize();
@@ -73,7 +63,7 @@
         class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
         type="button"
         disabled={!logsCtrl.layout?.log_dir?.trim()}
-        onclick={openLogsFolder}
+        onclick={() => void logsCtrl.openLogsFolder(notify)}
         title={logsCtrl.layout?.log_dir?.trim()
           ? `Open logs folder: ${logsCtrl.layout.log_dir.trim()}`
           : 'Open logs folder'}
@@ -107,7 +97,7 @@
     <AdminTabStrip
       ariaLabel="Logs sections"
       class="max-w-full flex-wrap"
-      tabs={tabDescriptors}
+      tabs={LOGS_TAB_DESCRIPTORS}
       active={tabPrefs.activeTab}
       onSelect={(id) => {
         void tabPrefs.setActiveTab(id);

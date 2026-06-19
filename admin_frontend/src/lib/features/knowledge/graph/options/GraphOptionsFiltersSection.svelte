@@ -1,8 +1,10 @@
 <script lang="ts">
   import { ChevronDown } from '@lucide/svelte';
   import { cn } from '$lib/utils';
-  import GraphRangeSlider from '../GraphRangeSlider.svelte';
+  import GraphOptionsButtonGroup from './GraphOptionsButtonGroup.svelte';
+  import GraphOptionsDateRangeField from './GraphOptionsDateRangeField.svelte';
   import GraphOptionsResetDot from './GraphOptionsResetDot.svelte';
+  import GraphOptionsScalarField from './GraphOptionsScalarField.svelte';
   import {
     LOW_CONN_THRESHOLD_MIN,
     MAX_CONN_PER_NODE_CAP,
@@ -73,34 +75,15 @@
   </button>
   {#if open}
     <div class="space-y-3 p-2.5">
-      <div>
-        <div class="mb-1 flex items-center text-xs">
-          <span class="flex items-center font-medium">
-            Edge validation
-            <GraphOptionsResetDot
-              dirty={graph.edgeValidity() !== 'all'}
-              onReset={() => graph.setEdgeValidity('all')}
-            />
-          </span>
-        </div>
-        <div class="grid grid-cols-3 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Filter edges by validity">
-          {#each VALIDITY_MODES as mode (mode.value)}
-            {@const active = graph.edgeValidity() === mode.value}
-            <button
-              type="button"
-              onclick={() => graph.setEdgeValidity(mode.value)}
-              class={cn(
-                'rounded px-1.5 py-1 text-xs font-medium transition-colors',
-                active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-              aria-pressed={active}
-              title={mode.title}
-            >
-              {mode.label}
-            </button>
-          {/each}
-        </div>
-      </div>
+      <GraphOptionsButtonGroup
+        title="Edge validation"
+        dirty={graph.edgeValidity() !== 'all'}
+        onReset={() => graph.setEdgeValidity('all')}
+        modes={VALIDITY_MODES}
+        value={graph.edgeValidity()}
+        onChange={(v) => graph.setEdgeValidity(v as EdgeValidity)}
+        ariaLabel="Filter edges by validity"
+      />
 
       <div>
         <div class="mb-1 flex items-center justify-between text-xs">
@@ -147,53 +130,29 @@
         </div>
       </div>
 
-      <div>
-        <div class="mb-1 flex items-center text-xs">
-          <span class="flex items-center font-medium">
-            Valid date
-            <GraphOptionsResetDot
-              dirty={graph.validRange() !== null}
-              onReset={() => validSpan && graph.setValidRange({ lo: validSpan.lo, hi: validSpan.hi })}
-            />
-          </span>
-        </div>
-        {#if validSpan}
-          <GraphRangeSlider
-            min={validSpan.lo}
-            max={validSpan.hi}
-            step={rangeStep(validSpan)}
-            value={validValue}
-            format={fmtDate}
-            onChange={(lo, hi) => graph.setValidRange({ lo, hi })}
-          />
-        {:else}
-          <p class="text-[10px] text-muted-foreground">No facts carry a valid date.</p>
-        {/if}
-      </div>
+      <GraphOptionsDateRangeField
+        title="Valid date"
+        dirty={graph.validRange() !== null}
+        onReset={() => validSpan && graph.setValidRange({ lo: validSpan.lo, hi: validSpan.hi })}
+        span={validSpan}
+        value={validValue}
+        step={rangeStep(validSpan)}
+        format={fmtDate}
+        onChange={(lo, hi) => graph.setValidRange({ lo, hi })}
+        emptyText="No facts carry a valid date."
+      />
 
-      <div>
-        <div class="mb-1 flex items-center text-xs">
-          <span class="flex items-center font-medium">
-            Creation date
-            <GraphOptionsResetDot
-              dirty={graph.creationRange() !== null}
-              onReset={() => creationSpan && graph.setCreationRange({ lo: creationSpan.lo, hi: creationSpan.hi })}
-            />
-          </span>
-        </div>
-        {#if creationSpan}
-          <GraphRangeSlider
-            min={creationSpan.lo}
-            max={creationSpan.hi}
-            step={rangeStep(creationSpan)}
-            value={creationValue}
-            format={fmtDate}
-            onChange={(lo, hi) => graph.setCreationRange({ lo, hi })}
-          />
-        {:else}
-          <p class="text-[10px] text-muted-foreground">No facts carry a creation date.</p>
-        {/if}
-      </div>
+      <GraphOptionsDateRangeField
+        title="Creation date"
+        dirty={graph.creationRange() !== null}
+        onReset={() => creationSpan && graph.setCreationRange({ lo: creationSpan.lo, hi: creationSpan.hi })}
+        span={creationSpan}
+        value={creationValue}
+        step={rangeStep(creationSpan)}
+        format={fmtDate}
+        onChange={(lo, hi) => graph.setCreationRange({ lo, hi })}
+        emptyText="No facts carry a creation date."
+      />
 
       <label class="flex items-center gap-2 text-xs">
         <input
@@ -211,79 +170,46 @@
         </span>
       </label>
 
-      <label class="block">
-        <div class="mb-1 flex items-center justify-between text-xs">
-          <span class="flex items-center font-medium">
-            Max connections per node
-            <GraphOptionsResetDot
-              dirty={!maxConnUnlimited}
-              onReset={() => graph.setMaxConnPerNode(MAX_CONN_PER_NODE_CAP)}
-            />
-          </span>
-          <span class="tabular-nums text-muted-foreground">{maxConnUnlimited ? 'All' : graph.maxConnPerNode()}</span>
-        </div>
-        <input
-          type="range"
-          min="1"
-          max={MAX_CONN_PER_NODE_CAP}
-          step="1"
-          value={graph.maxConnPerNode()}
-          oninput={(e) => graph.setMaxConnPerNode(e.currentTarget.valueAsNumber)}
-          class="h-1.5 w-full cursor-pointer accent-primary"
-          aria-label="Maximum number of connections shown per node"
-        />
-        <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>1</span><span>all</span></div>
-      </label>
+      <GraphOptionsScalarField
+        title="Max connections per node"
+        dirty={!maxConnUnlimited}
+        onReset={() => graph.setMaxConnPerNode(MAX_CONN_PER_NODE_CAP)}
+        valueText={maxConnUnlimited ? 'All' : String(graph.maxConnPerNode())}
+        min={1}
+        max={MAX_CONN_PER_NODE_CAP}
+        step={1}
+        value={graph.maxConnPerNode()}
+        onInput={(v) => graph.setMaxConnPerNode(v)}
+        leftLabel="1"
+        rightLabel="all"
+        ariaLabel="Maximum number of connections shown per node"
+      />
 
-      <div>
-        <div class="mb-1 flex items-center text-xs">
-          <span class="flex items-center font-medium">
-            Keep which connections
-            <GraphOptionsResetDot dirty={graph.maxConnBy() !== 'newest'} onReset={() => graph.setMaxConnBy('newest')} />
-          </span>
-        </div>
-        <div class="grid grid-cols-2 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Which connections to keep when capping">
-          {#each MAX_BY_MODES as mode (mode.value)}
-            {@const active = graph.maxConnBy() === mode.value}
-            <button
-              type="button"
-              onclick={() => graph.setMaxConnBy(mode.value)}
-              class={cn(
-                'rounded px-1.5 py-1 text-xs font-medium transition-colors',
-                active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-              aria-pressed={active}
-              title={mode.title}
-            >
-              {mode.label}
-            </button>
-          {/each}
-        </div>
-      </div>
+      <GraphOptionsButtonGroup
+        title="Keep which connections"
+        dirty={graph.maxConnBy() !== 'newest'}
+        onReset={() => graph.setMaxConnBy('newest')}
+        modes={MAX_BY_MODES}
+        value={graph.maxConnBy()}
+        onChange={(v) => graph.setMaxConnBy(v as MaxConnBy)}
+        ariaLabel="Which connections to keep when capping"
+        cols={2}
+      />
 
-      <label class="block">
-        <div class="mb-1 flex items-center justify-between text-xs">
-          <span class="flex items-center font-medium">
-            Max visible edges between nodes
-            <GraphOptionsResetDot
-              dirty={!visibleEdgesUnlimited}
-              onReset={() => graph.setVisibleEdgesPerPair(VISIBLE_EDGES_CAP)}
-            />
-          </span>
-          <span class="tabular-nums text-muted-foreground">{visibleEdgesUnlimited ? 'All' : graph.visibleEdgesPerPair()}</span>
-        </div>
-        <input
-          type="range"
-          min={VISIBLE_EDGES_MIN}
-          max={VISIBLE_EDGES_CAP}
-          step="1"
-          value={graph.visibleEdgesPerPair()}
-          oninput={(e) => graph.setVisibleEdgesPerPair(e.currentTarget.valueAsNumber)}
-          class="h-1.5 w-full cursor-pointer accent-primary"
-          aria-label="Maximum edges shown per entity pair before the rest collapse into one aggregate edge"
-        />
-        <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>{VISIBLE_EDGES_MIN}</span><span>all</span></div>
-      </label>
+      <GraphOptionsScalarField
+        title="Max visible edges between nodes"
+        dirty={!visibleEdgesUnlimited}
+        onReset={() => graph.setVisibleEdgesPerPair(VISIBLE_EDGES_CAP)}
+        valueText={visibleEdgesUnlimited ? 'All' : String(graph.visibleEdgesPerPair())}
+        min={VISIBLE_EDGES_MIN}
+        max={VISIBLE_EDGES_CAP}
+        step={1}
+        value={graph.visibleEdgesPerPair()}
+        onInput={(v) => graph.setVisibleEdgesPerPair(v)}
+        leftLabel={String(VISIBLE_EDGES_MIN)}
+        rightLabel="all"
+        ariaLabel="Maximum edges shown per entity pair before the rest collapse into one aggregate edge"
+      />
     </div>
   {/if}
 </section>

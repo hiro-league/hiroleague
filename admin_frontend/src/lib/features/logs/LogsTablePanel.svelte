@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { ArrowDown, ArrowUp, ArrowUpDown, MessageSquare } from '@lucide/svelte';
+  import { ArrowDown, ArrowUp, ArrowUpDown } from '@lucide/svelte';
   import { createCoreRowModel, createTable, type ColumnDef } from '@tanstack/svelte-table';
   import type { LogRow } from '$lib/api/logs';
   import { cn } from '$lib/utils';
   import LogExtraSegments from './LogExtraSegments.svelte';
+  import LogsTableMessageScopeCell from './LogsTableMessageScopeCell.svelte';
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
@@ -190,40 +191,12 @@
               ondblclick={() => onOpenRowDetails(row)}
             >
               <td class="w-[3.25rem] min-w-[3.25rem] px-0 py-1 text-center align-middle">
-                {#if row.scope_msg_id}
-                  {@const msgOrd = ctrl.getScopeMsgOrdinal(row.scope_msg_id)}
-                  {@const chipAlt = ctrl.getScopeMsgChipStripeAlt(row._rowKey)}
-                  <div class="flex items-center justify-center gap-0.5">
-                    {#if msgOrd != null}
-                      <!-- Chip color alternates when the message # changes vs the previous scoped row (table order). -->
-                      <span
-                        class={cn(
-                          'inline-flex min-h-4 min-w-[1rem] shrink-0 items-center justify-center rounded px-1 text-[0.6rem] font-semibold tabular-nums leading-none',
-                          chipAlt
-                            ? 'border border-border/70 bg-muted text-foreground'
-                            : 'border border-primary/35 bg-primary/15 text-primary'
-                        )}
-                        title="Message #{msgOrd} in this session (stable while the logs page is open)"
-                      >
-                        {msgOrd}
-                      </span>
-                    {/if}
-                    <button
-                      type="button"
-                      class="inline-grid shrink-0 place-items-center rounded-md p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                      title={row.scope_text_preview?.trim()
-                        ? `Message text: ${row.scope_text_preview} — Filter to this message`
-                        : 'Filter to this message'}
-                      onclick={(e) => onFilterToMessage(row.scope_msg_id!, e)}
-                      ondblclick={(e) => e.stopPropagation()}
-                    >
-                      <MessageSquare size={14} strokeWidth={2} aria-hidden="true" />
-                      <span class="sr-only">
-                        Filter to message{msgOrd != null ? ` ${msgOrd}` : ''}
-                      </span>
-                    </button>
-                  </div>
-                {/if}
+                <LogsTableMessageScopeCell
+                  {row}
+                  msgOrd={ctrl.getScopeMsgOrdinal(row.scope_msg_id)}
+                  chipAlt={ctrl.getScopeMsgChipStripeAlt(row._rowKey)}
+                  {onFilterToMessage}
+                />
               </td>
               <td class="truncate px-2 py-1.5 text-center text-muted-foreground">
                 {row.date_display}

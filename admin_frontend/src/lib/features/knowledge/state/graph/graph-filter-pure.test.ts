@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { GraphEdgeDTO, GraphNodeDTO } from '$lib/api/knowledge';
 import {
   computeCappedEdgeIds,
+  computeEdgeTypeFacets,
+  computeLowConnCount,
+  computeLowConnDimIds,
+  computeMatchedEdgeIds,
   computeMatchedNodeIds,
   computeNodeInstanceFacets,
   edgeIsCurrent,
@@ -131,5 +135,72 @@ describe('computeMatchedNodeIds', () => {
       episodeChunkIds: new Set()
     });
     expect([...matched]).toEqual(['n1']);
+  });
+
+  it('matches by alias and chunk ids', () => {
+    const n = node('n1', 'Person', 'X');
+    n.aliases = ['SecretAlias'];
+    n.chunk_ids = ['chunk-1'];
+    const byAlias = computeMatchedNodeIds([n], {
+      searchQuery: 'secret',
+      matchedChunkIds: new Set(),
+      episodeChunkIds: new Set()
+    });
+    expect([...byAlias]).toEqual(['n1']);
+
+    const byChunk = computeMatchedNodeIds([n], {
+      searchQuery: '',
+      matchedChunkIds: new Set(['chunk-1']),
+      episodeChunkIds: new Set()
+    });
+    expect([...byChunk]).toEqual(['n1']);
+  });
+});
+
+describe('computeEdgeTypeFacets', () => {
+  it('counts relation types and tracks hidden state', () => {
+    const links = [
+      edge('e1', 'a', 'b', 'KNOWS'),
+      edge('e2', 'a', 'c', 'KNOWS'),
+      edge('e3', 'b', 'c', 'WORKS_AT')
+    ];
+    const facets = computeEdgeTypeFacets(links, new Set(['WORKS_AT']));
+    expect(facets).toEqual([
+      { type: 'KNOWS', count: 2, hidden: false },
+      { type: 'WORKS_AT', count: 1, hidden: true }
+    ]);
+  });
+});
+
+describe('computeMatchedEdgeIds', () => {
+  it('matches relation type and fact text', () => {
+    const e = edge('e1', 'a', 'b', 'KNOWS');
+    e.fact = 'Alice knows Bob';
+    const matched = computeMatchedEdgeIds([e], {
+      searchQuery: 'knows bob',
+      matchedChunkIds: new Set(),
+      episodeChunkIds: new Set()
+    });
+    expect([...matched]).toEqual(['e1']);
+  });
+});
+
+describe('computeLowConnDimIds', () => {
+  it('returns sparse nodes only when treatment is dim', () => {
+    const nodes = [node('a'), node('b'), node('c')];
+    const degree = new Map([['a', 0], ['b', 1], ['c', 5]]);
+    expect(
+      [...computeLowConnDimIds(nodes, 'dim', 2, degree)]
+    ).toEqual(['a', 'b']);
+    expect(computeLowConnDimIds(nodes, 'hide', 2, degree).size).toBe(0);
+  });
+});
+
+describe('computeLowConnCount', () => {
+  it('counts visible nodes below threshold', () => {
+    const nodes = [node('a'), node('b'), node('c')];
+    const hidden = new Set(['c']);
+    const degree = new Map([['a', 0], ['b', 1], ['c', 0]]);
+    expect(computeLowConnCount(nodes, hidden, 2, degree)).toBe(2);
   });
 });

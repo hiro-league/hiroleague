@@ -7,10 +7,15 @@ import {
 } from '$lib/api/image-lab';
 import { patchPreferences } from '$lib/api/preferences';
 import type { ToastKind } from '$lib/ui/toast-types';
+import {
+  composeImagePrompt,
+  estimateImageCostUsd,
+  IMAGE_LAB_PLAYGROUND_PROFILE_ID,
+  isValidImageProfileId,
+  parseImageSeed
+} from '../shared/image-lab-pure';
 
 type Notify = (kind: ToastKind, message: string) => void;
-
-const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_]{1,40}$/;
 
 /**
  * The Lab generates with EXPLICIT params (model/steps/seed + client-composed prompt)
@@ -19,7 +24,7 @@ const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_]{1,40}$/;
  * what-you-see-is-what-runs surface, and "Save as recipe" promotes the current form
  * into a named `image_profiles` entry via the standard preferences PATCH.
  */
-const PLAYGROUND_PROFILE_ID = 'image_playground';
+const PLAYGROUND_PROFILE_ID = IMAGE_LAB_PLAYGROUND_PROFILE_ID;
 
 export function createImageLabController() {
   let loading = $state(true);
@@ -49,21 +54,9 @@ export function createImageLabController() {
   const profiles = $derived(options?.profiles ?? ({} as Record<string, ImageProfile>));
   const selectedModel = $derived(models.find((m) => m.id === model) ?? null);
   const modelReady = $derived(selectedModel?.available ?? false);
-  const seed = $derived.by(() => {
-    const text = seedText.trim();
-    if (!text) return null;
-    const parsed = Number.parseInt(text, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  });
-  // Mirrors backend compose_image_prompt (style_prefix, prompt, style_suffix).
-  const composedPrompt = $derived(
-    [stylePrefix.trim(), prompt.trim(), styleSuffix.trim()].filter(Boolean).join(', ')
-  );
-  const estimatedCostUsd = $derived.by(() => {
-    if (!selectedModel) return null;
-    if (selectedModel.per_image === null && selectedModel.per_step === null) return null;
-    return (selectedModel.per_image ?? 0) + steps * (selectedModel.per_step ?? 0);
-  });
+  const seed = $derived(parseImageSeed(seedText));
+  const composedPrompt = $derived(composeImagePrompt(stylePrefix, prompt, styleSuffix));
+  const estimatedCostUsd = $derived(estimateImageCostUsd(selectedModel, steps));
 
   async function load() {
     loading = true;
@@ -131,7 +124,7 @@ export function createImageLabController() {
   async function saveProfile(notify: Notify) {
     const id = saveProfileId.trim();
     const label = saveProfileLabel.trim();
-    if (!PROFILE_ID_RE.test(id)) {
+    if (!isValidImageProfileId(id)) {
       notify('warning', 'Recipe id must be a slug: lowercase letters, digits, underscores.');
       return;
     }

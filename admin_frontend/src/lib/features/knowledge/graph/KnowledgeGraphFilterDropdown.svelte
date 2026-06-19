@@ -12,8 +12,13 @@
   import { Combobox } from 'bits-ui';
   import { ArrowDownAZ, ArrowDownWideNarrow, Check, ChevronsUpDown, Search, X } from '@lucide/svelte';
   import { comboboxOpenAtTop } from '$lib/components/ui/combobox-open-top';
-
-  export type GraphFilterOption = { value: string; label: string; weight: number };
+  import {
+    filterDropdownPlaceholder,
+    filterOptionsBySearch,
+    filterSelectionSummary,
+    sortFilterOptions,
+    type GraphFilterOption
+  } from './graph-filter-dropdown-helpers';
 
   // Neutral master-toggle dot when a caller (e.g. edges) has no category color.
   const NEUTRAL_DOT = '#94a3b8';
@@ -55,28 +60,15 @@
     if (open && viewportRef) return comboboxOpenAtTop(viewportRef);
   });
 
-  const sorted = $derived(
-    [...options].sort((a, b) =>
-      sortMode === 'alpha'
-        ? a.label.localeCompare(b.label)
-        : b.weight - a.weight || a.label.localeCompare(b.label)
-    )
-  );
-  const filtered = $derived(
-    search.trim() === ''
-      ? sorted
-      : sorted.filter((o) => o.label.toLowerCase().includes(search.trim().toLowerCase()))
-  );
+  const sorted = $derived(sortFilterOptions(options, sortMode));
+  const filtered = $derived(filterOptionsBySearch(sorted, search));
 
   const total = $derived(options.length);
   const selectedCount = $derived(selected.length);
   const allSelected = $derived(total > 0 && selectedCount === total);
   const noneSelected = $derived(selectedCount === 0);
-  // Always carry the total: "all 13" when full, "0/13" when empty, "N/13" partial.
-  const summary = $derived(
-    allSelected ? `all ${total}` : noneSelected ? `0/${total}` : `${selectedCount}/${total}`
-  );
-  const placeholder = $derived(searchPlaceholder ?? `Search ${label}…`);
+  const summary = $derived(filterSelectionSummary(total, selectedCount));
+  const placeholder = $derived(filterDropdownPlaceholder(label, searchPlaceholder));
 
   // The color dot doubles as a select-all / select-none master toggle so the whole group can be
   // flipped without opening the dropdown: fully on → off; otherwise → fully on.

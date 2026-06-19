@@ -3,6 +3,15 @@ import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 
 export const LOGS_POLL_INTERVAL_MS = 500;
 
+/** URL ``msg_id`` wins over session-restored ``scopeMsgId`` when non-empty. */
+export function scopeMsgIdAfterHydrate(
+  sessionScopeMsgId: string,
+  urlMsgId: string | null | undefined
+): string {
+  const fromUrl = (urlMsgId ?? '').trim();
+  return fromUrl || sessionScopeMsgId;
+}
+
 /**
  * Session hydrate, initial load, polling interval, and teardown. The logs page now
  * scrolls with the document (sticky header + sticky filter toolbar like other pages),
@@ -17,10 +26,7 @@ export function setupLogsPageRuntime(opts: {
   const { prefs, ctrl, urlMsgId } = opts;
 
   prefs.hydrateFromSession();
-  const fromUrl = (urlMsgId ?? '').trim();
-  if (fromUrl) {
-    prefs.scopeMsgId = fromUrl;
-  }
+  prefs.scopeMsgId = scopeMsgIdAfterHydrate(prefs.scopeMsgId, urlMsgId);
   void ctrl.initialize();
   const interval = window.setInterval(() => void ctrl.poll(), LOGS_POLL_INTERVAL_MS);
 

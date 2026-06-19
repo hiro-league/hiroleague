@@ -1,5 +1,6 @@
 import { createActiveProvidersStore } from '$lib/catalog/active-providers/active-providers-store.svelte';
 import { listGateways, listWorkspaces, type GatewayRow, type WorkspaceRow } from '$lib/api/server';
+import { activeProviderDisplayNames, activeProviderOverflowCount } from '../shared/dashboard-derive';
 import { findGatewayLink, type GatewayLink } from '../shared/dashboard-gateway';
 
 export type DashboardController = ReturnType<typeof createDashboardController>;
@@ -12,14 +13,10 @@ export function createDashboardController() {
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  const activeProviderNames = $derived(
-    activeProvidersStore.rows
-      .map((provider) => provider.display_name || provider.provider_id)
-      .slice(0, 2)
-  );
+  const activeProviderNames = $derived(activeProviderDisplayNames(activeProvidersStore.rows));
 
   const activeProviderOverflow = $derived(
-    Math.max(activeProvidersStore.rows.length - activeProviderNames.length, 0)
+    activeProviderOverflowCount(activeProvidersStore.rows.length)
   );
 
   const runningWorkspaces = $derived(workspaces.filter((workspace) => workspace.running));

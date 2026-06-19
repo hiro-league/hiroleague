@@ -154,11 +154,17 @@ export function createGraphEngineBridge(opts: GraphEngineBridgeOptions): {
     );
   });
 
+  // Every option/state push below reads the engine BEFORE recording its dedup key, and
+  // bails if the engine isn't mounted yet — same guard the setData effect uses. Otherwise
+  // the first pass (which runs before the async engine.mount() completes) would record the
+  // key against a null engine, poisoning the cache so the value is never applied until the
+  // option next changes. `engine` is a $state in the panel, so these re-run once it mounts.
   $effect(() => {
     const recent = opts.getGraph().recent();
-    if (recent === lastRecent) return;
+    const engine = opts.getEngine();
+    if (!engine || recent === lastRecent) return;
     lastRecent = recent;
-    opts.getEngine()?.setRecent(recent);
+    engine.setRecent(recent);
   });
 
   $effect(() => {
@@ -180,49 +186,55 @@ export function createGraphEngineBridge(opts: GraphEngineBridgeOptions): {
 
   $effect(() => {
     const f = opts.getForceOptions();
+    const engine = opts.getEngine();
     const key = JSON.stringify(f);
-    if (key === lastForcesKey) return;
+    if (!engine || key === lastForcesKey) return;
     lastForcesKey = key;
-    opts.getEngine()?.setForces(f);
+    engine.setForces(f);
   });
 
   $effect(() => {
     const curve = opts.getCurveAmount();
-    if (curve === lastCurve) return;
+    const engine = opts.getEngine();
+    if (!engine || curve === lastCurve) return;
     lastCurve = curve;
-    opts.getEngine()?.setCurveAmount(curve);
+    engine.setCurveAmount(curve);
   });
 
   $effect(() => {
     const sizing = opts.getNodeSizing();
+    const engine = opts.getEngine();
     const key = `${sizing.minSize}|${sizing.maxSize}`;
-    if (key === lastNodeSizingKey) return;
+    if (!engine || key === lastNodeSizingKey) return;
     lastNodeSizingKey = key;
-    opts.getEngine()?.setNodeSizing(sizing);
+    engine.setNodeSizing(sizing);
   });
 
   $effect(() => {
     const ids = opts.getGraph().lowConnDimIds();
+    const engine = opts.getEngine();
     const key = [...ids].sort().join(',');
-    if (key === lastDenoiseKey) return;
+    if (!engine || key === lastDenoiseKey) return;
     lastDenoiseKey = key;
-    opts.getEngine()?.setDenoiseDim(ids);
+    engine.setDenoiseDim(ids);
   });
 
   $effect(() => {
     const l = opts.getLabelSizing();
+    const engine = opts.getEngine();
     const key = JSON.stringify(l);
-    if (key === lastLabelKey) return;
+    if (!engine || key === lastLabelKey) return;
     lastLabelKey = key;
-    opts.getEngine()?.setLabelSizing(l);
+    engine.setLabelSizing(l);
   });
 
   $effect(() => {
     const fade = opts.getNodeFade();
+    const engine = opts.getEngine();
     const key = JSON.stringify(fade);
-    if (key === lastFadeKey) return;
+    if (!engine || key === lastFadeKey) return;
     lastFadeKey = key;
-    opts.getEngine()?.setNodeFade(fade);
+    engine.setNodeFade(fade);
   });
 
   $effect(() => {
@@ -233,6 +245,7 @@ export function createGraphEngineBridge(opts: GraphEngineBridgeOptions): {
       focusNodeIds,
       searchFocusMode: opts.getSearchFocusMode()
     };
+    const engine = opts.getEngine();
     const key = JSON.stringify({
       searchActive,
       focus: focusNodeIds ? [...focusNodeIds].sort().join(',') : '',
@@ -240,13 +253,14 @@ export function createGraphEngineBridge(opts: GraphEngineBridgeOptions): {
       edges: [...matchedEdgeIds].sort().join(','),
       mode: state.searchFocusMode
     });
-    if (key === lastSearchKey) return;
+    if (!engine || key === lastSearchKey) return;
     lastSearchKey = key;
-    opts.getEngine()?.setSearch(state);
+    engine.setSearch(state);
   });
 
   $effect(() => {
     const focus = neighborFocus;
+    const engine = opts.getEngine();
     const key = JSON.stringify({
       active: focus.active,
       mode: focus.mode,
@@ -254,17 +268,18 @@ export function createGraphEngineBridge(opts: GraphEngineBridgeOptions): {
       nodes: [...focus.nodeIds].sort().join(','),
       edges: [...focus.edgeIds].sort().join(',')
     });
-    if (key === lastNeighborKey) return;
+    if (!engine || key === lastNeighborKey) return;
     lastNeighborKey = key;
-    opts.getEngine()?.setNeighborFocus(focus);
+    engine.setNeighborFocus(focus);
   });
 
   $effect(() => {
     const sel = opts.getGraph().selected();
+    const engine = opts.getEngine();
     const key = sel ? `${sel.kind}:${sel.id}` : '';
-    if (key === lastSelectionKey) return;
+    if (!engine || key === lastSelectionKey) return;
     lastSelectionKey = key;
-    opts.getEngine()?.setSelection(sel);
+    engine.setSelection(sel);
   });
 
   return {
