@@ -48,6 +48,8 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ProviderAddApiKeyTool": ".provider",
     "ProviderListConfiguredTool": ".provider",
     "ProviderRemoveTool": ".provider",
+    "ProviderSetEndpointTool": ".provider",
+    "ProviderCheckEndpointTool": ".provider",
     # character
     "CharacterCreateTool": ".character",
     "CharacterDeleteTool": ".character",
@@ -220,8 +222,10 @@ def all_tools() -> list[Tool]:
     from .provider import (
         AvailableModelsListTool,
         ProviderAddApiKeyTool,
+        ProviderCheckEndpointTool,
         ProviderListConfiguredTool,
         ProviderRemoveTool,
+        ProviderSetEndpointTool,
     )
     from .server import (
         RestartTool,
@@ -315,6 +319,8 @@ def all_tools() -> list[Tool]:
         LlmCatalogGetModelTool(),
         ProviderAddApiKeyTool(),
         ProviderRemoveTool(),
+        ProviderSetEndpointTool(),
+        ProviderCheckEndpointTool(),
         ProviderListConfiguredTool(),
         AvailableModelsListTool(),
     ]
@@ -397,8 +403,10 @@ if TYPE_CHECKING:  # pragma: no cover
     from .provider import (  # noqa: F401
         AvailableModelsListTool,
         ProviderAddApiKeyTool,
+        ProviderCheckEndpointTool,
         ProviderListConfiguredTool,
         ProviderRemoveTool,
+        ProviderSetEndpointTool,
     )
     from .server import (  # noqa: F401
         RestartTool,

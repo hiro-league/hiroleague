@@ -302,7 +302,9 @@ async def test_run_memory_eval_flush_failure_is_non_fatal(tmp_path) -> None:
 
 
 def test_discover_corpuses_pairs_by_stem(tmp_path) -> None:
-    # Memory: <stem>.episodes.jsonl pairs with <stem>.questions.yaml; *_bak is skipped.
+    # Memory is benchmark-driven: only corpuses listed under a benchmark in benchmarks.yaml are
+    # discovered, in manifest order, tagged + labeled by benchmark. A bare file not in the manifest
+    # ("scratch") stays hidden; a listed corpus with no file ("later") is skipped.
     (tmp_path / "trip.episodes.jsonl").write_text(
         '{"id":"e1","timestamp":"2024-01-01T00:00:00Z","body":"I went to Rome."}\n',
         encoding="utf-8",
@@ -310,16 +312,35 @@ def test_discover_corpuses_pairs_by_stem(tmp_path) -> None:
     (tmp_path / "trip.questions.yaml").write_text(
         '- {id: q1, question: "where?", expected_fragments: [Rome]}\n', encoding="utf-8"
     )
-    (tmp_path / "trip.episodes_bak.jsonl").write_text("# backup\n", encoding="utf-8")
+    (tmp_path / "scratch.episodes.jsonl").write_text(  # not in the manifest → hidden
+        '{"id":"e1","timestamp":"2024-01-01T00:00:00Z","body":"unlisted."}\n', encoding="utf-8"
+    )
+    (tmp_path / "benchmarks.yaml").write_text(
+        "benchmarks:\n"
+        "  demo:\n"
+        "    label: Demo\n"
+        "    corpuses:\n"
+        "      - {id: trip, label: Trip corpus}\n"
+        "      - {id: later, label: Not yet}\n",  # listed but no episodes file → skipped
+        encoding="utf-8",
+    )
 
     mem = discover_corpuses(tmp_path, "memory")
-    assert [c["id"] for c in mem] == ["trip"]  # the _bak file is ignored
+    assert [c["id"] for c in mem] == ["trip"]  # scratch hidden, later skipped (no file)
     c = mem[0]
     assert c["corpus_path"].endswith("trip.episodes.jsonl")
     assert c["questions_path"].endswith("trip.questions.yaml")
     assert c["item_count"] == 1 and c["question_count"] == 1
+    assert c["benchmark"] == "demo" and c["benchmark_label"] == "Demo"
+    assert c["label"] == "Trip corpus"  # display name from the manifest
 
-    # Knowledge: a folder of .md pairs with <folder>.questions.yaml beside it.
+    # No manifest → no memory corpuses (a loud-enough signal without crashing the picker).
+    nomani = tmp_path / "nomani"
+    nomani.mkdir()
+    (nomani / "x.episodes.jsonl").write_text("{}\n", encoding="utf-8")
+    assert discover_corpuses(nomani, "memory") == []
+
+    # Knowledge: a folder of .md pairs with <folder>.questions.yaml beside it (NOT manifest-driven).
     docs = tmp_path / "kb1"
     docs.mkdir()
     (docs / "a.md").write_text("hello", encoding="utf-8")

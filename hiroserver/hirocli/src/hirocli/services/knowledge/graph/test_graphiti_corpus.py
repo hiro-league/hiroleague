@@ -6,14 +6,15 @@ import json
 
 import pytest
 
-from hirocli.services.knowledge.eval_runner import DEFAULT_QUESTIONS_FILE, load_questions
+from hirocli.services.knowledge.eval_runner import ADAM_CORPUS_FILE, load_questions
 from hirocli.services.knowledge.graph.graphiti_corpus import (
     load_episodes_file,
     parse_episodes_jsonl,
 )
 
-# eval/ at repo root (DEFAULT_QUESTIONS_FILE lives there).
-_EVAL_DIR = DEFAULT_QUESTIONS_FILE.parent
+# The memory corpus root (sibling eval-corpus repo) — adam_year.* lives there.
+# Requires the eval-corpus checkout (or $HIRO_EVAL_CORPUS_DIR).
+_EVAL_DIR = ADAM_CORPUS_FILE.parent
 
 
 def _line(id_: str, ts: str, body: str, **extra) -> str:

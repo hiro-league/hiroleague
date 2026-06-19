@@ -39,11 +39,13 @@ import {
   getCorpusIngestExtraction,
   getEvalCorpus,
   getKnowledgeEvalState,
+  listEvalBenchmarkResults,
   listEvalCorpuses,
   listEvalQuestions,
   listEvalResults,
   pickKnowledgeFolder,
   runKnowledgeEval,
+  type BenchmarkResultsData,
   type EvalCorpus,
   type EvalEpisode,
   type EvalIngestedRanges,
@@ -480,6 +482,34 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     }
   }
 
+  // ---- Benchmark results overview (Report tab) -------------------------------------------------
+  // Per-corpus + TOTAL summaries for the CURRENTLY SELECTED benchmark (the Execute-tab selection —
+  // no separate Report-tab benchmark picker). The table reflects every corpus in that benchmark.
+  let benchmarkResults = $state<BenchmarkResultsData | null>(null);
+  let benchmarkResultsLoading = $state(false);
+  let benchmarkResultsError = $state<string | null>(null);
+
+  /** Load per-corpus + TOTAL summaries for the selected benchmark (memory track). No-op otherwise. */
+  async function loadBenchmarkResults() {
+    const bid = track === 'memory' ? selectedBenchmarkId() : '';
+    if (!bid) {
+      benchmarkResults = null;
+      return;
+    }
+    benchmarkResultsLoading = true;
+    benchmarkResultsError = null;
+    try {
+      const res = await listEvalBenchmarkResults(bid, folder.trim());
+      benchmarkResults = res.data;
+    } catch (err) {
+      benchmarkResultsError =
+        err instanceof Error ? err.message : 'Failed to load benchmark results.';
+      benchmarkResults = null;
+    } finally {
+      benchmarkResultsLoading = false;
+    }
+  }
+
   /** Load the chosen corpus's question bank; clears the prior selection. */
   async function loadQuestions() {
     // Refresh the Corpus review transcript alongside the bank — both follow the chosen
@@ -536,6 +566,38 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     // Auto-set "Rebuild graph" from the newly chosen corpus's graph state.
     applyRebuildDefaultForCorpus();
     void loadQuestions();
+  }
+
+  // Benchmark grouping (memory track) — corpuses arrive from the server pre-grouped + ordered by
+  // eval/benchmarks.yaml, so the selected benchmark is derived from the selected corpus (single
+  // source of truth = selectedCorpusId; no separate persisted state). Knowledge corpuses carry no
+  // benchmark, so `benchmarks()` is empty there and the picker falls back to the flat corpus list.
+
+  /** Distinct benchmarks present in the scanned corpuses, in manifest order (first-seen). */
+  const benchmarks = (): { id: string; label: string }[] => {
+    const seen = new Map<string, string>();
+    for (const c of corpuses) {
+      if (c.benchmark && !seen.has(c.benchmark)) seen.set(c.benchmark, c.benchmark_label || c.benchmark);
+    }
+    return [...seen].map(([id, label]) => ({ id, label }));
+  };
+
+  /** The benchmark of the currently selected corpus ('' on the knowledge track / no selection). */
+  const selectedBenchmarkId = (): string => selectedCorpus()?.benchmark ?? '';
+
+  /** Corpuses to show in the Corpus dropdown — filtered to the selected benchmark on the memory
+   *  track, or the full flat list on the knowledge track (where there's no benchmark grouping). */
+  const visibleCorpuses = (): EvalCorpus[] => {
+    const b = selectedBenchmarkId();
+    return b ? corpuses.filter((c) => c.benchmark === b) : corpuses;
+  };
+
+  /** Switch benchmark → select that benchmark's first corpus (routes through selectCorpus so the
+   *  question bank, answer-prompt, and Rebuild-graph default all refresh as on any corpus change). */
+  function selectBenchmark(id: string) {
+    if (selectedBenchmarkId() === id) return;
+    const first = corpuses.find((c) => c.benchmark === id);
+    if (first) selectCorpus(first.id);
   }
 
   function setTrack(v: EvalTrack) {
@@ -1030,6 +1092,28 @@ export function createKnowledgeEvalModel(deps: { setError: (message: string | nu
     get corpuses() {
       return corpuses;
     },
+    // Benchmark grouping (memory track) — drives the cascading Benchmark → Corpus selectors.
+    get benchmarks() {
+      return benchmarks();
+    },
+    get selectedBenchmarkId() {
+      return selectedBenchmarkId();
+    },
+    get visibleCorpuses() {
+      return visibleCorpuses();
+    },
+    selectBenchmark,
+    // Benchmark results overview (Report tab).
+    get benchmarkResults() {
+      return benchmarkResults;
+    },
+    get benchmarkResultsLoading() {
+      return benchmarkResultsLoading;
+    },
+    get benchmarkResultsError() {
+      return benchmarkResultsError;
+    },
+    loadBenchmarkResults,
     get corpusesLoading() {
       return corpusesLoading;
     },

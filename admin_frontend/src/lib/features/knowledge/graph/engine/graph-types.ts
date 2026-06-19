@@ -26,8 +26,8 @@ export interface FgNode {
   /** Hub-separation support: the node's connection count, stashed by the engine on each
    *  relayout so the charge/collide force accessors can scale by degree without re-deriving it. */
   __degree?: number;
-  /** Hub-separation collision radius (see degreeCollide in graph-forces.ts). 0 disables collision
-   *  for this node (the case when "Hub separation" is 0 → default behavior unchanged). */
+  /** Collision radius (see collideRadius / degreeCollide in graph-forces.ts): the always-on baseline
+   *  disc (drawn radius + COLLIDE_PAD) plus any extra hub bubble when "Hub separation" > 0. */
   __collideR?: number;
 }
 

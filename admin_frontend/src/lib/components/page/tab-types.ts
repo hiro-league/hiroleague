@@ -53,6 +53,11 @@ export type AdminTabDescriptor<TId extends string = string> =
 export type AdminSubtabDescriptor<TId extends string = string> = {
   id: TId;
   label: string;
+  /** Optional count rendered after the label in a subtle muted color, e.g. Corpus (302). */
+  count?: number;
+  /** Optional free-text count after the label, in the same muted style, e.g. "5/20" → (5/20).
+   *  Takes precedence over `count` when both are set. */
+  countText?: string;
   disabled?: boolean;
   ariaLabel?: string;
   htmlId?: string;

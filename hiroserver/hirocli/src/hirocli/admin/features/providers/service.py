@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +11,10 @@ from hirocli.domain.model_catalog import get_model_catalog
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.tools.provider import (
     ProviderAddApiKeyTool,
+    ProviderCheckEndpointTool,
     ProviderListConfiguredTool,
     ProviderRemoveTool,
+    ProviderSetEndpointTool,
 )
 
 from hirocli.admin.shared.result import Result
@@ -29,8 +32,13 @@ class ProvidersPageService:
             return Result.failure(str(exc))
         return Result.success(list(raw.providers))
 
-    def list_addable_cloud_providers(self, workspace_id: str | None) -> Result[list[dict[str, Any]]]:
-        """Cloud catalog providers not yet configured (for Add API key dropdown)."""
+    def list_addable_providers(self, workspace_id: str | None) -> Result[list[dict[str, Any]]]:
+        """Catalog providers not yet configured (Add-provider dropdown).
+
+        Includes both cloud (API key) and local (HTTP endpoint) providers; the ``auth_method``
+        field tells the add dialog which form to render. The synthetic in-process ``local``
+        provider is not a catalog row, so it never appears here.
+        """
         if not workspace_id:
             return Result.failure("No workspace selected.")
         try:
@@ -39,16 +47,21 @@ class ProvidersPageService:
             configured = {p.provider_id for p in store.list_configured()}
             cat = get_model_catalog()
             addable: list[dict[str, Any]] = []
-            for p in cat.list_providers(hosting="cloud"):
-                if p.id not in configured:
-                    addable.append(
-                        {
-                            "id": p.id,
-                            "display_name": p.display_name,
-                            # Cloudflare-style: the add dialog shows an extra account-id input.
-                            "requires_account_id": p.requires_account_id,
-                        }
-                    )
+            for p in cat.list_providers():
+                if p.id in configured:
+                    continue
+                addable.append(
+                    {
+                        "id": p.id,
+                        "display_name": p.display_name,
+                        "hosting": p.hosting,
+                        # Drives the add dialog's form: API key vs local HTTP endpoint.
+                        "auth_method": "local_endpoint" if p.hosting == "local" else "api_key",
+                        "default_base_url": p.default_base_url,
+                        # Cloudflare-style: the add dialog shows an extra account-id input.
+                        "requires_account_id": p.requires_account_id,
+                    }
+                )
             return Result.success(sorted(addable, key=lambda x: x["id"]))
         except Exception as exc:
             return Result.failure(str(exc))
@@ -76,6 +89,54 @@ class ProvidersPageService:
         except Exception as exc:
             return Result.failure(str(exc))
         return Result.success(None)
+
+    def set_local_endpoint(
+        self,
+        workspace_id: str | None,
+        provider_id: str,
+        base_url: str,
+    ) -> Result[None]:
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+        pid = provider_id.strip()
+        url = base_url.strip()
+        if not pid or not url:
+            return Result.failure("Provider and base URL are required.")
+        try:
+            ProviderSetEndpointTool().execute(
+                provider_id=pid,
+                base_url=url,
+                workspace=workspace_id,
+            )
+        except Exception as exc:
+            return Result.failure(str(exc))
+        return Result.success(None)
+
+    def check_endpoint(
+        self,
+        workspace_id: str | None,
+        provider_id: str,
+        base_url: str | None = None,
+    ) -> Result[dict[str, Any]]:
+        """Probe a local provider's endpoint (reachability + installed-model reconciliation).
+
+        ``base_url`` is optional — when omitted the stored/catalog endpoint is probed; pass a
+        candidate URL to test before saving. Offline is a successful Result with ``online: false``.
+        """
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+        pid = provider_id.strip()
+        if not pid:
+            return Result.failure("Provider is required.")
+        try:
+            result = ProviderCheckEndpointTool().execute(
+                provider_id=pid,
+                base_url=base_url,
+                workspace=workspace_id,
+            )
+        except Exception as exc:
+            return Result.failure(str(exc))
+        return Result.success(asdict(result))
 
     def remove_provider(self, workspace_id: str | None, provider_id: str) -> Result[bool]:
         if not workspace_id:

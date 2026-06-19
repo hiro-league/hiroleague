@@ -589,6 +589,7 @@ class AgentManager:
             temperature=llm_entry.temperature,
             max_tokens=llm_entry.max_tokens,
             thinking=getattr(llm_entry, "thinking", None),
+            num_ctx=getattr(llm_entry, "num_ctx", None),
             credential_store=self._credentials,
         )
         # Tools are bound into the compiled graph once and memoized; per-turn enable/disable is a

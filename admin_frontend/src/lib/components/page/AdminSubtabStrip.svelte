@@ -39,6 +39,8 @@
     {#each tabs as tab (tab.id)}
       <AdminSubtabButton
         label={tab.label}
+        count={tab.count}
+        countText={tab.countText}
         active={tab.id === active}
         disabled={tab.disabled}
         ariaLabel={tab.ariaLabel}

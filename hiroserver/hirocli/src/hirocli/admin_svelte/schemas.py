@@ -76,6 +76,17 @@ class ProviderAddApiKeyRequest(BaseModel):
     account_id: str | None = None
 
 
+class ProviderSetEndpointRequest(BaseModel):
+    provider_id: str
+    base_url: str
+
+
+class ProviderCheckRequest(BaseModel):
+    provider_id: str
+    # Optional candidate URL to test before saving; omit to probe the stored/catalog endpoint.
+    base_url: str | None = None
+
+
 class PreferencesPatchRequest(BaseModel):
     edits: dict[str, Any]
 

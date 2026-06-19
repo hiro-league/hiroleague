@@ -257,7 +257,7 @@ export function createPreferencesController(notify: Notify) {
 
   function updateProfile(
     id: string,
-    field: 'label' | 'temperature' | 'max_tokens' | 'thinking',
+    field: 'label' | 'temperature' | 'max_tokens' | 'thinking' | 'num_ctx',
     value: string
   ) {
     if (!draft || !draft.tuning_profiles[id]) return;
@@ -266,6 +266,8 @@ export function createPreferencesController(notify: Notify) {
     if (field === 'temperature') profile.temperature = Number(value);
     if (field === 'max_tokens') profile.max_tokens = Number(value);
     if (field === 'thinking') profile.thinking = value === 'default' ? null : (value as ThinkingValue);
+    // Blank = unset (null) → provider default; otherwise the Ollama num_ctx override.
+    if (field === 'num_ctx') profile.num_ctx = value.trim() === '' ? null : Number(value);
     markDirty();
   }
 

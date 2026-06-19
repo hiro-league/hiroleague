@@ -1,11 +1,14 @@
 import {
   addProviderApiKey,
+  checkProviderEndpoint,
   listActiveProviders,
   listAddableProviders,
   removeProvider,
   scanProviderEnvironment,
+  setLocalEndpoint,
   type ActiveProviderRow,
-  type AddableProviderRow
+  type AddableProviderRow,
+  type ProviderCheckResult
 } from '$lib/api/catalog';
 import type { ToastKind } from '$lib/ui/toast-types';
 
@@ -27,8 +30,21 @@ export function createActiveProvidersStore() {
     provider_id: '',
     api_key: '',
     // Cloudflare-style vendors need a non-secret account id alongside the API key.
-    account_id: ''
+    account_id: '',
+    // Local providers (Ollama, LM Studio): HTTP endpoint instead of an API key.
+    base_url: ''
   });
+
+  function addableProviderById(providerId: string): AddableProviderRow | undefined {
+    return addableProviders.find((provider) => provider.id === providerId);
+  }
+
+  // Dialog "Test connection" state (probe of the candidate endpoint before saving).
+  let checking = $state(false);
+  let checkResult = $state<ProviderCheckResult | null>(null);
+  // Live reachability per configured local provider, keyed by provider_id (probed on load).
+  type ProviderStatus = { checking: boolean; result: ProviderCheckResult | null };
+  let localStatus = $state<Record<string, ProviderStatus>>({});
 
   const counts = $derived(
     rows.reduce(
@@ -71,6 +87,8 @@ export function createActiveProvidersStore() {
       const payload = await listActiveProviders();
       rows = payload.data ?? [];
       resolved = true;
+      // Fire-and-forget reachability probes for configured local endpoints (don't block load).
+      probeConfiguredLocal();
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load active providers.';
       rows = [];
@@ -94,13 +112,18 @@ export function createActiveProvidersStore() {
     try {
       const payload = await listAddableProviders();
       addableProviders = payload.data;
+      checkResult = null;
+      checking = false;
+      const first = addableProviders[0];
       addForm = {
-        provider_id: addableProviders[0]?.id ?? '',
+        provider_id: first?.id ?? '',
         api_key: '',
-        account_id: ''
+        account_id: '',
+        // Prefill the suggested endpoint for local providers (blank for cloud).
+        base_url: first?.default_base_url ?? ''
       };
       if (addableProviders.length === 0) {
-        notify('info', 'All cloud catalog providers are already configured.');
+        notify('info', 'All catalog providers are already configured.');
         return;
       }
       dialog = 'add';
@@ -113,16 +136,65 @@ export function createActiveProvidersStore() {
   }
 
   async function submitAddProvider(notify: Notify) {
+    const selected = addableProviderById(addForm.provider_id);
+    const isLocal = selected?.auth_method === 'local_endpoint';
     busy = true;
     try {
-      await addProviderApiKey(addForm.provider_id, addForm.api_key, addForm.account_id);
-      notify('success', `Stored API key for ${addForm.provider_id}.`);
+      if (isLocal) {
+        await setLocalEndpoint(addForm.provider_id, addForm.base_url);
+        notify('success', `Set endpoint for ${addForm.provider_id}.`);
+      } else {
+        await addProviderApiKey(addForm.provider_id, addForm.api_key, addForm.account_id);
+        notify('success', `Stored API key for ${addForm.provider_id}.`);
+      }
       dialog = null;
       await load({ silent: true });
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to store API key.');
+      const fallback = isLocal ? 'Failed to set endpoint.' : 'Failed to store API key.';
+      notify('error', err instanceof Error ? err.message : fallback);
     } finally {
       busy = false;
+    }
+  }
+
+  // Discard a stale dialog test result when the provider or endpoint changes.
+  function clearCheckResult() {
+    checkResult = null;
+  }
+
+  async function testConnection(notify: Notify) {
+    const providerId = addForm.provider_id;
+    if (!providerId) return;
+    checking = true;
+    checkResult = null;
+    try {
+      const payload = await checkProviderEndpoint(providerId, addForm.base_url);
+      checkResult = payload.data;
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Connection test failed.');
+    } finally {
+      checking = false;
+    }
+  }
+
+  async function probeProvider(providerId: string) {
+    localStatus = {
+      ...localStatus,
+      [providerId]: { checking: true, result: localStatus[providerId]?.result ?? null }
+    };
+    try {
+      const payload = await checkProviderEndpoint(providerId);
+      localStatus = { ...localStatus, [providerId]: { checking: false, result: payload.data } };
+    } catch {
+      // Treat a failed probe request as "unknown" (no result) rather than surfacing a toast on load.
+      localStatus = { ...localStatus, [providerId]: { checking: false, result: null } };
+    }
+  }
+
+  function probeConfiguredLocal() {
+    for (const row of rows) {
+      // Only providers configured by HTTP endpoint — skip cloud and the built-in in-process 'local'.
+      if (row.auth_method === 'local_endpoint') void probeProvider(row.provider_id);
     }
   }
 
@@ -223,14 +295,31 @@ export function createActiveProvidersStore() {
     get addForm() {
       return addForm;
     },
-    set addForm(value: { provider_id: string; api_key: string; account_id: string }) {
+    set addForm(value: {
+      provider_id: string;
+      api_key: string;
+      account_id: string;
+      base_url: string;
+    }) {
       addForm = value;
+    },
+    get checking(): boolean {
+      return checking;
+    },
+    get checkResult(): ProviderCheckResult | null {
+      return checkResult;
+    },
+    get localStatus(): Record<string, ProviderStatus> {
+      return localStatus;
     },
     providerKindLabel,
     load,
     closeDialog,
     openAddDialog,
     submitAddProvider,
+    testConnection,
+    clearCheckResult,
+    probeProvider,
     scanEnvironment,
     openRemoveDialog,
     submitRemoveProvider

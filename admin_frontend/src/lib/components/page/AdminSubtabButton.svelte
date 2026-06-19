@@ -8,6 +8,10 @@
 
   type Props = {
     label: string;
+    /** Optional count shown after the label in a subtle muted color, e.g. Corpus (302). */
+    count?: number;
+    /** Optional free-text count (e.g. "5/20" → (5/20)); takes precedence over `count`. */
+    countText?: string;
     active: boolean;
     disabled?: boolean;
     ariaControls?: string;
@@ -22,6 +26,8 @@
 
   let {
     label,
+    count,
+    countText,
     active,
     disabled = false,
     ariaControls,
@@ -47,5 +53,8 @@
   tabindex={disabled ? -1 : 0}
   {onclick}
 >
-  {#if children}{@render children()}{:else}{label}{/if}
+  {#if children}{@render children()}{:else}{label}{#if countText != null}<span
+        class="ml-1 font-normal text-muted-foreground/70">({countText})</span
+      >{:else if count != null}<span class="ml-1 font-normal text-muted-foreground/70">({count})</span
+      >{/if}{/if}
 </button>

@@ -562,15 +562,21 @@ def register(provider_app: typer.Typer, console: Console) -> None:
         ),
     ) -> None:
         """Set a local provider HTTP endpoint (no API key)."""
+        # Reuse the shared ProviderSetEndpointTool so CLI/HTTP behave identically (validates the
+        # provider exists and is locally hosted, normalizes the URL).
+        from ..tools.provider import ProviderSetEndpointTool
+
         try:
-            entry, _ = resolve_workspace(workspace)
-            store = CredentialStore(Path(entry.path), entry.id)
-            store.set_local_endpoint(provider_id.strip(), base_url.strip())
+            result = ProviderSetEndpointTool().execute(
+                provider_id=provider_id,
+                base_url=base_url,
+                workspace=workspace,
+            )
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
         console.print(
-            f"[green]Set endpoint[/green] for [bold]{provider_id}[/bold] → {base_url.strip()}"
+            f"[green]Set endpoint[/green] for [bold]{result.provider_id}[/bold] → {result.base_url}"
         )
 
 

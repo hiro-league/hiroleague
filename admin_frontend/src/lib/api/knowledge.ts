@@ -437,6 +437,13 @@ export type EvalCorpus = {
   question_count: number;
   item_count: number; // episodes (memory) or .md docs (knowledge)
   has_graph: boolean; // a graph is already built for this corpus (drives the Rebuild-graph default + wipe warning)
+  ingested_count?: number; // memory track: distinct episodes ingested into the graph (vs item_count) → status dot
+
+  // Benchmark grouping — memory track only (from eval/benchmarks.yaml). Absent on knowledge-track
+  // corpuses, which aren't grouped. `label` is the display name (falls back to id server-side).
+  benchmark?: string; // benchmark id, e.g. "locomo"
+  benchmark_label?: string; // human-readable benchmark name, e.g. "LoCoMo"
+  label?: string; // human-readable corpus name shown in the Corpus dropdown
 };
 
 /** List the corpuses found in a folder for a track (the corpus-picker dropdown source). */
@@ -576,6 +583,38 @@ export function listEvalResults(
   return apiRequest<EvalResultsData>(`/knowledge/eval/results?${qs.toString()}`, {
     method: 'GET',
     timeoutMs: 15000
+  });
+}
+
+/** One corpus's row in the benchmark results summary table. ``summary`` is the same
+ *  aggregate the per-corpus Report uses (null until the corpus has saved rows). */
+export type BenchmarkCorpusResult = {
+  corpus_id: string;
+  label: string;
+  bank_questions: number; // questions in the corpus bank
+  item_count: number; // episodes in the corpus
+  answered: number; // saved (run) question rows
+  has_results: boolean;
+  summary: EvalCompletedPayload | null;
+};
+
+/** Benchmark-grouped memory-eval results: one summary per corpus + a TOTAL over all rows. */
+export type BenchmarkResultsData = {
+  benchmark: { id: string; label: string };
+  corpuses: BenchmarkCorpusResult[];
+  total: EvalCompletedPayload | null;
+};
+
+/** Load per-corpus + TOTAL summaries for every corpus in a benchmark (memory track). */
+export function listEvalBenchmarkResults(
+  benchmark: string,
+  folder = ''
+): Promise<ApiResponse<BenchmarkResultsData>> {
+  const qs = new URLSearchParams({ benchmark });
+  if (folder) qs.set('folder', folder);
+  return apiRequest<BenchmarkResultsData>(`/knowledge/eval/results/by-benchmark?${qs.toString()}`, {
+    method: 'GET',
+    timeoutMs: 20000
   });
 }
 

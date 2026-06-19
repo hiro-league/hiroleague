@@ -6,7 +6,7 @@
 # tts_voices: preset ids for bundled TTS integrations — verify against vendor docs when upgrading SDKs.
 # catalog_version: PEP 440-style string (quote so YAML does not parse as float).
 # Pinned to 0.1.3 until the hirocli/app package version is published (bump together then).
-catalog_version: "0.1.3"
+catalog_version: "0.1.4"
 
 providers:
   - id: openai
@@ -756,6 +756,59 @@ models:
     features: [tools, streaming]
     tags: [open_weights]
     notes: Heavier checkpoint; verify VRAM before using as default.
+
+  # Gemma 4 (Google open-weights, Apache 2.0; released 2026-04-02). Configurable thinking is a
+  # binary on/off toggle in Ollama (the `<|think|>` system token → ChatOllama `reasoning` bool),
+  # not graded effort — our ThinkingLevel collapses to on/off here. Native tool calling + JSON
+  # structured output. Pull the size you run (`ollama pull gemma4:<tag>`). num_ctx is NOT set to
+  # the full window by default (would OOM); raise it via a tuning profile's num_ctx.
+  - id: ollama:gemma4:e4b
+    provider_id: ollama
+    display_name: Gemma 4 E4B
+    released_at: "2026-04-02"
+    model_kind: chat
+    model_class: balanced
+    context_window: 131072
+    modalities: [text, image]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    tags: [open_weights]
+    notes: 4.5B effective params; matches gemma4:latest. Edge/default size, 128K context.
+
+  - id: ollama:gemma4:12b
+    provider_id: ollama
+    display_name: Gemma 4 12B
+    released_at: "2026-04-02"
+    model_kind: chat
+    model_class: balanced
+    context_window: 262144
+    modalities: [text, image]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    tags: [open_weights]
+    notes: 12B unified; 256K context. Verify VRAM before raising num_ctx toward the full window.
+
+  - id: ollama:gemma4:26b
+    provider_id: ollama
+    display_name: Gemma 4 26B (MoE)
+    released_at: "2026-04-02"
+    model_kind: chat
+    model_class: agentic
+    context_window: 262144
+    modalities: [text, image]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    tags: [open_weights]
+    notes: 25.2B total / 3.8B active (Mixture-of-Experts); 256K context. Efficient inference for its quality.
+
+  - id: ollama:gemma4:31b
+    provider_id: ollama
+    display_name: Gemma 4 31B
+    released_at: "2026-04-02"
+    model_kind: chat
+    model_class: agentic
+    context_window: 262144
+    modalities: [text, image]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    tags: [open_weights]
+    notes: 30.7B dense; 256K context. Heaviest / highest quality — verify VRAM.
 
   - id: ollama:nomic-embed-text
     provider_id: ollama

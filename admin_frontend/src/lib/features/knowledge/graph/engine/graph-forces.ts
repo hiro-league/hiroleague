@@ -1,9 +1,17 @@
 /**
  * d3-force tuning constants + the custom degree-radial centrality force for the knowledge
- * graph layout. These override force-graph's d3-force defaults to give the small
- * personal-KG corpus a less-clumped layout.
+ * graph layout. These override force-graph's d3-force defaults.
  *
- * Rough scaling guide for THIS corpus shape (~50 nodes):
+ * ⚠️ SCALE TARGET — this is NOT a toy graph. Production knowledge graphs are LARGE: tens of
+ * thousands of nodes (target ~10k–50k+, growing). Scalability is the FIRST constraint, ahead of
+ * visual polish. Every force must stay near-linear:
+ *   - charge (many-body) and links → force-graph runs these on a quadtree / per-edge: OK at scale.
+ *   - degreeRadial → O(n) single pass: OK.
+ *   - collision → the quadtree `forceCollide` from `d3-force-3d` (O(n log n)), registered in
+ *     graph-canvas-engine.ts. (Replaced a hand-rolled O(n²) collide that was fatal at scale.)
+ *
+ * The value sets below are REFERENCE FEEL tuned against a small (~50-node) dev corpus — a starting
+ * point, NOT a scale ceiling. Expect to re-tune (and likely auto-scale by node count) for real sizes.
  *   tighter cluster:  LINK_DISTANCE 40,  CHARGE_STRENGTH -80,   CENTER 0.2
  *   balanced (now):   LINK_DISTANCE 80,  CHARGE_STRENGTH -240,  CENTER 0.05
  *   airy / spread:    LINK_DISTANCE 140, CHARGE_STRENGTH -500,  CENTER 0.03
@@ -30,12 +38,38 @@ export const CHARGE_DISTANCE_MAX = 320;
 // how far the outermost (least-connected) ring sits.
 export const RADIAL_STRENGTH = 0.08;
 
+// Baseline (always-on) anti-overlap: every node claims a collision bubble equal to its DRAWN
+// disc radius plus this pad, regardless of hub separation. Charge is center-to-center and
+// radius-blind, so growing the node-size sliders used to make discs visually overlap at unchanged
+// center spacing; this is the short-range geometric floor that fixes that without touching
+// repulsion. It self-scales with node size (the Node size min/max sliders drive radiusForDegree),
+// so there's no separate slider — COLLIDE_PAD is just the minimum visible gap between two discs.
+export const COLLIDE_PAD = 2;
+
+// Default for the live "Collision spacing" slider (knowledge-graph-prefs.collideScale). A global
+// multiplier on EVERY node's collision radius (baseline + any hub bubble): 1 = normal, 1.5 = +50%
+// personal space, 2 = double. Experiment knob for keeping node LABELS from covering neighbours —
+// collision is a CIRCLE around the node centre while a title is wide text, so this spaces neighbours
+// uniformly (helps crowding; won't perfectly clear a long title off to the side).
+export const COLLIDE_SCALE_DEFAULT = 1;
+
+// Defaults for the live "Node fade" controls. opacity = smoothstep(importance + zoomReveal; start,
+// full). importance is 0..1 log-degree (degreeImportance); zoomReveal lifts clarity as you zoom in
+// (see nodeFadeAlpha). "Node fade" range [start, full] = which nodes are faded when fully zoomed out;
+// start = full = 0 → the whole effect is OFF (all solid). "Zoom reveal" range [lo, hi] is in ZOOM
+// units: hazy below lo× → clear above hi×; hi ≤ lo → static (no zoom motion, just the importance fade).
+export const NODE_FADE_START_DEFAULT = 0;
+export const NODE_FADE_FULL_DEFAULT = 0;
+export const NODE_REVEAL_LO_DEFAULT = 0.4; // at/below this zoom → maximum haze (only important nodes clear)
+export const NODE_REVEAL_HI_DEFAULT = 2.5; // at/above this zoom → fully revealed (everything solid)
+
 // ── Hub separation (the "Hub separation" slider, 0 = off) ─────────────────────────────────
 // Goal: pull high-degree hubs apart from EACH OTHER so a dense graph doesn't read as one
 // clump. Three coupled effects, ALL scaled by `hubSep` so hubSep=0 reproduces today's layout
 // exactly (multiplier 1 / radius 0 / band 0):
 //   1. charge ∝ √degree   — hubs repel everything (incl. other hubs) harder           (long range)
-//   2. collide ∝ √degree  — each hub gets a personal-space bubble it can't be overlapped (short range)
+//   2. collide ∝ √degree  — each hub gets EXTRA personal-space reach on top of the always-on
+//                           baseline disc collision (see COLLIDE_PAD / collideRadius)    (short range)
 //   3. inner band         — hubs aim at a small ring instead of radius 0, so degreeRadial stops
 //                           reeling every hub into the exact same centre point.
 // `hubSeparation` (0..1) = how aggressively hubs repel (charge intensity + engages collide/band).
@@ -50,7 +84,8 @@ export const HUB_COLLIDE_GAIN = 14; // extra collide radius (px) per unit hubFac
 export const HUB_DISTANCE_GAIN = 1; // distanceMax growth per unit (hubSep·spacing) so the push has reach
 export const HUB_BAND_FRACTION = 0.25; // inner-ring radius at hubSep=1, spacing=1, as a fraction of outerRing
 export const HUB_BAND_FRACTION_MAX = 0.85; // cap the band so hubs never target OUTSIDE the leaf ring
-export const HUB_COLLIDE_STRENGTH = 0.8; // how hard the collide force resolves overlap per tick
+export const HUB_COLLIDE_STRENGTH = 0.3; // forceCollide push strength per pass (0..1); soft + iterations = gentle convergence (no jiggle)
+export const COLLIDE_ITERATIONS = 5; // forceCollide resolution passes per tick; more passes clear overlap within fewer ticks
 
 /** Degree → "how much of a hub is this". 0 for a leaf (degree ≤ 1), growing with √degree, so the
  *  hub forces leave low-degree nodes alone and act only on the genuinely-connected ones. */
@@ -62,17 +97,37 @@ export function hubFactor(degree: number): number {
 // the engine. Lower = pulls strays inward; higher = pushes them out.
 export const RADIAL_RING = 35;
 
-// Simulation cooling, switched per update kind (see GraphCanvasEngine.setData). graphData
-// always restarts the sim at alpha=1 and there's no public way to start gentler, so we
-// control how much MOTION that energy produces via decay instead:
-//  - STRUCTURAL (initial load / reload / reconcile / filter): d3 defaults → full energy
-//    so charge can spread the whole graph out (no cramping).
-//  - DELTA (live node/edge add): heavy velocity damping + fast alpha decay so the
-//    established layout only drifts slightly while the new nodes settle in locally.
-export const VELOCITY_DECAY_DEFAULT = 0.4; // d3 default
-export const ALPHA_DECAY_DEFAULT = 0.0228; // d3 default (~300 ticks to cool)
+// ── Simulation cooling per transition type — the "transition smoothness" knobs ────────────────
+// Every transition restarts the sim at alpha=1. force-graph exposes NO custom-alpha and NO
+// alphaTarget setter (verified against force-graph.d.ts: only d3VelocityDecay / d3AlphaDecay /
+// d3AlphaMin / cooldownTicks / d3ReheatSimulation), and it doesn't hand out the simulation object.
+// So a "gentler reheat" can't be done by injecting less energy — it's done by controlling how much
+// of the alpha=1 burst reaches the screen and for how long. Three knobs, set per-transition right
+// BEFORE the reheat:
+//   • velocityDecay  — friction (0..1). HIGH (→1) throttles the burst on the FIRST tick → small,
+//                      smooth move; LOW (→0) lets nodes fly and ring. The dominant "how strong" knob.
+//   • alphaDecay     — how fast the sim cools (>0). HIGH = motion ends sooner; LOW = longer glide.
+//   • cooldownTicks  — HARD tick cap; the sim freezes after N ticks no matter what. Bluntest "stop
+//                      wiggling now" lever (force-graph default Infinity = run until alphaMin).
+// Three profiles for the three transition kinds:
+//   SPREAD — full relayout (initial load / reload / filter / "respread"): wants energy to lay out.
+//            NOTE: hide/show goes through the structural path, so SPREAD also governs filter feel —
+//            tuning SPREAD changes both initial-load and hide/show. (Splitting filter onto its own
+//            profile would be a further step — that's the deferred "localized hide/show".)
+//   TWEAK  — a physics-slider change on an already-settled graph (setForces): wants a gentle ease.
+//            Previously inherited whatever profile the last data op left → now its own knobs.
+//   DELTA  — a live node/edge add (ingest): established graph barely moves, new region settles.
+export const VELOCITY_DECAY_SPREAD = 0.5; // (baseline was 0.4 - keep as reference) d3 default; full energy so charge spreads the graph
+export const ALPHA_DECAY_SPREAD = 0.0228; // d3 default (~300 ticks to cool)
+export const COOLDOWN_TICKS_SPREAD = Infinity; // run to natural settle (no cap)
+
+export const VELOCITY_DECAY_TWEAK = 0.6; // ↑friction vs SPREAD so a slider nudge eases, not jolts
+export const ALPHA_DECAY_TWEAK = 0.045; // (default was 0.05 keep for reference) ~90 ticks → quick settle after a param change
+export const COOLDOWN_TICKS_TWEAK = 120; // hard stop so a tweak can't keep wandering for the full 15s
+
 export const VELOCITY_DECAY_DELTA = 0.8; // only 20% of velocity carries → small, gentle steps
 export const ALPHA_DECAY_DELTA = 0.08; // cools in ~70 ticks → brief, local settle
+export const COOLDOWN_TICKS_DELTA = 90; // local add stops promptly (rarely bites at this decay)
 
 /**
  * A d3-force implementing "most-connected in the middle, others around it": each node is
@@ -113,20 +168,65 @@ export function hubChargeStrength(degree: number, base: number, hubSep: number):
 }
 
 /**
- * Collision radius for a node: its drawn disc plus a hub bubble that grows with degree AND the
- * "Hub spacing" multiplier (the bubble IS the minimum hub-to-hub distance, so spacing is the
- * direct "how far" control). Returns 0 when hubSep=0 (or for leaves) so degreeCollide skips the
- * node. `nodeRadius` is passed in (the engine's NODE_RADIUS) to avoid a config import cycle.
+ * Collision radius for a node, in two layers:
+ *   1. baseline (always on) = drawn disc radius + COLLIDE_PAD, for EVERY node regardless of hub
+ *      separation — this is what stops discs visually overlapping when node sizing grows them.
+ *   2. hub bubble (only when hubSep>0, only genuine hubs) = an EXTRA reach that grows with degree
+ *      and the "Hub spacing" multiplier (the bubble IS the minimum hub-to-hub distance, so spacing
+ *      is the direct "how far" control), added ON TOP of the baseline.
+ * Always > 0, so degreeCollide runs over every node now (was inert at hubSep=0). `nodeRadius` is
+ * passed in (the engine's degree-based drawn radius) to avoid a config import cycle.
  */
-export function hubCollideRadius(
+export function collideRadius(
   degree: number,
   hubSep: number,
   hubSpacing: number,
-  nodeRadius: number
+  nodeRadius: number,
+  collideScale: number
 ): number {
-  if (hubSep <= 0) return 0;
-  const extra = hubSep * HUB_COLLIDE_GAIN * hubSpacing * hubFactor(degree);
-  return extra > 0 ? nodeRadius + extra : 0; // leaves (factor 0) → 0 → skipped by the force
+  const baseline = nodeRadius + COLLIDE_PAD; // always-on floor: discs never overlap
+  const extra = hubSep <= 0 ? 0 : hubSep * HUB_COLLIDE_GAIN * hubSpacing * hubFactor(degree); // leaves (factor 0) → 0
+  return (baseline + extra) * collideScale; // collideScale = live "Collision spacing" slider (1 = normal)
+}
+
+/** Cubic smoothstep of x, clamped to 0..1. */
+function smoothstep01(x: number): number {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Level-of-detail node opacity. opacity = smoothstep(importance + zoomReveal; fadeStart, fadeFull),
+ * where zoomReveal = smoothstep(zoom; revealLo, revealHi) ∈ [0,1] LIFTS every node's clarity as you
+ * zoom IN: below revealLo (far) reveal = 0 → only high-importance nodes clear; above revealHi (near)
+ * reveal = 1 → importance + 1 pushes everything solid; between, lower-importance nodes resolve in
+ * order. The [fadeStart, fadeFull] band stays fixed — zoom slides nodes THROUGH it (no collapse).
+ * revealHi ≤ revealLo → static (no zoom motion). fadeFull ≤ fadeStart → whole effect off (all solid).
+ */
+export function nodeFadeAlpha(
+  importance: number,
+  zoom: number,
+  fadeStart: number,
+  fadeFull: number,
+  revealLo: number,
+  revealHi: number
+): number {
+  if (fadeFull <= fadeStart) return 1; // disabled / degenerate range → no fade (all solid)
+  const reveal = revealHi <= revealLo ? 0 : smoothstep01((zoom - revealLo) / (revealHi - revealLo));
+  return smoothstep01((importance + reveal - fadeStart) / (fadeFull - fadeStart));
+}
+
+/**
+ * Node "importance" in 0..1 from its degree: log(1+degree) / log(1+maxDegree). Log (not √, not linear)
+ * because real knowledge graphs are heavy-tailed — a few mega-hubs (200–300 links) over a long low-
+ * degree tail; √-by-max crushed that tail into ~[0, 0.2]. Plain log (NOT min-max) so the least-
+ * connected node still gets a NONZERO, controllable importance (a degree-1 node ≈ 0.12, not 0), which
+ * is what lets the "Node fade" slider reveal small nodes. Used for the fade ONLY — node SIZE keeps √.
+ */
+export function degreeImportance(degree: number, degreeMax: number): number {
+  const hi = Math.log1p(Math.max(0, degreeMax));
+  if (hi <= 0) return 0; // empty / single isolated node → no spread
+  return Math.min(1, Math.max(0, Math.log1p(Math.max(0, degree)) / hi));
 }
 
 /** distanceMax for the many-body force, widened with hubSep × spacing so the stronger hub
@@ -136,54 +236,7 @@ export function hubDistanceMax(base: number, hubSep: number, hubSpacing: number)
   return base * (1 + Math.max(0, hubSep) * HUB_DISTANCE_GAIN * Math.max(1, hubSpacing));
 }
 
-/**
- * An inline collision force (no d3-force dependency — the bundle doesn't re-export it) that
- * keeps each node's `__collideR` bubble from overlapping its neighbours, mirroring d3.forceCollide:
- * it nudges the projected next position (x+vx, y+vy) apart by velocity, weighting the push by each
- * node's radius². Nodes with `__collideR <= 0` (hub separation off, or leaves) don't participate, so
- * at hubSep=0 this is inert. O(n²) per tick, fine for this corpus's node counts; only hubs carry a
- * non-trivial radius so most pairs are skipped immediately.
- */
-export function degreeCollide(strength = HUB_COLLIDE_STRENGTH) {
-  let simNodes: FgNode[] = [];
-  const force = () => {
-    const n = simNodes.length;
-    for (let i = 0; i < n; i++) {
-      const a = simNodes[i];
-      const ri = a.__collideR ?? 0;
-      if (ri <= 0) continue;
-      const xi = (a.x ?? 0) + (a.vx ?? 0);
-      const yi = (a.y ?? 0) + (a.vy ?? 0);
-      for (let j = i + 1; j < n; j++) {
-        const b = simNodes[j];
-        const rj = b.__collideR ?? 0;
-        if (rj <= 0) continue;
-        let x = xi - ((b.x ?? 0) + (b.vx ?? 0));
-        let y = yi - ((b.y ?? 0) + (b.vy ?? 0));
-        let l = x * x + y * y;
-        const r = ri + rj;
-        if (l >= r * r) continue; // no overlap
-        if (l === 0) {
-          // Coincident centres — jitter so the push has a direction (matches seedNewNodePositions).
-          x = (Math.random() - 0.5) * 1e-3;
-          y = (Math.random() - 0.5) * 1e-3;
-          l = x * x + y * y;
-        }
-        l = Math.sqrt(l);
-        const push = ((r - l) / l) * strength;
-        const xl = x * push;
-        const yl = y * push;
-        // Heavier node (bigger bubble) moves less: distribute by the OTHER node's radius² share.
-        const wj = (rj * rj) / (ri * ri + rj * rj);
-        a.vx = (a.vx ?? 0) + xl * wj;
-        a.vy = (a.vy ?? 0) + yl * wj;
-        b.vx = (b.vx ?? 0) - xl * (1 - wj);
-        b.vy = (b.vy ?? 0) - yl * (1 - wj);
-      }
-    }
-  };
-  force.initialize = (nodes: FgNode[]) => {
-    simNodes = nodes;
-  };
-  return force;
-}
+// Collision is no longer hand-rolled here. It was an O(n²) brute-force copy of d3.forceCollide
+// (jiggly + fatal at scale); the engine now registers the quadtree `forceCollide` from `d3-force-3d`
+// (O(n log n)) directly, driven by HUB_COLLIDE_STRENGTH / COLLIDE_ITERATIONS and the per-node
+// `__collideR` (collideRadius) as its `.radius(...)` accessor. See graph-canvas-engine.ts.

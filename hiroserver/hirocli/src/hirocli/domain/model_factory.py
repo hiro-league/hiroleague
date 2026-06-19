@@ -38,6 +38,7 @@ def create_chat_model(
     temperature: float = 0.7,
     max_tokens: int = 1024,
     thinking: ThinkingLevel | None = None,
+    num_ctx: int | None = None,
     credential_store: CredentialStore | None = None,
     callbacks: list[Any] | None = None,
 ) -> BaseChatModel:
@@ -54,6 +55,7 @@ def create_chat_model(
             temperature=temperature,
             max_tokens=max_tokens,
             thinking=thinking,
+            num_ctx=num_ctx,
         ),
         credential_store=credential_store,
         callbacks=callbacks,
@@ -216,13 +218,24 @@ def build_chat_model_from_tuning(
                 "Ollama base_url missing; run: hiro provider endpoint ollama http://localhost:11434"
             )
         logger.debug("Building ChatOllama — HiroServer · base_url=%s · model=%s", base_url, api_model)
-        return ChatOllama(
-            model=api_model,
-            base_url=base_url,
-            temperature=effective.temperature,
-            num_predict=effective.max_tokens,
-            callbacks=cb,
-        )
+        ollama_kwargs: dict[str, Any] = {
+            "model": api_model,
+            "base_url": base_url,
+            "temperature": effective.temperature,
+            "num_predict": effective.max_tokens,
+            "callbacks": cb,
+        }
+        # Ollama defaults num_ctx to 2048 regardless of the model's real window, truncating
+        # long-context local models. Only override when a tuning profile sets it (None = leave
+        # Ollama's default — we never auto-max to the catalog window to avoid OOMing the KV cache).
+        if effective.num_ctx is not None:
+            ollama_kwargs["num_ctx"] = effective.num_ctx
+        # ThinkingLevel was previously ignored for Ollama. ChatOllama exposes a *boolean* `reasoning`
+        # (the Ollama `think` flag), not graded effort, so any enabled level maps to True. Gated on
+        # the catalog `reasoning` feature so non-reasoning models aren't sent an unsupported flag.
+        if spec.supports_reasoning():
+            ollama_kwargs["reasoning"] = effective.thinking not in (None, "off")
+        return ChatOllama(**ollama_kwargs)
 
     raise ValueError(f"Model factory does not support provider {pid!r} yet.")
 

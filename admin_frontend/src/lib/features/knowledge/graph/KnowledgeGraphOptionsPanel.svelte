@@ -38,6 +38,11 @@
     chargeStrength = $bindable(),
     hubSeparation = $bindable(),
     hubSpacing = $bindable(),
+    collideScale = $bindable(),
+    nodeFadeStart = $bindable(),
+    nodeFadeFull = $bindable(),
+    nodeRevealLo = $bindable(),
+    nodeRevealHi = $bindable(),
     nodeSizeMin = $bindable(),
     nodeSizeMax = $bindable(),
     searchFocusMode = $bindable(),
@@ -60,6 +65,12 @@
     hubSeparationMax,
     hubSpacingMin,
     hubSpacingMax,
+    collideScaleMin,
+    collideScaleMax,
+    nodeFadeBoundMin,
+    nodeFadeBoundMax,
+    nodeRevealZoomMin,
+    nodeRevealZoomMax,
     nodeSizeBoundMin,
     nodeSizeBoundMax,
     zoomBoundMin,
@@ -80,6 +91,11 @@
     chargeStrength: number;
     hubSeparation: number;
     hubSpacing: number;
+    collideScale: number;
+    nodeFadeStart: number;
+    nodeFadeFull: number;
+    nodeRevealLo: number;
+    nodeRevealHi: number;
     nodeSizeMin: number;
     nodeSizeMax: number;
     searchFocusMode: SearchFocusMode;
@@ -102,6 +118,12 @@
     hubSeparationMax: number;
     hubSpacingMin: number;
     hubSpacingMax: number;
+    collideScaleMin: number;
+    collideScaleMax: number;
+    nodeFadeBoundMin: number;
+    nodeFadeBoundMax: number;
+    nodeRevealZoomMin: number;
+    nodeRevealZoomMax: number;
     nodeSizeBoundMin: number;
     nodeSizeBoundMax: number;
     zoomBoundMin: number;
@@ -316,6 +338,25 @@
             <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>fewest links</span><span>most links</span></div>
           </div>
 
+          <!-- Node fade: level-of-detail opacity by importance (log-degree). Below the left knob a node
+               is transparent (and non-interactive), above the right it's solid; drag the left knob DOWN
+               to reveal small nodes. Independent of Node size / labels. Both at 0 = off (whole effect). -->
+          <div>
+            <div class="mb-1 flex items-center text-xs"><span class="flex items-center font-medium">Node fade{@render resetDot(nodeFadeStart !== D.nodeFadeStart || nodeFadeFull !== D.nodeFadeFull, () => { nodeFadeStart = D.nodeFadeStart; nodeFadeFull = D.nodeFadeFull; })}</span></div>
+            <GraphRangeSlider min={nodeFadeBoundMin} max={nodeFadeBoundMax} step={0.02} value={[nodeFadeStart, nodeFadeFull]} format={(v) => v.toFixed(2)} onChange={(lo, hi) => { nodeFadeStart = Math.round(lo * 50) / 50; nodeFadeFull = Math.round(hi * 50) / 50; }} />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>transparent</span><span>solid</span></div>
+          </div>
+
+          <!-- Zoom reveal: how the fade moves with zoom (level-of-detail). Hazy at/below the left knob
+               (only important nodes clear) → fully clear at/above the right knob. Position = where on the
+               zoom axis it happens (match the on-canvas zoom readout); width = how gradual. Collapse the
+               knobs together for a static, zoom-independent fade. Only acts while Node fade is on. -->
+          <div class={cn(nodeFadeStart === 0 && nodeFadeFull === 0 && 'pointer-events-none opacity-40')}>
+            <div class="mb-1 flex items-center text-xs"><span class="flex items-center font-medium">Zoom reveal{@render resetDot(nodeRevealLo !== D.nodeRevealLo || nodeRevealHi !== D.nodeRevealHi, () => { nodeRevealLo = D.nodeRevealLo; nodeRevealHi = D.nodeRevealHi; })}</span></div>
+            <GraphRangeSlider min={nodeRevealZoomMin} max={nodeRevealZoomMax} step={0.1} value={[nodeRevealLo, nodeRevealHi]} format={(v) => v.toFixed(1) + '×'} onChange={(lo, hi) => { nodeRevealLo = r1(lo); nodeRevealHi = r1(hi); }} />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>hazy (far)</span><span>clear (near)</span></div>
+          </div>
+
           <label class="block">
             <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Edge curvature{@render resetDot(curveAmount !== D.curveAmount, () => (curveAmount = D.curveAmount))}</span><span class="tabular-nums text-muted-foreground">{curveAmount.toFixed(2)}</span></div>
             <input type="range" min="0" max="1" step="0.05" bind:value={curveAmount} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Curvature of edges between nodes" />
@@ -414,6 +455,13 @@
             <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Hub spacing{@render resetDot(hubSpacing !== D.hubSpacing, () => (hubSpacing = D.hubSpacing))}</span><span class="tabular-nums text-muted-foreground">{hubSpacing.toFixed(2)}×</span></div>
             <input type="range" min={hubSpacingMin} max={hubSpacingMax} step="0.25" bind:value={hubSpacing} disabled={hubSeparation === 0} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How far apart the separated hubs settle" />
             <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>near</span><span>far</span></div>
+          </label>
+          <!-- Collision spacing: multiplier on every node's collide radius, to open room so node
+               labels are less likely to cover neighbours (a circular approximation — see graph-forces). -->
+          <label class="block">
+            <div class="mb-1 flex items-center justify-between text-xs"><span class="flex items-center font-medium">Collision spacing{@render resetDot(collideScale !== D.collideScale, () => (collideScale = D.collideScale))}</span><span class="tabular-nums text-muted-foreground">{collideScale.toFixed(2)}×</span></div>
+            <input type="range" min={collideScaleMin} max={collideScaleMax} step="0.05" bind:value={collideScale} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Collision radius multiplier — extra spacing so labels don't cover other nodes" />
+            <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>normal</span><span>roomy</span></div>
           </label>
         </div>
       {/if}

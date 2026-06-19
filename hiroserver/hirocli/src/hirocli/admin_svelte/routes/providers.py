@@ -11,7 +11,11 @@ from starlette.concurrency import run_in_threadpool
 from hirocli.admin.features.providers.service import ProvidersPageService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_from_result
-from hirocli.admin_svelte.schemas import ProviderAddApiKeyRequest
+from hirocli.admin_svelte.schemas import (
+    ProviderAddApiKeyRequest,
+    ProviderCheckRequest,
+    ProviderSetEndpointRequest,
+)
 from hirocli.domain.local_models import (
     LOCAL_PROVIDER_ID,
     list_local_model_rows,
@@ -59,7 +63,7 @@ async def list_active_providers(workspace_id: SelectedWorkspaceIdDep) -> dict[st
 @providers_router.get("/providers/addable")
 async def list_addable_providers(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
     result = await run_in_threadpool(
-        ProvidersPageService().list_addable_cloud_providers,
+        ProvidersPageService().list_addable_providers,
         workspace_id,
     )
     payload = _api_from_result(result)
@@ -78,6 +82,34 @@ async def add_provider_api_key(
         body.provider_id,
         body.api_key,
         body.account_id,
+    )
+    return _api_from_result(result)
+
+
+@providers_router.post("/providers/local")
+async def set_provider_local_endpoint(
+    body: ProviderSetEndpointRequest,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    result = await run_in_threadpool(
+        ProvidersPageService().set_local_endpoint,
+        workspace_id,
+        body.provider_id,
+        body.base_url,
+    )
+    return _api_from_result(result)
+
+
+@providers_router.post("/providers/check")
+async def check_provider_endpoint(
+    body: ProviderCheckRequest,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    result = await run_in_threadpool(
+        ProvidersPageService().check_endpoint,
+        workspace_id,
+        body.provider_id,
+        body.base_url,
     )
     return _api_from_result(result)
 

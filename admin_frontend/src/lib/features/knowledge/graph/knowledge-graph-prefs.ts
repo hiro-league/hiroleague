@@ -13,7 +13,16 @@ import {
   writeLocalString,
   writeSessionString
 } from '$lib/preferences/storage';
-import { CENTER_STRENGTH, CHARGE_STRENGTH, RADIAL_RING } from './engine/graph-forces';
+import {
+  CENTER_STRENGTH,
+  CHARGE_STRENGTH,
+  COLLIDE_SCALE_DEFAULT,
+  NODE_FADE_FULL_DEFAULT,
+  NODE_FADE_START_DEFAULT,
+  NODE_REVEAL_LO_DEFAULT,
+  NODE_REVEAL_HI_DEFAULT,
+  RADIAL_RING
+} from './engine/graph-forces';
 import {
   EDGE_FONT_MAX,
   EDGE_FONT_MIN,
@@ -40,6 +49,22 @@ export const HUB_SEPARATION_MAX = 1;
  *  has an effect while Hub separation > 0. */
 export const HUB_SPACING_MIN = 0.5;
 export const HUB_SPACING_MAX = 6;
+
+/** "Collision spacing" slider bounds — a multiplier on every node's collide radius. 1 = normal
+ *  spacing; higher opens extra room so node labels are less likely to cover neighbours. */
+export const COLLIDE_SCALE_MIN = 1;
+export const COLLIDE_SCALE_MAX = 3;
+
+/** "Node fade" range bounds — the prominence (normalizedDegree × zoom) thresholds at which a node is
+ *  fully transparent (start) → fully solid (full). 0..0 disables it. Bound generously since zoom can
+ *  push prominence past 1 for hubs when zoomed in. */
+export const NODE_FADE_MIN = 0;
+export const NODE_FADE_MAX = 1; // thresholds are in importance units (0..1 log-degree)
+
+/** "Zoom reveal" range bounds, in ZOOM units (match the on-canvas zoom readout). Hazy below the low
+ *  thumb → clear above the high thumb. Generous span so any fit/overview zoom sits inside it. */
+export const NODE_REVEAL_ZOOM_MIN = 0.1;
+export const NODE_REVEAL_ZOOM_MAX = 6;
 
 /** "Node size" 2-knob range bounds (drawn disc radius in graph units). The min/max knobs map the
  *  least- and most-connected nodes; equal min/max = flat (every node the same). Default 8–22. */
@@ -88,6 +113,18 @@ export type GraphOptions = {
   /** "Hub spacing": multiplier for HOW FAR hubs spread (collide bubble + charge reach + band).
    *  1 = baseline; higher pushes hubs much further. Inert while hubSeparation = 0. */
   hubSpacing: number;
+  /** "Collision spacing": multiplier on every node's collide radius (1 = normal). Higher opens room
+   *  so node labels are less likely to cover neighbours. */
+  collideScale: number;
+  /** "Node fade" range: prominence (normalizedDegree × zoom) at which a node is fully transparent
+   *  (start) and fully solid (full). full ≤ start disables it (every node solid). Declutters by
+   *  fading small/far nodes; independent of the node-size/font sliders. */
+  nodeFadeStart: number;
+  nodeFadeFull: number;
+  /** "Zoom reveal" range (ZOOM units): hazy below `nodeRevealLo×` → clear above `nodeRevealHi×`.
+   *  Lifts node clarity as you zoom in. hi ≤ lo → static (no zoom motion). */
+  nodeRevealLo: number;
+  nodeRevealHi: number;
   /** "Node size" range: drawn radius for the least-connected (min) → most-connected (max) node,
    *  scaled by √degree. Equal min/max = flat (uniform size). Font scales with size too. */
   nodeSizeMin: number;
@@ -127,6 +164,11 @@ export const GRAPH_OPTION_DEFAULTS: GraphOptions = {
   chargeStrength: CHARGE_STRENGTH,
   hubSeparation: 0, // off by default → identical to the pre-feature layout
   hubSpacing: 1, // baseline spread when hub separation is enabled
+  collideScale: COLLIDE_SCALE_DEFAULT, // 1 = normal collide radius (no extra label spacing)
+  nodeFadeStart: NODE_FADE_START_DEFAULT, // 0/0 = node fade OFF (every node fully solid)
+  nodeFadeFull: NODE_FADE_FULL_DEFAULT,
+  nodeRevealLo: NODE_REVEAL_LO_DEFAULT, // zoom-reveal: hazy below this zoom…
+  nodeRevealHi: NODE_REVEAL_HI_DEFAULT, // …clear above this zoom (only active once Node fade is on)
   nodeSizeMin: 8, // degree-based sizing ON by default (least-connected radius)
   nodeSizeMax: 22, // most-connected radius
   searchFocusMode: 'highlight',
@@ -183,6 +225,31 @@ export function readGraphOptions(): GraphOptions {
         num(p.hubSpacing, GRAPH_OPTION_DEFAULTS.hubSpacing),
         HUB_SPACING_MIN,
         HUB_SPACING_MAX
+      ),
+      collideScale: clamp(
+        num(p.collideScale, GRAPH_OPTION_DEFAULTS.collideScale),
+        COLLIDE_SCALE_MIN,
+        COLLIDE_SCALE_MAX
+      ),
+      nodeFadeStart: clamp(
+        num(p.nodeFadeStart, GRAPH_OPTION_DEFAULTS.nodeFadeStart),
+        NODE_FADE_MIN,
+        NODE_FADE_MAX
+      ),
+      nodeFadeFull: clamp(
+        num(p.nodeFadeFull, GRAPH_OPTION_DEFAULTS.nodeFadeFull),
+        NODE_FADE_MIN,
+        NODE_FADE_MAX
+      ),
+      nodeRevealLo: clamp(
+        num(p.nodeRevealLo, GRAPH_OPTION_DEFAULTS.nodeRevealLo),
+        NODE_REVEAL_ZOOM_MIN,
+        NODE_REVEAL_ZOOM_MAX
+      ),
+      nodeRevealHi: clamp(
+        num(p.nodeRevealHi, GRAPH_OPTION_DEFAULTS.nodeRevealHi),
+        NODE_REVEAL_ZOOM_MIN,
+        NODE_REVEAL_ZOOM_MAX
       ),
       nodeSizeMin: clamp(
         num(p.nodeSizeMin, GRAPH_OPTION_DEFAULTS.nodeSizeMin),

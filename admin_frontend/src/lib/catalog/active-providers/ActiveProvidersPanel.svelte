@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { KeyRound, RefreshCw, Search, Trash2 } from '@lucide/svelte';
+  import { Plus, RefreshCw, Search, Trash2 } from '@lucide/svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import Badge from '$lib/components/ui/badge.svelte';
@@ -49,7 +49,7 @@
         <Search size={15} /> Scan environment
       </Button>
       <Button disabled={store.busy} onclick={() => void store.openAddDialog(notify)}>
-        <KeyRound size={15} /> Add API key
+        <Plus size={15} /> Add provider
       </Button>
     </div>
   </div>
@@ -61,7 +61,7 @@
   {:else if store.rows.length === 0}
     <InlineEmptyState
       message="No providers configured for this workspace."
-      hint="Add an API key or scan your environment."
+      hint="Add a provider (cloud API key or local endpoint) or scan your environment."
     />
   {:else}
     <AdminTableShell
@@ -107,6 +107,26 @@
                 />
               </div>
               <small class="block truncate text-xs text-muted-foreground">{provider.provider_id}</small>
+              {#if provider.auth_method === 'local_endpoint'}
+                {@const st = store.localStatus[provider.provider_id]}
+                <small class="block text-xs">
+                  {#if st?.checking}
+                    <span class="text-muted-foreground">Checking…</span>
+                  {:else if st?.result?.online}
+                    {@const pulled = st.result.catalog_status.filter((m) => m.pulled).length}
+                    <span class="text-green-700 dark:text-green-500">● online</span>
+                    <span class="text-muted-foreground">
+                      · {pulled}/{st.result.catalog_status.length} models pulled
+                    </span>
+                  {:else if st?.result}
+                    <span class="text-amber-600 dark:text-amber-500" title={st.result.error ?? ''}>
+                      ● offline
+                    </span>
+                  {:else}
+                    <span class="text-muted-foreground">● status unknown</span>
+                  {/if}
+                </small>
+              {/if}
             </span>
             <span>
               <Badge variant={provider.hosting === 'cloud' ? 'secondary' : 'outline'}>
@@ -126,14 +146,27 @@
                   Built-in
                 </span>
               {:else}
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  disabled={store.busy}
-                  onclick={() => store.openRemoveDialog(provider)}
-                >
-                  <Trash2 size={13} /> Remove
-                </Button>
+                <div class="flex items-center gap-1">
+                  {#if provider.auth_method === 'local_endpoint'}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={store.busy || store.localStatus[provider.provider_id]?.checking}
+                      onclick={() => void store.probeProvider(provider.provider_id)}
+                      title="Re-check endpoint reachability"
+                    >
+                      <RefreshCw size={13} /> Recheck
+                    </Button>
+                  {/if}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={store.busy}
+                    onclick={() => store.openRemoveDialog(provider)}
+                  >
+                    <Trash2 size={13} /> Remove
+                  </Button>
+                </div>
               {/if}
             </span>
           </div>
@@ -151,16 +184,27 @@
   providerId={store.addForm.provider_id}
   apiKey={store.addForm.api_key}
   accountId={store.addForm.account_id}
+  baseUrl={store.addForm.base_url}
+  checking={store.checking}
+  checkResult={store.checkResult}
   onClose={() => store.closeDialog()}
   onSubmit={() => void store.submitAddProvider(notify)}
+  onTest={() => void store.testConnection(notify)}
   onProviderIdChange={(value) => {
-    store.addForm = { ...store.addForm, provider_id: value };
+    // Switching provider re-prefills the suggested endpoint for local providers (blank for cloud).
+    const next = store.addableProviders.find((provider) => provider.id === value);
+    store.addForm = { ...store.addForm, provider_id: value, base_url: next?.default_base_url ?? '' };
+    store.clearCheckResult();
   }}
   onApiKeyChange={(value) => {
     store.addForm = { ...store.addForm, api_key: value };
   }}
   onAccountIdChange={(value) => {
     store.addForm = { ...store.addForm, account_id: value };
+  }}
+  onBaseUrlChange={(value) => {
+    store.addForm = { ...store.addForm, base_url: value };
+    store.clearCheckResult();
   }}
 />
 

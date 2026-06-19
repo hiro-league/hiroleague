@@ -24,6 +24,12 @@
     HUB_SEPARATION_MIN,
     HUB_SPACING_MAX,
     HUB_SPACING_MIN,
+    COLLIDE_SCALE_MAX,
+    COLLIDE_SCALE_MIN,
+    NODE_FADE_MAX,
+    NODE_FADE_MIN,
+    NODE_REVEAL_ZOOM_MAX,
+    NODE_REVEAL_ZOOM_MIN,
     NODE_SIZE_BOUND_MAX,
     NODE_SIZE_BOUND_MIN,
     LABEL_FONT_BOUND_MAX,
@@ -61,6 +67,11 @@
   let chargeStrength = $state(savedOptions.chargeStrength); // d3 charge (node repulsion); negative
   let hubSeparation = $state(savedOptions.hubSeparation); // pushes high-degree hubs apart (0 = off)
   let hubSpacing = $state(savedOptions.hubSpacing); // how far hubs spread (multiplier; inert at sep 0)
+  let collideScale = $state(savedOptions.collideScale); // collide-radius multiplier (label-spacing knob)
+  let nodeFadeStart = $state(savedOptions.nodeFadeStart); // "Node fade" range: prominence → fully transparent
+  let nodeFadeFull = $state(savedOptions.nodeFadeFull); // → fully solid (full ≤ start disables fade)
+  let nodeRevealLo = $state(savedOptions.nodeRevealLo); // zoom-reveal: hazy below this zoom…
+  let nodeRevealHi = $state(savedOptions.nodeRevealHi); // …clear above this zoom (hi ≤ lo = static)
   let nodeSizeMin = $state(savedOptions.nodeSizeMin); // degree-based node radius: least-connected
   let nodeSizeMax = $state(savedOptions.nodeSizeMax); // most-connected (font scales with size too)
   // Search highlight treatment of non-matches: 'highlight' (ring only) | 'dim' | 'hide'.
@@ -200,12 +211,15 @@
     hideMode ? displayLinks.filter((l) => matchedEdgeIds.has(l.id)) : displayLinks
   );
 
+  let zoomLevel = $state(1); // live canvas zoom scale (engine onZoomChange) → shown in the stats overlay
+
   onMount(async () => {
     if (!container) return;
     engine = new GraphCanvasEngine({
       onNodeClick: (id) => graph.selectNode(id),
       onLinkClick: (id) => graph.selectEdge(id),
-      onBackgroundClick: () => graph.clearSelection()
+      onBackgroundClick: () => graph.clearSelection(),
+      onZoomChange: (k) => (zoomLevel = k)
     });
     await engine.mount(container, {
       linkStrength,
@@ -215,6 +229,7 @@
       radialRing,
       hubSeparation,
       hubSpacing,
+      collideScale,
       nodeSizeMin,
       nodeSizeMax
     });
@@ -281,6 +296,7 @@
     const chargeStrengthValue = chargeStrength; // tracked
     const hubSeparationValue = hubSeparation; // tracked
     const hubSpacingValue = hubSpacing; // tracked
+    const collideScaleValue = collideScale; // tracked
     engine?.setForces({
       linkStrength: linkStrengthValue,
       linkDistance: linkDistanceValue,
@@ -288,7 +304,8 @@
       radialRing: radialRingValue,
       chargeStrength: chargeStrengthValue,
       hubSeparation: hubSeparationValue,
-      hubSpacing: hubSpacingValue
+      hubSpacing: hubSpacingValue,
+      collideScale: collideScaleValue
     });
   });
 
@@ -323,6 +340,11 @@
     });
   });
 
+  // "Node fade" range (View) → engine repaints node opacity (importance × zoom level-of-detail).
+  $effect(() => {
+    engine?.setNodeFade({ nodeFadeStart, nodeFadeFull, nodeRevealLo, nodeRevealHi }); // tracked
+  });
+
   // Search highlight state → engine repaints rings/dim/hide and frames the matched subset.
   $effect(() => {
     engine?.setSearch({
@@ -352,8 +374,15 @@
       nodeIds: new Set<string>(),
       edgeIds: new Set<string>()
     };
-    if (searchActive || selectionFocusMode === 'all') return inactive;
-    const mode = selectionFocusMode === 'hide' ? ('hide' as const) : ('dim' as const);
+    if (searchActive) return inactive;
+    // 'all' still computes the ego set (so the Node-fade can keep the selection + its neighbours
+    // solid) but uses mode 'none' → nothing else is dimmed/hidden. 'dim'/'hide' also dim the rest.
+    const mode =
+      selectionFocusMode === 'hide'
+        ? ('hide' as const)
+        : selectionFocusMode === 'dim'
+          ? ('dim' as const)
+          : ('none' as const);
     // Node selected → its ego network (the node + every edge touching it + those edges' endpoints).
     if (selectedNodeId) {
       const nodeIds = new Set<string>([selectedNodeId]);
@@ -406,6 +435,11 @@
       chargeStrength,
       hubSeparation,
       hubSpacing,
+      collideScale,
+      nodeFadeStart,
+      nodeFadeFull,
+      nodeRevealLo,
+      nodeRevealHi,
       nodeSizeMin,
       nodeSizeMax,
       searchFocusMode,
@@ -433,6 +467,11 @@
     chargeStrength = GRAPH_OPTION_DEFAULTS.chargeStrength;
     hubSeparation = GRAPH_OPTION_DEFAULTS.hubSeparation;
     hubSpacing = GRAPH_OPTION_DEFAULTS.hubSpacing;
+    collideScale = GRAPH_OPTION_DEFAULTS.collideScale;
+    nodeFadeStart = GRAPH_OPTION_DEFAULTS.nodeFadeStart;
+    nodeFadeFull = GRAPH_OPTION_DEFAULTS.nodeFadeFull;
+    nodeRevealLo = GRAPH_OPTION_DEFAULTS.nodeRevealLo;
+    nodeRevealHi = GRAPH_OPTION_DEFAULTS.nodeRevealHi;
     nodeSizeMin = GRAPH_OPTION_DEFAULTS.nodeSizeMin;
     nodeSizeMax = GRAPH_OPTION_DEFAULTS.nodeSizeMax;
     searchFocusMode = GRAPH_OPTION_DEFAULTS.searchFocusMode;
@@ -634,6 +673,11 @@
             bind:chargeStrength
             bind:hubSeparation
             bind:hubSpacing
+            bind:collideScale
+            bind:nodeFadeStart
+            bind:nodeFadeFull
+            bind:nodeRevealLo
+            bind:nodeRevealHi
             bind:nodeSizeMin
             bind:nodeSizeMax
             bind:searchFocusMode
@@ -656,6 +700,12 @@
             hubSeparationMax={HUB_SEPARATION_MAX}
             hubSpacingMin={HUB_SPACING_MIN}
             hubSpacingMax={HUB_SPACING_MAX}
+            collideScaleMin={COLLIDE_SCALE_MIN}
+            collideScaleMax={COLLIDE_SCALE_MAX}
+            nodeFadeBoundMin={NODE_FADE_MIN}
+            nodeFadeBoundMax={NODE_FADE_MAX}
+            nodeRevealZoomMin={NODE_REVEAL_ZOOM_MIN}
+            nodeRevealZoomMax={NODE_REVEAL_ZOOM_MAX}
             nodeSizeBoundMin={NODE_SIZE_BOUND_MIN}
             nodeSizeBoundMax={NODE_SIZE_BOUND_MAX}
             zoomBoundMin={LABEL_ZOOM_BOUND_MIN}
@@ -718,6 +768,9 @@
         {:else}
           <span>{graph.nodes().length} nodes · {graph.links().length} edges</span>
         {/if}
+        <span class="tabular-nums" title="Current zoom — match this against the label zoom thresholds in Options → View">
+          {zoomLevel.toFixed(2)}×
+        </span>
         {#if graph.live()}
           <span class="inline-flex items-center gap-1.5 text-emerald-500">
             <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> live

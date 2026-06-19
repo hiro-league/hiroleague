@@ -73,7 +73,7 @@
 >
   <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <p class="min-w-0 flex-1 text-sm text-muted-foreground">
-      Temperature, max tokens, and thinking presets referenced by the chat and memory defaults above.
+      Temperature, max tokens, thinking, and context-window presets referenced by the chat and memory defaults above.
     </p>
     {#if ctrl.draft}
       <Button
@@ -163,6 +163,20 @@
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
               </select>
+            </FormField>
+            <FormField
+              label="Context window"
+              hint="Local providers only (Ollama num_ctx). Blank = provider default (Ollama: 2048). Don't set to the full model window — large values use a lot of memory."
+            >
+              <input
+                type="number"
+                min="1"
+                step="1"
+                class={ADMIN_SELECT_LG}
+                placeholder="Provider default"
+                value={profile.num_ctx ?? ''}
+                oninput={(event) => ctrl.updateProfile(id, 'num_ctx', event.currentTarget.value)}
+              />
             </FormField>
           </div>
         </SectionCardMuted>

@@ -86,6 +86,11 @@ export type ActiveProviderRow = {
 export type AddableProviderRow = {
   id: string;
   display_name: string;
+  hosting: 'cloud' | 'local' | string;
+  /** "api_key" (cloud) or "local_endpoint" (local) — selects which add-dialog form to render. */
+  auth_method: 'api_key' | 'local_endpoint' | string;
+  /** Local providers: suggested endpoint prefilled in the dialog (e.g. http://localhost:11434). */
+  default_base_url?: string | null;
   /** Cloudflare-style: the add dialog must also collect the (non-secret) account id. */
   requires_account_id?: boolean;
 };
@@ -188,6 +193,51 @@ export async function addProviderApiKey(providerId: string, apiKey: string, acco
       provider_id: providerId,
       api_key: apiKey,
       account_id: accountId?.trim() ? accountId.trim() : null
+    }
+  });
+}
+
+export async function setLocalEndpoint(providerId: string, baseUrl: string) {
+  return apiRequest<null>('/providers/local', {
+    method: 'POST',
+    body: {
+      provider_id: providerId,
+      base_url: baseUrl.trim()
+    }
+  });
+}
+
+/** One cataloged model for a local provider and whether it is pulled on the server. */
+export type CatalogModelPullStatus = {
+  id: string;
+  name: string;
+  pulled: boolean;
+  /** Set only when not pulled: the exact command to fetch it (e.g. `ollama pull gemma4:26b`). */
+  pull_cmd?: string | null;
+};
+
+/** Reachability + installed-model reconciliation for a local provider endpoint. */
+export type ProviderCheckResult = {
+  provider_id: string;
+  workspace: string;
+  base_url: string;
+  online: boolean;
+  latency_ms?: number | null;
+  installed: string[];
+  catalog_status: CatalogModelPullStatus[];
+  error?: string | null;
+};
+
+/** Probe a local provider endpoint. Pass baseUrl to test a candidate before saving. */
+export async function checkProviderEndpoint(
+  providerId: string,
+  baseUrl?: string
+): Promise<ApiResponse<ProviderCheckResult>> {
+  return apiRequest<ProviderCheckResult>('/providers/check', {
+    method: 'POST',
+    body: {
+      provider_id: providerId,
+      base_url: baseUrl?.trim() ? baseUrl.trim() : null
     }
   });
 }

@@ -71,6 +71,13 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "default_base_url": "https://api.deepseek.com",
                 "metadata_updated_at": "2026-01-01",
             },
+            {
+                "id": "ollama",
+                "display_name": "Ollama (local)",
+                "hosting": "local",
+                "default_base_url": "http://localhost:11434",
+                "metadata_updated_at": "2026-01-01",
+            },
         ],
         "models": [
             {
@@ -102,6 +109,23 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "provider_id": "openai",
                 "display_name": "text-embedding-3-small",
                 "model_kind": "embedding",
+            },
+            {
+                # Colon in the api id (gemma4:12b) exercises split-on-first-colon id handling.
+                "id": "ollama:gemma4:12b",
+                "provider_id": "ollama",
+                "display_name": "Gemma 4 12B",
+                "model_kind": "chat",
+                "model_class": "balanced",
+                "features": ["tools", "structured_output", "reasoning"],
+            },
+            {
+                "id": "ollama:llama3.3",
+                "provider_id": "ollama",
+                "display_name": "Llama 3.3",
+                "model_kind": "chat",
+                "model_class": "agentic",
+                "features": ["tools", "streaming"],
             },
         ],
     }
@@ -220,6 +244,73 @@ def test_deepseek_off_disables_thinking_and_keeps_temperature(
     assert model.temperature == 0.2
     assert model.extra_body == {"thinking": {"type": "disabled"}}
     assert model.reasoning_effort is None
+
+
+def test_ollama_reasoning_on_sets_think_and_num_ctx(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_local_endpoint("ollama", "http://localhost:11434")
+
+    model = create_chat_model(
+        "ollama:gemma4:12b",
+        workspace_path=tmp_path,
+        credential_store=store,
+        temperature=0.5,
+        max_tokens=2048,
+        thinking="medium",
+        num_ctx=8192,
+    )
+
+    # api id is everything after the FIRST colon — the gemma4 tag's own colon is preserved.
+    assert model.model == "gemma4:12b"
+    assert str(model.base_url) == "http://localhost:11434"
+    assert model.num_predict == 2048
+    # Any enabled ThinkingLevel maps to the boolean think flag (Gemma 4 has no graded effort).
+    assert model.reasoning is True
+    assert model.num_ctx == 8192
+
+
+def test_ollama_reasoning_off_disables_think(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_local_endpoint("ollama", "http://localhost:11434")
+
+    model = create_chat_model(
+        "ollama:gemma4:12b",
+        workspace_path=tmp_path,
+        credential_store=store,
+        thinking="off",
+    )
+
+    assert model.reasoning is False
+    # num_ctx not passed → Ollama's own default applies (we never auto-max the catalog window).
+    assert model.num_ctx is None
+
+
+def test_ollama_non_reasoning_model_omits_think_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_local_endpoint("ollama", "http://localhost:11434")
+
+    # llama3.3 lacks the `reasoning` catalog feature, so the think flag must not be sent even
+    # when a thinking level is requested.
+    model = create_chat_model(
+        "ollama:llama3.3",
+        workspace_path=tmp_path,
+        credential_store=store,
+        thinking="high",
+    )
+
+    assert model.reasoning is None
 
 
 def test_with_structured_output_compat_deepseek_thinking_uses_json_mode() -> None:

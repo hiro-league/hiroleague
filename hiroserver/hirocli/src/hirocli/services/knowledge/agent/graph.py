@@ -384,6 +384,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 temperature=resolved.temperature,
                 max_tokens=resolved.max_tokens,
                 thinking=resolved.thinking,
+                num_ctx=resolved.num_ctx,
             )
             # Use the compat wrapper so DeepSeek thinking mode doesn't 400 on the forced
             # tool_choice (it falls back to json_mode). Unlike the graphiti adapter, this node
@@ -971,6 +972,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 temperature=resolved.temperature,
                 max_tokens=resolved.max_tokens,
                 thinking=resolved.thinking,
+                num_ctx=resolved.num_ctx,
             )
         except Exception as exc:
             log.error("knowledge.answer model creation failed", error=str(exc), exc_info=True)

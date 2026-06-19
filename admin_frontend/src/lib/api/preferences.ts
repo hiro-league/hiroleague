@@ -11,6 +11,8 @@ export type ModelTuning = {
   temperature: number;
   max_tokens: number;
   thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  // Local-provider context window (Ollama num_ctx); null/omitted = provider default (Ollama: 2048).
+  num_ctx?: number | null;
 };
 
 export type TuningProfile = ModelTuning & {

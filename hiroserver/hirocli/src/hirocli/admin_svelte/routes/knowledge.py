@@ -1581,6 +1581,91 @@ async def eval_results(
         return envelope_failure(str(exc))
 
 
+def _enrich_rows_with_evidence(corpus_id: str, questions_path: str, rows: list[dict[str, Any]]) -> None:
+    """Attach per-row evidence-recall (X/Y gold episodes covered) IN PLACE — the same read-path
+    enrichment the per-corpus results endpoint applies, so benchmark summaries carry the
+    Evidence-recall column too. Evidence is computed on read from the corpus sidecar
+    (``.locomo.yaml`` / ``.beam.yaml``); it is NOT persisted in the stored rows. Best-effort: no
+    sidecar / a scoring hiccup just leaves rows un-enriched (the column then shows dashes)."""
+    qpath = Path(questions_path) if questions_path else None
+    if qpath is None or not qpath.exists() or not rows:
+        return
+    try:
+        from hirocli.services.knowledge.eval_locomo import compute_evidence_recall_map
+
+        ev_map = compute_evidence_recall_map(corpus_id=corpus_id, questions_path=qpath, rows=rows)
+        for r in rows:
+            ev = ev_map.get(str(r.get("id") or ""))
+            if ev is not None:
+                r["evidence_recall"] = ev
+    except Exception:
+        log.warning(
+            "knowledge eval by-benchmark evidence enrichment failed · corpus=%s",
+            corpus_id,
+            exc_info=True,
+        )
+
+
+@knowledge_router.get("/knowledge/eval/results/by-benchmark")
+async def eval_results_by_benchmark(
+    workspace_id: SelectedWorkspaceIdDep,
+    benchmark: str = "",
+    folder: str = "",
+) -> dict[str, Any]:
+    """Per-corpus + TOTAL memory-eval summaries for every corpus in a benchmark.
+
+    Powers the benchmark results overview (one summary row per corpus + a TOTAL row over
+    all their saved rows). Reuses ``summarize_memory_rows`` — the same aggregator the
+    per-corpus results read uses — so the numbers match the single-corpus Report exactly.
+    Memory track only. A corpus with no saved rows yet reports ``summary: null``."""
+    from hirocli.services.knowledge.eval_runner import (
+        DEFAULT_EVAL_FOLDER,
+        discover_corpuses,
+        summarize_memory_rows,
+    )
+    from hirocli.services.knowledge.eval_store import get_eval_result_store
+
+    bid = benchmark.strip()
+    if not bid:
+        return envelope_failure("benchmark is required to read benchmark results.")
+    try:
+        base = Path(folder.strip()) if folder.strip() else DEFAULT_EVAL_FOLDER
+        corpuses = [c for c in discover_corpuses(base, "memory") if c.get("benchmark") == bid]
+        bench_label = corpuses[0]["benchmark_label"] if corpuses else bid
+        entry, _ = resolve_workspace(workspace_id)
+        store = get_eval_result_store(Path(entry.path))
+        out_corpuses: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
+        for c in corpuses:
+            rows = list(store.read_corpus(c["id"]).values())
+            # Evidence-recall isn't persisted — compute it on read (per corpus) so the benchmark
+            # totals + per-corpus summaries carry the Evidence-recall column, matching the detail view.
+            _enrich_rows_with_evidence(c["id"], c.get("questions_path") or "", rows)
+            all_rows.extend(rows)
+            out_corpuses.append(
+                {
+                    "corpus_id": c["id"],
+                    "label": c.get("label") or c["id"],
+                    "bank_questions": c.get("question_count", 0),  # questions in the bank
+                    "item_count": c.get("item_count", 0),  # episodes in the corpus
+                    "answered": len(rows),  # saved (run) question rows
+                    "has_results": bool(rows),
+                    "summary": summarize_memory_rows(rows, run_id=f"saved-{c['id']}") if rows else None,
+                }
+            )
+        total = summarize_memory_rows(all_rows, run_id=f"benchmark-{bid}") if all_rows else None
+        return _success(
+            {
+                "benchmark": {"id": bid, "label": bench_label},
+                "corpuses": out_corpuses,
+                "total": total,
+            }
+        )
+    except Exception as exc:
+        log.error("knowledge eval by-benchmark read failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
 class EvalResultsClearBody(BaseModel):
     """Results-only clear of a corpus's persisted eval snapshot (memory track)."""
 
@@ -1669,7 +1754,8 @@ async def eval_corpuses(
 ) -> dict[str, Any]:
     """List the corpuses in ``folder`` for ``track`` (the corpus-picker source).
 
-    ``folder`` defaults to the repo ``eval/`` dir. Each corpus pairs with its
+    ``folder`` defaults to the sibling ``eval-corpus`` repo (``DEFAULT_EVAL_FOLDER``;
+    override with ``$HIRO_EVAL_CORPUS_DIR``). Each corpus pairs with its
     ``<id>.questions.yaml`` bank by the stem convention (docs §12). The corpus files
     are workspace-independent, but each entry's ``has_graph`` flag (whether a graph was
     already built for it) is read from the selected workspace's graph — it drives the
@@ -1699,20 +1785,35 @@ async def eval_corpuses(
         # so a probe hiccup still yields the path; "" only when the workspace can't be resolved.
         log_dir = ""
         existing: set[str] = set()
+        # reason: per-corpus distinct-episodes-ingested count (memory track) → drives the picker's
+        # not/partial/fully-ingested status dot. Read from the workspace's eval store (the same
+        # ranges the Results panel shows); a probe hiccup leaves it 0 (= not ingested) per corpus.
+        ingested_by_id: dict[str, int] = {}
         try:
             entry, _ = resolve_workspace(workspace_id)
             ws_path = Path(entry.path)
             log_dir = str(ws_path / "logs")
             db_path = graphiti_db_path(ws_path)
             existing = await distinct_group_ids_with_prefix(db_path, prefix)
+            if track == "memory":
+                from hirocli.services.knowledge.eval_store import (
+                    coalesce_ingested_ranges,
+                    get_eval_result_store,
+                )
+
+                store = get_eval_result_store(ws_path)
+                for c in corpuses:
+                    spans = coalesce_ingested_ranges(store.read_ranges(c["id"]))
+                    ingested_by_id[c["id"]] = sum(end - start + 1 for start, end in spans)
         except Exception:
             log.warning(
-                "⚠️ knowledge.eval — has_graph probe failed · track=%s · defaulting to false",
+                "⚠️ knowledge.eval — has_graph/ingested probe failed · track=%s · defaulting to empty",
                 track,
                 exc_info=True,
             )
         for c in corpuses:
             c["has_graph"] = group_for(c["id"]) in existing
+            c["ingested_count"] = ingested_by_id.get(c["id"], 0)
         return _success(
             {"track": track, "folder": str(base), "corpuses": corpuses, "log_dir": log_dir}
         )

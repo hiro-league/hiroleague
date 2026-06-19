@@ -19,6 +19,7 @@
  * removed ids are dropped.
  */
 import type ForceGraph from 'force-graph';
+import { forceCollide } from 'd3-force-3d'; // quadtree collision (O(n log n)) — the lib force-graph already uses
 import { colorFor, humanizeRelType } from '../knowledge-graph-style';
 import type { SearchFocusMode } from '../knowledge-graph-prefs';
 import {
@@ -36,20 +37,33 @@ import {
 } from './graph-config';
 import { drawIcon, drawTextPill, labelFontSize, wrapLabel } from './graph-draw';
 import {
-  ALPHA_DECAY_DEFAULT,
+  ALPHA_DECAY_SPREAD,
+  ALPHA_DECAY_TWEAK,
   ALPHA_DECAY_DELTA,
   CHARGE_DISTANCE_MAX,
   CHARGE_STRENGTH,
-  degreeCollide,
+  COLLIDE_ITERATIONS,
+  COLLIDE_SCALE_DEFAULT,
+  NODE_FADE_START_DEFAULT,
+  NODE_FADE_FULL_DEFAULT,
+  NODE_REVEAL_LO_DEFAULT,
+  NODE_REVEAL_HI_DEFAULT,
+  nodeFadeAlpha,
+  degreeImportance,
+  COOLDOWN_TICKS_SPREAD,
+  COOLDOWN_TICKS_TWEAK,
+  COOLDOWN_TICKS_DELTA,
   degreeRadial,
   GRAVITY_STRENGTH,
   HUB_BAND_FRACTION,
   HUB_BAND_FRACTION_MAX,
+  HUB_COLLIDE_STRENGTH,
+  collideRadius,
   hubChargeStrength,
-  hubCollideRadius,
   hubDistanceMax,
   RADIAL_STRENGTH,
-  VELOCITY_DECAY_DEFAULT,
+  VELOCITY_DECAY_SPREAD,
+  VELOCITY_DECAY_TWEAK,
   VELOCITY_DECAY_DELTA
 } from './graph-forces';
 import { assignLinkCurvatures } from './graph-links';
@@ -81,7 +95,9 @@ export interface RenderLink {
  *  outside its ego network. Renderer-only (no relayout) so clicking around stays snappy. */
 export interface NeighborFocusState {
   active: boolean;
-  mode: 'dim' | 'hide';
+  // 'none' = the selection's ego set is known (so the fade can keep it solid) but the rest is NOT
+  // dimmed/hidden — used by selectionFocusMode 'all'. 'dim'/'hide' also apply the focus treatment.
+  mode: 'dim' | 'hide' | 'none';
   selectedId: string;
   nodeIds: Set<string>;
   edgeIds: Set<string>;
@@ -91,6 +107,9 @@ export interface GraphCanvasCallbacks {
   onNodeClick: (id: string) => void;
   onLinkClick: (id: string) => void;
   onBackgroundClick: () => void;
+  /** Current canvas zoom scale (force-graph transform.k), on every pan/zoom + programmatic fit.
+   *  Surfaced in the stats overlay to help tune the zoom-threshold sliders (edge/node labels). */
+  onZoomChange?: (k: number) => void;
 }
 
 /** Our concrete force-graph instance type — the shipped generic class specialized to our
@@ -123,10 +142,29 @@ function aggregateLabel(l: FgLink): string {
   return l.whole ? `${n} relations` : `${n} other relations`;
 }
 
+/** Below this "Node fade" opacity a node is treated as gone: skipped from drawing AND non-interactive. */
+const FADE_CULL_EPSILON = 0.012;
+
+/** Multiply the alpha channel of an `rgba()`/`rgb()` colour by `factor` (clamped 0..1). Non-rgba
+ *  strings (hex, named) are returned unchanged — only the scheme's rgba link colours get scaled. */
+function scaleColorAlpha(color: string, factor: number): string {
+  if (factor >= 1) return color;
+  const m = color.match(/^rgba?\(([^)]+)\)$/i);
+  if (!m) return color;
+  const p = m[1].split(',').map((s) => s.trim());
+  if (p.length < 3) return color;
+  const a = p.length >= 4 ? parseFloat(p[3]) : 1;
+  return `rgba(${p[0]},${p[1]},${p[2]},${Math.max(0, Math.min(1, a * factor))})`;
+}
+
 export class GraphCanvasEngine {
   private readonly callbacks: GraphCanvasCallbacks;
   private container: HTMLDivElement | null = null;
   private fg: FgInstance | null = null;
+  // The quadtree collision force (d3-force-3d). Held so we can refresh its CACHED per-node radii:
+  // forceCollide reads `.radius(...)` only at initialize, not per tick — unlike the old live-reading
+  // custom force — so sizing/hub changes that don't reset graphData must re-push the radii (syncCollideRadii).
+  private collideForce: ReturnType<typeof forceCollide<FgNode>> | null = null;
 
   // ── force-graph mirror objects (see class header). Existing mirrors keep identity → x/y. ──
   private readonly fgNodeById = new Map<string, FgNode>();
@@ -188,6 +226,9 @@ export class GraphCanvasEngine {
   // Live "Hub spacing" slider (multiplier ≥ 0; default 1). HOW FAR hubs settle apart — scales the
   // collide bubble, the charge distanceMax reach, and the inner band. Inert while hubSeparation = 0.
   private hubSpacing = 1;
+  // Live "Collision spacing" slider (multiplier; default 1). Scales EVERY node's collide radius, to
+  // open extra room so node labels don't cover neighbours. Fed into collideRadius (see graph-forces).
+  private collideScale = COLLIDE_SCALE_DEFAULT;
   // Base charge ("Node repulsion" slider value, negative); seeded from CHARGE_STRENGTH and updated
   // by setForces. Kept so retargets can rebuild the per-node charge accessor with the current base.
   private chargeStrength = CHARGE_STRENGTH;
@@ -211,6 +252,15 @@ export class GraphCanvasEngine {
   private nodeFontMin = NODE_FONT_MIN;
   private nodeFontMax = NODE_FONT_MAX;
   private edgeLabelMax = 22;
+  // Live "Node fade" range (View). Opacity = smoothstep(importance; thresholds shifted by zoom) — see
+  // nodeFadeAlpha. Render-only (setNodeFade → keepRedrawing). start = full = 0 disables it (all solid).
+  private nodeFadeStart = NODE_FADE_START_DEFAULT;
+  private nodeFadeFull = NODE_FADE_FULL_DEFAULT;
+  // "Zoom reveal" range (ZOOM units): hazy below Lo× → clear above Hi×. Lifts node clarity as you
+  // zoom in (level-of-detail). Hi ≤ Lo → static (importance-only fade, no zoom motion).
+  private nodeRevealLo = NODE_REVEAL_LO_DEFAULT;
+  private nodeRevealHi = NODE_REVEAL_HI_DEFAULT;
+  private currentZoom = 1; // live canvas zoom (transform.k), kept for accessors that get no scale arg
 
   // ── Redraw gating ──────────────────────────────────────────────────────────────────────
   // force-graph's autoPauseRedraw lets the canvas idle once the sim settles. We keep it on
@@ -236,6 +286,7 @@ export class GraphCanvasEngine {
       radialRing: number;
       hubSeparation: number;
       hubSpacing: number;
+      collideScale: number;
       nodeSizeMin: number;
       nodeSizeMax: number;
     }
@@ -246,6 +297,7 @@ export class GraphCanvasEngine {
     this.radialRing = initial.radialRing;
     this.hubSeparation = initial.hubSeparation;
     this.hubSpacing = initial.hubSpacing;
+    this.collideScale = initial.collideScale;
     this.nodeSizeMin = initial.nodeSizeMin;
     this.nodeSizeMax = initial.nodeSizeMax;
     const { default: ForceGraphCtor } = await import('force-graph');
@@ -295,6 +347,11 @@ export class GraphCanvasEngine {
       .nodeCanvasObject((n: FgNode, ctx: CanvasRenderingContext2D, scale: number) =>
         this.drawNode(n, ctx, scale)
       )
+      // Hit-area: paint the disc only when the node is visible enough; a "Node fade"-culled node
+      // (opacity ≈ 0) paints nothing → non-interactive (no clicks/hover), matching what's drawn.
+      .nodePointerAreaPaint((n: FgNode, color: string, ctx: CanvasRenderingContext2D, scale: number) =>
+        this.paintNodePointerArea(n, color, ctx, scale)
+      )
       .linkCanvasObjectMode(() => 'after')
       .linkCanvasObject((l: FgLink, ctx: CanvasRenderingContext2D, scale: number) =>
         this.drawLink(l, ctx, scale)
@@ -314,14 +371,25 @@ export class GraphCanvasEngine {
     // Degree-based radial centrality (hubs centre, leaves out) — replaces plain gravity.
     void GRAVITY_STRENGTH; // retained for the tuning guide; radial uses RADIAL_STRENGTH
     fg.d3Force('gravity', degreeRadial(RADIAL_STRENGTH));
-    // Hub-separation collision: gives high-degree hubs a personal-space bubble so they can't
-    // sit on top of each other. Inert at hubSep=0 (every node's __collideR is then 0).
-    fg.d3Force('collide', degreeCollide());
+    // Collision: an always-on baseline bubble (drawn disc + pad) so nodes never visually overlap,
+    // plus an extra hub bubble when "Hub separation" > 0. The baseline self-scales with node size,
+    // so growing the size sliders can't make discs overlap (see collideRadius). Quadtree solver
+    // (d3-force-3d) → O(n log n), scales to the real 10k–50k node target; `__collideR` is the
+    // per-node radius (kept in sync by syncCollideRadii on sizing/hub changes that skip graphData).
+    this.collideForce = forceCollide<FgNode>()
+      .radius((n) => n.__collideR ?? 0)
+      .strength(HUB_COLLIDE_STRENGTH)
+      .iterations(COLLIDE_ITERATIONS);
+    fg.d3Force('collide', this.collideForce);
     fg.onEngineStop(() => this.onEngineStop());
     // Detect a hand-driven pan/zoom so auto-fit yields to it (see userMovedCamera).
-    fg.onZoom(() => {
+    fg.onZoom((t) => {
       if (!this.programmaticZoom) this.userMovedCamera = true;
+      this.currentZoom = t.k; // for the edge fade (linkColor has no scale arg, unlike drawLink)
+      this.callbacks.onZoomChange?.(t.k); // report live zoom (also fires on programmatic fits)
     });
+    this.currentZoom = fg.zoom();
+    this.callbacks.onZoomChange?.(fg.zoom()); // seed the initial level before any zoom event
     fg.d3ReheatSimulation?.();
 
     // Refresh the cached scheme + repaint once whenever the app toggles theme.
@@ -378,8 +446,8 @@ export class GraphCanvasEngine {
       degree.set(a, (degree.get(a) ?? 0) + 1);
       degree.set(b, (degree.get(b) ?? 0) + 1);
     }
-    const maxDegree = Math.max(1, ...degree.values());
-    this.degreeMax = maxDegree; // node-sizing scale (radiusForDegree) tracks the current max
+    this.setDegreeRange(degree); // refresh degreeMax (sizing + fade importance)
+    const maxDegree = this.degreeMax;
     const outerRing = this.radialRing * Math.max(1, Math.sqrt(fgNodes.length));
     assignLinkCurvatures(fgLinks, this.curveAmount); // fan out parallel edges before painting
 
@@ -387,8 +455,9 @@ export class GraphCanvasEngine {
       // Full relayout (reload / filter / first paint): retarget every node, full-energy
       // cooling so the whole graph spreads.
       for (const n of fgNodes) this.assignTarget(n, degree, maxDegree, outerRing);
-      fg.d3VelocityDecay?.(VELOCITY_DECAY_DEFAULT);
-      fg.d3AlphaDecay?.(ALPHA_DECAY_DEFAULT);
+      fg.d3VelocityDecay?.(VELOCITY_DECAY_SPREAD);
+      fg.d3AlphaDecay?.(ALPHA_DECAY_SPREAD);
+      fg.cooldownTicks?.(COOLDOWN_TICKS_SPREAD);
       fg.graphData({ nodes: fgNodes, links: fgLinks });
       // fitPending only drives the SEARCH-subset reframe on settle now (onEngineStop). We do NOT
       // auto zoom-to-fit the whole graph on load / reload / filter — that snap was unwanted; the
@@ -412,6 +481,7 @@ export class GraphCanvasEngine {
     this.seedNewNodePositions(newNodes, fgLinks, placed);
     fg.d3VelocityDecay?.(VELOCITY_DECAY_DELTA);
     fg.d3AlphaDecay?.(ALPHA_DECAY_DELTA);
+    fg.cooldownTicks?.(COOLDOWN_TICKS_DELTA);
     fg.graphData({ nodes: fgNodes, links: fgLinks });
     this.fitPending = false; // don't snap the camera on live deltas
     fg.d3ReheatSimulation?.();
@@ -429,6 +499,7 @@ export class GraphCanvasEngine {
     chargeStrength: number;
     hubSeparation: number;
     hubSpacing: number;
+    collideScale: number;
   }): void {
     const fg = this.fg;
     if (!fg) return;
@@ -438,8 +509,10 @@ export class GraphCanvasEngine {
     this.chargeStrength = opts.chargeStrength;
     const hubChanged =
       opts.hubSeparation !== this.hubSeparation || opts.hubSpacing !== this.hubSpacing;
+    const collideScaleChanged = opts.collideScale !== this.collideScale;
     this.hubSeparation = opts.hubSeparation;
     this.hubSpacing = opts.hubSpacing;
+    this.collideScale = opts.collideScale; // set BEFORE any recompute so collideRadius reads the new scale
     // Live "Node repulsion" × "Hub separation" × "Hub spacing": charge is a per-node accessor (hubs
     // repel harder by degree), and distanceMax widens with hubSep×spacing so the push still reaches
     // hubs even when spread far. Reheat re-initialises many-body, recomputing strengths from __degree.
@@ -447,11 +520,21 @@ export class GraphCanvasEngine {
       ?.strength((n: FgNode) => hubChargeStrength(n.__degree ?? 0, this.chargeStrength, this.hubSeparation))
       .distanceMax(hubDistanceMax(CHARGE_DISTANCE_MAX, this.hubSeparation, this.hubSpacing));
     // The radial inner band AND every node's collide radius depend on hubSeparation, so a hub
-    // change needs a full retarget too (not just a ring change).
+    // change needs a full retarget too (not just a ring change). "Collision spacing" only affects
+    // __collideR, so when it alone changes a lighter collide-radii recompute is enough.
     if (opts.radialRing !== this.radialRing || hubChanged) {
       this.radialRing = opts.radialRing;
-      this.retargetAllNodes(); // recompute __targetR / __degree / __collideR for every node
+      this.retargetAllNodes(); // recompute __targetR / __degree / __collideR (uses the new collideScale)
+    } else if (collideScaleChanged) {
+      this.recomputeCollideRadii(); // collideScale touches only the collide bubble
     }
+    // A slider change on an already-settled graph wants to EASE to the new equilibrium, not relayout.
+    // The reheat still goes to alpha=1 (no custom-alpha in force-graph), so the TWEAK profile damps
+    // the burst (high velocityDecay) and caps the motion window (cooldownTicks) instead. Previously
+    // this path set no cooling and inherited whatever the last setData left behind.
+    fg.d3VelocityDecay?.(VELOCITY_DECAY_TWEAK);
+    fg.d3AlphaDecay?.(ALPHA_DECAY_TWEAK);
+    fg.cooldownTicks?.(COOLDOWN_TICKS_TWEAK);
     fg.d3ReheatSimulation?.();
   }
 
@@ -480,6 +563,21 @@ export class GraphCanvasEngine {
     this.keepRedrawing(120); // paint the new sizing even when the sim is idle
   }
 
+  /** Live "Node fade" range (View → importance/zoom opacity). Render-only: store + repaint, no
+   *  relayout. drawNode + paintNodePointerArea read these to fade (and cull) low-prominence nodes. */
+  setNodeFade(opts: {
+    nodeFadeStart: number;
+    nodeFadeFull: number;
+    nodeRevealLo: number;
+    nodeRevealHi: number;
+  }): void {
+    this.nodeFadeStart = opts.nodeFadeStart;
+    this.nodeFadeFull = opts.nodeFadeFull;
+    this.nodeRevealLo = opts.nodeRevealLo;
+    this.nodeRevealHi = opts.nodeRevealHi;
+    this.keepRedrawing(120);
+  }
+
   /** Degree-based node sizing (View → "Node size"). Render-only: refresh the hit-area accessor +
    *  the collide bubble base, then repaint. No relayout (the collide change settles on the next one). */
   setNodeSizing(opts: { minSize: number; maxSize: number }): void {
@@ -487,7 +585,7 @@ export class GraphCanvasEngine {
     this.nodeSizeMax = opts.maxSize;
     if (!this.fg) return;
     this.applyNodeVal(); // re-apply so force-graph recomputes cached node radii for hit-testing
-    this.recomputeCollideRadii(); // collide base = new drawn radius (matters only when hubs separate)
+    this.recomputeCollideRadii(); // collide bubble tracks the new drawn radius (baseline + any hub reach)
     this.keepRedrawing(150);
   }
 
@@ -496,6 +594,12 @@ export class GraphCanvasEngine {
   setDenoiseDim(ids: Set<string>): void {
     this.denoiseDimIds = ids;
     this.keepRedrawing(200);
+  }
+
+  /** Refresh degreeMax for the current set (drives node sizing AND fade importance). */
+  private setDegreeRange(degree: Map<string, number>): void {
+    const vals = [...degree.values()];
+    this.degreeMax = vals.length ? Math.max(1, ...vals) : 1;
   }
 
   /** Map a node's degree to its drawn radius in [nodeSizeMin, nodeSizeMax] via √degree against the
@@ -512,6 +616,47 @@ export class GraphCanvasEngine {
     return ratio * ratio;
   }
 
+  /** Node "importance" in 0..1 — MIN-MAX LOG of degree (see degreeImportance). Log-spread (not √)
+   *  so a heavy-tailed graph (a few mega-hubs over a long low-degree tail) doesn't crush the whole
+   *  tail into a sliver of the "Node fade" slider. Independent of the size sliders (degree, not radius). */
+  private normDegree(degree: number): number {
+    return degreeImportance(degree, this.degreeMax);
+  }
+
+  /** "Node fade" opacity for a node at the current zoom (scale): importance lifted by "Zoom reveal".
+   *  1 when the effect is off. */
+  private nodeAlpha(n: FgNode, scale: number): number {
+    // A selected node (its ego network) or a search match overrides the fade → always solid, so
+    // what you're inspecting and everything it touches stays fully visible. (See edgeAlpha too.)
+    if (this.fadeOverridden(this.nodeInFocus(n.id))) return 1;
+    return nodeFadeAlpha(
+      this.normDegree(n.__degree ?? 0),
+      scale,
+      this.nodeFadeStart,
+      this.nodeFadeFull,
+      this.nodeRevealLo,
+      this.nodeRevealHi
+    );
+  }
+
+  /** True when an active selection (ego set) or search match should ignore the importance fade and
+   *  render solid. When nothing is selected/searched this is false → the fade applies normally. */
+  private fadeOverridden(inFocus: boolean): boolean {
+    return (this.search.searchActive || this.neighborFocus.active) && inFocus;
+  }
+
+  /** "Node fade" opacity for an EDGE (reuse path): importance = min of its two endpoints' importance,
+   *  so an edge is never more visible than its faintest end (no lines to ghost nodes). Same fade band
+   *  + zoom reveal as nodes. `linkColor` passes this.currentZoom; drawLink passes its own scale. */
+  private edgeAlpha(l: FgLink, zoom: number): number {
+    // Selected edge (+ its endpoints), the selected node's incident edges, or a search match → solid.
+    if (this.fadeOverridden(this.edgeInFocus(l.id))) return 1;
+    const a = this.fgNodeById.get(String(linkEndId(l.source)));
+    const b = this.fgNodeById.get(String(linkEndId(l.target)));
+    const imp = Math.min(this.normDegree(a?.__degree ?? 0), this.normDegree(b?.__degree ?? 0));
+    return nodeFadeAlpha(imp, zoom, this.nodeFadeStart, this.nodeFadeFull, this.nodeRevealLo, this.nodeRevealHi);
+  }
+
   private applyNodeVal(): void {
     this.fg?.nodeVal((n: FgNode) => this.nodeValFor(n));
   }
@@ -521,14 +666,29 @@ export class GraphCanvasEngine {
   private recomputeCollideRadii(): void {
     for (const n of this.fgNodeById.values()) {
       const d = n.__degree ?? 0;
-      n.__collideR = hubCollideRadius(d, this.hubSeparation, this.hubSpacing, this.radiusForDegree(d));
+      n.__collideR = collideRadius(d, this.hubSeparation, this.hubSpacing, this.radiusForDegree(d), this.collideScale);
     }
+    this.syncCollideRadii();
+  }
+
+  /** Re-push the per-node `__collideR` into the quadtree collide force. forceCollide reads its radii
+   *  via `.radius(...)` only at initialize (not per tick), so after a radius recompute that does NOT
+   *  reset graphData (the sizing / hub-separation sliders) we re-set the accessor to force a re-read.
+   *  A graphData reset (setData) re-initializes the force on its own, so those paths don't need this. */
+  private syncCollideRadii(): void {
+    this.collideForce?.radius((n) => n.__collideR ?? 0);
   }
 
   /** Is this edge dimmed by the denoise filter (either endpoint low-connection)? Suppressed while a
    *  search or neighbor focus owns the emphasis. */
   private isDenoiseDimEdge(l: FgLink): boolean {
-    if (this.denoiseDimIds.size === 0 || this.search.searchActive || this.neighborFocus.active)
+    // A non-dimming selection (mode 'none' = selectionFocusMode 'all') does NOT own the emphasis,
+    // so denoise stays; only search or a dim/hide neighbor focus suppresses it.
+    if (
+      this.denoiseDimIds.size === 0 ||
+      this.search.searchActive ||
+      (this.neighborFocus.active && this.neighborFocus.mode !== 'none')
+    )
       return false;
     return (
       this.denoiseDimIds.has(String(linkEndId(l.source))) ||
@@ -549,10 +709,11 @@ export class GraphCanvasEngine {
       degree.set(a, (degree.get(a) ?? 0) + 1);
       degree.set(b, (degree.get(b) ?? 0) + 1);
     }
-    const maxDegree = Math.max(1, ...degree.values());
-    this.degreeMax = maxDegree; // keep the node-sizing scale in sync on a retarget
+    this.setDegreeRange(degree); // keep degreeMax in sync on a retarget
+    const maxDegree = this.degreeMax;
     const outerRing = this.radialRing * Math.max(1, Math.sqrt(nodes.length));
     for (const n of nodes) this.assignTarget(n, degree, maxDegree, outerRing);
+    this.syncCollideRadii(); // assignTarget rewrote __collideR; re-push into the cached collide force
   }
 
   /** "Edge curvature" slider → re-fan the current MIRROR links (no reheat; curvature is a
@@ -676,8 +837,9 @@ export class GraphCanvasEngine {
     const fg = this.fg;
     if (!fg) return;
     this.retargetAllNodes(); // recompute each node's radial target for the current set
-    fg.d3VelocityDecay?.(VELOCITY_DECAY_DEFAULT);
-    fg.d3AlphaDecay?.(ALPHA_DECAY_DEFAULT);
+    fg.d3VelocityDecay?.(VELOCITY_DECAY_SPREAD);
+    fg.d3AlphaDecay?.(ALPHA_DECAY_SPREAD);
+    fg.cooldownTicks?.(COOLDOWN_TICKS_SPREAD);
     this.markIntentionalReframe(); // allow the post-settle auto-fit
     this.fitPending = true;
     fg.d3ReheatSimulation?.(); // alpha→1 restart → forces re-spread the current nodes
@@ -762,9 +924,9 @@ export class GraphCanvasEngine {
   ): void {
     const d = degree.get(n.id) ?? 0;
     n.__degree = d; // stash for the per-node charge/collide accessors (hub separation) + sizing
-    // Collide bubble base = the node's DRAWN radius (degree-based sizing), so bigger hubs keep their
-    // spacing. radiusForDegree needs this.degreeMax, set by the caller before this loop.
-    n.__collideR = hubCollideRadius(d, this.hubSeparation, this.hubSpacing, this.radiusForDegree(d));
+    // Collide bubble base = the node's DRAWN radius (degree-based sizing) + pad, so bigger nodes
+    // always keep their spacing. radiusForDegree needs this.degreeMax, set by the caller before this loop.
+    n.__collideR = collideRadius(d, this.hubSeparation, this.hubSpacing, this.radiusForDegree(d), this.collideScale);
     // Soften the hub target: at hubSep>0 the busiest nodes aim at a small inner BAND instead of
     // radius 0, so degreeRadial stops reeling every hub into the exact centre (which made them
     // look clumped). The band grows with "Hub spacing" (capped) so the radial pull doesn't fight
@@ -888,9 +1050,12 @@ export class GraphCanvasEngine {
     if (l.invalid) return 'rgba(0,0,0,0)';
     const { off, mode } = this.focusFor(this.edgeInFocus(l.id));
     if (off && mode === 'hide') return 'rgba(0,0,0,0)'; // invisible non-focus
-    if (off && mode === 'dim') return this.scheme.linkColorDim;
-    if (this.isDenoiseDimEdge(l)) return this.scheme.linkColorDim; // low-connection edge faded
-    return this.scheme.linkColor;
+    // "Node fade" applied to edges: scale the line (and its arrow, which reuses this colour) by the
+    // edge's importance/zoom opacity. min-of-endpoints so it never outshines its faintest end.
+    const fade = this.edgeAlpha(l, this.currentZoom);
+    if (off && mode === 'dim') return scaleColorAlpha(this.scheme.linkColorDim, fade);
+    if (this.isDenoiseDimEdge(l)) return scaleColorAlpha(this.scheme.linkColorDim, fade); // low-connection edge faded
+    return scaleColorAlpha(this.scheme.linkColor, fade);
   }
 
   private linkWidth(l: FgLink): number {
@@ -919,11 +1084,20 @@ export class GraphCanvasEngine {
     // Denoise dim (low-connection): render-only, lowest priority — suppressed while a search or
     // neighbor focus is active (those own the emphasis). Faded less aggressively than a focus miss.
     const denoiseDim =
-      !this.search.searchActive && !this.neighborFocus.active && this.denoiseDimIds.has(node.id);
+      !this.search.searchActive &&
+      !(this.neighborFocus.active && this.neighborFocus.mode !== 'none') &&
+      this.denoiseDimIds.has(node.id);
     const dimmed = (offFocus && focusMode === 'dim') || denoiseDim;
-    if (dimmed) {
+    // "Node fade" (level-of-detail): opacity = smoothstep(importance; fadeStart, fadeFull). At ~0 the
+    // node is culled (skip drawing; paintNodePointerArea also drops its hit area → non-interactive).
+    // globalAlpha covers the icon + label below too, so a ghost node's text fades away with it.
+    const fade = this.nodeAlpha(node, scale);
+    if (fade <= FADE_CULL_EPSILON) return; // transparent → gone (not drawn, not interactive)
+    const drawAlpha = fade * (dimmed ? (denoiseDim ? 0.25 : 0.12) : 1);
+    const fadeApplied = drawAlpha < 1;
+    if (fadeApplied) {
       ctx.save();
-      ctx.globalAlpha = denoiseDim ? 0.25 : 0.12; // restored at the end of this draw
+      ctx.globalAlpha = drawAlpha; // restored at the end of this draw
     }
 
     // 1. Flash for fresh/updated nodes (fades over GLOW_MS): a soft filled halo plus a
@@ -993,7 +1167,22 @@ export class GraphCanvasEngine {
       );
     }
 
-    if (dimmed) ctx.restore(); // balance the globalAlpha save from the focus block above
+    if (fadeApplied) ctx.restore(); // balance the globalAlpha save (focus dim × node fade)
+  }
+
+  /** force-graph hit-area painter (shadow canvas). Paint the disc in `color` so the click/hover area
+   *  matches the drawn node — but paint NOTHING when "Node fade" has culled it, making it inert. */
+  private paintNodePointerArea(
+    node: FgNode,
+    color: string,
+    ctx: CanvasRenderingContext2D,
+    scale: number
+  ): void {
+    if (this.nodeAlpha(node, scale) <= FADE_CULL_EPSILON) return; // transparent → non-interactive
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(node.x ?? 0, node.y ?? 0, this.radiusForDegree(node.__degree ?? 0), 0, 2 * Math.PI);
+    ctx.fill();
   }
 
   // ── link draw (mode 'after'): fresh-edge flash then the rotated relation label ──
@@ -1043,6 +1232,10 @@ export class GraphCanvasEngine {
     const edgeHidden = edgeOffFocus && edgeFocusMode === 'hide';
     // Denoise-dimmed edges (an endpoint is low-connection) fade their label + invalid dash too.
     const edgeDim = (edgeOffFocus && edgeFocusMode === 'dim') || this.isDenoiseDimEdge(link);
+    // "Node fade" applied to the edge label + dashed-invalid line (the solid line/arrow fade via
+    // linkColor). min-of-endpoints opacity; ~0 → skip the label/dash entirely (line is already gone).
+    const edgeFade = this.edgeAlpha(link, scale);
+    if (edgeFade <= FADE_CULL_EPSILON) return;
 
     // Invalid (superseded) facts → dashed red line, drawn before the zoom-gated label so it shows
     // even when labels are hidden. Skipped when search-matched (keeps its amber highlight) or
@@ -1067,7 +1260,7 @@ export class GraphCanvasEngine {
       ) {
         const cps = link.__controlPoints as number[] | null;
         ctx.save();
-        if (edgeDim) ctx.globalAlpha = 0.2;
+        ctx.globalAlpha = (edgeDim ? 0.2 : 1) * edgeFade;
         ctx.beginPath();
         ctx.moveTo(isrc.x, isrc.y);
         if (cps && cps.length === 2) ctx.quadraticCurveTo(cps[0], cps[1], itgt.x, itgt.y);
@@ -1131,7 +1324,7 @@ export class GraphCanvasEngine {
     if (angle < -Math.PI / 2) angle += Math.PI;
 
     ctx.save();
-    if (edgeDim) ctx.globalAlpha = 0.15; // faded label for a dimmed non-match
+    ctx.globalAlpha = (edgeDim ? 0.15 : 1) * edgeFade; // label inherits the edge's fade (never brighter)
     ctx.translate(lx, ly);
     ctx.rotate(angle);
     // Rounded pill (same colour as the canvas bg) behind the label so it masks the line for

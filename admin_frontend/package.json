@@ -33,6 +33,7 @@
     "@tanstack/svelte-table": "^9.0.0-alpha.38",
     "bits-ui": "^2.18.0",
     "clsx": "^2.1.1",
+    "d3-force-3d": "^3.0.6",
     "dompurify": "^3.4.2",
     "force-graph": "^1.51.4",
     "marked": "^18.0.3",

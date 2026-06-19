@@ -212,6 +212,7 @@ def _spec(resolved: ResolvedModel) -> GraphitiModelSpec:
             temperature=resolved.temperature,
             max_tokens=resolved.max_tokens,
             thinking=resolved.thinking,
+            num_ctx=resolved.num_ctx,
         ),
     )
 

@@ -146,6 +146,11 @@ class ModelTuning(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
     thinking: ThinkingLevel | None = None
+    # Context-window size for local providers (Ollama `num_ctx`). Ollama silently defaults to 2048
+    # regardless of the model's real window, so long-context local models truncate unless this is
+    # set. Left None = let the provider decide (do NOT auto-max to the catalog window — large
+    # values allocate a huge KV cache and OOM local machines). Ignored by cloud providers.
+    num_ctx: int | None = Field(default=None, ge=1)
 
 
 class TuningProfile(ModelTuning):
@@ -1233,6 +1238,8 @@ class ResolvedModel:
     temperature: float
     max_tokens: int
     thinking: ThinkingLevel | None = None
+    # Local-provider context window (Ollama num_ctx); None = provider default. See ModelTuning.num_ctx.
+    num_ctx: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1301,6 +1308,7 @@ def resolve_llm(
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
         thinking=tuning.thinking,
+        num_ctx=tuning.num_ctx,
     )
 
 
@@ -1441,6 +1449,7 @@ def _resolve_knowledge_llm(
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
         thinking=tuning.thinking,
+        num_ctx=tuning.num_ctx,
     )
 
 
@@ -1572,6 +1581,7 @@ def _resolve_graphiti_model(
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
         thinking=tuning.thinking,
+        num_ctx=tuning.num_ctx,
     )
 
 
@@ -1726,6 +1736,7 @@ def resolve_character_llm(
             temperature=tuning.temperature,
             max_tokens=tuning.max_tokens,
             thinking=tuning.thinking,
+            num_ctx=tuning.num_ctx,
         )
     fallback = resolve_llm(
         prefs,
@@ -1742,6 +1753,7 @@ def resolve_character_llm(
         temperature=tuning.temperature,
         max_tokens=tuning.max_tokens,
         thinking=tuning.thinking,
+        num_ctx=tuning.num_ctx,
     )
 
 
