@@ -3,7 +3,7 @@
  *
  * The four "Graph options" sliders are local view preferences, so they live in
  * localStorage (durable across reloads and fresh navigation) rather than the URL.
- * Filters keep their own URL+localStorage handling in knowledge-graph.svelte.ts
+ * Filters keep their own URL+localStorage handling in state/graph/graph-persistence.ts
  * (URL stays shareable); these helpers cover only the options sliders.
  */
 import { PREF_KEYS, type GraphPanelSidePreference } from '$lib/preferences/keys';

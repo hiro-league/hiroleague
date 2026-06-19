@@ -21,7 +21,7 @@
   import type {
     EvidenceRecall,
     RecalledFact
-  } from '$lib/features/knowledge/shared/knowledge-events';
+  } from '$lib/features/eval/shared/eval-events';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
 

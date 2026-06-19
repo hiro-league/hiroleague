@@ -2,8 +2,8 @@
   import type { KnowledgeDocument, KnowledgeIngestMetadata } from '$lib/api/knowledge';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import CreatableCategorySelect from '$lib/features/knowledge/CreatableCategorySelect.svelte';
-  import CreatableTagsSelect from '$lib/features/knowledge/CreatableTagsSelect.svelte';
+  import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
+  import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import KnowledgeAffectedDocumentsList from '$lib/features/knowledge/browse/KnowledgeAffectedDocumentsList.svelte';
   import type { KnowledgeBrowseModel } from '$lib/features/knowledge/state/knowledge-browse.svelte';
   import type { KnowledgeOptionsModel } from '$lib/features/knowledge/state/knowledge-options.svelte';

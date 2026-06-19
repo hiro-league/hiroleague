@@ -4,8 +4,8 @@
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import CreatableCategorySelect from '$lib/features/knowledge/CreatableCategorySelect.svelte';
-  import CreatableTagsSelect from '$lib/features/knowledge/CreatableTagsSelect.svelte';
+  import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
+  import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import type { KnowledgeAskModel } from '$lib/features/knowledge/state/knowledge-ask.svelte';
   import type { KnowledgeOptionsModel } from '$lib/features/knowledge/state/knowledge-options.svelte';
   import { optionalInt } from '$lib/features/knowledge/shared/knowledge-pure';

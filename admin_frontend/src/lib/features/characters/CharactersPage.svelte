@@ -7,21 +7,13 @@
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import Button from '$lib/components/ui/button.svelte';
-  import CharactersBrowseSection from '$lib/features/characters/CharactersBrowseSection.svelte';
-  import CharacterEditToolbar from '$lib/features/characters/CharacterEditToolbar.svelte';
-  import CharacterExtrasSection from '$lib/features/characters/CharacterExtrasSection.svelte';
-  import CharacterPreferredModelsSection from '$lib/features/characters/CharacterPreferredModelsSection.svelte';
-  import CharacterPhotoCropModal from '$lib/features/characters/CharacterPhotoCropModal.svelte';
-  import CharacterProfileSection from '$lib/features/characters/CharacterProfileSection.svelte';
-  import CharacterPromptsSection from '$lib/features/characters/CharacterPromptsSection.svelte';
-  import CharacterTtsSettingsSection from '$lib/features/characters/CharacterTtsSettingsSection.svelte';
-  import CharacterViewPanel from '$lib/features/characters/CharacterViewPanel.svelte';
-  import { createCharactersFormModel } from '$lib/features/characters/characters-form.svelte';
-  import { createCharactersPageController } from '$lib/features/characters/characters-controller.svelte';
+  import CharactersBrowseSection from '$lib/features/characters/browse/CharactersBrowseSection.svelte';
+  import CharacterViewPanel from '$lib/features/characters/view/CharacterViewPanel.svelte';
+  import CharacterEditPanel from '$lib/features/characters/view/CharacterEditPanel.svelte';
+  import CharacterDialogs from '$lib/features/characters/modals/CharacterDialogs.svelte';
+  import { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
+  import { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
   import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
   import ToastHost from '$lib/ui/ToastHost.svelte';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
@@ -55,14 +47,6 @@
   const detailTabLabel = $derived(
     isNew ? 'New character' : ctrl.selected?.name?.trim() || prefs.characterId || 'Detail'
   );
-
-  const editToolbarTitle = $derived(prefs.characterId ? 'Edit character' : 'New character');
-
-  const editCharacterDisplayLine = $derived.by(() => {
-    if (!prefs.characterId) return '';
-    const n = formApi.form.name.trim() || ctrl.selected?.name?.trim() || '';
-    return n || prefs.characterId;
-  });
 
   const fixedTabs: readonly AdminTabDescriptor<CharactersTabPreference>[] = [
     { id: 'browse', label: 'Browse', kind: 'pane' }
@@ -133,151 +117,10 @@
       onEnterEdit={() => void ctrl.enterEditMode()}
     />
   {:else}
-    <section class="rounded-lg border bg-card shadow-sm">
-      <CharacterEditToolbar
-        title={editToolbarTitle}
-        characterId={prefs.characterId}
-        editCharacterDisplayLine={editCharacterDisplayLine}
-        selected={ctrl.selected}
-        dirty={formApi.dirty}
-        busy={ctrl.busy}
-        onDeleteClick={() => (ctrl.deleteOpen = true)}
-        onCancel={() => void ctrl.cancelEdit()}
-        onSave={() => void ctrl.saveCharacter()}
-      />
-
-      <div class="grid gap-5 px-4 pb-5 pt-3 md:px-5">
-        {#if ctrl.loadingDetail}
-          <InlineLoading label="Loading character…" />
-        {:else if ctrl.detailError}
-          <InlineDestructiveAlert
-            title="Could not load character"
-            message={ctrl.detailError}
-          />
-        {:else}
-          <div class="grid gap-8">
-            <CharacterProfileSection
-              form={formApi.form}
-              characterId={prefs.characterId}
-              selected={ctrl.selected}
-              markDirty={formApi.markDirty}
-              onPickPhoto={(e) => void ctrl.pickPhoto(e)}
-            />
-
-            <CharacterPreferredModelsSection
-              variant="llm"
-              form={formApi.form}
-              characterId={prefs.characterId}
-              catalogModels={ctrl.llmOptions}
-              catalogAllProviders={ctrl.catalogAllProviders}
-              workspaceResolved={ctrl.workspaceActiveProvidersResolved}
-              workspaceActiveIds={ctrl.workspaceChatActiveIds}
-              busy={ctrl.busy}
-              catalogReloadBusy={ctrl.catalogReloadBusy}
-              modelPickerResetNonce={formApi.modelPickerResetNonce}
-              resolved={ctrl.resolved}
-              resolvedError={ctrl.resolvedError}
-              tuningProfiles={ctrl.tuningProfiles}
-              workspaceDefaultTuningProfile={ctrl.workspaceDefaultTuningProfile}
-              dirty={formApi.dirty}
-              onReloadCatalog={() => void ctrl.reloadBundledCatalogInEditor()}
-              onDuplicateAttempt={() =>
-                notify('warning', 'That model is already in the list.')
-              }
-              markDirty={formApi.markDirty}
-            />
-
-            <CharacterPreferredModelsSection
-              variant="voice"
-              form={formApi.form}
-              characterId={prefs.characterId}
-              catalogModels={ctrl.voiceOptions}
-              catalogAllProviders={ctrl.catalogAllProviders}
-              workspaceResolved={ctrl.workspaceActiveProvidersResolved}
-              workspaceActiveIds={ctrl.workspaceTtsActiveIds}
-              busy={ctrl.busy}
-              catalogReloadBusy={ctrl.catalogReloadBusy}
-              modelPickerResetNonce={formApi.modelPickerResetNonce}
-              resolved={ctrl.resolved}
-              resolvedError={ctrl.resolvedError}
-              dirty={formApi.dirty}
-              onReloadCatalog={() => void ctrl.reloadBundledCatalogInEditor()}
-              onDuplicateAttempt={() =>
-                notify('warning', 'That model is already in the list.')
-              }
-              markDirty={formApi.markDirty}
-            />
-
-            <CharacterTtsSettingsSection
-              form={formApi.form}
-              catalogTtsProviders={ctrl.catalogTtsProviders}
-              google={ctrl.ttsPresetGoogle}
-              openai={ctrl.ttsPresetOpenai}
-              others={ctrl.ttsPresetOtherProviders}
-              onPickVoicePreset={(pid, vid) => ctrl.setTtsVoicePreset(pid, vid)}
-              markDirty={formApi.markDirty}
-            />
-
-            <CharacterPromptsSection form={formApi.form} markDirty={formApi.markDirty} />
-
-            <CharacterExtrasSection form={formApi.form} markDirty={formApi.markDirty} />
-          </div>
-        {/if}
-      </div>
-    </section>
+    <CharacterEditPanel {ctrl} {formApi} characterId={prefs.characterId} {notify} />
   {/if}
 </AdminPageHeader>
 
 <ToastHost toast={toasts.toast} />
 
-<Dialog.Root
-  open={ctrl.deleteOpen}
-  onOpenChange={(next) => {
-    if (!next && !ctrl.busy) ctrl.deleteOpen = false;
-  }}
->
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>Delete '{prefs.characterId}'?</Dialog.Title>
-      <Dialog.Description>This removes the character folder and index row.</Dialog.Description>
-    </Dialog.Header>
-    <p class="text-sm text-muted-foreground">This action cannot be undone.</p>
-    <Dialog.Footer>
-      <Button variant="outline" disabled={ctrl.busy} onclick={() => (ctrl.deleteOpen = false)}>Cancel</Button>
-      <Button variant="destructive" disabled={ctrl.busy} onclick={() => void ctrl.confirmDelete()}>Delete</Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
-
-<CharacterPhotoCropModal
-  open={ctrl.cropOpen}
-  busy={ctrl.busy}
-  cropZoom={ctrl.cropZoom}
-  cropX={ctrl.cropX}
-  cropY={ctrl.cropY}
-  onDismiss={() => ctrl.dismissCropModal()}
-  onCropZoomChange={ctrl.handleCropZoom}
-  onCropXChange={ctrl.handleCropPanX}
-  onCropYChange={ctrl.handleCropPanY}
-  onCropCanvasChange={ctrl.handleCropCanvas}
-  onSubmitPhoto={() => void ctrl.submitPhoto()}
-/>
-
-<Dialog.Root
-  open={unsaved.unsavedModalOpen}
-  onOpenChange={(next) => { if (!next) unsaved.closeUnsavedModalContinueEditing(); }}
->
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>Unsaved changes</Dialog.Title>
-      <Dialog.Description>You have edits that are not saved yet.</Dialog.Description>
-    </Dialog.Header>
-    <p class="text-sm text-muted-foreground">
-      Discard them and leave, or stay on this page to keep editing.
-    </p>
-    <Dialog.Footer>
-      <Button variant="outline" onclick={unsaved.closeUnsavedModalContinueEditing}>Continue editing</Button>
-      <Button variant="destructive" onclick={unsaved.confirmUnsavedModalDiscard}>Discard changes</Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<CharacterDialogs {ctrl} {unsaved} characterId={prefs.characterId} />

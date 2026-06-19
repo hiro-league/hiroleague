@@ -5,7 +5,9 @@
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
+  import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
@@ -14,6 +16,8 @@
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import type { CharacterRow } from '$lib/api/characters';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import {
     memoryCharacter,
     memoryChunkIds,
@@ -26,17 +30,16 @@
     memoryKindLabel,
     memoryPrimaryText,
     memoryStableKey,
-    memoryValidity
+    memoryValidity,
+    type MemoryFilterKey,
+    type MemorySortColumn
   } from './shared/memory-pure';
   import { MEMORIES_A11Y } from './shared/memories-a11y';
 
   let {
-    memorySearch = $bindable(''),
-    memoryFilterGroupId = $bindable(''),
-    memoryFilterCharacterId = $bindable(''),
-    memoryFilterSource = $bindable(''),
-    memoryFilterDateFrom = $bindable(''),
-    memoryFilterDateTo = $bindable(''),
+    filters,
+    setFilter,
+    sort,
     hidden,
     memoriesError,
     memoriesLoading,
@@ -55,12 +58,10 @@
     onViewJson,
     onViewProvenance
   }: {
-    memorySearch?: string;
-    memoryFilterGroupId?: string;
-    memoryFilterCharacterId?: string;
-    memoryFilterSource?: string;
-    memoryFilterDateFrom?: string;
-    memoryFilterDateTo?: string;
+    /** URL-synced filter values keyed by `mem_*`; written only via `setFilter`. */
+    filters: Record<MemoryFilterKey, string>;
+    setFilter: (key: MemoryFilterKey, value: string) => void;
+    sort: TableSortController<MemorySortColumn>;
     hidden: boolean;
     memoriesError: string;
     memoriesLoading: boolean;
@@ -95,16 +96,16 @@
   {hidden}
 >
   {#if memoriesError}
-    <p class="error m-0 font-sans text-sm text-muted-foreground" role="alert">{memoriesError}</p>
+    <InlineDestructiveAlert message={memoriesError} />
   {/if}
 
   <div class="memories-panel">
     {#if memoriesLoading}
       <InlineLoading label="Loading memories…" class="m-0" />
     {:else if memoryEnabled === false}
-      <p class="memories-hint">
-        Long-term memory is disabled or not configured for this workspace (settings or missing models).
-      </p>
+      <InlineEmptyState
+        message="Long-term memory is disabled or not configured for this workspace (settings or missing models)."
+      />
     {:else if memoriesError}
       <!-- Error banner above -->
     {:else}
@@ -115,7 +116,8 @@
             {#if groupsForMemoryFilterDropdown.length > 0}
               <AdminFilterBarSelect
                 label="Group"
-                bind:value={memoryFilterGroupId}
+                value={filters.mem_group}
+                onValueChange={(v) => setFilter('mem_group', v)}
                 placeholder="All memory"
                 class="min-w-[12rem]"
                 options={groupsForMemoryFilterDropdown}
@@ -123,27 +125,40 @@
             {/if}
             <AdminFilterBarSelect
               label="Character"
-              bind:value={memoryFilterCharacterId}
+              value={filters.mem_char}
+              onValueChange={(v) => setFilter('mem_char', v)}
               placeholder="All characters"
               class="min-w-[10rem]"
               options={characterOptions}
             />
             <AdminFilterBarSelect
               label="Source"
-              bind:value={memoryFilterSource}
+              value={filters.mem_source}
+              onValueChange={(v) => setFilter('mem_source', v)}
               placeholder="All sources"
               class="min-w-[10rem]"
               options={sourcesForMemoryFilterDropdown}
             />
             <FormField label="From" class="min-w-[9rem]">
-              <input type="date" class={cn(ADMIN_INPUT, 'w-full')} bind:value={memoryFilterDateFrom} />
+              <input
+                type="date"
+                class={cn(ADMIN_INPUT, 'w-full')}
+                value={filters.mem_from}
+                oninput={(e) => setFilter('mem_from', e.currentTarget.value)}
+              />
             </FormField>
             <FormField label="To" class="min-w-[9rem]">
-              <input type="date" class={cn(ADMIN_INPUT, 'w-full')} bind:value={memoryFilterDateTo} />
+              <input
+                type="date"
+                class={cn(ADMIN_INPUT, 'w-full')}
+                value={filters.mem_to}
+                oninput={(e) => setFilter('mem_to', e.currentTarget.value)}
+              />
             </FormField>
             <AdminFilterBarSearch
               label="Search"
-              bind:value={memorySearch}
+              value={filters.mem_q}
+              onValueChange={(v) => setFilter('mem_q', v)}
               placeholder="Search memory text, id, source…"
               class="min-w-[12rem] flex-1"
             />
@@ -186,23 +201,23 @@
       {/if}
 
       {#if memoriesTotalCount === 0}
-        <p class="memories-hint">No memories in the store for the default user yet.</p>
+        <InlineEmptyState message="No memories in the store for the default user yet." />
       {:else if visibleMemoriesRows.length === 0}
-        <p class="memories-hint">No memories match the current filters.</p>
+        <InlineEmptyState message="No memories match the current filters." />
       {:else}
         <AdminTableShell density="dense" stickyHead class="memories-table-wrap">
           <thead>
             <tr>
-              <th>Kind</th>
-              <th>Created</th>
-              <th>Validity</th>
-              <th>Character</th>
-              <th>Memory</th>
-              <th>Entities</th>
-              <th>Group</th>
-              <th>Origin</th>
-              <th>Id</th>
-              <th>Payload</th>
+              <AdminTableHeaderCell column="kind" {sort}>Kind</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="created" {sort}>Created</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="validity" {sort}>Validity</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="character" {sort}>Character</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="memory" {sort}>Memory</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="entities" {sort}>Entities</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="group" {sort}>Group</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="origin" {sort}>Origin</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="id" {sort}>Id</AdminTableHeaderCell>
+              <AdminTableHeaderCell column="id" {sort} sortable={false}>Payload</AdminTableHeaderCell>
             </tr>
           </thead>
           <tbody>
@@ -308,12 +323,6 @@
     flex-direction: column;
     gap: 12px;
     min-height: 120px;
-  }
-
-  .memories-hint {
-    margin: 0;
-    font-size: 14px;
-    color: var(--muted-foreground, #64748b);
   }
 
   .memories-controls {

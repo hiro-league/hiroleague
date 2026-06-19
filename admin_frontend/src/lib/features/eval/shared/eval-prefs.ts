@@ -70,3 +70,12 @@ export function writeAnswerPromptPref(corpusId: string, id: string): void {
   else delete map[corpusId];
   writeLocalString(PREF_KEYS.evalAnswerPrompt, JSON.stringify(map));
 }
+
+/** Corpus tab: Markdown rendering mode for episode bodies (persisted across reloads). */
+export function readCorpusMarkdownPref(): boolean {
+  return readLocalString(PREF_KEYS.evalCorpusMarkdown) === '1';
+}
+
+export function writeCorpusMarkdownPref(enabled: boolean): void {
+  writeLocalString(PREF_KEYS.evalCorpusMarkdown, enabled ? '1' : '0');
+}

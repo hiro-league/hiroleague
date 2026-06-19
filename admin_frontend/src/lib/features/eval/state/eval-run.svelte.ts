@@ -6,10 +6,10 @@
  * It deliberately does NOT own the setup form, corpus picker, or saved-results — those stay in the
  * data model, which injects a narrow `EvalRunCtx` so this controller can read the active track,
  * adopt a server-reported track mid-run, and notify the model on terminal events / after hydrate.
- * Source of truth is server-side (`GET /knowledge/eval/state`); there is no sessionStorage.
+ * Source of truth is server-side (`GET /eval/state`); there is no sessionStorage.
  */
 import {
-  connectKnowledgeEvalEvents,
+  connectEvalEvents,
   type EvalCancelledPayload,
   type EvalCompletedPayload,
   type EvalFailedPayload,
@@ -17,8 +17,8 @@ import {
   type EvalRunStateData,
   type EvalSetupProgressPayload,
   type EvalStartedPayload
-} from '$lib/features/knowledge/shared/knowledge-events';
-import { cancelKnowledgeEval, getKnowledgeEvalState } from '$lib/api/knowledge';
+} from '$lib/features/eval/shared/eval-events';
+import { cancelKnowledgeEval, getKnowledgeEvalState } from '$lib/api/eval';
 import { rowFromPayload, type EvalRow, type EvalStatus, type EvalTrack } from '$lib/features/eval/shared/eval-row';
 
 /** Narrow seam back to the data model — kept small on purpose (see the module doc). */
@@ -58,7 +58,7 @@ export function createEvalRunController(ctx: EvalRunCtx, opts: { initialModes: s
 
   function ensureSubscribed() {
     if (teardownEvents) return;
-    teardownEvents = connectKnowledgeEvalEvents({
+    teardownEvents = connectEvalEvents({
       onStarted: handleStarted,
       onSetupProgress: handleSetupProgress,
       onQuestion: handleQuestion,

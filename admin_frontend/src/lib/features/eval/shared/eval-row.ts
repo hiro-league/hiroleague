@@ -7,7 +7,7 @@ import type {
   EvalQuestionLeg,
   EvalQuestionPayload,
   EvidenceRecall
-} from '$lib/features/knowledge/shared/knowledge-events';
+} from '$lib/features/eval/shared/eval-events';
 
 /** Eval track — knowledge (document corpus) or memory (turn corpus). */
 export type EvalTrack = 'knowledge' | 'memory';

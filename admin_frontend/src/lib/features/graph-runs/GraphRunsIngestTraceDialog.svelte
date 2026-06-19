@@ -9,14 +9,45 @@
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import type {
-    IngestEntityType,
     IngestTraceEdge,
-    IngestTraceMessage,
     IngestTraceNode,
     IngestTraceRecord,
     IngestTraceStage
   } from '$lib/api/graph-runs';
   import { shortGraphId } from '$lib/format/short-graph-id';
+  import StageCard from './shared/StageCard.svelte';
+  import TraceTable from './shared/TraceTable.svelte';
+  import TraceTabs, { type TraceTab } from './shared/TraceTabs.svelte';
+  import ValidityPill from './shared/ValidityPill.svelte';
+  import { createToggleSet } from './shared/use-toggle-set.svelte';
+  import {
+    fmtDate,
+    isCurrent,
+    isISO,
+    prettyKey,
+    temporalTitle
+  } from './shared/trace-format';
+  import {
+    briefName,
+    briefType,
+    buildEntityTypeMap,
+    buildPhases,
+    dedupJson,
+    dedupMerges,
+    extractedEntities as extractedEntitiesFor,
+    groupStages,
+    inputView,
+    messages,
+    outputView,
+    prettyOutput,
+    resolveFactsView,
+    stageCount as stageCountFor,
+    stageMeta,
+    type ExtractedEntityRow,
+    type Phase,
+    type ResolveFactsView,
+    type ViewTable
+  } from './shared/ingest-trace-derive';
 
   let {
     trace,
@@ -62,9 +93,9 @@
   // Per-stage collapse, keyed by the stage's index in `trace.stages`. Separate disclosures for
   // the (large, repetitive) prompt and the raw-JSON fallback — both collapsed by default since
   // the structured table is the primary view. All reset on a new trace.
-  let collapsed = $state<Set<number>>(new Set());
-  let promptOpen = $state<Set<number>>(new Set());
-  let jsonOpen = $state<Set<number>>(new Set());
+  const collapsed = createToggleSet<number>();
+  const promptOpen = createToggleSet<number>();
+  const jsonOpen = createToggleSet<number>();
 
   // The config/stats line (episode · chunk · tokens …) is collapsed by default behind the
   // header gear so the header stays compact — mirrors the recall (retrieval) trace dialog.
@@ -74,9 +105,9 @@
   // episodes keeps you on the same tab (the tabKeys effect below re-validates / initialises it).
   $effect(() => {
     void trace;
-    collapsed = new Set();
-    promptOpen = new Set();
-    jsonOpen = new Set();
+    collapsed.clear();
+    promptOpen.clear();
+    jsonOpen.clear();
     settingsOpen = false;
   });
 
@@ -96,121 +127,18 @@
     }
   }
 
-  function toggleStage(index: number): void {
-    const next = new Set(collapsed);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
-    collapsed = next;
-  }
-
-  function togglePrompt(index: number): void {
-    const next = new Set(promptOpen);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
-    promptOpen = next;
-  }
-
-  function toggleJson(index: number): void {
-    const next = new Set(jsonOpen);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
-    jsonOpen = next;
-  }
+  const toggleStage = (index: number): void => collapsed.toggle(index);
+  const togglePrompt = (index: number): void => promptOpen.toggle(index);
+  const toggleJson = (index: number): void => jsonOpen.toggle(index);
 
   const isCollapsed = (index: number): boolean => collapsed.has(index);
   const isPromptOpen = (index: number): boolean => promptOpen.has(index);
   const isJsonOpen = (index: number): boolean => jsonOpen.has(index);
 
-  // ── Stage grouping ──────────────────────────────────────────────────────────────────────
-  // add_episode runs its stages in a fixed pipeline order; group the flat capture list by
-  // stage node and render groups in that order so it reads as a pipeline. Some nodes fire
-  // multiple times (e.g. `resolve_facts` once per edge), so a group can hold several calls.
-  const STAGE_ORDER = [
-    'extract_entities',
-    'resolve_entities',
-    'dedup_entities_auto',
-    'extract_facts',
-    'date_facts',
-    'resolve_facts',
-    'summarize_entities',
-    'extract_attributes',
-    'completion',
-    'other'
-  ];
-
-  function stageRank(node: string): number {
-    const i = STAGE_ORDER.indexOf(node);
-    return i === -1 ? STAGE_ORDER.length : i;
-  }
-
-  type StageRef = { stage: IngestTraceStage; idx: number };
-  type StageGroup = { node: string; label: string; stages: StageRef[] };
-
-  const groups = $derived.by<StageGroup[]>(() => {
-    if (!trace) return [];
-    const byNode = new Map<string, StageRef[]>();
-    trace.stages.forEach((stage, idx) => {
-      const arr = byNode.get(stage.node) ?? [];
-      arr.push({ stage, idx });
-      byNode.set(stage.node, arr);
-    });
-    return [...byNode.entries()]
-      .map(([node, stages]) => ({ node, label: stages[0]?.stage.label ?? node, stages }))
-      .sort((a, b) => stageRank(a.node) - stageRank(b.node));
-  });
-
-  // ── Pipeline phases (sub-tabs) ────────────────────────────────────────────────────────────
-  // The flat stage list spans three logical phases of add_episode. Group the node-groups into
-  // those phases so the Pipeline tab reads as: entities → attributes → facts (+ a catch-all).
-  // Every possible stage node maps to a phase (not just the ones a given episode happened to
-  // emit) so the sub-tabs are stable regardless of which stages fired.
-  const PHASE_ORDER = ['entities', 'attributes', 'facts', 'other'] as const;
-  const PHASE_TITLE: Record<string, string> = {
-    entities: 'Entities',
-    attributes: 'Attributes',
-    facts: 'Facts',
-    other: 'Other'
-  };
-  const PHASE_HINT: Record<string, string> = {
-    entities: 'extract → resolve / dedupe the people, places & things',
-    attributes: 'summaries & typed attributes attached to each entity',
-    facts: 'extract → date → resolve / invalidate the relationships',
-    other: 'completions & uncategorized stages'
-  };
-  const STAGE_PHASE: Record<string, string> = {
-    extract_entities: 'entities',
-    resolve_entities: 'entities',
-    dedup_entities_auto: 'entities',
-    summarize_entities: 'attributes',
-    extract_attributes: 'attributes',
-    extract_facts: 'facts',
-    date_facts: 'facts',
-    resolve_facts: 'facts',
-    completion: 'other',
-    other: 'other'
-  };
-
-  type Phase = { phase: string; title: string; hint: string; groups: StageGroup[]; idxs: number[] };
-
-  const phases = $derived.by<Phase[]>(() => {
-    const byPhase = new Map<string, StageGroup[]>();
-    for (const group of groups) {
-      const phase = STAGE_PHASE[group.node] ?? 'other';
-      const arr = byPhase.get(phase) ?? [];
-      arr.push(group);
-      byPhase.set(phase, arr);
-    }
-    return PHASE_ORDER.filter((p) => byPhase.has(p)).map((p) => {
-      const grps = byPhase.get(p) ?? [];
-      return {
-        phase: p,
-        title: PHASE_TITLE[p] ?? p,
-        hint: PHASE_HINT[p] ?? '',
-        groups: grps,
-        idxs: grps.flatMap((g) => g.stages.map((s) => s.idx))
-      };
-    });
-  });
+  // ── Stage grouping + pipeline phases (sub-tabs) ───────────────────────────────────────────
+  // Pure derivation lives in `shared/ingest-trace-derive`; here we just feed it the trace.
+  const groups = $derived(trace ? groupStages(trace.stages) : []);
+  const phases = $derived<Phase[]>(buildPhases(groups));
 
   // The flat tab order: each present phase, then Result, then the optional Corpus tab.
   const tabKeys = $derived<string[]>([
@@ -229,20 +157,21 @@
     phases.find((p) => p.phase === activeTab) ?? null
   );
 
-  /** Expand / collapse all stage cards in the ACTIVE phase (mirrors the retrieval dialog). */
-  function expandActive(): void {
-    if (!activePhaseObj) return;
-    const next = new Set(collapsed);
-    for (const i of activePhaseObj.idxs) next.delete(i);
-    collapsed = next;
-  }
+  // Tab strip model for <TraceTabs>: a tab per phase (count = stages), then Result (count =
+  // persisted nodes + edges), then the optional caller tab. `.by` defers nodes/edges (below).
+  const ingestTabs = $derived.by<TraceTab[]>(() => [
+    ...phases.map((p) => ({ key: p.phase, label: p.title, count: String(p.idxs.length) })),
+    { key: RESULT_TAB, label: 'Result', count: String(nodes.length + edges.length) },
+    ...(hasExtraTab ? [{ key: EXTRA_TAB, label: extraTabLabel, count: null }] : [])
+  ]);
 
-  function collapseActive(): void {
-    if (!activePhaseObj) return;
-    const next = new Set(collapsed);
-    for (const i of activePhaseObj.idxs) next.add(i);
-    collapsed = next;
-  }
+  /** Expand / collapse all stage cards in the ACTIVE phase (mirrors the retrieval dialog). */
+  const expandActive = (): void => {
+    if (activePhaseObj) collapsed.remove(activePhaseObj.idxs);
+  };
+  const collapseActive = (): void => {
+    if (activePhaseObj) collapsed.add(activePhaseObj.idxs);
+  };
 
   // ── Totals (for the header) ───────────────────────────────────────────────────────────────
   const totals = $derived.by(() => {
@@ -257,263 +186,18 @@
     return { inTok, outTok, ms, calls: trace?.stages.length ?? 0 };
   });
 
-  // ── Formatting ────────────────────────────────────────────────────────────────────────────
-  function messages(stage: IngestTraceStage): IngestTraceMessage[] {
-    return Array.isArray(stage.input) ? (stage.input as IngestTraceMessage[]) : [];
-  }
+  // ── Stage formatting / projection ─────────────────────────────────────────────────────────
+  // Pure helpers (table projection, fact-verdict parsing, dedup merge map, entity-type
+  // resolution, date formatting, validity) live in `shared/ingest-trace-derive` +
+  // `shared/trace-format`. Only the two helpers that need component state — the ontology
+  // legend — get thin wrappers here so markup call sites stay unchanged.
+  const entityTypeById = $derived(buildEntityTypeMap(trace?.entity_types ?? []));
 
-  function prettyOutput(stage: IngestTraceStage): string {
-    try {
-      return JSON.stringify(stage.output, null, 2);
-    } catch {
-      return String(stage.output ?? '');
-    }
-  }
+  const extractedEntities = (stage: IngestTraceStage): ExtractedEntityRow[] | null =>
+    extractedEntitiesFor(stage, entityTypeById);
 
-  // ── Structured → table projection ─────────────────────────────────────────────────────────
-  // Each stage's structured output (and a non-LLM stage's input) is rendered as a table by
-  // default — far more readable than raw JSON — with the JSON kept one click away as a fallback.
-  // The shape is detected, not hardcoded per stage, so it stays correct as graphiti's models
-  // evolve: a list (or a single list-valued field) → a rows table (one row per item, columns =
-  // the union of item keys); anything else → a key/value table. Scalars render inline.
-  type ViewTable =
-    | { kind: 'rows'; columns: string[]; rows: Record<string, string>[] }
-    | { kind: 'kv'; entries: { key: string; value: string }[] }
-    | { kind: 'scalar'; value: string }
-    | { kind: 'empty' };
-
-  function isPlainObject(v: unknown): v is Record<string, unknown> {
-    return typeof v === 'object' && v !== null && !Array.isArray(v);
-  }
-
-  /** A single value as a compact cell — scalars verbatim, nested structures as compact JSON. */
-  function cell(v: unknown): string {
-    if (v === null || v === undefined || v === '') return '—';
-    if (typeof v === 'string') return v;
-    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-    try {
-      return JSON.stringify(v);
-    } catch {
-      return String(v);
-    }
-  }
-
-  function prettyKey(key: string): string {
-    return key.replace(/_/g, ' ');
-  }
-
-  function rowsTable(items: unknown[]): ViewTable {
-    if (items.length === 0) return { kind: 'empty' };
-    // Scalar list (e.g. `duplicate_facts: [int]`) → a single-column "value" table.
-    if (!items.some(isPlainObject)) {
-      return { kind: 'rows', columns: ['value'], rows: items.map((it) => ({ value: cell(it) })) };
-    }
-    const columns: string[] = [];
-    for (const it of items) {
-      if (isPlainObject(it)) for (const k of Object.keys(it)) if (!columns.includes(k)) columns.push(k);
-    }
-    const rows = items.map((it) => {
-      const row: Record<string, string> = {};
-      for (const c of columns) row[c] = isPlainObject(it) ? cell(it[c]) : '';
-      return row;
-    });
-    return { kind: 'rows', columns, rows };
-  }
-
-  function toView(value: unknown): ViewTable {
-    if (value === null || value === undefined) return { kind: 'empty' };
-    if (Array.isArray(value)) return rowsTable(value);
-    if (isPlainObject(value)) {
-      const keys = Object.keys(value);
-      if (keys.length === 0) return { kind: 'empty' };
-      // A dict whose ONLY field is a list of objects (the common graphiti shape, e.g.
-      // `{extracted_entities: [...]}`) → render that list as the table directly.
-      const arrayKeys = keys.filter((k) => Array.isArray(value[k]));
-      if (arrayKeys.length === 1 && (value[arrayKeys[0]] as unknown[]).some(isPlainObject)) {
-        return rowsTable(value[arrayKeys[0]] as unknown[]);
-      }
-      return { kind: 'kv', entries: keys.map((k) => ({ key: k, value: cell(value[k]) })) };
-    }
-    return { kind: 'scalar', value: cell(value) };
-  }
-
-  const outputView = (stage: IngestTraceStage): ViewTable => toView(stage.output);
-
-  /** Non-LLM stages (dedup) carry a dict input rather than prompt messages — show it as a table. */
-  function inputView(stage: IngestTraceStage): ViewTable {
-    if (messages(stage).length) return { kind: 'empty' };
-    return toView(stage.input);
-  }
-
-  // ── Human-readable dates ──────────────────────────────────────────────────────────────────
-  // graphiti stores microsecond ISO timestamps (`2213-11-30T08:00:00.000000Z`) and the eval
-  // corpus uses far-future years, so we format by regex (not `Date`, which chokes on 6-digit
-  // fractional seconds) into `30 Nov 2213, 08:00 UTC`. Raw ISO stays in the tooltip + Raw JSON.
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/;
-
-  const isISO = (v: unknown): v is string => typeof v === 'string' && ISO_RE.test(v);
-
-  function fmtDate(iso: string | null | undefined, withTime = true): string {
-    if (!iso) return '';
-    const m = ISO_RE.exec(String(iso));
-    if (!m) return String(iso);
-    const [, y, mo, d, hh, mm] = m;
-    const month = MONTHS[Number(mo) - 1] ?? mo;
-    let out = `${Number(d)} ${month} ${y}`;
-    if (withTime && hh !== undefined) out += `, ${hh}:${mm} UTC`;
-    return out;
-  }
-
-  // ── Resolve / invalidate facts (option A) ───────────────────────────────────────────────────
-  // The EdgeDuplicate output is bare idx arrays (`{duplicate_facts, contradicted_facts}`) that
-  // only resolve against the prompt's two fact lists. We recover NEW FACT + the candidate facts
-  // (idx → text) from the captured prompt and join them to the indices into a verdict table.
-  // graphiti renders the lists as Python `str()` of dicts — single-quoted keys, per-string quote
-  // style — so the item regex accepts either quote style. Any parse miss → caller falls back to
-  // the generic table (+ Raw JSON is always available), so a prompt drift degrades, never breaks.
-  type FactCandidate = { idx: number; origin: string; fact: string; decision: 'duplicate' | 'contradicted' | 'none' };
-  type ResolveFactsView = { newFact: string; candidates: FactCandidate[]; dupCount: number; contraCount: number };
-
-  function tagBlock(text: string, tag: string): string {
-    const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
-    return re.exec(text)?.[1]?.trim() ?? '';
-  }
-
-  function parseFactItems(block: string): { idx: number; fact: string }[] {
-    const out: { idx: number; fact: string }[] = [];
-    const re = /'idx':\s*(\d+),\s*'fact':\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(block)) !== null) {
-      const raw = m[2] ?? m[3] ?? '';
-      const fact = raw.replace(/\\(["'\\])/g, '$1');
-      out.push({ idx: Number(m[1]), fact });
-    }
-    return out;
-  }
-
-  function resolveFactsView(stage: IngestTraceStage): ResolveFactsView | null {
-    const text = messages(stage)
-      .map((m) => m.content ?? '')
-      .join('\n');
-    if (!text.includes('<NEW FACT>')) return null;
-    const newFact = tagBlock(text, 'NEW FACT');
-    const existing = parseFactItems(tagBlock(text, 'EXISTING FACTS')).map((it) => ({
-      ...it,
-      origin: 'Existing fact'
-    }));
-    const invalidation = parseFactItems(tagBlock(text, 'FACT INVALIDATION CANDIDATES')).map((it) => ({
-      ...it,
-      origin: 'Invalidation candidate'
-    }));
-    const out = (stage.output ?? {}) as { duplicate_facts?: number[]; contradicted_facts?: number[] };
-    const dups = new Set(out.duplicate_facts ?? []);
-    const contras = new Set(out.contradicted_facts ?? []);
-    const candidates: FactCandidate[] = [...existing, ...invalidation]
-      .sort((a, b) => a.idx - b.idx)
-      .map(({ idx, fact, origin }) => ({
-        idx,
-        fact,
-        origin,
-        decision: contras.has(idx) ? 'contradicted' : dups.has(idx) ? 'duplicate' : 'none'
-      }));
-    if (!newFact && candidates.length === 0) return null;
-    return {
-      newFact,
-      candidates,
-      dupCount: out.duplicate_facts?.length ?? 0,
-      contraCount: out.contradicted_facts?.length ?? 0
-    };
-  }
-
-  // ── Dedupe entities (non-LLM auto-merges) ───────────────────────────────────────────────────
-  // Each stage in the group is one auto-merge (`input` = the freshly-extracted entity; `output`
-  // = `{merged_into, decision}`). Collapse the whole group into one "merge map" table so it reads
-  // as "what collapsed into what" instead of N key/value blobs.
-  type Brief = { name?: string; entity_type?: string; summary?: string; uuid?: string };
-  type Merge = { from: Brief; into: Brief; idx: number };
-
-  function dedupMerges(group: StageGroup): Merge[] {
-    return group.stages.map(({ stage, idx }) => ({
-      idx,
-      from: (stage.input ?? {}) as Brief,
-      into: ((stage.output as { merged_into?: Brief })?.merged_into ?? {}) as Brief
-    }));
-  }
-
-  const briefName = (b: Brief): string => b.name || '—';
-  const briefType = (b: Brief): string => b.entity_type || '';
-
-  /** Raw JSON for a whole dedup group (the merge list) — its collapsible fallback. */
-  function dedupJson(group: StageGroup): string {
-    const payload = group.stages.map(({ stage }) => ({ input: stage.input, output: stage.output }));
-    try {
-      return JSON.stringify(payload, null, 2);
-    } catch {
-      return String(payload);
-    }
-  }
-
-  // ── Extracted entities (resolve type ids) ───────────────────────────────────────────────────
-  // graphiti's `extract_entities` output is `{extracted_entities: [{name, entity_type_id, …}]}`
-  // where `entity_type_id` is a bare integer index into the ontology. The trace carries the
-  // active ontology legend (id → name + description), so we render the ACTUAL type name and its
-  // description instead of the opaque number. Missing legend (older sidecar) → `#id` fallback.
-  const entityTypeById = $derived.by<Map<number, IngestEntityType>>(() => {
-    const m = new Map<number, IngestEntityType>();
-    for (const t of trace?.entity_types ?? []) m.set(t.id, t);
-    return m;
-  });
-
-  type ExtractedEntityRow = { name: string; typeName: string; description: string };
-
-  function extractedEntities(stage: IngestTraceStage): ExtractedEntityRow[] | null {
-    const out = stage.output as { extracted_entities?: unknown } | null;
-    const list = out && Array.isArray(out.extracted_entities) ? out.extracted_entities : null;
-    if (!list) return null;
-    return list.map((raw) => {
-      const e = (raw ?? {}) as { name?: string; entity_type_id?: number };
-      const t = e.entity_type_id != null ? entityTypeById.get(e.entity_type_id) : undefined;
-      return {
-        name: e.name || '—',
-        typeName: t?.name ?? (e.entity_type_id != null ? `#${e.entity_type_id}` : '—'),
-        description: t?.description ?? ''
-      };
-    });
-  }
-
-  function stageMeta(stage: IngestTraceStage): string {
-    const parts: string[] = [];
-    if (stage.operation) parts.push(stage.operation);
-    if (stage.model_id) parts.push(stage.model_id);
-    if (stage.input_tokens || stage.output_tokens) {
-      parts.push(`${stage.input_tokens}i/${stage.output_tokens}o`);
-    }
-    if (Number.isFinite(stage.elapsed_ms) && stage.elapsed_ms > 0) {
-      parts.push(`${stage.elapsed_ms.toFixed(1)}ms`);
-    }
-    return parts.join(' · ');
-  }
-
-  // Count pill for a stage header (mirrors the recall dialog): how many items the stage
-  // produced, when that's a meaningful number. List-shaped outputs (extracted entities, table
-  // rows, resolved-fact candidates) → their length; key/value / scalar outputs → null (no pill).
-  function stageCount(stage: IngestTraceStage, node: string): number | null {
-    if (node === 'extract_entities') return extractedEntities(stage)?.length ?? null;
-    if (node === 'resolve_facts') return resolveFactsView(stage)?.candidates.length ?? null;
-    const ov = outputView(stage);
-    return ov.kind === 'rows' ? ov.rows.length : null;
-  }
-
-  const isCurrent = (e: IngestTraceEdge): boolean => !(e.invalid_at || e.expired_at);
-
-  function temporalTitle(e: IngestTraceEdge): string {
-    const lines: string[] = [];
-    if (e.valid_at) lines.push(`became true: ${e.valid_at}`);
-    if (e.invalid_at) lines.push(`stopped being true: ${e.invalid_at}`);
-    if (e.expired_at) lines.push(`system-expired: ${e.expired_at}`);
-    return lines.length ? lines.join('\n') : 'no temporal bounds';
-  }
+  const stageCount = (stage: IngestTraceStage, node: string): number | null =>
+    stageCountFor(stage, node, entityTypeById);
 
   const nodes = $derived<IngestTraceNode[]>(trace?.persisted_nodes ?? []);
   const edges = $derived<IngestTraceEdge[]>(trace?.persisted_edges ?? []);
@@ -524,8 +208,7 @@
      `scalar` = a lone value. Declared top-level so it's a local snippet, not a Dialog prop. -->
 {#snippet viewTable(view: ViewTable)}
   {#if view.kind === 'rows'}
-    <div class="trace-table-wrap">
-      <table class="trace-table out-table">
+    <TraceTable out>
         <thead>
           <tr>
             <th class="num">#</th>
@@ -544,11 +227,9 @@
             </tr>
           {/each}
         </tbody>
-      </table>
-    </div>
+    </TraceTable>
   {:else if view.kind === 'kv'}
-    <div class="trace-table-wrap">
-      <table class="trace-table out-table">
+    <TraceTable out>
         <tbody>
           {#each view.entries as entry (entry.key)}
             <tr>
@@ -559,8 +240,7 @@
             </tr>
           {/each}
         </tbody>
-      </table>
-    </div>
+    </TraceTable>
   {:else if view.kind === 'scalar'}
     <p class="out-scalar">{view.value}</p>
   {/if}
@@ -581,8 +261,7 @@
       {#if !rfv.contraCount && !rfv.dupCount}<span class="fact-badge fact-badge--new">added as new — no duplicate or contradiction</span>{/if}
     </p>
     {#if rfv.candidates.length}
-      <div class="trace-table-wrap">
-        <table class="trace-table out-table">
+      <TraceTable out>
           <thead>
             <tr><th class="num">idx</th><th>Origin</th><th>Candidate fact</th><th>Decision</th></tr>
           </thead>
@@ -604,8 +283,7 @@
               </tr>
             {/each}
           </tbody>
-        </table>
-      </div>
+      </TraceTable>
     {:else}
       <p class="trace-empty">No candidate facts — added directly as new.</p>
     {/if}
@@ -615,8 +293,7 @@
 <!-- Extract-entities output: each entity with its RESOLVED ontology type (name + description)
      rather than the raw numeric entity_type_id graphiti emits. Top-level local snippet. -->
 {#snippet entitiesTable(rows: ExtractedEntityRow[])}
-  <div class="trace-table-wrap">
-    <table class="trace-table out-table">
+  <TraceTable out>
       <thead>
         <tr>
           <th class="num">#</th>
@@ -635,8 +312,7 @@
           </tr>
         {/each}
       </tbody>
-    </table>
-  </div>
+  </TraceTable>
 {/snippet}
 
 <svelte:window onkeydown={onArrowNavKey} />
@@ -735,44 +411,14 @@
       <div class="trace-body">
         <!-- One flat tab row: a tab per pipeline phase (Entities / Attributes / Facts / Other),
              then Result (what landed in the graph), then the caller's optional Corpus tab. -->
-        <div class="trace-tabs trace-subtabs" role="tablist" aria-label="Ingest trace views">
-          {#each phases as phase (phase.phase)}
-            <button
-              type="button"
-              role="tab"
-              class="trace-tab"
-              class:trace-tab--active={activeTab === phase.phase}
-              aria-selected={activeTab === phase.phase}
-              onclick={() => (activeTab = phase.phase)}
-            >
-              {phase.title}
-              <span class="trace-tab__count">{phase.idxs.length}</span>
-            </button>
-          {/each}
-          <button
-            type="button"
-            role="tab"
-            class="trace-tab"
-            class:trace-tab--active={activeTab === RESULT_TAB}
-            aria-selected={activeTab === RESULT_TAB}
-            onclick={() => (activeTab = RESULT_TAB)}
-          >
-            Result
-            <span class="trace-tab__count">{nodes.length + edges.length}</span>
-          </button>
-          {#if hasExtraTab}
-            <button
-              type="button"
-              role="tab"
-              class="trace-tab"
-              class:trace-tab--active={activeTab === EXTRA_TAB}
-              aria-selected={activeTab === EXTRA_TAB}
-              onclick={() => (activeTab = EXTRA_TAB)}
-            >
-              {extraTabLabel}
-            </button>
-          {/if}
-        </div>
+        <TraceTabs
+          tabs={ingestTabs}
+          active={activeTab}
+          onSelect={(key) => (activeTab = key)}
+          ariaLabel="Ingest trace views"
+          variant="subtabs"
+          countTone="muted"
+        />
 
         {#if activePhaseObj}
           {@const phase = activePhaseObj}
@@ -789,31 +435,23 @@
                   <!-- Consolidated "merge map": all non-LLM auto-merges in one scannable table. -->
                   {@const gidx = group.stages[0].idx}
                   {@const merges = dedupMerges(group)}
-                  <div class="stage-card" data-source="dedup">
-                    <header class="stage-card__head">
-                      <button
-                        type="button"
-                        class="stage-card__titlebtn"
-                        aria-expanded={!isCollapsed(gidx)}
-                        title={isCollapsed(gidx) ? 'Expand' : 'Collapse'}
-                        onclick={() => toggleStage(gidx)}
-                      >
-                        <span class="stage-card__caret">{isCollapsed(gidx) ? '\u25B8' : '\u25BE'}</span>
-                        <span class="stage-card__label">
-                          Merge map<span class="stage-card__badge">dedup</span>
-                        </span>
-                        <span class="stage-card__pill" title="Auto-merges">{merges.length}</span>
-                      </button>
-                      <span class="stage-card__meta">auto-merges · deterministic (no LLM)</span>
-                    </header>
-                    {#if !isCollapsed(gidx)}
-                      <div class="stage-card__body">
+                  <StageCard
+                    collapsed={isCollapsed(gidx)}
+                    onToggle={() => toggleStage(gidx)}
+                    accent="dedup"
+                    badge="dedup"
+                    pills={[{ value: merges.length, title: 'Auto-merges' }]}
+                    expandTitle="Expand"
+                    collapseTitle="Collapse"
+                    bodyPadded
+                  >
+                    {#snippet label()}Merge map{/snippet}
+                    {#snippet meta()}auto-merges · deterministic (no LLM){/snippet}
                         <p class="phase-hint">
                           Exact-name / fuzzy MinHash collapses — each freshly-extracted entity reused an
                           existing node without an LLM call.
                         </p>
-                        <div class="trace-table-wrap">
-                          <table class="trace-table out-table">
+                        <TraceTable out>
                             <thead>
                               <tr>
                                 <th class="num">#</th>
@@ -840,8 +478,7 @@
                                 </tr>
                               {/each}
                             </tbody>
-                          </table>
-                        </div>
+                        </TraceTable>
                         <button
                           type="button"
                           class="prompt-toggle"
@@ -850,12 +487,10 @@
                         >
                           {isJsonOpen(gidx) ? '\u25BE' : '\u25B8'} Raw JSON
                         </button>
-                        {#if isJsonOpen(gidx)}
-                          <pre class="output-block__json">{dedupJson(group)}</pre>
-                        {/if}
-                      </div>
+                    {#if isJsonOpen(gidx)}
+                      <pre class="output-block__json">{dedupJson(group)}</pre>
                     {/if}
-                  </div>
+                  </StageCard>
                 {:else}
                   {#each group.stages as { stage, idx } (idx)}
                     {@const ov = outputView(stage)}
@@ -863,27 +498,16 @@
                     {@const rfv = group.node === 'resolve_facts' ? resolveFactsView(stage) : null}
                     {@const ee = group.node === 'extract_entities' ? extractedEntities(stage) : null}
                     {@const count = stageCount(stage, group.node)}
-                    <div class="stage-card" data-source={stage.source}>
-                      <header class="stage-card__head">
-                        <button
-                          type="button"
-                          class="stage-card__titlebtn"
-                          aria-expanded={!isCollapsed(idx)}
-                          title={isCollapsed(idx) ? 'Expand stage' : 'Collapse stage'}
-                          onclick={() => toggleStage(idx)}
-                        >
-                          <span class="stage-card__caret">{isCollapsed(idx) ? '\u25B8' : '\u25BE'}</span>
-                          <span class="stage-card__label">
-                            {stage.label}
-                            {#if stage.source !== 'llm'}<span class="stage-card__badge">{stage.source}</span>{/if}
-                          </span>
-                          {#if count !== null}<span class="stage-card__pill" title="Items produced by this stage">{count}</span>{/if}
-                        </button>
-                        <span class="stage-card__meta">{stageMeta(stage)}</span>
-                      </header>
-
-                      {#if !isCollapsed(idx)}
-                        <div class="stage-card__body">
+                    <StageCard
+                      collapsed={isCollapsed(idx)}
+                      onToggle={() => toggleStage(idx)}
+                      accent={stage.source}
+                      badge={stage.source !== 'llm' ? stage.source : undefined}
+                      pills={count !== null ? [{ value: count, title: 'Items produced by this stage' }] : []}
+                      bodyPadded
+                    >
+                      {#snippet label()}{stage.label}{/snippet}
+                      {#snippet meta()}{stageMeta(stage)}{/snippet}
                           {#if iv.kind !== 'empty'}
                             <div class="output-block">
                               <span class="output-block__label">Input — what this stage was given</span>
@@ -937,9 +561,7 @@
                               <pre class="output-block__json">{prettyOutput(stage)}</pre>
                             {/if}
                           </div>
-                        </div>
-                      {/if}
-                    </div>
+                    </StageCard>
                   {/each}
                 {/if}
               </section>
@@ -949,8 +571,7 @@
           <section class="result-section">
             <h3 class="stage-group__title">Entities ({nodes.length})</h3>
             {#if nodes.length}
-              <div class="trace-table-wrap">
-                <table class="trace-table">
+              <TraceTable>
                   <thead>
                     <tr>
                       <th class="num">#</th>
@@ -971,16 +592,14 @@
                       </tr>
                     {/each}
                   </tbody>
-                </table>
-              </div>
+              </TraceTable>
             {:else}
               <p class="trace-empty">No entities persisted.</p>
             {/if}
 
             <h3 class="stage-group__title">Facts ({edges.length})</h3>
             {#if edges.length}
-              <div class="trace-table-wrap">
-                <table class="trace-table">
+              <TraceTable>
                   <thead>
                     <tr>
                       <th class="num">#</th>
@@ -998,14 +617,7 @@
                       <tr>
                         <td class="num">{ei + 1}</td>
                         <td class="vstate">
-                          <span
-                            class="vpill"
-                            class:vpill--ok={isCurrent(e)}
-                            class:vpill--bad={!isCurrent(e)}
-                            title={temporalTitle(e)}
-                          >
-                            {isCurrent(e) ? '\u2713' : '\u2717'}
-                          </span>
+                          <ValidityPill current={isCurrent(e)} title={temporalTitle(e)} />
                         </td>
                         <td class="fact">{e.fact}</td>
                         <td class="rel">{e.name || '—'}</td>
@@ -1016,8 +628,7 @@
                       </tr>
                     {/each}
                   </tbody>
-                </table>
-              </div>
+              </TraceTable>
             {:else}
               <p class="trace-empty">No facts persisted.</p>
             {/if}
@@ -1080,61 +691,11 @@
     white-space: nowrap;
   }
 
-  .trace-tabs {
-    display: flex;
-    gap: 4px;
-    flex: none;
-  }
-
-  /* Pipeline phase sub-tabs sit in the scroll body (not the header) with a divider under. */
-  .trace-subtabs {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--background);
-    border-bottom: 1px solid color-mix(in srgb, var(--muted-foreground) 18%, transparent);
-    padding-bottom: 2px;
-  }
-
-  .trace-tab__count {
-    margin-left: 5px;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--muted-foreground);
-    font-variant-numeric: tabular-nums;
-  }
-
+  /* Tab strip moved to <TraceTabs>; phase hint stays here (rendered by this dialog). */
   .phase-hint {
     margin: 0;
     font-size: 11px;
     color: var(--muted-foreground);
-  }
-
-  .trace-tab {
-    appearance: none;
-    border: none;
-    background: transparent;
-    padding: 6px 12px;
-    border-bottom: 2px solid transparent;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted-foreground);
-    cursor: pointer;
-  }
-
-  .trace-tab:hover {
-    color: var(--foreground);
-  }
-
-  .trace-tab--active {
-    color: var(--foreground);
-    border-bottom-color: var(--primary);
-  }
-
-  .trace-tab:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: -2px;
-    border-radius: 4px;
   }
 
   .trace-body {
@@ -1194,111 +755,7 @@
     color: var(--muted-foreground);
   }
 
-  .stage-card {
-    border: 1px solid color-mix(in srgb, var(--muted-foreground) 18%, transparent);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  /* Non-LLM dedup stages get a distinct accent so they read as "observed, not model-driven". */
-  .stage-card[data-source='dedup'] {
-    border-color: color-mix(in srgb, #f59e0b 45%, transparent);
-  }
-
-  .stage-card__head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 8px 10px;
-    background: color-mix(in srgb, var(--muted-foreground) 8%, transparent);
-  }
-
-  /* Whole title row is the toggle — caret + label + count pill, all clickable (mirrors recall). */
-  .stage-card__titlebtn {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--foreground);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .stage-card__titlebtn:hover .stage-card__label {
-    color: var(--primary);
-  }
-
-  .stage-card__titlebtn:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
-    border-radius: 4px;
-  }
-
-  .stage-card__caret {
-    flex: none;
-    width: 14px;
-    font-size: 11px;
-    line-height: 1;
-    color: var(--muted-foreground);
-  }
-
-  .stage-card__label {
-    min-width: 0;
-    font-weight: 600;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  /* Count pill after the stage title: how many items the stage produced (mirrors recall). */
-  .stage-card__pill {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 18px;
-    height: 17px;
-    padding: 0 6px;
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--muted-foreground);
-    background: color-mix(in srgb, var(--muted-foreground) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--muted-foreground) 24%, transparent);
-  }
-
-  .stage-card__badge {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 0 5px;
-    border-radius: 3px;
-    background: color-mix(in srgb, #f59e0b 20%, transparent);
-    border: 1px solid color-mix(in srgb, #f59e0b 50%, transparent);
-  }
-
-  .stage-card__meta {
-    font-family:
-      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-      monospace;
-    font-size: 11px;
-    color: var(--muted-foreground);
-    text-align: right;
-    word-break: break-word;
-  }
-
-  .stage-card__body {
-    padding: 8px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+  /* `.stage-card*` styles moved to <StageCard>. */
 
   .prompt-toggle {
     align-self: flex-start;
@@ -1374,21 +831,6 @@
     gap: 4px;
   }
 
-  /* Structured stage output rendered as a table. Cells wrap (facts/summaries can be long); the
-     leading # / key column stays compact. */
-  .out-table .cell {
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-width: 520px;
-  }
-
-  .out-table .kv-key {
-    white-space: nowrap;
-    font-weight: 600;
-    color: var(--muted-foreground);
-    vertical-align: top;
-  }
-
   .out-scalar {
     margin: 0;
     font-size: 12px;
@@ -1412,16 +854,10 @@
     color: var(--muted-foreground);
   }
 
-  /* Dedup merge map: dim the entity type + center the → arrow column. */
+  /* Dedup merge map: dim the entity type (the → arrow column is styled by <TraceTable>). */
   .type-dim {
     color: var(--muted-foreground);
     font-weight: 400;
-  }
-
-  .out-table .arrow-col {
-    text-align: center;
-    color: var(--muted-foreground);
-    width: 1.5rem;
   }
 
   /* Resolve/invalidate facts verdict view. */
@@ -1489,90 +925,5 @@
     gap: 8px;
   }
 
-  .trace-table-wrap {
-    overflow-x: auto;
-  }
-
-  .trace-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-  }
-
-  .trace-table th,
-  .trace-table td {
-    text-align: left;
-    padding: 5px 8px;
-    border-top: 1px solid color-mix(in srgb, var(--muted-foreground) 12%, transparent);
-    vertical-align: top;
-  }
-
-  .trace-table th {
-    border-top: none;
-    font-size: 11px;
-    color: var(--muted-foreground);
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .trace-table tbody tr:hover td {
-    background: color-mix(in srgb, var(--primary) 24%, transparent);
-  }
-
-  .trace-table .num {
-    text-align: right;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .trace-table .fact {
-    min-width: 240px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .trace-table .entity {
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .trace-table .rel,
-  .trace-table .temporal,
-  .trace-table .uuid {
-    white-space: nowrap;
-    font-family:
-      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-      monospace;
-    font-size: 11px;
-  }
-
-  .trace-table .vstate {
-    text-align: center;
-    white-space: nowrap;
-  }
-
-  .vpill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    border: 1px solid transparent;
-  }
-
-  .vpill--ok {
-    color: #16a34a;
-    background: color-mix(in srgb, #16a34a 16%, transparent);
-    border-color: color-mix(in srgb, #16a34a 45%, transparent);
-  }
-
-  .vpill--bad {
-    color: #dc2626;
-    background: color-mix(in srgb, #dc2626 16%, transparent);
-    border-color: color-mix(in srgb, #dc2626 45%, transparent);
-  }
+  /* `.trace-table*` shell + cell styling moved to <TraceTable>. */
 </style>

@@ -1,0 +1,193 @@
+import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_CHAT,
+  DEFAULT_GRAPH,
+  DEFAULT_KNOWLEDGE,
+  DEFAULT_MEMORY_EXTRACTION,
+  DEFAULT_MEMORY_SEARCH,
+  normalizeWorkspacePreferences,
+  type WorkspacePreferences
+} from '$lib/api/preferences';
+import {
+  cloneWorkspacePreferences,
+  editsForSave,
+  preferencesAreDirty
+} from './preferences-edits';
+
+function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferences {
+  const base: WorkspacePreferences = {
+    version: 1,
+    llm: {
+      default_chat: null,
+      default_stt: null,
+      default_tts: null,
+      default_image_gen: null,
+      default_tuning_profile: 'balanced_chat',
+      default_image_profile: 'image_playground'
+    },
+    media: {
+      input: { voice: true, image: true, video: false, file: true },
+      output: { voice: true, image: false, video: false, file: true }
+    },
+    memory: {
+      enabled: true,
+      default_tuning_profile: 'memory_extraction',
+      user_name: '',
+      search: { ...DEFAULT_MEMORY_SEARCH },
+      extraction: { ...DEFAULT_MEMORY_EXTRACTION }
+    },
+    knowledge: { ...DEFAULT_KNOWLEDGE },
+    graph: { ...DEFAULT_GRAPH },
+    chat: { ...DEFAULT_CHAT },
+    tuning_profiles: {
+      balanced_chat: {
+        label: 'Balanced chat',
+        locked: true,
+        temperature: 0.7,
+        max_tokens: 2048,
+        thinking: null
+      }
+    },
+    image_profiles: {}
+  };
+  return normalizeWorkspacePreferences({ ...base, ...overrides });
+}
+
+describe('editsForSave', () => {
+  it('returns no edits when baseline and draft match', () => {
+    const prefs = makePrefs();
+    expect(editsForSave(prefs, cloneWorkspacePreferences(prefs))).toEqual({});
+    expect(preferencesAreDirty(prefs, cloneWorkspacePreferences(prefs))).toBe(false);
+  });
+
+  it('emits a leaf path for a scalar change', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.memory.user_name = 'Misho';
+    expect(editsForSave(baseline, draft)).toEqual({ 'memory.user_name': 'Misho' });
+  });
+
+  it('coerces cleared model ids to null', () => {
+    const baseline = makePrefs();
+    baseline.llm.default_chat = 'openai:gpt-4';
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.llm.default_chat = '';
+    expect(editsForSave(baseline, draft)).toEqual({ 'llm.default_chat': null });
+  });
+
+  it('coerces cleared reranker device to null', () => {
+    const baseline = makePrefs();
+    baseline.graph.reranker.device = 'cpu';
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.graph.reranker.device = '';
+    expect(editsForSave(baseline, draft)).toEqual({ 'graph.reranker.device': null });
+  });
+
+  it('sends tuning_profiles as one whole-object path', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.tuning_profiles.custom_1 = {
+      label: 'Custom 1',
+      locked: false,
+      temperature: 0.5,
+      max_tokens: 1024,
+      thinking: null
+    };
+    const edits = editsForSave(baseline, draft);
+    expect(Object.keys(edits)).toEqual(['tuning_profiles']);
+    expect(edits.tuning_profiles).toEqual(draft.tuning_profiles);
+  });
+
+  it('sends graph.eval.answer_prompts as one whole-object path', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.graph.eval.answer_prompts.custom = {
+      label: 'Custom',
+      locked: false,
+      prompt: 'Answer from context only.'
+    };
+    const edits = editsForSave(baseline, draft);
+    expect(Object.keys(edits)).toEqual(['graph.eval.answer_prompts']);
+    expect(edits['graph.eval.answer_prompts']).toEqual(draft.graph.eval.answer_prompts);
+  });
+
+  it('ignores read-only resolved fields', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.knowledge.answering.model_resolved = 'openai:gpt-4';
+    draft.knowledge.default_embedding_model_resolved = 'some-embedder';
+    expect(editsForSave(baseline, draft)).toEqual({});
+  });
+
+  it('ignores the backend-computed graph.embedder_model_resolved mirror', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    // Not in the frontend type, but the backend mirrors this @property into the payload.
+    (draft.graph as Record<string, unknown>).embedder_model_resolved = 'openai:text-embed';
+    expect(editsForSave(baseline, draft)).toEqual({});
+  });
+
+  it('ignores image profile and llm image defaults not edited in preferences UI', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.llm.default_image_gen = 'cloudflare:flux';
+    draft.image_profiles = {
+      image_playground: {
+        label: 'Playground',
+        locked: true,
+        model: null,
+        steps: 4,
+        size: '1024x1024',
+        style_prefix: '',
+        style_suffix: '',
+        seed: null
+      }
+    };
+    expect(editsForSave(baseline, draft)).toEqual({});
+  });
+
+  it('picks up nested graph and knowledge changes without manual enumeration', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.graph.k_hop = 2;
+    draft.knowledge.retrieval.top_k = 12;
+    draft.chat.tools_enabled = false;
+    expect(editsForSave(baseline, draft)).toEqual({
+      'graph.k_hop': 2,
+      'knowledge.retrieval.top_k': 12,
+      'chat.tools_enabled': false
+    });
+  });
+
+  it('emits media modality paths', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.media.input.video = true;
+    draft.media.output.image = true;
+    expect(editsForSave(baseline, draft)).toEqual({
+      'media.input.video': true,
+      'media.output.image': true
+    });
+  });
+
+  it('never emits undefined for sparse draft keys', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    delete (draft.memory as Record<string, unknown>).user_name;
+    const edits = editsForSave(baseline, draft);
+    expect(Object.keys(edits)).toEqual([]);
+    expect(preferencesAreDirty(baseline, draft)).toBe(false);
+    for (const value of Object.values(edits)) {
+      expect(value).not.toBe(undefined);
+    }
+  });
+
+  it('coerces a removed nullable model key to null', () => {
+    const baseline = makePrefs();
+    baseline.llm.default_chat = 'openai:gpt-4';
+    const draft = cloneWorkspacePreferences(baseline);
+    delete (draft.llm as Record<string, unknown>).default_chat;
+    expect(editsForSave(baseline, draft)).toEqual({ 'llm.default_chat': null });
+    expect(preferencesAreDirty(baseline, draft)).toBe(true);
+  });
+});

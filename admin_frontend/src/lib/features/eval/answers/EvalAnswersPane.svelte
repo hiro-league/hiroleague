@@ -6,22 +6,35 @@
 -->
 <script lang="ts">
   import { ChevronsDownUp, ChevronsUpDown, Download, LoaderCircle, X } from '@lucide/svelte';
+  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
+  import { ADMIN_SELECT_SM } from '$lib/styling/admin-tokens';
+  import { cn } from '$lib/utils';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import EvalResultsTable from '$lib/features/eval/answers/EvalResultsTable.svelte';
   import EvalNotRunList from '$lib/features/eval/answers/EvalNotRunList.svelte';
+  import {
+    EVAL_TOOLBAR_SEARCH,
+    EVAL_TOOLBAR_SEARCH_INPUT
+  } from '$lib/features/eval/shared/eval-table-ui';
   import { pct } from '$lib/features/eval/shared/eval-format';
+  import {
+    EVAL_ANSWER_FILTER_KEYS,
+    evalAnswerFilterOrAll,
+    evalAnswerFiltersActive
+  } from '$lib/features/eval/shared/eval-answer-filters';
   import {
     rowHaystack,
     rowMatchesFlag,
     rowMatchesMark,
     type AnsFlag,
-    type AnsMark,
-    type AnsSortKey
+    type AnsMark
   } from '$lib/features/eval/shared/eval-derive';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
+  import { useEvalAnswerSort } from '$lib/features/eval/state/eval-answer-sort.svelte';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
 
@@ -32,6 +45,7 @@
   }
   let { eval_, cfg, traces }: Props = $props();
 
+  const sort = useEvalAnswerSort();
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
   // Results-card header summary: the gate verdict once complete, otherwise live progress.
@@ -65,30 +79,40 @@
     expandedRows = next;
   }
 
-  // --- Filters (search + type + difficulty + recall flag + answer type) ---------------------
-  let ansSearch = $state('');
-  let ansSearchRecalled = $state(false);
-  let ansCategory = $state<string>('all');
+  // --- Filters (URL-synced via `ans_*` query params) ------------------------------------------
+  const tableFilters = useTableFilters({
+    keys: EVAL_ANSWER_FILTER_KEYS,
+    urlSync: true
+  });
+  const ansSearch = $derived(tableFilters.filters.ans_q);
+  const ansSearchRecalled = $derived(tableFilters.filters.ans_rec === '1');
+  const ansCategory = $derived(evalAnswerFilterOrAll(tableFilters.filters.ans_cat));
   type QDifficulty = 'all' | 'medium' | 'hard' | 'very_hard' | 'unspecified';
-  let ansDifficulty = $state<QDifficulty>('all');
-  let ansFlag = $state<AnsFlag>('all');
-  let ansMark = $state<AnsMark>('all');
-  // Highlight inside the recalled tables only when recalled search is enabled.
+  const ansDifficulty = $derived(evalAnswerFilterOrAll(tableFilters.filters.ans_diff) as QDifficulty);
+  const ansFlag = $derived(evalAnswerFilterOrAll(tableFilters.filters.ans_flag) as AnsFlag);
+  const ansMark = $derived(evalAnswerFilterOrAll(tableFilters.filters.ans_mark) as AnsMark);
   const recalledTerm = $derived(ansSearchRecalled ? ansSearch : '');
-  const ansFiltered = $derived(
-    ansSearch.trim() !== '' ||
-      ansCategory !== 'all' ||
-      ansDifficulty !== 'all' ||
-      ansFlag !== 'all' ||
-      ansMark !== 'all'
-  );
+  const ansFiltered = $derived(evalAnswerFiltersActive(tableFilters.filters));
   function resetAnswerFilters() {
-    ansSearch = '';
-    ansSearchRecalled = false;
-    ansCategory = 'all';
-    ansDifficulty = 'all';
-    ansFlag = 'all';
-    ansMark = 'all';
+    tableFilters.reset();
+  }
+  function setAnsSearch(value: string) {
+    tableFilters.set('ans_q', value);
+  }
+  function setAnsSearchRecalled(checked: boolean) {
+    tableFilters.set('ans_rec', checked ? '1' : '');
+  }
+  function setAnsCategory(value: string) {
+    tableFilters.set('ans_cat', value === 'all' ? '' : value);
+  }
+  function setAnsDifficulty(value: string) {
+    tableFilters.set('ans_diff', value === 'all' ? '' : value);
+  }
+  function setAnsFlag(value: string) {
+    tableFilters.set('ans_flag', value === 'all' ? '' : value);
+  }
+  function setAnsMark(value: string) {
+    tableFilters.set('ans_mark', value === 'all' ? '' : value);
   }
   // Distinct categories among the answer rows (first-seen order) for the type filter dropdown.
   const ansCategoryOptions = $derived.by(() => {
@@ -114,21 +138,6 @@
       return true;
     });
   });
-
-  // --- Intra-group sort (within each category group) ----------------------------------------
-  let ansSortKey = $state<AnsSortKey>('none');
-  let ansSortDir = $state<'asc' | 'desc'>('asc');
-  function cycleAnsSort(key: Exclude<AnsSortKey, 'none'>) {
-    if (ansSortKey !== key) {
-      ansSortKey = key;
-      ansSortDir = 'asc';
-    } else if (ansSortDir === 'asc') {
-      ansSortDir = 'desc';
-    } else {
-      ansSortKey = 'none';
-      ansSortDir = 'asc';
-    }
-  }
 
   // --- Results grouped by type (category) ---------------------------------------------------
   const resultGroups = $derived.by<[string, EvalRow[]][]>(() => {
@@ -226,124 +235,138 @@
         </button>
       {/if}
     {/if}
-    <div class="relative">
-      <input
-        class="h-7 w-48 rounded-md border bg-background pl-2 pr-7 font-sans text-xs"
-        placeholder="Search answers…"
-        bind:value={ansSearch}
+    <AdminFilterBar class="ml-auto items-center gap-2">
+      <label
+        class={EVAL_TOOLBAR_SEARCH}
         title="Searches the answer surface — question, ideal, answers, judge reason/evidence. Enable “Recalled” to also search every folded table: recalled facts/entities/episodes and the evidence-recall episodes."
-      />
-      {#if ansSearch.trim()}
+      >
+        <input
+          class={EVAL_TOOLBAR_SEARCH_INPUT}
+          placeholder="Search answers…"
+          value={ansSearch}
+          oninput={(e) => setAnsSearch(e.currentTarget.value)}
+        />
+        {#if ansSearch.trim()}
+          <button
+            type="button"
+            class="grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground"
+            onclick={() => setAnsSearch('')}
+            title="Clear search"
+            aria-label="Clear search"
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        {/if}
+      </label>
+      <label
+        class="flex cursor-pointer select-none items-center gap-1.5 font-sans text-xs text-muted-foreground"
+        title="Also search inside every folded table: the recalled facts/entities/episodes and the evidence-recall episodes"
+      >
+        <input
+          type="checkbox"
+          class="size-3.5"
+          checked={ansSearchRecalled}
+          onchange={(e) => setAnsSearchRecalled(e.currentTarget.checked)}
+        />
+        Recalled
+      </label>
+      <select
+        class={cn(ADMIN_SELECT_SM, 'min-w-28')}
+        value={ansCategory}
+        onchange={(e) => setAnsCategory(e.currentTarget.value)}
+        title="Filter by question type"
+      >
+        <option value="all">All types</option>
+        {#each ansCategoryOptions as c (c)}
+          <option value={c}>{c}</option>
+        {/each}
+      </select>
+      <select
+        class={cn(ADMIN_SELECT_SM, 'min-w-32')}
+        value={ansDifficulty}
+        onchange={(e) => setAnsDifficulty(e.currentTarget.value)}
+        title="Filter by difficulty"
+      >
+        <option value="all">All difficulties</option>
+        <option value="medium">medium</option>
+        <option value="hard">hard</option>
+        <option value="very_hard">very hard</option>
+        <option value="unspecified">unspecified</option>
+      </select>
+      {#if cfg.showRecallColumn}
+        <select
+          class={cn(ADMIN_SELECT_SM, 'min-w-28')}
+          value={ansFlag}
+          onchange={(e) => setAnsFlag(e.currentTarget.value)}
+          title="Filter by judge recall-sufficiency flag"
+        >
+          <option value="all">All flags</option>
+          <option value="sufficient">Sufficient</option>
+          <option value="miss">Recall miss</option>
+          <option value="unknown">Not judged</option>
+        </select>
+      {/if}
+      <select
+        class={cn(ADMIN_SELECT_SM, 'min-w-32')}
+        value={ansMark}
+        onchange={(e) => setAnsMark(e.currentTarget.value)}
+        title="Filter by answer type (judge verdict)"
+      >
+        <option value="all">All answer types</option>
+        <option value="pass">Pass</option>
+        <option value="partial">Partial</option>
+        <option value="fail">Fail</option>
+        <option value="abstain">Abstain</option>
+        <option value="not_judged">Not judged</option>
+      </select>
+      {#if ansFiltered}
         <button
           type="button"
-          class="absolute inset-y-0 right-1.5 my-auto flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-          onclick={() => (ansSearch = '')}
-          title="Clear search"
-          aria-label="Clear search"
+          class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted"
+          onclick={resetAnswerFilters}
+          title="Clear all filters"
         >
-          <X size={12} aria-hidden="true" />
+          Reset
         </button>
       {/if}
-    </div>
-    <label
-      class="flex cursor-pointer select-none items-center gap-1.5 font-sans text-xs text-muted-foreground"
-      title="Also search inside every folded table: the recalled facts/entities/episodes and the evidence-recall episodes"
-    >
-      <input type="checkbox" class="size-3.5" bind:checked={ansSearchRecalled} />
-      Recalled
-    </label>
-    <select
-      class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
-      bind:value={ansCategory}
-      title="Filter by question type"
-    >
-      <option value="all">All types</option>
-      {#each ansCategoryOptions as c (c)}
-        <option value={c}>{c}</option>
-      {/each}
-    </select>
-    <select
-      class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
-      bind:value={ansDifficulty}
-      title="Filter by difficulty"
-    >
-      <option value="all">All difficulties</option>
-      <option value="medium">medium</option>
-      <option value="hard">hard</option>
-      <option value="very_hard">very hard</option>
-      <option value="unspecified">unspecified</option>
-    </select>
-    {#if cfg.showRecallColumn}
-      <select
-        class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
-        bind:value={ansFlag}
-        title="Filter by judge recall-sufficiency flag"
-      >
-        <option value="all">All flags</option>
-        <option value="sufficient">Sufficient</option>
-        <option value="miss">Recall miss</option>
-        <option value="unknown">Not judged</option>
-      </select>
-    {/if}
-    <select
-      class="h-7 rounded-md border bg-background px-2 font-sans text-xs"
-      bind:value={ansMark}
-      title="Filter by answer type (judge verdict)"
-    >
-      <option value="all">All answer types</option>
-      <option value="pass">Pass</option>
-      <option value="partial">Partial</option>
-      <option value="fail">Fail</option>
-      <option value="abstain">Abstain</option>
-      <option value="not_judged">Not judged</option>
-    </select>
-    {#if ansFiltered}
-      <button
-        type="button"
-        class="rounded border px-2 py-0.5 font-sans text-xs hover:bg-muted"
-        onclick={resetAnswerFilters}
-        title="Clear all filters"
-      >
-        Reset
-      </button>
-    {/if}
-    {#if resultGroups.length > 0}
-      <button
-        type="button"
-        class="rounded border p-1 hover:bg-muted"
-        onclick={expandAllResultGroups}
-        title="Expand all groups"
-        aria-label="Expand all groups"
-      >
-        <ChevronsUpDown size={14} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        class="rounded border p-1 hover:bg-muted"
-        onclick={collapseAllResultGroups}
-        title="Collapse all groups"
-        aria-label="Collapse all groups"
-      >
-        <ChevronsDownUp size={14} aria-hidden="true" />
-      </button>
-    {/if}
-    {#if cfg.canExportLocomo}
-      <Button
-        type="button"
-        variant="outline"
-        class="h-7"
-        disabled={traces.exportingLocomo || eval_.savedCount === 0 || !eval_.selectedCorpus}
-        onclick={() => void traces.exportLocomoResults()}
-        title="Download saved memory results as a LoCoMo-compatible QA JSON file"
-      >
-        {#if traces.exportingLocomo}
-          <LoaderCircle size={14} class="animate-spin" />
-        {:else}
-          <Download size={14} />
-        {/if}
-        Export to LoCoMo
-      </Button>
-    {/if}
+      {#if resultGroups.length > 0}
+        <button
+          type="button"
+          class="rounded border p-1 hover:bg-muted"
+          onclick={expandAllResultGroups}
+          title="Expand all groups"
+          aria-label="Expand all groups"
+        >
+          <ChevronsUpDown size={14} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="rounded border p-1 hover:bg-muted"
+          onclick={collapseAllResultGroups}
+          title="Collapse all groups"
+          aria-label="Collapse all groups"
+        >
+          <ChevronsDownUp size={14} aria-hidden="true" />
+        </button>
+      {/if}
+      {#if cfg.canExportLocomo}
+        <Button
+          type="button"
+          variant="outline"
+          class="h-8"
+          disabled={traces.exportingLocomo || eval_.savedCount === 0 || !eval_.selectedCorpus}
+          onclick={() => void traces.exportLocomoResults()}
+          title="Download saved memory results as a LoCoMo-compatible QA JSON file"
+        >
+          {#if traces.exportingLocomo}
+            <LoaderCircle size={14} class="animate-spin" />
+          {:else}
+            <Download size={14} />
+          {/if}
+          Export to LoCoMo
+        </Button>
+      {/if}
+    </AdminFilterBar>
   </div>
   {#if eval_.rows.length > 0 || eval_.status === 'running'}
     <EvalResultsTable
@@ -358,9 +381,7 @@
       {resultGroups}
       {collapsedResultGroups}
       {toggleResultGroup}
-      {ansSortKey}
-      {ansSortDir}
-      {cycleAnsSort}
+      {sort}
       {expandedRows}
       {toggleRow}
       searchTerm={ansSearch}

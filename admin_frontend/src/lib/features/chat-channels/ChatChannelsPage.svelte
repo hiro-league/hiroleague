@@ -10,11 +10,6 @@
   import ChatChannelDeleteModal from '$lib/features/chat-channels/modals/ChatChannelDeleteModal.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import {
-    cycleChatAudioSpeed,
-    formatChatAudioSpeedLabel,
-    chatAudioPlaybackRate
-  } from '$lib/features/chat-channels/chat-audio-coordinator';
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import {
     CHAT_CHANNELS_PANEL_IDS,
@@ -106,42 +101,9 @@
     hidden={ctrl.activeTab !== 'messages'}
   >
     <ChatChannelsMessagesPanel
-      bind:selectedChannelId={ctrl.selectedChannelId}
-      bind:requestVoiceReplyUi={ctrl.requestVoiceReplyUi}
-      bind:useKnowledgeUi={ctrl.useKnowledgeUi}
-      bind:disableToolsUi={ctrl.disableToolsUi}
-      bind:showAgentTokensUi={ctrl.showAgentTokensUi}
-      bind:showAgentToolsUi={ctrl.showAgentToolsUi}
-      bind:draftMessage={ctrl.draftMessage}
-      channels={ctrl.channels}
-      channelsLoading={ctrl.channelsLoading}
-      channelsError={ctrl.channelsError}
-      messages={ctrl.messages}
-      messagesLoading={ctrl.messagesLoading}
-      messagesError={ctrl.messagesError}
-      liveUpdatesPaused={ctrl.liveUpdatesPaused}
-      agentTyping={ctrl.agentTyping}
-      agentVoiceGeneratingMessageId={ctrl.agentVoiceGeneratingMessageId}
-      busy={ctrl.busy}
-      headerPhotoSrc={ctrl.messagesHeaderPhotoSrc}
-      headerChannelHint={ctrl.messagesHeaderChannelHint}
-      headerChannelName={ctrl.messagesHeaderChannelName}
-      headerCharacterLabel={ctrl.messagesHeaderCharacterName}
-      headerDeviceId={ctrl.messagesHeaderDeviceId}
-      hasSelectedChannel={ctrl.selectedChannelExists}
-      recordingStartedAt={ctrl.recordingStartedAt}
-      composingBusy={ctrl.composingBusy}
-      audioSpeedLabel={formatChatAudioSpeedLabel($chatAudioPlaybackRate)}
+      {ctrl}
       onChannelChange={ctrl.handleChannelSelect}
-      onClearMessages={() => ctrl.openClearMessagesModal()}
       onRefresh={ctrl.refreshCurrent}
-      onCycleAudioSpeed={cycleChatAudioSpeed}
-      onSubmitDraft={ctrl.submitDraftText}
-      onBeginRecording={ctrl.beginRecording}
-      onFinalizeRecording={ctrl.finalizeRecording}
-      onDiscardRecording={ctrl.discardRecording}
-      voiceReplyCheckboxDisabled={ctrl.voiceReplyCheckboxDisabled}
-      voiceReplyCheckboxHint={ctrl.voiceReplyCheckboxHint}
     />
   </div>
 </AdminPageHeader>

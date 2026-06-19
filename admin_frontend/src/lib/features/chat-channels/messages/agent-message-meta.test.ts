@@ -6,9 +6,25 @@ import {
   agentMetadataByReplyId,
   agentTokensShouldAnimate,
   formatTokenCount,
+  hasVisibleAgentTelemetry,
+  resolveAgentMetadata,
+  shouldShowAgentTelemetry,
   telemetryBreakdownTitle,
   usageBreakdownTitle
 } from './agent-message-meta';
+
+function chatMessage(overrides: Partial<ChatHistoryMessage>): ChatHistoryMessage {
+  return {
+    id: 'm-1',
+    message_pk: 1,
+    channel_id: 1,
+    sender_type: 'user',
+    sender_id: 'admin',
+    created_at: '2026-05-13T00:00:00.000Z',
+    content: [{ content_type: 'text', body: 'hello' }],
+    ...overrides
+  };
+}
 
 describe('agent message metadata display', () => {
   it('formats output token counts using the admin compact thresholds', () => {
@@ -143,5 +159,69 @@ describe('agent message metadata display', () => {
     expect(agentTokensShouldAnimate({ status: 'failed' })).toBe(false);
     expect(agentTokensShouldAnimate({ status: undefined })).toBe(false);
     expect(agentTokensShouldAnimate(null)).toBe(false);
+  });
+});
+
+describe('hasVisibleAgentTelemetry', () => {
+  it('is false for null or empty metadata', () => {
+    expect(hasVisibleAgentTelemetry(null)).toBe(false);
+    expect(hasVisibleAgentTelemetry({})).toBe(false);
+    expect(hasVisibleAgentTelemetry({ usage_total: { output_tokens: 0 } })).toBe(false);
+  });
+
+  it('is true when tokens, cost, or elapsed are present', () => {
+    expect(hasVisibleAgentTelemetry({ usage_total: { output_tokens: 5 } })).toBe(true);
+    expect(hasVisibleAgentTelemetry({ elapsed_ms: 200 })).toBe(true);
+    expect(
+      hasVisibleAgentTelemetry({ cost: { currency: 'USD', estimated_total: 0.01, pricing_available: true } })
+    ).toBe(true);
+  });
+});
+
+describe('resolveAgentMetadata', () => {
+  it('returns the message own metadata when present', () => {
+    const msg = chatMessage({ metadata: { agent: { reply_id: 'r', usage_total: { output_tokens: 3 } } } });
+    const resolved = resolveAgentMetadata(msg, true, new Map());
+    expect(resolved?.usage_total?.output_tokens).toBe(3);
+  });
+
+  it('falls back to inbound-by-reply-id only for agent (non-user) messages', () => {
+    const inbound = new Map([['agent-msg', { usage_total: { output_tokens: 9 } }]]);
+    const agentMsg = chatMessage({ id: 'agent-msg', sender_type: 'assistant', metadata: undefined });
+    expect(resolveAgentMetadata(agentMsg, false, inbound)?.usage_total?.output_tokens).toBe(9);
+
+    const userMsg = chatMessage({ id: 'agent-msg', sender_type: 'user', metadata: undefined });
+    expect(resolveAgentMetadata(userMsg, true, inbound)).toBeNull();
+  });
+});
+
+describe('shouldShowAgentTelemetry', () => {
+  it('always shows for an agent reply with visible telemetry', () => {
+    const agent = { usage_total: { output_tokens: 5 } };
+    const msg = chatMessage({ id: 'a', sender_type: 'assistant' });
+    expect(shouldShowAgentTelemetry(msg, agent, false, [msg])).toBe(true);
+  });
+
+  it('hides on the user message when the agent reply already surfaces the same reply_id', () => {
+    const userMsg = chatMessage({ id: 'u', sender_type: 'user' });
+    const agentReply = chatMessage({
+      id: 'reply-1',
+      sender_type: 'assistant',
+      metadata: { agent: { usage_total: { output_tokens: 8 } } }
+    });
+    const agent = { reply_id: 'reply-1', usage_total: { output_tokens: 8 } };
+    expect(shouldShowAgentTelemetry(userMsg, agent, true, [userMsg, agentReply])).toBe(false);
+  });
+
+  it('shows on the user message when no agent reply carries the telemetry', () => {
+    const userMsg = chatMessage({ id: 'u', sender_type: 'user' });
+    const agent = { reply_id: 'reply-1', usage_total: { output_tokens: 8 } };
+    expect(shouldShowAgentTelemetry(userMsg, agent, true, [userMsg])).toBe(true);
+  });
+
+  it('is false without visible telemetry', () => {
+    const msg = chatMessage({ id: 'a', sender_type: 'assistant' });
+    expect(shouldShowAgentTelemetry(msg, null, false, [msg])).toBe(false);
+    expect(shouldShowAgentTelemetry(msg, { usage_total: { output_tokens: 0 } }, false, [msg])).toBe(false);
   });
 });

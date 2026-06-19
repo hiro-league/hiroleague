@@ -119,6 +119,51 @@ export function agentTools(agent: AgentMessageMetadata | null): AgentToolCall[] 
   return agent?.tools ?? [];
 }
 
+/** True when an agent metadata blob carries any displayable telemetry (tokens, cost, or elapsed). */
+export function hasVisibleAgentTelemetry(agent: AgentMessageMetadata | null): boolean {
+  return Boolean(
+    agent &&
+      (agentOutputTokens(agent) + agentInputTokensIncludingCached(agent) > 0 ||
+        agentCostLabel(agent) ||
+        agentElapsedLabel(agent))
+  );
+}
+
+/**
+ * Agent metadata to render on a bubble: the message's own metadata, or — for an
+ * agent (non-user) reply that lacks it — the inbound user message's metadata keyed
+ * by `reply_id` (so telemetry recorded on the request still shows on the reply).
+ */
+export function resolveAgentMetadata(
+  message: ChatHistoryMessage,
+  isUser: boolean,
+  inboundByReplyId: Map<string, AgentMessageMetadata>
+): AgentMessageMetadata | null {
+  return messageAgentMetadata(message) ?? (!isUser ? (inboundByReplyId.get(message.id) ?? null) : null);
+}
+
+/**
+ * Whether to render telemetry on this bubble. Agent replies always show their own;
+ * a user message only shows its telemetry when no agent reply already surfaces the
+ * same `reply_id` (avoids double-rendering the same stats on both sides).
+ */
+export function shouldShowAgentTelemetry(
+  message: ChatHistoryMessage,
+  agent: AgentMessageMetadata | null,
+  isUser: boolean,
+  messages: ChatHistoryMessage[]
+): boolean {
+  if (!agent || !hasVisibleAgentTelemetry(agent)) return false;
+  if (!isUser) return true;
+  const replyId = agent.reply_id;
+  return !messages.some(
+    (candidate) =>
+      candidate.sender_type !== 'user' &&
+      candidate.id === replyId &&
+      hasVisibleAgentTelemetry(messageAgentMetadata(candidate))
+  );
+}
+
 function formatMonetaryAmount(value: number, currency: string): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
   const symbol = currency === 'USD' ? '$' : `${currency} `;

@@ -13,7 +13,7 @@ import {
   type LogsLayout
 } from '$lib/api/logs';
 import { openWorkspaceFolder } from '$lib/api/server';
-import type { Notify } from '$lib/features/server/types';
+import type { Notify } from '$lib/ui/toast-types';
 import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 import {
   compareLogRows,

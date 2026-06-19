@@ -12,7 +12,7 @@ import {
   type BenchmarkResultsData,
   type EvalCorpus,
   type EvalIngestedRanges
-} from '$lib/api/knowledge';
+} from '$lib/api/eval';
 import { rowFromPayload } from '$lib/features/eval/shared/eval-row';
 import type { EvalTrack } from '$lib/features/eval/shared/eval-row';
 import type { EvalRunController } from '$lib/features/eval/state/eval-run.svelte';

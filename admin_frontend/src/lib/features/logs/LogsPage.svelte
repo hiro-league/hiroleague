@@ -173,23 +173,23 @@
       headerFieldList={runsCtrl.headerFieldList}
       nodeFieldList={runsCtrl.nodeFieldList}
       nodeDetailFieldList={runsCtrl.nodeDetailFieldList}
-      traceStepIds={runsCtrl.retrievalTraceStepIds}
-      activeRetrievalTrace={runsCtrl.activeRetrievalTrace}
-      ingestTraceStepIds={runsCtrl.ingestTraceStepIds}
-      activeIngestTrace={runsCtrl.activeIngestTrace}
+      traceStepIds={runsCtrl.traces.retrievalTraceStepIds}
+      activeRetrievalTrace={runsCtrl.traces.activeRetrievalTrace}
+      ingestTraceStepIds={runsCtrl.traces.ingestTraceStepIds}
+      activeIngestTrace={runsCtrl.traces.activeIngestTrace}
       onToggleNodeRow={runsCtrl.toggleNodeRowSelection}
       onOpenNodeDetails={runsCtrl.openNodeDetails}
       onCloseNodeDetails={runsCtrl.closeNodeDetails}
-      onOpenRetrievalTrace={runsCtrl.openRetrievalTrace}
-      onCloseRetrievalTrace={runsCtrl.closeRetrievalTrace}
-      onOpenIngestTrace={runsCtrl.openIngestTrace}
-      onCloseIngestTrace={runsCtrl.closeIngestTrace}
-      ingestTraceHasPrev={runsCtrl.ingestTraceHasPrev}
-      ingestTraceHasNext={runsCtrl.ingestTraceHasNext}
-      ingestTraceNavIndex={runsCtrl.ingestTraceNavIndex}
-      ingestTraceNavTotal={runsCtrl.ingestTraceNavTotal}
-      onPrevIngestTrace={runsCtrl.prevIngestTrace}
-      onNextIngestTrace={runsCtrl.nextIngestTrace}
+      onOpenRetrievalTrace={runsCtrl.traces.openRetrievalTrace}
+      onCloseRetrievalTrace={runsCtrl.traces.closeRetrievalTrace}
+      onOpenIngestTrace={runsCtrl.traces.openIngestTrace}
+      onCloseIngestTrace={runsCtrl.traces.closeIngestTrace}
+      ingestTraceHasPrev={runsCtrl.traces.ingestTraceHasPrev}
+      ingestTraceHasNext={runsCtrl.traces.ingestTraceHasNext}
+      ingestTraceNavIndex={runsCtrl.traces.ingestTraceNavIndex}
+      ingestTraceNavTotal={runsCtrl.traces.ingestTraceNavTotal}
+      onPrevIngestTrace={runsCtrl.traces.prevIngestTrace}
+      onNextIngestTrace={runsCtrl.traces.nextIngestTrace}
     />
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />

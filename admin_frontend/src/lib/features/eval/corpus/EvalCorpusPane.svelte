@@ -10,6 +10,10 @@
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { fmtCompact, fmtCount, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
+  import {
+    readCorpusMarkdownPref,
+    writeCorpusMarkdownPref
+  } from '$lib/features/eval/shared/eval-prefs';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
@@ -51,6 +55,11 @@
 
   // Episode search — bound into EvalCorpusReview (which renders the input on its sticky toolbar).
   let corpusSearch = $state('');
+  let corpusMarkdown = $state(readCorpusMarkdownPref());
+
+  $effect(() => {
+    writeCorpusMarkdownPref(corpusMarkdown);
+  });
 </script>
 
 {#if cfg.hasCorpusReview && eval_.selectedCorpus}
@@ -90,6 +99,7 @@
     <EvalCorpusReview
       episodes={eval_.corpusEpisodes}
       bind:search={corpusSearch}
+      bind:markdownMode={corpusMarkdown}
       showSearch={false}
       scroll={false}
       extraction={eval_.corpusExtraction}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Copy, X } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import type { Notify } from '$lib/features/server/types';
+  import type { Notify } from '$lib/ui/toast-types';
   import LogExtraSegments from './LogExtraSegments.svelte';
   import { LOGS_DETAIL_PANEL_ID } from './shared/logs-a11y';
   import { logLevelTextClass, logModuleTextClass } from './shared/logs-classes';

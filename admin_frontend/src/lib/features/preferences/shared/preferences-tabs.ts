@@ -58,3 +58,20 @@ export function preferenceTabQuery(tab: PreferenceTabId): string {
 export function preferenceTabHref(tab: PreferenceTabId, basePath = ''): string {
   return `${basePath}/preferences${preferenceTabQuery(tab)}`;
 }
+
+/** Migrate legacy `#preferences-*` scroll anchors to `?tab=` before tab prefs initialize. */
+export function migrateLegacyPreferenceHash(): void {
+  if (typeof window === 'undefined') return;
+  const hash = window.location.hash.slice(1);
+  if (!hash) return;
+  const tab = LEGACY_PREFERENCE_HASH_TO_TAB[hash];
+  if (!tab) return;
+  const nextUrl = new URL(window.location.href);
+  nextUrl.hash = '';
+  if (tab !== DEFAULT_PREFERENCE_TAB) {
+    nextUrl.searchParams.set('tab', tab);
+  } else {
+    nextUrl.searchParams.delete('tab');
+  }
+  window.history.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}`);
+}

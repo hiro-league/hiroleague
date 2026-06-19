@@ -49,7 +49,7 @@ export const PREF_KEYS = {
   knowledgeIngestBuildGraph: 'hiro.admin.knowledge.ingestBuildGraph',
   // Phase 5g — setup-form checkboxes for the Eval Batch (persist defaults
   // across reloads). The eval *run* itself is no longer cached client-side:
-  // it's replayed from the server registry (GET /knowledge/eval/state) so the
+  // it's replayed from the server registry (GET /eval/state) so the
   // run stays consistent across navigation and across origins (Vite vs packaged).
   evalIngest: 'hiro.admin.eval.ingest',
   evalBuildGraph: 'hiro.admin.eval.buildGraph',
@@ -69,6 +69,8 @@ export const PREF_KEYS = {
   evalAnswerPrompt: 'hiro.admin.eval.answerPrompt',
   /** Eval (memory track): max questions evaluated concurrently (1 = serial). */
   evalQuestionConcurrency: 'hiro.admin.eval.questionConcurrency',
+  /** Eval Corpus tab: render episode bodies as Markdown (default off). */
+  evalCorpusMarkdown: 'hiro.admin.eval.corpusMarkdown',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
   knowledgeGraphOptions: 'hiro.admin.knowledge.graphOptions',
   /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */

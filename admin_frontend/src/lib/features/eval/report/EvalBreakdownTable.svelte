@@ -14,10 +14,12 @@
     CircleSlash,
     CircleX
   } from '@lucide/svelte';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { fmtScore, pct } from '$lib/features/eval/shared/eval-format';
   import { legLabel } from '$lib/features/eval/shared/eval-display';
   import { breakdownTotals } from '$lib/features/eval/shared/eval-derive';
-  import type { EvalCategoryStat } from '$lib/features/knowledge/shared/knowledge-events';
+  import type { EvalCategoryStat } from '$lib/features/eval/shared/eval-events';
+  import { ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
 
   interface Props {
     title: string;
@@ -110,41 +112,39 @@
 </button>
 {#if !collapsed}
   <div class="mt-2">
-    <div class="overflow-x-auto rounded-md border">
-      <table class="w-full border-collapse font-sans text-sm">
-        <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-          {#if multi}
-            <tr>
-              <th class="px-2 py-1.5 text-left" rowspan="2">{header}</th>
-              <th class="px-2 py-1.5 text-center" rowspan="2">Total</th>
-              {#each cols as mode (mode)}
-                <th class="border-l px-2 py-1 text-center" colspan="9">{legLabel(mode)}</th>
-              {/each}
-            </tr>
-            <tr>{@render legHead()}</tr>
-          {:else}
-            <tr>
-              <th class="px-2 py-1.5 text-left">{header}</th>
-              <th class="px-2 py-1.5 text-center">Total</th>
-              {@render legHead()}
-            </tr>
-          {/if}
-        </thead>
-        <tbody>
-          {#each Object.entries(bc) as [cat, st] (cat)}
-            <tr class="border-t">
-              <td class="px-2 py-1.5">{cat}</td>
-              <td class="px-2 py-1.5 text-center font-mono tabular-nums text-muted-foreground">{st.total}</td>
-              {@render bdCells(st, st.correct?.flat ?? 0)}
-            </tr>
-          {/each}
-          <tr class="border-t-2 border-primary/40 bg-primary/10 font-semibold text-foreground">
-            <td class="px-2 py-1.5">Total</td>
-            <td class="px-2 py-1.5 text-center font-mono tabular-nums">{totals.total}</td>
-            {@render bdCells(totals, totals.correct.flat ?? 0, true)}
+    <AdminTableShell>
+      <thead class={ADMIN_TABLE_HEAD}>
+        {#if multi}
+          <tr>
+            <th class="px-3 py-2 text-left" rowspan="2">{header}</th>
+            <th class="px-3 py-2 text-center" rowspan="2">Total</th>
+            {#each cols as mode (mode)}
+              <th class="border-l px-3 py-1 text-center" colspan="9">{legLabel(mode)}</th>
+            {/each}
           </tr>
-        </tbody>
-      </table>
-    </div>
+          <tr>{@render legHead()}</tr>
+        {:else}
+          <tr>
+            <th class="px-3 py-2 text-left">{header}</th>
+            <th class="px-3 py-2 text-center">Total</th>
+            {@render legHead()}
+          </tr>
+        {/if}
+      </thead>
+      <tbody>
+        {#each Object.entries(bc) as [cat, st] (cat)}
+          <tr class="border-t">
+            <td class="px-3 py-1.5">{cat}</td>
+            <td class="px-3 py-1.5 text-center font-mono tabular-nums text-muted-foreground">{st.total}</td>
+            {@render bdCells(st, st.correct?.flat ?? 0)}
+          </tr>
+        {/each}
+        <tr class="border-t-2 border-primary/40 bg-primary/10 font-semibold text-foreground">
+          <td class="px-3 py-1.5">Total</td>
+          <td class="px-3 py-1.5 text-center font-mono tabular-nums">{totals.total}</td>
+          {@render bdCells(totals, totals.correct.flat ?? 0, true)}
+        </tr>
+      </tbody>
+    </AdminTableShell>
   </div>
 {/if}

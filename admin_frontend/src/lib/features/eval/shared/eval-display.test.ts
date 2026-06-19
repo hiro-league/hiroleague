@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { EvalCorpus } from '$lib/api/knowledge';
-import type { EvalCategoryStat } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalCorpus } from '$lib/api/eval';
+import type { EvalCategoryStat } from '$lib/features/eval/shared/eval-events';
 import {
   ingestState,
   orderedDifficulty,

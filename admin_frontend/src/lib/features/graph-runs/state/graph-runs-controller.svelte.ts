@@ -648,29 +648,10 @@ export function createGraphRunsPageController() {
     get nodeDetailRow() {
       return nodeDetailRow;
     },
-    get retrievalTraceStepIds() {
-      return traces.retrievalTraceStepIds;
-    },
-    get activeRetrievalTrace() {
-      return traces.activeRetrievalTrace;
-    },
-    get ingestTraceStepIds() {
-      return traces.ingestTraceStepIds;
-    },
-    get activeIngestTrace() {
-      return traces.activeIngestTrace;
-    },
-    get ingestTraceHasPrev() {
-      return traces.ingestTraceHasPrev;
-    },
-    get ingestTraceHasNext() {
-      return traces.ingestTraceHasNext;
-    },
-    get ingestTraceNavIndex() {
-      return traces.ingestTraceNavIndex;
-    },
-    get ingestTraceNavTotal() {
-      return traces.ingestTraceNavTotal;
+    /** Retrieval + ingest trace sub-model (markers, open-dialog targets, arrow-nav) — its own
+     * reactive getters + open/close/step methods are consumed directly as `ctrl.traces.*`. */
+    get traces() {
+      return traces;
     },
     RUNS_TAB,
     mount,
@@ -684,12 +665,6 @@ export function createGraphRunsPageController() {
     toggleNodeRowSelection,
     openNodeDetails,
     closeNodeDetails,
-    openRetrievalTrace: traces.openRetrievalTrace,
-    closeRetrievalTrace: traces.closeRetrievalTrace,
-    openIngestTrace: traces.openIngestTrace,
-    closeIngestTrace: traces.closeIngestTrace,
-    prevIngestTrace: traces.prevIngestTrace,
-    nextIngestTrace: traces.nextIngestTrace,
     runTabDisplayLabel,
     runTabTooltip
   };

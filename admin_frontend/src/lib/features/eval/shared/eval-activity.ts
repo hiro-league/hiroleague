@@ -8,7 +8,7 @@
  * Kept side-effect-free (no runes) so it can drive both the live terminal AND
  * the collapsed Activity header's "current line", and stay unit-testable.
  */
-import type { EvalSetupProgressPayload } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalSetupProgressPayload } from '$lib/features/eval/shared/eval-events';
 import type { EvalRow, EvalStatus } from '$lib/features/eval/state/eval-model.svelte';
 
 export type ActivityTone = 'muted' | 'info' | 'success' | 'warn' | 'error';

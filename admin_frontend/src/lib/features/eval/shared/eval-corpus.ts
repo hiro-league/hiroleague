@@ -3,7 +3,7 @@
  * and `selectedCorpusId`; these helpers turn that raw list into the benchmark grouping + the
  * filtered dropdown source, with no state of their own (easy to unit-test).
  */
-import type { EvalCorpus } from '$lib/api/knowledge';
+import type { EvalCorpus } from '$lib/api/eval';
 
 /** Distinct benchmarks present in the scanned corpuses, in manifest order (first-seen). Knowledge
  *  corpuses carry no benchmark, so this is empty there and the picker shows the flat corpus list. */

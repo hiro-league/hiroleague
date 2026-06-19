@@ -4,8 +4,8 @@
  * active track, or the live run arrives through the injected accessors (`EvalSetupDeps`), so it
  * stays decoupled from the corpus picker / run controller it sits beside under the model facade.
  */
-import type { EvalLeg, EvalSetupProgressPayload } from '$lib/features/knowledge/shared/knowledge-events';
-import type { EvalCorpus } from '$lib/api/knowledge';
+import type { EvalLeg, EvalSetupProgressPayload } from '$lib/features/eval/shared/eval-events';
+import type { EvalCorpus } from '$lib/api/eval';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import { readLocalBoolean, writeLocalBoolean, writeLocalString } from '$lib/preferences/storage';
 import { readAnswerPromptPref, readEvalInt, writeAnswerPromptPref } from '$lib/features/eval/shared/eval-prefs';

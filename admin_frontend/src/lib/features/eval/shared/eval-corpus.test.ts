@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { listBenchmarks, visibleCorpusesFor } from './eval-corpus';
-import type { EvalCorpus } from '$lib/api/knowledge';
+import type { EvalCorpus } from '$lib/api/eval';
 
 const corpus = (over: Partial<EvalCorpus> = {}): EvalCorpus => ({
   id: 'c',

@@ -4,11 +4,6 @@
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
-  import {
-    cycleChatAudioSpeed,
-    formatChatAudioSpeedLabel,
-    chatAudioPlaybackRate
-  } from '$lib/features/chat-channels/chat-audio-coordinator';
   import { cn } from '$lib/utils';
 
   const engine = getChatEngine();
@@ -124,42 +119,9 @@
 
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ChatChannelsMessagesPanel
-          bind:selectedChannelId={engine.selectedChannelId}
-          bind:requestVoiceReplyUi={engine.requestVoiceReplyUi}
-          bind:useKnowledgeUi={engine.useKnowledgeUi}
-          bind:disableToolsUi={engine.disableToolsUi}
-          bind:showAgentTokensUi={engine.showAgentTokensUi}
-          bind:showAgentToolsUi={engine.showAgentToolsUi}
-          bind:draftMessage={engine.draftMessage}
-          channels={engine.channels}
-          channelsLoading={engine.channelsLoading}
-          channelsError={engine.channelsError}
-          messages={engine.messages}
-          messagesLoading={engine.messagesLoading}
-          messagesError={engine.messagesError}
-          liveUpdatesPaused={engine.liveUpdatesPaused}
-          agentTyping={engine.agentTyping}
-          agentVoiceGeneratingMessageId={engine.agentVoiceGeneratingMessageId}
-          busy={engine.busy}
-          headerPhotoSrc={engine.messagesHeaderPhotoSrc}
-          headerChannelHint={engine.messagesHeaderChannelHint}
-          headerChannelName={engine.messagesHeaderChannelName}
-          headerCharacterLabel={engine.messagesHeaderCharacterName}
-          headerDeviceId={engine.messagesHeaderDeviceId}
-          hasSelectedChannel={engine.selectedChannelExists}
-          recordingStartedAt={engine.recordingStartedAt}
-          composingBusy={engine.composingBusy}
-          audioSpeedLabel={formatChatAudioSpeedLabel($chatAudioPlaybackRate)}
+          ctrl={engine}
           onChannelChange={() => void engine.reloadMessages()}
-          onClearMessages={() => engine.openClearMessagesModal()}
           onRefresh={engine.refreshConversation}
-          onCycleAudioSpeed={cycleChatAudioSpeed}
-          onSubmitDraft={engine.submitDraftText}
-          onBeginRecording={engine.beginRecording}
-          onFinalizeRecording={engine.finalizeRecording}
-          onDiscardRecording={engine.discardRecording}
-          voiceReplyCheckboxDisabled={engine.voiceReplyCheckboxDisabled}
-          voiceReplyCheckboxHint={engine.voiceReplyCheckboxHint}
           showHeader={settingsOpen}
           compactComposer={true}
           dense={true}

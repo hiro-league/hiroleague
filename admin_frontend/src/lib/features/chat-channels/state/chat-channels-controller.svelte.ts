@@ -1,54 +1,21 @@
-import { browser } from '$app/environment';
-import { untrack } from 'svelte';
 import {
   clearChatMessages,
-  createChatChannel,
   deleteChatChannel,
   listChatChannels,
-  listChatMessages,
-  sendChatMessage,
-  updateChatChannel,
-  uploadChatChannelPhoto,
   type ChatChannelRow,
   type ChatHistoryMessage
 } from '$lib/api/chat-channels';
-import { getCharacterResolved, listCharacters, type CharacterResolvedPayload, type CharacterRow } from '$lib/api/characters';
-import {
-  isChatChannelFormDirty,
-  parseChatChannelFormForSave,
-  snapshotChatChannelFormBaseline,
-  type ChatChannelFormBaseline,
-  type ChatChannelFormFields
-} from '$lib/features/chat-channels/shared/chat-channel-form';
-import { pickRecordingMimeType } from '$lib/features/chat-channels/shared/chat-channel-media';
-import {
-  buildRecordingBlobFromChunks,
-  recordingBlobToBase64,
-  stopMediaRecorderAndDetach
-} from '$lib/features/chat-channels/shared/chat-channel-recording';
+import { listCharacters, type CharacterRow } from '$lib/api/characters';
+import type { ChatChannelFormFields } from '$lib/features/chat-channels/shared/chat-channel-form';
 import { createChatChannelsPreferences } from '$lib/preferences/chat-channels-preferences.svelte';
-import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
 import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
 import { createChatChannelsDialogs } from '$lib/features/chat-channels/state/chat-channels-dialogs.svelte';
-import {
-  cursorFromMessages,
-  mergeChatHistoryMessages,
-  recentMessagePks,
-  sortChatHistoryMessages,
-  type ChatTailCursor
-} from '$lib/features/chat-channels/state/chat-channel-message-merge';
-import {
-  BACKOFF_STEPS_MS,
-  LIVE_UPDATES_PAUSED_AFTER_FAILURES,
-  POLL_INTERVAL_MS,
-  RECENT_RESYNC_K,
-  TAIL_LIMIT
-} from '$lib/features/chat-channels/state/chat-channels-poll-config';
-import { PREF_KEYS, type ChatChannelsTabPreference } from '$lib/preferences/keys';
-import {
-  characterResolvedAllowsVoiceRequest,
-  characterResolvedVoiceReplyControlHint
-} from '$lib/features/characters/character-resolved-voice';
+import { createChatChannelsUiPrefs } from '$lib/features/chat-channels/state/chat-channels-ui-prefs.svelte';
+import { createChatMessagesEngine } from '$lib/features/chat-channels/state/chat-messages-engine.svelte';
+import { createChatCharacterResolved } from '$lib/features/chat-channels/state/chat-character-resolved.svelte';
+import { createChatComposer } from '$lib/features/chat-channels/state/chat-composer.svelte';
+import { createChatChannelForm } from '$lib/features/chat-channels/state/chat-channel-form.svelte';
+import type { ChatChannelsTabPreference } from '$lib/preferences/keys';
 
 /** Shared chat conversation engine — backs both the /chats Messages tab and the global overlay. */
 export type ChatChannelsPageController = ReturnType<typeof createChatChannelsPageController>;
@@ -60,84 +27,52 @@ export function createChatChannelsPageController() {
   let selectedChannelId = $state<string | null>(null);
   let channels = $state<ChatChannelRow[]>([]);
   let characters = $state<CharacterRow[]>([]);
-  let messages = $state<ChatHistoryMessage[]>([]);
   let channelsLoading = $state(true);
-  let messagesLoading = $state(false);
   let channelsError = $state<string | null>(null);
-  let messagesError = $state<string | null>(null);
+  /** Shared "channel admin mutation in progress" flag (form submit + delete + clear). */
   let busy = $state(false);
   /** Confirm/delete/discard overlay flags live here so destructive UX rules stay centralized. */
   const dlg = createChatChannelsDialogs({ isBusy: () => busy });
-  let formOpen = $state(false);
-  let formMode = $state<'create' | 'edit'>('create');
-  let editingChannelId = $state<number | null>(null);
-  let formError = $state<string | null>(null);
-  let form = $state<ChatChannelFormFields>({ name: '', characterId: '', description: '' });
-  let pendingPhotoDataUrl = $state<string | null>(null);
-  let formBaseline = $state<ChatChannelFormBaseline | null>(null);
-  let requestVoiceReplyUi = $state(false);
-  /** Per-message "use knowledge" toggle (default on); persisted like the voice-reply pref. */
-  let useKnowledgeUi = $state(true);
-  /** Per-message "disable tools" toggle (default off ⇒ tools on); overrides the chat.tools_enabled pref. */
-  let disableToolsUi = $state(false);
-  /** Token/cost stats on Messages bubbles; persisted like voice-reply pref. */
-  let showAgentTokensUi = $state(true);
-  /** Agent tool stack on Messages bubbles; persisted independently of stats. */
-  let showAgentToolsUi = $state(true);
-  let draftMessage = $state('');
-  let recordingStartedAt = $state<number | null>(null);
-  let composingBusy = $state(false);
-  let tailCursor = $state<ChatTailCursor | null>(null);
-  let syncing = $state(false);
-  let pollErrorStreak = $state(0);
-  let messagesSectionMounted = $state(false);
-  let documentVisible = $state(true);
-  let pollTimer: number | null = null;
-  let pollTickInFlight = false;
-  let optimisticMessagePk = -1;
-  let agentTyping = $state(false);
-  let agentVoicePendingSince = $state<string | null>(null);
-
-  // Shared-singleton plumbing: this controller now backs BOTH the /chats Messages
-  // tab and the global chat overlay. Polling is leased by whichever surface is
-  // actually on screen (a persisted tab pref must NOT keep polling alive in the
-  // background once you navigate away), so eligibility is OR-ed across surfaces.
-  let pageMessagesActive = $state(false);
-  let overlayActive = $state(false);
+  /** Composer/bubble UI toggles (voice-reply, use-knowledge, disable-tools, stats, tools) — localStorage-backed. */
+  const uiPrefs = createChatChannelsUiPrefs();
+  /**
+   * Live-conversation engine — message list + polling loop + agent typing/voice state.
+   * Leased on/off screen by both surfaces; reads the controller-owned channel id back
+   * via `getSelectedChannelId`. Backs BOTH the /chats Messages tab and the global overlay.
+   */
+  const engine = createChatMessagesEngine({ getSelectedChannelId: () => selectedChannelId });
+  /** Create/edit channel form — lifecycle, dirty tracking, unsaved guard, photo + submit. */
+  const form = createChatChannelForm({
+    getCharacters: () => characters,
+    getChannels: () => channels,
+    isBusy: () => busy,
+    setBusy: (b) => (busy = b),
+    notify: toasts.notify,
+    onSaved: () => refreshCurrent()
+  });
   /** Idempotent boot guard so the shared engine starts (load channels/chars) exactly once. */
   let started = false;
-
-  /** ``GET /characters/:id/resolved`` for the selected channel’s character — same basis as the Characters page voice block. */
-  let characterResolvedForMessages = $state<CharacterResolvedPayload | null>(null);
-  let characterResolvedLoading = $state(false);
-  let characterResolvedError = $state<string | null>(null);
-  let characterResolvedFetchSeq = 0;
-
-  let mediaRecorderObj: MediaRecorder | null = null;
-  let recordingChunks: Blob[] = [];
-
-  const channelFormDirty = $derived(
-    isChatChannelFormDirty({
-      formOpen,
-      baseline: formBaseline,
-      form,
-      pendingPhotoDataUrl
-    })
-  );
-
-  const unsaved = createUnsavedGuard(
-    () => channelFormDirty,
-    () => formOpen,
-    (next) => {
-      if (!next) finalizeChannelForm();
-    }
-  );
 
   const selectedChannel = $derived(
     selectedChannelId
       ? (channels.find((channel) => String(channel.id) === selectedChannelId) ?? null)
       : null
   );
+
+  /** Resolved TTS config for the selected channel's character — gates the "Get voice reply" toggle. */
+  const charResolved = createChatCharacterResolved({
+    getSelectedChannel: () => selectedChannel,
+    uiPrefs
+  });
+
+  /** Message composer — draft box, mic capture, and the text/voice send flow. */
+  const composer = createChatComposer({
+    getSelectedChannelId: () => selectedChannelId,
+    engine,
+    uiPrefs,
+    effectiveRequestVoiceReply: () => charResolved.effectiveRequestVoiceReply(),
+    notify: toasts.notify
+  });
 
   /** Character browse photo only (no channel thumbnail fallback). */
   const messagesHeaderPhotoSrc = $derived.by(() => {
@@ -157,6 +92,7 @@ export function createChatChannelsPageController() {
   });
 
   const messagesHeaderDeviceId = $derived.by(() => {
+    const messages = engine.messages;
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m?.sender_type === 'user') {
@@ -174,211 +110,7 @@ export function createChatChannelsPageController() {
     return `${charPart}${ch.name} · id ${ch.id}`;
   });
 
-  const liveUpdatesEligible = $derived(
-    (pageMessagesActive || overlayActive) &&
-      selectedChannelId !== null &&
-      documentVisible &&
-      messagesSectionMounted
-  );
-
-  const liveUpdatesPaused = $derived(
-    pollErrorStreak >= LIVE_UPDATES_PAUSED_AFTER_FAILURES
-  );
-
-  const formTitle = $derived(
-    formMode === 'create' ? 'New conversation channel' : 'Edit conversation channel'
-  );
-
-  const modalChannelPhotoSrc = $derived(
-    pendingPhotoDataUrl ??
-      (formMode === 'edit' && editingChannelId !== null
-        ? (channels.find((c) => c.id === editingChannelId)?.photo_data_url ?? null)
-        : null)
-  );
-
-  $effect(() => {
-    if (!browser) return;
-    if (liveUpdatesEligible) {
-      untrack(startPolling);
-      return () => untrack(stopPolling);
-    }
-    untrack(stopPolling);
-  });
-
   const notify = toasts.notify;
-
-  function currentPollIntervalMs() {
-    const idx = Math.min(Math.max(pollErrorStreak - 1, 0), BACKOFF_STEPS_MS.length - 1);
-    return pollErrorStreak <= 0 ? POLL_INTERVAL_MS : BACKOFF_STEPS_MS[idx];
-  }
-
-  function startPolling() {
-    if (!browser || pollTimer !== null) return;
-    void pollMessagesOnce();
-    pollTimer = window.setInterval(() => {
-      void pollMessagesOnce();
-    }, currentPollIntervalMs());
-  }
-
-  function stopPolling() {
-    if (pollTimer !== null) {
-      window.clearInterval(pollTimer);
-      pollTimer = null;
-    }
-    syncing = false;
-  }
-
-  function restartPollingTimer() {
-    if (!browser || !liveUpdatesEligible) return;
-    stopPolling();
-    pollTimer = window.setInterval(() => {
-      void pollMessagesOnce();
-    }, currentPollIntervalMs());
-  }
-
-  function resetPollErrors() {
-    const hadBackoff = pollErrorStreak > 0;
-    pollErrorStreak = 0;
-    if (hadBackoff) restartPollingTimer();
-  }
-
-  function updateTailCursor() {
-    tailCursor = cursorFromMessages(messages);
-  }
-
-  function updateAgentTypingFromIncoming(incoming: ChatHistoryMessage[]) {
-    if (agentTyping && incoming.some((message) => message.sender_type !== 'user')) {
-      agentTyping = false;
-    }
-  }
-
-  function messageHasAudio(message: ChatHistoryMessage): boolean {
-    return message.content.some((item) => item.content_type === 'audio');
-  }
-
-  function messageHasText(message: ChatHistoryMessage): boolean {
-    return message.content.some((item) => item.content_type === 'text' && item.body.trim());
-  }
-
-  function updateAgentVoicePendingFromIncoming(incoming: ChatHistoryMessage[]) {
-    const since = agentVoicePendingSince;
-    if (!since) return;
-    if (
-      incoming.some(
-        (message) =>
-          message.sender_type !== 'user' &&
-          message.created_at >= since &&
-          messageHasAudio(message)
-      )
-    ) {
-      agentVoicePendingSince = null;
-    }
-  }
-
-  const agentVoiceGeneratingMessageId = $derived.by(() => {
-    const since = agentVoicePendingSince;
-    if (!since) return null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      if (
-        message &&
-        message.sender_type !== 'user' &&
-        message.created_at >= since &&
-        messageHasText(message) &&
-        !messageHasAudio(message)
-      ) {
-        return message.id;
-      }
-    }
-    return null as string | null;
-  });
-
-  function handleVisibilityChange() {
-    documentVisible = document.visibilityState === 'visible';
-  }
-
-  async function pollMessagesOnce() {
-    if (pollTickInFlight || !liveUpdatesEligible || messagesLoading) return;
-    const rawChannelId = selectedChannelId;
-    const channelId = rawChannelId ? Number(rawChannelId) : NaN;
-    if (!Number.isFinite(channelId)) return;
-
-    if (tailCursor === null) {
-      updateTailCursor();
-      if (tailCursor === null) {
-        if (!messages.some((message) => message.message_pk < 0)) return;
-        pollTickInFlight = true;
-        syncing = true;
-        try {
-          const payload = await listChatMessages(channelId);
-          if (selectedChannelId !== rawChannelId || !liveUpdatesEligible) return;
-          updateAgentTypingFromIncoming(payload.data);
-          updateAgentVoicePendingFromIncoming(payload.data);
-          messages = mergeChatHistoryMessages(messages, payload.data);
-          updateTailCursor();
-          resetPollErrors();
-        } catch {
-          pollErrorStreak += 1;
-          restartPollingTimer();
-        } finally {
-          if (selectedChannelId === rawChannelId) {
-            syncing = false;
-          }
-          pollTickInFlight = false;
-        }
-        return;
-      }
-    }
-
-    pollTickInFlight = true;
-    syncing = true;
-    try {
-      const cursor = tailCursor;
-      const tailPayload = await listChatMessages(channelId, {
-        after: cursor.created_at,
-        afterId: cursor.external_id,
-        limit: TAIL_LIMIT
-      });
-      if (selectedChannelId !== rawChannelId || !liveUpdatesEligible) return;
-      if (tailPayload.data.length > 0) {
-        updateAgentTypingFromIncoming(tailPayload.data);
-        updateAgentVoicePendingFromIncoming(tailPayload.data);
-        messages = mergeChatHistoryMessages(messages, tailPayload.data);
-        updateTailCursor();
-      }
-
-      if (!liveUpdatesEligible) return;
-      const messagePks = recentMessagePks(messages, RECENT_RESYNC_K);
-      if (messagePks.length > 0) {
-        const resyncPayload = await listChatMessages(channelId, { messagePks });
-        if (selectedChannelId !== rawChannelId || !liveUpdatesEligible) return;
-        if (resyncPayload.data.length > 0) {
-          updateAgentVoicePendingFromIncoming(resyncPayload.data);
-          messages = mergeChatHistoryMessages(messages, resyncPayload.data);
-          updateTailCursor();
-        }
-      }
-      resetPollErrors();
-    } catch {
-      pollErrorStreak += 1;
-      restartPollingTimer();
-    } finally {
-      if (selectedChannelId === rawChannelId) {
-        syncing = false;
-      }
-      pollTickInFlight = false;
-    }
-  }
-
-  function addOptimisticMessage(message: ChatHistoryMessage) {
-    if (
-      message.message_pk < 0 &&
-      messages.some((existing) => existing.id === message.id && existing.message_pk > 0)
-    ) {
-      return;
-    }
-    messages = mergeChatHistoryMessages(messages, [message]);
-  }
 
   /** Restore tab/channel from `createChatChannelsPreferences().initialize()`. */
   function initializeNavigation() {
@@ -413,54 +145,10 @@ export function createChatChannelsPageController() {
     }
     const nextChannelId = channels.length > 0 ? String(channels[0].id) : null;
     if (selectedChannelId !== nextChannelId) {
-      messages = [];
-      tailCursor = null;
-      agentTyping = false;
-      agentVoicePendingSince = null;
+      engine.resetConversation();
     }
     selectedChannelId = nextChannelId;
     return selectedChannelId;
-  }
-
-  function clearCharacterResolvedForMessages() {
-    characterResolvedForMessages = null;
-    characterResolvedError = null;
-    characterResolvedLoading = false;
-  }
-
-  /** Loads resolved TTS configuration for ``selectedChannel`` (admin Phase 7 — mirrors Characters page). */
-  async function refreshCharacterResolvedForMessagesChannel() {
-    const ch = selectedChannel;
-    if (!ch?.character_id?.trim()) {
-      clearCharacterResolvedForMessages();
-      return;
-    }
-    const cid = ch.character_id.trim();
-    const seq = ++characterResolvedFetchSeq;
-    characterResolvedLoading = true;
-    characterResolvedError = null;
-    try {
-      const payload = await getCharacterResolved(cid);
-      if (seq !== characterResolvedFetchSeq) return;
-      characterResolvedForMessages = payload.data;
-      characterResolvedError = null;
-      if (!characterResolvedAllowsVoiceRequest(payload.data)) {
-        requestVoiceReplyUi = false;
-      }
-    } catch (e) {
-      if (seq !== characterResolvedFetchSeq) return;
-      characterResolvedForMessages = null;
-      characterResolvedError = e instanceof Error ? e.message : 'Request failed.';
-      requestVoiceReplyUi = false;
-    } finally {
-      if (seq === characterResolvedFetchSeq) characterResolvedLoading = false;
-    }
-  }
-
-  function effectiveRequestVoiceReplyForSend(): boolean {
-    return (
-      characterResolvedAllowsVoiceRequest(characterResolvedForMessages) && requestVoiceReplyUi
-    );
   }
 
   async function loadCharacters() {
@@ -480,10 +168,7 @@ export function createChatChannelsPageController() {
       channels = payload.data;
       if (selectedChannelId && !channels.some((channel) => String(channel.id) === selectedChannelId)) {
         selectedChannelId = null;
-        messages = [];
-        tailCursor = null;
-        agentTyping = false;
-        agentVoicePendingSince = null;
+        engine.resetConversation();
       }
     } catch (err) {
       channelsError = err instanceof Error ? err.message : 'Failed to load chat channels.';
@@ -495,38 +180,16 @@ export function createChatChannelsPageController() {
   async function loadMessages() {
     const channelId = ensureSelectedChannel();
     if (!channelId) {
-      messages = [];
-      tailCursor = null;
-      agentTyping = false;
-      agentVoicePendingSince = null;
-      messagesError = null;
-      clearCharacterResolvedForMessages();
+      engine.clearConversation();
+      charResolved.clear();
       return;
     }
-
-    messagesLoading = true;
-    messagesError = null;
-    messages = [];
-    tailCursor = null;
-    try {
-      const payload = await listChatMessages(Number(channelId));
-      if (payload.data.at(-1)?.sender_type !== 'user') {
-        agentTyping = false;
-      }
-      updateAgentVoicePendingFromIncoming(payload.data);
-      messages = sortChatHistoryMessages(payload.data);
-      updateTailCursor();
-      resetPollErrors();
-    } catch (err) {
-      messagesError = err instanceof Error ? err.message : 'Failed to load messages.';
-    } finally {
-      messagesLoading = false;
-      void refreshCharacterResolvedForMessagesChannel();
-    }
+    await engine.loadConversation(Number(channelId));
+    void charResolved.refresh();
   }
 
   async function refreshCurrent() {
-    resetPollErrors();
+    engine.resetPollErrors();
     await loadChannels();
     if (nav.activeTab === 'messages') {
       ensureSelectedChannel();
@@ -548,10 +211,7 @@ export function createChatChannelsPageController() {
   async function openMessages(row: ChatChannelRow) {
     const id = String(row.id);
     if (selectedChannelId !== id) {
-      messages = [];
-      tailCursor = null;
-      agentTyping = false;
-      agentVoicePendingSince = null;
+      engine.resetConversation();
     }
     selectedChannelId = id;
     await nav.setActiveTab('messages', id);
@@ -566,91 +226,6 @@ export function createChatChannelsPageController() {
   function characterLabel(id: string) {
     const row = characters.find((c) => c.id === id);
     return row ? `${row.name} — ${row.id}` : id;
-  }
-
-  function openCreate() {
-    formMode = 'create';
-    editingChannelId = null;
-    formError = null;
-    pendingPhotoDataUrl = null;
-    form = { name: '', characterId: characters[0]?.id ?? '', description: '' };
-    formBaseline = snapshotChatChannelFormBaseline(form, pendingPhotoDataUrl);
-    formOpen = true;
-  }
-
-  function openEdit(row: ChatChannelRow) {
-    formMode = 'edit';
-    editingChannelId = row.id;
-    formError = null;
-    pendingPhotoDataUrl = null;
-    form = {
-      name: row.name,
-      characterId: row.character_id,
-      description: row.description ?? ''
-    };
-    formBaseline = snapshotChatChannelFormBaseline(form, pendingPhotoDataUrl);
-    formOpen = true;
-  }
-
-  /** Stack shared unsaved guard above editor when closing with a dirty form. */
-  function channelFormBeforeClose(_source: 'backdrop' | 'escape' | 'header'): boolean {
-    void _source;
-    if (!channelFormDirty) return true;
-    if (unsaved.unsavedModalOpen) return false;
-    void requestChannelFormDiscardConfirm();
-    return false;
-  }
-
-  async function requestChannelFormDiscardConfirm() {
-    if (await unsaved.confirmDiscard()) {
-      finalizeChannelForm();
-    }
-  }
-
-  function finalizeChannelForm() {
-    formOpen = false;
-    formBaseline = null;
-    pendingPhotoDataUrl = null;
-  }
-
-  async function cancelChannelFormExplicit() {
-    if (busy) return;
-    if (channelFormDirty && !(await unsaved.confirmDiscard())) return;
-    finalizeChannelForm();
-  }
-
-  async function submitForm() {
-    const parsed = parseChatChannelFormForSave(form);
-    if (!parsed.ok) {
-      formError = parsed.error;
-      return;
-    }
-    formError = null;
-    const payload = parsed.payload;
-
-    busy = true;
-    try {
-      let channelIdSaved: number;
-      if (formMode === 'edit' && editingChannelId !== null) {
-        await updateChatChannel(editingChannelId, payload);
-        channelIdSaved = editingChannelId;
-        notify('success', 'Channel updated.');
-      } else {
-        const res = await createChatChannel(payload);
-        channelIdSaved = res.data.id;
-        notify('success', 'Channel created.');
-      }
-      if (pendingPhotoDataUrl) {
-        await uploadChatChannelPhoto(channelIdSaved, pendingPhotoDataUrl);
-        pendingPhotoDataUrl = null;
-      }
-      finalizeChannelForm();
-      await refreshCurrent();
-    } catch (err) {
-      formError = err instanceof Error ? err.message : 'Save failed.';
-    } finally {
-      busy = false;
-    }
   }
 
   function closeDelete() {
@@ -669,10 +244,7 @@ export function createChatChannelsPageController() {
       dlg.clearDeleteTarget();
       if (selectedChannelId === String(deletedId)) {
         selectedChannelId = null;
-        messages = [];
-        tailCursor = null;
-        agentTyping = false;
-        agentVoicePendingSince = null;
+        engine.resetConversation();
       }
       await refreshCurrent();
     } catch (err) {
@@ -704,180 +276,16 @@ export function createChatChannelsPageController() {
     }
   }
 
-  async function submitDraftText() {
-    const id = selectedChannelId ? Number(selectedChannelId) : NaN;
-    const text = draftMessage.trim();
-    if (!Number.isFinite(id) || !text) return;
-    composingBusy = true;
-    try {
-      const requestVoiceReply = effectiveRequestVoiceReplyForSend();
-      const sent = await sendChatMessage(id, {
-        text,
-        request_voice_reply: requestVoiceReply || undefined,
-        use_knowledge: useKnowledgeUi,
-        disable_tools: disableToolsUi || undefined
-      });
-      const sentAt = new Date().toISOString();
-      draftMessage = '';
-      addOptimisticMessage({
-        id: sent.data.message_id,
-        message_pk: optimisticMessagePk--,
-        channel_id: id,
-        sender_type: 'user',
-        sender_id: 'admin',
-        created_at: sentAt,
-        content: [{ content_type: 'text', body: text }]
-      });
-      agentTyping = true;
-      agentVoicePendingSince = requestVoiceReply ? sentAt : null;
-      notify('success', 'Message sent.');
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Send failed.');
-    } finally {
-      composingBusy = false;
-    }
-  }
-
-  async function beginRecording() {
-    if (!selectedChannelId || recordingStartedAt !== null) return;
-    if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      notify('error', 'Microphone recording is unavailable in this browser.');
-      return;
-    }
-    const id = Number(selectedChannelId);
-    if (!Number.isFinite(id)) return;
-    composingBusy = true;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickRecordingMimeType();
-      const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-      recordingChunks = [];
-      mr.ondataavailable = (ev: BlobEvent) => {
-        if (ev.data && ev.data.size > 0) recordingChunks.push(ev.data);
-      };
-      mr.start(250);
-      mediaRecorderObj = mr;
-      recordingStartedAt = performance.now();
-    } catch (err) {
-      recordingStartedAt = null;
-      mediaRecorderObj = null;
-      notify('error', err instanceof Error ? err.message : 'Could not start microphone.');
-    } finally {
-      composingBusy = false;
-    }
-  }
-
-  async function finalizeRecording() {
-    if (!mediaRecorderObj || recordingStartedAt === null) return;
-    const mr = mediaRecorderObj;
-    const started = recordingStartedAt;
-    const id = Number(selectedChannelId);
-    const chunkSnapshot = recordingChunks.slice();
-
-    recordingStartedAt = null;
-    mediaRecorderObj = null;
-
-    await stopMediaRecorderAndDetach(mr);
-    recordingChunks = [];
-
-    composingBusy = true;
-    try {
-      const { blob, effectiveMime } = buildRecordingBlobFromChunks(chunkSnapshot, mr.mimeType);
-      const duration_ms = Math.max(1, Math.round(performance.now() - started));
-      const b64 = await recordingBlobToBase64(blob);
-      const requestVoiceReply = effectiveRequestVoiceReplyForSend();
-      const sent = await sendChatMessage(id, {
-        audio_base64: b64,
-        audio_mime_type: effectiveMime,
-        audio_duration_ms: duration_ms,
-        request_voice_reply: requestVoiceReply || undefined,
-        use_knowledge: useKnowledgeUi,
-        disable_tools: disableToolsUi || undefined
-      });
-      const sentAt = new Date().toISOString();
-      addOptimisticMessage({
-        id: sent.data.message_id,
-        message_pk: optimisticMessagePk--,
-        channel_id: id,
-        sender_type: 'user',
-        sender_id: 'admin',
-        created_at: sentAt,
-        content: [
-          {
-            content_type: 'audio',
-            body: `optimistic_audio:${sent.data.message_id}`,
-            metadata: {
-              duration_ms,
-              media_type: effectiveMime,
-              optimistic_audio_url: URL.createObjectURL(blob)
-            }
-          }
-        ]
-      });
-      agentTyping = true;
-      agentVoicePendingSince = requestVoiceReply ? sentAt : null;
-      notify('success', 'Voice message sent.');
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Send failed.');
-    } finally {
-      composingBusy = false;
-    }
-  }
-
-  async function discardRecording() {
-    if (!mediaRecorderObj || recordingStartedAt === null) return;
-    const mr = mediaRecorderObj;
-    recordingStartedAt = null;
-    mediaRecorderObj = null;
-    recordingChunks = [];
-    await stopMediaRecorderAndDetach(mr);
-  }
-
   /**
-   * Stop capture without sending — e.g. user navigates away while recording (avoids orphaned MediaStream tracks).
-   * Fire-and-forget from ``onMount`` cleanup is OK; we still await stop so the browser can release the mic.
-   */
-  async function disposeActiveRecording() {
-    const mr = mediaRecorderObj;
-    recordingStartedAt = null;
-    mediaRecorderObj = null;
-    recordingChunks = [];
-    if (!mr) return;
-    await stopMediaRecorderAndDetach(mr);
-  }
-
-  /**
-   * One-time boot for the shared engine: visibility listener, persisted UI prefs,
-   * and the initial channel/character load. Safe to call from both surfaces (page
-   * Messages tab and global overlay) — runs its body exactly once.
+   * One-time boot for the shared engine: message-engine runtime (visibility listener,
+   * section-mounted flag) and the initial channel/character load. Safe to call from
+   * both surfaces (page Messages tab and global overlay) — runs its body exactly once.
+   * UI toggles are restored eagerly by `createChatChannelsUiPrefs()` at construction.
    */
   async function ensureStarted() {
     if (started) return;
     started = true;
-    messagesSectionMounted = true;
-    if (browser) {
-      documentVisible = document.visibilityState === 'visible';
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-    }
-    try {
-      const raw = localStorage.getItem(PREF_KEYS.chatChannelsVoiceReply);
-      if (raw === '1') requestVoiceReplyUi = true;
-      if (raw === '0') requestVoiceReplyUi = false;
-      const rawKnowledge = localStorage.getItem(PREF_KEYS.chatChannelsUseKnowledge);
-      if (rawKnowledge === '1') useKnowledgeUi = true;
-      if (rawKnowledge === '0') useKnowledgeUi = false;
-      const rawDisableTools = localStorage.getItem(PREF_KEYS.chatChannelsDisableTools);
-      if (rawDisableTools === '1') disableToolsUi = true;
-      if (rawDisableTools === '0') disableToolsUi = false;
-      const rawTokens = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTelemetry);
-      if (rawTokens === '0') showAgentTokensUi = false;
-      if (rawTokens === '1') showAgentTokensUi = true;
-      const rawTools = localStorage.getItem(PREF_KEYS.chatChannelsShowAgentTools);
-      if (rawTools === '0') showAgentToolsUi = false;
-      if (rawTools === '1') showAgentToolsUi = true;
-    } catch {
-      /* ignore quota / private mode */
-    }
+    engine.startRuntime();
     await loadCharacters();
     await loadChannels();
   }
@@ -900,7 +308,7 @@ export function createChatChannelsPageController() {
   async function ensureConversationLoaded() {
     await ensureStarted();
     ensureSelectedChannel();
-    if (selectedChannelId && messages.length === 0 && !messagesLoading) {
+    if (selectedChannelId && engine.messages.length === 0 && !engine.messagesLoading) {
       await loadMessages();
     }
   }
@@ -912,26 +320,14 @@ export function createChatChannelsPageController() {
 
   /** Overlay refresh button — reload channels + messages without touching the URL. */
   async function refreshConversation() {
-    resetPollErrors();
+    engine.resetPollErrors();
     await loadChannels();
     ensureSelectedChannel();
     await loadMessages();
   }
 
-  function setPageMessagesActive(active: boolean) {
-    pageMessagesActive = active;
-  }
-
-  function setOverlayActive(active: boolean) {
-    overlayActive = active;
-  }
-
   function dispose() {
-    messagesSectionMounted = false;
-    if (browser) {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    }
-    stopPolling();
+    engine.dispose();
   }
 
   return {
@@ -942,8 +338,8 @@ export function createChatChannelsPageController() {
     ensureConversationLoaded,
     reloadMessages,
     refreshConversation,
-    setPageMessagesActive,
-    setOverlayActive,
+    setPageMessagesActive: engine.setPageMessagesActive,
+    setOverlayActive: engine.setOverlayActive,
 
     loadChannels,
     refreshCurrent,
@@ -954,14 +350,14 @@ export function createChatChannelsPageController() {
     handleChannelSelect,
 
     characterLabel,
-    openCreate,
-    openEdit,
+    openCreate: form.openCreate,
+    openEdit: form.openEdit,
 
-    channelFormBeforeClose,
-    finalizeChannelForm,
-    cancelChannelFormExplicit,
+    channelFormBeforeClose: form.channelFormBeforeClose,
+    finalizeChannelForm: form.finalizeChannelForm,
+    cancelChannelFormExplicit: form.cancelChannelFormExplicit,
 
-    submitForm,
+    submitForm: form.submitForm,
 
     closeDelete,
 
@@ -970,17 +366,17 @@ export function createChatChannelsPageController() {
     submitDelete,
     submitClearMessages,
 
-    submitDraftText,
-    beginRecording,
-    finalizeRecording,
-    discardRecording,
-    disposeActiveRecording,
+    submitDraftText: composer.submitDraftText,
+    beginRecording: composer.beginRecording,
+    finalizeRecording: composer.finalizeRecording,
+    discardRecording: composer.discardRecording,
+    disposeActiveRecording: composer.disposeActiveRecording,
 
     get toast() {
       return toasts.toast;
     },
     get unsaved() {
-      return unsaved;
+      return form.unsaved;
     },
     get activeTab() {
       return nav.activeTab;
@@ -992,73 +388,45 @@ export function createChatChannelsPageController() {
     },
     set selectedChannelId(v: string | null) {
       if (selectedChannelId !== v) {
-        messages = [];
-        tailCursor = null;
-        agentTyping = false;
-        agentVoicePendingSince = null;
+        engine.resetConversation();
       }
       selectedChannelId = v;
     },
     get requestVoiceReplyUi() {
-      return requestVoiceReplyUi;
+      return uiPrefs.requestVoiceReply;
     },
     set requestVoiceReplyUi(v: boolean) {
-      requestVoiceReplyUi = v;
-      try {
-        localStorage.setItem(PREF_KEYS.chatChannelsVoiceReply, v ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
+      uiPrefs.requestVoiceReply = v;
     },
     get useKnowledgeUi() {
-      return useKnowledgeUi;
+      return uiPrefs.useKnowledge;
     },
     set useKnowledgeUi(v: boolean) {
-      useKnowledgeUi = v;
-      try {
-        localStorage.setItem(PREF_KEYS.chatChannelsUseKnowledge, v ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
+      uiPrefs.useKnowledge = v;
     },
     get disableToolsUi() {
-      return disableToolsUi;
+      return uiPrefs.disableTools;
     },
     set disableToolsUi(v: boolean) {
-      disableToolsUi = v;
-      try {
-        localStorage.setItem(PREF_KEYS.chatChannelsDisableTools, v ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
+      uiPrefs.disableTools = v;
     },
     get showAgentTokensUi() {
-      return showAgentTokensUi;
+      return uiPrefs.showAgentTokens;
     },
     set showAgentTokensUi(v: boolean) {
-      showAgentTokensUi = v;
-      try {
-        localStorage.setItem(PREF_KEYS.chatChannelsShowAgentTelemetry, v ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
+      uiPrefs.showAgentTokens = v;
     },
     get showAgentToolsUi() {
-      return showAgentToolsUi;
+      return uiPrefs.showAgentTools;
     },
     set showAgentToolsUi(v: boolean) {
-      showAgentToolsUi = v;
-      try {
-        localStorage.setItem(PREF_KEYS.chatChannelsShowAgentTools, v ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
+      uiPrefs.showAgentTools = v;
     },
     get draftMessage() {
-      return draftMessage;
+      return composer.draftMessage;
     },
     set draftMessage(v: string) {
-      draftMessage = v;
+      composer.draftMessage = v;
     },
 
     get channels(): ChatChannelRow[] {
@@ -1071,31 +439,31 @@ export function createChatChannelsPageController() {
       return channelsError;
     },
     get messages(): ChatHistoryMessage[] {
-      return messages;
+      return engine.messages;
     },
     get messagesLoading(): boolean {
-      return messagesLoading;
+      return engine.messagesLoading;
     },
     get messagesError(): string | null {
-      return messagesError;
+      return engine.messagesError;
     },
     get messagesSyncing(): boolean {
-      return syncing;
+      return engine.syncing;
     },
     get agentTyping(): boolean {
-      return agentTyping;
+      return engine.agentTyping;
     },
     get agentVoiceGeneratingMessageId(): string | null {
-      return agentVoiceGeneratingMessageId;
+      return engine.agentVoiceGeneratingMessageId;
     },
     get liveUpdatesPaused(): boolean {
-      return liveUpdatesPaused;
+      return engine.liveUpdatesPaused;
     },
     get busy(): boolean {
       return busy;
     },
     get formOpen(): boolean {
-      return formOpen;
+      return form.formOpen;
     },
 
     get deleteTarget(): ChatChannelRow | null {
@@ -1116,35 +484,35 @@ export function createChatChannelsPageController() {
     },
 
     get recordingStartedAt(): number | null {
-      return recordingStartedAt;
+      return composer.recordingStartedAt;
     },
     get composingBusy(): boolean {
-      return composingBusy;
+      return composer.composingBusy;
     },
 
     get modalChannelPhotoSrc(): string | null {
-      return modalChannelPhotoSrc;
+      return form.modalChannelPhotoSrc;
     },
     get formTitle(): string {
-      return formTitle;
+      return form.formTitle;
     },
     get formMode(): 'create' | 'edit' {
-      return formMode;
+      return form.formMode;
     },
     get form(): ChatChannelFormFields {
-      return form;
+      return form.form;
     },
     set form(v: ChatChannelFormFields) {
-      form = v;
+      form.form = v;
     },
     get pendingPhotoDataUrl(): string | null {
-      return pendingPhotoDataUrl;
+      return form.pendingPhotoDataUrl;
     },
     set pendingPhotoDataUrl(v: string | null) {
-      pendingPhotoDataUrl = v;
+      form.pendingPhotoDataUrl = v;
     },
     get formError(): string | null {
-      return formError;
+      return form.formError;
     },
     get characters(): CharacterRow[] {
       return characters;
@@ -1170,21 +538,14 @@ export function createChatChannelsPageController() {
     },
 
     get voiceReplyCheckboxDisabled(): boolean {
-      return (
-        characterResolvedLoading ||
-        !characterResolvedAllowsVoiceRequest(characterResolvedForMessages)
-      );
+      return charResolved.voiceReplyCheckboxDisabled;
     },
     get voiceReplyCheckboxHint(): string {
-      return characterResolvedVoiceReplyControlHint(
-        characterResolvedForMessages,
-        characterResolvedError,
-        characterResolvedLoading
-      );
+      return charResolved.voiceReplyCheckboxHint;
     },
 
     get channelFormDirty(): boolean {
-      return channelFormDirty;
+      return form.channelFormDirty;
     }
   };
 }

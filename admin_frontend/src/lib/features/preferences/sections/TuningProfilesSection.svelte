@@ -5,6 +5,7 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import { TUNING_PROFILES_COPY } from '$lib/features/preferences/shared/preferences-copy';
   import { tuningProfileSectionBodyId } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
     PREFERENCE_TAB_IDS,
@@ -166,7 +167,7 @@
             </FormField>
             <FormField
               label="Context window"
-              hint="Local providers only (Ollama num_ctx). Blank = provider default (Ollama: 2048). Don't set to the full model window — large values use a lot of memory."
+              hint={TUNING_PROFILES_COPY.contextWindow}
             >
               <input
                 type="number"

@@ -59,8 +59,24 @@ export function useTableFilters<TKey extends string>(opts: {
 
   let filters = $state<Record<TKey, string>>(initial);
 
+  // Re-read the query string on browser history navigation (back/forward) so the
+  // in-memory filters track the address bar. We only replaceState on write, so
+  // without this popstate would desync the URL from the visible table. Auto-removed
+  // on teardown.
+  if (opts.urlSync && typeof window !== 'undefined') {
+    $effect(() => {
+      function rereadFromUrl() {
+        filters = readFiltersFromUrl(opts.keys, defaults, new URL(window.location.href).searchParams);
+      }
+      window.addEventListener('popstate', rereadFromUrl);
+      return () => window.removeEventListener('popstate', rereadFromUrl);
+    });
+  }
+
   function set(key: TKey, value: string) {
-    filters = { ...filters, [key]: value };
+    // Keep in-memory filters aligned with the trimmed values written to the URL.
+    const stored = opts.urlSync ? value.trim() : value;
+    filters = { ...filters, [key]: stored };
     if (opts.urlSync) {
       writeFiltersToUrl(opts.keys, filters);
     }

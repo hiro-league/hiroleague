@@ -17,8 +17,8 @@ A new preference is not done when the backend model has it — it must be **repr
 
 1. **Backend model** — add the field to the right model in `hiroserver/hirocli/src/hirocli/domain/preferences.py` (with `Field(...)` bounds/default). The PATCH endpoint is **schema-driven** (`preferences_runtime._set_path` walks the pydantic model), so a new field becomes a valid write path automatically — no backend allow-list to update.
 2. **Frontend type + default** — add it to the matching type **and** the default object in `admin_frontend/src/lib/api/preferences.ts`.
-3. **UI control** — add an input bound to `ctrl.draft.<section>.<field>` in the correct `admin_frontend/src/lib/features/preferences/sections/*.svelte` section (with `oninput={ctrl.markDirty}`). **If you're unsure which section/tab a field belongs in, ask the user — do not guess.**
-4. **⚠️ Save enumeration (the easy one to miss)** — add an `add('<section>.<field>', baseline…, draft…)` line in `admin_frontend/src/lib/features/preferences/state/preferences-edits.ts`. `editsForSave` only sends the paths it **explicitly enumerates**. A field that renders and binds but is missing here will appear editable, then **silently fail to save** and snap back on reload — with no error. Always verify this step.
+3. **UI control** — add an input bound to `ctrl.draft.<section>.<field>` in the correct `admin_frontend/src/lib/features/preferences/sections/**/*.svelte` card (with `oninput={ctrl.markDirty}` or `onchange={ctrl.markDirty}`). **If you're unsure which section/tab a field belongs in, ask the user — do not guess.**
+4. **Save payload** — `editsForSave` in `admin_frontend/src/lib/features/preferences/state/preferences-edits.ts` structurally diffs baseline vs draft, so a new bound field is picked up automatically. Only add to `SKIP_PATHS` if the field is read-only/computed, or to `WHOLE_OBJECT_PATHS` / nullable-path sets when the backend expects a special write shape. Run `npm run test:unit -- preferences-edits` after changing those rules.
 
 Run `npm run check` (admin_frontend) and the preferences tests after, and remember a backend field change needs a **server restart** to take effect.
 

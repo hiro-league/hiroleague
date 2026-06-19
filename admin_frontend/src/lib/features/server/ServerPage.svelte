@@ -8,8 +8,8 @@
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
   import MetricsTab from '$lib/features/metrics/MetricsTab.svelte';
-  import GatewaysTab from './GatewaysTab.svelte';
-  import WorkspacesTab from './WorkspacesTab.svelte';
+  import GatewaysTab from './view/GatewaysTab.svelte';
+  import WorkspacesTab from './view/WorkspacesTab.svelte';
 
   const prefs = createServerPreferences();
   const toasts = createToastNotifier();
@@ -40,7 +40,7 @@
   {:else if prefs.activeTab === 'gateways'}
     <GatewaysTab notify={toasts.notify} />
   {:else}
-    <MetricsTab />
+    <MetricsTab notify={toasts.notify} />
   {/if}
 </AdminPageHeader>
 

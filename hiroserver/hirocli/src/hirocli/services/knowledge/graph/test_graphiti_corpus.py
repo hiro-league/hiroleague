@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from hirocli.services.knowledge.eval_runner import ADAM_CORPUS_FILE, load_questions
+from hirocli.services.eval.runner import ADAM_CORPUS_FILE, load_questions
 from hirocli.services.knowledge.graph.graphiti_corpus import (
     load_episodes_file,
     parse_episodes_jsonl,

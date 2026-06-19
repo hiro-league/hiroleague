@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EvalRow } from '$lib/features/eval/state/eval-model.svelte';
-import type { EvalCategoryStat, EvalQuestionLeg } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalCategoryStat, EvalQuestionLeg } from '$lib/features/eval/shared/eval-events';
 import {
   rowRecallRank,
   rowDiffRank,

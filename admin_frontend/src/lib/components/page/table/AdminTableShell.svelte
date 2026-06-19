@@ -16,6 +16,8 @@
     gridColumns?: string;
     /** Pin the head row beneath sticky page chrome. */
     stickyHead?: boolean;
+    /** Override `--admin-table-sticky-top` when `stickyHead` is set (eval toolbars, etc.). */
+    stickyTop?: string;
     /**
      * `default` — catalog/server tables (14px, muted uppercase head).
      * `dense` — ledger-style lists (12px, plain head, cell bottom borders).
@@ -37,6 +39,7 @@
     minWidth,
     gridColumns,
     stickyHead = false,
+    stickyTop,
     density = 'default',
     maxBodyHeight,
     class: className,
@@ -68,7 +71,7 @@
     pageStickyHead && layout === 'table' && density === 'dense' && 'admin-table-shell-dense-sticky-page',
     className
   )}
-  style:--admin-table-sticky-top={pageStickyHead ? ADMIN_TABLE_STICKY_TOP : undefined}
+  style:--admin-table-sticky-top={pageStickyHead ? (stickyTop ?? ADMIN_TABLE_STICKY_TOP) : undefined}
   data-sticky-head={stickyHead || undefined}
   data-sticky-scope={pageStickyHead ? 'page' : containerStickyHead ? 'container' : undefined}
   data-density={density}

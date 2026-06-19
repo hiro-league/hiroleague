@@ -14,7 +14,7 @@
  * Pure + framework-free so it stays unit-testable (mirrors logs/shared/logs-ui.ts).
  */
 import type { EvalRow, EvalTrack } from '$lib/features/eval/state/eval-model.svelte';
-import type { RecalledFact } from '$lib/features/knowledge/shared/knowledge-events';
+import type { RecalledFact } from '$lib/features/eval/shared/eval-events';
 
 /** Human label for a leg in the brief (flat/graphiti = knowledge, recall = memory). */
 const LEG_LABEL: Record<string, string> = { flat: 'Flat', graphiti: 'Graphiti', recall: 'Recall' };

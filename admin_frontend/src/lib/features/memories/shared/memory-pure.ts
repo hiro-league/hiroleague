@@ -9,6 +9,7 @@
  */
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
+import type { TableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import { formatCompactDateTime, parseFlexibleDate } from '$lib/format/compact-datetime';
 import { shortGraphId } from '$lib/format/short-graph-id';
 
@@ -265,4 +266,144 @@ export function memoryRowPassesFilters(row: Record<string, unknown>, opts: Memor
     return false;
   }
   return true;
+}
+
+// ── Filter option + date-input derivation (pure) ────────────────────────────
+
+/**
+ * Source dropdown options derived from the loaded rows: distinct non-empty sources sorted
+ * alphabetically, prefixed with a "(no source)" sentinel option when any row has no source.
+ */
+export function memorySourceOptions(
+  rows: Record<string, unknown>[]
+): { value: string; label: string }[] {
+  const raw = new Set<string>();
+  let anyEmpty = false;
+  for (const row of rows) {
+    const s = String(memoryField(row, 'source') ?? '').trim();
+    if (s === '') anyEmpty = true;
+    else raw.add(s);
+  }
+  const out: { value: string; label: string }[] = [];
+  if (anyEmpty) out.push({ value: '__empty__', label: '(no source)' });
+  for (const s of [...raw].sort((a, b) => a.localeCompare(b))) {
+    out.push({ value: s, label: s });
+  }
+  return out;
+}
+
+/**
+ * Parse a `yyyy-mm-dd` date-input value into ms epoch (NaN when blank). `endOfDay` snaps to the
+ * inclusive end of the day so a "to" bound includes that whole date.
+ */
+export function memoryDateInputMs(value: string, endOfDay = false): number {
+  const v = value.trim();
+  if (!v) return NaN;
+  return new Date(`${v}T${endOfDay ? '23:59:59.999' : '00:00:00'}`).getTime();
+}
+
+// ── Table filter keys (URL-synced) ──────────────────────────────────────────
+// Namespaced (`mem_*`) so they never collide with the page-level `?tab=` param or the
+// Graph tab. Shared by the controller (write path) and the panel (typed bindings).
+export const MEMORY_FILTER_KEYS = ['mem_group', 'mem_char', 'mem_source', 'mem_from', 'mem_to', 'mem_q'] as const;
+export type MemoryFilterKey = (typeof MEMORY_FILTER_KEYS)[number];
+
+// ── Sorting (Memories table column headers) ─────────────────────────────────
+// Pure, deterministic ordering driven by the `useTableSort` controller. Kept here
+// (not in the controller) so column ordering stays unit-testable.
+
+export type MemorySortColumn =
+  | 'kind'
+  | 'created'
+  | 'validity'
+  | 'character'
+  | 'memory'
+  | 'entities'
+  | 'group'
+  | 'origin'
+  | 'id';
+
+export const MEMORY_SORT_COLUMNS: readonly MemorySortColumn[] = [
+  'kind',
+  'created',
+  'validity',
+  'character',
+  'memory',
+  'entities',
+  'group',
+  'origin',
+  'id'
+] as const;
+
+/** Most-recent-first is the default, matching the historical hard-coded order. */
+export const DEFAULT_MEMORY_SORT: { column: MemorySortColumn; direction: TableSortDirection } = {
+  column: 'created',
+  direction: 'desc'
+};
+
+export type MemorySortOpts = {
+  characterMap: Record<string, CharacterRow>;
+  channelById: Map<number, ChatChannelRow>;
+  /** group_id → logical label; falls back to the raw id for ordering when absent. */
+  groupLabelById?: Map<string, string>;
+};
+
+/** The text a column compares on (entity columns flatten to a single comparable string). */
+function memoryEntitiesText(row: Record<string, unknown>): string {
+  const e = memoryEntities(row);
+  if (!e) return '';
+  return e.kind === 'relation' ? `${e.source} ${e.relation} ${e.target}` : `${e.entity} ${e.type}`;
+}
+
+function compareMemoryColumn(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  column: MemorySortColumn,
+  opts: MemorySortOpts
+): number {
+  switch (column) {
+    case 'created':
+      return memorySortSeconds(a) - memorySortSeconds(b);
+    case 'validity':
+      // current (false → 0) sorts before expired (true → 1)
+      return Number(memoryValidity(a).expired) - Number(memoryValidity(b).expired);
+    case 'origin':
+      return memoryChunkIds(a).length - memoryChunkIds(b).length;
+    case 'kind':
+      return memoryKindLabel(a).localeCompare(memoryKindLabel(b));
+    case 'character':
+      return memoryCharacter(a, opts.characterMap, opts.channelById).name.localeCompare(
+        memoryCharacter(b, opts.characterMap, opts.channelById).name
+      );
+    case 'memory':
+      return memoryPrimaryText(a).localeCompare(memoryPrimaryText(b));
+    case 'entities':
+      return memoryEntitiesText(a).localeCompare(memoryEntitiesText(b));
+    case 'group': {
+      const label = (row: Record<string, unknown>) =>
+        opts.groupLabelById?.get(memoryGroupId(row)) ?? memoryGroupId(row);
+      return label(a).localeCompare(label(b));
+    }
+    case 'id':
+      return memoryId(a).localeCompare(memoryId(b));
+    default:
+      return 0;
+  }
+}
+
+/** Stable, direction-aware sort. Ties break by recency then id so order never jitters. */
+export function sortMemories(
+  rows: Record<string, unknown>[],
+  column: MemorySortColumn,
+  direction: TableSortDirection,
+  opts: MemorySortOpts
+): Record<string, unknown>[] {
+  const factor = direction === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const primary = compareMemoryColumn(a, b, column, opts);
+    if (primary !== 0) return factor * primary;
+    const recency = memorySortSeconds(b) - memorySortSeconds(a);
+    if (recency !== 0) return recency;
+    return memoryId(a).localeCompare(memoryId(b));
+  });
 }

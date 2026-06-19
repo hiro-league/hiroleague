@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { onDestroy, onMount, untrack } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import { createGraphFullscreenLifecycle } from '../shared/graph-fullscreen';
   import { Maximize2, Minimize2, RefreshCw, Scan, Shuffle, SlidersHorizontal } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
+  import { createGraphEngineBridge } from '../state/graph/graph-engine-bridge.svelte';
   import KnowledgeGraphDetailPanel from './KnowledgeGraphDetailPanel.svelte';
   import KnowledgeGraphOptionsPanel from './KnowledgeGraphOptionsPanel.svelte';
   import KnowledgeGraphToolbar from './KnowledgeGraphToolbar.svelte';
@@ -51,9 +53,7 @@
 
   // Node mount point for force-graph (it appends its own <canvas>).
   let container = $state<HTMLDivElement | null>(null);
-  // The canvas engine owns the force-graph instance, custom drawing, force tuning, camera
-  // arbitration, and redraw gating (see engine/graph-canvas-engine.ts). This panel only
-  // drives it: it pushes reactive model/option reads in via the $effects below.
+  // The canvas engine owns force-graph; model↔engine sync lives in graph-engine-bridge.svelte.ts.
   let engine: GraphCanvasEngine | null = null;
 
   // Graph-options sliders, seeded from localStorage so a tuned layout survives reloads
@@ -143,23 +143,20 @@
   // Graph tab (KnowledgePage passes forceCompact) so the canvas has room.
   let fullscreen = $state(false);
 
-  function resize(): void {
-    engine?.resize();
-  }
-
-  function toggleFullscreen(): void {
-    fullscreen = !fullscreen;
-    // Two frames so the layout swap settles before we re-measure the canvas.
-    requestAnimationFrame(() => requestAnimationFrame(resize));
-  }
-
-  // Esc exits fullscreen (the standard "return from full screen" gesture).
-  function onKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && fullscreen) {
-      fullscreen = false;
-      requestAnimationFrame(() => requestAnimationFrame(resize));
+  const graphFullscreen = createGraphFullscreenLifecycle({
+    getFullscreen: () => fullscreen,
+    setFullscreen: (value) => {
+      fullscreen = value;
+    },
+    onResize: () => engine?.resize(),
+    onVisibilityVisible: () => {
+      if (graph.progress() === null) return;
+      engine?.markIntentionalReframe();
+      void graph.loadGroups();
+      void graph.load();
     }
-  }
+  });
+  const { toggleFullscreen } = graphFullscreen;
 
   // The display link set fed to the engine + the focus computation below. Collapses each entity
   // pair's parallel edges past the "Visible edges" cap into one "N other relations" aggregate edge
@@ -174,44 +171,46 @@
     )
   );
 
-  // ── Search highlight aliases ────────────────────────────────────────────────
-  // Local mirrors of the model's search state so the $effects below can track them.
-  const searchActive = $derived(graph.searchActive());
-  const matchedNodeIds = $derived(graph.matchedNodeIds());
-  const matchedEdgeIds = $derived(graph.matchedEdgeIds());
-
-  // Node ids to frame on a search: matched nodes + the endpoints of matched edges, so an
-  // edge-only hit still pans its pair into view. Null when no search is active.
-  const focusNodeIds = $derived.by<Set<string> | null>(() => {
-    if (!searchActive) return null;
-    const ids = new Set<string>(matchedNodeIds);
-    if (matchedEdgeIds.size > 0) {
-      for (const l of displayLinks) {
-        if (matchedEdgeIds.has(l.id)) {
-          ids.add(String(linkEndId(l.source)));
-          ids.add(String(linkEndId(l.target)));
-        }
-      }
-    }
-    return ids;
+  createGraphEngineBridge({
+    getGraph: () => graph,
+    getEngine: () => engine,
+    getDisplayLinks: () => displayLinks,
+    getForceOptions: () => ({
+      linkStrength,
+      linkDistance,
+      centerStrength,
+      radialRing,
+      chargeStrength,
+      hubSeparation,
+      hubSpacing,
+      collideScale
+    }),
+    getCurveAmount: () => curveAmount,
+    getNodeSizing: () => ({ minSize: nodeSizeMin, maxSize: nodeSizeMax }),
+    getLabelSizing: () => ({
+      edgeZoomMin,
+      edgeZoomMax,
+      edgeFontMin,
+      edgeFontMax,
+      nodeZoomMin,
+      nodeZoomMax,
+      nodeFontMin,
+      nodeFontMax,
+      edgeLabelMax
+    }),
+    getNodeFade: () => ({
+      nodeFadeStart,
+      nodeFadeFull,
+      nodeRevealLo,
+      nodeRevealHi
+    }),
+    getSearchFocusMode: () => searchFocusMode,
+    getSelectionFocusMode: () => selectionFocusMode
   });
 
-  // ── Render subset (search-focus 'hide' relayout) ────────────────────────────
-  // 'highlight'/'dim' keep every visible node in the sim and just ring/fade the
-  // non-matches in the renderer. 'hide' instead REMOVES the off-focus nodes from the data
-  // fed to the engine, so the matched subset re-lays-out to fill the frame (a true
-  // "recreate", matching how the type filters behave). Restores the full set the moment
-  // the search clears or the mode switches away from 'hide'.
-  const hideMode = $derived(searchActive && searchFocusMode === 'hide');
-  const renderNodes = $derived.by(() => {
-    const base = graph.visibleNodes();
-    return hideMode && focusNodeIds ? base.filter((n) => focusNodeIds.has(n.id)) : base;
-  });
-  const renderLinks = $derived.by(() =>
-    hideMode ? displayLinks.filter((l) => matchedEdgeIds.has(l.id)) : displayLinks
-  );
+  let zoomLevel = $state(1);
 
-  let zoomLevel = $state(1); // live canvas zoom scale (engine onZoomChange) → shown in the stats overlay
+  onMount(() => graphFullscreen.mount());
 
   onMount(async () => {
     if (!container) return;
@@ -250,178 +249,6 @@
     engine?.markIntentionalReframe();
     void graph.selectGroup(id);
   }
-
-  // ── Drive the engine from reactive model / option reads ──────────────────────
-
-  // Recreate the graph from the render subset whenever membership, filters, OR the
-  // search-focus 'hide' subset change. The engine reconciles into its durable mirrors and
-  // decides structural (full relayout + fit) vs incremental delta (local settle). The
-  // engine.setData call is untracked so that iterating the reactive render objects inside
-  // it can't register stray per-field dependencies — the tracked reads are only the ones
-  // listed below (render set / filters / reload).
-  $effect(() => {
-    const nodes = renderNodes; // tracked
-    const links = renderLinks; // tracked
-    const loadVersion = graph.loadVersion(); // tracked: structural reload signal
-    const hiddenNodeIds = graph.hiddenNodeIds(); // tracked: a node-instance filter change is structural
-    const hiddenEdgeTypes = graph.hiddenEdgeTypes(); // tracked
-    const filterToken = graph.filterToken(); // tracked: an edge-filter change is structural too
-    if (!engine) return;
-    untrack(() =>
-      engine?.setData(nodes, links, { loadVersion, hiddenNodeIds, hiddenEdgeTypes, filterToken })
-    );
-  });
-
-  // Push the model's glow-timestamp map so the engine drives frames while halos fade.
-  $effect(() => {
-    engine?.setRecent(graph.recent()); // tracked
-  });
-
-  // A filter change is an intentional reframe — hand the camera back to auto-fit (the
-  // setData effect sets fitPending; the engine then frames the new set on engine-stop).
-  $effect(() => {
-    graph.hiddenNodeIds(); // tracked
-    graph.hiddenEdgeTypes(); // tracked
-    graph.filterToken(); // tracked: edge filters reframe too
-    engine?.markIntentionalReframe();
-  });
-
-  // Layout-force sliders ("Link strength"/"Link distance"/"Center pull"/"Spread radius")
-  // → d3 forces (engine reheats; radial ring retargets only when it actually changed).
-  $effect(() => {
-    const linkStrengthValue = linkStrength; // tracked
-    const linkDistanceValue = linkDistance; // tracked
-    const centerStrengthValue = centerStrength; // tracked
-    const radialRingValue = radialRing; // tracked
-    const chargeStrengthValue = chargeStrength; // tracked
-    const hubSeparationValue = hubSeparation; // tracked
-    const hubSpacingValue = hubSpacing; // tracked
-    const collideScaleValue = collideScale; // tracked
-    engine?.setForces({
-      linkStrength: linkStrengthValue,
-      linkDistance: linkDistanceValue,
-      centerStrength: centerStrengthValue,
-      radialRing: radialRingValue,
-      chargeStrength: chargeStrengthValue,
-      hubSeparation: hubSeparationValue,
-      hubSpacing: hubSpacingValue,
-      collideScale: collideScaleValue
-    });
-  });
-
-  // "Edge curvature" slider → re-fan the current edges (no reheat; render-only property).
-  $effect(() => {
-    engine?.setCurveAmount(curveAmount); // tracked
-  });
-
-  // "Node size" range → degree-based node + font sizing (render-only repaint, no relayout).
-  $effect(() => {
-    engine?.setNodeSizing({ minSize: nodeSizeMin, maxSize: nodeSizeMax }); // tracked
-  });
-
-  // Denoise 'dim' set → engine render-dims low-connection nodes/edges. (hide/only are structural,
-  // handled via the render subset + filterToken above.) Empty set unless lowConnMode === 'dim'.
-  $effect(() => {
-    engine?.setDenoiseDim(graph.lowConnDimIds()); // tracked
-  });
-
-  // Label sizing (View → font controls) → engine repaints labels at the new zoom/size mapping.
-  $effect(() => {
-    engine?.setLabelSizing({
-      edgeZoomMin, // tracked
-      edgeZoomMax,
-      edgeFontMin,
-      edgeFontMax,
-      nodeZoomMin,
-      nodeZoomMax,
-      nodeFontMin,
-      nodeFontMax,
-      edgeLabelMax
-    });
-  });
-
-  // "Node fade" range (View) → engine repaints node opacity (importance × zoom level-of-detail).
-  $effect(() => {
-    engine?.setNodeFade({ nodeFadeStart, nodeFadeFull, nodeRevealLo, nodeRevealHi }); // tracked
-  });
-
-  // Search highlight state → engine repaints rings/dim/hide and frames the matched subset.
-  $effect(() => {
-    engine?.setSearch({
-      searchActive, // tracked
-      matchedNodeIds, // tracked
-      matchedEdgeIds, // tracked
-      focusNodeIds, // tracked
-      searchFocusMode // tracked
-    });
-  });
-
-  // ── Selection (neighbor) focus ──────────────────────────────────────────────
-  // When a node is selected and selectionFocusMode isn't 'all', focus its ego network (the node
-  // + its directly-connected nodes/edges from the rendered set). Search WINS — this is inert while
-  // a search is active. Renderer-only (no relayout) so clicking nodes stays snappy.
-  const selectedNodeId = $derived(
-    graph.selected()?.kind === 'node' ? (graph.selected() as { id: string }).id : null
-  );
-  const selectedEdgeId = $derived(
-    graph.selected()?.kind === 'edge' ? (graph.selected() as { id: string }).id : null
-  );
-  const neighborFocus = $derived.by(() => {
-    const inactive = {
-      active: false,
-      mode: 'dim' as const,
-      selectedId: '',
-      nodeIds: new Set<string>(),
-      edgeIds: new Set<string>()
-    };
-    if (searchActive) return inactive;
-    // 'all' still computes the ego set (so the Node-fade can keep the selection + its neighbours
-    // solid) but uses mode 'none' → nothing else is dimmed/hidden. 'dim'/'hide' also dim the rest.
-    const mode =
-      selectionFocusMode === 'hide'
-        ? ('hide' as const)
-        : selectionFocusMode === 'dim'
-          ? ('dim' as const)
-          : ('none' as const);
-    // Node selected → its ego network (the node + every edge touching it + those edges' endpoints).
-    if (selectedNodeId) {
-      const nodeIds = new Set<string>([selectedNodeId]);
-      const edgeIds = new Set<string>();
-      for (const l of displayLinks) {
-        const a = String(linkEndId(l.source));
-        const b = String(linkEndId(l.target));
-        if (a === selectedNodeId || b === selectedNodeId) {
-          edgeIds.add(l.id);
-          nodeIds.add(a);
-          nodeIds.add(b);
-        }
-      }
-      return { active: true, mode, selectedId: selectedNodeId, nodeIds, edgeIds };
-    }
-    // Edge (or aggregate) selected → focus the edge itself + its two endpoint nodes, dim the rest.
-    if (selectedEdgeId) {
-      const l = displayLinks.find((x) => x.id === selectedEdgeId);
-      if (!l) return inactive;
-      const a = String(linkEndId(l.source));
-      const b = String(linkEndId(l.target));
-      return {
-        active: true,
-        mode,
-        selectedId: selectedEdgeId,
-        nodeIds: new Set<string>([a, b]),
-        edgeIds: new Set<string>([selectedEdgeId])
-      };
-    }
-    return inactive;
-  });
-  $effect(() => {
-    engine?.setNeighborFocus(neighborFocus); // tracked
-  });
-
-  // Highlight the selected node/edge (blue ring/line, overrides the search highlight).
-  $effect(() => {
-    engine?.setSelection(graph.selected()); // tracked
-  });
 
   // Persist the graph-options sliders to localStorage whenever any of them change (also
   // runs once on mount, writing the just-loaded values back — harmless).
@@ -488,19 +315,6 @@
     graph.resetEdgeFilters(); // "Reset to defaults" clears the Filters section too
   }
 
-  // The shared knowledge SSE is paused while this browser tab is hidden (frees the
-  // per-origin connection budget so other tabs don't stall). Live deltas have no backlog,
-  // so on refocus we backfill from a full re-export — but ONLY while a build is/was
-  // streaming (progress set), otherwise an idle, carefully-posed graph would needlessly
-  // relayout + reframe every time the user alt-tabs back.
-  function onVisibilityChange(): void {
-    if (document.visibilityState !== 'visible') return;
-    if (graph.progress() === null) return;
-    engine?.markIntentionalReframe();
-    void graph.loadGroups();
-    void graph.load();
-  }
-
   // ── Toolbar actions (engine-owned; search orchestration lives in the model) ──────
   // A reload should reframe the fresh data, so hand the camera back to auto-fit first.
   function reload(): void {
@@ -549,9 +363,6 @@
       : null;
   });
 </script>
-
-<svelte:window onresize={resize} onkeydown={onKeydown} />
-<svelte:document onvisibilitychange={onVisibilityChange} />
 
 <!--
   Two layouts:

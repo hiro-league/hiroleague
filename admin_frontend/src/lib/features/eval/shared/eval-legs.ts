@@ -4,7 +4,7 @@
  * setup sub-controller and presentational helpers can use them without a circular dependency on
  * the eval-model facade (which re-exports them for external consumers).
  */
-import type { EvalLeg } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalLeg } from '$lib/features/eval/shared/eval-events';
 
 /** All selectable legs, in canonical column order. */
 export const EVAL_ALL_LEGS: EvalLeg[] = ['flat', 'graphiti'];

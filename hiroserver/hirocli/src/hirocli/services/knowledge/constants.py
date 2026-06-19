@@ -35,18 +35,9 @@ KNOWLEDGE_JOB_COMPLETED = "knowledge.job.completed"
 KNOWLEDGE_JOB_FAILED = "knowledge.job.failed"
 KNOWLEDGE_INGESTED = "knowledge.ingested"
 KNOWLEDGE_DELETED = "knowledge.deleted"
-# L3 eval — Phase 5c. Streamed by ``services/knowledge/eval_runner.py`` so the
-# admin Eval Batch UI can update the per-question table live without polling.
-# Same pattern as the ingest job events above (one started, progress per item,
-# one completed/failed).
-KNOWLEDGE_EVAL_STARTED = "knowledge.eval.started"
-KNOWLEDGE_EVAL_SETUP_PROGRESS = "knowledge.eval.setup_progress"   # ingest / graph-build steps
-KNOWLEDGE_EVAL_QUESTION_COMPLETED = "knowledge.eval.question_completed"
-KNOWLEDGE_EVAL_COMPLETED = "knowledge.eval.completed"
-KNOWLEDGE_EVAL_FAILED = "knowledge.eval.failed"
-# Terminal cancel (user pressed Cancel in the admin Eval panel). Distinct from
-# FAILED so the UI reads it as neutral, not an error.
-KNOWLEDGE_EVAL_CANCELLED = "knowledge.eval.cancelled"
+# Eval event types moved to ``hirocli.services.eval.constants`` (the eval feature is a peer
+# of knowledge/memory, not a knowledge sub-concern). They still ride the shared
+# ``/knowledge/events`` SSE transport.
 # Graph viz — live updates for the admin "Graph" tab. Emitted by Graphiti ingest
 # (``GraphitiMemoryService.ingest_chunks``) as episodes are processed so the view can
 # pop new elements in real time over the existing ``/knowledge/events`` SSE

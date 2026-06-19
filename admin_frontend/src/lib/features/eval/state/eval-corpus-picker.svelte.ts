@@ -5,17 +5,17 @@
  * owns none of the run options or saved-results surface; those siblings are reached through the
  * injected `EvalCorpusPickerDeps` callbacks (`onCorpusResolved` / `reloadResults`).
  */
+import { pickKnowledgeFolder } from '$lib/api/knowledge';
 import {
   getCorpusIngestExtraction,
   getEvalCorpus,
   listEvalCorpuses,
   listEvalQuestions,
-  pickKnowledgeFolder,
   type CorpusEpisodeExtraction,
   type EvalCorpus,
   type EvalEpisode,
   type EvalQuestionItem
-} from '$lib/api/knowledge';
+} from '$lib/api/eval';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import { readCorpusPref, writeCorpusPref } from '$lib/features/eval/shared/eval-prefs';
 import { listBenchmarks, visibleCorpusesFor } from '$lib/features/eval/shared/eval-corpus';

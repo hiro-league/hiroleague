@@ -22,6 +22,7 @@
   import Button from '$lib/components/ui/button.svelte';
   import EvalCorpusReview from '$lib/features/eval/view/EvalCorpusReview.svelte';
   import EvalClearResultsConfirmDialog from '$lib/features/eval/view/EvalClearResultsConfirmDialog.svelte';
+  import EvalSwitchCorpusConfirmDialog from '$lib/features/eval/view/EvalSwitchCorpusConfirmDialog.svelte';
   import EvalExecutePane from '$lib/features/eval/execute/EvalExecutePane.svelte';
   import EvalCorpusPane from '$lib/features/eval/corpus/EvalCorpusPane.svelte';
   import EvalAnswersPane from '$lib/features/eval/answers/EvalAnswersPane.svelte';
@@ -34,13 +35,18 @@
   import { createEvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
+  import type { ToastKind } from '$lib/ui/toast-types';
+  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { cn } from '$lib/utils';
 
   interface Props {
     /** Eval model (track state, run lifecycle, corpus picker) — created and
      *  init/torn-down by the host Eval page; this component is a pure view. */
     eval_: EvalModel;
+    /** Canonical toast notifier from the host page (trace/copy/export feedback). */
+    notify: (kind: ToastKind, message: string) => void;
   }
-  let { eval_ }: Props = $props();
+  let { eval_, notify }: Props = $props();
 
   // Per-track capability table (memory vs knowledge): the single declarative source for every
   // track divergence the panes render.
@@ -67,7 +73,8 @@
     get eval_() {
       return eval_;
     },
-    getAiEngine: () => aiEngine
+    getAiEngine: () => aiEngine,
+    getNotify: () => notify
   });
 
   // Label for the dialogs' optional "Corpus" tab (empty = no tab) — memory track, episodes loaded.
@@ -133,6 +140,48 @@
     if (cfg.persistsResults) clearConfirmOpen = true;
     else void eval_.clear();
   }
+
+  // Knowledge-track corpus switch confirm — replaces native confirm() in the model.
+  let switchCorpusOpen = $state(false);
+  let pendingCorpusId = $state('');
+  let switchCorpusResolve: ((applied: boolean) => void) | null = null;
+
+  function requestSelectCorpus(id: string): Promise<boolean> {
+    if (eval_.trySelectCorpus(id)) return Promise.resolve(true);
+    pendingCorpusId = id;
+    switchCorpusOpen = true;
+    return new Promise((resolve) => {
+      switchCorpusResolve = resolve;
+    });
+  }
+
+  function finishSwitchCorpus(applied: boolean) {
+    switchCorpusOpen = false;
+    if (applied && pendingCorpusId) eval_.commitSelectCorpus(pendingCorpusId);
+    pendingCorpusId = '';
+    switchCorpusResolve?.(applied);
+    switchCorpusResolve = null;
+  }
+
+  const pendingCorpus = $derived(eval_.visibleCorpuses.find((c) => c.id === pendingCorpusId));
+  const pendingCorpusName = $derived(
+    pendingCorpus?.label ?? pendingCorpus?.name ?? pendingCorpusId
+  );
+
+  function onSwitchCorpusOpenChange(next: boolean) {
+    if (next) {
+      switchCorpusOpen = true;
+      return;
+    }
+    // ESC / overlay dismiss — same as Cancel; skip if confirm already settled the promise.
+    if (switchCorpusResolve) finishSwitchCorpus(false);
+    else switchCorpusOpen = false;
+  }
+
+  function onBenchmarkChange(benchmarkId: string) {
+    const first = eval_.corpuses.find((c) => c.benchmark === benchmarkId);
+    if (first) void requestSelectCorpus(first.id);
+  }
 </script>
 
 <svelte:document onvisibilitychange={onVisibilityChange} />
@@ -152,7 +201,7 @@
     <div class="flex items-center gap-1.5 font-sans text-sm">
       <span class="text-muted-foreground">Folder</span>
       <input
-        class="h-8 w-64 rounded-md border bg-background px-2 text-sm"
+        class={cn(ADMIN_INPUT, 'h-8 w-64')}
         placeholder="Folder to scan for corpuses"
         value={eval_.folder}
         oninput={(e) => eval_.setFolder(e.currentTarget.value)}
@@ -188,9 +237,9 @@
       <label class="flex select-none items-center gap-2 font-sans text-sm">
         <span class="text-muted-foreground">Benchmark</span>
         <select
-          class="h-8 min-w-40 rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+          class={cn(ADMIN_SELECT, 'h-8 min-w-40 disabled:opacity-50')}
           value={eval_.selectedBenchmarkId}
-          onchange={(e) => eval_.selectBenchmark(e.currentTarget.value)}
+          onchange={(e) => onBenchmarkChange(e.currentTarget.value)}
           disabled={isBusy}
         >
           {#each eval_.benchmarks as b (b.id)}
@@ -202,9 +251,9 @@
     <label class="flex select-none items-center gap-2 font-sans text-sm">
       <span class="text-muted-foreground">Corpus</span>
       <select
-        class="h-8 min-w-48 rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+        class={cn(ADMIN_SELECT, 'h-8 min-w-48 disabled:opacity-50')}
         value={eval_.selectedCorpusId}
-        onchange={(e) => eval_.selectCorpus(e.currentTarget.value)}
+        onchange={(e) => void requestSelectCorpus(e.currentTarget.value)}
         disabled={isBusy || eval_.visibleCorpuses.length === 0}
       >
         {#if eval_.visibleCorpuses.length === 0}
@@ -245,32 +294,11 @@
   {:else if activeSubtab === 'answers'}
     <EvalAnswersPane {eval_} {cfg} {traces} />
   {:else if activeSubtab === 'report'}
-    <EvalReportPane {eval_} {cfg} onRequestClear={requestClear} />
+    <EvalReportPane {eval_} {cfg} onRequestClear={requestClear} onSelectCorpus={requestSelectCorpus} />
   {/if}
 </section>
 
-<!-- ===== Cross-pane trace / export banners + dialogs ===== -->
-{#if traces.traceError}
-  <InlineDestructiveAlert message={traces.traceError} class="mt-2" />
-{/if}
-{#if traces.copyError}
-  <InlineDestructiveAlert message="Copy for AI failed: {traces.copyError}" class="mt-2" />
-{/if}
-{#if traces.locomoExportError}
-  <InlineDestructiveAlert message="LoCoMo export failed: {traces.locomoExportError}" class="mt-2" />
-{/if}
-{#if traces.locomoExportNotice}
-  <!-- Success/primary notice (not destructive) — no blessed inline primitive for this transient
-       confirmation yet, so it stays hand-rolled. (Candidate for a toast in a follow-up.) -->
-  <div class="mt-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 font-sans text-sm text-primary" role="status">
-    {traces.locomoExportNotice}
-  </div>
-{/if}
-{#if traces.ingestTraceError}
-  <InlineDestructiveAlert message={traces.ingestTraceError} class="mt-2" />
-{/if}
-
-<!-- Corpus tab for the ingest trace dialog: built-in search box (that dialog has no top search). -->
+<!-- Cross-pane trace / export dialogs ===== -->
 {#snippet corpusTab()}
   <EvalCorpusReview episodes={eval_.corpusEpisodes} compact />
 {/snippet}
@@ -314,4 +342,12 @@
     clearConfirmOpen = false;
     void eval_.clear();
   }}
+/>
+
+<!-- Knowledge-track corpus switch confirm — abandons in-view run results. -->
+<EvalSwitchCorpusConfirmDialog
+  open={switchCorpusOpen}
+  onOpenChange={onSwitchCorpusOpenChange}
+  corpusName={pendingCorpusName}
+  onConfirm={() => finishSwitchCorpus(true)}
 />

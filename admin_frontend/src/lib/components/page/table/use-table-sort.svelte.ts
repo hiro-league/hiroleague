@@ -28,7 +28,10 @@ function readSortFromUrl<TCol extends string>(
   const rawDir = params.get(directionParam);
   const sortBy =
     rawSort && (allowed as readonly string[]).includes(rawSort) ? (rawSort as TCol) : defaultBy;
-  const direction: TableSortDirection = rawDir === 'desc' ? 'desc' : defaultDirection;
+  // Honor both explicit directions from the URL; only fall back to the default when the
+  // value is absent/garbage. Treating only `desc` as explicit silently dropped `asc` links.
+  const direction: TableSortDirection =
+    rawDir === 'desc' || rawDir === 'asc' ? rawDir : defaultDirection;
   return { sortBy, direction };
 }
 
@@ -73,6 +76,27 @@ export function useTableSort<TCol extends string>(opts: {
 
   let sortBy = $state<TCol>(initial.sortBy);
   let direction = $state<TableSortDirection>(initial.direction);
+
+  // Keep in-memory sort aligned with the address bar when the user navigates
+  // browser history (back/forward). Without this, popstate leaves the URL and the
+  // visible ordering out of sync. Registered once; auto-removed on teardown.
+  if (opts.urlSync && typeof window !== 'undefined') {
+    $effect(() => {
+      function rereadFromUrl() {
+        const next = readSortFromUrl(
+          opts.allowed,
+          opts.defaultBy,
+          defaultDirection,
+          new URL(window.location.href).searchParams,
+          urlKeys
+        );
+        sortBy = next.sortBy;
+        direction = next.direction;
+      }
+      window.addEventListener('popstate', rereadFromUrl);
+      return () => window.removeEventListener('popstate', rereadFromUrl);
+    });
+  }
 
   function setSort(column: TCol, nextDirection: TableSortDirection) {
     sortBy = column;

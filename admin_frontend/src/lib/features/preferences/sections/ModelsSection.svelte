@@ -1,5 +1,4 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
@@ -7,10 +6,10 @@
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import ReloadCatalogButton from '$lib/features/preferences/widgets/ReloadCatalogButton.svelte';
   import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
-  import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
+  import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
+  import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -46,32 +45,21 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.modelsChat}
     >
-      <SingleModelPicker
+      <PrefModelPicker
+        {ctrl}
+        kind="chat"
+        path="llm.default_chat"
         embedded
         label="Default chat model"
-        hint=""
         selectedId={ctrl.draft.llm.default_chat}
-        catalogModels={ctrl.chatOptions}
-        catalogAllProviders={ctrl.catalogAllProviders}
-        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-        workspaceActiveProviderIds={ctrl.activeProvidersStore.chatActiveProviderIds}
-        busy={ctrl.busy}
-        emptyProviders="No chat providers in catalog."
-        emptyModelsForProvider="No chat models for this provider."
-        onSelect={(id) => ctrl.setDefaultModel('default_chat', id)}
-        onChange={ctrl.markDirty}
       />
-      <FormField label="Default chat model profile" class="max-w-md">
-        <select
-          class={ADMIN_SELECT_LG}
-          value={ctrl.draft.llm.default_tuning_profile}
-          onchange={(event) => ctrl.setDefaultTuningProfile('llm', event.currentTarget.value)}
-        >
-          {#each ctrl.profileEntries as [id, profile] (id)}
-            <option value={id}>{profile.label}</option>
-          {/each}
-        </select>
-      </FormField>
+      <TuningProfileSelect
+        {ctrl}
+        label="Default chat model profile"
+        class="max-w-md"
+        value={ctrl.draft.llm.default_tuning_profile}
+        scope="llm"
+      />
     </SectionCardMuted>
 
     <SectionCardMuted
@@ -80,20 +68,13 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.modelsStt}
     >
-      <SingleModelPicker
+      <PrefModelPicker
+        {ctrl}
+        kind="stt"
+        path="llm.default_stt"
         embedded
         label="Default speech-to-text model"
-        hint=""
         selectedId={ctrl.draft.llm.default_stt}
-        catalogModels={ctrl.sttOptions}
-        catalogAllProviders={ctrl.catalogAllProviders}
-        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-        workspaceActiveProviderIds={ctrl.activeProvidersStore.sttActiveProviderIds}
-        busy={ctrl.busy}
-        emptyProviders="No speech-to-text providers in catalog."
-        emptyModelsForProvider="No speech-to-text models for this provider."
-        onSelect={(id) => ctrl.setDefaultModel('default_stt', id)}
-        onChange={ctrl.markDirty}
       />
     </SectionCardMuted>
 
@@ -103,20 +84,13 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.modelsTts}
     >
-      <SingleModelPicker
+      <PrefModelPicker
+        {ctrl}
+        kind="tts"
+        path="llm.default_tts"
         embedded
         label="Default text-to-speech model"
-        hint=""
         selectedId={ctrl.draft.llm.default_tts}
-        catalogModels={ctrl.ttsOptions}
-        catalogAllProviders={ctrl.catalogAllProviders}
-        workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
-        workspaceActiveProviderIds={ctrl.activeProvidersStore.ttsActiveProviderIds}
-        busy={ctrl.busy}
-        emptyProviders="No text-to-speech providers in catalog."
-        emptyModelsForProvider="No text-to-speech models for this provider."
-        onSelect={(id) => ctrl.setDefaultModel('default_tts', id)}
-        onChange={ctrl.markDirty}
       />
     </SectionCardMuted>
   {/if}

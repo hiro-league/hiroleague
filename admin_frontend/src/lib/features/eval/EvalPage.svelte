@@ -9,6 +9,8 @@
   import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
   import { knowledgeEventStream } from '$lib/features/knowledge/shared/knowledge-event-stream.svelte';
   import { createEvalPreferences } from '$lib/preferences/eval-preferences.svelte';
+  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import ToastHost from '$lib/ui/ToastHost.svelte';
   import {
     createEvalModel,
     type EvalTrack
@@ -23,6 +25,7 @@
    */
   let error = $state<string | null>(null);
   const tabPrefs = createEvalPreferences();
+  const toasts = createToastNotifier();
   const eval_ = createEvalModel({ setError: (msg) => (error = msg) });
 
   onMount(() => {
@@ -99,5 +102,7 @@
     </div>
   {/if}
 
-  <EvalPanel {eval_} />
+  <EvalPanel {eval_} notify={toasts.notify} />
 </AdminPageHeader>
+
+<ToastHost toast={toasts.toast} />

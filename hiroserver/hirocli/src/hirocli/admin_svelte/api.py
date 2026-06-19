@@ -16,6 +16,7 @@ from hirocli.admin_svelte.routes.characters import characters_router
 from hirocli.admin_svelte.routes.chat_channels import chat_channels_router
 from hirocli.admin_svelte.routes.config import config_router
 from hirocli.admin_svelte.routes.devices import devices_router
+from hirocli.admin_svelte.routes.eval import eval_router
 from hirocli.admin_svelte.routes.events import events_router
 from hirocli.admin_svelte.routes.gateways import gateways_router
 from hirocli.admin_svelte.routes.graph_runs import graph_runs_router
@@ -34,6 +35,7 @@ api_router.include_router(workspaces_router)
 api_router.include_router(gateways_router)
 api_router.include_router(graph_runs_router)
 api_router.include_router(knowledge_router)
+api_router.include_router(eval_router)
 api_router.include_router(memory_router)
 api_router.include_router(config_router)
 api_router.include_router(catalog_router)

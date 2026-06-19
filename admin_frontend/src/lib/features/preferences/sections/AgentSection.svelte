@@ -9,6 +9,7 @@
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -65,25 +66,19 @@
         </span>
       </FormField>
 
-      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.chat.cite_sources}
-          disabled={ctrl.busy}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Cite knowledge sources in chat replies</span>
-      </label>
+      <SettingToggle
+        label="Cite knowledge sources in chat replies"
+        bind:checked={ctrl.draft.chat.cite_sources}
+        disabled={ctrl.busy}
+        onchange={ctrl.markDirty}
+      />
 
-      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.chat.tools_enabled}
-          disabled={ctrl.busy}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Enable agent tools in chat</span>
-      </label>
+      <SettingToggle
+        label="Enable agent tools in chat"
+        bind:checked={ctrl.draft.chat.tools_enabled}
+        disabled={ctrl.busy}
+        onchange={ctrl.markDirty}
+      />
     </SectionCardMuted>
 
     <!-- Consolidated here from the removed "Agent Memory" tab — these toggles bound to the same
@@ -95,45 +90,28 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.memoryRetrieval}
     >
-      <label class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3">
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.memory.enabled}
-          disabled={ctrl.busy}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Enable agent memory</span>
-      </label>
+      <SettingToggle
+        label="Enable agent memory"
+        bind:checked={ctrl.draft.memory.enabled}
+        disabled={ctrl.busy}
+        onchange={ctrl.markDirty}
+      />
 
-      <label
-        class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3 {!ctrl
-          .draft.memory.enabled
-          ? 'opacity-50'
-          : ''}"
-      >
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.memory.extraction.enabled}
-          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Remember new facts after each reply</span>
-      </label>
+      <SettingToggle
+        label="Remember new facts after each reply"
+        bind:checked={ctrl.draft.memory.extraction.enabled}
+        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+        class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
+        onchange={ctrl.markDirty}
+      />
 
-      <label
-        class="flex min-h-10 items-center gap-3 rounded-md border border-border/50 bg-card/45 px-3 {!ctrl
-          .draft.memory.enabled
-          ? 'opacity-50'
-          : ''}"
-      >
-        <input
-          type="checkbox"
-          bind:checked={ctrl.draft.memory.search.enabled}
-          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-          onchange={ctrl.markDirty}
-        />
-        <span class="font-sans text-sm font-medium">Recall memories before each reply</span>
-      </label>
+      <SettingToggle
+        label="Recall memories before each reply"
+        bind:checked={ctrl.draft.memory.search.enabled}
+        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+        class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
+        onchange={ctrl.markDirty}
+      />
 
       <FormField label="Memories to recall (top K)" class="max-w-xs">
         <input

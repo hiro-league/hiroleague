@@ -6,7 +6,7 @@
  * panel keeps the reactive `$state` (sort key/dir, filters) and passes it in at each call site.
  */
 import type { EvalRow } from '$lib/features/eval/state/eval-model.svelte';
-import type { EvalCategoryStat } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalCategoryStat } from '$lib/features/eval/shared/eval-events';
 import { markLabel } from '$lib/features/eval/shared/eval-display';
 import { timeMs } from '$lib/features/eval/shared/eval-format';
 

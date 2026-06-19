@@ -29,6 +29,8 @@
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import type { WorkspacePreferences } from '$lib/api/preferences';
+  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { cn } from '$lib/utils';
 
   interface Props {
     eval_: EvalModel;
@@ -260,7 +262,7 @@
       <input
         type="number"
         min="1"
-        class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
+        class={cn(ADMIN_INPUT, 'h-8 w-20')}
         value={eval_.episodeFrom}
         oninput={(e) => (eval_.episodeFrom = e.currentTarget.valueAsNumber)}
         disabled={isBusy}
@@ -270,7 +272,7 @@
       <input
         type="number"
         min="0"
-        class="h-8 w-20 rounded-md border bg-background px-2 text-sm"
+        class={cn(ADMIN_INPUT, 'h-8 w-20')}
         value={eval_.episodeTo}
         oninput={(e) => (eval_.episodeTo = e.currentTarget.valueAsNumber)}
         disabled={isBusy}
@@ -344,7 +346,7 @@
         type="number"
         min="1"
         max={eval_.questionConcurrencyMax}
-        class="h-8 w-16 rounded-md border bg-background px-2 text-sm"
+        class={cn(ADMIN_INPUT, 'h-8 w-16')}
         value={eval_.questionConcurrency}
         oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
         disabled={isBusy || eval_.selectedCount === 0}
@@ -358,7 +360,7 @@
     >
       <span class="text-muted-foreground">Answer prompt</span>
       <select
-        class="h-8 rounded-md border bg-background px-2 text-sm"
+        class={cn(ADMIN_SELECT, 'h-8')}
         value={eval_.answerPromptId}
         onchange={(e) => (eval_.answerPromptId = e.currentTarget.value)}
         disabled={isBusy}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { activityHeaderLine } from './eval-activity';
 import type { EvalRow } from '$lib/features/eval/state/eval-model.svelte';
-import type { EvalSetupProgressPayload } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalSetupProgressPayload } from '$lib/features/eval/shared/eval-events';
 
 function memoryRow(index: number, question: string, mark = ''): EvalRow {
   return {

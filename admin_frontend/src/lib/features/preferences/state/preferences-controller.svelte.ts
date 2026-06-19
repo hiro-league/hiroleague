@@ -27,8 +27,13 @@ import {
 } from '$lib/api/knowledge';
 import type { ThinkingValue } from '$lib/features/preferences/shared/preferences-constants';
 import {
+  applyModelIdToDraft,
+  type PrefModelIdPath
+} from '$lib/features/preferences/shared/preferences-model-picker';
+import {
   cloneWorkspacePreferences,
-  editsForSave
+  editsForSave,
+  preferencesAreDirty
 } from '$lib/features/preferences/state/preferences-edits';
 import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
 import type { ToastKind } from '$lib/ui/toast-types';
@@ -76,7 +81,7 @@ export function createPreferencesController(notify: Notify) {
 
   const dirty = $derived.by(() => {
     if (forceClean || !baseline || !draft) return false;
-    return JSON.stringify(baseline) !== JSON.stringify(draft);
+    return preferencesAreDirty(baseline, draft);
   });
 
   const canSave = $derived(dirty && !busy && !loading);
@@ -114,72 +119,9 @@ export function createPreferencesController(notify: Notify) {
     forceClean = false;
   }
 
-  function setDefaultModel(path: 'default_chat' | 'default_stt' | 'default_tts', id: string | null) {
+  function setModelId(path: PrefModelIdPath, id: string | null) {
     if (!draft) return;
-    draft.llm[path] = id;
-    markDirty();
-  }
-
-  function setKnowledgeEmbeddingModel(id: string | null) {
-    if (!draft || draft.knowledge.default_embedding_model_locked) return;
-    draft.knowledge.default_embedding_model = id;
-    markDirty();
-  }
-
-  function setKnowledgeAnswerModel(id: string | null) {
-    if (!draft) return;
-    draft.knowledge.answering.model = id;
-    markDirty();
-  }
-
-  function setKnowledgeRerankerEnabled(enabled: boolean) {
-    if (!draft) return;
-    draft.knowledge.retrieval.reranker.enabled = enabled;
-    markDirty();
-  }
-
-  function setKnowledgeRerankerModel(id: string | null) {
-    if (!draft) return;
-    draft.knowledge.retrieval.reranker.model_id = id;
-    markDirty();
-  }
-
-  function setKnowledgeGraphExtractionModel(id: string | null) {
-    if (!draft) return;
-    draft.graph.extraction_model = id;
-    markDirty();
-  }
-
-  function setKnowledgeGraphSmallModel(id: string | null) {
-    if (!draft) return;
-    draft.graph.small_model = id;
-    markDirty();
-  }
-
-  // Eval answer + judge models are SEPARATE (each its own model + tuning profile). null = fall
-  // back to the knowledge answering model.
-  function setEvalAnswerModel(id: string | null) {
-    if (!draft) return;
-    draft.graph.eval.answer_model = id;
-    markDirty();
-  }
-
-  function setEvalJudgeModel(id: string | null) {
-    if (!draft) return;
-    draft.graph.eval.judge_model = id;
-    markDirty();
-  }
-
-  function setKnowledgeGraphEmbedderModel(id: string | null) {
-    if (!draft) return;
-    draft.graph.embedder_model = id;
-    markDirty();
-  }
-
-  function setKnowledgeGraphRerankerModel(id: string | null) {
-    if (!draft) return;
-    draft.graph.reranker.model_id = id;
-    markDirty();
+    if (applyModelIdToDraft(draft, path, id)) markDirty();
   }
 
   // Model ids currently being polled by this browser session (so resume + click never
@@ -501,17 +443,7 @@ export function createPreferencesController(notify: Notify) {
     sectionLabel,
     sectionDescription,
     markDirty,
-    setDefaultModel,
-    setKnowledgeEmbeddingModel,
-    setKnowledgeAnswerModel,
-    setKnowledgeRerankerEnabled,
-    setKnowledgeRerankerModel,
-    setKnowledgeGraphExtractionModel,
-    setKnowledgeGraphSmallModel,
-    setKnowledgeGraphEmbedderModel,
-    setKnowledgeGraphRerankerModel,
-    setEvalAnswerModel,
-    setEvalJudgeModel,
+    setModelId,
     downloadReranker,
     cancelReranker,
     setDefaultTuningProfile,

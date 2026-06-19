@@ -8,6 +8,7 @@
   import { tick } from 'svelte';
   import { ChevronDown, ChevronRight, Trash2 } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { fmtCost, pct } from '$lib/features/eval/shared/eval-format';
   import { orderedDifficulty } from '$lib/features/eval/shared/eval-display';
   import EvalBreakdownTable from '$lib/features/eval/report/EvalBreakdownTable.svelte';
@@ -16,14 +17,17 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
+  import { ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
 
   interface Props {
     eval_: EvalModel;
     cfg: EvalTrackConfig;
     /** Open the Clear-results flow (memory: confirm dialog; knowledge: immediate in-view reset). */
     onRequestClear: () => void;
+    /** Select corpus — may prompt on knowledge track; resolves when applied or cancelled. */
+    onSelectCorpus: (id: string) => Promise<boolean>;
   }
-  let { eval_, cfg, onRequestClear }: Props = $props();
+  let { eval_, cfg, onRequestClear, onSelectCorpus }: Props = $props();
 
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
@@ -42,7 +46,8 @@
   let benchTableCollapsed = $state(false);
   let reportDetailEl = $state<HTMLElement | null>(null);
   async function selectCorpusAndScroll(id: string) {
-    eval_.selectCorpus(id);
+    const ok = await onSelectCorpus(id);
+    if (!ok) return;
     await tick(); // let the detail render for the newly selected corpus before scrolling
     reportDetailEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -91,14 +96,14 @@
       <span class="text-sm font-semibold">{bench.benchmark.label} · By corpus</span>
     </button>
     {#if !benchTableCollapsed}
-      <table class="mt-1 w-full border-collapse font-sans text-sm">
-        <thead class="bg-muted text-[11px] uppercase tracking-wide text-muted-foreground">
+      <AdminTableShell class="mt-1">
+        <thead class={ADMIN_TABLE_HEAD}>
           <tr>
-            <th class="border-b px-2 py-1 text-left">Corpus</th>
-            <th class="border-b px-2 py-1 text-right">Answered</th>
-            <th class="border-b px-2 py-1 text-right">Pass</th>
-            <th class="border-b px-2 py-1 text-right">Score</th>
-            <th class="border-b px-2 py-1 text-right">Cost</th>
+            <th class="px-3 py-2 text-left">Corpus</th>
+            <th class="px-3 py-2 text-right">Answered</th>
+            <th class="px-3 py-2 text-right">Pass</th>
+            <th class="px-3 py-2 text-right">Score</th>
+            <th class="px-3 py-2 text-right">Cost</th>
           </tr>
         </thead>
         <tbody>
@@ -107,16 +112,16 @@
             {@const pass = c.summary?.passing?.recall ?? 0}
             {@const score = c.summary?.scoring?.recall ?? 0}
             <tr
-              class="cursor-pointer border-b hover:bg-muted/40 {c.corpus_id === eval_.selectedCorpusId
+              class="cursor-pointer border-t hover:bg-muted/40 {c.corpus_id === eval_.selectedCorpusId
                 ? 'bg-primary/5'
                 : ''}"
               onclick={() => void selectCorpusAndScroll(c.corpus_id)}
             >
-              <td class="px-2 py-1">{c.label}</td>
-              <td class="px-2 py-1 text-right tabular-nums">{ans}/{c.bank_questions}</td>
-              <td class="px-2 py-1 text-right tabular-nums">{ans ? pct(pass, ans) : '—'}</td>
-              <td class="px-2 py-1 text-right tabular-nums">{ans ? pct(score, ans) : '—'}</td>
-              <td class="px-2 py-1 text-right tabular-nums"
+              <td class="px-3 py-1.5">{c.label}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{ans}/{c.bank_questions}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{ans ? pct(pass, ans) : '—'}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{ans ? pct(score, ans) : '—'}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums"
                 >{c.has_results ? fmtCost(c.summary?.total_cost_usd) : '—'}</td
               >
             </tr>
@@ -129,15 +134,15 @@
           {@const tscore = bench.total.scoring?.recall ?? 0}
           <tfoot>
             <tr class="border-t-2 font-semibold">
-              <td class="px-2 py-1">TOTAL</td>
-              <td class="px-2 py-1 text-right tabular-nums">{tans}/{tbank}</td>
-              <td class="px-2 py-1 text-right tabular-nums">{tans ? pct(tpass, tans) : '—'}</td>
-              <td class="px-2 py-1 text-right tabular-nums">{tans ? pct(tscore, tans) : '—'}</td>
-              <td class="px-2 py-1 text-right tabular-nums">{fmtCost(bench.total.total_cost_usd)}</td>
+              <td class="px-3 py-1.5">TOTAL</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{tans}/{tbank}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{tans ? pct(tpass, tans) : '—'}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{tans ? pct(tscore, tans) : '—'}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{fmtCost(bench.total.total_cost_usd)}</td>
             </tr>
           </tfoot>
         {/if}
-      </table>
+      </AdminTableShell>
       <p class="mt-1 font-sans text-[11px] text-muted-foreground">
         Click a corpus to load its detailed breakdown below.
       </p>

@@ -1,10 +1,10 @@
 /**
- * Pure builder for the `POST /knowledge/eval/run` request body. Extracted from the model's `start`
+ * Pure builder for the `POST /eval/run` request body. Extracted from the model's `start`
  * so the per-track field split — and especially the 1-based-inclusive → 0-based offset/limit
  * episode-window math — is isolated and unit-testable, separate from the run lifecycle's `$state`.
  */
-import type { EvalCorpus, EvalRunRequest } from '$lib/api/knowledge';
-import type { EvalLeg } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalCorpus, EvalRunRequest } from '$lib/api/eval';
+import type { EvalLeg } from '$lib/features/eval/shared/eval-events';
 import type { EvalTrack } from '$lib/features/eval/state/eval-model.svelte';
 
 export type BuildEvalRunRequestParams = {

@@ -9,14 +9,14 @@ const h = vi.hoisted(() => ({
   state: { data: null as unknown }
 }));
 
-vi.mock('$lib/features/knowledge/shared/knowledge-events', () => ({
-  connectKnowledgeEvalEvents: (handlers: Record<string, (p: unknown) => void>) => {
+vi.mock('$lib/features/eval/shared/eval-events', () => ({
+  connectEvalEvents: (handlers: Record<string, (p: unknown) => void>) => {
     h.handlers = handlers;
     return h.teardown;
   }
 }));
 
-vi.mock('$lib/api/knowledge', () => ({
+vi.mock('$lib/api/eval', () => ({
   cancelKnowledgeEval: (...args: unknown[]) => h.cancel(...(args as [])),
   getKnowledgeEvalState: async () => h.state
 }));

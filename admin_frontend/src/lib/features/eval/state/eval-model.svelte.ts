@@ -5,11 +5,11 @@
  * init/teardown), and wires the seams between the sub-controllers. The flat public surface is
  * preserved so the panes consume `eval_.<field>` exactly as before.
  *
- * Source of truth for the run is SERVER-SIDE (``GET /knowledge/eval/state``), not sessionStorage:
+ * Source of truth for the run is SERVER-SIDE (``GET /eval/state``), not sessionStorage:
  * on mount we subscribe (so an in-flight run keeps streaming) then hydrate from the server, which
  * makes the panel survive navigation mid-run and show the SAME run across origins (Vite vs packaged).
  */
-import { runKnowledgeEval } from '$lib/api/knowledge';
+import { runKnowledgeEval } from '$lib/api/eval';
 import { buildEvalRunRequest } from '$lib/features/eval/shared/eval-request';
 import { EVAL_ALL_LEGS } from '$lib/features/eval/shared/eval-legs';
 import type { EvalTrack } from '$lib/features/eval/shared/eval-row';
@@ -111,33 +111,43 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
   }
 
   /** Select a corpus. Memory results are PERSISTED per corpus, so switching loses nothing — reset
-   *  the live view silently. Knowledge results aren't persisted, so confirm before abandoning a
-   *  completed/failed run (a fresh/idle panel switches without a prompt; Cancel aborts the switch).
-   *  Then commit the id, restore the per-corpus setup, and reload the bank + results. */
-  function selectCorpus(id: string) {
+   *  the live view silently. Knowledge results aren't persisted — use `trySelectCorpus` + confirm
+   *  dialog before `commitSelectCorpus` when abandoning a completed/failed run. */
+  function needsCorpusSwitchConfirm(id: string): boolean {
+    if (corpus.selectedCorpusId === id) return false;
+    if (track === 'memory') return false;
+    const hasResults = run.rows.length > 0 || run.summary !== null || run.failureMessage !== null;
+    return hasResults && run.status !== 'starting' && run.status !== 'running';
+  }
+
+  function commitSelectCorpus(id: string) {
     if (corpus.selectedCorpusId === id) return;
-    if (track === 'memory') {
-      run.resetRunState();
-    } else {
-      const hasResults = run.rows.length > 0 || run.summary !== null || run.failureMessage !== null;
-      if (hasResults && run.status !== 'starting' && run.status !== 'running') {
-        const ok = confirm('Switching corpus will clear the previous run’s results. Continue?');
-        if (!ok) return;
-        run.resetRunState();
-      }
-    }
+    // Clear in-view run; memory reloads persisted results via loadQuestions → reloadResults.
+    run.resetRunState();
     corpus.setSelectedCorpusId(id);
     setup.restoreAnswerPrompt(id);
     setup.applyRebuildDefaultForCorpus();
     void corpus.loadQuestions();
   }
 
-  /** Switch benchmark → select that benchmark's first corpus (routes through selectCorpus so the
+  /** Apply immediately when no confirm is needed; return false when the UI must prompt first. */
+  function trySelectCorpus(id: string): boolean {
+    if (corpus.selectedCorpusId === id) return true;
+    if (needsCorpusSwitchConfirm(id)) return false;
+    commitSelectCorpus(id);
+    return true;
+  }
+
+  function selectCorpus(id: string) {
+    void trySelectCorpus(id);
+  }
+
+  /** Switch benchmark → select that benchmark's first corpus (routes through trySelectCorpus so the
    *  question bank, answer-prompt, and Rebuild-graph default all refresh as on any corpus change). */
   function selectBenchmark(id: string) {
     if (corpus.selectedBenchmarkId === id) return;
     const first = corpus.corpuses.find((c) => c.benchmark === id);
-    if (first) selectCorpus(first.id);
+    if (first) trySelectCorpus(first.id);
   }
 
   /** Mount hook: subscribe (so an already-running eval keeps streaming) then replay the server's
@@ -361,6 +371,9 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
       return corpus.selectedCorpus;
     },
     selectCorpus,
+    trySelectCorpus,
+    commitSelectCorpus,
+    needsCorpusSwitchConfirm,
     get questions() {
       return corpus.questions;
     },

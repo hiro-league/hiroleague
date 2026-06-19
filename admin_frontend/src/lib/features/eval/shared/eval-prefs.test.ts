@@ -20,7 +20,9 @@ import {
   readCorpusPref,
   writeCorpusPref,
   readAnswerPromptPref,
-  writeAnswerPromptPref
+  writeAnswerPromptPref,
+  readCorpusMarkdownPref,
+  writeCorpusMarkdownPref
 } from './eval-prefs';
 
 describe('readEvalInt', () => {
@@ -77,5 +79,15 @@ describe('per-corpus answer-prompt pref', () => {
     writeAnswerPromptPref('c1', 'terse');
     writeAnswerPromptPref('c1', '');
     expect(readAnswerPromptPref('c1')).toBe('');
+  });
+});
+
+describe('corpus markdown pref', () => {
+  it('round-trips enabled/disabled', () => {
+    expect(readCorpusMarkdownPref()).toBe(false);
+    writeCorpusMarkdownPref(true);
+    expect(readCorpusMarkdownPref()).toBe(true);
+    writeCorpusMarkdownPref(false);
+    expect(readCorpusMarkdownPref()).toBe(false);
   });
 });

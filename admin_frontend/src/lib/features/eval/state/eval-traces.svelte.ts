@@ -15,11 +15,12 @@ import {
   type IngestTraceRecord,
   type RetrievalTraceRecord
 } from '$lib/api/graph-runs';
-import { exportEvalResultsLocomo } from '$lib/api/knowledge';
+import { exportEvalResultsLocomo } from '$lib/api/eval';
 import { seedGraphEpisodeFocus } from '$lib/features/knowledge/graph/knowledge-graph-prefs';
 import { formatEvalRowForAI } from '$lib/features/eval/shared/eval-clipboard';
 import type { EvalRow } from '$lib/features/eval/shared/eval-row';
 import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
+import type { ToastKind } from '$lib/ui/toast-types';
 
 /** Narrow read-seam back to the panel: the model + the (prefs-derived) compact engine line that
  *  the per-row "Copy for AI" brief embeds. Kept as accessors so they stay reactive. */
@@ -27,10 +28,13 @@ export type EvalTracesCtx = {
   eval_: EvalModel;
   /** Compact engine line for the copy brief (derived from prefs in the panel). */
   getAiEngine: () => string;
+  /** Canonical toast notifier from the host page (transient trace/copy/export feedback). */
+  getNotify: () => (kind: ToastKind, message: string) => void;
 };
 
 export function createEvalTraces(ctx: EvalTracesCtx) {
   const { eval_ } = ctx;
+  const notify = (kind: ToastKind, message: string) => ctx.getNotify()(kind, message);
 
   // --- Retrieval pipeline trace (graph legs only) -------------------------------------------
   let activeTrace = $state<RetrievalTraceRecord | null>(null);
@@ -38,10 +42,8 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
   let activeTraceIdeal = $state('');
   let activeTraceAnswer = $state('');
   let traceLoadingRunId = $state<string | null>(null);
-  let traceError = $state<string | null>(null);
 
   async function openTrace(runId: string, ideal = '', answer = '') {
-    traceError = null;
     traceLoadingRunId = runId;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
@@ -52,10 +54,13 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
         activeTraceIdeal = ideal;
         activeTraceAnswer = answer;
       } else {
-        traceError = 'No retrieval trace recorded for this run (graph tracing may have been off).';
+        notify(
+          'error',
+          'No retrieval trace recorded for this run (graph tracing may have been off).'
+        );
       }
     } catch (err) {
-      traceError = err instanceof Error ? err.message : 'Failed to load retrieval trace.';
+      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
     } finally {
       traceLoadingRunId = null;
     }
@@ -72,10 +77,8 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
   let ingestTraces = $state<IngestTraceRecord[]>([]);
   let ingestTraceIndex = $state(0);
   let ingestTraceLoading = $state(false);
-  let ingestTraceError = $state<string | null>(null);
 
   async function openIngestTrace(runId: string) {
-    ingestTraceError = null;
     ingestTraceLoading = true;
     try {
       const res = await getGraphRunIngestTrace(runId);
@@ -85,10 +88,10 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
         ingestTraceIndex = 0;
         activeIngestTrace = traces[0];
       } else {
-        ingestTraceError = 'No ingest trace recorded for this run (graph tracing may have been off).';
+        notify('error', 'No ingest trace recorded for this run (graph tracing may have been off).');
       }
     } catch (err) {
-      ingestTraceError = err instanceof Error ? err.message : 'Failed to load ingest trace.';
+      notify('error', err instanceof Error ? err.message : 'Failed to load ingest trace.');
     } finally {
       ingestTraceLoading = false;
     }
@@ -102,13 +105,15 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     runId: string;
     stepIndex: number | '';
   }) {
-    ingestTraceError = null;
     ingestTraceLoading = true;
     try {
       const res = await getGraphRunIngestTrace(info.runId);
       const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
       if (traces.length === 0) {
-        ingestTraceError = 'No ingest trace recorded for this episode (graph tracing may have been off).';
+        notify(
+          'error',
+          'No ingest trace recorded for this episode (graph tracing may have been off).'
+        );
         return;
       }
       let idx = traces.findIndex((t) => t.chunk_id === info.id);
@@ -118,7 +123,7 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
       ingestTraceIndex = idx >= 0 ? idx : 0;
       activeIngestTrace = traces[ingestTraceIndex];
     } catch (err) {
-      ingestTraceError = err instanceof Error ? err.message : 'Failed to load ingest trace.';
+      notify('error', err instanceof Error ? err.message : 'Failed to load ingest trace.');
     } finally {
       ingestTraceLoading = false;
     }
@@ -151,10 +156,8 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
 
   // --- Per-row "Copy for AI" ----------------------------------------------------------------
   let copiedRow = $state<number | null>(null);
-  let copyError = $state<string | null>(null);
 
   async function copyRowForAI(r: EvalRow) {
-    copyError = null;
     try {
       const text = formatEvalRowForAI({
         row: r,
@@ -170,21 +173,17 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
         if (copiedRow === r.index) copiedRow = null;
       }, 1500);
     } catch (err) {
-      copyError = err instanceof Error ? err.message : 'Could not copy to clipboard.';
+      notify('error', `Copy for AI failed: ${err instanceof Error ? err.message : 'Could not copy to clipboard.'}`);
     }
   }
 
   // --- LoCoMo export (memory track) ---------------------------------------------------------
   let exportingLocomo = $state(false);
-  let locomoExportError = $state<string | null>(null);
-  let locomoExportNotice = $state<string | null>(null);
 
   async function exportLocomoResults() {
     const corpus = eval_.selectedCorpus;
     if (!corpus) return;
     exportingLocomo = true;
-    locomoExportError = null;
-    locomoExportNotice = null;
     try {
       const res = await exportEvalResultsLocomo(corpus.id, corpus.questions_path);
       const blob = new Blob([res.data.content], { type: 'application/json' });
@@ -196,14 +195,17 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      locomoExportNotice = `${res.data.exported_count}/${res.data.total_count} LoCoMo rows exported${
-        res.data.partial ? ' (partial)' : ''
-      }.`;
-      setTimeout(() => {
-        locomoExportNotice = null;
-      }, 3500);
+      notify(
+        'success',
+        `${res.data.exported_count}/${res.data.total_count} LoCoMo rows exported${
+          res.data.partial ? ' (partial)' : ''
+        }.`
+      );
     } catch (err) {
-      locomoExportError = err instanceof Error ? err.message : 'Could not export LoCoMo results.';
+      notify(
+        'error',
+        `LoCoMo export failed: ${err instanceof Error ? err.message : 'Could not export LoCoMo results.'}`
+      );
     } finally {
       exportingLocomo = false;
     }
@@ -223,9 +225,6 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     get traceLoadingRunId() {
       return traceLoadingRunId;
     },
-    get traceError() {
-      return traceError;
-    },
     openTrace,
     closeTrace,
     // Ingest trace surface.
@@ -241,9 +240,6 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     get ingestTraceLoading() {
       return ingestTraceLoading;
     },
-    get ingestTraceError() {
-      return ingestTraceError;
-    },
     openIngestTrace,
     openIngestTraceForEpisode,
     stepIngestTrace,
@@ -253,19 +249,10 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     get copiedRow() {
       return copiedRow;
     },
-    get copyError() {
-      return copyError;
-    },
     copyRowForAI,
     // LoCoMo export surface.
     get exportingLocomo() {
       return exportingLocomo;
-    },
-    get locomoExportError() {
-      return locomoExportError;
-    },
-    get locomoExportNotice() {
-      return locomoExportNotice;
     },
     exportLocomoResults
   };

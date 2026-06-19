@@ -19,6 +19,7 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import { ADMIN_INPUT, ADMIN_SEARCH_FIELD } from '$lib/styling/admin-tokens';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
   import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import { cn } from '$lib/utils';
   import { LOG_LEVELS, LOG_TIME_RANGES } from '$lib/api/logs';
@@ -300,11 +301,7 @@
 {#if ctrl.error}
   <InlineDestructiveAlert message={ctrl.error} class="px-3 py-2 text-sm" />
 {:else if ctrl.pollError}
-  <div
-    class="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 font-sans text-sm text-amber-700 dark:text-amber-300"
-  >
-    {ctrl.pollError}
-  </div>
+  <InlineWarningAlert message={ctrl.pollError} class="px-3 py-2 text-sm" />
 {/if}
 
 <AdminMasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">

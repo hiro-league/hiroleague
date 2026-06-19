@@ -5,16 +5,21 @@ import {
   type MetricsTickResponse,
   type MetricsUiFrame
 } from '$lib/api/metrics';
+import type { Notify } from '$lib/ui/toast-types';
+import { appendMetricsChartPoint, type MetricsChartPoint } from '../shared/metrics-chart';
 import {
-  appendMetricsChartPoint,
-  type MetricsChartPoint
-} from '../shared/metrics-chart';
+  emptyMetricsChartSeries,
+  METRICS_CHART_BINDINGS,
+  type MetricsChartSeriesKey
+} from '../shared/metrics-chart-series';
 
+/** UI refresh cadence — independent of the server-side sample interval (`intervalValue`). */
 const POLL_INTERVAL_MS = 2000;
 
 export type MetricsController = ReturnType<typeof createMetricsController>;
 
-export function createMetricsController() {
+export function createMetricsController(opts: { notify: Notify }) {
+  const { notify } = opts;
   let tickData = $state<MetricsTickResponse | null>(null);
   let frame = $state<MetricsUiFrame | null>(null);
   let enabled = $state(true);
@@ -26,15 +31,9 @@ export function createMetricsController() {
   let initialized = false;
   let polling = $state(false);
 
-  let procCpu = $state<MetricsChartPoint[]>([]);
-  let procRss = $state<MetricsChartPoint[]>([]);
-  let procThreads = $state<MetricsChartPoint[]>([]);
-  let diskRead = $state<MetricsChartPoint[]>([]);
-  let diskWrite = $state<MetricsChartPoint[]>([]);
-  let netSent = $state<MetricsChartPoint[]>([]);
-  let netRecv = $state<MetricsChartPoint[]>([]);
-  let sysCpu = $state<MetricsChartPoint[]>([]);
-  let sysMem = $state<MetricsChartPoint[]>([]);
+  let chartSeries = $state<Record<MetricsChartSeriesKey, MetricsChartPoint[]>>(
+    emptyMetricsChartSeries()
+  );
 
   const available = $derived(tickData?.available ?? false);
   const statusText = $derived(tickData?.status_text ?? 'Loading metrics...');
@@ -43,21 +42,25 @@ export function createMetricsController() {
     !available ? 'destructive' : !enabled ? 'outline' : pollError ? 'warning' : 'success'
   );
 
+  function clearChartSeries() {
+    chartSeries = emptyMetricsChartSeries();
+  }
+
+  function chartSeriesFor(key: MetricsChartSeriesKey) {
+    return chartSeries[key];
+  }
+
   function applyFrame(nextFrame: MetricsUiFrame) {
     frame = nextFrame;
     const chart = nextFrame.chart;
     const ts = chart.ts_ms;
-    if (procCpu.at(-1)?.ts === ts) return;
+    if (chartSeries.procCpu.at(-1)?.ts === ts) return;
 
-    procCpu = appendMetricsChartPoint(procCpu, ts, chart.proc_cpu);
-    procRss = appendMetricsChartPoint(procRss, ts, chart.proc_rss_mb);
-    procThreads = appendMetricsChartPoint(procThreads, ts, chart.proc_threads);
-    diskRead = appendMetricsChartPoint(diskRead, ts, chart.disk_read_kb);
-    diskWrite = appendMetricsChartPoint(diskWrite, ts, chart.disk_write_kb);
-    netSent = appendMetricsChartPoint(netSent, ts, chart.net_sent_kb);
-    netRecv = appendMetricsChartPoint(netRecv, ts, chart.net_recv_kb);
-    sysCpu = appendMetricsChartPoint(sysCpu, ts, chart.sys_cpu);
-    sysMem = appendMetricsChartPoint(sysMem, ts, chart.sys_mem_pct);
+    const next = { ...chartSeries };
+    for (const { stateKey, chartKey } of METRICS_CHART_BINDINGS) {
+      next[stateKey] = appendMetricsChartPoint(next[stateKey], ts, chart[chartKey]);
+    }
+    chartSeries = next;
   }
 
   async function loadTick(syncControls = false) {
@@ -74,8 +77,9 @@ export function createMetricsController() {
       }
       if (data.frame) {
         applyFrame(data.frame);
-      } else if (!data.enabled) {
+      } else {
         frame = null;
+        clearChartSeries();
       }
     } catch (err) {
       pollError = err instanceof Error ? err.message : 'Metrics polling failed.';
@@ -98,7 +102,12 @@ export function createMetricsController() {
       intervalValue = payload.data.interval;
       await loadTick(true);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to update metrics configuration.';
+      const message =
+        err instanceof Error ? err.message : 'Failed to update metrics configuration.';
+      error = message;
+      notify('error', message);
+      // Resync toolbar controls from the server after optimistic checkbox/slider edits.
+      await loadTick(true);
     } finally {
       applying = false;
     }
@@ -163,33 +172,7 @@ export function createMetricsController() {
     get children() {
       return children;
     },
-    get procCpu() {
-      return procCpu;
-    },
-    get procRss() {
-      return procRss;
-    },
-    get procThreads() {
-      return procThreads;
-    },
-    get diskRead() {
-      return diskRead;
-    },
-    get diskWrite() {
-      return diskWrite;
-    },
-    get netSent() {
-      return netSent;
-    },
-    get netRecv() {
-      return netRecv;
-    },
-    get sysCpu() {
-      return sysCpu;
-    },
-    get sysMem() {
-      return sysMem;
-    },
+    chartSeriesFor,
     loadTick,
     onEnabledChange,
     onIntervalInput,

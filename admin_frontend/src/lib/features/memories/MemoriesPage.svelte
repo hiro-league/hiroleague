@@ -16,14 +16,22 @@
   // component still lives under features/knowledge/graph (it renders the
   // knowledge entity graph); the Memories controller owns its model + live SSE.
   import KnowledgeGraphPanel from '$lib/features/knowledge/graph/KnowledgeGraphPanel.svelte';
+  import { createKnowledgeGraphModel } from '$lib/features/knowledge/state/knowledge-graph.svelte';
   import { createMemoriesPageController } from './state/memories-controller.svelte';
 
   const tabPrefs = createMemoriesPreferences();
   const ctl = createMemoriesPageController();
 
+  // The entity-graph viz (second tab) is a self-contained knowledge model owned here, not by the
+  // memories controller. Its live SSE runs at the page level so deltas keep accumulating even
+  // while the user is on the Memories tab; the panel still owns rendering + its initial load.
+  let graphError = $state<string | null>(null);
+  const graph = createKnowledgeGraphModel({ setError: (msg) => (graphError = msg) });
+
   onMount(() => {
     tabPrefs.initialize();
-    return ctl.mount();
+    ctl.mount();
+    return graph.connectEvents();
   });
 
   afterNavigate(() => {
@@ -66,20 +74,17 @@
     />
   {/snippet}
 
-  {#if tabPrefs.activeTab === 'graph' && ctl.graphError}
-    <InlineDestructiveAlert message={ctl.graphError} />
+  {#if tabPrefs.activeTab === 'graph' && graphError}
+    <InlineDestructiveAlert message={graphError} />
   {/if}
 
   {#if tabPrefs.activeTab === 'graph'}
-    <KnowledgeGraphPanel graph={ctl.graph} />
+    <KnowledgeGraphPanel {graph} />
   {:else}
     <MemoriesPanel
-      bind:memorySearch={ctl.memorySearch}
-      bind:memoryFilterGroupId={ctl.memoryFilterGroupId}
-      bind:memoryFilterCharacterId={ctl.memoryFilterCharacterId}
-      bind:memoryFilterSource={ctl.memoryFilterSource}
-      bind:memoryFilterDateFrom={ctl.memoryFilterDateFrom}
-      bind:memoryFilterDateTo={ctl.memoryFilterDateTo}
+      filters={ctl.filters}
+      setFilter={ctl.setFilter}
+      sort={ctl.sort}
       hidden={false}
       memoriesError={ctl.memoriesError}
       memoriesLoading={ctl.memoriesLoading}

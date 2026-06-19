@@ -4,8 +4,8 @@
  * ingestion-status dot. Side-effect-free (value in → display value out) so they can be unit-tested
  * and shared across the eval panels without pulling in component state.
  */
-import type { EvalCorpus } from '$lib/api/knowledge';
-import type { EvalCategoryStat } from '$lib/features/knowledge/shared/knowledge-events';
+import type { EvalCorpus } from '$lib/api/eval';
+import type { EvalCategoryStat } from '$lib/features/eval/shared/eval-events';
 import { EVAL_LEG_LABEL } from '$lib/features/eval/shared/eval-legs';
 
 /** Corpus-picker ingestion status (memory track) — a colored dot + word before each option:
