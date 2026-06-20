@@ -33,8 +33,13 @@ from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
-from .agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED, ChatAgentGraph
-from .agent_graph.base import BaseAgentGraph, _normalize_reply_content
+from .agent_graph import (
+    GRAPH_RUN_COMPLETED,
+    GRAPH_RUN_FAILED,
+    AgentServices,
+    ChatAgentGraph,
+    ChatGraphConfig,
+)
 from .agent_graph.ledger import RunAccumulator, current_run
 from .agent_graph.tracing import langsmith_run_id
 from .comm_log import (
@@ -61,7 +66,6 @@ log = Logger.get("AGENT")
 # Keep the public helpers the old test surface imports.
 __all__ = [
     "AgentManager",
-    "_normalize_reply_content",
     "_audio_extension_for_media_type",
     "_reply_content_type",
 ]
@@ -132,7 +136,7 @@ class AgentManager:
         self._memory: "MemoryService | None" = None
         self._credentials = None
         self._checkpointer = None
-        self._graph: BaseAgentGraph | None = None
+        self._graph: ChatAgentGraph | None = None
         # Compiled-graph cache keyed by (system_prompt_hash, model fingerprint).
         self._compiled_cache: OrderedDict[tuple[Any, ...], "CompiledStateGraph"] = OrderedDict()
         self._compiled_cache_max = 24
@@ -187,17 +191,21 @@ class AgentManager:
         db = str(db_path(self._ctx.workspace_path))
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
             self._checkpointer = checkpointer
-            self._graph = ChatAgentGraph(
+            from .agent_graph.ledger import LedgerSink
+
+            services = AgentServices(
                 workspace_path=self._ctx.workspace_path,
-                stt_service=self._stt,
-                vision_service=self._vision,
-                tts_service=self._tts,
-                memory_service=self._memory,
-                credential_store=self._credentials,
+                ledger_sink=LedgerSink(self._ctx.workspace_path),
+                stt=self._stt,
+                vision=self._vision,
+                tts=self._tts,
+                memory=self._memory,
+                credentials=self._credentials,
                 checkpointer=checkpointer,
                 preferences=self._ctx.preferences,
                 knowledge_subgraph=self._build_knowledge_subgraph(),
             )
+            self._graph = ChatAgentGraph(services)
             # Hot-reload STT/TTS when workspace model defaults change. Nodes read
             # ``self._stt`` / ``self._tts`` per call, so swapping attributes is enough
             # (compiled graphs are for chat LLM only).
@@ -597,13 +605,15 @@ class AgentManager:
         if self._lc_agent_tools is None:
             self._lc_agent_tools = self._langchain_tools_for_agent()
         compiled = self._graph.build(
-            model=model,
-            tools=self._lc_agent_tools,
-            model_id=llm_entry.model_id,
-            system_prompt=system_prompt,
-            temperature=llm_entry.temperature,
-            max_tokens=llm_entry.max_tokens,
-            thinking=getattr(llm_entry, "thinking", None),
+            ChatGraphConfig(
+                model=model,
+                tools=self._lc_agent_tools,
+                model_id=llm_entry.model_id,
+                system_prompt=system_prompt,
+                temperature=llm_entry.temperature,
+                max_tokens=llm_entry.max_tokens,
+                thinking=getattr(llm_entry, "thinking", None),
+            )
         )
         self._compiled_cache[key] = compiled
         self._compiled_cache.move_to_end(key)

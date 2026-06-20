@@ -13,19 +13,13 @@ from typing import Any
 
 import pytest
 
-from hirocli.runtime.agent_graph.base import BaseAgentGraph
 from hirocli.runtime.agent_graph.events import GRAPH_REPLY_COMPLETED
+from hirocli.runtime.agent_graph.nodes.media import MediaNodes
+from hirocli.runtime.tests.graph_fakes import make_agent_services
 
 
-def _graph(tmp_path: Path) -> BaseAgentGraph:
-    return BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-    )
+def _graph(tmp_path: Path) -> MediaNodes:
+    return MediaNodes(make_agent_services(tmp_path))
 
 
 # ---------------------------------------------------------------------------

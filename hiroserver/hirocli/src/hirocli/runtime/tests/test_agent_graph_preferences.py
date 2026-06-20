@@ -4,7 +4,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from hirocli.domain.data_store import ensure_data_db, get_default_user_id
-from hirocli.runtime.agent_graph.base import BaseAgentGraph, _llm_usage_payload
+from hirocli.runtime.agent_graph.config import ChatGraphConfig
+from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes
+from hirocli.runtime.tests.graph_fakes import RecordingLedgerSink, ScriptedChatModel, make_agent_services
 from hirocli.runtime.agent_graph.events import GRAPH_MEMORY_RETRIEVED, GRAPH_MEMORY_STORED
 from hirocli.runtime.agent_graph.ledger import LedgerEntry, LedgerSink, current_entry
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
@@ -80,14 +82,15 @@ def _enable_memory(runtime: WorkspacePreferencesRuntime) -> None:
 async def test_trim_history_uses_runtime_chat_max_messages(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
     runtime.update("chat.max_messages", 3)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
 
     messages = [HumanMessage(content=f"m{i}") for i in range(5)]
@@ -98,6 +101,8 @@ async def test_trim_history_uses_runtime_chat_max_messages(tmp_path) -> None:
 
 
 def test_llm_usage_payload_uses_langchain_usage_metadata_only() -> None:
+    from hirocli.runtime.agent_graph.graph_kit import llm_usage_payload
+
     msg = AIMessage(
         content="hi",
         usage_metadata={
@@ -116,7 +121,7 @@ def test_llm_usage_payload_uses_langchain_usage_metadata_only() -> None:
         },
     )
 
-    payload = _llm_usage_payload(
+    payload = llm_usage_payload(
         msg,
         inbound_id="in-1",
         chat_channel_id=1,
@@ -142,15 +147,15 @@ async def test_memory_search_and_compose_context_injects_memory(tmp_path) -> Non
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
     events = []
 
@@ -163,8 +168,7 @@ async def test_memory_search_and_compose_context_injects_memory(tmp_path) -> Non
         {"user_text": "what should you remember?", **result}
     )
     # Memory is assembled ephemerally into turn_context by compose_context (blocks only, no persona).
-    compose = graph.make_compose_context_node()
-    ctx_result = await compose(
+    ctx_result = await graph.compose_context_node(
         {"user_text": "what should you remember?", **result}, lambda _event: None
     )
 
@@ -183,37 +187,29 @@ async def test_memory_search_records_search_and_result_previews(tmp_path) -> Non
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    sink = RecordingLedgerSink(tmp_path)
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime, ledger_sink=sink)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
-    entry = LedgerEntry(
-        sink=LedgerSink(tmp_path),
-        node="memory_search",
-        run_id="run-1",
-        step_index=1,
-        captures=frozenset({"decision"}),
-    )
-    token = current_entry.set(entry)
-    try:
-        await graph.memory_search_node(
-            {"user_text": "tea preference?", "character_id": "hiro"},
-            lambda _event: None,
-        )
-    finally:
-        current_entry.reset(token)
 
+    await graph.memory_search_node(
+        {"user_text": "tea preference?", "character_id": "hiro"},
+        lambda _event: None,
+    )
+
+    row = sink.row("memory_search") or {}
     # Input carries the query + top_k (the only knob Graphiti recall uses; F4 dropped
     # threshold/rerank from the preview); output uses the ` · ` separator.
-    assert entry.input_preview.startswith("q: tea preference?")
-    assert "top_k=" in entry.input_preview
-    assert entry.output_preview == "results: 1 · User prefers concise replies"
+    assert str(row.get("input_preview") or "").startswith("q: tea preference?")
+    assert "top_k=" in str(row.get("input_preview") or "")
+    assert row.get("output_preview") == "results: 1 · User prefers concise replies"
 
 
 @pytest.mark.asyncio
@@ -221,15 +217,15 @@ async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
     events = []
 
@@ -271,15 +267,15 @@ async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
 
     sink = LedgerSink(tmp_path)
@@ -326,15 +322,15 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None
     memory = _MemoryService(stored_count=0)
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
 
     sink = LedgerSink(tmp_path)
@@ -377,15 +373,15 @@ async def test_store_turn_memory_threads_message_timestamp(tmp_path) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
 
     await graph._store_turn_memory(
@@ -412,15 +408,15 @@ async def test_store_turn_memory_missing_envelope_timestamp_is_none(tmp_path) ->
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-        memory_service=memory,
-        preferences=runtime,
+    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
+    graph = ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
     )
 
     await graph._store_turn_memory(

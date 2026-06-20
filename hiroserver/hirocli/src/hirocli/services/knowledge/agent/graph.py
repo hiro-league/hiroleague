@@ -22,18 +22,28 @@ from hirocli.domain.preferences import (
     resolve_knowledge_answering_llm,
     resolve_knowledge_rewrite_llm,
 )
-from hirocli.runtime.agent_graph.base import BaseAgentGraph
-from hirocli.runtime.agent_graph.base import _KNOWLEDGE_PREVIEW_MAX as KNOWLEDGE_PREVIEW_MAX
-from hirocli.runtime.agent_graph.base import _estimate_text_tokens as estimate_text_tokens
-from hirocli.runtime.agent_graph.base import _knowledge_results_rows as knowledge_results_rows
-from hirocli.runtime.agent_graph.base import _llm_usage_payload as llm_usage_payload
-from hirocli.runtime.agent_graph.base import _normalize_reply_content
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
-from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged
-from hirocli.services.knowledge.graph.ledger_tracer import (
-    RerankUsage,
-    current_rerank_usage,
+from hirocli.runtime.agent_graph.graph_kit import (
+    KNOWLEDGE_PREVIEW_MAX,
+    emit,
+    estimate_text_tokens,
+    knowledge_results_rows,
+    llm_usage_payload,
+    normalize_reply_content,
 )
+from hirocli.runtime.agent_graph.ledger import (
+    current_entry,
+    graph_logged,
+    observe,
+)
+from hirocli.runtime.agent_graph.node_group import NodeGroup
+from hirocli.runtime.agent_graph.services import AgentServices
+from hirocli.services.knowledge.graph.graphiti_session import graphiti_session
+
+# Runtime import (NOT TYPE_CHECKING): ``KnowledgeAgentState`` is a LangGraph ``StateGraph``
+# schema; LangGraph evaluates its annotations via ``get_type_hints`` at build time, so these
+# names must resolve at runtime despite ``from __future__ import annotations``.
+from hirocli.services.knowledge.models import KnowledgeSearchHit, KnowledgeSource
 
 from .helpers import (
     NormalizedQuery,
@@ -43,10 +53,10 @@ from .helpers import (
     matched_query_terms,
     normalize_query,
 )
+from .legs import RetrievalLeg, effective_leg, graphiti_facts_block, intended_leg
 
 if TYPE_CHECKING:
     from hirocli.domain.preferences import WorkspacePreferences
-    from hirocli.services.knowledge.models import KnowledgeSearchHit, KnowledgeSource
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH")
 
@@ -80,57 +90,56 @@ def _minmax_relevances(scores: list[float]) -> list[float]:
 
 
 class KnowledgeAgentState(TypedDict, total=False):
+    """Per-invoke scratch for the knowledge retrieval / answering graph.
+
+    Compiled without a checkpointer (``build_retrieval()``) or with ephemeral runs only —
+    no cross-call persistence. Every field is written during a single invocation and may be
+    absent at entry.
+    """
+
+    # --- Query in ---
     query: str
     filters: dict[str, Any]
     top_k: int
     min_score: float
     explain: bool
     rewrite: bool
-    # Retrieval mode for the graph layer (eval "legs"):
-    #   "off"      → flat Qdrant hybrid over all chunks (graph_expand no-ops)
-    #   "graphiti" → graph facts ARE the source: facts as skeleton + the verbatim
-    #                episode chunks fetched by-id (no query hybrid).
-    # Defaults to "off" so any caller that hasn't opted in stays flat. The graphiti
-    # leg requires the knowledge.graph backend enabled + a built graph.
     graph_mode: str
-    # Facts (statements) returned by ``graph_expand`` for the query. Injected into
-    # the answer context for the graphiti leg as the skeleton; empty on the flat
-    # leg. Carries the temporal supersession the LLM reasons over.
-    graph_facts: list[str]
-    # Temporal lens for graph_expand: "current" (drop superseded facts) or "all".
-    # Absent → falls back to knowledge.graph.temporal_default.
     graph_temporal: str
-    # Preformatted prior conversation (chat only). When present, ``rewrite_query`` uses it to
-    # resolve references ("the second one") into a standalone query. Empty/absent for Ask/CLI.
     history: str
+
+    # --- Rewrite output ---
     rewrite_keywords: list[str]
-    # Set by ``rewrite_query`` (when rewrite runs): False routes past embed/search to skip
-    # retrieval for small talk. Absent/True → retrieve normally (safe default on any fallback).
     knowledge_needed: bool
     rewritten_query: str | None
     normalized_query: NormalizedQuery
-    # L3 — entities extracted by ``rewrite_query`` (proper nouns + qualified relational
-    # mentions like "my sister"). Consumed by ``graph_expand``; ignored when use_graph=False.
     query_entities: list[str]
-    # Populated by ``graph_expand``: union of chunk_ids (== episode uuids) supporting
-    # the facts Graphiti search returned for the query. ``build_filters`` folds these
-    # into the Qdrant filter as a ``HasIdCondition`` to focus the candidate set.
+
+    # --- Graph leg (graphiti) ---
+    graph_facts: list[str]
     graph_chunk_ids: list[str]
+    # Set by graph_expand: the resolved leg after the soft-fallback. Downstream nodes read THIS,
+    # not graph_mode + chunk_ids. Values: RetrievalLeg.value ("flat" | "graphiti").
+    effective_leg: str
+
+    # --- Vector leg ---
     qdrant_filter: Any
     query_vector: list[float]
     query_sparse_vector: Any
-    hits: list[Any]
-    # Set True by the rerank node when a reranker actually reordered the hits; drives the
-    # score_source ("reranker" vs "rrf"/"cosine") that build_context stamps onto sources.
+    hits: list[KnowledgeSearchHit]
     reranked: bool
-    sources: list[Any]
+
+    # --- Assembly / answer ---
+    sources: list[KnowledgeSource]
     context: str
     answer: str
     model_id: str | None
     usage: dict[str, Any]
+    no_results: bool
+
+    # --- Identity / bookkeeping ---
     started_at: str
     elapsed_ms: int
-    no_results: bool
     inbound_id: str
     chat_channel_id: int | str
     device_id: str
@@ -138,7 +147,7 @@ class KnowledgeAgentState(TypedDict, total=False):
     character_id: str
 
 
-class KnowledgeAgentGraph(BaseAgentGraph):
+class KnowledgeAgentGraph(NodeGroup):
     """Small LangGraph for knowledge search -> cited answer."""
 
     def __init__(
@@ -149,16 +158,13 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         prefs: "WorkspacePreferences",
         workspace_id: str | None = None,
     ) -> None:
-        super().__init__(
+        from hirocli.runtime.agent_graph.ledger import LedgerSink
+
+        services = AgentServices(
             workspace_path=workspace_path,
-            stt_service=None,
-            vision_service=None,
-            tts_service=None,
-            credential_store=None,
-            checkpointer=None,
-            memory_service=None,
-            preferences=None,
+            ledger_sink=LedgerSink(workspace_path),
         )
+        super().__init__(services)
         self._service = service
         self._prefs = prefs
         self._workspace_id = workspace_id
@@ -182,10 +188,12 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             "graph_expand",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/graph_expand", self.graph_expand),
         )
+        # --- graphiti leg: graph_expand → graph_fetch → build_context ---
         graph.add_node(
             "graph_fetch",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/graph_fetch", self.graph_fetch),
         )
+        # --- flat / vector leg: build_filters → embed_query → vector_search → rerank → build_context ---
         graph.add_node(
             "build_filters",
             self._wrap_dynamic_node(f"{KNOWLEDGE_NODE_PREFIX}/build_filters", self.build_filters),
@@ -236,14 +244,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         graph.add_edge("vector_search", "rerank")
         graph.add_edge("rerank", "build_context")
 
-    def build(
-        self,
-        *,
-        model: Any = None,
-        tools: list | None = None,
-        model_id: str = "",
-        system_prompt: str | None = None,
-    ) -> CompiledStateGraph:
+    def build(self) -> CompiledStateGraph:
         """Full Ask/CLI/HTTP graph: shared retrieval prefix + cited-answer step."""
         graph = StateGraph(KnowledgeAgentState)
         self._add_retrieval_nodes(graph)
@@ -283,13 +284,11 @@ class KnowledgeAgentGraph(BaseAgentGraph):
 
     @staticmethod
     def _route_after_expand(state: KnowledgeAgentState) -> str:
-        # The "graphiti" leg answers from the graph alone: fetch the fact episodes'
-        # chunks by-id (graph_fetch), skipping the query-driven hybrid search. It
-        # needs chunk_ids to do that — with none (empty graph / miss / error) it
-        # soft-falls-back to the hybrid path, which becomes a full flat search.
-        if state.get("graph_mode") == "graphiti" and state.get("graph_chunk_ids"):
-            return "graph_only"
-        return "vector"
+        return (
+            "graph_only"
+            if state.get("effective_leg") == RetrievalLeg.GRAPHITI.value
+            else "vector"
+        )
 
     @staticmethod
     def _route_after_context(state: KnowledgeAgentState) -> str:
@@ -316,38 +315,32 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # Every failure path is a logged, observable fallback to the raw query — retrieval must
         # never be blocked by the rewrite step.
         if not state.get("rewrite"):
-            if entry := current_entry.get():
-                entry.set_decision("skipped", "rewrite_off")
-                entry.set_output_preview("rewrite disabled · raw query used")
+            observe(decision=("skipped", "rewrite_off"), output="rewrite disabled · raw query used")
             return {}
         normalized = state["normalized_query"]
-        if entry := current_entry.get():
-            entry.set_input_preview(f"text: {normalized.text[:200]}")
+        observe(input=f"text: {normalized.text[:200]}")
         if not normalized.text.strip():
-            if entry := current_entry.get():
-                entry.set_decision("skipped", "empty_query")
-                entry.set_output_preview("rewrite: <skipped empty query>")
+            observe(decision=("skipped", "empty_query"), output="rewrite: <skipped empty query>")
             return {}
 
         resolved = resolve_knowledge_rewrite_llm(
             self._prefs,
-            self._workspace_path,
+            self.services.workspace_path,
             workspace_id=self._workspace_id,
         )
         if resolved is None:
             log.info("⚠️ knowledge.rewrite — no answering model configured · skipping rewrite")
-            if entry := current_entry.get():
-                entry.set_decision("skipped", "no_llm_configured")
-                entry.set_output_preview("rewrite: <skipped no model>")
+            observe(decision=("skipped", "no_llm_configured"), output="rewrite: <skipped no model>")
             return {}
 
         model_id = resolved.model_id
-        if entry := current_entry.get():
-            # Model is in the model column; show only the tuning that actually ran.
-            entry.set_input_preview(
+        # Model is in the model column; show only the tuning that actually ran.
+        observe(
+            input=(
                 f"text: {normalized.text[:180]} · temp={resolved.temperature} "
                 f"max_tokens={resolved.max_tokens} thinking={resolved.thinking or 'off'}"
             )
+        )
         # Cross-provider guard: only attempt structured output on models the catalog says
         # support it; otherwise the call would burn tokens and fall back every time.
         spec = get_model_catalog().get_model(model_id)
@@ -356,9 +349,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 "⚠️ knowledge.rewrite — model lacks structured_output support · skipping rewrite",
                 model=model_id,
             )
-            if entry := current_entry.get():
-                entry.set_decision("skipped", "no_structured_output")
-                entry.set_output_preview("rewrite: <skipped unsupported model>")
+            observe(
+                decision=("skipped", "no_structured_output"),
+                output="rewrite: <skipped unsupported model>",
+            )
             return {}
 
         prompt = (
@@ -379,7 +373,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         try:
             base_model = create_chat_model(
                 model_id,
-                workspace_path=self._workspace_path,
+                workspace_path=self.services.workspace_path,
                 workspace_id=self._workspace_id,
                 temperature=resolved.temperature,
                 max_tokens=resolved.max_tokens,
@@ -401,10 +395,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 exc_info=True,
             )
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
-            if entry := current_entry.get():
-                # Identify the failing model; fail() records decision + code + the readable message.
-                entry.add_usage(provider=provider, model=model_id)
-                entry.fail("rewrite_call_failed", message=str(exc))
+            observe(
+                usage={"provider": provider, "model": model_id},
+                fail={"code": "rewrite_call_failed", "message": str(exc)},
+            )
             return {}
 
         parsed = result.get("parsed") if isinstance(result, dict) else None
@@ -422,17 +416,18 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 estimated_input_tokens=estimate,
             )
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
-            if entry := current_entry.get():
-                entry.add_usage(
-                    provider=provider,
-                    model=model_id,
-                    input_tokens=int(usage_payload.get("input_tokens") or estimate or 0),
-                    output_tokens=int(usage_payload.get("output_tokens") or 0),
-                    cached_input_tokens=int(usage_payload.get("cached_input_tokens") or 0),
-                    reasoning_tokens=int(usage_payload.get("reasoning_tokens") or 0),
-                )
+            observe(
+                usage={
+                    "provider": provider,
+                    "model": model_id,
+                    "input_tokens": int(usage_payload.get("input_tokens") or estimate or 0),
+                    "output_tokens": int(usage_payload.get("output_tokens") or 0),
+                    "cached_input_tokens": int(usage_payload.get("cached_input_tokens") or 0),
+                    "reasoning_tokens": int(usage_payload.get("reasoning_tokens") or 0),
+                }
+            )
             if writer is not None:
-                self._emit(writer, GRAPH_LLM_USAGE, usage_payload)
+                emit(writer, GRAPH_LLM_USAGE, usage_payload)
 
         # include_raw=True returns parse failures in the result dict (it does NOT raise), so we
         # must inspect parsing_error explicitly, log it with finish_reason, and fall back.
@@ -448,12 +443,12 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 finish_reason=finish_reason or "unknown",
                 model=model_id,
             )
-            if entry := current_entry.get():
-                # Garbage output: structured-output parse failed → record it as a failure.
-                entry.fail(
-                    "rewrite_unparsed",
-                    message=f"unparseable structured output (finish_reason={finish_reason or 'unknown'})",
-                )
+            observe(
+                fail={
+                    "code": "rewrite_unparsed",
+                    "message": f"unparseable structured output (finish_reason={finish_reason or 'unknown'})",
+                }
+            )
             return {}
 
         new_text = (parsed.standalone_query or "").strip() or normalized.text
@@ -468,15 +463,18 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             if t and t not in seen:
                 seen[t] = None
         entities = list(seen)
-        if entry := current_entry.get():
-            if knowledge_needed:
-                kw = f" · kw={','.join(keywords)[:80]}" if keywords else ""
-                ent = f" · ent={','.join(entities)[:80]}" if entities else ""
-                entry.set_decision("rewritten", "ok")
-                entry.set_output_preview(f"query: {new_text[:160]}{kw}{ent}")
-            else:
-                entry.set_decision("rewritten", "no_knowledge_needed")
-                entry.set_output_preview("knowledge_needed: false (retrieval skipped)")
+        if knowledge_needed:
+            kw = f" · kw={','.join(keywords)[:80]}" if keywords else ""
+            ent = f" · ent={','.join(entities)[:80]}" if entities else ""
+            observe(
+                decision=("rewritten", "ok"),
+                output=f"query: {new_text[:160]}{kw}{ent}",
+            )
+        else:
+            observe(
+                decision=("rewritten", "no_knowledge_needed"),
+                output="knowledge_needed: false (retrieval skipped)",
+            )
         return {
             "normalized_query": NormalizedQuery(
                 raw=normalized.raw, text=new_text, language=normalized.language
@@ -492,104 +490,79 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # L3 — Graphiti fact search → episode→chunk_id resolution. The output
         # ``graph_chunk_ids`` drives ``graph_fetch`` (by-id passages for the graphiti
         # leg) and ``graph_facts`` become the answer skeleton. SOFT FALLBACK: empty
-        # result → no chunk_ids → routing falls through to the hybrid path = normal
-        # flat search (graph silently did nothing).
-        entry = current_entry.get()
-        if (state.get("graph_mode") or "off") != "graphiti":
-            if entry:
-                entry.set_decision("skipped", "graph_mode_off")
-                entry.set_output_preview("graph_mode=off · no expansion")
-            return {}
+        # result → no chunk_ids → effective_leg=FLAT → routing falls through to the
+        # hybrid path = normal flat search (graph silently did nothing).
+        entry = current_entry.get()  # kept: flush + sidecar need the entry object, not just previews
+        intended = intended_leg(state.get("graph_mode"))
+        if intended is not RetrievalLeg.GRAPHITI:
+            observe(decision=("skipped", "graph_mode_off"), output="graph_mode=off · no expansion")
+            return {"effective_leg": RetrievalLeg.FLAT.value}
         # Graphiti searches on the full query (hybrid over the graph) — no separate
         # entity list required (unlike the old name-resolution path).
         query = (state.get("rewritten_query") or state.get("query") or "").strip()
         if not query:
-            if entry:
-                entry.set_decision("skipped", "no_query")
-                entry.set_output_preview("no query · no expansion")
-            return {}
+            observe(decision=("skipped", "no_query"), output="no query · no expansion")
+            return {"effective_leg": RetrievalLeg.FLAT.value}
 
         # Graphiti fact-search → episodes→chunk_ids. The chunk_ids drive the by-id
         # passage fetch (``graph_fetch``) for the graphiti leg. SOFT FALLBACK: any
-        # miss/error → empty result → routing falls through to normal flat search.
-        from hirocli.services.knowledge.graph import GraphitiMemoryService, graphiti_db_path
+        # miss/error → empty result → effective_leg=FLAT → normal flat search.
+        from hirocli.services.knowledge.graph import graphiti_db_path
 
-        db_path = graphiti_db_path(self._workspace_path)
+        db_path = graphiti_db_path(self.services.workspace_path)
         if not db_path.exists():
             # No graph built for this workspace yet — flat search. Don't open
             # Graphiti (it would create an empty Kuzu DB as a read side effect).
-            if entry:
-                entry.set_decision("skipped", "no_graph")
-                entry.set_output_preview("no graph built · flat search")
-            return {}
-        if entry:
-            entry.set_input_preview(f"query: {query[:80]}{'…' if len(query) > 80 else ''}")
+            observe(decision=("skipped", "no_graph"), output="no graph built · flat search")
+            return {"effective_leg": RetrievalLeg.FLAT.value}
+        observe(input=f"query: {query[:80]}{'…' if len(query) > 80 else ''}")
 
-        service = None
+        expansion = None
+        rerank_usage = None
+        capture = None
         try:
-            service = GraphitiMemoryService.from_preferences(
-                self._prefs, self._workspace_path, workspace_id=self._workspace_id
-            )
-            if service is None:
-                # backend=off or no extraction model — degrade to flat.
-                if entry:
-                    entry.set_decision("skipped", "backend_off_or_no_model")
-                    entry.set_output_preview("graph backend off / no model · flat search")
-                return {}
-            temporal = (
-                state.get("graph_temporal") or self._prefs.graph.temporal_default
-            )
-            num_results = max(1, int(self._prefs.knowledge.retrieval.top_k))
-            # Accumulate cross-encoder rerank usage so the priced ``rerank`` roll-up child carries
-            # model + processed tokens. Stays empty for RRF/MMR / local rerankers (no priced child).
-            rerank_usage = RerankUsage()
-            rerank_token = current_rerank_usage.set(rerank_usage)
-            # Deep per-stage retrieval trace (the ``trace`` observability tier): the EDGES scope
-            # routes through the re-hosted traced pipeline and we persist a sidecar the retrieval-
-            # trace dialog reads back (docs §12.2). Single pref dial — replaces the former
-            # HIRO_GRAPH_TRACE_RETRIEVAL env var.
-            from hirocli.services.knowledge.graph.retrieval_trace import (
-                RetrievalCapture,
-                current_capture,
-            )
-
-            capture = (
-                RetrievalCapture() if self._prefs.graph.observability == "trace" else None
-            )
-            capture_token = current_capture.set(capture) if capture is not None else None
-            try:
-                expansion = await service.search_chunk_ids(
+            async with graphiti_session(
+                self._prefs, self.services.workspace_path, self._workspace_id
+            ) as session:
+                if session is None:
+                    observe(
+                        decision=("skipped", "backend_off_or_no_model"),
+                        output="graph backend off / no model · flat search",
+                    )
+                    return {"effective_leg": RetrievalLeg.FLAT.value}
+                temporal = (
+                    state.get("graph_temporal") or self._prefs.graph.temporal_default
+                )
+                num_results = max(1, int(self._prefs.knowledge.retrieval.top_k))
+                expansion = await session.search_chunk_ids(
                     query, num_results=num_results, temporal=temporal
                 )
-            finally:
-                current_rerank_usage.reset(rerank_token)
-                if capture_token is not None:
-                    current_capture.reset(capture_token)
+                rerank_usage = session.rerank_usage
+                capture = session.capture
         except Exception as exc:
             log.warning(
                 "⚠️ graphiti graph_expand failed · falling back to flat search",
                 error=str(exc)[:200],
                 exc_info=True,
             )
-            if entry:
-                entry.fail("graph_expand_failed", message=str(exc))
-            return {}
-        finally:
-            if service is not None:
-                await service.close()
+            observe(fail={"code": "graph_expand_failed", "message": str(exc)})
+            return {"effective_leg": RetrievalLeg.FLAT.value}
 
-        if entry:
-            entry.set_decision(
+        facts_preview = " | ".join(expansion.facts[:4])
+        more = f" (+{len(expansion.facts) - 4})" if len(expansion.facts) > 4 else ""
+        observe(
+            decision=(
                 "expanded" if expansion.chunk_ids else "empty",
                 f"facts_{expansion.facts_used}/{expansion.facts_total}_chunks_{len(expansion.chunk_ids)}",
-            )
-            facts_preview = " | ".join(expansion.facts[:4])
-            more = f" (+{len(expansion.facts) - 4})" if len(expansion.facts) > 4 else ""
-            entry.set_output_preview(
-                f"facts[{expansion.facts_used}]: {facts_preview}{more} · chunks: {len(expansion.chunk_ids)}"
-            )
-            # Attach the priced ``rerank`` roll-up (cloud cross-encoder cost); the deep per-stage
-            # breakdown lives only in the ``trace`` sidecar below (docs §12.2).
+            ),
+            output=(
+                f"facts[{expansion.facts_used}]: {facts_preview}{more} · "
+                f"chunks: {len(expansion.chunk_ids)}"
+            ),
+        )
+        if entry is not None:
+            # Sanctioned direct-entry use: priced rerank roll-up + per-stage trace sidecar keyed by
+            # this run/step. observe() can't express these — they consume the LedgerEntry itself.
             from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
 
             flush_graph_expand(entry, expansion, rerank_usage=rerank_usage)
@@ -601,16 +574,18 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 )
 
                 write_trace_sidecar(
-                    self._workspace_path,
+                    self.services.workspace_path,
                     run_id=entry.run_id,
                     step_index=entry.step_index,
                     trace=capture.trace,
                 )
         # graph_facts feed the answer skeleton for the graphiti leg; graph_chunk_ids
         # drive the by-id passage fetch (graph_fetch).
+        resolved = effective_leg(intended, chunk_ids=expansion.chunk_ids)
         return {
             "graph_chunk_ids": list(expansion.chunk_ids),
             "graph_facts": list(expansion.facts),
+            "effective_leg": resolved.value,
         }
 
     @graph_logged(captures={"decision"})
@@ -619,15 +594,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # chunks for the fact-supporting chunk_ids directly by id (graph-ranked
         # order, no query hybrid / no min_score drop). Empty-text points (chunk
         # not in Qdrant) are skipped. Pairs with the facts injected in build_context.
-        entry = current_entry.get()
         chunk_ids = state.get("graph_chunk_ids") or []
         if not chunk_ids:
-            if entry:
-                entry.set_decision("skipped", "no_chunk_ids")
-                entry.set_output_preview("graphiti leg · no chunk_ids · facts-only")
+            observe(
+                decision=("skipped", "no_chunk_ids"),
+                output="graphiti leg · no chunk_ids · facts-only",
+            )
             return {"hits": []}
-        if entry:
-            entry.set_input_preview(f"chunk_ids: {len(chunk_ids)} (graph-ranked, by-id)")
+        observe(input=f"chunk_ids: {len(chunk_ids)} (graph-ranked, by-id)")
         try:
             hits = await self._service.fetch_hits_by_point_ids(chunk_ids)
         except Exception as exc:
@@ -636,16 +610,15 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 error=str(exc)[:200],
                 exc_info=True,
             )
-            if entry:
-                entry.fail("graph_fetch_failed", message=str(exc))
+            observe(fail={"code": "graph_fetch_failed", "message": str(exc)})
             return {"hits": []}
-        if entry:
-            entry.set_decision("ok" if hits else "empty", f"passages_{len(hits)}")
-            rows = knowledge_results_rows(hits)
-            head = f"passages {len(hits)} of {len(chunk_ids)} (by-id)"
-            entry.set_output_preview(
-                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
-            )
+        rows = knowledge_results_rows(hits)
+        head = f"passages {len(hits)} of {len(chunk_ids)} (by-id)"
+        observe(
+            decision=("ok" if hits else "empty", f"passages_{len(hits)}"),
+            output=f"{head} · {rows}" if rows else head,
+            output_max_len=KNOWLEDGE_PREVIEW_MAX,
+        )
         # reranked=False so build_context tags relevance as ordinal (graph-ranked).
         return {"hits": hits, "reranked": False}
 
@@ -663,35 +636,37 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         embedding_model = self._prefs.knowledge.default_embedding_model_resolved
         hybrid = self._prefs.knowledge.retrieval.hybrid
         sparse_model = self._prefs.knowledge.retrieval.sparse_model
-        if entry := current_entry.get():
-            # Put the embedding model in the model column and an estimated input-token count so the
-            # ledger prices it (gross list price; embedding pricing is input-only). Local/free
-            # embedders aren't catalogued → cost stays blank.
-            provider = embedding_model.split(":", 1)[0] if ":" in embedding_model else ""
-            entry.add_usage(
-                provider=provider,
-                model=embedding_model,
-                input_tokens=estimate_text_tokens(normalized.text),
-            )
-            # Dense model is already in the model column; only the (uncolumned) sparse model + query
-            # add new info here.
-            entry.set_input_preview(
+        # Put the embedding model in the model column and an estimated input-token count so the
+        # ledger prices it (gross list price; embedding pricing is input-only). Local/free
+        # embedders aren't catalogued → cost stays blank.
+        provider = embedding_model.split(":", 1)[0] if ":" in embedding_model else ""
+        observe(
+            usage={
+                "provider": provider,
+                "model": embedding_model,
+                "input_tokens": estimate_text_tokens(normalized.text),
+            },
+            input=(
                 (f"sparse: {sparse_model} · " if hybrid else "")
                 + f"text: {normalized.text[:180]}"
-            )
+            ),
+        )
         try:
             vector = await self._service.embed_query(normalized.text)
         except Exception as exc:
             # Record a rich error row, then propagate so knowledge_retrieve degrades gracefully.
-            if entry := current_entry.get():
-                entry.fail("embed_failed", message=str(exc))
+            observe(fail={"code": "embed_failed", "message": str(exc)})
             raise
         if not _is_valid_vector(vector):
             # Garbage embedding (empty / non-finite) — flag it and short-circuit to 0 hits instead of
             # silently searching with a useless vector.
-            if entry := current_entry.get():
-                length = len(vector) if hasattr(vector, "__len__") else 0
-                entry.fail("invalid_embedding", message=f"embedder returned invalid vector (len={length})")
+            length = len(vector) if hasattr(vector, "__len__") else 0
+            observe(
+                fail={
+                    "code": "invalid_embedding",
+                    "message": f"embedder returned invalid vector (len={length})",
+                }
+            )
             return {"query_vector": []}
         out: dict[str, Any] = {"query_vector": vector}
         # Only pay for the BM25 query embed when hybrid is enabled. Append rewrite keywords
@@ -706,10 +681,11 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             out["query_sparse_vector"] = sparse
         # Was an empty row before; report vector dim + whether the sparse branch ran so the step is
         # not a black box.
-        if entry := current_entry.get():
-            dim = len(vector) if hasattr(vector, "__len__") else 0
-            entry.set_decision("embedded", f"dim_{dim}")
-            entry.set_output_preview(f"embedded: dim={dim}; sparse={'yes' if sparse is not None else 'no'}")
+        dim = len(vector) if hasattr(vector, "__len__") else 0
+        observe(
+            decision=("embedded", f"dim_{dim}"),
+            output=f"embedded: dim={dim}; sparse={'yes' if sparse is not None else 'no'}",
+        )
         return out
 
     @graph_logged(captures={"decision"})
@@ -721,20 +697,19 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         )
         nq = state.get("normalized_query")
         query_text = nq.text if nq is not None else str(state.get("query") or "")
-        if entry := current_entry.get():
-            # Surface the query text + effective knobs so a low/zero hit count is interpretable
-            # (wrong query? min_score too high? filtered? hybrid off?) instead of a bare "hits: 0".
-            entry.set_input_preview(
+        # Surface the query text + effective knobs so a low/zero hit count is interpretable
+        # (wrong query? min_score too high? filtered? hybrid off?) instead of a bare "hits: 0".
+        observe(
+            input=(
                 f"q: {query_text[:80]} · top_k={top_k} min_score={min_score:.2f} "
                 f"prefetch/branch={retrieval.prefetch_limit} "
                 f"hybrid={'on' if retrieval.hybrid else 'off'} "
                 f"filter={'yes' if state.get('qdrant_filter') else 'none'}"
             )
+        )
         vector = state.get("query_vector") or []
         if not vector:
-            if entry := current_entry.get():
-                entry.set_decision("empty", "no_query_vector")
-                entry.set_output_preview("hits 0; no_query_vector")
+            observe(decision=("empty", "no_query_vector"), output="hits 0; no_query_vector")
             return {"hits": []}
         hits = await self._service.vector_search_by_vector(
             vector,
@@ -746,16 +721,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             explain=bool(state.get("explain")),
             qdrant_filter=state.get("qdrant_filter"),
         )
-        if entry := current_entry.get():
-            entry.set_decision("ok", f"hits_{len(hits)}")
-            # Show the actual top results (title + snippet), tagged rrf/cosine (pre-rerank), so you
-            # can see WHAT was retrieved, not just how many.
-            source = "rrf" if retrieval.hybrid else "cosine"
-            rows = knowledge_results_rows(hits)
-            head = f"hits {len(hits)} ({source})"
-            entry.set_output_preview(
-                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
-            )
+        source = "rrf" if retrieval.hybrid else "cosine"
+        rows = knowledge_results_rows(hits)
+        head = f"hits {len(hits)} ({source})"
+        observe(
+            decision=("ok", f"hits_{len(hits)}"),
+            output=f"{head} · {rows}" if rows else head,
+            output_max_len=KNOWLEDGE_PREVIEW_MAX,
+        )
         return {"hits": hits}
 
     @graph_logged(captures={"usage", "decision"})
@@ -768,15 +741,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         # Record WHY we skipped instead of writing a blank row — a node that ran should never be a
         # black box.
         if not reranker.enabled or not reranker.model_id:
-            if entry := current_entry.get():
-                reason = "disabled" if not reranker.enabled else "no_model"
-                entry.set_decision("skipped", reason)
-                entry.set_output_preview(f"reranker off ({reason}) · retrieval order kept")
+            reason = "disabled" if not reranker.enabled else "no_model"
+            observe(
+                decision=("skipped", reason),
+                output=f"reranker off ({reason}) · retrieval order kept",
+            )
             return {}
         if not hits:
-            if entry := current_entry.get():
-                entry.set_decision("skipped", "no_candidates")
-                entry.set_output_preview("no candidates to rerank")
+            observe(decision=("skipped", "no_candidates"), output="no candidates to rerank")
             return {}
         provider = reranker.model_id.split(":", 1)[0] if ":" in reranker.model_id else ""
         normalized = state["normalized_query"]
@@ -786,14 +758,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         processed_tokens = estimate_text_tokens(normalized.text) * len(hits) + sum(
             estimate_text_tokens(getattr(hit, "text", "") or "") for hit in hits
         )
-        if entry := current_entry.get():
-            # Reranker in the model column + processed tokens so the row prices (local cross-encoders
-            # aren't catalogued → cost stays blank).
-            entry.add_usage(
-                provider=provider, model=reranker.model_id, input_tokens=processed_tokens
-            )
-            # Reranker model is already in the model column — don't repeat it here.
-            entry.set_input_preview(f"candidates: {len(hits)} · top_n: {reranker.top_n}")
+        observe(
+            usage={
+                "provider": provider,
+                "model": reranker.model_id,
+                "input_tokens": processed_tokens,
+            },
+            input=f"candidates: {len(hits)} · top_n: {reranker.top_n}",
+        )
         try:
             reranked = await self._service.rerank_hits(
                 normalized.text,
@@ -810,18 +782,15 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 model=reranker.model_id,
                 exc_info=True,
             )
-            if entry := current_entry.get():
-                entry.fail("rerank_failed", message=str(exc))
+            observe(fail={"code": "rerank_failed", "message": str(exc)})
             return {}
-        if entry := current_entry.get():
-            entry.set_decision("ok", f"reranked_{len(reranked)}")
-            # Show the surviving results themselves (title + snippet + post-rerank relevance) so the
-            # precision step is judgeable, not just "K of N".
-            rows = knowledge_results_rows(reranked)
-            head = f"reranked {len(reranked)} of {len(hits)}"
-            entry.set_output_preview(
-                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
-            )
+        rows = knowledge_results_rows(reranked)
+        head = f"reranked {len(reranked)} of {len(hits)}"
+        observe(
+            decision=("ok", f"reranked_{len(reranked)}"),
+            output=f"{head} · {rows}" if rows else head,
+            output_max_len=KNOWLEDGE_PREVIEW_MAX,
+        )
         return {"hits": reranked, "reranked": True}
 
     @graph_logged(captures={"decision"})
@@ -864,29 +833,26 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                     valid_at=valid_at_by_id.get(hit.point_id),
                 )
             )
-        # Graph legs (mix/graphiti) prepend the fact statements as an answer
-        # skeleton (G4 / §5.5) — this is what carries the temporal supersession the
-        # passages alone can't express. Facts count as context too, so a graphiti
-        # leg with thin passages still answers (not dropped as no_results).
+        # Graph legs prepend the fact statements as an answer skeleton (G4 / §5.5) — this is
+        # what carries the temporal supersession the passages alone can't express. Facts count
+        # as context too, so a graphiti leg with thin passages still answers (not no_results).
+        facts_block = graphiti_facts_block(state.get("graph_facts") or [])
         facts = [f for f in (state.get("graph_facts") or []) if (f or "").strip()]
         context = build_context(sources)
-        if facts:
-            facts_block = "Known facts from the knowledge graph:\n" + "\n".join(
-                f"- {f}" for f in facts
-            )
+        if facts_block:
             context = f"{facts_block}\n\n{context}" if context else facts_block
         no_results = not (sources or facts)
-        if entry := current_entry.get():
-            # Surface the assembled prompt skeleton: dated passages (the valid_at that lets the
-            # model resolve "today") + the fact-skeleton count. This is the only node that holds
-            # per-passage dates, so without it they're invisible in the ledger.
-            entry.set_decision("no_results" if no_results else "ok")
-            dated = sum(1 for s in sources if getattr(s, "valid_at", None))
-            rows = knowledge_results_rows(sources)
-            head = f"context · sources={len(sources)} (dated {dated}) · facts={len(facts)}"
-            entry.set_output_preview(
-                f"{head} · {rows}" if rows else head, max_len=KNOWLEDGE_PREVIEW_MAX
-            )
+        # Surface the assembled prompt skeleton: dated passages (the valid_at that lets the
+        # model resolve "today") + the fact-skeleton count. This is the only node that holds
+        # per-passage dates, so without it they're invisible in the ledger.
+        dated = sum(1 for s in sources if getattr(s, "valid_at", None))
+        rows = knowledge_results_rows(sources)
+        head = f"context · sources={len(sources)} (dated {dated}) · facts={len(facts)}"
+        observe(
+            decision="no_results" if no_results else "ok",
+            output=f"{head} · {rows}" if rows else head,
+            output_max_len=KNOWLEDGE_PREVIEW_MAX,
+        )
         return {
             "sources": sources,
             "context": context,
@@ -901,14 +867,14 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         ``valid_at`` lives on the Graphiti episode (not the Qdrant payload), so it needs a
         graph read. Scoped to the graph legs so the flat leg stays a true no-graph baseline;
         best-effort — any miss (no graph / read error) yields ``{}`` and dateless passages."""
-        if (state.get("graph_mode") or "off") != "graphiti" or not hits:
+        if state.get("effective_leg") != RetrievalLeg.GRAPHITI.value or not hits:
             return {}
         from hirocli.services.knowledge.graph.graphiti_service import (
             graphiti_db_path,
             read_episode_valid_at,
         )
 
-        db_path = graphiti_db_path(self._workspace_path)
+        db_path = graphiti_db_path(self.services.workspace_path)
         if not db_path.exists():
             return {}
         point_ids = [h.point_id for h in hits if getattr(h, "point_id", "")]
@@ -934,30 +900,29 @@ class KnowledgeAgentGraph(BaseAgentGraph):
     ) -> dict[str, Any]:
         resolved = resolve_knowledge_answering_llm(
             self._prefs,
-            self._workspace_path,
+            self.services.workspace_path,
             workspace_id=self._workspace_id,
         )
         normalized = state["normalized_query"]
         answering = self._prefs.knowledge.answering
-        if entry := current_entry.get():
-            # Show the answering config that actually ran: language policy, citation toggle, and the
-            # resolved tuning (temp/max_tokens/thinking) — not just the question text.
-            # Model is in the model column; show the answering config + tuning that ran, not the id.
-            tuning = (
-                f" · temp={resolved.temperature} max_tokens={resolved.max_tokens} "
-                f"thinking={resolved.thinking or 'off'}"
-                if resolved is not None
-                else ""
-            )
-            entry.set_input_preview(
+        # Show the answering config that actually ran: language policy, citation toggle, and the
+        # resolved tuning (temp/max_tokens/thinking) — not just the question text.
+        # Model is in the model column; show the answering config + tuning that ran, not the id.
+        tuning = (
+            f" · temp={resolved.temperature} max_tokens={resolved.max_tokens} "
+            f"thinking={resolved.thinking or 'off'}"
+            if resolved is not None
+            else ""
+        )
+        observe(
+            input=(
                 f"text: {normalized.text[:180]} · lang={answering.language_policy} "
                 f"cite={answering.cite_sources}{tuning}"
             )
+        )
         if resolved is None:
             answer = self._fallback_answer(state)
-            if entry := current_entry.get():
-                entry.set_decision("skipped", "no_llm_configured")
-                entry.set_output_preview(f"answer: {answer[:200]}")
+            observe(decision=("skipped", "no_llm_configured"), output=f"answer: {answer[:200]}")
             return {
                 "answer": answer,
                 "model_id": None,
@@ -967,7 +932,7 @@ class KnowledgeAgentGraph(BaseAgentGraph):
         try:
             model = create_chat_model(
                 model_id,
-                workspace_path=self._workspace_path,
+                workspace_path=self.services.workspace_path,
                 workspace_id=self._workspace_id,
                 temperature=resolved.temperature,
                 max_tokens=resolved.max_tokens,
@@ -978,9 +943,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             log.error("knowledge.answer model creation failed", error=str(exc), exc_info=True)
             answer = self._fallback_answer(state)
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
-            if entry := current_entry.get():
-                entry.add_usage(provider=provider, model=model_id)
-                entry.fail("model_create_failed", message=str(exc))
+            observe(
+                usage={"provider": provider, "model": model_id},
+                fail={"code": "model_create_failed", "message": str(exc)},
+            )
             return {"answer": answer, "model_id": model_id, "usage": {}}
         messages = [
             SystemMessage(content=self._system_prompt(normalized)),
@@ -993,9 +959,10 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             log.error("knowledge.answer model call failed", error=str(exc), exc_info=True)
             answer = self._fallback_answer(state)
             provider = model_id.split(":", 1)[0] if ":" in model_id else ""
-            if entry := current_entry.get():
-                entry.add_usage(provider=provider, model=model_id)
-                entry.fail("model_call_failed", message=str(exc))
+            observe(
+                usage={"provider": provider, "model": model_id},
+                fail={"code": "model_call_failed", "message": str(exc)},
+            )
             return {"answer": answer, "model_id": model_id, "usage": {}}
         usage_payload = llm_usage_payload(
             response,
@@ -1004,23 +971,22 @@ class KnowledgeAgentGraph(BaseAgentGraph):
             model_id=model_id,
             estimated_input_tokens=estimate,
         )
-        answer = _normalize_reply_content(getattr(response, "content", ""))
+        answer = normalize_reply_content(getattr(response, "content", ""))
         provider = model_id.split(":", 1)[0] if ":" in model_id else ""
-        if entry := current_entry.get():
-            entry.add_usage(
-                provider=provider,
-                model=model_id,
-                input_tokens=int(usage_payload.get("input_tokens") or estimate or 0),
-                output_tokens=int(usage_payload.get("output_tokens") or 0),
-                cached_input_tokens=int(usage_payload.get("cached_input_tokens") or 0),
-                reasoning_tokens=int(usage_payload.get("reasoning_tokens") or 0),
-            )
-            entry.set_decision("text_reply", "ok")
-            entry.set_output_preview(
-                f"answer: {answer[:200]}" if answer.strip() else "answer: <empty>"
-            )
+        observe(
+            usage={
+                "provider": provider,
+                "model": model_id,
+                "input_tokens": int(usage_payload.get("input_tokens") or estimate or 0),
+                "output_tokens": int(usage_payload.get("output_tokens") or 0),
+                "cached_input_tokens": int(usage_payload.get("cached_input_tokens") or 0),
+                "reasoning_tokens": int(usage_payload.get("reasoning_tokens") or 0),
+            },
+            decision=("text_reply", "ok"),
+            output=f"answer: {answer[:200]}" if answer.strip() else "answer: <empty>",
+        )
         if writer is not None:
-            self._emit(writer, GRAPH_LLM_USAGE, usage_payload)
+            emit(writer, GRAPH_LLM_USAGE, usage_payload)
         return {
             "answer": answer,
             "model_id": model_id,
@@ -1037,19 +1003,23 @@ class KnowledgeAgentGraph(BaseAgentGraph):
                 elapsed_ms = int((dt.datetime.now(dt.UTC) - started).total_seconds() * 1000)
             except ValueError:
                 elapsed_ms = 0
-        if entry := current_entry.get():
-            sources = len(state.get("sources") or [])
-            if state.get("no_results"):
-                entry.set_decision("empty", "no_results")
-                entry.set_output_preview(f"no_results · sources=0 · elapsed={elapsed_ms}ms")
-            else:
-                # Don't repeat the answer (it's already on call_model) — show the terminal run
-                # summary that only finalize knows: source count + answer size + total elapsed.
-                answer = str(state.get("answer") or "")
-                entry.set_decision("completed", "knowledge_answer")
-                entry.set_output_preview(
-                    f"answered · sources={sources} · answer_chars={len(answer)} · elapsed={elapsed_ms}ms"
-                )
+        sources = len(state.get("sources") or [])
+        if state.get("no_results"):
+            observe(
+                decision=("empty", "no_results"),
+                output=f"no_results · sources=0 · elapsed={elapsed_ms}ms",
+            )
+        else:
+            # Don't repeat the answer (it's already on call_model) — show the terminal run
+            # summary that only finalize knows: source count + answer size + total elapsed.
+            answer = str(state.get("answer") or "")
+            observe(
+                decision=("completed", "knowledge_answer"),
+                output=(
+                    f"answered · sources={sources} · answer_chars={len(answer)} · "
+                    f"elapsed={elapsed_ms}ms"
+                ),
+            )
         return {"elapsed_ms": elapsed_ms}
 
     def _fallback_answer(self, state: KnowledgeAgentState) -> str:

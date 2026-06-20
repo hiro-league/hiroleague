@@ -17,39 +17,15 @@ from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
 from hirocli.domain.conversation_channel import CHAT_CHANNEL_ID_METADATA_KEY, create_channel
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.runtime.agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED
-from hirocli.runtime.agent_graph.base import BaseAgentGraph, _trim_chat_history
+from hirocli.runtime.agent_graph import ChatAgentGraph
+from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes, _trim_chat_history
+from hirocli.runtime.agent_graph.config import ChatGraphConfig
+from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, make_agent_services
 from hirocli.runtime.agent_manager import (
     AgentManager,
     _audio_extension_for_media_type,
-    _normalize_reply_content,
     _reply_content_type,
 )
-
-
-def test_normalize_reply_content_keeps_plain_text() -> None:
-    assert _normalize_reply_content("Hello") == "Hello"
-
-
-def test_normalize_reply_content_extracts_provider_text_blocks() -> None:
-    content = [
-        {
-            "type": "text",
-            "text": "I'm sorry, I cannot help you with that.",
-            "extras": {"signature": "opaque-provider-signature"},
-        }
-    ]
-
-    assert _normalize_reply_content(content) == "I'm sorry, I cannot help you with that."
-
-
-def test_normalize_reply_content_joins_multiple_text_blocks() -> None:
-    content = [
-        {"type": "text", "text": "First"},
-        {"type": "non_text", "metadata": {"ignored": True}},
-        {"type": "text", "text": "Second"},
-    ]
-
-    assert _normalize_reply_content(content) == "First\nSecond"
 
 
 def test_reply_content_type_reports_block_count() -> None:
@@ -113,16 +89,22 @@ def test_trim_chat_history_drops_orphaned_tool_exchange_prefix() -> None:
     ]
 
 
+def _conv_nodes(tmp_path, **service_kw) -> ConversationNodes:
+    services = make_agent_services(tmp_path, **service_kw)
+    return ConversationNodes(
+        services,
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_finalize_node_emits_terminal_run_event(tmp_path) -> None:
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-    )
+    graph = _conv_nodes(tmp_path)
     events: list[dict] = []
 
     await graph.finalize_node(
@@ -149,14 +131,7 @@ async def test_finalize_node_emits_terminal_run_event(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_finalize_node_emits_failed_when_text_reply_missing(tmp_path) -> None:
-    graph = BaseAgentGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-    )
+    graph = _conv_nodes(tmp_path)
     events: list[dict] = []
 
     await graph.finalize_node(

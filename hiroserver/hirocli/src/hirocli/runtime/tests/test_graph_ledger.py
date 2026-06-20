@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from hiro_commons.log import Logger
-from hirocli.runtime.agent_graph.base import BaseAgentGraph
+from hirocli.runtime.agent_graph.node_group import NodeGroup
 from hirocli.runtime.agent_graph.ledger import (
     LedgerSink,
     RunAccumulator,
@@ -19,10 +19,13 @@ from hirocli.runtime.agent_graph.ledger import (
 )
 
 
-class LedgerProbeGraph(BaseAgentGraph):
-    def build(self, **_: Any):
-        raise NotImplementedError
+from hirocli.runtime.agent_graph.config import ChatGraphConfig
+from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes
+from hirocli.runtime.agent_graph.nodes.media import MediaNodes
+from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, make_agent_services
 
+
+class LedgerProbeGraph(NodeGroup):
     @graph_logged()
     async def ok_node(self, state: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
@@ -189,9 +192,9 @@ async def test_ledger_tracking_is_bounded_per_sink(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_send_branch_identity_and_caught_error_status(tmp_path: Path) -> None:
-    graph = _graph(tmp_path)
+    media = MediaNodes(make_agent_services(tmp_path))
 
-    await graph.stt_node(
+    await media.stt_node(
         {
             "audio_item": {"item_index": 3, "body": "", "mime_type": "audio/m4a"},
             "inbound_id": "in-send",
@@ -212,9 +215,17 @@ async def test_send_branch_identity_and_caught_error_status(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_skipped_node_preserves_skipped_status(tmp_path: Path) -> None:
-    graph = _graph(tmp_path)
+    conv = ConversationNodes(
+        make_agent_services(tmp_path),
+        ChatGraphConfig(
+            model=ScriptedChatModel(responses=[]),
+            tools=[],
+            model_id="fake:model",
+            system_prompt=None,
+        ),
+    )
 
-    await graph.tts_node(
+    await conv.tts_node(
         {
             "inbound_id": "in-tts-skip",
             "chat_channel_id": 7,
@@ -231,14 +242,7 @@ async def test_skipped_node_preserves_skipped_status(tmp_path: Path) -> None:
 
 
 def _graph(tmp_path: Path) -> LedgerProbeGraph:
-    return LedgerProbeGraph(
-        workspace_path=tmp_path,
-        stt_service=None,
-        vision_service=None,
-        tts_service=None,
-        credential_store=None,
-        checkpointer=None,
-    )
+    return LedgerProbeGraph(make_agent_services(tmp_path))
 
 
 def test_stt_priced_by_duration_fallback(tmp_path: Path) -> None:

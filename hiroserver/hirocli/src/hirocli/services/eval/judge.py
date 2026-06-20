@@ -229,7 +229,7 @@ async def _ledger_llm_node(
 
     # Shared usage extractor: pulls cached-read + reasoning tokens (nested in *_token_details), not
     # just the flat input/output counts — so eval rows price like every other LLM node.
-    from hirocli.runtime.agent_graph.base import _usage_from_metadata
+    from hirocli.runtime.agent_graph.graph_kit import usage_from_metadata
     from hirocli.runtime.agent_graph.ledger import current_entry
 
     provider = _provider_prefix(model_id)
@@ -241,7 +241,7 @@ async def _ledger_llm_node(
     status, error_code = "ok", ""
     try:
         result, ai, output_preview, decision = await call()
-        usage = _usage_from_metadata(getattr(ai, "usage_metadata", None) or {})
+        usage = usage_from_metadata(getattr(ai, "usage_metadata", None) or {})
         entry.add_usage(
             provider=provider,
             # Store the FULL ``provider:model`` id (not the bare model) — the pricing catalog is
@@ -291,7 +291,7 @@ async def answer_from_context(
     should decline (tests memory recall honestly)."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    from hirocli.runtime.agent_graph.base import _normalize_reply_content
+    from hirocli.runtime.agent_graph.graph_kit import normalize_reply_content
 
     instr = (instructions or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
     recalled = format_recall_context(context, render) or "(no elements recalled)"
@@ -311,7 +311,7 @@ async def answer_from_context(
         # Flatten provider content (Anthropic returns a list of text blocks) to plain text;
         # str() on the raw list leaked a JSON-ish repr into the recall answer. Reuse the
         # shared agent-graph normalizer instead of duplicating block-extraction here.
-        text = _normalize_reply_content(getattr(ai, "content", "")).strip()
+        text = normalize_reply_content(getattr(ai, "content", "")).strip()
         # Decision surfaces whether the model answered or declined. Two decline phrases: the new
         # default's "No information available." (LoCoMo's negative-control convention) plus the
         # legacy "I don't know" so a custom prompt pref still using it keeps detecting.

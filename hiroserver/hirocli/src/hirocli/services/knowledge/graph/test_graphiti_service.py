@@ -80,7 +80,8 @@ def test_from_preferences_none_when_no_model(tmp_path) -> None:
 async def test_snapshot_empty_when_no_db(tmp_path) -> None:
     # No graph built → empty, and no DB file created (read must not have side effects).
     db = graphiti_db_path(tmp_path)
-    nodes, edges, chunk_to_document = await read_graph_snapshot(db)
+    # read_graph_snapshot returns a 4-tuple (the 4th is the entity→episode MENTIONS map).
+    nodes, edges, chunk_to_document, _episode_mentions = await read_graph_snapshot(db)
     assert nodes == []
     assert edges == []
     assert chunk_to_document == {}
@@ -97,7 +98,7 @@ async def test_snapshot_empty_graph_against_real_kuzu(tmp_path) -> None:
         await svc.initialize()
     finally:
         await svc.close()
-    nodes, edges, _chunk_to_document = await read_graph_snapshot(db)
+    nodes, edges, _chunk_to_document, _episode_mentions = await read_graph_snapshot(db)
     assert nodes == []
     assert edges == []
 
@@ -118,7 +119,7 @@ async def test_snapshot_while_service_open_shares_driver(tmp_path) -> None:
         await svc.initialize()
         assert kuzu_registry._refcount(key) == 1
         # Service still open (driver held) → snapshot must NOT raise a lock error.
-        nodes, edges, _ = await read_graph_snapshot(db)
+        nodes, edges, _, _ = await read_graph_snapshot(db)
         assert nodes == [] and edges == []
         # Snapshot reused the shared driver and released it → back to just the service.
         assert kuzu_registry._refcount(key) == 1
@@ -138,7 +139,7 @@ async def test_snapshot_reads_on_dedicated_connection(tmp_path) -> None:
     try:
         await svc.initialize()
         writer_client = svc.graphiti.driver.client  # the pinned pool=1 writer connection
-        nodes, edges, _ = await read_graph_snapshot(db)
+        nodes, edges, _, _ = await read_graph_snapshot(db)
         assert nodes == [] and edges == []
         # The writer's connection object is untouched — the snapshot used its own.
         assert svc.graphiti.driver.client is writer_client

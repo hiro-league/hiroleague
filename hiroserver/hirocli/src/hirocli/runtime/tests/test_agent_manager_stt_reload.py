@@ -12,8 +12,9 @@ import pytest_asyncio
 
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.events import DomainEvent, DomainEventType, get_domain_event_bus
-from hirocli.runtime.agent_graph.base import BaseAgentGraph
+from hirocli.runtime.agent_graph import ChatAgentGraph
 from hirocli.runtime.agent_manager import AgentManager
+from hirocli.runtime.tests.graph_fakes import make_agent_services
 from hirocli.runtime.preference_reactor import PreferenceReactor
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 
@@ -67,15 +68,14 @@ def _make_agent_manager(workspace_path: Path) -> AgentManager:
     mgr._compiled_cache = {}
     mgr._compiled_cache_max = 24
     mgr._providers_change_lock = asyncio.Lock()
-    mgr._graph = BaseAgentGraph(
-        workspace_path=workspace_path,
-        stt_service=mgr._stt,
-        vision_service=None,
-        tts_service=mgr._tts,
-        memory_service=mgr._memory,
-        credential_store=None,
-        checkpointer=None,
-        preferences=runtime,
+    mgr._graph = ChatAgentGraph(
+        make_agent_services(
+            workspace_path,
+            stt=mgr._stt,
+            tts=mgr._tts,
+            memory=mgr._memory,
+            preferences=runtime,
+        )
     )
     return mgr
 
@@ -113,7 +113,7 @@ async def test_default_stt_change_swaps_stt_on_manager_and_graph(
 
         assert rebuilds == [tmp_path]
         assert mgr._stt is new_stt
-        assert mgr._graph._stt is new_stt
+        assert mgr._graph.services.stt is new_stt
     finally:
         reactor.close()
 
@@ -179,11 +179,11 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
     assert tts_rebuilds == [tmp_path]
     assert memory_rebuilds == [tmp_path]
     assert mgr._stt is new_stt
-    assert mgr._graph._stt is new_stt
+    assert mgr._graph.services.stt is new_stt
     assert mgr._tts is new_tts
-    assert mgr._graph._tts is new_tts
+    assert mgr._graph.services.tts is new_tts
     assert mgr._memory is new_memory
-    assert mgr._graph._memory is new_memory
+    assert mgr._graph.services.memory is new_memory
 
 
 @pytest.mark.asyncio
@@ -219,7 +219,7 @@ async def test_default_tts_change_swaps_tts_on_manager_and_graph(
 
         assert rebuilds == [tmp_path]
         assert mgr._tts is new_tts
-        assert mgr._graph._tts is new_tts
+        assert mgr._graph.services.tts is new_tts
     finally:
         reactor.close()
 
@@ -255,7 +255,7 @@ async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
 
         assert rebuilds == [(tmp_path, None)]
         assert mgr._memory is new_memory
-        assert mgr._graph._memory is new_memory
+        assert mgr._graph.services.memory is new_memory
     finally:
         reactor.close()
 
@@ -296,7 +296,7 @@ async def test_graph_engine_change_reloads_memory(
 
         assert rebuilds == [tmp_path]
         assert mgr._memory is new_memory
-        assert mgr._graph._memory is new_memory
+        assert mgr._graph.services.memory is new_memory
     finally:
         reactor.close()
 

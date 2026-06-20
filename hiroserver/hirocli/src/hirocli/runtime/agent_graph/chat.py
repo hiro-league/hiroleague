@@ -1,4 +1,4 @@
-"""ChatAgentGraph — wires reusable nodes into the chat agent flow.
+"""ChatAgentGraph — thin builder composing media + conversation node groups.
 
 The flow is:
 
@@ -17,107 +17,94 @@ is added only when a retrieval subgraph is wired and the per-message toggle is o
 ``user_text`` (e.g. audio-only inbound where STT errored). Without this,
 ``call_model`` would be invoked against the prior message history with no
 new turn appended and burn the full context for nothing — see
-``media_failed_node`` in ``BaseAgentGraph`` for the canned-reply emission.
-
-Single graph variant for now (chat). Future variants (voice-only, transcribe-
-only) would subclass ``BaseAgentGraph`` similarly.
+``media_failed_node`` for the canned-reply emission.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from langchain_core.language_models import BaseChatModel
-from langgraph.graph import END, START
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
-from .base import BaseAgentGraph
-
+from .config import ChatGraphConfig
+from .nodes.conversation import ConversationNodes
+from .nodes.media import MediaNodes
+from .services import AgentServices
+from .state import GraphState
 
 _RETRY_TWICE = RetryPolicy(max_attempts=2)
 
 
-class ChatAgentGraph(BaseAgentGraph):
-    """Single chat agent flow (LLM + tools + STT + vision + optional TTS)."""
+class ChatAgentGraph:
+    """Standalone chat graph builder — composes ``MediaNodes`` + ``ConversationNodes``."""
 
-    def build(
-        self,
-        *,
-        model: BaseChatModel,
-        tools: list,
-        model_id: str,
-        system_prompt: str | None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        thinking: Any = None,
-    ) -> CompiledStateGraph:
-        b = self._new_state_graph()
+    def __init__(self, services: AgentServices) -> None:
+        self.services = services
 
-        b.add_node("ingest", self.ingest_node)
-        b.add_node("stt", self.stt_node, retry=_RETRY_TWICE)
-        b.add_node("vision", self.vision_node, retry=_RETRY_TWICE)
-        b.add_node("gather", self.gather_node)
-        b.add_node("media_failed", self.media_failed_node)
-        b.add_node("trim_history", self.trim_history_node)
-        b.add_node("memory_search", self.memory_search_node, retry=_RETRY_TWICE)
-        b.add_node("context_build", self.context_build_node)
-        b.add_node("compose_context", self.make_compose_context_node())
-        b.add_node(
-            "call_model",
-            self.make_call_model_node(
-                model=model,
-                tools=tools,
-                model_id=model_id,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                thinking=thinking,
-            ),
-        )
-        b.add_node("memory_out", self.memory_out_node, retry=_RETRY_TWICE)
-        b.add_node("tts", self.tts_node, retry=_RETRY_TWICE)
-        b.add_node("finalize", self.finalize_node)
+    def build(self, config: ChatGraphConfig) -> CompiledStateGraph:
+        media = MediaNodes(self.services)
+        conv = ConversationNodes(self.services, config)
+        b = StateGraph(GraphState)
 
+        b.add_node("ingest", media.ingest_node)
+        b.add_node("stt", media.stt_node, retry_policy=_RETRY_TWICE)
+        b.add_node("vision", media.vision_node, retry_policy=_RETRY_TWICE)
+        b.add_node("gather", media.gather_node)
+        b.add_node("media_failed", media.media_failed_node)
+        b.add_node("trim_history", conv.trim_history_node)
+        b.add_node("memory_search", conv.memory_search_node, retry_policy=_RETRY_TWICE)
+        b.add_node("context_build", conv.context_build_node)
+        b.add_node("compose_context", conv.compose_context_node)
+        b.add_node("call_model", conv.call_model_node)
+        b.add_node("memory_out", conv.memory_out_node, retry_policy=_RETRY_TWICE)
+        b.add_node("tts", conv.tts_node, retry_policy=_RETRY_TWICE)
+        b.add_node("finalize", conv.finalize_node)
+
+        tools = config.tools
         if tools:
-            b.add_node("tools", self.make_tools_node(tools))
+            b.add_node("tools", conv.tools_node)
 
-        knowledge_on = self._knowledge_subgraph is not None
+        knowledge_on = self.services.knowledge_subgraph is not None
         if knowledge_on:
-            b.add_node("knowledge_retrieve", self.knowledge_retrieve_node)
+            b.add_node("knowledge_retrieve", conv.knowledge_retrieve_node)
 
-        # Wiring
         b.add_edge(START, "ingest")
-        # Fan-out: ingest decides which branches to spawn.
-        b.add_conditional_edges("ingest", self.dispatch_media, ["stt", "vision", "gather"])
+        b.add_conditional_edges("ingest", media.dispatch_media, ["stt", "vision", "gather"])
         b.add_edge("stt", "gather")
         b.add_edge("vision", "gather")
-        # Skip the LLM entirely when this turn produced no usable user_text
-        # (audio-only inbound + STT failure being the typical case).
-        b.add_conditional_edges("gather", self.input_gate, ["trim_history", "media_failed"])
-        # Trim once, up front, then run memory + knowledge in parallel off the same window.
+        b.add_conditional_edges("gather", media.input_gate, ["trim_history", "media_failed"])
         if knowledge_on:
             b.add_conditional_edges(
-                "trim_history", self.knowledge_fanout, ["memory_search", "knowledge_retrieve"]
+                "trim_history", conv.knowledge_fanout, ["memory_search", "knowledge_retrieve"]
             )
             b.add_edge("knowledge_retrieve", "context_build")
         else:
             b.add_edge("trim_history", "memory_search")
         b.add_edge("memory_search", "context_build")
-        # Assemble the ephemeral system message (persona + memory + knowledge) once, before the
-        # tools loop; call_model reads it each iteration. Keeps memory/knowledge out of messages.
         b.add_edge("context_build", "compose_context")
         b.add_edge("compose_context", "call_model")
 
         if tools:
-            b.add_conditional_edges("call_model", self.should_continue, ["tools", "memory_out"])
+            b.add_conditional_edges("call_model", conv.should_continue, ["tools", "memory_out"])
             b.add_edge("tools", "call_model")
         else:
             b.add_edge("call_model", "memory_out")
 
-        b.add_conditional_edges("memory_out", self.tts_gate, ["tts", "finalize"])
-        b.add_conditional_edges("media_failed", self.tts_gate, ["tts", "finalize"])
+        b.add_conditional_edges("memory_out", conv.tts_gate, ["tts", "finalize"])
+        b.add_conditional_edges("media_failed", conv.tts_gate, ["tts", "finalize"])
         b.add_edge("tts", "finalize")
         b.add_edge("finalize", END)
 
-        return b.compile(checkpointer=self._checkpointer)
+        return b.compile(checkpointer=self.services.checkpointer)
+
+    def set_stt_service(self, stt_service) -> None:
+        self.services.stt = stt_service
+
+    def set_tts_service(self, tts_service) -> None:
+        self.services.tts = tts_service
+
+    def set_memory_service(self, memory_service) -> None:
+        self.services.memory = memory_service
+
+    def set_knowledge_subgraph(self, knowledge_subgraph: CompiledStateGraph | None) -> None:
+        self.services.knowledge_subgraph = knowledge_subgraph
