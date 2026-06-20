@@ -1,0 +1,41 @@
+[
+  {
+    "event": "graph.ingest.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "character_id": "hiro",
+      "model_id": "fake:model",
+      "audio_count": 1,
+      "image_count": 0,
+      "text_count": 0
+    }
+  },
+  {
+    "event": "graph.error",
+    "payload": {
+      "inbound_id": "in-1",
+      "node": "stt",
+      "error": "stt boom"
+    }
+  },
+  {
+    "event": "graph.reply.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "thread_id": "t-1",
+      "reply_text": "Sorry, I couldn't understand the audio. Please try again.",
+      "reply_id": "reply-<uuid>",
+      "request_voice_reply": false
+    }
+  },
+  {
+    "event": "graph.run.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "reply_id": "reply-<uuid>"
+    }
+  }
+]

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
-from hirocli.runtime.agent_graph.nodes.tts_support import build_tts_usage, metered_text
+from hirocli.runtime.agent_graph.nodes.tts_support import (
+    build_tts_attachment_and_payload,
+    build_tts_usage,
+    metered_text,
+)
 
 
 def test_metered_text_prefixes_openai_mini_tts_with_instructions() -> None:
@@ -49,3 +53,25 @@ def test_build_tts_usage_openai_empty_shape() -> None:
     assert usage["tts_text_tokens"] is None
     assert usage["tts_audio_tokens"] is None
     assert usage["tts_audio_seconds"] == 0.8
+
+
+def test_build_tts_attachment_and_payload() -> None:
+    result = SimpleNamespace(
+        audio_bytes=b"\x00\x01",
+        duration_ms=1200,
+        mime_type="audio/wav",
+        model="gemini-2.5-flash-preview-tts",
+        voice="Kore",
+        provider="google",
+        usage_metadata={},
+    )
+    resolved = SimpleNamespace(instructions="warm tone")
+    built = build_tts_attachment_and_payload(
+        result, resolved, "hello", reply_id="reply-1"
+    )
+
+    assert built.attachment["media_type"] == "audio/wav"
+    assert built.attachment["audio_b64"]
+    assert built.payload["reply_id"] == "reply-1"
+    assert built.payload["input_characters"] == 5
+    assert built.usage_counts["input_tokens"] > 0

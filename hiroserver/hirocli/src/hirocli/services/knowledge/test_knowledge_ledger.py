@@ -89,11 +89,11 @@ async def test_knowledge_graph_writes_ledger_rows_for_standalone_run(
             return AIMessage(content="Ledger answer.")
 
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.graph.create_chat_model",
+        "hirocli.services.knowledge.agent.nodes.create_chat_model",
         lambda *_args, **_kwargs: FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.graph.resolve_knowledge_answering_llm",
+        "hirocli.services.knowledge.agent.nodes.resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
             temperature=0.2,
@@ -132,6 +132,8 @@ async def test_knowledge_graph_writes_ledger_rows_for_standalone_run(
     assert run_rows[0]["run_id"] == run_id
     assert preview_query(query) in str(run_rows[0].get("input_preview") or "")
     assert all(row["run_id"] == run_id for row in node_rows)
+    # Ledger labels carry the ``knowledge/`` namespace (set on ``KnowledgeNodes``); the
+    # LangGraph routing names stay bare.
     assert any(row["node"] == "knowledge/embed_query" for row in node_rows)
     assert any(row["node"] == "knowledge/vector_search" for row in node_rows)
     assert any(row["node"] == "knowledge/call_model" for row in node_rows)
@@ -159,11 +161,11 @@ async def test_knowledge_graph_nests_under_parent_run_without_aggregate_row(
             return AIMessage(content="Nested answer.")
 
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.graph.create_chat_model",
+        "hirocli.services.knowledge.agent.nodes.create_chat_model",
         lambda *_args, **_kwargs: FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.graph.resolve_knowledge_answering_llm",
+        "hirocli.services.knowledge.agent.nodes.resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
             temperature=0.2,
@@ -204,7 +206,10 @@ async def test_knowledge_graph_nests_under_parent_run_without_aggregate_row(
     node_rows = [row for row in rows if row.get("row_kind") == "node"]
     assert node_rows
     assert all(row["run_id"] == parent_run_id for row in node_rows)
-    assert any(row["node"].startswith("knowledge/") for row in node_rows)
+    assert any(
+        row["node"] in {"knowledge/parse_query", "knowledge/embed_query", "knowledge/vector_search"}
+        for row in node_rows
+    )
 
 
 @pytest.mark.asyncio
@@ -230,11 +235,11 @@ async def test_service_answer_writes_standalone_run_row(
             return AIMessage(content="Service answer.")
 
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.graph.create_chat_model",
+        "hirocli.services.knowledge.agent.nodes.create_chat_model",
         lambda *_args, **_kwargs: FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.graph.resolve_knowledge_answering_llm",
+        "hirocli.services.knowledge.agent.nodes.resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
             temperature=0.2,

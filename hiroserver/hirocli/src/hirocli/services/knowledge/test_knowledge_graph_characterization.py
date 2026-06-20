@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-import hirocli.services.knowledge.agent.graph as kgraph
+import hirocli.services.knowledge.agent.nodes as knowledge_nodes_module
 from hirocli.domain.preferences import load_preferences
 from hirocli.runtime.tests.graph_fakes import (
     FakeKnowledgeService,
@@ -32,14 +32,11 @@ from hirocli.runtime.tests.graph_fakes import (
 from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
 from hirocli.services.knowledge.agent.legs import RetrievalLeg
 
-# Knowledge nodes are wrapped under a "knowledge/" ledger prefix (KNOWLEDGE_NODE_PREFIX).
-K = "knowledge/"
-
 
 @pytest.fixture(autouse=True)
 def _no_answering_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force ``call_model`` down its no-LLM fallback so the answer is deterministic + offline."""
-    monkeypatch.setattr(kgraph, "resolve_knowledge_answering_llm", lambda *a, **k: None)
+    monkeypatch.setattr(knowledge_nodes_module, "resolve_knowledge_answering_llm", lambda *a, **k: None)
 
 
 def _build(tmp_path: Path, *, service: Any = None, retrieval_only: bool = False):
@@ -86,10 +83,18 @@ async def test_flat_leg_answers_from_sources(tmp_path: Path) -> None:
     assert len(result.final.get("sources") or []) == 1
     answer = result.final.get("answer") or ""
     assert answer.startswith("Found")  # deterministic no-LLM fallback
+    # Ledger labels are ``knowledge/<node>`` — the prefix groups the run in the admin
+    # Graph Runs view and avoids collisions with chat-side ``call_model``/``finalize``.
     nodes = set(sink.nodes())
-    assert {f"{K}embed_query", f"{K}vector_search", f"{K}build_context", f"{K}call_model", f"{K}finalize"} <= nodes
-    assert sink.decisions()[f"{K}build_context"][0] == "ok"
-    assert sink.decisions()[f"{K}finalize"][0] == "completed"
+    assert {
+        "knowledge/embed_query",
+        "knowledge/vector_search",
+        "knowledge/build_context",
+        "knowledge/call_model",
+        "knowledge/finalize",
+    } <= nodes
+    assert sink.decisions()["knowledge/build_context"][0] == "ok"
+    assert sink.decisions()["knowledge/finalize"][0] == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -106,10 +111,10 @@ async def test_small_talk_skips_retrieval(tmp_path: Path) -> None:
     assert (result.final.get("sources") or []) == []
     nodes = set(sink.nodes())
     # The skip edge bypasses the whole retrieval spine and the answer step.
-    assert f"{K}embed_query" not in nodes
-    assert f"{K}vector_search" not in nodes
-    assert f"{K}call_model" not in nodes
-    assert sink.decisions()[f"{K}finalize"][0] == "empty"
+    assert "knowledge/embed_query" not in nodes
+    assert "knowledge/vector_search" not in nodes
+    assert "knowledge/call_model" not in nodes
+    assert sink.decisions()["knowledge/finalize"][0] == "empty"
 
 
 # ---------------------------------------------------------------------------
@@ -123,10 +128,10 @@ async def test_graphiti_mode_soft_falls_back_to_vector(tmp_path: Path) -> None:
     result = await run_graph(compiled, _query(graph_mode="graphiti"))
 
     # No graph DB in a fresh workspace → graph_expand skips and routing falls through to vector.
-    assert sink.decisions()[f"{K}graph_expand"][0] == "skipped"
+    assert sink.decisions()["knowledge/graph_expand"][0] == "skipped"
     nodes = set(sink.nodes())
-    assert f"{K}vector_search" in nodes
-    assert f"{K}graph_fetch" not in nodes
+    assert "knowledge/vector_search" in nodes
+    assert "knowledge/graph_fetch" not in nodes
     assert (result.final.get("answer") or "").startswith("Found")
 
 
@@ -144,9 +149,9 @@ async def test_retrieval_only_form_stops_at_build_context(tmp_path: Path) -> Non
     assert (result.final.get("context") or "") != ""
     assert "answer" not in result.final
     nodes = set(sink.nodes())
-    assert f"{K}build_context" in nodes
-    assert f"{K}call_model" not in nodes
-    assert f"{K}finalize" not in nodes
+    assert "knowledge/build_context" in nodes
+    assert "knowledge/call_model" not in nodes
+    assert "knowledge/finalize" not in nodes
 
 
 # ---------------------------------------------------------------------------
@@ -169,5 +174,5 @@ async def test_graphiti_soft_fallback_resolves_effective_leg_flat(tmp_path: Path
 
     assert result.final.get("effective_leg") == RetrievalLeg.FLAT.value
     nodes = set(sink.nodes())
-    assert f"{K}vector_search" in nodes
-    assert f"{K}graph_fetch" not in nodes
+    assert "knowledge/vector_search" in nodes
+    assert "knowledge/graph_fetch" not in nodes

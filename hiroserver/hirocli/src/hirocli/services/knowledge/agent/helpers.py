@@ -180,3 +180,18 @@ def build_context(sources: Sequence[ContextSource]) -> str:
         date = f" — {valid_at}" if valid_at else ""
         blocks.append(f"[{source.ref}] {source.title}{heading}{date}\n{source.text}")
     return "\n\n".join(blocks)
+
+
+def minmax_relevances(scores: list[float]) -> list[float]:
+    """Min-max normalize retrieval scores into [0, 1] *within this result set* (ordinal).
+
+    Used for the score contract when no reranker ran — RRF/cosine scores are not calibrated, so
+    the top hit maps to 1.0 and the lowest to 0.0. A degenerate (all-equal) set maps all to 1.0.
+    """
+    if not scores:
+        return []
+    lo, hi = min(scores), max(scores)
+    if hi <= lo:
+        return [1.0 for _ in scores]
+    span = hi - lo
+    return [(score - lo) / span for score in scores]

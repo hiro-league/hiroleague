@@ -1,0 +1,75 @@
+[
+  {
+    "event": "graph.ingest.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "character_id": "hiro",
+      "model_id": "fake:model",
+      "audio_count": 1,
+      "image_count": 0,
+      "text_count": 0
+    }
+  },
+  {
+    "event": "graph.stt.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "item_index": 0,
+      "transcript": "hello from audio"
+    }
+  },
+  {
+    "event": "graph.memory.retrieved",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "character_id": "hiro",
+      "count": 1,
+      "elapsed_ms": 0
+    }
+  },
+  {
+    "event": "graph.llm.usage",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "model_id": "fake:model",
+      "usage_available": true,
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  {
+    "event": "graph.reply.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "thread_id": "t-1",
+      "reply_text": "got your voice note",
+      "reply_id": "reply-<uuid>",
+      "request_voice_reply": false,
+      "knowledge_sources": []
+    }
+  },
+  {
+    "event": "graph.memory.stored",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "character_id": "hiro",
+      "count": 1,
+      "elapsed_ms": 0
+    }
+  },
+  {
+    "event": "graph.run.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "reply_id": "reply-<uuid>"
+    }
+  }
+]

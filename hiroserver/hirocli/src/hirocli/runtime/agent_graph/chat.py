@@ -23,7 +23,6 @@ new turn appended and burn the full context for nothing — see
 from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
 from .config import ChatGraphConfig
@@ -33,6 +32,17 @@ from .services import AgentServices
 from .state import GraphState
 
 _RETRY_TWICE = RetryPolicy(max_attempts=2)
+RETRY_POLICIES: dict[str, RetryPolicy] = {
+    "stt": _RETRY_TWICE,
+    "vision": _RETRY_TWICE,
+    "memory_search": _RETRY_TWICE,
+    "memory_out": _RETRY_TWICE,
+    "tts": _RETRY_TWICE,
+}
+
+
+def _retry_for(label: str) -> RetryPolicy | None:
+    return RETRY_POLICIES.get(label)
 
 
 class ChatAgentGraph:
@@ -46,27 +56,28 @@ class ChatAgentGraph:
         conv = ConversationNodes(self.services, config)
         b = StateGraph(GraphState)
 
-        b.add_node("ingest", media.ingest_node)
-        b.add_node("stt", media.stt_node, retry_policy=_RETRY_TWICE)
-        b.add_node("vision", media.vision_node, retry_policy=_RETRY_TWICE)
-        b.add_node("gather", media.gather_node)
-        b.add_node("media_failed", media.media_failed_node)
-        b.add_node("trim_history", conv.trim_history_node)
-        b.add_node("memory_search", conv.memory_search_node, retry_policy=_RETRY_TWICE)
-        b.add_node("context_build", conv.context_build_node)
-        b.add_node("compose_context", conv.compose_context_node)
-        b.add_node("call_model", conv.call_model_node)
-        b.add_node("memory_out", conv.memory_out_node, retry_policy=_RETRY_TWICE)
-        b.add_node("tts", conv.tts_node, retry_policy=_RETRY_TWICE)
-        b.add_node("finalize", conv.finalize_node)
+        for label, fn in media.registered_nodes().items():
+            kwargs: dict = {}
+            if (retry := _retry_for(label)) is not None:
+                kwargs["retry_policy"] = retry
+            b.add_node(label, fn, **kwargs)
 
-        tools = config.tools
-        if tools:
-            b.add_node("tools", conv.tools_node)
+        skip_conv: set[str] = set()
+        if not config.tools:
+            skip_conv.add("tools")
+        if self.services.knowledge_subgraph is None:
+            skip_conv.add("knowledge_retrieve")
 
+        for label, fn in conv.registered_nodes().items():
+            if label in skip_conv:
+                continue
+            kwargs = {}
+            if (retry := _retry_for(label)) is not None:
+                kwargs["retry_policy"] = retry
+            b.add_node(label, fn, **kwargs)
+
+        tools = bool(config.tools)
         knowledge_on = self.services.knowledge_subgraph is not None
-        if knowledge_on:
-            b.add_node("knowledge_retrieve", conv.knowledge_retrieve_node)
 
         b.add_edge(START, "ingest")
         b.add_conditional_edges("ingest", media.dispatch_media, ["stt", "vision", "gather"])
@@ -96,15 +107,3 @@ class ChatAgentGraph:
         b.add_edge("finalize", END)
 
         return b.compile(checkpointer=self.services.checkpointer)
-
-    def set_stt_service(self, stt_service) -> None:
-        self.services.stt = stt_service
-
-    def set_tts_service(self, tts_service) -> None:
-        self.services.tts = tts_service
-
-    def set_memory_service(self, memory_service) -> None:
-        self.services.memory = memory_service
-
-    def set_knowledge_subgraph(self, knowledge_subgraph: CompiledStateGraph | None) -> None:
-        self.services.knowledge_subgraph = knowledge_subgraph

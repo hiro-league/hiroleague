@@ -17,6 +17,7 @@ from hirocli.runtime.agent_graph.ledger import (
     current_substep,
     graph_logged,
 )
+from hirocli.runtime.agent_graph.ledger.pricing import price_row
 
 
 from hirocli.runtime.agent_graph.config import ChatGraphConfig
@@ -249,12 +250,13 @@ def test_stt_priced_by_duration_fallback(tmp_path: Path) -> None:
     """With only audio seconds (no token usage), STT prices via the per-second fallback."""
     graph = _graph(tmp_path)
 
-    priced = graph._ledger_sink._with_cost(
+    priced = price_row(
         {
             "provider": "openai",
             "model": "openai:gpt-4o-transcribe",
             "stt_audio_seconds": 12.5,
-        }
+        },
+        graph._ledger_sink.catalog,
     )
 
     # gpt-4o-transcribe per_second = 0.0001 → 12.5 × 0.0001 = 0.00125.
@@ -266,14 +268,15 @@ def test_stt_priced_by_tokens_when_usage_present(tmp_path: Path) -> None:
     """When provider usage is recorded, STT prices token-based (audio-in + output)."""
     graph = _graph(tmp_path)
 
-    priced = graph._ledger_sink._with_cost(
+    priced = price_row(
         {
             "provider": "openai",
             "model": "openai:gpt-4o-mini-transcribe",
             "stt_audio_seconds": 8.4,
             "stt_audio_tokens": 1200,
             "output_tokens": 80,
-        }
+        },
+        graph._ledger_sink.catalog,
     )
 
     # 1200 × 1.25/1e6 + 80 × 5.00/1e6 = 0.0019 (token path wins over the per-second fallback).
@@ -329,7 +332,7 @@ def test_gemini_tts_prices_with_audio_tokens(tmp_path: Path) -> None:
     """
     graph = _graph(tmp_path)
 
-    priced = graph._ledger_sink._with_cost(
+    priced = price_row(
         {
             "provider": "gemini",
             "model": "gemini-2.5-flash-preview-tts",
@@ -338,7 +341,8 @@ def test_gemini_tts_prices_with_audio_tokens(tmp_path: Path) -> None:
             "tts_audio_tokens": 240,
             "tts_audio_seconds": 4.0,
             "input_tokens": 18,
-        }
+        },
+        graph._ledger_sink.catalog,
     )
 
     assert priced["cost_usd"] not in ("", None)
@@ -350,7 +354,7 @@ def test_gemini_tts_without_audio_tokens_stays_unpriced(tmp_path: Path) -> None:
     """Missing AUDIO modality tokens (e.g. older usage_metadata shapes) still no-price."""
     graph = _graph(tmp_path)
 
-    priced = graph._ledger_sink._with_cost(
+    priced = price_row(
         {
             "provider": "gemini",
             "model": "gemini-2.5-flash-preview-tts",
@@ -358,7 +362,8 @@ def test_gemini_tts_without_audio_tokens_stays_unpriced(tmp_path: Path) -> None:
             "tts_text_tokens": 18,
             "tts_audio_seconds": 4.0,
             "input_tokens": 18,
-        }
+        },
+        graph._ledger_sink.catalog,
     )
 
     assert priced["cost_usd"] == ""

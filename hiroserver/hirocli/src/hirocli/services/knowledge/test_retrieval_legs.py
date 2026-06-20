@@ -9,15 +9,13 @@ import pytest
 from hirocli.domain.preferences import load_preferences
 from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, run_graph
 from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
+from hirocli.services.knowledge.agent.nodes import KnowledgeNodes
 from hirocli.services.knowledge.agent.legs import (
     RetrievalLeg,
     effective_leg,
     graphiti_facts_block,
     intended_leg,
 )
-
-K = "knowledge/"
-
 
 # ---------------------------------------------------------------------------
 # intended_leg
@@ -93,7 +91,7 @@ def test_route_after_expand_reads_effective_leg(
     effective: str | None, expected_route: str
 ) -> None:
     state: dict = {"effective_leg": effective} if effective is not None else {}
-    assert KnowledgeAgentGraph._route_after_expand(state) == expected_route  # noqa: SLF001
+    assert KnowledgeNodes.route_after_expand(state) == expected_route
 
 
 # ---------------------------------------------------------------------------

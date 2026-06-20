@@ -22,7 +22,7 @@ from ..events import (
     GRAPH_STT_COMPLETED,
     GRAPH_VISION_COMPLETED,
 )
-from ..graph_kit import emit
+from ..graph_kit import emit, emit_for, IDENTITY_PEER_KEYS
 from ..ledger import graph_logged, observe
 from ..node_group import NodeGroup
 from ..state import (
@@ -107,13 +107,11 @@ class MediaNodes(NodeGroup):
             len(image_items),
             len(text_inputs),
         )
-        emit(
+        emit_for(
             writer,
+            state,
             GRAPH_INGEST_COMPLETED,
             {
-                "inbound_id": state.get("inbound_id", ""),
-                "chat_channel_id": state.get("chat_channel_id", 0),
-                "character_id": state.get("character_id", ""),
                 "model_id": state.get("model_id", ""),
                 "audio_count": len(audio_items),
                 "image_count": len(image_items),
@@ -233,15 +231,15 @@ class MediaNodes(NodeGroup):
             "mime_type": item["mime_type"],
             "duration_ms": item.get("duration_ms"),
         }
-        emit(
+        emit_for(
             writer,
+            sub_state,
             GRAPH_STT_COMPLETED,
             {
-                "inbound_id": inbound_id,
-                "chat_channel_id": sub_state.get("chat_channel_id", 0),
                 "item_index": item["item_index"],
                 "transcript": text,
             },
+            identity_keys=IDENTITY_PEER_KEYS,
         )
         return {"transcripts": [result]}
 
@@ -300,15 +298,15 @@ class MediaNodes(NodeGroup):
             "item_index": item["item_index"],
             "description": description,
         }
-        emit(
+        emit_for(
             writer,
+            sub_state,
             GRAPH_VISION_COMPLETED,
             {
-                "inbound_id": inbound_id,
-                "chat_channel_id": sub_state.get("chat_channel_id", 0),
                 "item_index": item["item_index"],
                 "description": description,
             },
+            identity_keys=IDENTITY_PEER_KEYS,
         )
         return {"visions": [result]}
 
@@ -397,17 +395,17 @@ class MediaNodes(NodeGroup):
             "⚠️ media_failed — %s · %s · len=%d",
             inbound_id, detail, len(reply_text),
         )
-        emit(
+        emit_for(
             writer,
+            state,
             GRAPH_REPLY_COMPLETED,
             {
-                "inbound_id": inbound_id,
-                "chat_channel_id": state.get("chat_channel_id", 0),
                 "thread_id": state.get("thread_id", ""),
                 "reply_text": reply_text,
                 "reply_id": reply_id,
                 "request_voice_reply": bool(state.get("request_voice_reply", False)),
             },
+            identity_keys=IDENTITY_PEER_KEYS,
         )
         return {"reply_text": reply_text, "reply_id": reply_id}
 

@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from .graph_kit import memory_text
+
 # Section order (lower first). Instructions → knowledge → memory, matching the prompt design;
 # the citation instruction trails last (it refers back to the knowledge it annotates).
 _PRIORITY_INSTRUCTIONS = 10
@@ -158,7 +160,7 @@ def memory_block(memories: list[dict[str, Any]]) -> ContextBlock:
     """Render long-term memory hits as ``- {date} · score {s} · {text}`` (placeholder when empty)."""
     lines: list[str] = []
     for item in (memories or [])[:8]:
-        text = _memory_text(item)
+        text = memory_text(item)
         if not text:
             continue
         parts: list[str] = []
@@ -192,14 +194,6 @@ def _get(item: Any, key: str) -> Any:
     if isinstance(item, dict):
         return item.get(key)
     return getattr(item, key, None)
-
-
-def _memory_text(item: Any) -> str:
-    for key in ("memory", "text", "content", "data", "value"):
-        value = _get(item, key)
-        if value:
-            return " ".join(str(value).split())
-    return ""
 
 
 def _format_memory_date(value: Any) -> str:

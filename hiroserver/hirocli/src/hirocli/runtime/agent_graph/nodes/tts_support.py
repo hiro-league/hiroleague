@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+from dataclasses import dataclass
 from typing import Any
 
 from hiro_commons.llm_usage import gemini_usage_aggregate_fallback, modality_token_count
 
 from ..graph_kit import estimate_text_tokens
+from ..state import ReplyAudio
 
 
 def metered_text(
@@ -53,3 +56,58 @@ def build_tts_usage(
             duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0.0
         ),
     }
+
+
+@dataclass(frozen=True)
+class TtsAttachmentAndPayload:
+    attachment: ReplyAudio
+    payload: dict[str, Any]
+    usage_counts: dict[str, Any]
+
+
+def build_tts_attachment_and_payload(
+    result: Any,
+    resolved: Any,
+    text: str,
+    *,
+    reply_id: str,
+) -> TtsAttachmentAndPayload:
+    """Base64-encode audio and build the ``GRAPH_TTS_COMPLETED`` payload + ``ReplyAudio``."""
+    audio_b64 = base64.b64encode(result.audio_bytes).decode()
+    duration_ms = result.duration_ms
+    provider = str(getattr(result, "provider", "") or "")
+    usage_metadata = getattr(result, "usage_metadata", None)
+    if not isinstance(usage_metadata, dict):
+        usage_metadata = {}
+    metered = metered_text(provider, result.model, resolved.instructions, text)
+    usage_counts = build_tts_usage(
+        usage_metadata, duration_ms=duration_ms, text=metered
+    )
+    payload = {
+        "reply_id": reply_id,
+        "blob_id": "",
+        "media_type": result.mime_type,
+        "size": len(result.audio_bytes),
+        "duration_ms": duration_ms,
+        "audio_b64": audio_b64,
+        "provider": provider,
+        "model": result.model,
+        "voice": result.voice,
+        "input_characters": len(text),
+        "input_text_tokens": usage_counts["input_tokens"],
+        "generated_audio_seconds": usage_counts["tts_audio_seconds"],
+        "usage_metadata": usage_metadata,
+    }
+    attachment: ReplyAudio = {
+        "blob_id": "",
+        "media_type": result.mime_type,
+        "size": len(result.audio_bytes),
+        "duration_ms": duration_ms,
+        "media_path": "",
+        "audio_b64": audio_b64,
+    }
+    return TtsAttachmentAndPayload(
+        attachment=attachment,
+        payload=payload,
+        usage_counts=usage_counts,
+    )

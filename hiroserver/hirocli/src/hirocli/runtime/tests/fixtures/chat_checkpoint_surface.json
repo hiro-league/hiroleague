@@ -1,0 +1,38 @@
+{
+  "channel_keys": [
+    "audio_items",
+    "character_id",
+    "chat_channel_id",
+    "data_user_id",
+    "errors",
+    "image_items",
+    "inbound_envelope",
+    "inbound_id",
+    "knowledge_enabled",
+    "messages",
+    "model_id",
+    "reply_id",
+    "reply_text",
+    "request_voice_reply",
+    "routing_metadata",
+    "text_inputs",
+    "thread_id",
+    "tools_enabled",
+    "transcripts",
+    "turn_context",
+    "user_text",
+    "visions",
+    "voice_input_allowed"
+  ],
+  "cleared_scratch_fields": {
+    "audio_items": [],
+    "image_items": [],
+    "text_inputs": [
+      "hello there"
+    ]
+  },
+  "messages_nonempty": true,
+  "transcripts_present": true,
+  "visions_present": true,
+  "errors_present": true
+}

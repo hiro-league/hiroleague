@@ -771,7 +771,7 @@ class AgentManager:
 
         self._stt = new_stt
         if self._graph is not None:
-            self._graph.set_stt_service(new_stt)
+            self._graph.services.stt = new_stt
         log.fineinfo(
             "STT rebound — HiroServer",
             context=context,
@@ -799,7 +799,7 @@ class AgentManager:
 
         self._tts = new_tts
         if self._graph is not None:
-            self._graph.set_tts_service(new_tts)
+            self._graph.services.tts = new_tts
         log.fineinfo(
             "TTS rebound — HiroServer",
             context=context,
@@ -815,7 +815,7 @@ class AgentManager:
         self._memory = None
         self._ctx.memory_service = None
         if self._graph is not None:
-            self._graph.set_memory_service(None)
+            self._graph.services.memory = None
         await _close_memory_service(old_memory)
 
         try:
@@ -836,7 +836,7 @@ class AgentManager:
         self._memory = new_memory
         self._ctx.memory_service = new_memory
         if self._graph is not None:
-            self._graph.set_memory_service(new_memory)
+            self._graph.services.memory = new_memory
         log.fineinfo(
             "Memory rebound - HiroServer",
             context=context,
@@ -970,7 +970,7 @@ class AgentManager:
         """Rebuild the knowledge subgraph and drop chat graphs after knowledge prefs change."""
         if self._graph is None:
             return
-        self._graph.set_knowledge_subgraph(self._build_knowledge_subgraph())
+        self._graph.services.knowledge_subgraph = self._build_knowledge_subgraph()
         self._compiled_cache.clear()
         log.info(
             "✅ knowledge subgraph rebuilt — chat graph cache cleared",

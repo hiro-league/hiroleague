@@ -1,0 +1,131 @@
+{
+  "node_order": [
+    "ingest",
+    "stt",
+    "vision",
+    "gather",
+    "media_failed",
+    "trim_history",
+    "memory_search",
+    "context_build",
+    "compose_context",
+    "call_model",
+    "memory_out",
+    "tts",
+    "finalize"
+  ],
+  "retry_policies": {
+    "stt": {
+      "max_attempts": 2
+    },
+    "vision": {
+      "max_attempts": 2
+    },
+    "memory_search": {
+      "max_attempts": 2
+    },
+    "memory_out": {
+      "max_attempts": 2
+    },
+    "tts": {
+      "max_attempts": 2
+    }
+  },
+  "edges": [
+    {
+      "source": "__start__",
+      "target": "ingest",
+      "conditional": false
+    },
+    {
+      "source": "call_model",
+      "target": "memory_out",
+      "conditional": false
+    },
+    {
+      "source": "compose_context",
+      "target": "call_model",
+      "conditional": false
+    },
+    {
+      "source": "context_build",
+      "target": "compose_context",
+      "conditional": false
+    },
+    {
+      "source": "finalize",
+      "target": "__end__",
+      "conditional": false
+    },
+    {
+      "source": "gather",
+      "target": "media_failed",
+      "conditional": true
+    },
+    {
+      "source": "gather",
+      "target": "trim_history",
+      "conditional": true
+    },
+    {
+      "source": "ingest",
+      "target": "gather",
+      "conditional": true
+    },
+    {
+      "source": "ingest",
+      "target": "stt",
+      "conditional": true
+    },
+    {
+      "source": "ingest",
+      "target": "vision",
+      "conditional": true
+    },
+    {
+      "source": "media_failed",
+      "target": "finalize",
+      "conditional": true
+    },
+    {
+      "source": "media_failed",
+      "target": "tts",
+      "conditional": true
+    },
+    {
+      "source": "memory_out",
+      "target": "finalize",
+      "conditional": true
+    },
+    {
+      "source": "memory_out",
+      "target": "tts",
+      "conditional": true
+    },
+    {
+      "source": "memory_search",
+      "target": "context_build",
+      "conditional": false
+    },
+    {
+      "source": "stt",
+      "target": "gather",
+      "conditional": false
+    },
+    {
+      "source": "trim_history",
+      "target": "memory_search",
+      "conditional": false
+    },
+    {
+      "source": "tts",
+      "target": "finalize",
+      "conditional": false
+    },
+    {
+      "source": "vision",
+      "target": "gather",
+      "conditional": false
+    }
+  ]
+}

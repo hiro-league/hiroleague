@@ -37,10 +37,10 @@ from hirocli.runtime.agent_graph.ledger import (
     LedgerEntry,
     LedgerSink,
     RunAccumulator,
-    _record_node_exception,
     current_entry,
     current_run,
 )
+from hirocli.runtime.agent_graph.ledger.wrapper import record_node_exception as _record_node_exception
 
 from .graphiti_adapters import GraphitiLLMUsage
 from .ledger_tracer import SpanRecord, current_spans

@@ -12,7 +12,6 @@ from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     HumanMessage,
-    SystemMessage,
     ToolMessage,
 )
 from langchain_core.messages.utils import count_tokens_approximately
@@ -39,16 +38,25 @@ from ..events import (
     GRAPH_TTS_COMPLETED,
 )
 from ..graph_kit import (
+    IDENTITY_PEER_KEYS,
     KNOWLEDGE_PREVIEW_MAX,
     emit,
+    emit_for,
     knowledge_results_rows,
     llm_usage_payload,
+    memory_text,
     normalize_reply_content,
+    tool_args_one_line,
+    tool_call_args,
+    tool_call_id,
+    tool_call_name,
+    tool_result_bounded,
 )
 from ..ledger import graph_logged, observe, record_child, substep_scope
 from ..node_group import NodeGroup
-from .tts_support import build_tts_usage, metered_text
-from ..state import GraphState, ReplyAudio
+from .call_model_support import inject_turn_context
+from .tts_support import build_tts_attachment_and_payload
+from ..state import GraphState
 from ._helpers import _error_slug
 
 if TYPE_CHECKING:
@@ -56,13 +64,11 @@ if TYPE_CHECKING:
 
 log = Logger.get("AGENT.GRAPH")
 
-_AGENT_TOOL_ARGS_MAX = 2000
-_AGENT_TOOL_RESULT_MAX = 4000
 
 def _llm_decision(message: AIMessage) -> tuple[str, str]:
     tool_calls = getattr(message, "tool_calls", None) or []
     if tool_calls:
-        return "tool_call", _tool_call_name(tool_calls[0])
+        return "tool_call", tool_call_name(tool_calls[0])
     content = normalize_reply_content(message.content)
     if content.strip():
         return "text_reply", "ok"
@@ -121,25 +127,11 @@ def _memory_results_preview(
     count: int | None = None,
 ) -> str:
     total = len(memories) if count is None else count
-    snippets = [_memory_text(item) for item in memories[:3]]
+    snippets = [memory_text(item) for item in memories[:3]]
     snippets = [item for item in snippets if item]
     if snippets:
         return f"{label}: {total} · " + " | ".join(snippets)
     return f"{label}: {total}"
-
-
-
-
-def _memory_text(item: dict[str, Any]) -> str:
-    text = (
-        item.get("memory")
-        or item.get("text")
-        or item.get("content")
-        or item.get("data")
-        or item.get("value")
-        or ""
-    )
-    return " ".join(str(text or "").split())
 
 
 
@@ -156,7 +148,7 @@ def _last_human_message_preview(messages: list[AnyMessage]) -> str:
 def _tool_calls_preview(tool_calls: list[dict[str, Any]]) -> str:
     if not tool_calls:
         return "reply: <empty>"
-    names = [_tool_call_name(call) or "unknown" for call in tool_calls[:4]]
+    names = [tool_call_name(call) or "unknown" for call in tool_calls[:4]]
     return f"tool_calls: {len(tool_calls)}; " + ", ".join(names)
 
 
@@ -170,35 +162,6 @@ def _tool_input_preview(tool_name: str, args: dict[str, Any]) -> str:
     return f"{tool_name or 'unknown'} args: {arg_text}"
 
 
-# Bounded strings for admin message metadata (separate from ledger previews).
-_AGENT_TOOL_ARGS_MAX = 2000
-_AGENT_TOOL_RESULT_MAX = 4000
-
-
-
-
-def _tool_args_one_line(args: dict[str, Any], *, max_len: int = _AGENT_TOOL_ARGS_MAX) -> str:
-    try:
-        text = json.dumps(args, ensure_ascii=False, default=str, separators=(",", ":"))
-    except TypeError:
-        text = str(args)
-    compact = " ".join(text.split())
-    if len(compact) <= max_len:
-        return compact
-    return compact[: max_len - 3] + "..."
-
-
-
-
-def _tool_result_bounded(content: str, *, max_len: int = _AGENT_TOOL_RESULT_MAX) -> str:
-    text = str(content or "")
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
-
-
-
-
 def _trim_chat_history(messages: list[AnyMessage], limit: int) -> list[AnyMessage]:
     """Return a bounded chat suffix that does not start inside a tool exchange."""
     if limit <= 0:
@@ -207,25 +170,6 @@ def _trim_chat_history(messages: list[AnyMessage], limit: int) -> list[AnyMessag
     while keep and not isinstance(keep[0], HumanMessage):
         keep.pop(0)
     return keep
-
-
-
-
-def _tool_call_id(call: dict[str, Any]) -> str:
-    return str(call.get("id") or "")
-
-
-
-
-def _tool_call_name(call: dict[str, Any]) -> str:
-    return str(call.get("name") or "")
-
-
-
-
-def _tool_call_args(call: dict[str, Any]) -> dict[str, Any]:
-    args = call.get("args") or {}
-    return args if isinstance(args, dict) else {}
 
 
 
@@ -242,6 +186,20 @@ def _tool_result_content(result: Any) -> str:
 
 class ConversationNodes(NodeGroup):
     """Model-bound conversation nodes — constructed per ``build(config)``."""
+
+    # Matches ``ChatAgentGraph.build`` add_node order (LangGraph treats registration order as stable).
+    _NODE_REGISTRATION_ORDER = (
+        "trim_history",
+        "memory_search",
+        "context_build",
+        "compose_context",
+        "call_model",
+        "memory_out",
+        "tts",
+        "finalize",
+        "tools",
+        "knowledge_retrieve",
+    )
 
     def __init__(self, services: "AgentServices", config: ChatGraphConfig) -> None:
         super().__init__(services)
@@ -331,13 +289,11 @@ class ConversationNodes(NodeGroup):
             output=_memory_results_preview("results", hits),
         )
         log.info("memory_search retrieved - n=%d", len(hits), elapsed_ms=elapsed_ms)
-        emit(
+        emit_for(
             writer,
+            state,
             GRAPH_MEMORY_RETRIEVED,
             {
-                "inbound_id": state.get("inbound_id", ""),
-                "chat_channel_id": state.get("chat_channel_id", 0),
-                "character_id": state.get("character_id", ""),
                 "count": len(hits),
                 "elapsed_ms": elapsed_ms,
             },
@@ -495,18 +451,18 @@ class ConversationNodes(NodeGroup):
             "✅ reply — %s · len=%d",
             state.get("inbound_id", "?"), len(reply_text),
         )
-        emit(
+        emit_for(
             writer,
+            state,
             GRAPH_REPLY_COMPLETED,
             {
-                "inbound_id": state.get("inbound_id", ""),
-                "chat_channel_id": state.get("chat_channel_id", 0),
                 "thread_id": state.get("thread_id", ""),
                 "reply_text": reply_text,
                 "reply_id": reply_id,
                 "request_voice_reply": bool(state.get("request_voice_reply", False)),
                 "knowledge_sources": self._reply_knowledge_sources(state),
             },
+            identity_keys=IDENTITY_PEER_KEYS,
         )
         await self._store_turn_memory(state, writer, reply_text)
         return {"reply_text": reply_text, "reply_id": reply_id}
@@ -624,13 +580,11 @@ class ConversationNodes(NodeGroup):
             elapsed_ms,
             stored=stored_count,
         )
-        emit(
+        emit_for(
             writer,
+            state,
             GRAPH_MEMORY_STORED,
             {
-                "inbound_id": state.get("inbound_id", ""),
-                "chat_channel_id": state.get("chat_channel_id", 0),
-                "character_id": state.get("character_id", ""),
                 "count": stored_count,
                 "elapsed_ms": elapsed_ms,
             },
@@ -738,19 +692,14 @@ class ConversationNodes(NodeGroup):
             elapsed_ms=elapsed_ms,
         )
 
-        import base64
-
-        audio_b64 = base64.b64encode(result.audio_bytes).decode()
-        reply_id = state.get("reply_id") or ""
-        duration_ms = result.duration_ms
-        provider = str(getattr(result, "provider", "") or "")
-        usage_metadata = getattr(result, "usage_metadata", None)
-        if not isinstance(usage_metadata, dict):
-            usage_metadata = {}
-        metered = metered_text(provider, result.model, resolved.instructions, text)
-        usage_counts = build_tts_usage(
-            usage_metadata, duration_ms=duration_ms, text=metered
+        built = build_tts_attachment_and_payload(
+            result,
+            resolved,
+            text,
+            reply_id=state.get("reply_id") or "",
         )
+        provider = str(getattr(result, "provider", "") or "")
+        usage_counts = built.usage_counts
         observe(
             usage={
                 "provider": provider,
@@ -763,38 +712,18 @@ class ConversationNodes(NodeGroup):
             },
             decision=("voiced", provider),
             output=(
-                f"audio: {len(result.audio_bytes)} bytes · duration: {duration_ms}ms"
+                f"audio: {len(result.audio_bytes)} bytes · duration: {result.duration_ms}ms"
                 f" · voice: {result.voice}"
             ),
         )
-        payload = {
-            "inbound_id": inbound_id,
-            "chat_channel_id": state.get("chat_channel_id", 0),
-            "reply_id": reply_id,
-            "blob_id": "",
-            "media_type": result.mime_type,
-            "size": len(result.audio_bytes),
-            "duration_ms": duration_ms,
-            "audio_b64": audio_b64,
-            "provider": provider,
-            "model": result.model,
-            "voice": result.voice,
-            "input_characters": len(text),
-            "input_text_tokens": usage_counts["input_tokens"],
-            "generated_audio_seconds": usage_counts["tts_audio_seconds"],
-            "usage_metadata": usage_metadata,
-        }
-        emit(writer, GRAPH_TTS_COMPLETED, payload)
-
-        attachment: ReplyAudio = {
-            "blob_id": "",
-            "media_type": result.mime_type,
-            "size": len(result.audio_bytes),
-            "duration_ms": result.duration_ms,
-            "media_path": "",
-            "audio_b64": audio_b64,
-        }
-        return {"reply_audio": attachment}
+        emit_for(
+            writer,
+            state,
+            GRAPH_TTS_COMPLETED,
+            built.payload,
+            identity_keys=IDENTITY_PEER_KEYS,
+        )
+        return {"reply_audio": built.attachment}
 
 
     @graph_logged(captures={"decision"})
@@ -814,14 +743,12 @@ class ConversationNodes(NodeGroup):
         )
         if reply_text and reply_id:
             observe(decision=("completed", "ok"), output="run: completed")
-            emit(
-            writer,
+            emit_for(
+                writer,
+                state,
                 GRAPH_RUN_COMPLETED,
-                {
-                    "inbound_id": inbound_id,
-                    "chat_channel_id": chat_channel_id,
-                    "reply_id": reply_id,
-                },
+                {"reply_id": reply_id},
+                identity_keys=IDENTITY_PEER_KEYS,
             )
             return {}
 
@@ -832,16 +759,16 @@ class ConversationNodes(NodeGroup):
                 "decision": "failed",
             }
         )
-        emit(
+        emit_for(
             writer,
+            state,
             GRAPH_RUN_FAILED,
             {
-                "inbound_id": inbound_id,
-                "chat_channel_id": chat_channel_id,
                 "code": "reply_generation_failed",
                 "message": "I couldn't finish generating a reply.",
                 "node": "finalize",
             },
+            identity_keys=IDENTITY_PEER_KEYS,
         )
         return {}
 
@@ -900,19 +827,7 @@ class ConversationNodes(NodeGroup):
         # question last — so it sits next to the query and never persists in ``messages``.
         # ``turn_context`` is absent for non-chat variants that skip compose_context.
         turn_context = (state.get("turn_context") or "").strip()
-        inputs: list[AnyMessage] = list(messages)
-        if turn_context:
-            # The current user turn is the last HumanMessage (after a tool loop it is no longer
-            # the final element). Enrich a copy of it; the stored message stays clean.
-            for i in range(len(inputs) - 1, -1, -1):
-                if isinstance(inputs[i], HumanMessage):
-                    user_text = normalize_reply_content(inputs[i].content)
-                    inputs[i] = HumanMessage(
-                        content=f"{turn_context}\n\n## Last User Message\n{user_text}"
-                    )
-                    break
-        if self._system_prompt:
-            inputs = [SystemMessage(content=self._system_prompt), *inputs]
+        inputs = inject_turn_context(messages, turn_context, self._system_prompt)
         # Preview the clean stored turn (not the enriched copy) + the tuning that ran. Model
         # is in the model column, so it's not repeated here.
         tuning = (
@@ -987,9 +902,9 @@ class ConversationNodes(NodeGroup):
 
         out: list[ToolMessage] = []
         for idx, call in enumerate(last.tool_calls):
-            tool_call_id = _tool_call_id(call)
-            tool_name = _tool_call_name(call)
-            args = _tool_call_args(call)
+            call_id = tool_call_id(call)
+            tool_name = tool_call_name(call)
+            args = tool_call_args(call)
             tool = self._tools_by_name.get(tool_name)
             started = time.perf_counter()
             status = "completed"
@@ -1025,27 +940,27 @@ class ConversationNodes(NodeGroup):
                     output=f"error: {error}",
                     fail={"code": _error_slug(error or "tool_error"), "decision": "client_error"},
                 )
-            emit(
+            emit_for(
                 writer,
+                state,
                 GRAPH_TOOL_COMPLETED,
                 {
-                    "inbound_id": state.get("inbound_id", ""),
-                    "chat_channel_id": int(state.get("chat_channel_id") or 0),
-                    "tool_call_id": tool_call_id,
+                    "tool_call_id": call_id,
                     "tool_name": tool_name,
                     "status": status,
                     "elapsed_ms": elapsed_ms,
                     "error": error,
-                    "args": _tool_args_one_line(args),
-                    "result": _tool_result_bounded(content)
+                    "args": tool_args_one_line(args),
+                    "result": tool_result_bounded(content)
                     if status == "completed"
                     else None,
                 },
+                identity_keys=IDENTITY_PEER_KEYS,
             )
             out.append(
                 ToolMessage(
                     content=content,
-                    tool_call_id=tool_call_id or tool_name,
+                    tool_call_id=call_id or tool_name,
                 )
             )
 
