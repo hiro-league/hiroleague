@@ -51,24 +51,44 @@ GRAPH_LEDGER_COLUMNS = [
 LEDGER_LOGGER_PREFIX = "AGENT.GRAPH.LEDGER"
 
 
+# Declared error-handling policy for a node (review §2.2). DESCRIPTIVE, not enforced by the
+# wrapper — the wrapper always records + re-raises an *unhandled* exception regardless. The
+# policy documents how the node body handles its OWN errors, so raise-vs-degrade is auditable
+# in one column at the top of each method instead of buried in the body:
+#   "raise"   — propagates exceptions on its main path (e.g. the LLM call nodes); no
+#               except→return-partial branch.
+#   "degrade" — catches a failing external call and returns a partial result so the turn
+#               still completes (e.g. memory/knowledge/tts nodes), with a curated error_code.
+#   "mixed"   — does both in one body (``embed_query``: re-raises the embed failure but
+#               degrades an invalid-vector result). Kept explicit rather than mislabelled.
+# NOT hoisted into the wrapper because each degrade site emits a curated ``error_code`` and a
+# domain-specific partial return; a generic catch would drift the ledger and widen the scope.
+ON_ERROR_VALUES = frozenset({"raise", "degrade", "mixed"})
+
+
 @dataclass(frozen=True)
 class GraphLoggedSpec:
     captures: frozenset[str] = frozenset()
     flush: bool = True
+    on_error: str = "raise"
 
 
 def graph_logged(
     *,
     captures: Iterable[str] | None = None,
     flush: bool = True,
+    on_error: str = "raise",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Mark a graph node as ledger-worthy.
 
     Unmarked nodes are still wrapped for ContextVar discipline but do not flush
-    a parent row.
+    a parent row. ``on_error`` declares the node's error policy (see ``ON_ERROR_VALUES``);
+    it is descriptive metadata, not a behavior switch.
     """
 
-    spec = GraphLoggedSpec(frozenset(captures or ()), flush=flush)
+    if on_error not in ON_ERROR_VALUES:
+        raise ValueError(f"on_error must be one of {sorted(ON_ERROR_VALUES)}, got {on_error!r}")
+    spec = GraphLoggedSpec(frozenset(captures or ()), flush=flush, on_error=on_error)
 
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
         setattr(fn, "_graph_logged_spec", spec)

@@ -83,7 +83,7 @@ class MemoryNodes(NodeGroup):
         "memory_out": RetryPolicy(max_attempts=2),
     }
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def memory_search_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Bring recent conversation memory (Graphiti) into the turn. Runs after ``trim_history``."""
         text = state.get("user_text") or ""
@@ -146,7 +146,7 @@ class MemoryNodes(NodeGroup):
         )
         return {"retrieved_memories": hits}
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="raise")
     async def memory_out_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Finalize the reply text and emit ``reply.completed``.
 

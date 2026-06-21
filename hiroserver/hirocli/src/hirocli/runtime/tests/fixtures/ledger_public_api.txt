@@ -2,6 +2,7 @@ GRAPH_LEDGER_COLUMNS
 GraphLoggedSpec
 LedgerEntry
 LedgerSink
+ON_ERROR_VALUES
 RunAccumulator
 current_entry
 current_run

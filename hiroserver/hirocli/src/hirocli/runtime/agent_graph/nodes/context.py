@@ -81,7 +81,7 @@ class ContextNodes(NodeGroup):
             return {}
         return {"messages": [HumanMessage(content=text)]}
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="raise")
     async def compose_context_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         sources = state.get("knowledge_sources") or []
         # Instructions, Knowledge, and Memories are always present (sections render a

@@ -10,6 +10,7 @@ from .context import current_entry, current_run, current_substep
 from .observe import observe, record_child, substep_scope
 from .schema import (
     GRAPH_LEDGER_COLUMNS,
+    ON_ERROR_VALUES,
     GraphLoggedSpec,
     LedgerEntry,
     RunAccumulator,
@@ -21,6 +22,7 @@ from .wrapper import wrap_graph_callable, wrap_graph_node
 
 __all__ = [
     "GRAPH_LEDGER_COLUMNS",
+    "ON_ERROR_VALUES",
     "GraphLoggedSpec",
     "LedgerEntry",
     "LedgerSink",

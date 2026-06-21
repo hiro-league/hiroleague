@@ -113,7 +113,8 @@ class LLMNodes(NodeGroup):
             return bool(self._tools)
         return True
 
-    def should_continue(self, state: GraphState) -> str:
+    @staticmethod
+    def should_continue(state: GraphState) -> str:
         """Tools-loop conditional edge: route to ``tools`` when the LLM asked for one."""
         msgs = state.get("messages", []) or []
         if not msgs:
@@ -123,7 +124,7 @@ class LLMNodes(NodeGroup):
             return "tools"
         return "memory_out"
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="raise")
     async def call_model_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         messages: list[AnyMessage] = list(state.get("messages", []) or [])
         if not messages:
@@ -199,7 +200,7 @@ class LLMNodes(NodeGroup):
         emit(writer, GRAPH_LLM_USAGE, usage_payload)
         return {"messages": [response]}
 
-    @graph_logged(captures={"decision"}, flush=False)
+    @graph_logged(captures={"decision"}, flush=False, on_error="degrade")
     async def tools_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         messages: list[AnyMessage] = list(state.get("messages", []) or [])
         if not messages:

@@ -132,7 +132,8 @@ class MediaNodes(NodeGroup):
         }
 
 
-    def dispatch_media(self, state: GraphState) -> list[Send] | str:
+    @staticmethod
+    def dispatch_media(state: GraphState) -> list[Send] | str:
         """Fan out to STT and vision branches, one Send per content item.
 
         Returns either a list of ``Send`` objects (parallel sub-state branches
@@ -166,7 +167,7 @@ class MediaNodes(NodeGroup):
         return "gather"
 
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def stt_node(self, sub_state: SttSend, writer: StreamWriter) -> dict[str, Any]:
         """Transcribe one audio item. Runs in parallel branches via Send."""
         item: AudioItem = sub_state["audio_item"]
@@ -250,7 +251,7 @@ class MediaNodes(NodeGroup):
         return {"transcripts": [result]}
 
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="degrade")
     async def vision_node(self, sub_state: VisionSend, writer: StreamWriter) -> dict[str, Any]:
         """Describe one image item. Runs in parallel branches via Send."""
         item: ImageItem = sub_state["image_item"]
@@ -345,7 +346,8 @@ class MediaNodes(NodeGroup):
         }
 
 
-    def input_gate(self, state: GraphState) -> str:
+    @staticmethod
+    def input_gate(state: GraphState) -> str:
         """Short-circuit when this turn produced no usable input.
 
         Triggered when ``gather_node`` failed to compose ``user_text`` (typical
@@ -360,7 +362,7 @@ class MediaNodes(NodeGroup):
         return "media_failed"
 
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="raise")
     async def media_failed_node(
         self, state: GraphState, writer: StreamWriter
     ) -> dict[str, Any]:

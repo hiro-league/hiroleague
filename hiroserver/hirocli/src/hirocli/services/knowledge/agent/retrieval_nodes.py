@@ -104,7 +104,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
             "started_at": dt.datetime.now(dt.UTC).isoformat(),
         }
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def rewrite_query_node(
         self,
         state: KnowledgeAgentState,
@@ -258,7 +258,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
             )
         return update
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="degrade")
     async def graph_expand_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         # L3 — Graphiti fact search → episode→chunk_id resolution. The output
         # ``graph_chunk_ids`` drives ``graph_fetch`` (by-id passages for the graphiti
@@ -361,7 +361,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
             "effective_leg": resolved.value,
         }
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="degrade")
     async def graph_fetch_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         # "graphiti" leg — the graph alone decides: fetch the verbatim episode
         # chunks for the fact-supporting chunk_ids directly by id (graph-ranked
@@ -403,7 +403,9 @@ class KnowledgeRetrievalNodes(NodeGroup):
         merged = dict(state.get("filters") or {})
         return {"qdrant_filter": build_qdrant_filter(merged)}
 
-    @graph_logged(captures={"usage", "decision"})
+    # mixed: re-raises on embed-call failure (``embed_failed``, retrieval can't continue without
+    # an embedding) but degrades on a garbage vector (``invalid_embedding`` → ``query_vector: []``).
+    @graph_logged(captures={"usage", "decision"}, on_error="mixed")
     async def embed_query_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         normalized = state["normalized_query"]
         embedding_model = self._prefs.knowledge.default_embedding_model_resolved
@@ -461,7 +463,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
         )
         return out
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="raise")
     async def vector_search_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         retrieval = self._prefs.knowledge.retrieval
         top_k = int(state.get("top_k") or retrieval.top_k)
@@ -504,7 +506,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
         )
         return {"hits": hits}
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def rerank_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         # Opt-in cross-encoder reranking over the retrieved candidates (precision step).
         # Prefs-only, default off. Fails safe: any error logs and returns {} so the fused
@@ -566,7 +568,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
         )
         return {"hits": reranked, "reranked": True}
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="raise")
     async def build_context_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         from hirocli.services.knowledge.converters import source_from_hit
 

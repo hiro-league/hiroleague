@@ -41,7 +41,12 @@ class TTSNodes(NodeGroup):
     _RETRY_POLICIES = {"tts": RetryPolicy(max_attempts=2)}
 
     def tts_gate(self, state: GraphState) -> str:
-        """Decide whether to enter the TTS branch after the reply completes."""
+        """Decide whether to enter the TTS branch after the reply completes.
+
+        Kept as an instance method (vs the other routers' ``@staticmethod`` style) because
+        ``services.tts.is_available()`` is a *runtime* check — preference reactors hot-swap
+        the TTS service in place, so this can flip across turns without a graph rebuild.
+        """
         if not state.get("reply_text"):
             return "finalize"
         if not state.get("request_voice_reply"):
@@ -100,7 +105,7 @@ class TTSNodes(NodeGroup):
             return None
         return resolved
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def tts_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Synthesize speech for ``reply_text`` and emit ``tts.completed``.
 
@@ -182,7 +187,7 @@ class TTSNodes(NodeGroup):
         )
         return {"reply_audio": built.attachment}
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="raise")
     async def finalize_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Emit the terminal graph-run lifecycle event.
 

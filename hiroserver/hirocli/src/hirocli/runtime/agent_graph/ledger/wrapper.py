@@ -82,6 +82,11 @@ def _open_wrapped_entry(
     return entry, token
 
 
+# NOTE: an exception that escapes the node body is ALWAYS recorded + re-raised here,
+# regardless of the node's declared ``spec.on_error``. ``on_error`` describes how the node
+# body handles its OWN expected failures (curated error_code + partial return); it is not a
+# wrapper-level swallow switch. An exception reaching this layer is therefore unhandled — a
+# real bug or infra failure — and must propagate. See ``schema.ON_ERROR_VALUES``.
 def _flush_entry(entry: LedgerEntry, sink: LedgerSink, spec: GraphLoggedSpec | None, *, status: str, exc: Exception | None = None) -> None:
     if status == "ok":
         entry.finish("ok")

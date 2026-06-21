@@ -63,21 +63,21 @@ class KnowledgeFanoutNodes(NodeGroup):
             return self.services.knowledge_subgraph is not None
         return True
 
-    def knowledge_fanout(self, state: GraphState) -> list[str]:
+    @staticmethod
+    def knowledge_fanout(state: GraphState) -> list[str]:
         """Fan out from ``trim_history`` to the parallel context branches.
 
-        ``memory_search`` always runs; ``knowledge_retrieve`` is added only when a knowledge
-        subgraph is wired and the per-message toggle is on (default on). Both join at
-        ``context_build``.
+        ``memory_search`` always runs; ``knowledge_retrieve`` is added only when the
+        per-message toggle is on (default on). The compile-time check that the knowledge
+        subgraph is wired lives on ``is_active`` — this conditional edge isn't even
+        registered when the subgraph is absent (``ChatAgentGraph.build``).
         """
         targets = ["memory_search"]
-        if self.services.knowledge_subgraph is not None and bool(
-            state.get("knowledge_enabled", True)
-        ):
+        if state.get("knowledge_enabled", True):
             targets.append("knowledge_retrieve")
         return targets
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="degrade")
     async def knowledge_retrieve_node(
         self, state: GraphState, writer: StreamWriter
     ) -> dict[str, Any]:

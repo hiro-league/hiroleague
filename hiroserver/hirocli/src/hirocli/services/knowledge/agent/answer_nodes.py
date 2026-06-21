@@ -18,7 +18,7 @@ import datetime as dt
 from typing import Any
 
 from hiro_commons.log import Logger
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import StreamWriter
 
@@ -32,6 +32,7 @@ from hirocli.runtime.agent_graph.graph_kit import (
 )
 from hirocli.runtime.agent_graph.ledger import graph_logged, observe
 from hirocli.runtime.agent_graph.node_group import NodeGroup
+from hirocli.runtime.agent_graph.nodes.call_model_support import prepend_system
 from hirocli.runtime.agent_graph.services import AgentServices
 
 from .config import KnowledgeGraphConfig
@@ -58,7 +59,7 @@ class KnowledgeAnswerNodes(NodeGroup):
             return "finalize"
         return "call_model"
 
-    @graph_logged(captures={"usage", "decision"})
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def call_model_node(
         self,
         state: KnowledgeAgentState,
@@ -124,10 +125,14 @@ class KnowledgeAnswerNodes(NodeGroup):
                 fail={"code": "model_create_failed", "message": str(exc)},
             )
             return {"answer": answer, "model_id": model_id, "usage": {}}
-        messages = [
-            SystemMessage(content=system_prompt(prefs=self._prefs, normalized=normalized)),
-            HumanMessage(content=f"Question:\n{normalized.text}\n\nContext:\n{state.get('context', '')}"),
-        ]
+        messages = prepend_system(
+            [
+                HumanMessage(
+                    content=f"Question:\n{normalized.text}\n\nContext:\n{state.get('context', '')}"
+                )
+            ],
+            system_prompt(prefs=self._prefs, normalized=normalized),
+        )
         estimate = count_tokens_approximately(messages)
         try:
             response = await model.ainvoke(messages)
@@ -174,7 +179,7 @@ class KnowledgeAnswerNodes(NodeGroup):
             "usage": usage_payload,
         }
 
-    @graph_logged(captures={"decision"})
+    @graph_logged(captures={"decision"}, on_error="raise")
     def finalize_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         started_at = state.get("started_at")
         elapsed_ms = 0
