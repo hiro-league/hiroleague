@@ -189,8 +189,11 @@ auto-attached to the chat agent surface yet (eval-only for now).
 
 ### 5.3 Prompt shape (system)
 
-No category catalog — role + general guidance on the four knobs. The generality (need #3) and the
-no-baking rule (need #4) live *here*: we teach the **method**, not the answers.
+No category **catalog** and no per-category logic — but the prompt **does** prime the model with common
+**intent shapes** (open-ended, see §7) plus general guidance on the four knobs and the reduce library (§6).
+The generality (need #3) and the no-baking rule (need #4) live *here*: we teach the **method** and offer
+**illustrative** shapes the model is free to ignore — we never hardcode a closed set of question types or
+shape answers by category.
 
 ```text
 You answer the user's question from a memory of past conversation facts. You cannot read the
@@ -206,11 +209,33 @@ Stop as soon as the retrieved facts are enough, or after {MAX_SEARCHES} searches
   hops            → 1 direct; 2 if the answer links one entity to another; 3 for two links.
   include_history → true to see when each fact became valid / invalid (timeline / change questions).
 
+Results arrive as a mix of three element kinds, each shaped differently — use them accordingly:
+  - edge (fact)  → a dated relational claim, with valid/invalid dates; the only kind that
+                   carries validity, so latest / ever-never / change-over-time live here.
+  - entity       → a standing who/what profile (name + summary); NO dates — context, not a
+                   timeline; cannot be ordered by time.
+  - episode      → a verbatim conversation turn with ONE timestamp (no invalidation).
+  include_history and the temporal reduces apply to edges (and ordering can include episodes by
+  their single timestamp); they do nothing for entities.
+
+Questions commonly want one of: the current value or state of something; how something changed
+over time; whether something ever or never happened; a count of distinct things; the order in
+which things happened; or a synthesis across several facts. This list is NOT exhaustive — if the
+question needs a different shape, decide it yourself. Let the shape you identify drive your query
+phrasing, your knob choices, and which reduce (if any) you request.
+
+Reduce (optional, on your final turn): if the answer needs a precise count, an ordering, the
+latest value, a duration between two facts, or both sides of an "ever/never", request the matching
+reduce instead of computing it yourself — the system runs it deterministically. (Available:
+distinct_count, order_by_time, latest, date_diff, keep_conflicting. See the tool docs.)
+
 After each result decide: do I have enough to answer correctly? If not, what is missing and which
 knob surfaces it? If the memory genuinely lacks the detail, say so — do not guess.
 ```
 
 ### 5.4 Response shape (per step) — native tool call + free-text `goal`
+
+A search step (during the loop):
 
 ```json
 { "tool": "search_memory",
@@ -220,53 +245,125 @@ knob surfaces it? If the memory genuinely lacks the detail, say so — do not gu
 ```
 
 `goal` is **free text**, used only as a **provenance label** for the accumulator and the trace — never a
-key into canned logic. (See §6 on intent.)
+key into canned logic (see §7 on intent).
+
+The final turn is either a direct answer, or an optional **reduce request** over the accumulated set
+followed by the answer. The `reduce` field is the model's *declared* op — selected by its own reasoning,
+executed deterministically by the reducer (§6):
+
+```json
+{ "reduce": { "op": "date_diff", "anchors": ["editing job start date", "reading deadline"] },
+  "answer": "…" }
+```
+
+`op` ∈ `{ none, distinct_count, order_by_time, latest, date_diff, keep_conflicting }`. Omit `reduce`
+(or `op: none`) to answer straight from the deduped, time-sorted accumulator.
 
 ### 5.5 Tool-result shape (fed back to the agent)
 
+Items are **kind-tagged** and shaped per kind (`search_scope` — a hidden admin knob — decides which kinds
+appear: `edges`, `edges+nodes`, or `edges+nodes+episodes`). Only **edges** carry validity; **entities**
+have no dates; **episodes** carry a single `valid_at`. Scores are **kind-local and not comparable across
+kinds** (edges/nodes are cosine/cross-encoder; episodes are BM25/rerank only).
+
 ```json
-{ "search_id": 2, "returned": 7, "new": 4, "accumulated_total": 11,
-  "facts": [
-    { "id":"…", "fact":"Monthly budget is $50.", "valid_at":"2024-02-10", "invalid_at":null,        "superseded":false },
-    { "id":"…", "fact":"Monthly budget is $40.", "valid_at":"2024-01-05", "invalid_at":"2024-02-10", "superseded":true  }
+{ "search_id": 2, "returned": 9, "new": 6, "accumulated_total": 14,
+  "items": [
+    { "kind":"edge",    "id":"e1", "fact":"Monthly budget is $50.",
+      "valid_at":"2024-02-10", "invalid_at":null,        "superseded":false, "source_episode":"…m0204", "score":0.71 },
+    { "kind":"edge",    "id":"e2", "fact":"Monthly budget is $40.",
+      "valid_at":"2024-01-05", "invalid_at":"2024-02-10", "superseded":true,  "source_episode":"…m0090", "score":0.55 },
+    { "kind":"entity",  "id":"n1", "name":"Crystal", "summary":"Reader; sets monthly book budgets…", "score":0.49 },
+    { "kind":"episode", "id":"ep1","text":"Crystal: let's bump the budget to $50 a month.", "valid_at":"2024-02-10", "score":0.83 }
   ] }
 ```
+
+(`invalid_at`/`superseded` are present only on edges; `source_episode` only on edges; entities have no
+`valid_at`; episodes have `valid_at` but no `invalid_at`/`superseded`.)
 
 ---
 
 ## 6. Accumulation — many returns, one context (need #7)
 
-A single **accumulator** (dedup-by-`id` set) grows across iterations:
+A single **kind-partitioned accumulator** grows across iterations. It is **not** a flat fact list — it
+holds whatever element kinds the (hidden) `search_scope` returns: **edges**, **entities**, **episodes**.
 
-- Each search's results are **deduped against the accumulator**, so the agent sees only *new* facts
-  (context stays lean). The `returned` / `new` / `accumulated_total` counters are the model's signal that a
-  search added nothing → change a knob or stop.
-- Every item retains **provenance** (`search_id`, `goal`) and, when `include_history`, its **validity
-  fields**.
+- **Dedup by `(kind, uuid)`** — edge, node, and episode uuids are separate namespaces. Each search's
+  results are deduped against the accumulator so the agent sees only *new* items (context stays lean). The
+  `returned` / `new` / `accumulated_total` counters are the model's signal that a search added nothing →
+  change a knob or stop.
+- Every item is **kind-tagged** and keeps **provenance** (`search_id`, `goal`). Field availability is
+  per-kind: edges carry `valid_at`/`invalid_at`/`superseded` + `source_episode`; entities carry
+  `name`/`summary` and **no dates**; episodes carry a single `valid_at`.
+- **No cross-kind score sorting.** Edge/node cosine scores and episode BM25/rerank scores are not on one
+  scale — never globally rank the mixed set by score. (This is a *second* reason for the anti-truncation
+  rule below, beyond facet-drowning.)
 - On stop, the accumulator **is** the `recalled` set and the final message **is** the `answer` — so N
   searches collapse to the **one-in/one-out** shape the eval expects.
-- **Deterministic post-work is intent-agnostic on purpose** (no baking): the executor does only
-  **dedup-by-id** and, when `include_history`, **sort-by-`valid_at` + expose superseded markers**. It does
-  **not** do per-category counting/diffing/ordering — that would re-encode the benchmark. The *semantic*
-  work (counting distinct items, comparing current-vs-old, narrating a timeline) is the **model reasoning
-  over the clean, deduped, time-annotated set**.
 - **Anti-truncation rule:** never merge by "concatenate all returns, then global top-k" — that re-creates
-  the original bug (a dense facet drowning a rare critical fact). Because each search is a *separate* tool
-  call with its own `limit`, each contributes its own results directly into the accumulator; there is no
-  global re-rank that can evict another search's findings.
+  the original bug (a dense facet drowning a rare critical item) *and* would compare incomparable cross-kind
+  scores. Because each search is a *separate* tool call with its own `limit`, each contributes its own
+  results directly into its kind bucket; there is no global re-rank that can evict another search's findings.
+
+### 6.1 Reduce primitives — general ops, model-selected, code-executed
+
+Once the accumulator is final, the answer sometimes needs a **precise transformation** over it (a count,
+an ordering, a duration). These are handled by a **small, general, composable reduce library** — *not* an
+intent→op routing table. The distinction that keeps this un-baked (need #4):
+
+- **The model selects** which reduce applies (if any) by reasoning about the question — it is the model's
+  latent intent made explicit as an `op` choice in its final turn (§5.4). There is **no fixed classifier**
+  mapping a question category to an op.
+- **Code executes** the deterministic ops — because LLMs miscount large sets and botch date math. The
+  *semantic* reduces (comparing, synthesizing, summarizing) stay with the model.
+- Every op is a **domain-neutral memory operation** ("count distinct things" is universal, not a benchmark
+  category), so the library transfers to any question, including shapes we don't anticipate.
+- **Ops are kind-aware and guarded** (see §5–6: edges have validity, entities have no dates, episodes have
+  one timestamp). An op that needs validity simply **skips kinds that lack it** rather than erroring.
+
+| Primitive | Executed by | Applies to kind(s) | Model picks it when the answer needs… |
+|---|---|---|---|
+| `dedupe` (by `(kind, uuid)`) | code — **always** | all | (implicit; runs on every accumulator) |
+| `order_by_time` (sort by `valid_at`) | code — always w/ `include_history`, else on request | **edges + episodes** (entities have no time → excluded) | an ordering / timeline |
+| `latest` (newest `valid_at` per subject+attribute) | code | **edges only** | the current value of something that changed |
+| `distinct_count` (dedupe → count + list) | code | **declared target kind** (distinct entities vs facts vs episode-events differ) | a count of distinct things |
+| `date_diff` (two model-named anchor facts → delta) | code | **edges** (or episode timestamps) | a duration between two events |
+| `keep_conflicting` (affirming + negating sets, labeled) | code | **edges only** (validity-bearing) | both sides of an "ever / never" |
+| `compare` / `synthesize` | **model** | all (entities = profile context, episodes = verbatim, edges = dated claims) | any semantic judgement over the set |
+
+`dedupe` and (under `include_history`) `order_by_time` always run as part of presenting the accumulator;
+the rest fire only when the model requests them. Temporal ops (`latest`, `keep_conflicting`, `date_diff`)
+operate over **edges**; `order_by_time` also accepts **episodes** by their single timestamp; **entities are
+never ordered** — they are standing context. `distinct_count` must name the kind it counts. **Searching**
+both polarities (for `keep_conflicting`) or enumerating enough rows (for `distinct_count`) is **loop-side**
+— the model issues the extra/negation searches; the reduce only *shapes* the accumulated set. The two
+cooperate: loop gathers, reduce computes.
 
 ---
 
-## 7. Do we still extract "intent"? — No closed-set classification (needs #3, #4)
+## 7. Intent — open guidance, not a closed classifier (needs #3, #4)
 
-We do **not** extract a categorical intent and switch on it. Intent stays **latent**, expressed two ways:
+We do **not** maintain a fixed taxonomy of question types and switch retrieval/format on it — that is the
+baking we reject. But we also do **not** strip intent from the prompt. The balance:
 
-1. **Implicitly**, through the query rewrite + which knobs the model sets (`historical + include_history`
-   *is* the model saying "this is a change-over-time question," without naming a category).
-2. **A free-text `goal`** per search, used only as a provenance/merge label.
+1. **Open-ended shape guidance in the prompt (§5.3).** A short, explicitly **non-exhaustive** list of
+   common intent shapes (current value · change-over-time · ever/never · count · ordering · synthesis)
+   primes good query phrasing, knob choices, and reduce selection — with an explicit "*or a shape not
+   listed — you decide*." It is illustrative, never a closed enum, and it drives **retrieval behavior
+   only**, never answer formatting.
+2. **Latent expression** through the query rewrite + which knobs the model sets (`historical +
+   include_history` *is* the model saying "change over time," without naming a category).
+3. **Declared, on the model's terms:** the free-text `goal` per search (provenance/merge label) and the
+   optional `reduce.op` on the final turn (§5.4) — both **chosen by the model's reasoning**, not by a
+   hardcoded category→behavior table.
 
-The model gets the benefit of reasoning about what it's after (better phrasing, right knobs) with **zero**
-fixed taxonomy and nothing tuned to any benchmark.
+The model does **not** choose `search_scope` (which element kinds — edges/nodes/episodes — come back); that
+stays a hidden admin knob (§5.2). The model simply reasons over whatever kinds the scope returns, with the
+kind-aware guards of §6.1.
+
+What stays forbidden (need #4): a fixed classifier that routes recognized categories to canned
+retrieve/reduce/format, any per-category answer shaping, and any shape list tuned to — or examples drawn
+from — a specific benchmark. The shapes in §5.3 are general assistant-memory patterns, freely overridable.
 
 ---
 
@@ -327,9 +424,13 @@ Keeping the retrieval loop identical across both is the parity requirement in
    `hops`); **not** agent-default.
 3. Build the retrieval-agent node (LangGraph V1 `create_agent`) with the §5.3 prompt, the accumulator
    (§6), and the `MAX_SEARCHES` cap + verbatim fallback.
-4. Wire it as the memory-eval recall leg; emit the accumulator as `recalled` and the final message as
+4. Implement the **reduce library** (§6.1) as deterministic functions over the accumulator
+   (`distinct_count`, `order_by_time`, `latest`, `date_diff`, `keep_conflicting`; `dedupe` +
+   `order_by_time` always-on), invoked by the model's declared `reduce.op` on its final turn (§5.4).
+   `compare`/`synthesize` need no code — they are the answerer reasoning over the reduced set.
+5. Wire it as the memory-eval recall leg; emit the accumulator as `recalled` and the final message as
    `answer`.
-5. Measure **evidence recall** on units 13 & 14 (and the broader BEAM-128k set) as a held-out diagnostic;
+6. Measure **evidence recall** on units 13 & 14 (and the broader BEAM-128k set) as a held-out diagnostic;
    compare against the 44% baseline — **without** tuning to it.
 
 > **To get up to speed after implementing:** changing `graph.k_hop` semantics to per-call needs a **server
