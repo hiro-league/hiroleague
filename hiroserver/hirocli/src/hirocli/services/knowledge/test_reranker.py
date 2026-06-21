@@ -10,8 +10,11 @@ from langchain_core.documents import Document
 from langchain_core.documents.compressor import BaseDocumentCompressor
 
 from hirocli.domain.preferences import WorkspacePreferences
+from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.services import AgentServices
+from hirocli.services.knowledge.agent import KnowledgeGraphConfig
 from hirocli.services.knowledge.agent.helpers import minmax_relevances
-from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
+from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
 from hirocli.services.knowledge.models import KnowledgeSearchHit
 from hirocli.services.knowledge.reranker import _normalize, rerank_hits
 from hirocli.services.knowledge import reranker_registry as reg
@@ -149,9 +152,11 @@ class _FakeService:
         return self._result
 
 
-def _graph(service, prefs: WorkspacePreferences, tmp_path: Path) -> KnowledgeAgentGraph:
-    return KnowledgeAgentGraph(
-        workspace_path=tmp_path, service=service, prefs=prefs, workspace_id="ws"
+def _graph(service, prefs: WorkspacePreferences, tmp_path: Path) -> KnowledgeRetrievalNodes:
+    """Materialize a ``KnowledgeRetrievalNodes`` group for direct node-call unit tests."""
+    return KnowledgeRetrievalNodes(
+        AgentServices(workspace_path=tmp_path, ledger_sink=LedgerSink(tmp_path)),
+        KnowledgeGraphConfig(service=service, prefs=prefs, workspace_id="ws"),
     )
 
 
@@ -166,7 +171,7 @@ async def test_rerank_node_noop_when_disabled(tmp_path: Path) -> None:
     prefs = WorkspacePreferences()  # reranker disabled by default
     svc = _FakeService()
     graph = _graph(svc, prefs, tmp_path)
-    out = await graph._nodes.rerank_node(_state_with_hits([_hit(0, "a", 0.9)]))
+    out = await graph.rerank_node(_state_with_hits([_hit(0, "a", 0.9)]))
     assert out == {}
     assert svc.calls == []  # service never invoked when disabled
 
@@ -179,7 +184,7 @@ async def test_rerank_node_success_sets_reranked(tmp_path: Path) -> None:
     reranked = [_hit(2, "c", 0.1)]
     svc = _FakeService(result=reranked)
     graph = _graph(svc, prefs, tmp_path)
-    out = await graph._nodes.rerank_node(_state_with_hits([_hit(0, "a", 0.9), _hit(2, "c", 0.1)]))
+    out = await graph.rerank_node(_state_with_hits([_hit(0, "a", 0.9), _hit(2, "c", 0.1)]))
     assert out["reranked"] is True
     assert out["hits"] == reranked
     assert svc.calls[0]["model_id"] == "local:ms-marco-multibert-l-12"
@@ -192,7 +197,7 @@ async def test_rerank_node_falls_back_on_error(tmp_path: Path) -> None:
     prefs.knowledge.retrieval.reranker.model_id = "local:bge-reranker-v2-m3"
     svc = _FakeService(error=reg.RerankerNotDownloadedError("local:bge-reranker-v2-m3"))
     graph = _graph(svc, prefs, tmp_path)
-    out = await graph._nodes.rerank_node(_state_with_hits([_hit(0, "a", 0.9)]))
+    out = await graph.rerank_node(_state_with_hits([_hit(0, "a", 0.9)]))
     assert out == {}  # fallback: keep retrieval order, reranked stays falsy
 
 
@@ -201,7 +206,7 @@ async def test_build_context_score_source_without_rerank(tmp_path: Path) -> None
     prefs = WorkspacePreferences()  # hybrid default True
     graph = _graph(_FakeService(), prefs, tmp_path)
     state = _state_with_hits([_hit(0, "a", 0.9), _hit(1, "b", 0.1)])
-    out = await graph._nodes.build_context_node(state)
+    out = await graph.build_context_node(state)
     sources = out["sources"]
     assert [s.score_source for s in sources] == ["rrf", "rrf"]
     # min-max within set: top hit 1.0, lowest 0.0
@@ -219,7 +224,7 @@ async def test_build_context_score_source_when_reranked(tmp_path: Path) -> None:
 
     hit = replace(hit, rerank_score=2.0, relevance=0.88)
     state = {**_state_with_hits([hit]), "reranked": True}
-    out = await graph._nodes.build_context_node(state)
+    out = await graph.build_context_node(state)
     src = out["sources"][0]
     assert src.score_source == "reranker"
     assert src.relevance == 0.88

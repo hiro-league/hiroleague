@@ -7,9 +7,11 @@ from pathlib import Path
 import pytest
 
 from hirocli.domain.preferences import load_preferences
+from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, run_graph
-from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
-from hirocli.services.knowledge.agent.nodes import KnowledgeNodes
+from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
+from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
 from hirocli.services.knowledge.agent.legs import (
     RetrievalLeg,
     effective_leg,
@@ -91,7 +93,7 @@ def test_route_after_expand_reads_effective_leg(
     effective: str | None, expected_route: str
 ) -> None:
     state: dict = {"effective_leg": effective} if effective is not None else {}
-    assert KnowledgeNodes.route_after_expand(state) == expected_route
+    assert KnowledgeRetrievalNodes.route_after_expand(state) == expected_route
 
 
 # ---------------------------------------------------------------------------
@@ -102,12 +104,11 @@ def test_route_after_expand_reads_effective_leg(
 def _build(tmp_path: Path):
     prefs = load_preferences(tmp_path)
     graph = KnowledgeAgentGraph(
-        workspace_path=tmp_path,
-        service=FakeKnowledgeService(),
-        prefs=prefs,
-        workspace_id=None,
+        AgentServices(workspace_path=tmp_path, ledger_sink=LedgerSink(tmp_path))
     )
-    return graph.build_retrieval()
+    return graph.build_retrieval(
+        KnowledgeGraphConfig(service=FakeKnowledgeService(), prefs=prefs)
+    )
 
 
 def _query(**over):

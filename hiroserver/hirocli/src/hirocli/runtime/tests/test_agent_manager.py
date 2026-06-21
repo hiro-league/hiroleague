@@ -18,9 +18,9 @@ from hirocli.domain.conversation_channel import CHAT_CHANNEL_ID_METADATA_KEY, cr
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.runtime.agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED
 from hirocli.runtime.agent_graph import ChatAgentGraph
-from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes, _trim_chat_history
-from hirocli.runtime.agent_graph.config import ChatGraphConfig
-from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, make_agent_services
+from hirocli.runtime.agent_graph.nodes.context import _trim_chat_history
+from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
+from hirocli.runtime.tests.graph_fakes import make_agent_services
 from hirocli.runtime.agent_manager import (
     AgentManager,
     _audio_extension_for_media_type,
@@ -89,17 +89,13 @@ def test_trim_chat_history_drops_orphaned_tool_exchange_prefix() -> None:
     ]
 
 
-def _conv_nodes(tmp_path, **service_kw) -> ConversationNodes:
-    services = make_agent_services(tmp_path, **service_kw)
-    return ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+def _conv_nodes(tmp_path, **service_kw) -> TTSNodes:
+    """Materialize ``TTSNodes`` for ``finalize_node`` tests.
+
+    Lives here (vs in ``test_conversation_nodes``) because both tests below exercise
+    ``finalize_node`` specifically, after the §1.5 split moved it onto ``TTSNodes``.
+    """
+    return TTSNodes(make_agent_services(tmp_path, **service_kw))
 
 
 @pytest.mark.asyncio

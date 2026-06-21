@@ -13,7 +13,7 @@ from hiro_channel_sdk.constants import (
 )
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger
-from langgraph.types import Send, StreamWriter
+from langgraph.types import RetryPolicy, Send, StreamWriter
 
 from ..events import (
     GRAPH_ERROR,
@@ -23,6 +23,7 @@ from ..events import (
     GRAPH_VISION_COMPLETED,
 )
 from ..graph_kit import emit, emit_for, IDENTITY_PEER_KEYS
+from ..outcomes import NodeOutcome, emit_outcome
 from ..ledger import graph_logged, observe
 from ..node_group import NodeGroup
 from ..state import (
@@ -56,6 +57,12 @@ def _image_item_preview(item: ImageItem) -> str:
 
 class MediaNodes(NodeGroup):
     """Stateless intake nodes — constructed from ``AgentServices`` only."""
+
+    # STT/vision both call external providers and benefit from one retry on transient errors.
+    _RETRY_POLICIES = {
+        "stt": RetryPolicy(max_attempts=2),
+        "vision": RetryPolicy(max_attempts=2),
+    }
 
     async def ingest_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Split the inbound UnifiedMessage into per-modality fan-out inputs.
@@ -207,17 +214,6 @@ class MediaNodes(NodeGroup):
                 provider = str(getattr(provider_obj, "name", "") or "")
         # Record seconds (per-second fallback) AND the token usage (token-based pricing) so the
         # ledger prices via ``estimate_stt_usage_cost``.
-        observe(
-            usage={
-                "provider": provider,
-                "model": model_id,
-                "stt_audio_seconds": (float(item.get("duration_ms") or 0) / 1000),
-                "stt_audio_tokens": (int(usage.get("audio_tokens") or 0) or None),
-                "output_tokens": (int(usage.get("output_tokens") or 0) or None),
-            },
-            decision=("transcribed" if text.strip() else "silence", provider),
-            output=f"transcript: {text}" if text.strip() else "transcript: <empty>",
-        )
         log.info(
             "✅ stt — %s · item=%d", inbound_id, item["item_index"],
             elapsed_ms=elapsed_ms,
@@ -231,15 +227,25 @@ class MediaNodes(NodeGroup):
             "mime_type": item["mime_type"],
             "duration_ms": item.get("duration_ms"),
         }
-        emit_for(
+        emit_outcome(
             writer,
             sub_state,
-            GRAPH_STT_COMPLETED,
-            {
-                "item_index": item["item_index"],
-                "transcript": text,
-            },
-            identity_keys=IDENTITY_PEER_KEYS,
+            NodeOutcome(
+                usage={
+                    "provider": provider,
+                    "model": model_id,
+                    "stt_audio_seconds": (float(item.get("duration_ms") or 0) / 1000),
+                    "stt_audio_tokens": (int(usage.get("audio_tokens") or 0) or None),
+                    "output_tokens": (int(usage.get("output_tokens") or 0) or None),
+                },
+                decision=("transcribed" if text.strip() else "silence", provider),
+                output=f"transcript: {text}" if text.strip() else "transcript: <empty>",
+                event=(
+                    GRAPH_STT_COMPLETED,
+                    {"item_index": item["item_index"], "transcript": text},
+                ),
+                event_identity_keys=IDENTITY_PEER_KEYS,
+            ),
         )
         return {"transcripts": [result]}
 
@@ -288,7 +294,6 @@ class MediaNodes(NodeGroup):
             return {"errors": [err]}
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        observe(decision=("described", "image"), output=f"description: {description}")
         log.info(
             "✅ vision — %s · item=%d", inbound_id, item["item_index"],
             elapsed_ms=elapsed_ms,
@@ -298,15 +303,18 @@ class MediaNodes(NodeGroup):
             "item_index": item["item_index"],
             "description": description,
         }
-        emit_for(
+        emit_outcome(
             writer,
             sub_state,
-            GRAPH_VISION_COMPLETED,
-            {
-                "item_index": item["item_index"],
-                "description": description,
-            },
-            identity_keys=IDENTITY_PEER_KEYS,
+            NodeOutcome(
+                decision=("described", "image"),
+                output=f"description: {description}",
+                event=(
+                    GRAPH_VISION_COMPLETED,
+                    {"item_index": item["item_index"], "description": description},
+                ),
+                event_identity_keys=IDENTITY_PEER_KEYS,
+            ),
         )
         return {"visions": [result]}
 

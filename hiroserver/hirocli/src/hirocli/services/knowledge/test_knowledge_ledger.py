@@ -15,7 +15,8 @@ from hirocli.runtime.agent_graph.ledger import (
     RunAccumulator,
     current_run,
 )
-from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
+from hirocli.runtime.agent_graph.services import AgentServices
+from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
 from hirocli.services.knowledge.ledger_runner import (
     KNOWLEDGE_RUN_ID_PREFIX,
     finalize_standalone_run,
@@ -89,11 +90,11 @@ async def test_knowledge_graph_writes_ledger_rows_for_standalone_run(
             return AIMessage(content="Ledger answer.")
 
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.answer_nodes.create_chat_model",
         lambda *_args, **_kwargs: FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.resolve_knowledge_answering_llm",
+        "hirocli.services.knowledge.agent.answer_nodes.resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
             temperature=0.2,
@@ -102,11 +103,11 @@ async def test_knowledge_graph_writes_ledger_rows_for_standalone_run(
     )
 
     graph_builder = KnowledgeAgentGraph(
-        workspace_path=workspace,
-        service=FakeRetrievalService(),
-        prefs=WorkspacePreferences(),
+        AgentServices(workspace_path=workspace, ledger_sink=LedgerSink(workspace))
     )
-    graph = graph_builder.build()
+    graph = graph_builder.build(
+        KnowledgeGraphConfig(service=FakeRetrievalService(), prefs=WorkspacePreferences())
+    )
     query = "What is indexed?"
 
     run_id = ""
@@ -132,7 +133,7 @@ async def test_knowledge_graph_writes_ledger_rows_for_standalone_run(
     assert run_rows[0]["run_id"] == run_id
     assert preview_query(query) in str(run_rows[0].get("input_preview") or "")
     assert all(row["run_id"] == run_id for row in node_rows)
-    # Ledger labels carry the ``knowledge/`` namespace (set on ``KnowledgeNodes``); the
+    # Ledger labels carry the ``knowledge/`` namespace (set on ``KnowledgeRetrievalNodes`` / ``KnowledgeAnswerNodes``); the
     # LangGraph routing names stay bare.
     assert any(row["node"] == "knowledge/embed_query" for row in node_rows)
     assert any(row["node"] == "knowledge/vector_search" for row in node_rows)
@@ -161,11 +162,11 @@ async def test_knowledge_graph_nests_under_parent_run_without_aggregate_row(
             return AIMessage(content="Nested answer.")
 
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.answer_nodes.create_chat_model",
         lambda *_args, **_kwargs: FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.resolve_knowledge_answering_llm",
+        "hirocli.services.knowledge.agent.answer_nodes.resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
             temperature=0.2,
@@ -174,11 +175,11 @@ async def test_knowledge_graph_nests_under_parent_run_without_aggregate_row(
     )
 
     graph_builder = KnowledgeAgentGraph(
-        workspace_path=workspace,
-        service=FakeRetrievalService(),
-        prefs=WorkspacePreferences(),
+        AgentServices(workspace_path=workspace, ledger_sink=LedgerSink(workspace))
     )
-    graph = graph_builder.build()
+    graph = graph_builder.build(
+        KnowledgeGraphConfig(service=FakeRetrievalService(), prefs=WorkspacePreferences())
+    )
 
     try:
         async with knowledge_answer_ledger(sink=sink, query="nested?") as ledger_run:
@@ -235,11 +236,11 @@ async def test_service_answer_writes_standalone_run_row(
             return AIMessage(content="Service answer.")
 
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.answer_nodes.create_chat_model",
         lambda *_args, **_kwargs: FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.resolve_knowledge_answering_llm",
+        "hirocli.services.knowledge.agent.answer_nodes.resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
             temperature=0.2,

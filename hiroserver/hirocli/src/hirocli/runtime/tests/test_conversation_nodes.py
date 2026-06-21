@@ -1,4 +1,9 @@
-"""Unit tests for ``ConversationNodes`` — isolated over fake ``AgentServices`` (P4 §6.2)."""
+"""Unit tests across the conversation-side node groups (LLM, Context, Memory, TTS).
+
+After the §1.5 split, ``ConversationNodes`` no longer exists — these tests now exercise
+the individual cluster groups directly. The factory helpers below build whichever group
+each test needs, keeping the per-test surface narrow.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,10 @@ from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
 from hirocli.runtime.agent_graph.config import ChatGraphConfig
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE, GRAPH_TTS_COMPLETED
-from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes
+from hirocli.runtime.agent_graph.nodes.context import ContextNodes
+from hirocli.runtime.agent_graph.nodes.llm import LLMNodes
+from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
+from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 from hirocli.runtime.tests.graph_fakes import (
     FakeMemory,
@@ -27,49 +35,70 @@ from hirocli.runtime.tests.graph_fakes import (
 )
 
 
-def _conv(
+def _config(
+    *,
+    responses: list | None = None,
+    tools: list | None = None,
+) -> ChatGraphConfig:
+    return ChatGraphConfig(
+        model=ScriptedChatModel(responses=responses or []),
+        tools=tools or [],
+        model_id="fake:model",
+        system_prompt="You are Hiro.",
+        temperature=0.5,
+        max_tokens=128,
+    )
+
+
+def _llm(
     tmp_path: Path,
     *,
     responses: list | None = None,
     tools: list | None = None,
-    memory=None,
-    tts=None,
     prefs: WorkspacePreferencesRuntime | None = None,
     ledger_sink: RecordingLedgerSink | None = None,
-) -> ConversationNodes:
-    services = make_agent_services(
-        tmp_path,
-        memory=memory,
-        tts=tts,
-        preferences=prefs,
-        ledger_sink=ledger_sink,
-    )
-    return ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=responses or []),
-            tools=tools or [],
-            model_id="fake:model",
-            system_prompt="You are Hiro.",
-            temperature=0.5,
-            max_tokens=128,
-        ),
-    )
+) -> LLMNodes:
+    services = make_agent_services(tmp_path, preferences=prefs, ledger_sink=ledger_sink)
+    return LLMNodes(services, _config(responses=responses, tools=tools))
+
+
+def _context(
+    tmp_path: Path, *, prefs: WorkspacePreferencesRuntime | None = None
+) -> ContextNodes:
+    return ContextNodes(make_agent_services(tmp_path, preferences=prefs))
+
+
+def _memory(
+    tmp_path: Path,
+    *,
+    memory=None,
+    prefs: WorkspacePreferencesRuntime | None = None,
+) -> MemoryNodes:
+    return MemoryNodes(make_agent_services(tmp_path, memory=memory, preferences=prefs))
+
+
+def _tts(
+    tmp_path: Path,
+    *,
+    tts=None,
+    prefs: WorkspacePreferencesRuntime | None = None,
+) -> TTSNodes:
+    return TTSNodes(make_agent_services(tmp_path, tts=tts, preferences=prefs))
 
 
 @pytest.mark.asyncio
 async def test_call_model_emits_llm_usage(tmp_path: Path) -> None:
-    conv = _conv(tmp_path, responses=[ai_text("hi")])
+    llm = _llm(tmp_path, responses=[ai_text("hi")])
     events: list[dict] = []
-    result = await conv.call_model_node(
+    result = await llm.call_model_node(
         {"messages": [], "inbound_id": "in-1", "chat_channel_id": 1, "model_id": "fake:model"},
         events.append,
     )
     assert result == {}
 
-    conv2 = _conv(tmp_path, responses=[ai_text("hi")])
+    llm2 = _llm(tmp_path, responses=[ai_text("hi")])
     events = []
-    result = await conv2.call_model_node(
+    result = await llm2.call_model_node(
         {
             "messages": [AIMessage(content="prior"), AIMessage(content="ignored")],
             "inbound_id": "in-1",
@@ -86,7 +115,7 @@ async def test_call_model_emits_llm_usage(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_tools_node_produces_tool_message(tmp_path: Path) -> None:
     sink = RecordingLedgerSink(tmp_path)
-    conv = _conv(
+    llm = _llm(
         tmp_path,
         responses=[ai_tool_call("echo_tool", {"text": "ping"}), ai_text("done")],
         tools=[echo_tool],
@@ -102,7 +131,7 @@ async def test_tools_node_produces_tool_message(tmp_path: Path) -> None:
         "inbound_id": "in-1",
         "chat_channel_id": 1,
     }
-    result = await conv.tools_node(state, lambda _e: None)
+    result = await llm.tools_node(state, lambda _e: None)
     assert result["messages"][0].content == "echo: ping"
     assert "tools/echo_tool" in sink.nodes()
 
@@ -111,8 +140,8 @@ async def test_tools_node_produces_tool_message(tmp_path: Path) -> None:
 async def test_compose_context_writes_turn_context_not_messages(tmp_path: Path) -> None:
     ensure_data_db(tmp_path)
     runtime = WorkspacePreferencesRuntime(tmp_path)
-    conv = _conv(tmp_path, prefs=runtime)
-    result = await conv.compose_context_node(
+    context = _context(tmp_path, prefs=runtime)
+    result = await context.compose_context_node(
         {
             "retrieved_memories": [{"memory": "likes tea"}],
             "knowledge_sources": [],
@@ -129,8 +158,8 @@ async def test_memory_search_with_fake_memory(tmp_path: Path) -> None:
     ensure_data_db(tmp_path)
     runtime = WorkspacePreferencesRuntime(tmp_path)
     runtime.update_many({"memory.enabled": True})
-    conv = _conv(tmp_path, memory=FakeMemory(), prefs=runtime)
-    result = await conv.memory_search_node(
+    memory = _memory(tmp_path, memory=FakeMemory(), prefs=runtime)
+    result = await memory.memory_search_node(
         {"user_text": "hello", "character_id": "hiro"},
         lambda _e: None,
     )
@@ -139,10 +168,10 @@ async def test_memory_search_with_fake_memory(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_tts_gate_routing(tmp_path: Path) -> None:
-    conv = _conv(tmp_path, tts=FakeTTS())
-    assert conv.tts_gate({"reply_text": "hi", "request_voice_reply": True}) == "tts"
-    assert conv.tts_gate({"reply_text": "hi", "request_voice_reply": False}) == "finalize"
-    assert conv.tts_gate({"reply_text": None}) == "finalize"
+    tts = _tts(tmp_path, tts=FakeTTS())
+    assert tts.tts_gate({"reply_text": "hi", "request_voice_reply": True}) == "tts"
+    assert tts.tts_gate({"reply_text": "hi", "request_voice_reply": False}) == "finalize"
+    assert tts.tts_gate({"reply_text": None}) == "finalize"
 
 
 @pytest.mark.asyncio
@@ -158,9 +187,9 @@ async def test_tts_node_emits_completed_with_fake_tts(
             model="fake:tts", voice="alloy", instructions=None
         ),
     )
-    conv = _conv(tmp_path, tts=FakeTTS(), prefs=runtime)
+    tts = _tts(tmp_path, tts=FakeTTS(), prefs=runtime)
     events: list[dict] = []
-    result = await conv.tts_node(
+    result = await tts.tts_node(
         {
             "inbound_id": "in-tts",
             "chat_channel_id": 3,
@@ -182,9 +211,9 @@ async def test_tts_node_emits_completed_with_fake_tts(
 
 @pytest.mark.asyncio
 async def test_tts_node_skips_missing_character(tmp_path: Path) -> None:
-    conv = _conv(tmp_path, tts=FakeTTS())
+    tts = _tts(tmp_path, tts=FakeTTS())
     events: list[dict] = []
-    result = await conv.tts_node(
+    result = await tts.tts_node(
         {
             "inbound_id": "in-tts-skip",
             "chat_channel_id": 3,

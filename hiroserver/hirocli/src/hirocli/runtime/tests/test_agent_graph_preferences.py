@@ -4,9 +4,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from hirocli.domain.data_store import ensure_data_db, get_default_user_id
-from hirocli.runtime.agent_graph.config import ChatGraphConfig
-from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes
-from hirocli.runtime.tests.graph_fakes import RecordingLedgerSink, ScriptedChatModel, make_agent_services
+from hirocli.runtime.agent_graph.nodes.context import ContextNodes
+from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
+from hirocli.runtime.tests.graph_fakes import RecordingLedgerSink, make_agent_services
 from hirocli.runtime.agent_graph.events import GRAPH_MEMORY_RETRIEVED, GRAPH_MEMORY_STORED
 from hirocli.runtime.agent_graph.ledger import LedgerEntry, LedgerSink, current_entry
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
@@ -83,15 +83,7 @@ async def test_trim_history_uses_runtime_chat_max_messages(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
     runtime.update("chat.max_messages", 3)
     services = make_agent_services(tmp_path, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = ContextNodes(services)
 
     messages = [HumanMessage(content=f"m{i}") for i in range(5)]
     result = await graph.trim_history_node({"messages": messages})
@@ -148,27 +140,20 @@ async def test_memory_search_and_compose_context_injects_memory(tmp_path) -> Non
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    memory_group = MemoryNodes(services)
+    context_group = ContextNodes(services)
     events = []
 
-    result = await graph.memory_search_node(
+    result = await memory_group.memory_search_node(
         {"user_text": "what should you remember?", "character_id": "hiro"},
         events.append,
     )
     # context_build now stores ONLY the clean user turn — context must not enter messages.
-    message_result = await graph.context_build_node(
+    message_result = await context_group.context_build_node(
         {"user_text": "what should you remember?", **result}
     )
     # Memory is assembled ephemerally into turn_context by compose_context (blocks only, no persona).
-    ctx_result = await graph.compose_context_node(
+    ctx_result = await context_group.compose_context_node(
         {"user_text": "what should you remember?", **result}, lambda _event: None
     )
 
@@ -189,15 +174,7 @@ async def test_memory_search_records_search_and_result_previews(tmp_path) -> Non
     _enable_memory(runtime)
     sink = RecordingLedgerSink(tmp_path)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime, ledger_sink=sink)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = MemoryNodes(services)
 
     await graph.memory_search_node(
         {"user_text": "tea preference?", "character_id": "hiro"},
@@ -218,15 +195,7 @@ async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = MemoryNodes(services)
     events = []
 
     result = await graph.memory_out_node(
@@ -268,15 +237,7 @@ async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = MemoryNodes(services)
 
     sink = LedgerSink(tmp_path)
     entry = LedgerEntry(
@@ -323,15 +284,7 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = MemoryNodes(services)
 
     sink = LedgerSink(tmp_path)
     entry = LedgerEntry(
@@ -374,15 +327,7 @@ async def test_store_turn_memory_threads_message_timestamp(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = MemoryNodes(services)
 
     await graph._store_turn_memory(
         {
@@ -409,15 +354,7 @@ async def test_store_turn_memory_missing_envelope_timestamp_is_none(tmp_path) ->
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = ConversationNodes(
-        services,
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    graph = MemoryNodes(services)
 
     await graph._store_turn_memory(
         {

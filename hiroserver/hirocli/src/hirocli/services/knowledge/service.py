@@ -23,8 +23,13 @@ from hirocli.domain.preferences import load_preferences
 
 if TYPE_CHECKING:
     from hirocli.domain.preferences import KnowledgeChunkingPreferences, WorkspacePreferences
-from hirocli.runtime.agent_graph.ledger import current_run
-from hirocli.services.knowledge.agent import KnowledgeAgentGraph, build_qdrant_filter
+from hirocli.runtime.agent_graph.ledger import LedgerSink, current_run
+from hirocli.runtime.agent_graph.services import AgentServices
+from hirocli.services.knowledge.agent import (
+    KnowledgeAgentGraph,
+    KnowledgeGraphConfig,
+    build_qdrant_filter,
+)
 from hirocli.services.knowledge.audit_log import (
     build_answer_audit,
     build_ingest_audit,
@@ -610,12 +615,14 @@ class KnowledgeService:
         prefs = self.workspace_prefs()
         retrieval = prefs.knowledge.retrieval
         graph_builder = KnowledgeAgentGraph(
-            workspace_path=self.workspace_path,
-            service=self,
-            prefs=prefs,
-            workspace_id=workspace_id,
+            AgentServices(
+                workspace_path=self.workspace_path,
+                ledger_sink=LedgerSink(self.workspace_path),
+            )
         )
-        graph = graph_builder.build()
+        graph = graph_builder.build(
+            KnowledgeGraphConfig(service=self, prefs=prefs, workspace_id=workspace_id)
+        )
         # graph_mode == "graphiti" turns on the graph_expand node. Useful only when
         # rewrite=True too (rewrite extracts query entities for the graph); a graph
         # mode with rewrite=False is a no-op + a warning.

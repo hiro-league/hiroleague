@@ -1,4 +1,4 @@
-"""Pure TTS metering helpers extracted from ``ConversationNodes.tts_node`` (P5)."""
+"""Pure TTS metering helpers used by ``TTSNodes.tts_node``."""
 
 from __future__ import annotations
 

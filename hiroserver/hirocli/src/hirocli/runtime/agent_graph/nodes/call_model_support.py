@@ -1,4 +1,4 @@
-"""Pure helpers for ``ConversationNodes.call_model_node`` (P2c)."""
+"""Pure helpers for ``LLMNodes.call_model_node``."""
 
 from __future__ import annotations
 

@@ -6,14 +6,14 @@
     "gather",
     "media_failed",
     "trim_history",
-    "memory_search",
     "context_build",
     "compose_context",
-    "call_model",
+    "memory_search",
     "memory_out",
+    "knowledge_retrieve",
+    "call_model",
     "tts",
-    "finalize",
-    "knowledge_retrieve"
+    "finalize"
   ],
   "retry_policies": {
     "stt": {

@@ -1,4 +1,4 @@
-"""Unit tests for ``KnowledgeNodes`` branch coverage."""
+"""Unit tests for ``KnowledgeRetrievalNodes`` branch coverage."""
 
 from __future__ import annotations
 
@@ -12,9 +12,10 @@ from hirocli.runtime.agent_graph.ledger import LedgerSink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, knowledge_hit
 import hirocli.services.knowledge.agent.rewrite_support as rewrite_support_module
+from hirocli.services.knowledge.agent import KnowledgeGraphConfig
 from hirocli.services.knowledge.agent.helpers import NormalizedQuery, QueryRewrite
 from hirocli.services.knowledge.agent.legs import RetrievalLeg
-from hirocli.services.knowledge.agent.nodes import KnowledgeNodes
+from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
 
 
 def _nodes(
@@ -22,16 +23,17 @@ def _nodes(
     *,
     service: Any | None = None,
     prefs: WorkspacePreferences | None = None,
-) -> KnowledgeNodes:
+) -> KnowledgeRetrievalNodes:
     services = AgentServices(
         workspace_path=tmp_path,
         ledger_sink=LedgerSink(tmp_path),
     )
-    return KnowledgeNodes(
-        services=services,
-        service=service or FakeKnowledgeService(),
-        prefs=prefs or WorkspacePreferences(),
-        workspace_id=None,
+    return KnowledgeRetrievalNodes(
+        services,
+        KnowledgeGraphConfig(
+            service=service or FakeKnowledgeService(),
+            prefs=prefs or WorkspacePreferences(),
+        ),
     )
 
 
@@ -79,11 +81,11 @@ async def test_rewrite_query_node_parse_failure(tmp_path: Path, monkeypatch: pyt
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": ["structured_output"]})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
         lambda *_a, **_k: _FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.with_structured_output_compat",
+        "hirocli.services.knowledge.agent.retrieval_nodes.with_structured_output_compat",
         lambda model, *_a, **_k: model,
     )
     nodes = _nodes(tmp_path)
@@ -117,7 +119,7 @@ async def test_rewrite_query_node_no_structured_output(
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": []})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
         lambda *_a, **_k: _FakeModel(),
     )
     nodes = _nodes(tmp_path)
@@ -147,11 +149,11 @@ async def test_rewrite_query_node_call_failed(tmp_path: Path, monkeypatch: pytes
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": ["structured_output"]})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
         lambda *_a, **_k: _BoomModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.with_structured_output_compat",
+        "hirocli.services.knowledge.agent.retrieval_nodes.with_structured_output_compat",
         lambda model, *_a, **_k: model,
     )
     nodes = _nodes(tmp_path)
@@ -188,11 +190,11 @@ async def test_rewrite_query_node_success(tmp_path: Path, monkeypatch: pytest.Mo
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": ["structured_output"]})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.create_chat_model",
+        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
         lambda *_a, **_k: _FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.nodes.with_structured_output_compat",
+        "hirocli.services.knowledge.agent.retrieval_nodes.with_structured_output_compat",
         lambda model, *_a, **_k: model,
     )
     nodes = _nodes(tmp_path)

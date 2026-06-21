@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from langgraph.graph import StateGraph
+from langgraph.types import RetryPolicy
+
 from ...domain.preferences import DEFAULT_MAX_HISTORY_MESSAGES
 from .ledger import wrap_graph_node
 from .preferences_view import PreferencesView
@@ -13,6 +16,20 @@ if TYPE_CHECKING:
     from .services import AgentServices
 
 TRIMMED_MESSAGE_LIMIT = DEFAULT_MAX_HISTORY_MESSAGES
+
+
+def mount(graph: StateGraph, group: "NodeGroup") -> None:
+    """Register every active node from ``group``, attaching its declared retry policy.
+
+    Lives here (not in ``chat.py``) so the knowledge graph builder can reuse it without
+    importing the chat package — that direction is a circular import via the shared
+    ``GraphState`` → ``services.knowledge.models`` chain.
+    """
+    for label, fn in group.registered_nodes().items():
+        kwargs: dict = {}
+        if (retry := group.retry_policy_for(label)) is not None:
+            kwargs["retry_policy"] = retry
+        graph.add_node(label, fn, **kwargs)
 
 
 def _is_graph_node_method(name: str, attr: Any) -> bool:
@@ -49,6 +66,9 @@ class NodeGroup:
     """
 
     _ledger_label_prefix: str = ""
+    # Per-node retry policy. Builder applies these to ``StateGraph.add_node`` so retry
+    # config lives with the node group that owns the node, not in the graph builder.
+    _RETRY_POLICIES: dict[str, RetryPolicy] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -103,5 +123,26 @@ class NodeGroup:
         return ordered
 
     def registered_nodes(self) -> dict[str, Callable[..., Any]]:
-        """Bound node callables keyed by LangGraph node label (insertion order preserved)."""
-        return {label: getattr(self, name) for label, name in type(self).node_methods().items()}
+        """Bound node callables keyed by LangGraph node label (insertion order preserved).
+
+        Filters out labels for which ``is_active(label)`` returns False, so the graph
+        builder no longer has to maintain a parallel skip-set for feature-gated nodes.
+        """
+        return {
+            label: getattr(self, name)
+            for label, name in type(self).node_methods().items()
+            if self.is_active(label)
+        }
+
+    def is_active(self, label: str) -> bool:
+        """Whether ``label`` should be registered into the graph by the builder.
+
+        Default True. Subclasses override to feature-gate nodes against bound
+        config/services without leaking that decision into the builder
+        (e.g. ``LLMNodes`` gates ``tools``; ``KnowledgeFanoutNodes`` gates ``knowledge_retrieve``).
+        """
+        return True
+
+    def retry_policy_for(self, label: str) -> RetryPolicy | None:
+        """Retry policy for ``label``, or None when the node should run with default policy."""
+        return self._RETRY_POLICIES.get(label)

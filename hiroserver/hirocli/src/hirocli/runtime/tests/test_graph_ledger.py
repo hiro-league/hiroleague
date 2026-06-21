@@ -20,10 +20,9 @@ from hirocli.runtime.agent_graph.ledger import (
 from hirocli.runtime.agent_graph.ledger.pricing import price_row
 
 
-from hirocli.runtime.agent_graph.config import ChatGraphConfig
-from hirocli.runtime.agent_graph.nodes.conversation import ConversationNodes
 from hirocli.runtime.agent_graph.nodes.media import MediaNodes
-from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, make_agent_services
+from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
+from hirocli.runtime.tests.graph_fakes import make_agent_services
 
 
 class LedgerProbeGraph(NodeGroup):
@@ -216,17 +215,9 @@ async def test_send_branch_identity_and_caught_error_status(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_skipped_node_preserves_skipped_status(tmp_path: Path) -> None:
-    conv = ConversationNodes(
-        make_agent_services(tmp_path),
-        ChatGraphConfig(
-            model=ScriptedChatModel(responses=[]),
-            tools=[],
-            model_id="fake:model",
-            system_prompt=None,
-        ),
-    )
+    tts = TTSNodes(make_agent_services(tmp_path))
 
-    await conv.tts_node(
+    await tts.tts_node(
         {
             "inbound_id": "in-tts-skip",
             "chat_channel_id": 7,

@@ -22,34 +22,36 @@ from typing import Any
 
 import pytest
 
-import hirocli.services.knowledge.agent.nodes as knowledge_nodes_module
+import hirocli.services.knowledge.agent.answer_nodes as knowledge_answer_module
 from hirocli.domain.preferences import load_preferences
 from hirocli.runtime.tests.graph_fakes import (
     FakeKnowledgeService,
     RecordingLedgerSink,
     run_graph,
 )
-from hirocli.services.knowledge.agent.graph import KnowledgeAgentGraph
+from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.services import AgentServices
+from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
 from hirocli.services.knowledge.agent.legs import RetrievalLeg
 
 
 @pytest.fixture(autouse=True)
 def _no_answering_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force ``call_model`` down its no-LLM fallback so the answer is deterministic + offline."""
-    monkeypatch.setattr(knowledge_nodes_module, "resolve_knowledge_answering_llm", lambda *a, **k: None)
+    monkeypatch.setattr(knowledge_answer_module, "resolve_knowledge_answering_llm", lambda *a, **k: None)
 
 
 def _build(tmp_path: Path, *, service: Any = None, retrieval_only: bool = False):
     prefs = load_preferences(tmp_path)
     graph = KnowledgeAgentGraph(
-        workspace_path=tmp_path,
-        service=service or FakeKnowledgeService(),
-        prefs=prefs,
-        workspace_id=None,
+        AgentServices(workspace_path=tmp_path, ledger_sink=LedgerSink(tmp_path))
     )
     sink = RecordingLedgerSink(tmp_path)
     graph._ledger_sink = sink  # capture flushed ledger rows
-    compiled = graph.build_retrieval() if retrieval_only else graph.build()
+    config = KnowledgeGraphConfig(
+        service=service or FakeKnowledgeService(), prefs=prefs, workspace_id=None
+    )
+    compiled = graph.build_retrieval(config) if retrieval_only else graph.build(config)
     return compiled, sink
 
 

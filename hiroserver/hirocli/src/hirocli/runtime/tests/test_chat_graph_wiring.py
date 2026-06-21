@@ -65,10 +65,23 @@ def test_topology_fixture_gate_reddens_on_drift() -> None:
 
 
 def test_retry_policies_match_retry_dict(tmp_path: Path) -> None:
-    from hirocli.runtime.agent_graph.chat import RETRY_POLICIES
+    """Retry policies attached to each compiled node come from the owning ``NodeGroup``.
 
+    The source of truth lives on each group's ``_RETRY_POLICIES`` classvar — the builder no
+    longer holds a separate registry. This test guards that the compiled graph still carries
+    every declared policy verbatim, merged across all groups that declare any.
+    """
+    from hirocli.runtime.agent_graph.nodes.media import MediaNodes
+    from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
+    from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
+
+    expected = {
+        **MediaNodes._RETRY_POLICIES,
+        **MemoryNodes._RETRY_POLICIES,
+        **TTSNodes._RETRY_POLICIES,
+    }
     compiled = _build_graph(tmp_path)
     topology = chat_topology(compiled)
     assert topology["retry_policies"] == {
-        label: {"max_attempts": policy.max_attempts} for label, policy in RETRY_POLICIES.items()
+        label: {"max_attempts": policy.max_attempts} for label, policy in expected.items()
     }

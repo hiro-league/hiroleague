@@ -944,16 +944,26 @@ class AgentManager:
         if service is None:
             return None
         from ..domain.workspace import workspace_id_for_path
-        from ..services.knowledge.agent.graph import KnowledgeAgentGraph
+        from ..services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
+        from .agent_graph.ledger import LedgerSink
+        from .agent_graph.services import AgentServices
 
         try:
-            builder = KnowledgeAgentGraph(
+            # Subgraph carries its own minimal ``AgentServices`` — invoked inside the chat
+            # run, its ``knowledge/*`` ledger rows still inherit the active run_id via the
+            # LangGraph state, so cost folds into the chat turn (no separate ledger run).
+            sub_services = AgentServices(
                 workspace_path=self._ctx.workspace_path,
-                service=service,
-                prefs=self._current_preferences(),
-                workspace_id=workspace_id_for_path(self._ctx.workspace_path),
+                ledger_sink=LedgerSink(self._ctx.workspace_path),
             )
-            return builder.build_retrieval()
+            builder = KnowledgeAgentGraph(sub_services)
+            return builder.build_retrieval(
+                KnowledgeGraphConfig(
+                    service=service,
+                    prefs=self._current_preferences(),
+                    workspace_id=workspace_id_for_path(self._ctx.workspace_path),
+                )
+            )
         except Exception as exc:
             log.warning(
                 "⚠️ knowledge subgraph build failed — chat knowledge disabled",
