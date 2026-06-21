@@ -22,6 +22,10 @@ from hirocli.services.eval.runner import (
     run_memory_eval,
     summarize_memory_rows,
 )
+from hirocli.services.memory.agent.accumulator import Accumulator
+from hirocli.services.memory.agent.retrieval_agent import RetrievalResult
+
+pytest_plugins = ["hirocli.services.eval.test_retrieval_shim"]
 
 
 def _ev_row(qid: str, category: str, matched: int, total: int) -> dict:
@@ -536,14 +540,241 @@ async def test_memory_question_row_shape(tmp_path) -> None:
     # No answering model in a bare tmp workspace → answer/judge are skipped (model is None);
     # the row still carries the recall leg with the recalled facts + gold.
     mem = _FakeMemory({"Where do I live now?": ["I moved to Denver", "I used to live in Boston"]})
-    row = await _memory_question(mem, _QUESTIONS[1], user_id=MEMORY_EVAL_USER_ID, character_id="adam")
+    row = await _memory_question(
+        mem,
+        _QUESTIONS[1],
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="adam",
+    )
     assert row["track"] == "memory"
     leg = row["legs"]["recall"]
     # Recalled facts are now structured rows (the table reads metadata); the fake memory
     # yields plain ``{"memory": ...}`` hits, which pass through verbatim.
     assert leg["recalled"] == [
-        {"memory": "I moved to Denver"},
-        {"memory": "I used to live in Boston"},
+        {"memory": "I moved to Denver", "search_id": 1, "goal": "verbatim"},
+        {"memory": "I used to live in Boston", "search_id": 1, "goal": "verbatim"},
     ]
     assert leg["mark"] == ""  # judge off (no model) → no mark
     assert row["gold"] == "Denver"  # ideal answer (judge reference / display)
+
+
+@pytest.mark.retrieval_agent
+@pytest.mark.asyncio
+async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatch) -> None:
+    import csv
+
+    from hirocli.runtime.agent_graph.ledger import LedgerSink
+
+    async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
+        acc = Accumulator()
+        acc.merge(
+            [{"kind": "fact", "uuid": "e1", "memory": "Brightloom"}],
+            search_id=1,
+            goal="work",
+        )
+        return RetrievalResult(
+            accumulator=acc,
+            reduce_op="latest",
+            reduce_args={"subject": "employer"},
+            answer_text="",
+            transcript=[
+                {"event": "tool_call", "turn": 1, "sub_queries": 2, "cumulative_agent_turns": 1},
+                {"event": "sub_result", "turn": 1, "sid": 1, "returned": 4, "new": 3},
+                {"event": "sub_result", "turn": 1, "sid": 2, "returned": 2, "new": 1},
+                {"event": "final", "turn": 2, "cumulative_agent_turns": 2, "reduce_op": "latest"},
+            ],
+        )
+
+    class _RetrievalModelStub:
+        def bind_tools(self, tools):  # noqa: ANN001
+            return self
+
+    monkeypatch.setattr(
+        "hirocli.services.eval.models.build_eval_answer_model",
+        lambda _path: (_RetrievalModelStub(), "fake:model"),
+    )
+    monkeypatch.setattr(
+        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        _fake_run_retrieval,
+    )
+
+    sink = LedgerSink(tmp_path)
+    mem = _FakeMemory({})
+    await _memory_question(
+        mem,
+        _QUESTIONS[0],
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="adam",
+        sink=sink,
+        run_id="trace-run",
+    )
+
+    graph_log = tmp_path / "logs" / "graph.log"
+    assert graph_log.exists()
+    with graph_log.open(encoding="utf-8") as fh:
+        recall_rows = [row for row in csv.DictReader(fh) if row.get("node") == "memory_recall"]
+    assert len(recall_rows) == 1
+    preview = recall_rows[0]["output_preview"]
+    assert "searches=2" in preview
+    assert "turns=2" in preview
+    assert "reduce=latest" in preview
+    assert "Brightloom" in preview
+
+    sidecar = tmp_path / "logs" / "retrieval_trace" / "agent" / "trace-run__q_work.jsonl"
+    assert sidecar.exists()
+    sidecar_lines = [line for line in sidecar.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(sidecar_lines) == 4
+
+
+@pytest.mark.retrieval_agent
+@pytest.mark.asyncio
+async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_run_retrieval(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        acc = Accumulator()
+        acc.merge(
+            [{"kind": "fact", "uuid": "e1", "memory": "Brightloom"}],
+            search_id=1,
+            goal="",
+        )
+        return RetrievalResult(
+            accumulator=acc,
+            reduce_op="none",
+            reduce_args={},
+            answer_text="",
+            transcript=[],
+        )
+
+    class _RetrievalModelStub:
+        def bind_tools(self, tools):  # noqa: ANN001
+            return self
+
+    monkeypatch.setattr(
+        "hirocli.services.eval.models.build_eval_answer_model",
+        lambda _path: (_RetrievalModelStub(), "fake:model"),
+    )
+    monkeypatch.setattr(
+        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        _fake_run_retrieval,
+    )
+    mem = _FakeMemory({})
+    row = await _memory_question(
+        mem,
+        _QUESTIONS[0],
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="adam",
+    )
+
+    assert captured["question"] == "Where do I work?"
+    assert captured["limits"].max_agent_turns == 4
+    assert isinstance(captured["prompt_text"], str) and captured["prompt_text"]
+    assert row["legs"]["recall"]["recalled"] == [
+        {
+            "kind": "fact",
+            "uuid": "e1",
+            "memory": "Brightloom",
+            "search_id": 1,
+            "goal": "",
+        }
+    ]
+
+
+@pytest.mark.retrieval_agent
+@pytest.mark.asyncio
+async def test_recall_leg_applies_declared_reduce_op(tmp_path, monkeypatch) -> None:
+    async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
+        acc = Accumulator()
+        acc.merge(
+            [
+                {
+                    "kind": "fact",
+                    "uuid": "e1",
+                    "memory": "Budget $40",
+                    "fact": "Budget $40",
+                    "valid_at": "2024-01-01",
+                },
+                {
+                    "kind": "fact",
+                    "uuid": "e2",
+                    "memory": "Budget $50",
+                    "fact": "Budget $50",
+                    "valid_at": "2024-02-01",
+                },
+            ],
+            search_id=1,
+            goal="budget",
+        )
+        return RetrievalResult(
+            accumulator=acc,
+            reduce_op="latest",
+            reduce_args={"subject": "budget"},
+            answer_text="",
+            transcript=[],
+        )
+
+    class _RetrievalModelStub:
+        def bind_tools(self, tools):  # noqa: ANN001
+            return self
+
+    monkeypatch.setattr(
+        "hirocli.services.eval.models.build_eval_answer_model",
+        lambda _path: (_RetrievalModelStub(), "fake:model"),
+    )
+    monkeypatch.setattr(
+        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        _fake_run_retrieval,
+    )
+    mem = _FakeMemory({})
+    row = await _memory_question(
+        mem,
+        _QUESTIONS[0],
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="adam",
+    )
+
+    recalled = row["legs"]["recall"]["recalled"]
+    assert len(recalled) == 1
+    assert recalled[0]["memory"] == "Budget $50"
+
+
+@pytest.mark.asyncio
+async def test_eval_row_shape_unchanged(tmp_path) -> None:
+    mem = _FakeMemory({"Where do I work?": ["I work at Brightloom"]})
+    row = await _memory_question(
+        mem,
+        _QUESTIONS[0],
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="adam",
+    )
+    assert set(row.keys()) >= {
+        "id",
+        "category",
+        "question",
+        "track",
+        "gold",
+        "cost_usd",
+        "legs",
+        "answered_at",
+    }
+    leg = row["legs"]["recall"]
+    assert set(leg.keys()) >= {
+        "mode",
+        "mark",
+        "reason",
+        "elapsed_ms",
+        "answer",
+        "answer_preview",
+        "recalled",
+        "recall_sufficient",
+        "grounded",
+        "evidence",
+        "cost_usd",
+    }
+    assert leg["mode"] == "recall"

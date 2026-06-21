@@ -3,6 +3,8 @@
   import GraphEvalJudgePromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalJudgePromptCard.svelte';
   import GraphEvalKnowledgePromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalKnowledgePromptCard.svelte';
   import GraphEvalMemAnswerPromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalMemAnswerPromptCard.svelte';
+  import GraphEvalRetrievalAgentPromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalRetrievalAgentPromptCard.svelte';
+  import GraphRetrievalAgentCard from '$lib/features/preferences/sections/graph-engine/GraphRetrievalAgentCard.svelte';
   import GraphEvalModelsCard from '$lib/features/preferences/sections/graph-engine/GraphEvalModelsCard.svelte';
   import GraphExtractionCard from '$lib/features/preferences/sections/graph-engine/GraphExtractionCard.svelte';
   import GraphRerankerCard from '$lib/features/preferences/sections/graph-engine/GraphRerankerCard.svelte';
@@ -43,6 +45,8 @@
     <GraphSearchIndexingCard {ctrl} />
     <GraphRerankerCard {ctrl} />
     <GraphEvalMemAnswerPromptCard {ctrl} />
+    <GraphRetrievalAgentCard {ctrl} />
+    <GraphEvalRetrievalAgentPromptCard {ctrl} />
     <GraphEvalJudgePromptCard {ctrl} />
     <GraphEvalKnowledgePromptCard {ctrl} />
     <GraphViewCard {ctrl} />

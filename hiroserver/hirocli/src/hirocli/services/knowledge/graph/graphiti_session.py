@@ -26,9 +26,15 @@ class GraphitiSession:
         *,
         num_results: int,
         temporal: str,
+        k_hop: int | None = None,
+        show_expiry: bool = False,
     ):
         return await self.service.search_chunk_ids(
-            query, num_results=num_results, temporal=temporal
+            query,
+            num_results=num_results,
+            temporal=temporal,
+            k_hop=k_hop,
+            show_expiry=show_expiry,
         )
 
 

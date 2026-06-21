@@ -850,6 +850,8 @@ class GraphitiMemoryService:
         group_id: str | None = None,
         num_results: int = 20,
         temporal: str = "current",
+        k_hop: int | None = None,
+        show_expiry: bool = False,
     ) -> GraphitiExpansion:
         """Graphiti fact search → focused Qdrant chunk_ids (+ fact texts).
 
@@ -870,10 +872,11 @@ class GraphitiMemoryService:
             num_results=num_results,
             temporal=temporal,
             recipe=self._search_recipe,
-            k_hop=self._k_hop,
+            k_hop=self._k_hop if k_hop is None else k_hop,
             min_relevance=self._reranker_min_score,
             sim_min_score=self._sim_min_score,
             scope=self._search_scope,
+            show_expiry=show_expiry,
         )
 
     async def close(self) -> None:

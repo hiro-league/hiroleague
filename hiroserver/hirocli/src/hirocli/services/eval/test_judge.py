@@ -20,6 +20,8 @@ from hirocli.services.eval.judge import (
 from hirocli.services.eval.runner import MEMORY_EVAL_USER_ID, _memory_question
 from hirocli.services.eval.scoring import MARK_FAIL, MARK_PASS
 
+pytest_plugins = ["hirocli.services.eval.test_retrieval_shim"]
+
 
 class _FakeAI:
     def __init__(self, content: str) -> None:
@@ -148,7 +150,7 @@ class _FakeMemory:
 
 
 @pytest.mark.asyncio
-async def test_memory_question_wires_answer_and_judge() -> None:
+async def test_memory_question_wires_answer_and_judge(tmp_path) -> None:
     mem = _FakeMemory(["Otto is the current mascot drone"])
     q = {
         "id": "q1",
@@ -159,6 +161,7 @@ async def test_memory_question_wires_answer_and_judge() -> None:
     row = await _memory_question(
         mem,
         q,
+        workspace_path=tmp_path,
         user_id=MEMORY_EVAL_USER_ID,
         character_id="helix",
         # Answer + judge are SEPARATE eval models now; one fake serves each role.
@@ -172,17 +175,25 @@ async def test_memory_question_wires_answer_and_judge() -> None:
     assert leg["answer"] == "Otto."  # the model answer (grounded in recalled facts)
     assert leg["mark"] == MARK_PASS  # judged against the ideal
     # recalled keeps structured hit dicts (temporal/source metadata), not plain strings
-    assert leg["recalled"] == [{"memory": "Otto is the current mascot drone"}]
+    assert leg["recalled"] == [
+        {"memory": "Otto is the current mascot drone", "search_id": 1, "goal": "verbatim"},
+    ]
     assert row["gold"] == "Otto"
 
 
 @pytest.mark.asyncio
-async def test_memory_question_judge_off_has_answer_no_mark() -> None:
+async def test_memory_question_judge_off_has_answer_no_mark(tmp_path) -> None:
     mem = _FakeMemory(["Otto is the current mascot drone"])
     q = {"id": "q1", "question": "drone?", "expected_answer": "Otto"}
     row = await _memory_question(
-        mem, q, user_id=MEMORY_EVAL_USER_ID, character_id="helix",
-        answer_model=_FakeModel(answer="Otto."), answer_model_id="fake:model", judge=False,
+        mem,
+        q,
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="helix",
+        answer_model=_FakeModel(answer="Otto."),
+        answer_model_id="fake:model",
+        judge=False,
     )
     leg = row["legs"]["recall"]
     assert leg["answer"] == "Otto." and leg["mark"] == ""  # answer only, no judge mark

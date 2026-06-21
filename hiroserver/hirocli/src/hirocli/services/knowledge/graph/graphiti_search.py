@@ -404,6 +404,7 @@ async def search_chunk_ids(
     min_relevance: float = 0.0,
     sim_min_score: float = 0.3,
     scope: str = "edges",
+    show_expiry: bool = False,
 ) -> GraphitiExpansion:
     """Run Graphiti fact search → focused chunk_ids (+ fact texts).
 
@@ -540,23 +541,25 @@ async def search_chunk_ids(
             # relative phrasing in the supporting passage to an absolute date.
             dated = _fact_with_date(fact, valid_at, invalid_at)
             facts.append(dated)
-            # Parallel structured row (the recalled-facts table reads these).
-            fact_rows.append(
-                {
-                    "kind": "fact",
-                    "memory": dated,
-                    "fact": fact,
-                    "valid_at": valid_at,
-                    "invalid_at": invalid_at,
-                    "superseded": superseded,
-                    "chunk_id": episodes[0] if episodes else "",
-                    "name": name,
-                    "source_uuid": source_uuid,
-                    "target_uuid": target_uuid,
-                    "uuid": edge_uuid,
-                    "score": score,
-                }
-            )
+            # Parallel structured row (the recalled-facts table reads these). Validity fields are
+            # optional: the retrieval-agent tool sets show_expiry=true when the model needs
+            # invalid_at / superseded on edges; default omits them (agentic-memory P0).
+            row: dict[str, Any] = {
+                "kind": "fact",
+                "memory": dated,
+                "fact": fact,
+                "chunk_id": episodes[0] if episodes else "",
+                "name": name,
+                "source_uuid": source_uuid,
+                "target_uuid": target_uuid,
+                "uuid": edge_uuid,
+                "score": score,
+            }
+            if show_expiry:
+                row["valid_at"] = valid_at
+                row["invalid_at"] = invalid_at
+                row["superseded"] = superseded
+            fact_rows.append(row)
 
     # Statement date per fact = its source episode's reference_time (when the turn was SAID).
     # The answerer resolves relative phrases ("five years ago") against THIS date; valid_at/

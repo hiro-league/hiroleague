@@ -111,6 +111,52 @@ describe('editsForSave', () => {
     expect(edits['graph.eval.answer_prompts']).toEqual(draft.graph.eval.answer_prompts);
   });
 
+  it('sends graph.eval.retrieval_agent_prompts as one whole-object path', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.graph.eval.retrieval_agent_prompts.custom = {
+      label: 'Custom',
+      locked: false,
+      prompt: 'Search in parallel when plural.'
+    };
+    const edits = editsForSave(baseline, draft);
+    expect(Object.keys(edits)).toEqual(['graph.eval.retrieval_agent_prompts']);
+    expect(edits['graph.eval.retrieval_agent_prompts']).toEqual(
+      draft.graph.eval.retrieval_agent_prompts
+    );
+  });
+
+  it('picks up retrieval_agent scalar edits', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.graph.eval.retrieval_agent.max_agent_turns = 6;
+    draft.graph.eval.active_retrieval_agent_prompt_id = 'default';
+    expect(editsForSave(baseline, draft)).toEqual({
+      'graph.eval.retrieval_agent.max_agent_turns': 6
+    });
+  });
+
+  it('picks_up_new_caps_paths_in_diff', () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.graph.eval.retrieval_agent = {
+      max_agent_turns: 6,
+      max_parallel_searches: 4,
+      limit_default: 25,
+      limit_min: 12,
+      limit_max: 45,
+      hops_max: 2
+    };
+    expect(editsForSave(baseline, draft)).toEqual({
+      'graph.eval.retrieval_agent.max_agent_turns': 6,
+      'graph.eval.retrieval_agent.max_parallel_searches': 4,
+      'graph.eval.retrieval_agent.limit_default': 25,
+      'graph.eval.retrieval_agent.limit_min': 12,
+      'graph.eval.retrieval_agent.limit_max': 45,
+      'graph.eval.retrieval_agent.hops_max': 2
+    });
+  });
+
   it('ignores read-only resolved fields', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);

@@ -199,6 +199,9 @@ class GraphitiConversationMemory:
         user_id: int,
         character_id: str,
         limit: int | None = None,
+        temporal: "KnowledgeGraphTemporalDefault | None" = None,
+        k_hop: int | None = None,
+        show_expiry: bool = False,
         threshold: float | None = None,
         rerank: bool | None = None,
         metadata_filters: dict[str, Any] | None = None,
@@ -241,13 +244,17 @@ class GraphitiConversationMemory:
             RetrievalCapture() if self._graph.observability == "trace" else None
         )
         capture_token = current_capture.set(capture) if capture is not None else None
-        # Memory recall reads the admin temporal lens (replaces the former D8 hardcode):
-        # the same ``graph.temporal_default`` pref that drives knowledge graph_expand applies
-        # here, so Settings → Graph → Temporal lens governs every leg uniformly.
-        temporal = self._temporal_default
+        # Memory recall reads the admin temporal lens by default; per-call overrides support
+        # the retrieval-agent tool (agentic-memory P0).
+        temporal_lens = temporal if temporal is not None else self._temporal_default
         try:
             expansion = await self._graph.search_chunk_ids(
-                q, group_id=group, num_results=top_k, temporal=temporal
+                q,
+                group_id=group,
+                num_results=top_k,
+                temporal=temporal_lens,
+                k_hop=k_hop,
+                show_expiry=show_expiry,
             )
         finally:
             current_rerank_usage.reset(rerank_token)

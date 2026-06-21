@@ -235,3 +235,79 @@ async def test_recipe_constant_not_mutated() -> None:
     g = _FakeGraphiti([_Edge(["c1"], "f")])
     await search_chunk_ids(g, "q", group_id="kb_main", num_results=99)
     assert EDGE_HYBRID_SEARCH_RRF.limit == before  # untouched
+
+
+@pytest.mark.asyncio
+async def test_search_chunk_ids_show_expiry_false_omits_validity() -> None:
+    g = _FakeGraphiti([_Edge(["c1"], "Adam lives in Boston", invalid_at=_past())])
+    exp = await search_chunk_ids(
+        g, "history", group_id="kb_main", temporal="all", show_expiry=False
+    )
+    assert exp.fact_rows
+    row = exp.fact_rows[0]
+    assert "valid_at" not in row
+    assert "invalid_at" not in row
+    assert "superseded" not in row
+
+
+@pytest.mark.asyncio
+async def test_search_chunk_ids_show_expiry_true_emits_validity_on_edges() -> None:
+    past = _past()
+    g = _FakeGraphiti([_Edge(["c1"], "Adam lived in Boston", invalid_at=past)])
+    exp = await search_chunk_ids(
+        g, "history", group_id="kb_main", temporal="all", show_expiry=True
+    )
+    assert exp.fact_rows
+    row = exp.fact_rows[0]
+    assert row["valid_at"] == ""
+    assert row["invalid_at"] == past.date().isoformat()
+    assert row["superseded"] is True
+
+
+@pytest.mark.asyncio
+async def test_search_chunk_ids_show_expiry_only_on_edges() -> None:
+    class _Node:
+        def __init__(self) -> None:
+            self.summary = "A reader"
+            self.name = "Ada"
+            self.uuid = "n1"
+            self.labels = ["Person"]
+
+    class _Episode:
+        def __init__(self) -> None:
+            self.content = "I love sci-fi."
+            self.uuid = "e1"
+            self.valid_at = _past()
+
+    class _WideResults:
+        def __init__(self) -> None:
+            self.edges = [_Edge(["c1"], "Ada loves sci-fi")]
+            self.nodes = [_Node()]
+            self.episodes = [_Episode()]
+
+    class _WideGraphiti(_FakeGraphiti):
+        async def search_(self, query, config=None, group_ids=None, search_filter=None):
+            self.calls.append(
+                {
+                    "query": query,
+                    "config": config,
+                    "group_ids": group_ids,
+                    "num_results": getattr(config, "limit", None),
+                    "search_filter": search_filter,
+                }
+            )
+            return _WideResults()
+
+    g = _WideGraphiti([])
+    exp = await search_chunk_ids(
+        g,
+        "sci-fi",
+        group_id="kb_main",
+        scope="edges_nodes_episodes",
+        show_expiry=True,
+    )
+    assert exp.fact_rows[0]["superseded"] is False
+    assert "superseded" not in exp.node_rows[0]
+    assert "invalid_at" not in exp.node_rows[0]
+    assert "superseded" not in exp.episode_rows[0]
+    assert "invalid_at" not in exp.episode_rows[0]

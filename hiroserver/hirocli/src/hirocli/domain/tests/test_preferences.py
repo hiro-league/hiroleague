@@ -12,6 +12,8 @@ from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
+    DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
+    DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
     AnswerPromptProfile,
     LLMPreferences,
     MediaPreferences,
@@ -19,6 +21,7 @@ from hirocli.domain.preferences import (
     ModalityFlags,
     PREFERENCE_SECTIONS,
     PROMPT_DEFAULTS,
+    RetrievalAgentLimits,
     TuningProfile,
     WorkspacePreferences,
     knowledge_answering_model_source,
@@ -26,6 +29,7 @@ from hirocli.domain.preferences import (
     preferences_file,
     resolve_knowledge_answering_llm,
     resolve_llm,
+    resolve_retrieval_agent_prompt,
     save_preferences,
 )
 from hirocli.domain.server_info import (
@@ -203,6 +207,58 @@ def test_answer_prompt_library_roundtrips(tmp_path: Path) -> None:
     )
     _, default_text = reloaded.graph.eval.resolve_answer_prompt("nope")
     assert default_text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+
+
+def test_retrieval_agent_defaults() -> None:
+    limits = WorkspacePreferences().graph.eval.retrieval_agent
+    assert limits.max_agent_turns == 4
+    assert limits.max_parallel_searches == 3
+    assert limits.limit_default == 20
+    assert limits.limit_min == 10
+    assert limits.limit_max == 40
+    assert limits.hops_max == 3
+
+
+def test_retrieval_agent_limit_coherence_validator() -> None:
+    with pytest.raises(ValueError, match="limit_min"):
+        RetrievalAgentLimits(limit_min=30, limit_default=20)
+
+
+def test_retrieval_agent_caps_clamped_to_pydantic_bounds() -> None:
+    with pytest.raises(Exception):
+        RetrievalAgentLimits(max_parallel_searches=99)
+
+
+def test_resolve_retrieval_agent_prompt_blank_falls_back_to_default() -> None:
+    prefs = WorkspacePreferences()
+    prefs.graph.eval.retrieval_agent_prompts["custom"] = AnswerPromptProfile(
+        label="Custom", prompt=""
+    )
+    prefs.graph.eval.active_retrieval_agent_prompt_id = "custom"
+    pid, text = resolve_retrieval_agent_prompt(prefs)
+    assert pid == "custom"
+    assert text == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+
+
+def test_resolve_retrieval_agent_prompt_uses_active_id() -> None:
+    prefs = WorkspacePreferences()
+    prefs.graph.eval.retrieval_agent_prompts["variant"] = AnswerPromptProfile(
+        label="Variant", prompt="Search carefully."
+    )
+    prefs.graph.eval.active_retrieval_agent_prompt_id = "variant"
+    pid, text = resolve_retrieval_agent_prompt(prefs)
+    assert pid == "variant"
+    assert text == "Search carefully."
+
+
+def test_retrieval_agent_prompt_default_in_builtin_defaults() -> None:
+    default_profile = WorkspacePreferences().graph.eval.retrieval_agent_prompts[
+        DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+    ]
+    assert default_profile.prompt == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+    pid, text = resolve_retrieval_agent_prompt(WorkspacePreferences())
+    assert pid == DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+    assert text == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
 
 
 def test_resolve_llm_with_default_and_credentials(

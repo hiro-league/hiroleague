@@ -157,6 +157,18 @@ export type GraphPreferences = {
     show_event_time: boolean;
     show_expired_at: boolean;
     show_superseded: boolean;
+    // Agentic retrieval loop caps/clamps — one global value for eval and chat.
+    retrieval_agent: {
+      max_agent_turns: number;
+      max_parallel_searches: number;
+      limit_default: number;
+      limit_min: number;
+      limit_max: number;
+      hops_max: number;
+    };
+    // Named retrieval-agent system prompt library (mirrors answer_prompts).
+    retrieval_agent_prompts: Record<string, AnswerPromptProfile>;
+    active_retrieval_agent_prompt_id: string;
   };
   // Admin graph-viz DISPLAY knobs (the shared Knowledge/Memories Graph tab's per-type node
   // filter). Frontend-only — the graph engine ignores these.
@@ -284,7 +296,19 @@ export const DEFAULT_GRAPH: GraphPreferences = {
     judge_tuning_profile: 'knowledge_answering',
     show_event_time: true,
     show_expired_at: false,
-    show_superseded: false
+    show_superseded: false,
+    retrieval_agent: {
+      max_agent_turns: 4,
+      max_parallel_searches: 3,
+      limit_default: 20,
+      limit_min: 10,
+      limit_max: 40,
+      hops_max: 3
+    },
+    retrieval_agent_prompts: {
+      default: { label: 'Default', locked: true, prompt: '' }
+    },
+    active_retrieval_agent_prompt_id: 'default'
   },
   view: {
     large_type_threshold: 200
@@ -351,7 +375,15 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       },
       eval: {
         ...DEFAULT_GRAPH.eval,
-        ...(prefs.graph?.eval ?? {})
+        ...(prefs.graph?.eval ?? {}),
+        retrieval_agent: {
+          ...DEFAULT_GRAPH.eval.retrieval_agent,
+          ...(prefs.graph?.eval?.retrieval_agent ?? {})
+        },
+        retrieval_agent_prompts: {
+          ...DEFAULT_GRAPH.eval.retrieval_agent_prompts,
+          ...(prefs.graph?.eval?.retrieval_agent_prompts ?? {})
+        }
       },
       // Older payloads predate the graph-viz display knobs — fill from defaults.
       view: {

@@ -190,10 +190,125 @@ async def _remember_episodes(
     return learned
 
 
+async def _recall_via_agent(
+    *,
+    question: str,
+    memory: Any,
+    workspace_path: Path,
+    answer_model: Any | None,
+    user_id: int,
+    character_id: str,
+    retrieval_limits: Any | None = None,
+    retrieval_prompt_text: str = "",
+) -> tuple[list[dict[str, Any]], list[str], Any | None]:
+    """Run the agentic recall leg (P5): retrieval loop → reduce → legacy recall rows.
+
+    ``retrieval_limits`` and ``retrieval_prompt_text`` are pre-resolved by ``run_memory_eval``
+    once per run and threaded through to avoid reloading ``preferences.json`` on every
+    parallel question. When either is omitted (direct ``_memory_question`` test entry, etc.)
+    this function loads them from the workspace as a fallback.
+    """
+    from hirocli.services.memory.agent.reduce import apply_reduce, accumulated_item_to_recall_row
+    from hirocli.services.memory.agent.retrieval_agent import run_retrieval
+
+    limits = retrieval_limits
+    prompt_text = retrieval_prompt_text
+    if limits is None or not prompt_text:
+        from hirocli.domain.preferences import load_preferences, resolve_retrieval_agent_prompt
+
+        prefs = load_preferences(workspace_path)
+        if limits is None:
+            limits = prefs.graph.eval.retrieval_agent
+        if not prompt_text:
+            _prompt_id, prompt_text = resolve_retrieval_agent_prompt(prefs)
+
+    retrieval_model = answer_model
+    if retrieval_model is None:
+        # Direct-call tests pass answer_model=None and rely on the monkey-patched eval model
+        # builder; production always threads a built model in, so this path is a fallback.
+        from hirocli.services.eval.models import build_eval_answer_model
+
+        retrieval_model, _ = build_eval_answer_model(workspace_path)
+
+    if retrieval_model is None:
+        log.warning(
+            "⚠️ knowledge.eval — retrieval agent skipped · no chat model · q=%s",
+            _preview(question, 80),
+        )
+        return [], [], None
+
+    result = await run_retrieval(
+        question=question,
+        memory=memory,
+        limits=limits,
+        prompt_text=prompt_text,
+        model=retrieval_model,
+        user_id=user_id,
+        character_id=character_id,
+    )
+    reduced = apply_reduce(
+        result.accumulator,
+        op=result.reduce_op,
+        args=result.reduce_args,
+    )
+    recalled_rows = [accumulated_item_to_recall_row(item) for item in reduced.items]
+    facts = [str(r["memory"]) for r in recalled_rows if str(r.get("memory") or "").strip()]
+    log.info(
+        "⬇️ knowledge.eval — recall · items=%d · reduce=%s · q='%s'",
+        len(recalled_rows),
+        result.reduce_op,
+        _preview(question, 80),
+    )
+    return recalled_rows, facts, result
+
+
+def _persist_retrieval_trace(
+    *,
+    workspace_path: Path,
+    run_id: str,
+    question_id: str,
+    retrieval_result: Any | None,
+) -> None:
+    """Write the agent-loop transcript sidecar (P6) — best-effort, never raises."""
+    if retrieval_result is None:
+        return
+    transcript = getattr(retrieval_result, "transcript", None) or []
+    if not transcript:
+        return
+    from hirocli.services.memory.agent.agent_trace import write_agent_retrieval_trace
+
+    write_agent_retrieval_trace(
+        workspace_path,
+        run_id=run_id,
+        question_id=question_id,
+        events=transcript,
+    )
+
+
+def _memory_recall_output_preview(
+    retrieval_result: Any | None,
+    *,
+    facts: list[str],
+) -> str:
+    """Ledger preview for the ``memory_recall`` node (P6)."""
+    from hirocli.services.knowledge.ledger_runner import preview_answer
+    from hirocli.services.memory.agent.agent_trace import format_memory_recall_output_preview
+
+    facts_preview = preview_answer(" | ".join(facts) or "(nothing recalled)")
+    if retrieval_result is None:
+        return facts_preview
+    return format_memory_recall_output_preview(
+        getattr(retrieval_result, "transcript", None) or [],
+        reduce_op=str(getattr(retrieval_result, "reduce_op", None) or "none"),
+        facts_preview=facts_preview,
+    )
+
+
 async def _memory_question(
     memory: Any,
     q: dict[str, Any],
     *,
+    workspace_path: Path,
     user_id: int,
     character_id: str,
     sink: Any | None = None,
@@ -211,6 +326,8 @@ async def _memory_question(
     answer_instructions: str = "",
     judge_system_prompt: str = "",
     render: "RecallRenderOptions | None" = None,
+    retrieval_limits: Any | None = None,
+    retrieval_prompt_text: str = "",
 ) -> dict[str, Any]:
     """One memory question, all in ONE Graph Run: **recall** (graph search) → **answer**
     (grounded only in the recalled facts) → optional **judge** (vs the ideal answer).
@@ -224,7 +341,7 @@ async def _memory_question(
         answer_from_context,
         judge_answer,
     )
-    from hirocli.services.knowledge.ledger_runner import preview_answer, preview_query
+    from hirocli.services.knowledge.ledger_runner import preview_query
 
     render = render or RecallRenderOptions()
 
@@ -244,6 +361,7 @@ async def _memory_question(
 
     facts: list[str] = []
     recalled_rows: list[dict[str, Any]] = []
+    retrieval_result: Any | None = None
     answer, mark, reason, evidence = "", "", "", ""
     # Judge-reported: did the recalled context contain what was needed to answer? Defaults True
     # (judge off / not asked) so it never falsely flags a recall miss when unjudged.
@@ -265,30 +383,48 @@ async def _memory_question(
                 )
                 entry_token = current_entry.set(entry)
                 try:
-                    hits = await memory.search(
-                        q["question"], user_id=user_id, character_id=character_id
+                    recalled_rows, facts, retrieval_result = await _recall_via_agent(
+                        question=q["question"],
+                        memory=memory,
+                        workspace_path=workspace_path,
+                        answer_model=answer_model,
+                        user_id=user_id,
+                        character_id=character_id,
+                        retrieval_limits=retrieval_limits,
+                        retrieval_prompt_text=retrieval_prompt_text,
                     )
-                    facts = [
-                        str(h.get("memory") or "")
-                        for h in hits
-                        if str(h.get("memory") or "").strip()
-                    ]
+                    _persist_retrieval_trace(
+                        workspace_path=workspace_path,
+                        run_id=run_id,
+                        question_id=str(q.get("id") or ""),
+                        retrieval_result=retrieval_result,
+                    )
                     entry.input_preview = preview_query(q["question"])
-                    entry.output_preview = preview_answer(" | ".join(facts) or "(nothing recalled)")
+                    entry.output_preview = _memory_recall_output_preview(
+                        retrieval_result,
+                        facts=facts,
+                    )
                 finally:
                     entry.finish("ok")
                     sink.write_rows(entry.rows(include_parent=True))
                     current_entry.reset(entry_token)
             else:
-                hits = await memory.search(
-                    q["question"], user_id=user_id, character_id=character_id
+                recalled_rows, facts, retrieval_result = await _recall_via_agent(
+                    question=q["question"],
+                    memory=memory,
+                    workspace_path=workspace_path,
+                    answer_model=answer_model,
+                    user_id=user_id,
+                    character_id=character_id,
+                    retrieval_limits=retrieval_limits,
+                    retrieval_prompt_text=retrieval_prompt_text,
                 )
-                facts = [
-                    str(h.get("memory") or "") for h in hits if str(h.get("memory") or "").strip()
-                ]
-            # Structured recalled rows (kind + metadata) feed BOTH the answer/judge prompts and the
-            # results fact table; the plain ``facts`` strings remain for previews/fallbacks.
-            recalled_rows = [h for h in hits if str(h.get("memory") or "").strip()]
+                _persist_retrieval_trace(
+                    workspace_path=workspace_path,
+                    run_id=run_id,
+                    question_id=str(q.get("id") or ""),
+                    retrieval_result=retrieval_result,
+                )
             if _recall_rt is not None:
                 _recall_rt.outputs = {
                     "recalled": len(recalled_rows),
@@ -346,6 +482,36 @@ async def _memory_question(
             current_run.reset(run_token)
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    recall_leg: dict[str, Any] = {
+        "mode": "recall",
+        "mark": mark,
+        "reason": reason,
+        "elapsed_ms": elapsed_ms,
+        "answer": answer,
+        "answer_preview": _preview(answer, 200),
+        "run_id": (acc.run_id if acc is not None else None),
+        "recalled": recalled_rows,
+        "recall_sufficient": recall_sufficient,
+        "grounded": grounded,
+        "evidence": evidence,
+        "cost_usd": cost_usd,
+    }
+    if retrieval_result is not None:
+        from hirocli.services.memory.agent.agent_trace import build_retrieval_loop_payload
+
+        limits = retrieval_limits
+        if limits is None:
+            from hirocli.domain.preferences import load_preferences
+
+            limits = load_preferences(workspace_path).graph.eval.retrieval_agent
+        loop_payload = build_retrieval_loop_payload(
+            getattr(retrieval_result, "transcript", None) or [],
+            reduce_op=str(getattr(retrieval_result, "reduce_op", None) or "none"),
+            reduce_args=dict(getattr(retrieval_result, "reduce_args", None) or {}),
+            max_agent_turns=int(getattr(limits, "max_agent_turns", 4) or 4),
+        )
+        if loop_payload is not None:
+            recall_leg["retrieval_loop"] = loop_payload
     return {
         "id": q["id"],
         "category": q.get("category", ""),
@@ -363,20 +529,7 @@ async def _memory_question(
         # When this question finished evaluating (for the "Time" column). Persisted in row_json.
         "answered_at": utc_now_iso(),
         "legs": {
-            "recall": {
-                "mode": "recall",
-                "mark": mark,
-                "reason": reason,
-                "elapsed_ms": elapsed_ms,
-                "answer": answer,
-                "answer_preview": _preview(answer, 200),
-                "run_id": (acc.run_id if acc is not None else None),
-                "recalled": recalled_rows,
-                "recall_sufficient": recall_sufficient,
-                "grounded": grounded,
-                "evidence": evidence,
-                "cost_usd": cost_usd,
-            }
+            "recall": recall_leg,
         },
     }
 
@@ -433,6 +586,8 @@ async def _memory_question_task(
     render: "RecallRenderOptions",
     bus: Any,
     evidence_ctx: "EvidenceRecallContext | None" = None,
+    retrieval_limits: Any | None = None,
+    retrieval_prompt_text: str = "",
 ) -> None:
     """One question of the parallel phase: gate on the concurrency cap, run
     recall→answer→judge via ``_memory_question`` (unchanged — its per-question Graph Run
@@ -467,6 +622,7 @@ async def _memory_question_task(
             row = await _memory_question(
                 memory,
                 q,
+                workspace_path=workspace_path,
                 user_id=user_id,
                 character_id=character_id,
                 sink=sink,
@@ -480,6 +636,8 @@ async def _memory_question_task(
                 answer_instructions=memory_answer_prompt,
                 judge_system_prompt=judge_prompt,
                 render=render,
+                retrieval_limits=retrieval_limits,
+                retrieval_prompt_text=retrieval_prompt_text,
             )
     # Evidence recall (LoCoMo corpora): score X/Y gold-evidence coverage from THIS question's
     # recalled context and inline it on the row, so the live event carries it (EV column + fold
@@ -572,7 +730,8 @@ async def run_memory_eval(
     # Editable eval prompts (graph.eval.*); blank → relaxed defaults in judge.
     from hirocli.domain.preferences import load_preferences
 
-    _eval_prefs = load_preferences(workspace_path).graph.eval
+    _prefs = load_preferences(workspace_path)
+    _eval_prefs = _prefs.graph.eval
     # Resolve the run's chosen answer-prompt profile (eval-panel pick) → instruction text + a
     # provenance label; unknown/blank id falls back to the locked default profile, then the
     # built-in constant. The id alone can later resolve to different text (profiles are editable),
@@ -580,6 +739,11 @@ async def run_memory_eval(
     answer_prompt_label, memory_answer_prompt = _eval_prefs.resolve_answer_prompt(answer_prompt_id)
     answer_prompt_hash = hashlib.sha256(memory_answer_prompt.encode("utf-8")).hexdigest()[:8]
     judge_prompt = _eval_prefs.judge_prompt
+    # Pre-resolve the retrieval-agent prefs ONCE per run and thread them into every question
+    # task — avoids a load_preferences() disk read per parallel question (admin pref changes
+    # mid-run land on the next run, same contract as answer/judge prompts).
+    _retrieval_limits = _eval_prefs.retrieval_agent
+    _, _retrieval_prompt_text = _eval_prefs.resolve_retrieval_agent_prompt()
     # Recalled-context render toggles (graph.eval.show_*) — built once and shared by every
     # question's answer/judge/evidence renders so they stay consistent within the run.
     from hirocli.services.eval.judge import RecallRenderOptions
@@ -803,6 +967,8 @@ async def run_memory_eval(
                                 render=render,
                                 bus=bus,
                                 evidence_ctx=evidence_ctx,
+                                retrieval_limits=_retrieval_limits,
+                                retrieval_prompt_text=_retrieval_prompt_text,
                             )
                         )
             except BaseExceptionGroup as eg:

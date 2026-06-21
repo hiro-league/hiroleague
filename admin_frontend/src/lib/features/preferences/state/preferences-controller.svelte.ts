@@ -55,6 +55,8 @@ export function createPreferencesController(notify: Notify) {
   let baseline = $state<WorkspacePreferences | null>(null);
   let draft = $state<WorkspacePreferences | null>(null);
   let forceClean = $state(false);
+  // Per-section validation errors (e.g. cross-field caps on the Retrieval Agent card).
+  let sectionErrors = $state<Record<string, string | null>>({});
 
   let chatOptions = $state<CatalogModelRow[]>([]);
   let sttOptions = $state<CatalogModelRow[]>([]);
@@ -84,7 +86,10 @@ export function createPreferencesController(notify: Notify) {
     return preferencesAreDirty(baseline, draft);
   });
 
-  const canSave = $derived(dirty && !busy && !loading);
+  const hasSectionErrors = $derived(
+    Object.values(sectionErrors).some((message) => message != null && message !== '')
+  );
+  const canSave = $derived(dirty && !busy && !loading && !hasSectionErrors);
 
   const profileEntries = $derived.by(() =>
     Object.entries(draft?.tuning_profiles ?? {}).sort(([, a], [, b]) =>
@@ -117,6 +122,11 @@ export function createPreferencesController(notify: Notify) {
 
   function markDirty() {
     forceClean = false;
+  }
+
+  function setSectionError(sectionId: string, message: string | null) {
+    if (sectionErrors[sectionId] === message) return;
+    sectionErrors = { ...sectionErrors, [sectionId]: message };
   }
 
   function setModelId(path: PrefModelIdPath, id: string | null) {
@@ -443,6 +453,7 @@ export function createPreferencesController(notify: Notify) {
     sectionLabel,
     sectionDescription,
     markDirty,
+    setSectionError,
     setModelId,
     downloadReranker,
     cancelReranker,

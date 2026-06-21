@@ -768,6 +768,114 @@ Reply with one JSON object containing exactly these fields, in this order:
 - The verdict depends only on Answer vs Ideal."""
 
 
+# System prompt for the agentic memory-retrieval loop (agentic-memory-retrieval-design §5.3).
+# Resolved from ``graph.eval.retrieval_agent_prompts``; blank profile text falls back here.
+DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT = """\
+## Objective
+You retrieve facts from past conversations to answer the user's question. You cannot read the
+memory directly — call `search_memory`. Each call carries a `queries` list of 1..{MAX_PARALLEL_SEARCHES}
+sub-queries — that's how you DECOMPOSE a multi-part question into sub-questions that run together.
+You may call `search_memory` on several turns (one call per turn), observing each return before
+deciding to search again or to answer. You have {MAX_AGENT_TURNS} agent turns total — that
+INCLUDES your final-answer turn, so plan accordingly. If the memory genuinely lacks the detail,
+say so — do not guess.
+
+## Element formats
+Results arrive as a mix of three element kinds, each shaped differently — use them accordingly:
+  - edge (fact) → a dated relational claim, with valid_at / (optional) invalid_at / superseded
+                  flag when `show_expiry` is on. The ONLY kind that carries validity, so
+                  latest / ever-never / change-over-time live here.
+  - entity      → a standing who/what profile (name + summary); NO dates — context, not a
+                  timeline; cannot be ordered by time.
+  - episode     → a verbatim conversation turn with ONE timestamp; no invalidation.
+
+## Method
+  1. Rephrase the question as a STORED FACT, not as the user asked it — drop "can you",
+     "how many", "walk me through". The index sees facts, not requests.
+  2. **DECOMPOSE if the question is plural.** If it asks about several distinct things
+     (multiple subjects, several time windows, "X and Y and Z", a comparison, a list across
+     unrelated topics), split it into independent sub-questions and put them as multiple entries
+     in the `queries` list of ONE `search_memory` call (up to {MAX_PARALLEL_SEARCHES} entries).
+     Each sub-question gets its own `query` + knobs + `goal`. If the question is singular, a
+     single-entry list is fine.
+  3. Decide the AXIS each (sub-)question lives on: current value/state · change over time ·
+     ever/never · count · ordering · synthesis · something else you name yourself.
+  4. Choose the four knobs to match that axis (see "Knobs" below) — independently per
+     sub-question; they can differ.
+  5. Read what came back. If the gap is "wrong axis," rephrase (don't just widen). If the
+     gap is "thin data on the right axis," raise `limit` (or `hops`). If a sub-question
+     came back empty, retry just that one — leave the rest. If the set already answers, stop.
+
+## Knobs (compact reference)
+  query        → a stored-fact phrasing of what's needed.
+  temporal     → "current" for the state that holds now; "all" when the question is about
+                 change over time, or whether something ever/never happened.
+  limit        → start at the default; raise (up to {MAX_LIMIT}) only when a search was empty
+                 or thin AND rephrasing didn't help.
+  hops         → 1 direct; 2 if the answer links one entity to another; 3 for two links.
+  show_expiry  → true to see `invalid_at` and the `superseded` flag on edges (timeline / change
+                 questions). Only meaningful with `temporal="all"`.
+
+## Reduce ops (optional, declared on your FINAL turn)
+If the answer needs a precise count, an ordering, the latest value, a duration between two
+facts, or both sides of an "ever/never", request the matching reduce instead of computing it
+yourself — the system runs it deterministically.
+  distinct_count · order_by_time · latest · date_diff · keep_conflicting
+Omit `reduce` (or `op: none`) to answer straight from the deduped accumulator.
+
+## Positive Calibrators (synthetic; NOT drawn from any benchmark)
+P1 — current value
+  q: What's the user's monthly book budget?
+  knobs: temporal=current, limit=20, hops=1, show_expiry=false. No reduce.
+  behavior: one search, take the valid-now edge; answer.
+
+P2 — change over time
+  q: How has the book budget changed?
+  knobs: temporal=all, show_expiry=true, hops=1. reduce.op=order_by_time.
+  behavior: surface valid + superseded edges with their dates; let the reduce order them.
+
+P3 — ever/never
+  q: Have they ever mentioned disliking a genre?
+  behavior: ONE `search_memory` call with TWO entries in `queries` — one affirming phrasing,
+  one negating phrasing. Then reduce.op=keep_conflicting to present both polarities.
+
+P4 — decomposition of a plural question
+  q: What's the user's current job, their main hobby, and their last trip?
+  behavior: ONE `search_memory` call with THREE entries in `queries` — one per sub-question,
+  each with its own query/goal (job: temporal=current; hobby: temporal=current; trip:
+  temporal=all, reduce later with `latest`). Read all three sub-results together; answer in one go.
+
+## Negative Calibrators (don't burn the search budget badly)
+N1 — empty + same query + higher limit is NOT progress. If a search returned nothing, the
+     phrasing is wrong; rephrase first, then widen.
+N2 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
+     adds distractors.
+N3 — show_expiry=true under temporal=current is wasted — every returned edge is valid-now and
+     has nothing to expire.
+N4 — never answer from the question alone. If your turns run out and nothing supports the
+     answer, abstain.
+N5 — do NOT decompose a singular question into N near-duplicate entries in `queries` to "cover
+     more ground." Sub-queries are for genuinely independent sub-questions; three rephrasings of
+     the same question just burns the budget and clogs the accumulator with topical distractors.
+N6 — do NOT put more than {MAX_PARALLEL_SEARCHES} entries in `queries`; the call is rejected and
+     you waste a turn on the error round-trip.
+
+## Stopping & abstaining
+Stop the moment the accumulated facts answer the question. If your turns run out and the answer
+is still unsupported, abstain in the final turn — do not pad with guesses.
+
+## Validation (pre-final-turn self-check)
+- Did I rephrase the question into a stored-fact form before the first search?
+- If the question is plural, did I DECOMPOSE it into multiple entries in the `queries` list of
+  one call, instead of an omnibus single query? Conversely, if it's singular, did I avoid
+  near-duplicate sub-queries?
+- For each empty/thin search, did I diagnose "wrong axis" vs "thin data" before re-trying?
+- For a temporal / ever-never question, did I either set show_expiry=true under temporal=all,
+  or include BOTH polarities as two entries in `queries`?
+- For a count / ordering / duration, did I declare the matching reduce op instead of
+  computing it myself?"""
+
+
 # Dotted preference path → built-in default text for every editable system prompt. Exposed in the
 # admin /preferences payload so the UI can offer "Restore default" on prompt editors: once a prompt
 # is saved as "" the pydantic default never re-applies (defaults only fill ABSENT JSON keys), so the
@@ -817,6 +925,42 @@ def default_answer_prompts() -> dict[str, AnswerPromptProfile]:
             prompt=DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
         ),
     }
+
+
+DEFAULT_RETRIEVAL_AGENT_PROMPT_ID = "default"
+
+
+def default_retrieval_agent_prompts() -> dict[str, AnswerPromptProfile]:
+    return {
+        DEFAULT_RETRIEVAL_AGENT_PROMPT_ID: AnswerPromptProfile(
+            label="Default",
+            locked=True,
+            prompt=DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
+        ),
+    }
+
+
+class RetrievalAgentLimits(BaseModel):
+    """Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity)."""
+
+    # Number of LLM turns the agent gets across the whole loop, INCLUDING the final-answer turn
+    # (every invocation costs tokens). On the last allowed turn the model is invoked without tools
+    # so it must answer. (P9 rename: was ``max_searches``; the counter advances per turn, not per
+    # dispatched search call.)
+    max_agent_turns: int = Field(default=4, ge=1, le=10)
+    # Sub-queries per single ``search_memory`` call (the decomposition fan-out). Enforced by the
+    # tool against the configured value; one global value for eval and chat.
+    max_parallel_searches: int = Field(default=3, ge=1, le=5)
+    limit_default: int = Field(default=20, ge=1, le=100)
+    limit_min: int = Field(default=10, ge=1, le=100)
+    limit_max: int = Field(default=40, ge=1, le=100)
+    hops_max: int = Field(default=3, ge=1, le=3)
+
+    @model_validator(mode="after")
+    def _coherent_limits(self) -> "RetrievalAgentLimits":
+        if self.limit_min > self.limit_default or self.limit_default > self.limit_max:
+            raise ValueError("limit_min ≤ limit_default ≤ limit_max")
+        return self
 
 
 class GraphViewPreferences(BaseModel):
@@ -874,6 +1018,14 @@ class GraphEvalPreferences(BaseModel):
     show_event_time: bool = True
     show_expired_at: bool = False
     show_superseded: bool = False
+    # Agentic retrieval loop caps/clamps (agentic-memory-retrieval-design §5.2). One global
+    # value for eval and chat — do not split per surface.
+    retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
+    # Named library of retrieval-agent system prompts (mirrors answer_prompts).
+    retrieval_agent_prompts: dict[str, AnswerPromptProfile] = Field(
+        default_factory=default_retrieval_agent_prompts
+    )
+    active_retrieval_agent_prompt_id: str = DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
 
     def resolve_answer_prompt(self, profile_id: str | None) -> tuple[str, str]:
         """Resolve a mem-eval answer-prompt profile id → ``(label, instruction_text)``.
@@ -887,6 +1039,19 @@ class GraphEvalPreferences(BaseModel):
             return (DEFAULT_ANSWER_PROMPT_ID, DEFAULT_MEMORY_EVAL_ANSWER_PROMPT)
         text = (profile.prompt or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
         return (profile.label or pid or DEFAULT_ANSWER_PROMPT_ID, text)
+
+    def resolve_retrieval_agent_prompt(self) -> tuple[str, str]:
+        """Resolve the active retrieval-agent prompt profile → ``(id, text)``.
+
+        Blank profile text falls back to ``DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT``."""
+        active = (self.active_retrieval_agent_prompt_id or "").strip() or DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+        profile = self.retrieval_agent_prompts.get(active) or self.retrieval_agent_prompts.get(
+            DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+        )
+        if profile is None:
+            return (DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT)
+        text = (profile.prompt or "").strip() or DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+        return (active, text)
 
 
 class GraphPreferences(BaseModel):
@@ -1624,6 +1789,11 @@ def resolve_graphiti_small_model(
         workspace_id=workspace_id,
         credential_store=credential_store,
     )
+
+
+def resolve_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
+    """Return ``(profile_id, prompt_text)`` for the agentic retrieval loop."""
+    return prefs.graph.eval.resolve_retrieval_agent_prompt()
 
 
 def resolve_eval_answer_llm(

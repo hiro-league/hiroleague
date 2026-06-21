@@ -15,7 +15,11 @@ const SKIP_PATHS = new Set([
 ]);
 
 /** Subtrees the backend expects as a single path write (not per-leaf patches). */
-const WHOLE_OBJECT_PATHS = new Set(['tuning_profiles', 'graph.eval.answer_prompts']);
+const WHOLE_OBJECT_PATHS = new Set([
+  'tuning_profiles',
+  'graph.eval.answer_prompts',
+  'graph.eval.retrieval_agent_prompts'
+]);
 
 /** Nullable model-id paths — empty string is coerced to null on save. */
 const NULLABLE_MODEL_PATHS = new Set([

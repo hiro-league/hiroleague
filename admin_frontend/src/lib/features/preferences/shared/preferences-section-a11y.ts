@@ -23,6 +23,8 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   graphEngineReranker: 'preferences-section-graph-engine-reranker',
   graphView: 'preferences-section-graph-view',
   graphEvalMemAnswerPrompt: 'preferences-section-graph-eval-mem-answer-prompt',
+  graphRetrievalAgent: 'preferences-section-graph-retrieval-agent',
+  graphEvalRetrievalAgentPrompt: 'preferences-section-graph-eval-retrieval-agent-prompt',
   graphEvalJudgePrompt: 'preferences-section-graph-eval-judge-prompt',
   graphEvalKnowledgePrompt: 'preferences-section-graph-eval-knowledge-prompt'
 } as const;

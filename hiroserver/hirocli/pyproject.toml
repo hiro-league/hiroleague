@@ -108,3 +108,6 @@ dev = [
 # gives each file a unique import path and avoids "import file mismatch" on collection.
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+markers = [
+    "retrieval_agent: exercise the real agentic recall path instead of the verbatim-search shim",
+]

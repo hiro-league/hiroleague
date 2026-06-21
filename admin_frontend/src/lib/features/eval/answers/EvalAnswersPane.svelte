@@ -1,11 +1,11 @@
 <!--
-  Questions/Answers pane — a sticky toolbar (run-selection + search/filters + group expand-all +
-  LoCoMo export) over the grouped results table (EvalResultsTable) and the still-unanswered bank
-  questions (EvalNotRunList). Owns ALL answer-view state: filters, intra-group sort, row + group
-  expansion, and the sticky controls-bar height var the table's sticky thead pins beneath.
+  Questions/Answers pane — a sticky toolbar (run-selection + search/filters + LoCoMo export) over
+  the flat results table (EvalResultsTable) and the still-unanswered bank questions
+  (EvalNotRunList). Owns ALL answer-view state: filters, sort, row expansion, and the sticky
+  controls-bar height var the table's sticky thead pins beneath.
 -->
 <script lang="ts">
-  import { ChevronsDownUp, ChevronsUpDown, Download, LoaderCircle, X } from '@lucide/svelte';
+  import { Download, LoaderCircle, X } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -29,6 +29,7 @@
     rowHaystack,
     rowMatchesFlag,
     rowMatchesMark,
+    sortGroupRows,
     type AnsFlag,
     type AnsMark
   } from '$lib/features/eval/shared/eval-derive';
@@ -37,6 +38,10 @@
   import { useEvalAnswerSort } from '$lib/features/eval/state/eval-answer-sort.svelte';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
+  import {
+    decompositionRate,
+    turnsPerQuestionHistogram
+  } from '$lib/features/eval/answers/eval-trajectory-controller.svelte';
 
   interface Props {
     eval_: EvalModel;
@@ -139,46 +144,32 @@
     });
   });
 
-  // --- Results grouped by type (category) ---------------------------------------------------
-  const resultGroups = $derived.by<[string, EvalRow[]][]>(() => {
-    const map = new Map<string, EvalRow[]>();
-    for (const r of filteredAnswerRows) {
-      const cat = r.category || '—';
-      const arr = map.get(cat) ?? [];
-      arr.push(r);
-      map.set(cat, arr);
-    }
-    for (const arr of map.values()) arr.sort((a, b) => a.index - b.index);
-    return [...map.entries()];
+  // --- Flat results list (sorted) -----------------------------------------------------------
+  const resultRows = $derived.by<EvalRow[]>(() => {
+    const sorted = [...filteredAnswerRows].sort((a, b) => a.index - b.index);
+    return sortGroupRows(sorted, sort.sortKey, sort.sortDir);
   });
-  let collapsedResultGroups = $state<Set<string>>(new Set());
-  function toggleResultGroup(cat: string) {
-    const next = new Set(collapsedResultGroups);
-    if (next.has(cat)) next.delete(cat);
-    else next.add(cat);
-    collapsedResultGroups = next;
-  }
-  function expandAllResultGroups() {
-    collapsedResultGroups = new Set();
-  }
-  function collapseAllResultGroups() {
-    collapsedResultGroups = new Set(resultGroups.map(([cat]) => cat));
-  }
+
+  const retrievalTurnsHistogram = $derived(turnsPerQuestionHistogram(eval_.rows));
+  const retrievalDecompositionRate = $derived(decompositionRate(eval_.rows));
+  const showRetrievalLoopSummary = $derived(
+    cfg.track === 'memory' && eval_.rows.some((row) => row.legs.recall?.retrieval_loop)
+  );
 
   // --- Table column shape (legs + optional columns) -----------------------------------------
   const legColumns = $derived(eval_.runModes);
   const showDelta = $derived(cfg.showDelta);
   const showRecallCol = $derived(cfg.showRecallColumn);
   const showEvidenceCol = $derived(cfg.showEvidenceColumn);
-  // Base 6 = select + #, Question, Type, Difficulty, Ideal; + legs + optional columns + Time.
+  // Base 5 = select + #, Type, Question, Ideal; + legs (1/leg: answer-type for memory, answer for
+  // knowledge) + optional recall/evidence/Δ columns + Difficulty + Time.
   const resultsColspan = $derived(
-    6 +
+    5 +
       legColumns.length +
       (showDelta ? 1 : 0) +
       (showRecallCol ? 1 : 0) +
       (showEvidenceCol ? 1 : 0) +
-      (cfg.showAnswerTypeColumn ? 1 : 0) +
-      1
+      2
   );
 
   // --- Not-run questions (full-bank questions with no answered row yet) ----------------------
@@ -202,7 +193,7 @@
 {#if eval_.questions.length === 0}
   <InlineEmptyState message="No questions loaded — pick a corpus on the Execute tab." />
 {:else}
-  <!-- Sticky controls: run-selection + search/filters + group expand-all + LoCoMo export. -->
+  <!-- Sticky controls: run-selection + search/filters + LoCoMo export. -->
   <div
     bind:this={aControlsEl}
     class="sticky z-10 flex flex-wrap items-center gap-2 bg-background py-2"
@@ -329,26 +320,6 @@
           Reset
         </button>
       {/if}
-      {#if resultGroups.length > 0}
-        <button
-          type="button"
-          class="rounded border p-1 hover:bg-muted"
-          onclick={expandAllResultGroups}
-          title="Expand all groups"
-          aria-label="Expand all groups"
-        >
-          <ChevronsUpDown size={14} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="rounded border p-1 hover:bg-muted"
-          onclick={collapseAllResultGroups}
-          title="Collapse all groups"
-          aria-label="Collapse all groups"
-        >
-          <ChevronsDownUp size={14} aria-hidden="true" />
-        </button>
-      {/if}
       {#if cfg.canExportLocomo}
         <Button
           type="button"
@@ -368,6 +339,26 @@
       {/if}
     </AdminFilterBar>
   </div>
+  {#if showRetrievalLoopSummary}
+    <div
+      class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs"
+      title="Run-level agentic retrieval diagnostics"
+    >
+      <span class="font-semibold uppercase tracking-wide text-muted-foreground">Retrieval loop</span>
+      <span class="text-muted-foreground">
+        turns/Q:
+        {#each [1, 2, 3, 4] as bucket (bucket)}
+          <span class="ml-2 font-mono text-foreground">{bucket}={retrievalTurnsHistogram[bucket as 1 | 2 | 3 | 4]}</span>
+        {/each}
+      </span>
+      {#if retrievalDecompositionRate != null}
+        <span class="text-muted-foreground">
+          decomposition
+          <span class="ml-1 font-mono text-foreground">{Math.round(retrievalDecompositionRate * 100)}%</span>
+        </span>
+      {/if}
+    </div>
+  {/if}
   {#if eval_.rows.length > 0 || eval_.status === 'running'}
     <EvalResultsTable
       {eval_}
@@ -378,9 +369,7 @@
       {showRecallCol}
       {showEvidenceCol}
       {resultsColspan}
-      {resultGroups}
-      {collapsedResultGroups}
-      {toggleResultGroup}
+      {resultRows}
       {sort}
       {expandedRows}
       {toggleRow}

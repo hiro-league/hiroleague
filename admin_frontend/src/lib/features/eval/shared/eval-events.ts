@@ -1,3 +1,4 @@
+import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
 import { knowledgeEventStream } from '$lib/features/knowledge/shared/knowledge-event-stream.svelte';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,9 @@ export type RecalledFact = {
   target_uuid?: string; // object entity uuid
   uuid?: string; // fact edge / entity / episode uuid
   score?: number | null; // relevance score when the backend exposes it (now also entities/episodes)
+  // Agentic retrieval loop: which search produced this item (memory eval / chat agent).
+  search_id?: number;
+  goal?: string;
   // Entity-only (kind === 'entity'): the ontology type (Person/Org/…) and the raw attribute summary.
   entity_type?: string;
   summary?: string;
@@ -82,6 +86,8 @@ export type EvalQuestionLeg = {
   grounded?: boolean;
   recall_sufficient?: boolean;
   evidence?: string;
+  /** Agentic retrieval loop summary (memory eval rows after P5/P8). */
+  retrieval_loop?: RetrievalLoop;
 };
 
 /** Payload shape of ``eval.question_completed`` events (unified).

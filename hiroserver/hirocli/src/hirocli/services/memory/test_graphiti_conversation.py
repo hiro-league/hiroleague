@@ -50,13 +50,17 @@ class _FakeGraph:
             edges_total=self._edges_total, entities_total=0, tokens_input=0, tokens_output=0
         )
 
-    async def search_chunk_ids(self, query, *, group_id, num_results, temporal):
+    async def search_chunk_ids(
+        self, query, *, group_id, num_results, temporal, k_hop=None, show_expiry=False
+    ):
         self.search_calls.append(
             {
                 "query": query,
                 "group_id": group_id,
                 "num_results": num_results,
                 "temporal": temporal,
+                "k_hop": k_hop,
+                "show_expiry": show_expiry,
             }
         )
         return SimpleNamespace(
