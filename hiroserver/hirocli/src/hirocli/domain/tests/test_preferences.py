@@ -261,6 +261,39 @@ def test_retrieval_agent_prompt_default_in_builtin_defaults() -> None:
     assert text == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
 
 
+def test_locked_default_prompts_reseed_from_code_on_load(tmp_path: Path) -> None:
+    """Stale-locked-default fix: a workspace whose persisted LOCKED ``default`` profile holds OLD
+    text (a code-default edit landed after the workspace was created) gets that text overwritten
+    from the code constant on load, while a user's CUSTOM (non-locked) profile is preserved."""
+    import json as _json
+
+    ws = tmp_path / "ws"
+    save_preferences(ws, WorkspacePreferences())
+    raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
+    # Simulate an older workspace: stale text baked into the locked defaults + a user custom profile.
+    raw.setdefault("graph", {}).setdefault("eval", {})
+    raw["graph"]["eval"]["retrieval_agent_prompts"] = {
+        "default": {"label": "Default", "locked": True, "prompt": "OLD STALE RETRIEVAL PROMPT"},
+        "mine": {"label": "Mine", "locked": False, "prompt": "my custom retrieval prompt"},
+    }
+    raw["graph"]["eval"]["answer_prompts"] = {
+        "default": {"label": "Default (grounded)", "locked": True, "prompt": "OLD STALE ANSWER PROMPT"},
+    }
+    preferences_file(ws).write_text(_json.dumps(raw), encoding="utf-8")
+
+    reloaded = load_preferences(ws)
+    # Locked defaults are re-seeded from the live code constants…
+    assert (
+        reloaded.graph.eval.retrieval_agent_prompts["default"].prompt
+        == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+    )
+    assert (
+        reloaded.graph.eval.answer_prompts["default"].prompt == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+    )
+    # …while the user's custom (non-locked) profile is left untouched.
+    assert reloaded.graph.eval.retrieval_agent_prompts["mine"].prompt == "my custom retrieval prompt"
+
+
 def test_resolve_llm_with_default_and_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

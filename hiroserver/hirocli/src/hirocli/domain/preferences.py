@@ -13,7 +13,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -954,6 +954,28 @@ def default_retrieval_agent_prompts() -> dict[str, AnswerPromptProfile]:
     }
 
 
+_ProfileT = TypeVar("_ProfileT", bound=BaseModel)
+
+
+def reseed_locked_profiles(
+    current: dict[str, _ProfileT], defaults: dict[str, _ProfileT]
+) -> dict[str, _ProfileT]:
+    """Re-seed code-owned (``locked``) profiles from ``defaults`` so edits to the BUILT-IN defaults
+    reach EXISTING workspaces, not only fresh ones.
+
+    Locked profiles can't be edited in the UI, so their content is owned by code — but the library
+    dict is persisted in ``preferences.json`` and the field's ``default_factory`` only fills ABSENT
+    keys, so a stored copy silently drifts from the constant after a code edit (the stale-default
+    defect). This overwrites every locked default id with its live content while leaving
+    user-created (non-locked) profiles untouched. Idempotent — a no-op when the persisted text
+    already equals code, so it costs nothing on an up-to-date workspace."""
+    merged = dict(current)
+    for pid, profile in defaults.items():
+        if getattr(profile, "locked", False):
+            merged[pid] = profile
+    return merged
+
+
 class RetrievalAgentLimits(BaseModel):
     """Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity)."""
 
@@ -1047,6 +1069,19 @@ class GraphEvalPreferences(BaseModel):
         default_factory=default_retrieval_agent_prompts
     )
     active_retrieval_agent_prompt_id: str = DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+
+    @model_validator(mode="after")
+    def _reseed_locked_prompt_profiles(self) -> "GraphEvalPreferences":
+        """Locked default prompt profiles are code-owned: re-seed them from the constants on every
+        load so edits to the built-in defaults reach EXISTING workspaces (not just fresh ones),
+        while user-created profiles are preserved. Without this, the persisted ``default`` profile in
+        preferences.json drifts from the code constant after a default-text edit — the engine + admin
+        UI would keep serving the stale text until a manual re-seed (the stale-locked-default defect)."""
+        self.answer_prompts = reseed_locked_profiles(self.answer_prompts, default_answer_prompts())
+        self.retrieval_agent_prompts = reseed_locked_profiles(
+            self.retrieval_agent_prompts, default_retrieval_agent_prompts()
+        )
+        return self
 
     def resolve_answer_prompt(self, profile_id: str | None) -> tuple[str, str]:
         """Resolve a mem-eval answer-prompt profile id → ``(label, instruction_text)``.
