@@ -5,6 +5,8 @@ import {
   ingestState,
   orderedDifficulty,
   difficultyMeta,
+  isCorrectAbstention,
+  markGlyph,
   markVariant,
   markTitle,
   markLabel,
@@ -79,23 +81,36 @@ describe('difficultyMeta', () => {
 });
 
 describe('verdict mark mappers', () => {
-  it('markVariant colors each glyph (abstain is neutral)', () => {
+  it('markVariant colors each glyph (abstain is neutral, green on a negative control)', () => {
     expect(markVariant('✓')).toBe('success');
     expect(markVariant('◐')).toBe('warning');
     expect(markVariant('✗')).toBe('destructive');
     expect(markVariant('🛇')).toBe('secondary');
+    expect(markVariant('🛇', true)).toBe('success'); // correct abstention → green
     expect(markVariant('')).toBe('secondary');
   });
-  it('markLabel gives a short word, "Not judged" when no glyph', () => {
+  it('markLabel gives a short word; a correct abstention reads as Pass', () => {
     expect(markLabel('✓')).toBe('Pass');
     expect(markLabel('◐')).toBe('Partial');
     expect(markLabel('✗')).toBe('Fail');
     expect(markLabel('🛇')).toBe('Abstain');
+    expect(markLabel('🛇', true)).toBe('Pass'); // negative-control abstain presents as a pass
     expect(markLabel('')).toBe('Not judged');
   });
-  it('markTitle explains the glyph', () => {
+  it('markGlyph swaps a correct abstention to the pass glyph', () => {
+    expect(markGlyph('✗')).toBe('✗');
+    expect(markGlyph('🛇')).toBe('🛇'); // plain abstain keeps its glyph
+    expect(markGlyph('🛇', true)).toBe('✓'); // correct abstention shows the pass glyph
+  });
+  it('isCorrectAbstention is true only for abstain on a negative control', () => {
+    expect(isCorrectAbstention('🛇', true)).toBe(true);
+    expect(isCorrectAbstention('🛇', false)).toBe(false);
+    expect(isCorrectAbstention('✓', true)).toBe(false);
+  });
+  it('markTitle explains the glyph; a correct abstention reads as a pass', () => {
     expect(markTitle('✓')).toContain('Pass');
     expect(markTitle('🛇')).toContain('Abstain');
+    expect(markTitle('🛇', true)).toContain('Pass'); // negative-control abstain reads as a pass
     expect(markTitle('')).toBe('Not judged (judge was off)');
   });
 });

@@ -83,6 +83,15 @@ async def test_clamps_limit_within_bounds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_omitted_limit_resolves_to_admin_limit_default() -> None:
+    """M1 fix: when the model omits ``limit``, the search uses the admin-settable ``limit_default``
+    (not a hardcoded 20). Setting the pref must actually change the query's num_results."""
+    tool = _tool(limits=RetrievalAgentLimits(limit_default=30, limit_min=10, limit_max=40))
+    await tool.call(_args(SearchMemoryQuery(query="budget")))  # no limit passed
+    assert tool._memory._graph.search_calls[0]["num_results"] == 30
+
+
+@pytest.mark.asyncio
 async def test_pydantic_rejects_hops_out_of_bounds() -> None:
     with pytest.raises(ValidationError):
         SearchMemoryQuery(query="budget", hops=4)  # type: ignore[arg-type]

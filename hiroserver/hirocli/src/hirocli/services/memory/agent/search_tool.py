@@ -33,7 +33,9 @@ class SearchMemoryQuery(BaseModel):
 
     query: str
     temporal: Literal["current", "all"] = "current"
-    limit: int = 20
+    # M1 fix: ``None`` means "model omitted limit" → resolve to the admin pref ``limit_default``
+    # in ``_run_one`` (was a hardcoded ``20`` that shadowed the editable pref, making it inert).
+    limit: int | None = None
     hops: Literal[1, 2, 3] = 1
     show_expiry: bool = False
     goal: str = ""
@@ -163,13 +165,16 @@ class SearchMemoryTool:
         single bad sub-query does not abort the rest of the batch (gather stays clean)."""
         # ``hops`` is soft-capped to the admin ``hops_max`` (like ``limit`` clamping) rather
         # than erroring — friendlier to the model and removes an error path.
-        clamped_limit = max(self._limits.limit_min, min(self._limits.limit_max, q.limit))
+        # M1 fix: an omitted ``limit`` resolves to the admin-settable ``limit_default`` (was a
+        # hardcoded 20), then the [min, max] clamp applies.
+        requested_limit = q.limit if q.limit is not None else self._limits.limit_default
+        clamped_limit = max(self._limits.limit_min, min(self._limits.limit_max, requested_limit))
         eff_hops = min(q.hops, self._limits.hops_max)
-        if clamped_limit != q.limit or eff_hops != q.hops:
+        if clamped_limit != requested_limit or eff_hops != q.hops:
             log.debug(
                 "search_memory clamped · sid=%d · limit %d→%d · hops %d→%d",
                 sid,
-                q.limit,
+                requested_limit,
                 clamped_limit,
                 q.hops,
                 eff_hops,
@@ -197,6 +202,9 @@ class SearchMemoryTool:
                 temporal=q.temporal,
                 k_hop=eff_hops,
                 show_expiry=q.show_expiry,
+                # Tag this sub-query's pipeline trace with its sid so the trajectory UI can
+                # open the exact retrieval trace for S{sid}.
+                sid=sid,
             )
         except Exception as exc:
             log.exception("❌ search_memory sub-query failed · sid=%d", sid)

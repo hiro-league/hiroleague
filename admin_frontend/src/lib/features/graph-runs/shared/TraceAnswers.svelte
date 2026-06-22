@@ -1,14 +1,8 @@
 <script lang="ts">
   import HighlightText from './HighlightText.svelte';
 
-  // The retrieval dialog's Question → Answer → Ideal header. The question is always present;
-  // Answer/Ideal only appear in eval context. Each line highlights the active search query.
-  let {
-    question,
-    llmAnswer = '',
-    idealAnswer = '',
-    query
-  }: { question: string; llmAnswer?: string; idealAnswer?: string; query: string } = $props();
+  // The retrieval dialog header question line. Gold / our answers live on the Overview tab.
+  let { question, query }: { question: string; query: string } = $props();
 </script>
 
 <div class="trace-answers">
@@ -16,22 +10,10 @@
     <span class="trace-answer__label trace-answer__label--q">Question</span>
     <span class="trace-answer__text"><HighlightText text={question} {query} /></span>
   </div>
-  {#if llmAnswer}
-    <div class="trace-answer">
-      <span class="trace-answer__label trace-answer__label--llm">Answer</span>
-      <span class="trace-answer__text"><HighlightText text={llmAnswer} {query} /></span>
-    </div>
-  {/if}
-  {#if idealAnswer}
-    <div class="trace-answer">
-      <span class="trace-answer__label trace-answer__label--ideal">Ideal</span>
-      <span class="trace-answer__text"><HighlightText text={idealAnswer} {query} /></span>
-    </div>
-  {/if}
 </div>
 
 <style>
-  /* Question → Answer → Ideal. Question is always present; Answer/Ideal only in eval context. */
+  /* Question line under the dialog title row. */
   .trace-answers {
     display: flex;
     flex-direction: column;
@@ -58,14 +40,6 @@
 
   .trace-answer__label--q {
     color: var(--foreground);
-  }
-
-  .trace-answer__label--llm {
-    color: var(--primary);
-  }
-
-  .trace-answer__label--ideal {
-    color: #16a34a;
   }
 
   .trace-answer__text {

@@ -22,12 +22,13 @@ async def verbatim_recall_shim(
     memory: Any,
     workspace_path: Path,
     retrieval_model: Any | None,
+    retrieval_model_id: str = "",
     user_id: int,
     character_id: str,
     retrieval_limits: Any | None = None,
     retrieval_prompt_text: str = "",
 ) -> tuple[list[dict[str, Any]], list[str], Any | None]:
-    del workspace_path, retrieval_model, retrieval_limits, retrieval_prompt_text
+    del workspace_path, retrieval_model, retrieval_model_id, retrieval_limits, retrieval_prompt_text
     hits = await memory.search(
         question,
         user_id=user_id,

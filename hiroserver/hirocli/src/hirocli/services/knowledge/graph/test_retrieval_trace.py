@@ -67,6 +67,24 @@ def test_sidecar_roundtrip_keeps_step_linkage(tmp_path) -> None:
     assert rec["stages"][0]["items"][0]["uuid"] == "e1"
 
 
+def test_sidecar_stamps_subquery_sid(tmp_path) -> None:
+    # Agentic recall: each sub-query's trace carries its sid; non-agentic stays None.
+    trace = RetrievalTrace(
+        query="John basketball goals",
+        group_id="kb_main",
+        recipe="rrf",
+        temporal="current",
+        num_results=10,
+        sim_min_score=0.3,
+        k_hop=1,
+    )
+    write_trace_sidecar(tmp_path, run_id="recall-7", step_index=2, trace=trace, sid=3)
+    write_trace_sidecar(tmp_path, run_id="recall-7", step_index=2, trace=trace)
+
+    records = read_trace_sidecar(tmp_path, "recall-7")
+    assert [r["sid"] for r in records] == [3, None]
+
+
 def test_sidecar_appends_multiple_searches(tmp_path) -> None:
     for step in (4, 7):
         t = RetrievalTrace(

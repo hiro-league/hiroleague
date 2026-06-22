@@ -50,30 +50,51 @@ export function difficultyMeta(d: string): { label: string; cls: string } | null
   }
 }
 
-/** Color the mark chip. Negative-control abstain (🛇) reads as neutral, not green. */
-export function markVariant(mark: string): 'success' | 'warning' | 'destructive' | 'secondary' {
+/** A correct abstention: 🛇 on a negative-control row, where declining IS the right outcome.
+ *  It presents as a Pass (✓ glyph, green, "Pass"); callers render a CircleSlash marker beside the
+ *  badge so it still reads as "declined". A plain abstain (non-control) is an answering miss. */
+export function isCorrectAbstention(mark: string, negControl = false): boolean {
+  return mark === '🛇' && negControl;
+}
+
+/** Glyph shown inside the verdict badge. A correct abstention shows ✓ (it scored as a pass); the
+ *  abstain marker icon beside the badge carries the "actually declined" nuance. */
+export function markGlyph(mark: string, negControl = false): string {
+  return isCorrectAbstention(mark, negControl) ? '✓' : mark;
+}
+
+/** Color the mark chip. A correct abstention reads green (matches the report's correct-count);
+ *  a plain abstain stays neutral. */
+export function markVariant(
+  mark: string,
+  negControl = false
+): 'success' | 'warning' | 'destructive' | 'secondary' {
   if (mark === '✓') return 'success';
   if (mark === '◐') return 'warning';
   if (mark === '✗') return 'destructive';
-  return 'secondary'; // 🛇 abstain
+  if (isCorrectAbstention(mark, negControl)) return 'success';
+  return 'secondary'; // 🛇 abstain (non-control → a recall/answering miss)
 }
 
 /** Tooltip for the judge-mark glyph — the icons aren't self-explanatory (esp. the 🛇 abstain
  *  "stop sign"), so every mark badge carries this as its title. */
-export function markTitle(mark: string): string {
+export function markTitle(mark: string, negControl = false): string {
   if (mark === '✓') return 'Pass — the answer matches the ideal';
   if (mark === '◐') return 'Partial — partially correct or incomplete';
   if (mark === '✗') return 'Fail — the answer is wrong';
-  if (mark === '🛇') return 'Abstain — declined / “I don’t know” (the correct outcome for a negative-control question)';
+  if (mark === '🛇')
+    return negControl
+      ? 'Pass — correctly declined on a negative-control question'
+      : 'Abstain — declined / “I don’t know” (a recall/answering miss on a normal question)';
   return 'Not judged (judge was off)';
 }
 
 /** Short verdict word for the judge line badge. */
-export function markLabel(mark: string): string {
+export function markLabel(mark: string, negControl = false): string {
   if (mark === '✓') return 'Pass';
   if (mark === '◐') return 'Partial';
   if (mark === '✗') return 'Fail';
-  if (mark === '🛇') return 'Abstain';
+  if (mark === '🛇') return negControl ? 'Pass' : 'Abstain';
   return 'Not judged';
 }
 

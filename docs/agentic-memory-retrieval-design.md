@@ -220,9 +220,15 @@ not a hardcoded value.) Implicit worst-case graph load with defaults:
 **Cap semantics.** `MAX_PARALLEL_SEARCHES` bounds the *length of the `queries` list per tool call*
 and is enforced by Pydantic `max_length` (the tool rejects the call if it's exceeded; the model
 gets a validation error back and can retry). `MAX_AGENT_TURNS` bounds the *count of LLM invocations
-across the whole loop*; the executor advances its counter on every invocation and, when the next
-one would be the last allowed, rebinds the agent with `tools=[]` so the model can only emit a final
-answer.
+across the whole loop*. **As implemented**, the loop runs up to `MAX_AGENT_TURNS − 1` tool-bound
+search turns and then **always** spends one **dedicated, tool-free final turn** — a separate
+`with_structured_output` call — to emit the declared reduce op + answer. The final turn is split
+out (rather than the model choosing to answer inline / the agent being rebound with `tools=[]` on
+the last turn) because only OpenAI reliably supports *tools + a fixed response schema in one call*;
+binding no competing tool makes structured output work on every provider (see §5.4). The total LLM
+invocation count therefore stays ≤ `MAX_AGENT_TURNS`, and the worst-case search count is
+`(MAX_AGENT_TURNS − 1) × MAX_PARALLEL_SEARCHES` (as in the load note above). A model that stops
+searching early breaks out of the search loop and still spends the one dedicated final turn.
 
 **Wiring note (no-backward-compat):** `temporal` and `limit`(=`num_results`) are already per-call on
 `search_chunk_ids`. **`hops` (today `graph.k_hop`) and `show_expiry` are global admin prefs and must be
@@ -403,10 +409,12 @@ followed by the answer. The `reduce` field is the model's *declared* op — sele
 executed deterministically by the reducer (§6):
 
 ```json
-{ "reduce": { "op": "date_diff", "anchors": ["editing job start date", "reading deadline"] },
+{ "reduce": { "op": "date_diff", "args": { "anchors": ["editing job start date", "reading deadline"] } },
   "answer": "…" }
 ```
 
+Op-specific args are **nested under `args`** (not inline siblings of `op`) — this is the shape the
+final-turn instruction asks for and the parser reads; an inline shape gets its args silently dropped.
 `op` ∈ `{ none, distinct_count, order_by_time, latest, date_diff, keep_conflicting }`. Omit `reduce`
 (or `op: none`) to answer straight from the deduped, time-sorted accumulator.
 
@@ -591,12 +599,13 @@ Keeping the retrieval loop identical across both is the parity requirement in
    `…hops.max`, and the prompt profile `graph.eval.retrieval_agent_prompts` (with
    `DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT` in `hirocli/domain/preferences.py`). Editor card on
    the Preferences admin page, same shape as the existing answer/judge prompt editors.
-4. Build the retrieval-agent node (LangGraph V1 `create_agent`) with the §5.3 prompt (resolved from
-   the active profile, blank ⇒ default), the accumulator (§6), and the `MAX_AGENT_TURNS` total cap
-   (counter advances per LLM invocation; when the next invocation would be the last allowed, the
-   agent is rebound with `tools=[]` so it can only emit a final answer). The `search_memory` tool
-   runs its `queries` sub-list concurrently via `asyncio.gather` internally; `MAX_PARALLEL_SEARCHES`
-   is enforced by Pydantic `max_length` on the list.
+4. Build the retrieval-agent node with the §5.3 prompt (resolved from the active profile, blank ⇒
+   default), the accumulator (§6), and the `MAX_AGENT_TURNS` total cap: up to `MAX_AGENT_TURNS − 1`
+   tool-bound search turns followed by one **dedicated, tool-free** structured final turn (see the
+   "Cap semantics" note in §5.2 for why the final turn is split out rather than rebinding the agent
+   with `tools=[]`). The `search_memory` tool runs its `queries` sub-list concurrently via
+   `asyncio.gather` internally; `MAX_PARALLEL_SEARCHES` is enforced by Pydantic `max_length` on the
+   list.
 5. Implement the **reduce library** (§6.1) as deterministic functions over the accumulator
    (`distinct_count`, `order_by_time`, `latest`, `date_diff`, `keep_conflicting`; `dedupe` +
    `order_by_time` always-on), invoked by the model's declared `reduce.op` on its final turn (§5.4).

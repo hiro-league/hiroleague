@@ -211,17 +211,23 @@ def write_trace_sidecar(
     run_id: str,
     step_index: int | str,
     trace: RetrievalTrace,
+    sid: int | None = None,
 ) -> None:
     """Append one search trace to the run's JSONL sidecar (best-effort, never raises).
 
     One file per ``run_id`` (``<run_id>.jsonl``); one line per fact search, tagged
     with ``step_index`` so the dialog can link a trace to its ``graph_expand`` ledger
     row. A trace render/IO hiccup must never break retrieval — failures are logged
-    and swallowed."""
+    and swallowed.
+
+    ``sid`` is the agentic-retrieval sub-query id (one recall fires N concurrent
+    ``search_memory`` sub-queries, each writing its own trace under the same run_id);
+    it lets the eval trajectory UI open the pipeline trace for a specific sub-query.
+    ``None`` for non-agentic searches (chat / single recall)."""
     try:
         directory = trace_dir(workspace_path)
         directory.mkdir(parents=True, exist_ok=True)
-        record = {"run_id": run_id, "step_index": step_index, **trace.to_dict()}
+        record = {"run_id": run_id, "step_index": step_index, "sid": sid, **trace.to_dict()}
         line = json.dumps(record, ensure_ascii=False)
         path = directory / f"{_safe_run_id(run_id)}.jsonl"
         # Lock the append: concurrent searches in one run (chat) must not interleave a

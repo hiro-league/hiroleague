@@ -1,8 +1,12 @@
 <!--
   Turn-by-turn retrieval-agent trajectory for one memory-eval recall leg (P8).
-  Clicking a search row highlights matching facts in the sibling Facts tab.
+  Each search row shows its query and a "Trace" button that opens the full retrieval pipeline
+  dialog for that sub-query (via onOpenTrace → eval-traces.openTraceForSubQuery, matched on sid).
+  Clicking the row body highlights the matching facts in the sibling Facts tab.
 -->
 <script lang="ts">
+  import { FileSearch, LoaderCircle } from '@lucide/svelte';
+  import Button from '$lib/components/ui/button.svelte';
   import type { RecalledFact } from '$lib/features/eval/shared/eval-events';
   import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
   import { trajectoryStats } from './eval-trajectory-controller.svelte';
@@ -11,8 +15,12 @@
     loop: RetrievalLoop;
     facts: RecalledFact[];
     onSearchSelect: (sid: number) => void;
+    /** Open the full pipeline trace for sub-query `sid`. Undefined when the leg has no run_id. */
+    onOpenTrace?: (sid: number) => void;
+    /** sid whose pipeline trace is currently loading (drives the per-row spinner). */
+    loadingSid?: number | null;
   }
-  let { loop, facts, onSearchSelect }: Props = $props();
+  let { loop, facts, onSearchSelect, onOpenTrace, loadingSid = null }: Props = $props();
 
   const stats = $derived(trajectoryStats(loop, facts.length));
 </script>
@@ -28,22 +36,44 @@
       </span>
     </div>
     {#each turn.sub_queries as c (c.sid)}
-      <button
-        type="button"
-        class="grid grid-cols-[56px_1fr_auto_auto] items-center gap-x-3 gap-y-1 pl-4 text-left hover:bg-muted/40"
-        title={`Highlight facts retrieved by S${c.sid}`}
-        onclick={() => onSearchSelect(c.sid)}
-      >
-        <span class="font-mono text-muted-foreground">S{c.sid}</span>
-        <div class="grid gap-0.5">
-          <span class="text-muted-foreground italic">goal: "{c.goal}"</span>
-          <span class="font-mono text-[11px] text-muted-foreground/80">
-            {c.temporal} · limit {c.limit} · hops {c.hops}{#if c.show_expiry} · show_expiry{/if}
-          </span>
-        </div>
-        <span class="font-mono text-muted-foreground">{c.returned} returned</span>
-        <span class="rounded bg-success/15 px-2 py-0.5 font-mono text-success">+{c.new} new</span>
-      </button>
+      <div class="flex items-center gap-2 pl-4">
+        <button
+          type="button"
+          class="grid flex-1 grid-cols-[56px_1fr_auto_auto] items-center gap-x-3 gap-y-1 text-left hover:bg-muted/40"
+          title={`Highlight facts retrieved by S${c.sid}`}
+          onclick={() => onSearchSelect(c.sid)}
+        >
+          <span class="font-mono text-muted-foreground">S{c.sid}</span>
+          <div class="grid gap-0.5">
+            <span class="text-muted-foreground italic">goal: "{c.goal}"</span>
+            <span class="truncate font-mono text-[11px] text-foreground/90" title={c.query}>
+              query: "{c.query}"
+            </span>
+            <span class="font-mono text-[11px] text-muted-foreground/80">
+              {c.temporal} · limit {c.limit} · hops {c.hops}{#if c.show_expiry} · show_expiry{/if}
+            </span>
+          </div>
+          <span class="font-mono text-muted-foreground">{c.returned} returned</span>
+          <span class="rounded bg-success/15 px-2 py-0.5 font-mono text-success">+{c.new} new</span>
+        </button>
+        {#if onOpenTrace}
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-7 shrink-0 gap-1 px-2 text-[11px]"
+            disabled={loadingSid !== null}
+            title={`Open the retrieval pipeline trace for S${c.sid}`}
+            onclick={() => onOpenTrace(c.sid)}
+          >
+            {#if loadingSid === c.sid}
+              <LoaderCircle size={12} class="animate-spin" aria-hidden="true" />
+            {:else}
+              <FileSearch size={12} aria-hidden="true" />
+            {/if}
+            Trace
+          </Button>
+        {/if}
+      </div>
     {/each}
   {/each}
   <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 text-xs">

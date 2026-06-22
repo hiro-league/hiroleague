@@ -568,8 +568,10 @@ async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatc
 
     async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
         acc = Accumulator()
+        # Fact mentions the subject so the latest() reduce actually matches it (M3: a non-matching
+        # subject now correctly yields an empty result instead of an arbitrary unrelated edge).
         acc.merge(
-            [{"kind": "fact", "uuid": "e1", "memory": "Brightloom"}],
+            [{"kind": "fact", "uuid": "e1", "memory": "Employer is Brightloom", "valid_at": "2024-01-01"}],
             search_id=1,
             goal="work",
         )
@@ -673,6 +675,9 @@ async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None
     assert captured["question"] == "Where do I work?"
     assert captured["limits"].max_agent_turns == 4
     assert isinstance(captured["prompt_text"], str) and captured["prompt_text"]
+    # The retrieval model id must reach run_retrieval so its LLM usage can be priced/ledgered
+    # (it was discarded before the agentic-cost fix, so memory_recall showed $0).
+    assert captured["model_id"] == "fake:model"
     assert row["legs"]["recall"]["recalled"] == [
         {
             "kind": "fact",
@@ -741,6 +746,54 @@ async def test_recall_leg_applies_declared_reduce_op(tmp_path, monkeypatch) -> N
     recalled = row["legs"]["recall"]["recalled"]
     assert len(recalled) == 1
     assert recalled[0]["memory"] == "Budget $50"
+
+
+@pytest.mark.retrieval_agent
+@pytest.mark.asyncio
+async def test_recall_leg_malformed_reduce_degrades_not_crashes(tmp_path, monkeypatch) -> None:
+    """H1: a malformed reduce (date_diff declared without anchors) must NOT raise — a question
+    failure propagates up and aborts the WHOLE batch run, so it degrades to a plain recall."""
+
+    async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
+        acc = Accumulator()
+        acc.merge(
+            [{"kind": "fact", "uuid": "e1", "memory": "Brightloom", "fact": "Brightloom"}],
+            search_id=1,
+            goal="",
+        )
+        # date_diff with NO anchors → apply_reduce raises ValueError unless the runner guards it.
+        return RetrievalResult(
+            accumulator=acc,
+            reduce_op="date_diff",
+            reduce_args={},
+            answer_text="",
+            transcript=[],
+        )
+
+    class _RetrievalModelStub:
+        def bind_tools(self, tools):  # noqa: ANN001
+            return self
+
+    monkeypatch.setattr(
+        "hirocli.services.eval.models.build_eval_retrieval_model",
+        lambda _path: (_RetrievalModelStub(), "fake:model"),
+    )
+    monkeypatch.setattr(
+        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        _fake_run_retrieval,
+    )
+    mem = _FakeMemory({})
+    # Must not raise; degrades to op=none and still returns the deduped recall.
+    row = await _memory_question(
+        mem,
+        _QUESTIONS[0],
+        workspace_path=tmp_path,
+        user_id=MEMORY_EVAL_USER_ID,
+        character_id="adam",
+    )
+    recalled = row["legs"]["recall"]["recalled"]
+    assert len(recalled) == 1
+    assert recalled[0]["memory"] == "Brightloom"
 
 
 @pytest.mark.asyncio

@@ -223,6 +223,8 @@ export type RetrievalTraceStage = {
 export type RetrievalTraceRecord = {
   run_id: string;
   step_index: number | '';
+  /** Agentic-retrieval sub-query id this trace belongs to; null/absent for non-agentic recall. */
+  sid?: number | null;
   schema_version: number;
   query: string;
   group_id: string;

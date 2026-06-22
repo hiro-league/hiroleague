@@ -125,6 +125,45 @@ def test_latest_picks_newest_valid_at_per_subject_attribute() -> None:
     assert " $50" in _edge_text(reduced.items[0])
 
 
+def test_latest_returns_empty_when_subject_attribute_match_nothing() -> None:
+    """M3 fix: a subject/attribute that matches NO edge must yield an empty result, not the newest
+    unrelated edge (which the answerer would otherwise present as the current value of X)."""
+    acc = Accumulator()
+    _load(
+        acc,
+        [
+            _edge("e1", fact="Moved to Berlin", valid_at="2024-05-01"),
+            _edge("e2", fact="Adopted a cat", valid_at="2024-06-01"),
+        ],
+    )
+
+    reduced = apply_reduce(acc, op="latest", args={"subject": "phone", "attribute": "number"})
+
+    assert reduced.items == []
+    assert reduced.summary["op"] == "latest"
+    assert reduced.summary["groups"] == 0
+
+
+def test_date_diff_matches_free_text_anchors_by_word_overlap() -> None:
+    """M4 fix: anchors match by distinctive-word overlap (not exact substring), pick the BEST match,
+    and two anchors can't collapse onto the same fact."""
+    acc = Accumulator()
+    _load(acc, [_edge("e1", fact="Crystal started her editing job", valid_at="2024-01-01")])
+    _load(acc, [_edge("e2", fact="The reading challenge deadline passed", valid_at="2024-01-15")])
+    # Distractor sharing a word with anchor 1 ("job") but the wrong event.
+    _load(acc, [_edge("e3", fact="Applied for a new job listing", valid_at="2024-03-01")])
+
+    reduced = apply_reduce(
+        acc,
+        op="date_diff",
+        args={"anchors": ["when she started the editing job", "the reading deadline"]},
+    )
+
+    # Anchor 1 best-matches e1 (editing+job+started) over e3 (only job); anchor 2 → e2.
+    assert reduced.summary["days"] == 14
+    assert {item.payload["uuid"] for item in reduced.items} == {"e1", "e2"}
+
+
 def test_date_diff_two_named_anchors() -> None:
     acc = Accumulator()
     _load(

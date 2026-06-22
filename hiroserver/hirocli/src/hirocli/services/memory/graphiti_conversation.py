@@ -205,6 +205,7 @@ class GraphitiConversationMemory:
         threshold: float | None = None,
         rerank: bool | None = None,
         metadata_filters: dict[str, Any] | None = None,
+        sid: int | None = None,
     ) -> list[dict[str, Any]]:
         """Recall the facts that bear on ``query``, using the admin temporal lens
         (``graph.temporal_default`` — ``current`` hides superseded facts, ``all`` includes
@@ -274,6 +275,9 @@ class GraphitiConversationMemory:
                     run_id=entry.run_id,
                     step_index=entry.step_index,
                     trace=capture.trace,
+                    # Stamp the agentic sub-query id so the eval trajectory UI can open the
+                    # pipeline trace for this specific search (None for non-agentic recall).
+                    sid=sid,
                 )
         # The kept, dated current facts ARE the recalled memories. Each fact text already
         # carries its validity date (e.g. "… (as of 2024-05-01)") from the search layer.

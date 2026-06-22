@@ -5,7 +5,7 @@
   EvalResultRowDetail.
 -->
 <script lang="ts">
-  import { ChevronRight, Flag, LoaderCircle } from '@lucide/svelte';
+  import { ChevronRight, CircleSlash, Flag, LoaderCircle } from '@lucide/svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import EvalAnswerTableHeaderCell from '$lib/features/eval/answers/EvalAnswerTableHeaderCell.svelte';
@@ -17,7 +17,9 @@
     deltaVariant,
     difficultyMeta,
     evidenceVariant,
+    isCorrectAbstention,
     legLabel,
+    markGlyph,
     markLabel,
     markTitle,
     markVariant
@@ -32,7 +34,6 @@
     recallLoopSaturated
   } from '$lib/features/eval/answers/eval-trajectory-controller.svelte';
   import { ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
-  import { setupStickyHeightVar } from '$lib/styling/sticky-height';
 
   interface Props {
     eval_: EvalModel;
@@ -47,10 +48,18 @@
     sort: EvalAnswerSortController;
     expandedRows: Set<number>;
     toggleRow: (index: number) => void;
+    /** Open the giant detail dialog for a row (from the answer-type / answer cell). */
+    onOpenDetails: (r: EvalRow) => void;
     /** Active answer-search term (row highlight). */
     searchTerm: string;
-    /** Recalled-search term (fold highlight). */
-    recalledTerm: string;
+    /** Filtered select-all header checkbox state. */
+    allFilteredSelected: boolean;
+    someFilteredSelected: boolean;
+    filteredCount: number;
+    onToggleSelectAllFiltered: () => void;
+    selectAllDisabled: boolean;
+    bulkTextOpen: boolean;
+    bulkTextTick: number;
   }
   let {
     eval_,
@@ -65,37 +74,32 @@
     sort,
     expandedRows,
     toggleRow,
+    onOpenDetails,
     searchTerm,
-    recalledTerm
+    allFilteredSelected,
+    someFilteredSelected,
+    filteredCount,
+    onToggleSelectAllFiltered,
+    selectAllDisabled,
+    bulkTextOpen,
+    bulkTextTick
   }: Props = $props();
 
-  // Publish the sticky <thead> height + a representative data-row height as CSS vars so an
-  // expanded row's cells can pin beneath the head, and the fold's tab strip can pin beneath the
-  // pinned row. Both are measured live (ResizeObserver) so font / wrap changes stay in sync.
-  let theadEl = $state<HTMLTableSectionElement | null>(null);
-  let firstRowEl = $state<HTMLTableRowElement | null>(null);
+  let selectAllCheckboxEl = $state<HTMLInputElement | null>(null);
+
+  const selectAllCheckboxTooltip = $derived(
+    filteredCount === 0
+      ? 'No filtered questions'
+      : allFilteredSelected
+        ? 'Deselect all filtered questions'
+        : 'Select all filtered questions'
+  );
+
   $effect(() => {
-    if (!theadEl) return;
-    return setupStickyHeightVar(theadEl, '--admin-eval-thead-h');
+    if (selectAllCheckboxEl) {
+      selectAllCheckboxEl.indeterminate = someFilteredSelected;
+    }
   });
-  $effect(() => {
-    if (!firstRowEl) return;
-    return setupStickyHeightVar(firstRowEl, '--admin-eval-row-h');
-  });
-  // Bind ONLY the index-0 row's node into `firstRowEl` (bind:this can't take a ternary; a tiny
-  // action gives us the conditional capture without duplicating the row template).
-  function captureFirstRow(node: HTMLTableRowElement, gi: number) {
-    if (gi === 0) firstRowEl = node;
-    return {
-      update(newGi: number) {
-        if (newGi === 0) firstRowEl = node;
-        else if (firstRowEl === node) firstRowEl = null;
-      },
-      destroy() {
-        if (firstRowEl === node) firstRowEl = null;
-      }
-    };
-  }
 </script>
 
 <!-- Judge recall-sufficiency flag — green = sufficient, rose = miss; nothing when not judged. -->
@@ -118,13 +122,23 @@
 
 <!-- No overflow wrapper on the shell: a scroll container would trap the sticky header. -->
 <AdminTableShell stickyHead stickyTop={EVAL_ANSWERS_TABLE_STICKY_TOP}>
-  <thead bind:this={theadEl} class={ADMIN_TABLE_HEAD}>
+  <thead class={ADMIN_TABLE_HEAD}>
     <tr>
-      <th class="px-3 py-2 text-center" title="Select questions to run">Run?</th>
+      <th class="w-10 px-3 py-2 text-center">
+        <input
+          bind:this={selectAllCheckboxEl}
+          type="checkbox"
+          class="size-3.5"
+          aria-label={selectAllCheckboxTooltip}
+          title={selectAllCheckboxTooltip}
+          disabled={selectAllDisabled || filteredCount === 0}
+          checked={allFilteredSelected}
+          onchange={onToggleSelectAllFiltered}
+        />
+      </th>
       <th class="px-3 py-2 text-left">#</th>
       <th class="px-3 py-2 text-left">Type</th>
       <th class="px-3 py-2 text-left">Question</th>
-      <th class="px-3 py-2 text-left">Ideal</th>
       {#if showRecallCol}
         <EvalAnswerTableHeaderCell
           column="recall"
@@ -175,11 +189,7 @@
     {/if}
     {#each resultRows as r, gi (r.id)}
       {@const isExpanded = expandedRows.has(r.index)}
-      <tr
-        use:captureFirstRow={gi}
-        class="border-t align-top {eval_.isSelected(r.id) ? 'bg-primary/5' : ''}"
-        class:tr-sticky={isExpanded}
-      >
+      <tr class="border-t align-top {eval_.isSelected(r.id) ? 'bg-primary/5' : ''}">
         <td class="px-3 py-1.5 text-center">
           <input
             type="checkbox"
@@ -210,21 +220,20 @@
             <span class="line-clamp-2" title={r.question}><EvalHighlight text={r.question} term={searchTerm} /></span>
           </button>
         </td>
-        <td class="px-3 py-1.5 text-xs text-muted-foreground">
-          <span class="line-clamp-2" title={r.gold || ''}>{#if r.gold}<EvalHighlight text={r.gold} term={searchTerm} />{:else}—{/if}</span>
-        </td>
         {#if showRecallCol}
           {@const rleg = r.legs?.recall}
-          <td class="px-3 py-1.5 text-center">
+          <td class="whitespace-nowrap px-3 py-1.5 text-center">
             <div class="flex flex-col items-center gap-1">
-              {@render recallFlag(rleg?.mark ? (rleg.recall_sufficient ?? true) : undefined)}
+              <div class="flex items-center justify-center gap-1">
+                {@render recallFlag(rleg?.mark ? (rleg.recall_sufficient ?? true) : undefined)}
+                {#if rleg?.retrieval_loop && recallLoopSaturated(rleg)}
+                  <Badge variant="warning" class="font-mono text-[10px]" title="Hit max searches or parallel cap">cap</Badge>
+                {/if}
+              </div>
               {#if rleg?.retrieval_loop}
                 <span class="font-mono text-[10px] leading-tight text-muted-foreground" title="Searches/turns · recalled facts · reduce op">
                   {recallCellLabel(rleg)}
                 </span>
-                {#if recallLoopSaturated(rleg)}
-                  <Badge variant="warning" class="font-mono text-[10px]" title="Hit max searches or parallel cap">cap</Badge>
-                {/if}
               {:else if rleg?.recalled && rleg.recalled.length > 0}
                 <span class="font-mono text-[10px] text-muted-foreground">{rleg.recalled.length}</span>
               {/if}
@@ -252,9 +261,19 @@
             <td class="whitespace-nowrap px-3 py-1.5">
               {#if r.legs[mode]}
                 {@const leg = r.legs[mode]}
-                <Badge variant={markVariant(leg.mark)} class="font-mono" title={markTitle(leg.mark)}>
-                  {leg.mark ? `${leg.mark} ${markLabel(leg.mark)}` : '—'}
-                </Badge>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded hover:bg-primary/5"
+                  onclick={() => onOpenDetails(r)}
+                  title="Open full diagnostic detail"
+                >
+                  <Badge variant={markVariant(leg.mark, r.is_negative_control)} class="font-mono" title={markTitle(leg.mark, r.is_negative_control)}>
+                    {leg.mark ? `${markGlyph(leg.mark, r.is_negative_control)} ${markLabel(leg.mark, r.is_negative_control)}` : '—'}
+                  </Badge>
+                  {#if isCorrectAbstention(leg.mark, r.is_negative_control)}
+                    <span class="inline-flex text-muted-foreground" title="Abstained — declined on this negative-control question (counts as a pass)"><CircleSlash class="size-3.5" aria-label="Abstained" /></span>
+                  {/if}
+                </button>
               {:else}
                 <span class="text-xs text-muted-foreground">—</span>
               {/if}
@@ -263,10 +282,18 @@
             <td class="px-3 py-1.5">
               {#if r.legs[mode]}
                 {@const leg = r.legs[mode]}
-                <div class="flex items-start gap-1.5">
-                  <Badge variant={markVariant(leg.mark)} class="mt-0.5 font-mono" title={markTitle(leg.mark)}>{leg.mark || '—'}</Badge>
+                <button
+                  type="button"
+                  class="flex w-full items-start gap-1.5 rounded text-left hover:bg-primary/5"
+                  onclick={() => onOpenDetails(r)}
+                  title="Open full diagnostic detail"
+                >
+                  <Badge variant={markVariant(leg.mark, r.is_negative_control)} class="mt-0.5 font-mono" title={markTitle(leg.mark, r.is_negative_control)}>{markGlyph(leg.mark, r.is_negative_control) || '—'}</Badge>
+                  {#if isCorrectAbstention(leg.mark, r.is_negative_control)}
+                    <span class="mt-0.5 inline-flex text-muted-foreground" title="Abstained — declined on this negative-control question (counts as a pass)"><CircleSlash class="size-3.5" aria-label="Abstained" /></span>
+                  {/if}
                   <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{#if leg.answer}<EvalHighlight text={leg.answer} term={searchTerm} />{:else}— (no answer){/if}</span>
-                </div>
+                </button>
               {:else}
                 <span class="text-xs text-muted-foreground">—</span>
               {/if}
@@ -293,10 +320,19 @@
           title={fmtDateTime(r.answered_at)}
         >{fmtTime(r.answered_at)}</td>
       </tr>
-      <!-- Fold: per-leg judge verdict + recalled facts (expanded). -->
-      <tr class="border-t bg-muted/10" hidden={!isExpanded}>
-        <td colspan={resultsColspan} class="px-3 py-3">
-          <EvalResultRowDetail {r} {legColumns} {searchTerm} {recalledTerm} {traces} />
+      <!-- Slim fold: ideal answer + per-leg stats/actions + "Open details" (expanded). -->
+      <tr class="border-y border-border/70 bg-muted/55" hidden={!isExpanded}>
+        <td class="bg-muted/55 px-3 py-3"></td>
+        <td colspan={resultsColspan - 1} class="bg-muted/55 px-3 py-3">
+          <EvalResultRowDetail
+            {r}
+            {legColumns}
+            {searchTerm}
+            {traces}
+            {bulkTextOpen}
+            {bulkTextTick}
+            onOpenDetails={() => onOpenDetails(r)}
+          />
         </td>
       </tr>
     {/each}
@@ -310,16 +346,3 @@
     {/if}
   </tbody>
 </AdminTableShell>
-
-<style>
-  /* When a row's fold is open, pin the question row's cells beneath the sticky <thead> so the
-     question stays in view while the user scrolls through the fold. `--admin-table-sticky-top`
-     is set by AdminTableShell (page-pinned thead origin); `--admin-eval-thead-h` is published
-     by setupStickyHeightVar from the thead itself. */
-  .tr-sticky :global(td) {
-    position: sticky;
-    top: calc(var(--admin-table-sticky-top, 4rem) + var(--admin-eval-thead-h, 36px));
-    z-index: 4;
-    background: var(--background);
-  }
-</style>

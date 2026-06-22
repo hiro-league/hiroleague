@@ -193,8 +193,12 @@ def _latest(
             ).lower()
             if all(needle in haystack for needle in needles):
                 filtered.append(item)
-        if filtered:
-            candidates = filtered
+        # M3 fix: a subject/attribute was requested but NOTHING matched → there is no "latest
+        # value of X" to report. Return empty instead of silently falling back to the newest
+        # UNRELATED edge (which the answerer would present as the current value of X).
+        if not filtered:
+            return ReducedSet(items=[], summary=_latest_summary(0, subject, attribute))
+        candidates = filtered
 
     if subject or attribute:
         best = max(
@@ -220,45 +224,88 @@ def _latest(
             reverse=True,
         )
 
-    summary: dict[str, Any] = {"op": "latest", "groups": len(items)}
+    return ReducedSet(items=items, summary=_latest_summary(len(items), subject, attribute))
+
+
+def _latest_summary(groups: int, subject: str | None, attribute: str | None) -> dict[str, Any]:
+    summary: dict[str, Any] = {"op": "latest", "groups": groups}
     if subject:
         summary["subject"] = subject
     if attribute:
         summary["attribute"] = attribute
-    return ReducedSet(items=items, summary=summary)
+    return summary
 
 
-def _match_anchor(item: AccumulatedItem, anchor: str) -> bool:
-    needle = anchor.strip().lower()
-    if not needle:
-        return False
-    haystacks = [
+# Words too generic to carry anchor meaning — dropped before scoring so overlap reflects the
+# distinctive terms (a model anchor like "when the editing job started" matches on editing/job/start,
+# not on "when"/"the").
+_ANCHOR_STOPWORDS = frozenset(
+    {
+        "the", "a", "an", "of", "to", "and", "or", "in", "on", "at", "for", "with", "from",
+        "is", "was", "were", "be", "did", "do", "does", "when", "what", "how", "long",
+        "i", "my", "me", "you", "your", "it", "that", "this", "then", "than", "between",
+    }
+)
+
+
+def _anchor_tokens(text: str) -> set[str]:
+    return {
+        w
+        for w in re.findall(r"[a-z0-9]+", str(text or "").lower())
+        if len(w) > 2 and w not in _ANCHOR_STOPWORDS
+    }
+
+
+def _item_anchor_tokens(item: AccumulatedItem) -> set[str]:
+    tokens: set[str] = set()
+    for part in (
         item.goal,
         _edge_text(item),
         str(item.payload.get("name") or ""),
         str(item.payload.get("memory") or ""),
-    ]
-    return any(needle in str(h).lower() for h in haystacks if h)
+    ):
+        tokens |= _anchor_tokens(part)
+    return tokens
 
 
-def _find_anchor(acc: Accumulator, anchor: str) -> AccumulatedItem | None:
+def _find_anchor(
+    acc: Accumulator, anchor: str, *, exclude_ids: set[int]
+) -> AccumulatedItem | None:
+    """M4 fix: pick the item with the highest fraction of the anchor's distinctive words (not the
+    first literal-substring hit), tie-breaking toward the more recent item, and skipping items
+    already claimed by another anchor so two anchors can't collapse onto the same fact."""
+    needle = _anchor_tokens(anchor)
+    if not needle:
+        return None
+    best: AccumulatedItem | None = None
+    best_score = 0.0
+    best_ts = datetime.min.replace(tzinfo=UTC)
     for kind in ("edge", "episode"):
         for item in acc.items_by_kind()[kind]:
-            if _match_anchor(item, anchor):
-                return item
-    return None
+            if id(item) in exclude_ids:
+                continue
+            overlap = len(needle & _item_anchor_tokens(item))
+            if overlap == 0:
+                continue
+            score = overlap / len(needle)
+            ts = _item_timestamp(item) or datetime.min.replace(tzinfo=UTC)
+            if score > best_score or (score == best_score and ts > best_ts):
+                best, best_score, best_ts = item, score, ts
+    return best
 
 
 def _date_diff(acc: Accumulator, *, anchors: list[str]) -> ReducedSet:
     matched: list[AccumulatedItem] = []
     timestamps: list[datetime] = []
+    used_ids: set[int] = set()
     for anchor in anchors:
-        item = _find_anchor(acc, anchor)
+        item = _find_anchor(acc, anchor, exclude_ids=used_ids)
         if item is None:
             continue
         ts = _item_timestamp(item)
         if ts is None:
             continue
+        used_ids.add(id(item))
         matched.append(item)
         timestamps.append(ts)
 

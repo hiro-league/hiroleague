@@ -16,8 +16,13 @@ export type TurnsHistogram = Record<1 | 2 | 3 | 4, number>;
 
 const DEFAULT_MAX_AGENT_TURNS = 4;
 
-export function formatReduceLabel(reduce: RetrievalLoop['reduce']): string {
+export function formatReduceOpName(reduce: RetrievalLoop['reduce']): string {
   const op = (reduce.op || 'none').trim();
+  return op || 'none';
+}
+
+export function formatReduceLabel(reduce: RetrievalLoop['reduce']): string {
+  const op = formatReduceOpName(reduce);
   if (!op || op === 'none') return 'none';
   const args = reduce.args ?? {};
   const entries = Object.entries(args).filter(([, v]) => v !== undefined && v !== null && v !== '');
@@ -45,6 +50,14 @@ export function recallCellLabel(leg: EvalQuestionLeg): string {
   const recalled = leg.recalled ?? [];
   const loop = leg.retrieval_loop;
   if (!loop) return `${recalled.length}`;
+  return `${loop.agent_turns} turns · ${recalled.length} facts · ${formatReduceOpName(loop.reduce)}`;
+}
+
+/** Full turns/facts/reduce line for the expanded row fold (includes reduce args). */
+export function recallFoldLabel(leg: EvalQuestionLeg): string {
+  const recalled = leg.recalled ?? [];
+  const loop = leg.retrieval_loop;
+  if (!loop) return `${recalled.length} facts`;
   return `${loop.agent_turns} turns · ${recalled.length} facts · ${formatReduceLabel(loop.reduce)}`;
 }
 

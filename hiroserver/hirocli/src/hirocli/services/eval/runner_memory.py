@@ -200,6 +200,7 @@ async def _recall_via_agent(
     memory: Any,
     workspace_path: Path,
     retrieval_model: Any | None,
+    retrieval_model_id: str = "",
     user_id: int,
     character_id: str,
     retrieval_limits: Any | None = None,
@@ -232,7 +233,8 @@ async def _recall_via_agent(
         # retrieval builder falls back to the answer model when graph.eval.retrieval_model is unset.
         from hirocli.services.eval.models import build_eval_retrieval_model
 
-        retrieval_model, _ = build_eval_retrieval_model(workspace_path)
+        # Capture the model id too (was discarded) so the recall LLM cost can be priced/ledgered.
+        retrieval_model, retrieval_model_id = build_eval_retrieval_model(workspace_path)
 
     if retrieval_model is None:
         log.warning(
@@ -247,14 +249,29 @@ async def _recall_via_agent(
         limits=limits,
         prompt_text=prompt_text,
         model=retrieval_model,
+        model_id=retrieval_model_id,
         user_id=user_id,
         character_id=character_id,
     )
-    reduced = apply_reduce(
-        result.accumulator,
-        op=result.reduce_op,
-        args=result.reduce_args,
-    )
+    try:
+        reduced = apply_reduce(
+            result.accumulator,
+            op=result.reduce_op,
+            args=result.reduce_args,
+        )
+    except Exception:
+        # A malformed reduce (e.g. date_diff declared without anchors) must NOT abort the whole eval
+        # run — question failures propagate up and fail the batch (see _unwrap_question_failure). One
+        # question's bad reduce degrades to a plain deduped/time-sorted recall instead of crashing.
+        log.warning(
+            "⚠️ knowledge.eval — reduce '%s' failed; degrading to none · q='%s'",
+            result.reduce_op,
+            _preview(question, 80),
+            exc_info=True,
+        )
+        result.reduce_op = "none"
+        result.reduce_args = {}
+        reduced = apply_reduce(result.accumulator, op="none")
     # Break-2 fix (P10): carry the deterministic reduce result (count / days / conflict tallies) so
     # the answerer USES it instead of recomputing — code-executed reduce was pointless when the
     # summary was dropped here (e.g. distinct_count computed 13 but the answerer recounted to 8).
@@ -332,6 +349,7 @@ async def _memory_question(
     # The agentic retrieval loop uses its OWN model (graph.eval.retrieval_model; falls back to the
     # answer model when unset). None → _recall_via_agent builds it as a direct-call fallback.
     retrieval_model: Any | None = None,
+    retrieval_model_id: str = "",
     # Renamed from answer_system_prompt: the answering instructions now ride in the USER message
     # (judge.answer_from_context); the system prompt there is a hardcoded role.
     answer_instructions: str = "",
@@ -399,6 +417,7 @@ async def _memory_question(
                         memory=memory,
                         workspace_path=workspace_path,
                         retrieval_model=retrieval_model,
+                        retrieval_model_id=retrieval_model_id,
                         user_id=user_id,
                         character_id=character_id,
                         retrieval_limits=retrieval_limits,
@@ -415,6 +434,12 @@ async def _memory_question(
                         retrieval_result,
                         facts=facts,
                     )
+                    # M2: surface search failures on the ledger node (status stays ok — recall ran),
+                    # so a recall emptied by errored sub-queries is distinguishable in Graph Runs
+                    # from one that genuinely found nothing.
+                    err_n = getattr(retrieval_result, "error_count", 0)
+                    if err_n:
+                        entry.set_decision("recall", f"{err_n} search error(s)")
                 finally:
                     entry.finish("ok")
                     sink.write_rows(entry.rows(include_parent=True))
@@ -425,6 +450,7 @@ async def _memory_question(
                     memory=memory,
                     workspace_path=workspace_path,
                     retrieval_model=retrieval_model,
+                    retrieval_model_id=retrieval_model_id,
                     user_id=user_id,
                     character_id=character_id,
                     retrieval_limits=retrieval_limits,
@@ -593,6 +619,7 @@ async def _memory_question_task(
     answer_model: Any | None,
     answer_model_id: str,
     retrieval_model: Any | None,
+    retrieval_model_id: str,
     judge_model: Any | None,
     judge_model_id: str,
     judged: bool,
@@ -646,6 +673,7 @@ async def _memory_question_task(
                 answer_model=answer_model,
                 answer_model_id=answer_model_id,
                 retrieval_model=retrieval_model,
+                retrieval_model_id=retrieval_model_id,
                 judge_model=judge_model,
                 judge_model_id=judge_model_id,
                 judge=judged,
@@ -980,6 +1008,7 @@ async def run_memory_eval(
                                 answer_model=answer_model,
                                 answer_model_id=answer_model_id,
                                 retrieval_model=retrieval_model,
+                                retrieval_model_id=_retrieval_model_id,
                                 judge_model=judge_model,
                                 judge_model_id=judge_model_id,
                                 judged=judged,

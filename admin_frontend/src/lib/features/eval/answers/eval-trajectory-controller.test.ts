@@ -5,7 +5,9 @@ import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
 import {
   decompositionRate,
   formatReduceLabel,
+  formatReduceOpName,
   recallCellLabel,
+  recallFoldLabel,
   recallLoopSaturated,
   turnsPerQuestionHistogram,
   trajectoryPaneSnapshot,
@@ -62,6 +64,8 @@ function row(leg: Partial<EvalQuestionLeg>): EvalRow {
 
 describe('formatReduceLabel / trajectoryStats', () => {
   it('formats reduce ops', () => {
+    expect(formatReduceOpName({ op: 'none', args: {} })).toBe('none');
+    expect(formatReduceOpName({ op: 'latest', args: { subject: 'employer' } })).toBe('latest');
     expect(formatReduceLabel({ op: 'none', args: {} })).toBe('none');
     expect(formatReduceLabel({ op: 'latest', args: {} })).toBe('latest');
     expect(formatReduceLabel({ op: 'latest', args: { subject: 'employer' } })).toBe(
@@ -111,7 +115,7 @@ describe('recallCellLabel / saturation', () => {
     expect(recallLoopSaturated(leg)).toBe(false);
   });
 
-  it('routes reduce args through formatReduceLabel in the recall cell', () => {
+  it('shows reduce op name only in the recall table cell', () => {
     const leg: EvalQuestionLeg = {
       mark: '',
       elapsed_ms: 0,
@@ -121,7 +125,20 @@ describe('recallCellLabel / saturation', () => {
       recalled: [{ memory: 'a' }],
       retrieval_loop: loop({ agent_turns: 1, reduce: { op: 'latest', args: { subject: 'employer' } } })
     };
-    expect(recallCellLabel(leg)).toBe('1 turns · 1 facts · latest(subject=employer)');
+    expect(recallCellLabel(leg)).toBe('1 turns · 1 facts · latest');
+  });
+
+  it('includes reduce args in the expanded fold label', () => {
+    const leg: EvalQuestionLeg = {
+      mark: '',
+      elapsed_ms: 0,
+      answer_preview: '',
+      answer: '',
+      run_id: null,
+      recalled: [{ memory: 'a' }, { memory: 'b' }],
+      retrieval_loop: loop({ agent_turns: 2, reduce: { op: 'latest', args: { subject: 'employer' } } })
+    };
+    expect(recallFoldLabel(leg)).toBe('2 turns · 2 facts · latest(subject=employer)');
   });
 
   it('flags cap saturation when agent_turns hits the cap', () => {

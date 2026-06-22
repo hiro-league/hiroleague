@@ -657,8 +657,12 @@ flowchart TD
   | `accumulated_total` | deduped **items** in the Accumulator | yes (in every tool result) | nothing — informational signal that helps the model decide "do I have enough?" |
 - **`Force`** is the only place a turn changes behaviour mid-loop: when the total cap is hit, the
   next model invocation is run with the tool list stripped (or equivalently, with a single allowed
-  "final answer" tool), so the model **cannot** emit more `search_memory` calls. This is the
-  verbatim-fallback safety: even a runaway model produces a final answer.
+  "final answer" tool), so the model **cannot** emit more `search_memory` calls.
+  > **Superseded by P9 (§12) + §5.2:** the shipped loop does NOT strip tools mid-loop — it runs
+  > `max_agent_turns − 1` tool-bound search turns and then a separate dedicated tool-free structured
+  > final turn. And the **verbatim fallback is a distinct safety**: if the accumulator is still empty
+  > after the loop, one search is run with the raw question so recall is never worse than the
+  > pre-agentic single-shot baseline (it is NOT just "force a final answer").
 
 **Why the drop-notice matters.** When parallel-cap clips extras, the agent gets a synthetic
 `ToolMessage` like `"dropped 2 parallel calls; cap is 3 — re-issue if needed next turn"`. Otherwise
@@ -1152,8 +1156,11 @@ Two changes ride together because they touch the same loop boundary:
    with any tool-using LLM, removes the executor's mid-turn trim/drop logic).
 2. **Rename `max_searches` → `max_agent_turns`** with a semantic change. The new counter advances
    **once per LLM invocation** — every turn, whether it emitted a tool call or a final answer —
-   because we pay tokens for every invocation regardless of what it emits. The last allowed turn is
-   forced to be final-answer-only (tools stripped on that invocation).
+   because we pay tokens for every invocation regardless of what it emits. **As implemented**, the
+   loop runs up to `max_agent_turns − 1` tool-bound search turns and then **always** spends one
+   dedicated, tool-free `with_structured_output` final turn (rather than rebinding the same agent
+   with `tools=[]` on the last turn) — binding no competing tool makes structured output work on
+   every provider, not just OpenAI.
 
 ### Why now (after P1–P8 shipped)
 
@@ -1172,7 +1179,7 @@ Two changes ride together because they touch the same loop boundary:
 | Parallel-cap enforcement | executor clips extras, sends synthesized drop-notice ToolMessage | Pydantic `max_length=3` on `queries` list — model gets a tool-validation error if it tries more |
 | Counter | `cumulative_searches` — increments per dispatched call | `cumulative_agent_turns` — increments **per LLM invocation** (every turn) |
 | Cap field name | `max_searches` | `max_agent_turns` |
-| Cap enforcement | mid-turn `TotalCap → Trim` branch (see §6 flowchart) | **gone** — only check is "is this the last allowed invocation? if yes, strip tools before invoking" |
+| Cap enforcement | mid-turn `TotalCap → Trim` branch (see §6 flowchart) | **gone** — the search loop runs `max_agent_turns − 1` tool-bound turns, then a separate dedicated tool-free structured final turn always runs |
 | Worst-case graph calls | `max_searches` | `(max_agent_turns − 1) × max_parallel_searches` (implicit; not separately capped) |
 
 ### Files touched
@@ -1267,17 +1274,21 @@ S{N} row → highlight facts in the Facts tab) needs to key on the tuple.
 ### Low-level — retrieval_agent.py simplifications
 
 ```python
-# retrieval_agent.py — counter rename + per-turn semantics
+# retrieval_agent.py — counter + per-turn semantics (as implemented)
 cumulative_agent_turns = 0
+max_search_turns = max(0, limits.max_agent_turns - 1)  # last turn reserved for the final call
+search_model = model.bind_tools([lc_tool])
 
-async for event in agent.astream({"messages": [HumanMessage(question)]}):
-    # On EVERY model invocation:
+for turn in range(1, max_search_turns + 1):
     cumulative_agent_turns += 1
-    is_last_allowed = cumulative_agent_turns >= limits.max_agent_turns
-    if is_last_allowed:
-        # Strip tools so the model MUST emit a final answer.
-        # (Mechanism: rebind the agent for this one invocation with tools=[].)
-        ...
+    response = await search_model.ainvoke(messages)
+    if not response.tool_calls:
+        break                       # model is done searching → go straight to the final turn
+    ...                             # run search_memory, accumulate, append ToolMessage(s)
+
+# ALWAYS spend one dedicated, tool-free structured turn (works on every provider, not just OpenAI):
+cumulative_agent_turns += 1
+reduce_op, reduce_args, answer, raw = await _final_structured_turn(model=model, messages=messages)
 ```
 
 The old `Trim`, `Drop`, `TotalCap` branches in §6's flowchart all disappear. The only remaining
@@ -1376,7 +1387,7 @@ Backend — replace / add:
 - `test_search_memory_returns_grouped_sub_results` — result has `sub_results` keyed by `sub_id`.
 - `test_search_id_is_turn_sub_tuple` — accumulator items carry `(turn, sub_id)` provenance.
 - `test_agent_counter_advances_per_invocation` — counter is +1 on every LLM call, whether it emitted a tool call or a final answer.
-- `test_last_allowed_turn_strips_tools` — when `cumulative_agent_turns == max_agent_turns - 1`, the next invocation is rebound with `tools=[]`; the model can only emit a final-answer message.
+- `test_caps_search_turns_then_final` — with `max_agent_turns=N` the loop runs at most `N − 1` tool-bound search turns and then exactly one dedicated tool-free structured final turn (total LLM invocations ≤ `N`); `test_zero_search_turns_goes_straight_to_final` covers `max_agent_turns=1`.
 - **Remove** `test_caps_total_searches`, `test_total_cap_trims_partial_turn`, `test_caps_parallel_searches`'s drop-notice assertion — those behaviors no longer exist. Replace with `test_pydantic_rejects_over_max_parallel` covering the new boundary.
 
 Preferences:

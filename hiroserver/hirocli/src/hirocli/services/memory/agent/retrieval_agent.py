@@ -34,7 +34,11 @@ from pydantic import BaseModel, Field
 from hirocli.domain.preferences import RetrievalAgentLimits
 from hirocli.services.memory.agent.accumulator import Accumulator
 from hirocli.services.memory.agent.reduce import ReduceOp
-from hirocli.services.memory.agent.search_tool import SearchMemoryArgs, SearchMemoryTool
+from hirocli.services.memory.agent.search_tool import (
+    SearchMemoryArgs,
+    SearchMemoryQuery,
+    SearchMemoryTool,
+)
 from hirocli.services.memory.graphiti_conversation import GraphitiConversationMemory
 
 log = Logger.get("SVC.MEMORY.AGENT.RETRIEVAL")
@@ -92,6 +96,10 @@ class RetrievalResult:
     reduce_args: dict[str, Any]
     answer_text: str
     transcript: list[dict[str, Any]] = field(default_factory=list)
+    # M2: count of failed sub-queries / tool errors across the loop, so the caller can mark the
+    # memory_recall ledger node — otherwise a recall that returned nothing because every search
+    # errored is indistinguishable from one that genuinely found nothing.
+    error_count: int = 0
     # Set by the caller after it runs ``apply_reduce`` — the deterministic computed result
     # (count / days / conflict tallies) so the answerer can use it instead of recomputing.
     reduce_summary: dict[str, Any] = field(default_factory=dict)
@@ -108,6 +116,40 @@ def _tool_call_name(call: dict[str, Any]) -> str:
 def _tool_call_args(call: dict[str, Any]) -> dict[str, Any]:
     args = call.get("args")
     return dict(args) if isinstance(args, dict) else {}
+
+
+def _accumulate_message_usage(totals: dict[str, int], message: Any) -> None:
+    """Sum one LLM reply's ``usage_metadata`` (input/output/cached/reasoning) into ``totals``.
+
+    Fix: the agentic recall loop drives its own LLM calls, but their usage was never read into the
+    ledger — so the ``memory_recall`` node stopped showing model/tokens/cost after the agentic
+    refactor. We fold every turn's usage here and write the total once (see ``_write_recall_usage``).
+    """
+    meta = getattr(message, "usage_metadata", None)
+    if not isinstance(meta, dict) or not meta:
+        return
+    from hirocli.runtime.agent_graph.graph_kit import usage_from_metadata
+
+    usage = usage_from_metadata(meta)
+    for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"):
+        value = usage.get(key)
+        if value is not None:
+            totals[key] = totals.get(key, 0) + value
+
+
+def _write_recall_usage(*, model_id: str, totals: dict[str, int]) -> None:
+    """Attribute the loop's accumulated LLM token usage to the active ``memory_recall`` ledger entry.
+
+    ``add_usage`` overwrites (not accumulates) and the rerank cost rides on separate child rows, so
+    summing across all turns and writing once to the parent here is correct and conflict-free."""
+    if not totals:
+        return
+    from hirocli.runtime.agent_graph.ledger.observe import observe
+
+    # Pricing catalog is keyed by the prefixed ``provider:model`` id (mirrors judge's _ledger_llm_node);
+    # a bare/blank model misses the catalog and prices as $0 while still showing the token counts.
+    provider = model_id.partition(":")[0] if ":" in model_id else ""
+    observe(usage={"provider": provider, "model": model_id, **totals})
 
 
 def _normalize_reply_content(content: Any) -> str:
@@ -156,7 +198,17 @@ def _coerce_final(parsed: Any, raw: Any) -> tuple[str, dict[str, Any], str]:
             reduce = data.get("reduce")
             if isinstance(reduce, dict):
                 op = str(reduce.get("op") or "none")
-                args = {k: v for k, v in reduce.items() if k != "op" and v is not None}
+                # Args live NESTED under "args" — the shape _FINAL_TURN_INSTRUCTION asks for and the
+                # pydantic path reads. Read that first so a compliant json_mode reply isn't misread
+                # as args={"args": {...}} (which silently dropped real args → wrong/failed reduce);
+                # fall back to flat siblings of "op" for models that emit the older inline shape.
+                nested = reduce.get("args")
+                if isinstance(nested, dict):
+                    args = {k: v for k, v in nested.items() if v is not None}
+                else:
+                    args = {
+                        k: v for k, v in reduce.items() if k not in ("op", "args") and v is not None
+                    }
             answer = str(data.get("answer") or "")
 
     if op not in _VALID_REDUCE_OPS:
@@ -258,16 +310,51 @@ def _record_search_turn(
         )
 
 
+async def _verbatim_fallback_search(
+    *,
+    question: str,
+    search_tool: SearchMemoryTool,
+    started_ms: int,
+    turn: int,
+    transcript: list[dict[str, Any]],
+) -> int:
+    """Degenerate-trajectory floor (design §10): when the loop accumulated NOTHING — the model never
+    searched, every sub-query errored, or the turn budget left no search turn (e.g.
+    ``max_agent_turns=1``) — run ONE verbatim search with the raw question so recall is never worse
+    than the pre-agentic single-shot baseline. Never raises; returns the count of items added."""
+    args = SearchMemoryArgs(queries=[SearchMemoryQuery(query=question, goal="verbatim fallback")])
+    try:
+        result = await search_tool.call(args)
+    except Exception:
+        log.warning("⚠️ retrieval — verbatim fallback search failed", exc_info=True)
+        return 0
+    payload = result.model_dump()
+    # Record it like a normal search turn so the trajectory UI / trace shows the fallback ran.
+    _record_search_turn(
+        transcript=transcript,
+        started_ms=started_ms,
+        turn=turn,
+        cumulative_agent_turns=turn,
+        call={"name": SearchMemoryTool.name, "args": args.model_dump(), "id": "verbatim_fallback"},
+        payload=payload,
+        content="",
+    )
+    return sum(int(sub.get("new") or 0) for sub in payload.get("sub_results") or [])
+
+
 async def _final_structured_turn(
     *,
     model: BaseChatModel,
     messages: list[AnyMessage],
-) -> tuple[str, dict[str, Any], str]:
+) -> tuple[str, dict[str, Any], str, Any]:
     """One dedicated, tool-free call → declared reduce op + answer (design §5.4, P10).
 
     Routed through ``with_structured_output_compat`` so DeepSeek thinking mode (which 400s on the
     forced tool_choice) falls back to ``json_mode``; every other provider uses native json_schema.
-    Never raises — a failed/empty structured turn degrades to ``none`` + empty answer."""
+    Never raises — a failed/empty structured turn degrades to ``none`` + empty answer.
+
+    Returns the raw reply message (4th element) too, so the caller can fold this turn's token usage
+    into the ledger — ``include_raw=True`` keeps ``usage_metadata`` on ``out["raw"]``."""
     from hirocli.domain.model_factory import with_structured_output_compat
 
     structured = with_structured_output_compat(model, RetrievalFinal, include_raw=True)
@@ -276,11 +363,18 @@ async def _final_structured_turn(
         out = await structured.ainvoke(final_messages, config={"run_name": "retrieval_final"})
     except Exception:
         log.warning("⚠️ retrieval — final structured turn failed; reduce=none", exc_info=True)
-        return "none", {}, ""
+        return "none", {}, "", None
 
     if isinstance(out, dict):
-        return _coerce_final(out.get("parsed"), out.get("raw"))
-    return _coerce_final(out, None)
+        op, args, answer = _coerce_final(out.get("parsed"), out.get("raw"))
+        return op, args, answer, out.get("raw")
+    op, args, answer = _coerce_final(out, None)
+    # M6 hardening: ``out`` here is the bare parsed model (no ``usage_metadata``); only forward it
+    # as the usage-bearing raw message if it actually carries usage, else None. In practice
+    # ``with_structured_output_compat`` always passes ``include_raw=True`` so the dict branch wins —
+    # this keeps the contract explicit if a provider/wrapper ever returns the bare object.
+    raw = out if getattr(out, "usage_metadata", None) else None
+    return op, args, answer, raw
 
 
 async def run_retrieval(
@@ -292,8 +386,12 @@ async def run_retrieval(
     model: BaseChatModel,
     user_id: int,
     character_id: str,
+    model_id: str = "",
 ) -> RetrievalResult:
     """Drive the bounded retrieval loop; returns the populated accumulator + declared reduce/answer.
+
+    ``model_id`` is the prefixed ``provider:model`` id of ``model`` — threaded through so the loop's
+    own LLM token usage can be priced and attributed to the ``memory_recall`` ledger node.
 
     The search loop gets ``max_agent_turns - 1`` tool-bound turns (the last turn is reserved for the
     dedicated structured final call, so total LLM invocations stay within ``max_agent_turns`` — the
@@ -321,6 +419,9 @@ async def run_retrieval(
         HumanMessage(content=question),
     ]
     transcript: list[dict[str, Any]] = []
+    # Accumulates the loop's own LLM token usage across every turn; written once to the
+    # memory_recall ledger entry at the end (the refactor dropped this, so the node showed $0).
+    usage_totals: dict[str, int] = {}
     cumulative_agent_turns = 0
     # One turn is reserved for the dedicated structured final call (see docstring).
     max_search_turns = max(0, limits.max_agent_turns - 1)
@@ -329,6 +430,8 @@ async def run_retrieval(
     for turn in range(1, max_search_turns + 1):
         cumulative_agent_turns += 1
         response = await search_model.ainvoke(messages)
+        # Fold this search turn's tokens in before any coercion (usage rides on the raw reply).
+        _accumulate_message_usage(usage_totals, response)
         if not isinstance(response, AIMessage):
             response = AIMessage(content=_normalize_reply_content(response))
 
@@ -363,9 +466,30 @@ async def run_retrieval(
                 content=content,
             )
 
+    # Degenerate-trajectory floor (design §10): if the loop accumulated nothing, run one verbatim
+    # search with the raw question so recall is never worse than the pre-agentic single-shot
+    # baseline (covers no-search, all-errored, and max_agent_turns=1 trajectories).
+    if acc.size() == 0:
+        log.warning(
+            "⚠️ retrieval — empty accumulator after loop; running verbatim fallback · q='%s'",
+            question[:80],
+        )
+        await _verbatim_fallback_search(
+            question=question,
+            search_tool=search_tool,
+            started_ms=started_ms,
+            turn=cumulative_agent_turns + 1,
+            transcript=transcript,
+        )
+
     # Dedicated final structured turn (always runs; counts as one invocation).
     cumulative_agent_turns += 1
-    reduce_op, reduce_args, answer_text = await _final_structured_turn(model=model, messages=messages)
+    reduce_op, reduce_args, answer_text, final_raw = await _final_structured_turn(
+        model=model, messages=messages
+    )
+    _accumulate_message_usage(usage_totals, final_raw)
+    # Attribute the loop's total LLM cost to the active memory_recall ledger node (no-op off-ledger).
+    _write_recall_usage(model_id=model_id, totals=usage_totals)
     log.info(
         "✅ retrieval — agent · %d/%d turns · searches=%d · reduce=%s",
         cumulative_agent_turns,
@@ -383,12 +507,22 @@ async def run_retrieval(
             "answer_len_chars": len(answer_text),
         }
     )
+    # M2: tally search failures (per-sub-query errors + whole-tool errors) from the transcript so
+    # the caller can mark the memory_recall ledger node — a recall emptied by errors must not look
+    # like a clean "found nothing".
+    error_count = sum(
+        1
+        for row in transcript
+        if row.get("event") == "tool_error"
+        or (row.get("event") == "sub_result" and row.get("error"))
+    )
     return RetrievalResult(
         accumulator=acc,
         reduce_op=reduce_op,
         reduce_args=reduce_args,
         answer_text=answer_text,
         transcript=transcript,
+        error_count=error_count,
     )
 
 

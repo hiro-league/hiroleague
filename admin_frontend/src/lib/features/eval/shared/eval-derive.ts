@@ -15,7 +15,7 @@ export type AnsSortKey = 'none' | 'recall' | 'time' | 'difficulty' | 'evidence' 
 /** Recall-sufficiency flag filter (memory track). */
 export type AnsFlag = 'all' | 'sufficient' | 'miss' | 'unknown';
 /** Answer-type (judge verdict) filter. */
-export type AnsMark = 'all' | 'pass' | 'partial' | 'fail' | 'abstain' | 'not_judged';
+export type AnsMark = 'all' | 'pass' | 'incorrect' | 'partial' | 'fail' | 'abstain' | 'not_judged';
 
 // Difficulty ramp + saved-state order used as sort keys (lower sorts first ascending).
 const DIFF_SORT: Record<string, number> = { medium: 0, hard: 1, very_hard: 2 };
@@ -28,6 +28,14 @@ const MARK_FILTER_KEY: Record<string, AnsMark> = {
   '✗': 'fail',
   '🛇': 'abstain'
 };
+
+/** Answer-type filter bucket for one leg. A correct abstention (🛇 on a negative-control row)
+ *  presents and scores as a pass, so it buckets under `pass` — the Pass filter finds it, the
+ *  Abstain filter doesn't. A plain abstain (a real miss) stays `abstain`. */
+export function legFilterKey(mark: string, negControl: boolean): AnsMark {
+  if (mark === '🛇' && negControl) return 'pass';
+  return MARK_FILTER_KEY[mark] ?? 'not_judged';
+}
 
 /** Recall rank for a row's recall leg: miss (0), sufficient (1), unknown/not-judged (2). */
 export function rowRecallRank(r: EvalRow): number {
@@ -49,9 +57,12 @@ export function rowEvidenceRank(r: EvalRow): number {
   return ev.matched / ev.total;
 }
 
-/** Answer-type (judge mark) rank for the recall leg (✓ < ◐ < ✗ < 🛇 < not-judged). */
+/** Answer-type (judge mark) rank for the recall leg (✓ < ◐ < ✗ < 🛇 < not-judged). A correct
+ *  abstention sorts as a pass so the 'mark' sort stays consistent with its Pass presentation. */
 export function rowMarkRank(r: EvalRow): number {
-  return STATE_SORT[r.legs?.recall?.mark ?? ''] ?? 4;
+  const mark = r.legs?.recall?.mark ?? '';
+  if (mark === '🛇' && r.is_negative_control) return STATE_SORT['✓'];
+  return STATE_SORT[mark] ?? 4;
 }
 
 /** Apply the active sort to a group's rows (stable on index); identity when sort is off. */
@@ -79,8 +90,13 @@ export function sortGroupRows(
  *  knowledge legs are an at-a-glance OR — per-leg filtering isn't worth the extra controls). */
 export function rowMatchesMark(r: EvalRow, ansMark: AnsMark): boolean {
   if (ansMark === 'all') return true;
+  if (ansMark === 'incorrect') {
+    return Object.values(r.legs).some(
+      (leg) => legFilterKey(leg.mark, r.is_negative_control) !== 'pass'
+    );
+  }
   return Object.values(r.legs).some(
-    (leg) => (MARK_FILTER_KEY[leg.mark] ?? 'not_judged') === ansMark
+    (leg) => legFilterKey(leg.mark, r.is_negative_control) === ansMark
   );
 }
 

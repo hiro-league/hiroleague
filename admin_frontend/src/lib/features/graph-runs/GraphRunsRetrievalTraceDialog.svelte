@@ -5,6 +5,7 @@
   import ExpandCollapseButtons from './shared/ExpandCollapseButtons.svelte';
   import TraceAnswers from './shared/TraceAnswers.svelte';
   import TraceDialogShell from './shared/TraceDialogShell.svelte';
+  import TraceOverviewAnswers from './shared/TraceOverviewAnswers.svelte';
   import TraceTabs, { type TraceTab } from './shared/TraceTabs.svelte';
   import RetrievalLaneStages from './view/RetrievalLaneStages.svelte';
   import { createToggleSet } from './shared/use-toggle-set.svelte';
@@ -32,6 +33,7 @@
     extraTab?: import('svelte').Snippet<[string]>;
   } = $props();
 
+  const OVERVIEW_TAB = '__overview__';
   const EXTRA_TAB = '__extra__';
   const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
@@ -42,6 +44,7 @@
   let search = $state('');
   let settingsOpen = $state(false);
   let sortByStage = $state<Map<number, SortState>>(new Map());
+  let activeTab = $state<string>(OVERVIEW_TAB);
 
   $effect(() => {
     void trace;
@@ -50,6 +53,7 @@
     search = '';
     settingsOpen = false;
     sortByStage = new Map();
+    activeTab = OVERVIEW_TAB;
   });
 
   const laneMatchCounts = $derived.by(() => computeLaneMatchCounts(lanes, search));
@@ -58,13 +62,10 @@
   const embedStage = $derived(trace ? findEmbedStage(trace.stages) : null);
   const lanes = $derived<Lane[]>(trace ? buildLanes(trace.stages) : []);
 
-  let activeTab = $state<string>('');
-
   $effect(() => {
-    const keys = lanes.map((l) => l.lane);
-    if (!keys.includes(activeTab) && !(hasExtraTab && activeTab === EXTRA_TAB)) {
-      activeTab = keys[0] ?? '';
-    }
+    const keys = [OVERVIEW_TAB, ...lanes.map((l) => l.lane)];
+    if (hasExtraTab) keys.push(EXTRA_TAB);
+    if (!keys.includes(activeTab)) activeTab = OVERVIEW_TAB;
   });
 
   const activeLane = $derived<Lane | null>(
@@ -72,6 +73,7 @@
   );
 
   const laneTabs = $derived<TraceTab[]>([
+    { key: OVERVIEW_TAB, label: 'Overview', count: null },
     ...lanes.map((l) => ({
       key: l.lane,
       label: l.title,
@@ -79,6 +81,8 @@
     })),
     ...(hasExtraTab ? [{ key: EXTRA_TAB, label: extraTabLabel, count: null }] : [])
   ]);
+
+  const onLaneTab = $derived(activeTab !== OVERVIEW_TAB && activeTab !== EXTRA_TAB);
 
   const expandActive = (): void => {
     if (activeLane) collapsed.remove(activeLane.stages.map((s) => s.idx));
@@ -115,7 +119,7 @@
         />
       </div>
     {/if}
-    {#if trace && activeLane}
+    {#if trace && activeLane && onLaneTab}
       <div class="trace-head-actions">
         <Button
           variant="outline"
@@ -143,8 +147,8 @@
 
   {#snippet headerDetail()}
     {#if trace}
-      <TraceAnswers question={trace.query} {llmAnswer} {idealAnswer} query={search} />
-      {#if settingsOpen}
+      <TraceAnswers question={trace.query} query={search} />
+      {#if settingsOpen && onLaneTab}
         <span class="trace-config">
           recipe={trace.recipe} · temporal={trace.temporal} · top_k={trace.num_results} ·
           candidate_limit=2×top_k={2 * trace.num_results} · sim_min_score={trace.sim_min_score} ·
@@ -166,7 +170,13 @@
         countTone="primary"
       />
 
-      {#if hasExtraTab && activeTab === EXTRA_TAB}
+      {#if activeTab === OVERVIEW_TAB}
+        <div class="trace-lanes">
+          <div class="p-4">
+            <TraceOverviewAnswers {idealAnswer} {llmAnswer} />
+          </div>
+        </div>
+      {:else if hasExtraTab && activeTab === EXTRA_TAB}
         <div class="trace-lanes">
           <div class="p-4">{@render extraTab?.(search)}</div>
         </div>

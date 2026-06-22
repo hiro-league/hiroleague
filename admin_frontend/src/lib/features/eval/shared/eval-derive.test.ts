@@ -81,6 +81,11 @@ describe('rowMarkRank', () => {
     expect(rowMarkRank(row({ legs: { recall: leg({ mark: '🛇' }) } }))).toBe(3);
     expect(rowMarkRank(row({ legs: {} }))).toBe(4);
   });
+  it('ranks a correct abstention as a pass (negative control)', () => {
+    expect(
+      rowMarkRank(row({ is_negative_control: true, legs: { recall: leg({ mark: '🛇' }) } }))
+    ).toBe(0);
+  });
 });
 
 describe('sortGroupRows', () => {
@@ -121,6 +126,30 @@ describe('rowMatchesMark', () => {
     expect(rowMatchesMark(r, 'pass')).toBe(true);
     expect(rowMatchesMark(r, 'fail')).toBe(true);
     expect(rowMatchesMark(r, 'partial')).toBe(false);
+  });
+  it('buckets a correct abstention under "pass", not "abstain"', () => {
+    const r = row({ is_negative_control: true, legs: { recall: leg({ mark: '🛇' }) } });
+    expect(rowMatchesMark(r, 'pass')).toBe(true);
+    expect(rowMatchesMark(r, 'abstain')).toBe(false);
+    expect(rowMatchesMark(r, 'incorrect')).toBe(false);
+    // a plain abstain (not a negative control) still buckets under "abstain"
+    const plain = row({ is_negative_control: false, legs: { recall: leg({ mark: '🛇' }) } });
+    expect(rowMatchesMark(plain, 'abstain')).toBe(true);
+    expect(rowMatchesMark(plain, 'pass')).toBe(false);
+    expect(rowMatchesMark(plain, 'incorrect')).toBe(true);
+  });
+
+  it('matches incorrect as any leg that is not pass', () => {
+    const pass = row({ legs: { recall: leg({ mark: '✓' }) } });
+    const fail = row({ legs: { recall: leg({ mark: '✗' }) } });
+    const partial = row({ legs: { recall: leg({ mark: '◐' }) } });
+    const notJudged = row({ legs: { recall: leg({ mark: '' }) } });
+    const mixed = row({ legs: { flat: leg({ mark: '✓' }), graphiti: leg({ mark: '✗' }) } });
+    expect(rowMatchesMark(pass, 'incorrect')).toBe(false);
+    expect(rowMatchesMark(fail, 'incorrect')).toBe(true);
+    expect(rowMatchesMark(partial, 'incorrect')).toBe(true);
+    expect(rowMatchesMark(notJudged, 'incorrect')).toBe(true);
+    expect(rowMatchesMark(mixed, 'incorrect')).toBe(true);
   });
 });
 
