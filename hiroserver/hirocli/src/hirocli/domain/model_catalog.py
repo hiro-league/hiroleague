@@ -155,6 +155,11 @@ class ModelSpec(BaseModel):
     context_window: int | None = None
     modalities: list[str] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
+    # OpenAI-style reasoning_effort values this model actually accepts. The vocabulary differs by
+    # generation (GPT-5.0: minimal/low/medium/high; GPT-5.4+: none/low/medium/high/xhigh), so the
+    # factory clamps the neutral ThinkingLevel onto this set. Empty = no catalog vocabulary (the
+    # factory falls back to sending the level verbatim).
+    reasoning_efforts: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     pricing: PricingBlock | None = None
     released_at: str | None = Field(
@@ -831,7 +836,14 @@ def clear_model_catalog_cache() -> None:
 
     Used by tests, ``reload_model_catalog()``, and admin/CLI reload flows.
     """
-    get_model_catalog.cache_clear()
+    # ``get_model_catalog`` is normally the ``functools.lru_cache`` wrapper, but tests routinely
+    # monkeypatch it to a plain function (no ``cache_clear``). That state is also reachable via
+    # pytest fixture-finalizer ordering: when a teardown calls this before monkeypatch restores the
+    # wrapper, the attribute is transiently the patched function. Guard so we no-op instead of
+    # raising ``AttributeError`` — a non-cached function has no cache to clear.
+    cache_clear = getattr(get_model_catalog, "cache_clear", None)
+    if cache_clear is not None:
+        cache_clear()
 
 
 def _normalize_tts_provider_id(provider_id: str) -> str:

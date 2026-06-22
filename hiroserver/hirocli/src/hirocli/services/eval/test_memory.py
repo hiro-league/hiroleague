@@ -591,7 +591,7 @@ async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatc
             return self
 
     monkeypatch.setattr(
-        "hirocli.services.eval.models.build_eval_answer_model",
+        "hirocli.services.eval.models.build_eval_retrieval_model",
         lambda _path: (_RetrievalModelStub(), "fake:model"),
     )
     monkeypatch.setattr(
@@ -654,7 +654,7 @@ async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None
             return self
 
     monkeypatch.setattr(
-        "hirocli.services.eval.models.build_eval_answer_model",
+        "hirocli.services.eval.models.build_eval_retrieval_model",
         lambda _path: (_RetrievalModelStub(), "fake:model"),
     )
     monkeypatch.setattr(
@@ -722,7 +722,7 @@ async def test_recall_leg_applies_declared_reduce_op(tmp_path, monkeypatch) -> N
             return self
 
     monkeypatch.setattr(
-        "hirocli.services.eval.models.build_eval_answer_model",
+        "hirocli.services.eval.models.build_eval_retrieval_model",
         lambda _path: (_RetrievalModelStub(), "fake:model"),
     )
     monkeypatch.setattr(

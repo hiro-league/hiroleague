@@ -201,6 +201,7 @@ models:
     context_window: 1050000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
+    reasoning_efforts: [none, low, medium, high, xhigh]
     notes: Frontier model; prompts with >272K input tokens use 2x input and 1.5x output for the full session (see OpenAI pricing).
     pricing:
       input_per_1m_tokens: 5.00
@@ -219,6 +220,8 @@ models:
     context_window: 1050000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, json_mode, reasoning]
+    # Pro tier — like gpt-5-pro it accepts `high` only (verify against OpenAI docs); sub-high levels clamp up.
+    reasoning_efforts: [high]
     notes: Pro tier (more compute than GPT-5.5). Streaming not supported per OpenAI model docs; long jobs may need background mode. No cached-input pricing tier (verify openai.com/api/pricing).
     pricing:
       input_per_1m_tokens: 30.00
@@ -235,6 +238,8 @@ models:
     context_window: 1000000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
+    # Verified via live API 400: this generation dropped `minimal`, added `none`/`xhigh`.
+    reasoning_efforts: [none, low, medium, high, xhigh]
     pricing:
       input_per_1m_tokens: 2.50
       cached_input_per_1m_tokens: 0.25
@@ -252,6 +257,8 @@ models:
     context_window: 1050000
     modalities: [text, image_in]
     features: [tools, parallel_tools, streaming, json_mode, reasoning]
+    # Pro tier — `high` only (verify against OpenAI docs); sub-high levels clamp up.
+    reasoning_efforts: [high]
     notes: Pro tier; structured outputs not supported per OpenAI docs. Responses API–centric for advanced flows; prompts with >272K input tokens use 2x input and 1.5x output for the full session (same long-context rule as GPT-5.4).
     pricing:
       input_per_1m_tokens: 30.00
@@ -268,6 +275,7 @@ models:
     context_window: 400000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
+    reasoning_efforts: [none, low, medium, high, xhigh]
     pricing:
       input_per_1m_tokens: 0.75
       cached_input_per_1m_tokens: 0.075
@@ -284,6 +292,7 @@ models:
     context_window: 400000
     modalities: [text, image_in]
     features: [tools, structured_output, streaming, json_mode, reasoning]
+    reasoning_efforts: [none, low, medium, high, xhigh]
     pricing:
       input_per_1m_tokens: 0.20
       cached_input_per_1m_tokens: 0.02
@@ -301,6 +310,8 @@ models:
     context_window: 400000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
+    # GPT-5.0 generation effort scale (minimal–high); no `none`/`xhigh` (those are GPT-5.4+).
+    reasoning_efforts: [minimal, low, medium, high]
     notes: Previous-gen reasoning model; OpenAI points new projects to GPT-5.1+ (see latest model guide). reasoning.effort minimal–high.
     pricing:
       input_per_1m_tokens: 1.25
@@ -318,6 +329,7 @@ models:
     context_window: 400000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
+    reasoning_efforts: [minimal, low, medium, high]
     notes: Cost/latency tier vs GPT-5; OpenAI recommends GPT-5.4 mini for new high-volume workloads.
     pricing:
       input_per_1m_tokens: 0.25
@@ -335,6 +347,7 @@ models:
     context_window: 400000
     modalities: [text, image_in]
     features: [tools, structured_output, streaming, json_mode, reasoning]
+    reasoning_efforts: [minimal, low, medium, high]
     notes: Fastest/cheapest GPT-5 variant; OpenAI recommends GPT-5.4 nano for new speed-sensitive workloads.
     pricing:
       input_per_1m_tokens: 0.05
@@ -352,6 +365,8 @@ models:
     context_window: 400000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
+    # Highest-compute GPT-5; accepts `high` only (per OpenAI docs). Sub-high levels clamp up to high.
+    reasoning_efforts: [high]
     notes: Highest-compute GPT-5; defaults to reasoning.effort high only. Oriented to Responses API; long requests may need background mode. Cached-input tier not listed on model pricing table — verify vendor.
     pricing:
       input_per_1m_tokens: 15.00

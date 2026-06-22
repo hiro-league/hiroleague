@@ -39,7 +39,11 @@ export const GRAPH_EVAL_MODELS_COPY = {
   answerProfile: 'Tuning profile (temperature / max-tokens / thinking) for the eval answer model.',
   judgeModel:
     'Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat.',
-  judgeProfile: 'Tuning profile for the judge model. Lower temperature = more repeatable grading.'
+  judgeProfile: 'Tuning profile for the judge model. Lower temperature = more repeatable grading.',
+  retrievalModel:
+    'Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model → default chat.',
+  retrievalProfile:
+    'Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.'
 } as const;
 
 export const GRAPH_RERANKER_COPY = {

@@ -267,6 +267,43 @@ async def _ledger_llm_node(
         current_entry.reset(token)
 
 
+def _format_computed_block(computed: "dict[str, Any] | None") -> str:
+    """Render a declared reduce's deterministic result as a short, instruction-shaped line so the
+    answerer USES it instead of recomputing (Break-2, P10). Returns "" for none/empty/no-op."""
+    if not computed:
+        return ""
+    op = str(computed.get("op") or "").strip()
+    if op == "distinct_count":
+        count = computed.get("count")
+        if count is None:
+            return ""
+        kind = str(computed.get("kind") or "item")
+        names = computed.get("names")
+        line = f"- distinct_count = {count} (counting distinct {kind}s). Use this exact number."
+        if isinstance(names, list) and names:
+            line += " Distinct values: " + "; ".join(str(n) for n in names) + "."
+        return line
+    if op == "date_diff":
+        days = computed.get("days")
+        if days is None:
+            return "- date_diff: the two anchor events were not both found — say so; do not guess a duration."
+        return f"- date_diff = {days} days between the two anchor events. Use this exact value."
+    if op == "keep_conflicting":
+        aff = computed.get("affirming")
+        neg = computed.get("negating")
+        if aff is None and neg is None:
+            return ""
+        return (
+            f"- keep_conflicting: {aff} affirming vs {neg} negating fact(s) below — present BOTH "
+            "sides as a contradiction; do not pick one."
+        )
+    if op == "latest":
+        return "- latest: the facts below are already reduced to the most recent value per subject — answer from them."
+    if op == "order_by_time":
+        return "- order_by_time: the facts below are already in chronological order — preserve it."
+    return ""
+
+
 async def answer_from_context(
     model: Any,
     model_id: str,
@@ -276,6 +313,7 @@ async def answer_from_context(
     sink: Any | None = None,
     instructions: str | None = None,
     render: RecallRenderOptions | None = None,
+    computed: "dict[str, Any] | None" = None,
 ) -> str:
     """Brief answer to ``question`` grounded ONLY in ``context`` — the recalled hits as STRUCTURED
     rows (``{kind, memory, …metadata}``), rendered into Relevant Facts / Entities / Messages
@@ -295,9 +333,12 @@ async def answer_from_context(
 
     instr = (instructions or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
     recalled = format_recall_context(context, render) or "(no elements recalled)"
+    computed_block = _format_computed_block(computed)
+    computed_section = f"\n\n## Computed Results\n{computed_block}" if computed_block else ""
     human = (
         f"{instr}\n\n"
-        f"## User Question\n{question}\n\n"
+        f"## User Question\n{question}"
+        f"{computed_section}\n\n"
         f"## Recalled Memory Elements\n{recalled}"
     )
 

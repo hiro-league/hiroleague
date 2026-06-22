@@ -181,19 +181,25 @@ class EvalSummary:
 
 def _build_eval_model(workspace_path: Path, *, which: str) -> tuple[Any | None, str]:
     """Resolve + build an eval chat model. ``which`` picks the role — ``'answer'`` (the memory-eval
-    answer step) or ``'judge'`` (the LLM judge, both tracks) — each with its OWN model + tuning
-    profile preference (``graph.eval.answer_*`` / ``graph.eval.judge_*``). Returns ``(model,
-    model_id)`` or ``(None, "")`` when unconfigured/unavailable so callers skip that step gracefully."""
+    answer step), ``'judge'`` (the LLM judge, both tracks), or ``'retrieval'`` (the agentic
+    retrieval loop) — each with its OWN model + tuning profile preference (``graph.eval.answer_*``
+    / ``graph.eval.judge_*`` / ``graph.eval.retrieval_*``). Returns ``(model, model_id)`` or
+    ``(None, "")`` when unconfigured/unavailable so callers skip that step gracefully."""
     try:
         from hirocli.domain.model_factory import create_chat_model
         from hirocli.domain.preferences import (
             load_preferences,
             resolve_eval_answer_llm,
             resolve_eval_judge_llm,
+            resolve_eval_retrieval_llm,
         )
 
         prefs = load_preferences(workspace_path)
-        resolver = resolve_eval_answer_llm if which == "answer" else resolve_eval_judge_llm
+        resolver = {
+            "answer": resolve_eval_answer_llm,
+            "judge": resolve_eval_judge_llm,
+            "retrieval": resolve_eval_retrieval_llm,
+        }[which]
         spec = resolver(prefs, workspace_path)
         if spec is None:
             log.warning("⚠️ knowledge.eval — no eval %s model configured; skipping it", which)
@@ -219,3 +225,9 @@ def build_eval_answer_model(workspace_path: Path) -> tuple[Any | None, str]:
 def build_eval_judge_model(workspace_path: Path) -> tuple[Any | None, str]:
     """The eval JUDGE model (``graph.eval.judge_model`` + tuning). See ``_build_eval_model``."""
     return _build_eval_model(workspace_path, which="judge")
+
+
+def build_eval_retrieval_model(workspace_path: Path) -> tuple[Any | None, str]:
+    """The agentic-retrieval model (``graph.eval.retrieval_model`` + tuning; falls back to the
+    answer model when unset). See ``_build_eval_model``."""
+    return _build_eval_model(workspace_path, which="retrieval")

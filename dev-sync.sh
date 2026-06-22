@@ -56,17 +56,22 @@ echo "==> Updating Hiro tool binary..."
 # Each top-level binary is installed separately because hirocli no longer bundles hiro-channel-devices
 # (the channel is its own distributable package, and the meta-package `hiroleague` is only used by end users).
 # Also clean up any older `hiroleague` editable tool install left over from before the package split.
+# Pin tool installs to the project Python (matches dev-sync-fast.sh and hiroserver/.python-version).
+# Unlike `uv sync`, `uv tool install` ignores .python-version and would otherwise grab uv's default
+# managed interpreter (e.g. 3.14), for which kuzu has no prebuilt wheel — forcing a from-source build
+# that needs cmake/make. Override with HIRO_UV_PYTHON if needed.
+HIRO_UV_PYTHON="${HIRO_UV_PYTHON:-3.12}"
 uv tool uninstall hiroleague 2>/dev/null || true
 uv tool uninstall hirocli 2>/dev/null || true
-uv tool install --editable hirocli --upgrade --force
+uv tool install --editable hirocli --upgrade --force --python "$HIRO_UV_PYTHON"
 
 echo "==> Updating hiro-channel-devices tool binary..."
 uv tool uninstall hiro-channel-devices 2>/dev/null || true
-uv tool install --editable channels/hiro-channel-devices --upgrade --force
+uv tool install --editable channels/hiro-channel-devices --upgrade --force --python "$HIRO_UV_PYTHON"
 
 echo "==> Updating hirogate tool binary..."
 uv tool uninstall hirogate 2>/dev/null || true
-uv tool install --editable gateway --upgrade --force
+uv tool install --editable gateway --upgrade --force --python "$HIRO_UV_PYTHON"
 
 echo ""
 echo "Done. All tool binaries are up to date."

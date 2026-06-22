@@ -34,7 +34,8 @@ const NULLABLE_MODEL_PATHS = new Set([
   'graph.embedder_model',
   'graph.reranker.model_id',
   'graph.eval.answer_model',
-  'graph.eval.judge_model'
+  'graph.eval.judge_model',
+  'graph.eval.retrieval_model'
 ]);
 
 /** Nullable string paths — blank is coerced to null on save. */

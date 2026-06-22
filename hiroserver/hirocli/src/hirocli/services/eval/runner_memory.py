@@ -42,7 +42,11 @@ from hirocli.services.eval.corpus import (
     load_adam_questions,
 )
 from hirocli.services.eval.events import _cancel_requested, _preview, _publish
-from hirocli.services.eval.models import build_eval_answer_model, build_eval_judge_model
+from hirocli.services.eval.models import (
+    build_eval_answer_model,
+    build_eval_judge_model,
+    build_eval_retrieval_model,
+)
 from hirocli.services.eval.summary import summarize_memory_rows
 
 if TYPE_CHECKING:
@@ -195,7 +199,7 @@ async def _recall_via_agent(
     question: str,
     memory: Any,
     workspace_path: Path,
-    answer_model: Any | None,
+    retrieval_model: Any | None,
     user_id: int,
     character_id: str,
     retrieval_limits: Any | None = None,
@@ -222,13 +226,13 @@ async def _recall_via_agent(
         if not prompt_text:
             _prompt_id, prompt_text = resolve_retrieval_agent_prompt(prefs)
 
-    retrieval_model = answer_model
     if retrieval_model is None:
-        # Direct-call tests pass answer_model=None and rely on the monkey-patched eval model
-        # builder; production always threads a built model in, so this path is a fallback.
-        from hirocli.services.eval.models import build_eval_answer_model
+        # Direct-call tests pass retrieval_model=None and rely on the monkey-patched eval model
+        # builder; production always threads a built model in, so this path is a fallback. The
+        # retrieval builder falls back to the answer model when graph.eval.retrieval_model is unset.
+        from hirocli.services.eval.models import build_eval_retrieval_model
 
-        retrieval_model, _ = build_eval_answer_model(workspace_path)
+        retrieval_model, _ = build_eval_retrieval_model(workspace_path)
 
     if retrieval_model is None:
         log.warning(
@@ -251,6 +255,10 @@ async def _recall_via_agent(
         op=result.reduce_op,
         args=result.reduce_args,
     )
+    # Break-2 fix (P10): carry the deterministic reduce result (count / days / conflict tallies) so
+    # the answerer USES it instead of recomputing — code-executed reduce was pointless when the
+    # summary was dropped here (e.g. distinct_count computed 13 but the answerer recounted to 8).
+    result.reduce_summary = dict(reduced.summary or {})
     recalled_rows = [accumulated_item_to_recall_row(item) for item in reduced.items]
     facts = [str(r["memory"]) for r in recalled_rows if str(r.get("memory") or "").strip()]
     log.info(
@@ -321,6 +329,9 @@ async def _memory_question(
     judge_model: Any | None = None,
     judge_model_id: str = "",
     judge: bool = False,
+    # The agentic retrieval loop uses its OWN model (graph.eval.retrieval_model; falls back to the
+    # answer model when unset). None → _recall_via_agent builds it as a direct-call fallback.
+    retrieval_model: Any | None = None,
     # Renamed from answer_system_prompt: the answering instructions now ride in the USER message
     # (judge.answer_from_context); the system prompt there is a hardcoded role.
     answer_instructions: str = "",
@@ -387,7 +398,7 @@ async def _memory_question(
                         question=q["question"],
                         memory=memory,
                         workspace_path=workspace_path,
-                        answer_model=answer_model,
+                        retrieval_model=retrieval_model,
                         user_id=user_id,
                         character_id=character_id,
                         retrieval_limits=retrieval_limits,
@@ -413,7 +424,7 @@ async def _memory_question(
                     question=q["question"],
                     memory=memory,
                     workspace_path=workspace_path,
-                    answer_model=answer_model,
+                    retrieval_model=retrieval_model,
                     user_id=user_id,
                     character_id=character_id,
                     retrieval_limits=retrieval_limits,
@@ -443,6 +454,9 @@ async def _memory_question(
                 # Editable graph.eval.memory_answer_prompt (blank → structured default in judge).
                 instructions=answer_instructions,
                 render=render,
+                # Deterministic reduce result (Break-2): the answerer must use the computed
+                # count/duration/etc rather than recomputing from the items.
+                computed=getattr(retrieval_result, "reduce_summary", None),
             )
         # 3) judge — vs the ideal answer (optional step). Gets the SAME recalled context so it can
         # set recall_sufficient (recall-miss vs answering-miss), not just grade vs the ideal. Uses
@@ -578,6 +592,7 @@ async def _memory_question_task(
     sink: Any,
     answer_model: Any | None,
     answer_model_id: str,
+    retrieval_model: Any | None,
     judge_model: Any | None,
     judge_model_id: str,
     judged: bool,
@@ -630,6 +645,7 @@ async def _memory_question_task(
                 set_id=set_id,
                 answer_model=answer_model,
                 answer_model_id=answer_model_id,
+                retrieval_model=retrieval_model,
                 judge_model=judge_model,
                 judge_model_id=judge_model_id,
                 judge=judged,
@@ -724,6 +740,10 @@ async def run_memory_eval(
     # Answer + judge each use their OWN eval model/tuning (separated — graph.eval.answer_* vs
     # graph.eval.judge_*). The judge is only built when requested.
     answer_model, answer_model_id = build_eval_answer_model(workspace_path)
+    # The agentic retrieval loop gets its OWN model/tuning (graph.eval.retrieval_*). Unset →
+    # build_eval_retrieval_model resolves to the answer model (prior behavior). Built once per run
+    # and threaded into every question task, like answer/judge.
+    retrieval_model, _retrieval_model_id = build_eval_retrieval_model(workspace_path)
     judge_model, judge_model_id = (
         build_eval_judge_model(workspace_path) if judge else (None, "")
     )
@@ -959,6 +979,7 @@ async def run_memory_eval(
                                 sink=sink,
                                 answer_model=answer_model,
                                 answer_model_id=answer_model_id,
+                                retrieval_model=retrieval_model,
                                 judge_model=judge_model,
                                 judge_model_id=judge_model_id,
                                 judged=judged,

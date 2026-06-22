@@ -13,6 +13,7 @@ from hirocli.domain.memory import MemoryAddResult
 from hirocli.services.eval.judge import (
     MEMORY_EVAL_ANSWER_SYSTEM_PROMPT,
     _JudgeOutput,
+    _format_computed_block,
     answer_from_context,
     format_recall_context,
     judge_answer,
@@ -88,6 +89,38 @@ async def test_answer_from_context_returns_model_text() -> None:
         sink=None,
     )
     assert ans == "The drone is Otto."
+
+
+def test_format_computed_block_renders_op_results() -> None:
+    """The deterministic reduce result (Break-2) becomes an instruction-shaped line the answerer uses."""
+    assert "distinct_count = 13" in _format_computed_block({"op": "distinct_count", "count": 13, "kind": "edge"})
+    assert "date_diff = 5 days" in _format_computed_block({"op": "date_diff", "days": 5})
+    kc = _format_computed_block({"op": "keep_conflicting", "affirming": 2, "negating": 1})
+    assert "2 affirming" in kc and "1 negating" in kc
+    # no-op / empty → no block at all
+    assert _format_computed_block({"op": "none"}) == ""
+    assert _format_computed_block(None) == ""
+    # date_diff with a missing anchor → tells the answerer not to guess
+    assert "not both found" in _format_computed_block({"op": "date_diff", "days": None})
+
+
+@pytest.mark.asyncio
+async def test_answer_from_context_includes_computed_block() -> None:
+    """A declared reduce's computed result is rendered into the user message ahead of the elements."""
+    m = _FakeModel(answer="13 movies.")
+    await answer_from_context(
+        m,
+        "fake:model",
+        question="How many unique movies?",
+        context=[{"kind": "fact", "fact": "Watched Soul"}],
+        sink=None,
+        computed={"op": "distinct_count", "count": 13, "kind": "edge"},
+    )
+    human = m.last_messages[-1].content
+    assert "## Computed Results" in human
+    assert "distinct_count = 13" in human
+    # the computed block precedes the recalled elements
+    assert human.index("## Computed Results") < human.index("## Recalled Memory Elements")
 
 
 @pytest.mark.asyncio

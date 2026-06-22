@@ -87,6 +87,28 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "model_kind": "chat",
                 "model_class": "reasoning",
                 "features": ["reasoning"],
+                # GPT-5.4 generation dropped `minimal`, added `none`/`xhigh`.
+                "reasoning_efforts": ["none", "low", "medium", "high", "xhigh"],
+            },
+            {
+                # GPT-5.0 generation still has `minimal`, lacks `none`/`xhigh`.
+                "id": "openai:gpt-5",
+                "provider_id": "openai",
+                "display_name": "GPT 5",
+                "model_kind": "chat",
+                "model_class": "reasoning",
+                "features": ["reasoning"],
+                "reasoning_efforts": ["minimal", "low", "medium", "high"],
+            },
+            {
+                # Pro tier — high only; every enabled level clamps up to high.
+                "id": "openai:gpt-5-pro",
+                "provider_id": "openai",
+                "display_name": "GPT 5 pro",
+                "model_kind": "chat",
+                "model_class": "reasoning",
+                "features": ["reasoning"],
+                "reasoning_efforts": ["high"],
             },
             {
                 "id": "google:gemini-3-flash-preview",
@@ -173,8 +195,63 @@ def test_openai_reasoning_uses_completion_tokens_and_effort(
 
     assert model._default_params["model"] == "gpt-5.4"
     assert model._default_params["max_completion_tokens"] == 4096
-    assert model.reasoning_effort == "minimal"
+    # GPT-5.4 dropped `minimal` (live API 400s on it) — neutral `minimal` clamps up to `low`.
+    assert model.reasoning_effort == "low"
     assert "max_tokens" not in model._default_params
+    # Reasoning models must route through the Responses API — /v1/chat/completions 400s on
+    # reasoning_effort + function tools for GPT-5.x.
+    assert model.use_responses_api is True
+
+
+def test_openai_minimal_passes_through_on_gpt5_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("openai", "sk-test")
+
+    # GPT-5.0 keeps `minimal` in its vocabulary, so it is sent verbatim (no clamp).
+    model = create_chat_model(
+        "openai:gpt-5", workspace_path=tmp_path, credential_store=store, thinking="minimal",
+    )
+    assert model.reasoning_effort == "minimal"
+
+
+def test_openai_off_maps_to_none_when_supported_else_omits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("openai", "sk-test")
+
+    # gpt-5.4 has an explicit `none` effort → `off` maps to it.
+    model_none = create_chat_model(
+        "openai:gpt-5.4", workspace_path=tmp_path, credential_store=store, thinking="off",
+    )
+    assert model_none.reasoning_effort == "none"
+
+    # gpt-5.0 has no `none` → `off` omits reasoning_effort (model applies its default effort).
+    model_omit = create_chat_model(
+        "openai:gpt-5", workspace_path=tmp_path, credential_store=store, thinking="off",
+    )
+    assert model_omit.reasoning_effort is None
+
+
+def test_openai_pro_clamps_every_level_up_to_high(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("openai", "sk-test")
+
+    # Pro tier accepts `high` only; a sub-high request clamps up rather than 400ing.
+    model = create_chat_model(
+        "openai:gpt-5-pro", workspace_path=tmp_path, credential_store=store, thinking="low",
+    )
+    assert model.reasoning_effort == "high"
 
 
 def test_google_thinking_level_maps_for_gemini_3(

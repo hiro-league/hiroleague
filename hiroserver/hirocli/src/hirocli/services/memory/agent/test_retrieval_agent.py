@@ -1,4 +1,10 @@
-"""Tests for the bounded retrieval-agent loop (P3, refactored P9: multi-arg tool + turn cap)."""
+"""Tests for the bounded retrieval-agent loop (P3; P9 multi-arg tool; P10 dedicated structured final).
+
+P10: the loop runs a tool-bound SEARCH phase (``bind_tools``) for up to ``max_agent_turns - 1``
+turns, then ONE tool-free structured turn (``with_structured_output``) yields the declared reduce
+op + answer. ``ScriptedChatModel`` scripts the final turn via :func:`ai_final` (JSON content the
+fake's ``with_structured_output`` parses).
+"""
 
 from __future__ import annotations
 
@@ -8,10 +14,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from hirocli.domain.preferences import RetrievalAgentLimits
-from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, ai_text, ai_tool_call
-from hirocli.services.memory.agent.retrieval_agent import run_retrieval
+from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, ai_final, ai_text
+from hirocli.services.memory.agent.retrieval_agent import _coerce_final, run_retrieval
 from hirocli.services.memory.graphiti_conversation import GraphitiConversationMemory
 
 _PROMPT = "MAX={MAX_AGENT_TURNS} PAR={MAX_PARALLEL_SEARCHES} LIM={MAX_LIMIT}"
@@ -80,6 +87,8 @@ def _q(query: str, **knobs) -> dict:
 
 
 def _search_call(*queries: dict, call_id: str = "c1"):
+    from hirocli.runtime.tests.graph_fakes import ai_tool_call
+
     return ai_tool_call("search_memory", {"queries": list(queries)}, call_id=call_id)
 
 
@@ -96,10 +105,10 @@ async def _run(*, model, memory, limits=None, question="Q?") -> object:
 
 
 @pytest.mark.asyncio
-async def test_single_search_then_answer() -> None:
+async def test_single_search_then_final() -> None:
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
     model = ScriptedChatModel(
-        responses=[_search_call(_q("monthly budget")), ai_text("The budget is $50.")]
+        responses=[_search_call(_q("monthly budget")), ai_final("The budget is $50.")]
     )
     result = await _run(model=model, memory=_memory(graph=graph))
     assert result.accumulator.size() == 1
@@ -114,7 +123,7 @@ async def test_decomposition_sub_queries_gathered_concurrently() -> None:
     model = ScriptedChatModel(
         responses=[
             _search_call(_q("job"), _q("hobby"), _q("trip", temporal="all")),
-            ai_text("job, hobby, trip"),
+            ai_final("job, hobby, trip"),
         ]
     )
 
@@ -141,51 +150,56 @@ async def test_decomposition_sub_queries_gathered_concurrently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_caps_max_agent_turns() -> None:
-    """With max_agent_turns=4 the model gets 3 search turns; turn 4 is forced final."""
+async def test_caps_search_turns_then_final() -> None:
+    """max_agent_turns=4 → 3 tool-bound search turns, then turn 4 is the dedicated structured final."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
     model = ScriptedChatModel(
         responses=[
             _search_call(_q("q1"), call_id="c1"),
             _search_call(_q("q2"), call_id="c2"),
             _search_call(_q("q3"), call_id="c3"),
-            ai_text("forced final"),
+            ai_final("forced final"),
         ]
     )
-    result = await _run(model=model, memory=_memory(graph=graph), limits=RetrievalAgentLimits(max_agent_turns=4))
+    result = await _run(
+        model=model, memory=_memory(graph=graph), limits=RetrievalAgentLimits(max_agent_turns=4)
+    )
     assert len(graph.search_calls) == 3
     assert result.answer_text == "forced final"
-    assert model._cursor[0] == 4  # three search turns + one forced final
+    final = next(row for row in result.transcript if row["event"] == "final")
+    assert final["cumulative_agent_turns"] == 4  # 3 search turns + the structured final
 
 
 @pytest.mark.asyncio
-async def test_agent_counter_advances_per_invocation() -> None:
+async def test_counter_counts_search_stop_and_final() -> None:
+    """Early stop: one search turn, one no-tool stop turn, then the structured final = 3 invocations."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
-    model = ScriptedChatModel(responses=[_search_call(_q("q1")), ai_text("done")])
+    model = ScriptedChatModel(responses=[_search_call(_q("q1")), ai_text("done"), ai_final("answer")])
     result = await _run(model=model, memory=_memory(graph=graph))
     final = next(row for row in result.transcript if row["event"] == "final")
-    assert final["cumulative_agent_turns"] == 2  # one search turn + one answer turn
+    assert final["cumulative_agent_turns"] == 3
 
 
 @pytest.mark.asyncio
-async def test_last_allowed_turn_strips_tools() -> None:
-    """max_agent_turns=1 → the only turn is forced final; even a scripted tool call is ignored."""
+async def test_zero_search_turns_goes_straight_to_final() -> None:
+    """max_agent_turns=1 → no search budget; the only turn is the dedicated structured final."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
-    model = ScriptedChatModel(responses=[_search_call(_q("q1")), ai_text("never reached")])
-    result = await _run(model=model, memory=_memory(graph=graph), limits=RetrievalAgentLimits(max_agent_turns=1))
-    assert graph.search_calls == []  # tools stripped on the forced turn → no search ran
+    model = ScriptedChatModel(responses=[ai_final("only final")])
+    result = await _run(
+        model=model, memory=_memory(graph=graph), limits=RetrievalAgentLimits(max_agent_turns=1)
+    )
+    assert graph.search_calls == []  # no search turn ran
     assert result.accumulator.size() == 0
-    assert model._cursor[0] == 1
+    assert result.answer_text == "only final"
+    final = next(row for row in result.transcript if row["event"] == "final")
+    assert final["cumulative_agent_turns"] == 1
 
 
 @pytest.mark.asyncio
-async def test_parses_final_reduce_op() -> None:
+async def test_final_reduce_op_parsed() -> None:
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget changed")])
     model = ScriptedChatModel(
-        responses=[
-            _search_call(_q("budget history")),
-            ai_text('{"reduce": {"op": "latest"}, "answer": "Latest budget is $50."}'),
-        ]
+        responses=[_search_call(_q("budget history")), ai_final("Latest budget is $50.", op="latest")]
     )
     result = await _run(model=model, memory=_memory(graph=graph))
     assert result.reduce_op == "latest"
@@ -193,12 +207,26 @@ async def test_parses_final_reduce_op() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_tool_calls_returns_direct_answer() -> None:
+async def test_final_reduce_args_propagate() -> None:
+    graph = _SlowFakeGraph(hits=[_hit("e1", "movies")])
+    model = ScriptedChatModel(
+        responses=[
+            _search_call(_q("planned movies")),
+            ai_final("13 movies", op="distinct_count", kind="edge"),
+        ]
+    )
+    result = await _run(model=model, memory=_memory(graph=graph))
+    assert result.reduce_op == "distinct_count"
+    assert result.reduce_args == {"kind": "edge"}
+
+
+@pytest.mark.asyncio
+async def test_no_search_direct_final() -> None:
     graph = _SlowFakeGraph()
-    model = ScriptedChatModel(responses=[ai_text("No memory needed.")])
+    model = ScriptedChatModel(responses=[ai_final("No information available.")])
     result = await _run(model=model, memory=_memory(graph=graph))
     assert graph.search_calls == []
-    assert result.answer_text == "No memory needed."
+    assert result.answer_text == "No information available."
     assert result.accumulator.size() == 0
 
 
@@ -207,7 +235,7 @@ async def test_trace_event_shapes() -> None:
     """A search turn yields tool_call + one sub_result per sub-query, then a final row."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
     model = ScriptedChatModel(
-        responses=[_search_call(_q("monthly budget")), ai_text("The budget is $50.")]
+        responses=[_search_call(_q("monthly budget")), ai_final("The budget is $50.")]
     )
     result = await _run(model=model, memory=_memory(graph=graph))
     events = [row["event"] for row in result.transcript]
@@ -217,9 +245,7 @@ async def test_trace_event_shapes() -> None:
 @pytest.mark.asyncio
 async def test_one_failing_sub_query_does_not_abort() -> None:
     graph = _FailOnQueryGraph(fail_query="bad", hits=[_hit("e1", "ok")])
-    model = ScriptedChatModel(
-        responses=[_search_call(_q("bad"), _q("good")), ai_text("Recovered.")]
-    )
+    model = ScriptedChatModel(responses=[_search_call(_q("bad"), _q("good")), ai_final("Recovered.")])
     result = await _run(model=model, memory=_memory(graph=graph))
     assert result.answer_text == "Recovered."
     sub_results = [row for row in result.transcript if row["event"] == "sub_result"]
@@ -227,3 +253,29 @@ async def test_one_failing_sub_query_does_not_abort() -> None:
     errored = [row for row in sub_results if row.get("error")]
     assert len(errored) == 1
     assert "simulated search failure" in errored[0]["error"]
+
+
+# --- _coerce_final: the provider-shape fallback paths (json_mode dict / parse failure) -----------
+
+
+def test_coerce_final_from_json_mode_dict() -> None:
+    """DeepSeek json_mode returns a plain dict (not a RetrievalFinal) — still coerced correctly."""
+    op, args, answer = _coerce_final(
+        {"reduce": {"op": "distinct_count", "kind": "edge"}, "answer": "3 movies"}, None
+    )
+    assert op == "distinct_count"
+    assert args == {"kind": "edge"}
+    assert answer == "3 movies"
+
+
+def test_coerce_final_unknown_op_degrades_to_none() -> None:
+    op, args, answer = _coerce_final({"reduce": {"op": "bogus"}, "answer": "x"}, None)
+    assert op == "none"
+    assert answer == "x"
+
+
+def test_coerce_final_non_json_raw_becomes_answer() -> None:
+    op, args, answer = _coerce_final(None, AIMessage(content="plain prose answer"))
+    assert op == "none"
+    assert args == {}
+    assert answer == "plain prose answer"

@@ -16,7 +16,8 @@ export type PrefModelIdPath =
   | 'graph.embedder_model'
   | 'graph.reranker.model_id'
   | 'graph.eval.answer_model'
-  | 'graph.eval.judge_model';
+  | 'graph.eval.judge_model'
+  | 'graph.eval.retrieval_model';
 
 export const PREF_MODEL_EMPTY_LABELS: Record<
   PrefModelKind,
@@ -124,6 +125,9 @@ export function applyModelIdToDraft(
       return true;
     case 'graph.eval.judge_model':
       draft.graph.eval.judge_model = id;
+      return true;
+    case 'graph.eval.retrieval_model':
+      draft.graph.eval.retrieval_model = id;
       return true;
     default: {
       // Exhaustiveness guard: adding a PrefModelIdPath without a case here is a compile error,

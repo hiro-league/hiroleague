@@ -802,16 +802,18 @@ Results arrive as a mix of three element kinds, each shaped differently — use 
      ever/never · count · ordering · synthesis · something else you name yourself.
   4. Choose the four knobs to match that axis (see "Knobs" below) — independently per
      sub-question; they can differ.
-  5. Read what came back. If the gap is "wrong axis," rephrase (don't just widen). If the
-     gap is "thin data on the right axis," raise `limit` (or `hops`). If a sub-question
-     came back empty, retry just that one — leave the rest. If the set already answers, stop.
+  5. Read what came back. Topically-related facts that don't supply a piece the answer
+     needs are a "wrong axis" miss — rephrase toward the missing piece, don't just widen.
+     If a piece is thin on the right axis, raise `limit` (or `hops`). If a search adds
+     nothing new (`new=0`), the phrasing is exhausted — change the axis, don't repeat it.
+     Stop only when you can construct the answer (see "Stopping").
 
 ## Knobs (compact reference)
   query        → a stored-fact phrasing of what's needed.
   temporal     → "current" for the state that holds now; "all" when the question is about
                  change over time, or whether something ever/never happened.
-  limit        → start at the default; raise (up to {MAX_LIMIT}) only when a search was empty
-                 or thin AND rephrasing didn't help.
+  limit        → start at the default; raise (up to {MAX_LIMIT}) only when a piece is on the
+                 right axis but thin AND rephrasing didn't help.
   hops         → 1 direct; 2 if the answer links one entity to another; 3 for two links.
   show_expiry  → true to see `invalid_at` and the `superseded` flag on edges (timeline / change
                  questions). Only meaningful with `temporal="all"`.
@@ -846,8 +848,9 @@ P4 — decomposition of a plural question
   temporal=all, reduce later with `latest`). Read all three sub-results together; answer in one go.
 
 ## Negative Calibrators (don't burn the search budget badly)
-N1 — empty + same query + higher limit is NOT progress. If a search returned nothing, the
-     phrasing is wrong; rephrase first, then widen.
+N1 — `new=0` (or a fuller-but-still-wrong-axis return) + same query + higher limit is NOT
+     progress. When a search adds nothing you can use, the phrasing is wrong; rephrase first,
+     then widen.
 N2 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
      adds distractors.
 N3 — show_expiry=true under temporal=current is wasted — every returned edge is valid-now and
@@ -861,15 +864,20 @@ N6 — do NOT put more than {MAX_PARALLEL_SEARCHES} entries in `queries`; the ca
      you waste a turn on the error round-trip.
 
 ## Stopping & abstaining
-Stop the moment the accumulated facts answer the question. If your turns run out and the answer
-is still unsupported, abstain in the final turn — do not pad with guesses.
+Before you stop, name what the question needs to be answerable — the evidence and HOW it
+combines into the answer: a single value; a set you must enumerate and count; two dated facts
+to compare or subtract; both sides of a claim to confirm or deny; or several facts that
+together imply it. Stop only when the accumulator supplies every piece your own requirement
+names — not merely when related facts came back. If your turns run out and a required piece is
+still missing, abstain in the final turn — do not pad with guesses.
 
 ## Validation (pre-final-turn self-check)
 - Did I rephrase the question into a stored-fact form before the first search?
 - If the question is plural, did I DECOMPOSE it into multiple entries in the `queries` list of
   one call, instead of an omnibus single query? Conversely, if it's singular, did I avoid
   near-duplicate sub-queries?
-- For each empty/thin search, did I diagnose "wrong axis" vs "thin data" before re-trying?
+- Did I state what the answer requires and confirm the accumulator supplies every piece —
+  rather than stopping just because related facts came back?
 - For a temporal / ever-never question, did I either set show_expiry=true under temporal=all,
   or include BOTH polarities as two entries in `queries`?
 - For a count / ordering / duration, did I declare the matching reduce op instead of
@@ -1009,6 +1017,13 @@ class GraphEvalPreferences(BaseModel):
     answer_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     judge_model: str | None = None
     judge_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    # The agentic retrieval loop (memory track) gets its OWN model + tuning profile. ``None`` falls
+    # back to the eval ANSWER model (the loop borrowed it before it had its own preference): the
+    # resolver chains retrieval_model → answer_model → knowledge.answering.model → llm.default_chat,
+    # so an unset workspace is unchanged. Lets the retrieval/tool-calling step use a different model
+    # (e.g. a cheaper or higher-reasoning one) than the final answer step.
+    retrieval_model: str | None = None
+    retrieval_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
     # line carries, and whether episodes keep their [date] prefix. ``show_event_time`` (valid_at,
     # labeled "event_time") also governs the episode [date]; ``show_expired_at`` (invalid_at) and
@@ -1255,6 +1270,7 @@ class WorkspacePreferences(BaseModel):
             self.graph.small_tuning_profile,
             self.graph.eval.answer_tuning_profile,
             self.graph.eval.judge_tuning_profile,
+            self.graph.eval.retrieval_tuning_profile,
         ):
             if graph_profile_id not in self.tuning_profiles:
                 raise ValueError(
@@ -1830,6 +1846,28 @@ def resolve_eval_judge_llm(
         workspace_path,
         explicit_model=prefs.graph.eval.judge_model,
         tuning_profile_id=prefs.graph.eval.judge_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_eval_retrieval_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the agentic-retrieval model (memory track) — its own model override + tuning
+    profile. Model chain: ``graph.eval.retrieval_model`` → ``graph.eval.answer_model`` →
+    ``knowledge.answering.model`` → ``llm.default_chat``. The answer-model tier preserves prior
+    behavior (the retrieval loop borrowed the answer model before it had a dedicated preference),
+    so an unset ``retrieval_model`` resolves to exactly the same model as the answer step."""
+    return _resolve_graphiti_model(
+        prefs,
+        workspace_path,
+        explicit_model=prefs.graph.eval.retrieval_model or prefs.graph.eval.answer_model,
+        tuning_profile_id=prefs.graph.eval.retrieval_tuning_profile,
         workspace_id=workspace_id,
         credential_store=credential_store,
     )

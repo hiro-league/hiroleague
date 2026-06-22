@@ -151,6 +151,10 @@ export type GraphPreferences = {
     answer_tuning_profile: string;
     judge_model: string | null;
     judge_tuning_profile: string;
+    // Agentic retrieval loop (memory track) — its own model + tuning. null falls back to the eval
+    // answer model, then the knowledge answering model → default chat.
+    retrieval_model: string | null;
+    retrieval_tuning_profile: string;
     // Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
     // line carries. show_event_time (valid_at, labeled "event_time") also governs the episode
     // [date] prefix; show_expired_at = invalid_at; show_superseded = the SUPERSEDED tag.
@@ -294,6 +298,8 @@ export const DEFAULT_GRAPH: GraphPreferences = {
     answer_tuning_profile: 'knowledge_answering',
     judge_model: null,
     judge_tuning_profile: 'knowledge_answering',
+    retrieval_model: null,
+    retrieval_tuning_profile: 'knowledge_answering',
     show_event_time: true,
     show_expired_at: false,
     show_superseded: false,

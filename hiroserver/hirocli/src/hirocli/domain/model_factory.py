@@ -108,8 +108,12 @@ def build_chat_model_from_tuning(
             "callbacks": cb,
         }
         if spec.supports_reasoning():
+            # OpenAI rejects reasoning_effort + function tools on /v1/chat/completions
+            # (400: "Please use /v1/responses instead") for GPT-5.x reasoning models.
+            # Route reasoning models through the Responses API so tool-calling agents work.
+            kwargs["use_responses_api"] = True
             kwargs["max_completion_tokens"] = effective.max_tokens
-            effort = _openai_reasoning_effort(effective.thinking)
+            effort = _openai_reasoning_effort(effective.thinking, spec)
             if effort is not None:
                 kwargs["reasoning_effort"] = effort
         else:
@@ -260,10 +264,48 @@ def with_structured_output_compat(model: Any, schema: type, *, include_raw: bool
     return model.with_structured_output(schema, include_raw=include_raw)
 
 
-def _openai_reasoning_effort(thinking: ThinkingLevel | None) -> str | None:
-    if thinking in (None, "off"):
+# OpenAI reasoning_effort vocabulary, ordered low→high effort. Used to clamp the neutral
+# ThinkingLevel onto whatever a given model accepts (the set varies by GPT-5 generation).
+_OPENAI_EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+
+
+def _openai_reasoning_effort(thinking: ThinkingLevel | None, spec: ModelSpec) -> str | None:
+    """Map the neutral ``ThinkingLevel`` onto a ``reasoning_effort`` the *model* accepts.
+
+    OpenAI's effort vocabulary differs by generation (GPT-5.0: minimal/low/medium/high;
+    GPT-5.4+: none/low/medium/high/xhigh — no ``minimal``), and pro tiers accept ``high`` only.
+    Sending an unsupported level 400s ("does not support 'minimal' with this model"), so we clamp
+    to the nearest value in the catalog ``reasoning_efforts``. ``off`` maps to an explicit ``none``
+    when the model has it, else omits the param so the model applies its own default effort. Models
+    without a catalog vocabulary fall back to sending the level verbatim (legacy behavior).
+    """
+    if thinking is None:
         return None
-    return thinking
+    supported = set(spec.reasoning_efforts)
+    if not supported:
+        return None if thinking == "off" else thinking
+    if thinking == "off":
+        return "none" if "none" in supported else None
+    return _clamp_openai_effort(thinking, supported)
+
+
+def _clamp_openai_effort(desired: str, supported: set[str]) -> str | None:
+    """Nearest supported OpenAI ``reasoning_effort`` to ``desired``; ties resolve to the higher.
+
+    The tie-break-toward-higher is deliberate: it lands neutral ``minimal`` on ``low`` (not
+    ``none``) for GPT-5.4+ models that dropped ``minimal``, and collapses sub-``high`` levels onto
+    ``high`` for high-only pro tiers.
+    """
+    if desired in supported:
+        return desired
+    candidates = [e for e in supported if e in _OPENAI_EFFORT_ORDER]
+    if desired not in _OPENAI_EFFORT_ORDER or not candidates:
+        return None
+    target = _OPENAI_EFFORT_ORDER.index(desired)
+    return min(
+        candidates,
+        key=lambda e: (abs(_OPENAI_EFFORT_ORDER.index(e) - target), -_OPENAI_EFFORT_ORDER.index(e)),
+    )
 
 
 def _deepseek_reasoning_effort(

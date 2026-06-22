@@ -83,6 +83,27 @@ def test_bundled_catalog_loads() -> None:
     assert cohere.free_offers[0].details_url == "https://docs.cohere.com/docs/rate-limits"
 
 
+def test_clear_cache_is_robust_when_get_model_catalog_is_monkeypatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``clear_model_catalog_cache`` must not raise when ``get_model_catalog`` is a plain function.
+
+    Regression for a cross-suite ordering bug: registering an eval test module as a plugin
+    (``pytest_plugins = ["...test_retrieval_shim"]``) promotes its autouse ``monkeypatch``-dependent
+    fixture to session scope. That reorders ``monkeypatch`` ahead of another module's autouse
+    cache-clear fixture, so the teardown calls ``clear_model_catalog_cache()`` while
+    ``get_model_catalog`` is still the patched lambda (no ``cache_clear``). The clear must no-op
+    rather than ``AttributeError``.
+    """
+    import hirocli.domain.model_catalog as mc
+
+    sentinel = get_model_catalog()
+    monkeypatch.setattr(mc, "get_model_catalog", lambda: sentinel)
+    assert not hasattr(mc.get_model_catalog, "cache_clear")
+    # Must not raise even though the patched function has no LRU cache to clear.
+    clear_model_catalog_cache()
+
+
 def test_reload_model_catalog_refreshes_process_cache() -> None:
     """``reload_model_catalog`` must clear LRU cache so a new singleton is loaded."""
     first = get_model_catalog()

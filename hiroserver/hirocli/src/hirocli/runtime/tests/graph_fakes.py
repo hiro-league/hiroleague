@@ -95,6 +95,10 @@ class ScriptedChatModel(BaseChatModel):
     The fake scripts tool calls itself (an ``AIMessage`` with ``tool_calls``), so ``bind_tools``
     just returns ``self``. Each response should carry ``usage_metadata`` when the test asserts
     the LLM-usage ledger/event.
+
+    ``with_structured_output`` returns a small runnable that consumes the NEXT scripted response
+    (sharing the same cursor) and parses its JSON content into ``schema`` — so the retrieval loop's
+    dedicated final structured turn can be scripted alongside the search turns (see ``ai_final``).
     """
 
     responses: list[Any]
@@ -108,11 +112,41 @@ class ScriptedChatModel(BaseChatModel):
     def bind_tools(self, tools: Any, **kwargs: Any) -> "ScriptedChatModel":
         return self
 
-    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
+    def _take(self) -> Any:
         i = self._cursor[0]
         msg = self.responses[min(i, len(self.responses) - 1)]
         self._cursor[0] = i + 1
-        return ChatResult(generations=[ChatGeneration(message=msg)])
+        return msg
+
+    def with_structured_output(self, schema: Any, *, include_raw: bool = False, **kwargs: Any) -> Any:
+        return _ScriptedStructured(self, schema, include_raw)
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self._take())])
+
+
+class _ScriptedStructured:
+    """Runnable returned by ``ScriptedChatModel.with_structured_output`` — parses the next scripted
+    response's JSON content into ``schema`` (mirrors langchain's ``include_raw`` envelope)."""
+
+    def __init__(self, model: "ScriptedChatModel", schema: Any, include_raw: bool) -> None:
+        self._model = model
+        self._schema = schema
+        self._include_raw = include_raw
+
+    async def ainvoke(self, messages: Any, config: Any = None, **kwargs: Any) -> Any:
+        msg = self._model._take()
+        content = getattr(msg, "content", "") or ""
+        parsed = None
+        error = None
+        if isinstance(content, str) and content.strip().startswith("{"):
+            try:
+                parsed = self._schema.model_validate_json(content)
+            except Exception as exc:  # noqa: BLE001 — surfaced via parsing_error like langchain
+                error = exc
+        if self._include_raw:
+            return {"raw": msg, "parsed": parsed, "parsing_error": error}
+        return parsed
 
 
 def ai_text(text: str, *, input_tokens: int = 10, output_tokens: int = 5) -> AIMessage:
@@ -133,6 +167,18 @@ def ai_tool_call(name: str, args: dict[str, Any], *, call_id: str = "call_1") ->
         content="",
         tool_calls=[{"name": name, "args": args, "id": call_id}],
         usage_metadata={"input_tokens": 8, "output_tokens": 3, "total_tokens": 11},
+    )
+
+
+def ai_final(answer: str, *, op: str = "none", **args: Any) -> AIMessage:
+    """A final-turn structured reply: an ``AIMessage`` whose content is the ``RetrievalFinal`` JSON
+    the dedicated structured turn parses (``{"reduce": {"op", "args"}, "answer"}``)."""
+    import json as _json
+
+    payload = {"reduce": {"op": op, "args": dict(args)}, "answer": answer}
+    return AIMessage(
+        content=_json.dumps(payload),
+        usage_metadata={"input_tokens": 8, "output_tokens": 4, "total_tokens": 12},
     )
 
 
