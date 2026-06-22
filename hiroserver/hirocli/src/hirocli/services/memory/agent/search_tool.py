@@ -90,21 +90,32 @@ def _serialize_item(item: AccumulatedItem) -> dict[str, Any]:
     score_out = float(score) if isinstance(score, (int, float)) else None
 
     if item.kind == "edge":
+        # Fidelity fix (items 1,3,5): surface the relation name and the `stated` (said) date to the
+        # agent — both live in the accumulated row but were dropped here, leaving the agent unable to
+        # tell e.g. PLANS_TO_WATCH from IS_AVAILABLE_ON, and date-blind on temporal questions.
+        # `superseded` is no longer emitted (retirement is conveyed by `invalid_at`/"until").
         row: dict[str, Any] = {
             "kind": "edge",
             "id": item.uuid,
             "fact": (payload.get("fact") or payload.get("memory") or "").strip(),
             "score": score_out,
         }
+        relation = str(payload.get("name") or "").strip()
+        if relation:
+            row["relation"] = relation
         chunk_id = str(payload.get("chunk_id") or "").strip()
         if chunk_id:
             row["source_episode"] = chunk_id
-        if "valid_at" in payload:
-            row["valid_at"] = payload.get("valid_at") or None
-        if "invalid_at" in payload:
-            row["invalid_at"] = payload.get("invalid_at") or None
-        if "superseded" in payload:
-            row["superseded"] = bool(payload.get("superseded"))
+        stated = str(payload.get("stated") or "").strip()
+        if stated:
+            row["stated"] = stated
+        # Eval vocabulary (item 6): surface dates under the SAME names the answerer prompt uses —
+        # `as_of` = valid_at (became true, always present now), `until` = invalid_at (stopped being
+        # true, only when the model asked for show_expiry). Emit each only when it has a value.
+        if payload.get("valid_at"):
+            row["as_of"] = payload.get("valid_at")
+        if payload.get("invalid_at"):
+            row["until"] = payload.get("invalid_at")
         return row
 
     if item.kind == "entity":
@@ -112,13 +123,21 @@ def _serialize_item(item: AccumulatedItem) -> dict[str, Any]:
         summary = str(payload.get("summary") or payload.get("memory") or "").strip()
         if summary.startswith(f"About {name}:"):
             summary = summary[len(f"About {name}:") :].strip()
-        return {
+        # Fidelity fix (item 2): surface the entity TYPE — present in the row but dropped here, so
+        # the agent couldn't distinguish a catalog/list entity from a subject profile.
+        row = {
             "kind": "entity",
             "id": item.uuid,
             "name": name,
             "summary": summary,
             "score": score_out,
         }
+        entity_type = str(payload.get("entity_type") or "").strip()
+        # Drop the base "Entity" label — it means "no specific ontology type", so surfacing it is
+        # noise that doesn't help the agent distinguish a typed subject from an untyped one.
+        if entity_type and entity_type != "Entity":
+            row["entity_type"] = entity_type
+        return row
 
     text = str(payload.get("memory") or payload.get("content") or "").strip()
     row = {
@@ -127,9 +146,10 @@ def _serialize_item(item: AccumulatedItem) -> dict[str, Any]:
         "text": text,
         "score": score_out,
     }
-    valid_at = payload.get("valid_at")
-    if valid_at:
-        row["valid_at"] = valid_at
+    # Eval vocabulary (item 6): an episode's single timestamp IS its `stated` (said) date.
+    stated = payload.get("valid_at")
+    if stated:
+        row["stated"] = stated
     return row
 
 

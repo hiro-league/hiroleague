@@ -17,6 +17,7 @@ def _edge(
     superseded: bool = False,
     name: str = "",
     goal: str = "",
+    target_uuid: str = "",
 ) -> dict:
     row: dict = {
         "kind": "fact",
@@ -32,6 +33,8 @@ def _edge(
         row["name"] = name
     if goal:
         row["goal"] = goal
+    if target_uuid:
+        row["target_uuid"] = target_uuid
     return row
 
 
@@ -58,7 +61,7 @@ def _load(acc: Accumulator, hits: list[dict], *, sid: int = 1, goal: str = "") -
     acc.merge(hits, search_id=sid, goal=goal)
 
 
-def test_distinct_count_counts_only_named_kind() -> None:
+def test_distinct_count_counts_distinct_entities_but_keeps_all_kinds() -> None:
     acc = Accumulator()
     _load(acc, [_edge(f"e{i}", fact=f"fact {i}", valid_at="2024-01-01") for i in range(5)])
     _load(
@@ -72,10 +75,33 @@ def test_distinct_count_counts_only_named_kind() -> None:
 
     reduced = apply_reduce(acc, op="distinct_count", args={"kind": "entity"})
 
+    assert reduced.summary["op"] == "distinct_count"  # Bug C: op present so it renders
     assert reduced.summary["count"] == 2
     assert reduced.summary["names"] == ["Alice", "Bob"]
-    assert len(reduced.items) == 2
-    assert all(item.kind == "entity" for item in reduced.items)
+    # Bug A: the answerer receives ALL kinds (5 edges + 2 entities), not just the counted kind.
+    assert len(reduced.items) == 7
+    assert {item.kind for item in reduced.items} == {"edge", "entity"}
+
+
+def test_distinct_count_edges_dedupe_by_resolved_object() -> None:
+    """Bug B: facts about the SAME object (target node) count once — not one per row."""
+    acc = Accumulator()
+    _load(
+        acc,
+        [
+            _edge("e1", fact='Plans to watch "Coco"', valid_at="2024-03-12", target_uuid="coco"),
+            _edge("e2", fact='"Coco" is on Disney+', valid_at="2024-03-12", target_uuid="coco"),
+            _edge("e3", fact='Plans to watch "Soul"', valid_at="2024-03-12", target_uuid="soul"),
+        ],
+    )
+    _load(acc, [_entity("n1", name="Pixar")], sid=2)
+
+    reduced = apply_reduce(acc, op="distinct_count", args={"kind": "edge"})
+
+    assert reduced.summary["op"] == "distinct_count"
+    assert reduced.summary["count"] == 2  # coco + soul, not 3 rows
+    # Bug A: all kinds reach the answerer (3 edges + 1 entity).
+    assert len(reduced.items) == 4
 
 
 def test_order_by_time_sorts_edges_and_episodes_skipping_entities() -> None:

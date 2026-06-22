@@ -145,6 +145,51 @@ async def test_answer_from_context_message_layout() -> None:
     assert "Otto is the mascot drone" in human
 
 
+def test_recall_metadata_survives_search_to_answer_render() -> None:
+    """Cross-hop fidelity (item 13): relation / entity type / stated / as_of / until survive the
+    hops accumulator → reduce → recall-row adaptation → answer-prompt render — the missing-hop
+    class of bug that starved/flattened the answerer's context."""
+    from hirocli.services.eval.judge import RecallRenderOptions
+    from hirocli.services.memory.agent.accumulator import Accumulator
+    from hirocli.services.memory.agent.reduce import accumulated_item_to_recall_row, apply_reduce
+
+    acc = Accumulator()
+    acc.merge(
+        [
+            {
+                "kind": "fact", "uuid": "e1", "memory": "...",
+                "fact": 'Crystal plans to watch "Coco"', "name": "PLANS_TO_WATCH",
+                "stated": "2024-03-12", "valid_at": "2024-03-12", "invalid_at": "2024-04-01",
+            },
+            {
+                "kind": "entity", "uuid": "n1", "name": "Pixar", "entity_type": "Organization",
+                "summary": "makes films", "memory": "makes films",
+            },
+            {"kind": "episode", "uuid": "ep1", "memory": "I love Coco", "valid_at": "2024-03-12"},
+        ],
+        search_id=1,
+        goal="",
+    )
+
+    reduced = apply_reduce(acc, op="none")
+    rows = [accumulated_item_to_recall_row(i) for i in reduced.items]
+    rendered = format_recall_context(
+        rows, RecallRenderOptions(show_event_time=True, show_expired_at=True)
+    )
+
+    # all three kinds reach the answerer (no kind dropped on the way)
+    assert "Relevant Facts" in rendered
+    assert "Relevant Entities" in rendered
+    assert "Relevant Messages" in rendered
+    # and the metadata survives, in the answerer's vocabulary
+    assert "PLANS_TO_WATCH" in rendered            # relation
+    assert "[2024-03-12]" in rendered              # stated (leading [DATE])
+    assert "as of: 2024-03-12" in rendered         # valid_at → as of
+    assert "until: 2024-04-01" in rendered         # invalid_at → until
+    assert "Pixar (Organization)" in rendered      # entity type
+    assert "I love Coco" in rendered               # episode body
+
+
 @pytest.mark.asyncio
 async def test_judge_maps_verdict_to_mark() -> None:
     m = _FakeModel(verdict="pass")

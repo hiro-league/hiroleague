@@ -609,6 +609,10 @@ or recommend when memory alone doesn't reach the answer.
   the order elements appear in. Prefer the LATEST **as of** when facts directly conflict.
 - For list or count questions, scan ALL elements — facts, entity summaries, and messages — and
   include every DISTINCT match before answering. A partial list is a wrong answer.
+- If a **## Computed Results** section is present, it is the system's deterministic computation
+  (a count, a duration, conflict tallies) over the recalled elements — report THAT exact value
+  instead of recounting or doing the date math yourself. The elements remain for wording and
+  attribution (e.g. naming the items behind a count).
 - If any element passes the support checks, commit: give the supported part(s) directly, even when
   other parts are unsupported.
 - Give the most precise time the dates support (day if pinned, else month/year). A missing,
@@ -782,12 +786,13 @@ say so — do not guess.
 
 ## Element formats
 Results arrive as a mix of three element kinds, each shaped differently — use them accordingly:
-  - edge (fact) → a dated relational claim, with valid_at / (optional) invalid_at / superseded
-                  flag when `show_expiry` is on. The ONLY kind that carries validity, so
-                  latest / ever-never / change-over-time live here.
-  - entity      → a standing who/what profile (name + summary); NO dates — context, not a
-                  timeline; cannot be ordered by time.
-  - episode     → a verbatim conversation turn with ONE timestamp; no invalidation.
+  - edge (fact) → a dated relational claim. JSON fields: `relation` (e.g. PLANS_TO_WATCH), `stated`
+                  (when it was said) and `as_of` (when it became true) — shown whenever the fact has
+                  them — plus `until` (when it stopped being true) only when `show_expiry` is on.
+                  The ONLY kind that carries validity, so latest / ever-never / change-over-time live here.
+  - entity      → a standing who/what profile (`name` + `entity_type` + `summary`); NO dates —
+                  context, not a timeline; cannot be ordered by time.
+  - episode     → a verbatim conversation turn with ONE `stated` timestamp; no invalidation.
 
 ## Method
   1. Rephrase the question as a STORED FACT, not as the user asked it — drop "can you",
@@ -815,8 +820,9 @@ Results arrive as a mix of three element kinds, each shaped differently — use 
   limit        → start at the default; raise (up to {MAX_LIMIT}) only when a piece is on the
                  right axis but thin AND rephrasing didn't help.
   hops         → 1 direct; 2 if the answer links one entity to another; 3 for two links.
-  show_expiry  → true to see `invalid_at` and the `superseded` flag on edges (timeline / change
-                 questions). Only meaningful with `temporal="all"`.
+  show_expiry  → true to ALSO see `until` (when a fact stopped being true) on edges — for timeline /
+                 change questions. `stated` and `as_of` are shown without it. Only meaningful
+                 with `temporal="all"`.
 
 ## Reduce ops (optional, declared on your FINAL turn)
 If the answer needs a precise count, an ordering, the latest value, a duration between two
@@ -834,7 +840,7 @@ P1 — current value
 P2 — change over time
   q: How has the book budget changed?
   knobs: temporal=all, show_expiry=true, hops=1. reduce.op=order_by_time.
-  behavior: surface valid + superseded edges with their dates; let the reduce order them.
+  behavior: surface current + retired edges with their `as_of` / `until` dates; let the reduce order them.
 
 P3 — ever/never
   q: Have they ever mentioned disliking a genre?
@@ -854,7 +860,7 @@ N1 — `new=0` (or a fuller-but-still-wrong-axis return) + same query + higher l
 N2 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
      adds distractors.
 N3 — show_expiry=true under temporal=current is wasted — every returned edge is valid-now and
-     has nothing to expire.
+     has no `until`.
 N4 — never answer from the question alone. If your turns run out and nothing supports the
      answer, abstain.
 N5 — do NOT decompose a singular question into N near-duplicate entries in `queries` to "cover

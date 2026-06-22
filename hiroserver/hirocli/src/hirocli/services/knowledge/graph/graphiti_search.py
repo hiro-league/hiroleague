@@ -541,9 +541,14 @@ async def search_chunk_ids(
             # relative phrasing in the supporting passage to an absolute date.
             dated = _fact_with_date(fact, valid_at, invalid_at)
             facts.append(dated)
-            # Parallel structured row (the recalled-facts table reads these). Validity fields are
-            # optional: the retrieval-agent tool sets show_expiry=true when the model needs
-            # invalid_at / superseded on edges; default omits them (agentic-memory P0).
+            # Parallel structured row (the recalled-facts table reads these). Fidelity fix
+            # (retrieval-agent items 4-5): ``valid_at`` ("as of") is part of the fact's identity and
+            # the agent's temporal axis, so it is ALWAYS surfaced — it was wrongly gated behind
+            # ``show_expiry``, leaving the agent date-blind on temporal questions whenever it had
+            # expiry off. ``show_expiry`` now gates ONLY ``invalid_at`` ("until"). ``superseded`` is
+            # dropped from the row: fact retirement is conveyed by ``until`` (invalid_at), matching
+            # the answerer's vocabulary (the ``superseded`` local stays — it still drives the
+            # temporal-current filter + the ledger RankedFact above).
             row: dict[str, Any] = {
                 "kind": "fact",
                 "memory": dated,
@@ -554,11 +559,10 @@ async def search_chunk_ids(
                 "target_uuid": target_uuid,
                 "uuid": edge_uuid,
                 "score": score,
+                "valid_at": valid_at,
             }
             if show_expiry:
-                row["valid_at"] = valid_at
                 row["invalid_at"] = invalid_at
-                row["superseded"] = superseded
             fact_rows.append(row)
 
     # Statement date per fact = its source episode's reference_time (when the turn was SAID).

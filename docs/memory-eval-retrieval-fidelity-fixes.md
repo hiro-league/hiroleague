@@ -134,6 +134,52 @@ unit-testable.
 | 12 | **Prompt↔payload parity test** | new test | assert `_serialize_item` keys == the fields the retrieval prompt names | prevent silent drift like today's |
 | 13 | **Field-fidelity test across hops** | new test | assert relation/type/stated/dates survive search → accumulator → reduce → `eval_answer` | the missing-hop class of bug |
 
+### Implementation status
+
+- **Items 1–5: ✅ done.** `_serialize_item` emits `relation`, `entity_type`, `stated`; `valid_at`
+  ungated (always surfaced), `invalid_at` behind `show_expiry`; `superseded` dropped from row builder
+  + serializer.
+- **Items 6–10: ✅ done.**
+  - **6 (vocabulary):** agent-facing keys now match the answerer — edge `valid_at→as_of`,
+    `invalid_at→until`; episode `valid_at→stated`.
+  - **7 (prompt):** retrieval-agent prompt (`preferences.py` default) Element-formats + Knobs +
+    P2/N3 rewritten to `relation` / `stated` / `as of` / `until` / entity `type`; the `superseded`
+    references are gone.
+  - **8 (Bug A):** `_distinct_count` returns the FULL deduped set (all kinds) — no more starving the
+    answerer to one kind.
+  - **9 (Bug B):** edges dedupe by resolved object (`_edge_distinct_key` → `target_uuid`, fallback
+    normalized fact text); entities by name; episodes are uuid-distinct turns.
+  - **10 (Bug C):** the `distinct_count` summary now carries `op` so `## Computed Results` renders.
+  - Tests: added/updated in `test_search_tool.py`, `test_graphiti_search.py`, `test_reduce.py`;
+    full memory + eval + graph + domain suites green (348 + 134 passed).
+- **Item 9 decision (resolves the §8 open item):** "distinct edge" = distinct **relation target**
+  (`target_uuid`), i.e. the object the fact is about. This is deterministic and beats `len(rows)`,
+  but it is **not type-filtered** — it counts distinct objects of any type, not "distinct movies".
+  A typed count (e.g. `distinct_count` scoped to entities of a given type) is a larger change, left
+  out of scope. ⚠️ **Consequence:** `msr_01` may still not land exactly on 13 via
+  `distinct_count{kind:edge}` — reaching the gold also needs the model to pick the right
+  kind/relation (helped by items 6–7) and, ultimately, typed counting. Confirm at rerun (§9).
+- **Items 11–13: ✅ done.**
+  - **11 (answer-prompt clause):** `DEFAULT_MEMORY_EVAL_ANSWER_PROMPT` now instructs the answerer to
+    report a `## Computed Results` value (count/duration/tallies) verbatim instead of recomputing —
+    so the deterministic reduce result is actually trusted.
+  - **12 (parity test):** `test_serialized_field_names_documented_in_retrieval_prompt` asserts every
+    metadata field the agent receives (`relation`/`stated`/`as_of`/`until`/`entity_type`) is
+    documented by exact name in the retrieval prompt — guards against the silent prompt↔payload
+    drift that caused the original bug.
+  - **13 (cross-hop fidelity test):** `test_recall_metadata_survives_search_to_answer_render`
+    asserts relation/type/stated/as_of/until and all three element kinds survive accumulator →
+    reduce → recall-row → answer render.
+- **Polish (findings 1–3 from the code review): ✅ done** — prompt uses literal JSON keys
+  (`as_of`/`until`/`entity_type`), "always shown" softened to "when present", and the base
+  `"Entity"` type label is dropped as noise.
+- **Findings 4 (computational answers feed all kinds): expected, watch at rerun.**
+- **Still dead, clean up later (touches prefs + admin UI, so deferred):**
+  `RecallRenderOptions.show_superseded` (`judge.py:85`) and the `graph.eval.show_superseded` pref —
+  no row carries `superseded` anymore, so the toggle is inert.
+- **All 13 items + review polish landed.** Remaining work is the **§9 verification rerun**
+  (`ie_01` regression + `msr_01`), not code.
+
 ---
 
 ## 6. Decisions (from review)

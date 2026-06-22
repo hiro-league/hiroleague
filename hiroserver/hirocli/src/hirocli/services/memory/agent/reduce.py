@@ -100,6 +100,20 @@ def _edge_text(item: AccumulatedItem) -> str:
     return str(payload.get("fact") or payload.get("memory") or "").strip()
 
 
+def _edge_distinct_key(item: AccumulatedItem) -> str:
+    """Distinct-object key for an edge (Bug B): the resolved OBJECT node (the relation's target)
+    identifies the thing the fact is about, so several facts about the SAME object collapse to one
+    (e.g. "plans to watch Coco" + "Coco is on Disney+" → one Coco). Falls back to the normalized
+    fact text when no target uuid is present (legacy/text-only rows). NOTE: this counts distinct
+    relation *targets*; it does not type-filter (e.g. movies vs other objects) — a typed count is a
+    separate, larger change, deliberately out of scope here."""
+    target = str(item.payload.get("target_uuid") or "").strip()
+    if target:
+        return f"t:{target}"
+    text = _edge_text(item).lower()
+    return f"f:{text}" if text else ""
+
+
 def _entity_name(item: AccumulatedItem) -> str:
     payload = item.payload
     return str(payload.get("name") or payload.get("memory") or "").strip()
@@ -143,30 +157,49 @@ def _sort_timed_items(items: list[AccumulatedItem]) -> list[AccumulatedItem]:
     return timed + untimed
 
 
+def _time_sorted_all_kinds(by_kind: dict[str, list[AccumulatedItem]]) -> list[AccumulatedItem]:
+    """Edges + episodes time-sorted; entities (no timeline) trail in insertion order. Shared by the
+    reduce ops that present the full recalled set so they order it identically — and so callers that
+    already hold ``items_by_kind()`` need not re-fetch it (F4)."""
+    return _sort_timed_items(by_kind["edge"] + by_kind["episode"]) + by_kind["entity"]
+
+
 def _dedupe_and_time_sort(acc: Accumulator) -> ReducedSet:
     """Baseline presentation: dedupe is already in the accumulator; time-sort edges + episodes."""
-    by_kind = acc.items_by_kind()
-    timed_block = _sort_timed_items(by_kind["edge"] + by_kind["episode"])
-    items = timed_block + by_kind["entity"]
-    return ReducedSet(items=items, summary={"op": "none"})
+    return ReducedSet(items=_time_sorted_all_kinds(acc.items_by_kind()), summary={"op": "none"})
 
 
 def _order_by_time(acc: Accumulator) -> ReducedSet:
-    by_kind = acc.items_by_kind()
-    items = _sort_timed_items(by_kind["edge"] + by_kind["episode"]) + by_kind["entity"]
-    return ReducedSet(items=items, summary={"op": "order_by_time"})
+    return ReducedSet(items=_time_sorted_all_kinds(acc.items_by_kind()), summary={"op": "order_by_time"})
 
 
 def _distinct_count(acc: Accumulator, *, kind: str) -> ReducedSet:
+    """Count DISTINCT things of ``kind`` and hand the answerer the FULL recalled set.
+
+    Three fixes vs. the original:
+      • Bug A — never starve the answerer to one kind: ``items`` is the full deduped set across all
+        kinds (so entities/episodes survive a ``distinct_count{kind:edge}``); the reduce ANNOTATES
+        with a count, it does not replace the context.
+      • Bug B — count distinct OBJECTS, not raw rows: edges dedupe by resolved object
+        (``_edge_distinct_key``), entities by name; episodes are inherently distinct turns.
+      • Bug C — the summary carries ``op`` so the answer prompt's computed block can render it.
+    """
     target = _normalize_target_kind(kind)
-    items = list(acc.items_by_kind()[target])
+    by_kind = acc.items_by_kind()  # F4: fetch once, reuse for both the count and the full set
+    target_items = by_kind[target]
+    summary: dict[str, Any] = {"op": "distinct_count", "kind": target}
     if target == "entity":
-        labels = [_entity_name(item) for item in items if _entity_name(item)]
-        unique = list(dict.fromkeys(labels))
-        summary = {"count": len(unique), "names": unique, "kind": target}
-    else:
-        summary = {"count": len(items), "kind": target}
-    return ReducedSet(items=items, summary=summary)
+        names = list(dict.fromkeys(n for n in (_entity_name(i) for i in target_items) if n))
+        summary["count"] = len(names)
+        summary["names"] = names
+    elif target == "episode":
+        summary["count"] = len(target_items)  # episodes are uuid-distinct turns
+    else:  # edge → distinct resolved objects
+        keys = {k for k in (_edge_distinct_key(i) for i in target_items) if k}
+        summary["count"] = len(keys)
+    # Bug A: the answerer receives every recalled element (all kinds, time-sorted) — same set as
+    # ``op:none`` — with the computed count alongside in the summary.
+    return ReducedSet(items=_time_sorted_all_kinds(by_kind), summary=summary)
 
 
 def _latest(

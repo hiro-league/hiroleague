@@ -238,20 +238,22 @@ async def test_recipe_constant_not_mutated() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_chunk_ids_show_expiry_false_omits_validity() -> None:
+async def test_search_chunk_ids_show_expiry_false_keeps_valid_at_hides_until() -> None:
+    # Fidelity fix (item 4): valid_at ("as of") is ALWAYS surfaced, even with show_expiry off;
+    # only invalid_at ("until") stays gated. superseded is dropped entirely (item 5).
     g = _FakeGraphiti([_Edge(["c1"], "Adam lives in Boston", invalid_at=_past())])
     exp = await search_chunk_ids(
         g, "history", group_id="kb_main", temporal="all", show_expiry=False
     )
     assert exp.fact_rows
     row = exp.fact_rows[0]
-    assert "valid_at" not in row
+    assert "valid_at" in row
     assert "invalid_at" not in row
     assert "superseded" not in row
 
 
 @pytest.mark.asyncio
-async def test_search_chunk_ids_show_expiry_true_emits_validity_on_edges() -> None:
+async def test_search_chunk_ids_show_expiry_true_emits_until_on_edges() -> None:
     past = _past()
     g = _FakeGraphiti([_Edge(["c1"], "Adam lived in Boston", invalid_at=past)])
     exp = await search_chunk_ids(
@@ -261,7 +263,8 @@ async def test_search_chunk_ids_show_expiry_true_emits_validity_on_edges() -> No
     row = exp.fact_rows[0]
     assert row["valid_at"] == ""
     assert row["invalid_at"] == past.date().isoformat()
-    assert row["superseded"] is True
+    # superseded dropped (item 5): retirement is conveyed by `until` (invalid_at).
+    assert "superseded" not in row
 
 
 @pytest.mark.asyncio
@@ -306,7 +309,10 @@ async def test_search_chunk_ids_show_expiry_only_on_edges() -> None:
         scope="edges_nodes_episodes",
         show_expiry=True,
     )
-    assert exp.fact_rows[0]["superseded"] is False
+    # superseded is dropped from fact rows (item 5); invalid_at ("until") shows on edges under
+    # show_expiry but never on nodes/episodes.
+    assert "superseded" not in exp.fact_rows[0]
+    assert "invalid_at" in exp.fact_rows[0]
     assert "superseded" not in exp.node_rows[0]
     assert "invalid_at" not in exp.node_rows[0]
     assert "superseded" not in exp.episode_rows[0]
