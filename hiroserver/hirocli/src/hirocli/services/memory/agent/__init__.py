@@ -1,19 +1,18 @@
 """Agentic memory-retrieval building blocks (eval recall leg)."""
 
 from .accumulator import AccumulatedItem, Accumulator
-from .reduce import ReducedSet, apply_reduce, accumulated_item_to_recall_row
+from .presentation import accumulated_item_to_recall_row, present_accumulator
 from .retrieval_agent import RetrievalResult, run_retrieval
 from .search_tool import SearchMemoryArgs, SearchMemoryResult, SearchMemoryTool
 
 __all__ = [
     "AccumulatedItem",
     "Accumulator",
-    "ReducedSet",
     "RetrievalResult",
     "SearchMemoryArgs",
     "SearchMemoryResult",
     "SearchMemoryTool",
     "accumulated_item_to_recall_row",
-    "apply_reduce",
+    "present_accumulator",
     "run_retrieval",
 ]

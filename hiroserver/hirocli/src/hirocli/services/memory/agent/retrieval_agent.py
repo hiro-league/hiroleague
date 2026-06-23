@@ -1,108 +1,60 @@
 """Bounded retrieval-agent loop for the memory-eval recall leg (P3, refactored P9, P10).
 
-Two phases, deliberately split because only OpenAI exposes "tools + a fixed response schema in
-one call" — Anthropic/Gemini/DeepSeek/Ollama do not (verified against the installed integrations):
+The model is bound with ``search_memory`` (``bind_tools``) and runs up to ``max_agent_turns``
+turns, emitting ONE ``search_memory`` call per turn (whose ``queries`` list holds the
+decomposition; the tool runs the sub-queries concurrently). The loop ends two ways:
 
-1. **Search loop** — the model is bound with ``search_memory`` (``bind_tools``) and runs up to
-   ``max_agent_turns - 1`` turns, emitting ONE ``search_memory`` call per turn (whose ``queries``
-   list holds the decomposition; the tool runs the sub-queries concurrently). It stops early by
-   emitting a turn with no tool call.
-2. **Final structured turn** — ONE dedicated call with NO tools, via ``with_structured_output``,
-   yields :class:`RetrievalFinal` = the declared ``reduce`` op + a free-text ``answer``. Because it
-   binds no competing tool, structured output works on every provider (DeepSeek thinking mode falls
-   back to ``json_mode`` inside ``with_structured_output_compat`` — hence the JSON shape is spelled
-   out in ``_FINAL_TURN_INSTRUCTION``, since field descriptions never reach the model there).
+- **Exit A (natural stop)** — the model emits a turn with NO tool call; that turn's content IS its
+  final answer, so we reuse it (no extra call).
+- **Exit B (budget exhausted)** — the loop hits the turn cap while still searching; there is no
+  answer turn yet, so we run ONE tool-free ``_final_answer_turn`` to compose an answer over the
+  full accumulator.
 
-The caller (``runner_memory``) runs the declared reduce over the accumulator and feeds the result
-to the answerer; the loop's own ``answer_text`` is kept for the trace/parity but the eval re-answers
-from the reduced context.
+Reduce was removed (2026-06): the agent no longer declares a reduce op. The caller
+(``runner_memory``) hands the accumulator (deduped/time-sorted) and this ``answer_text`` to the
+answerer.
 """
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_args
+from typing import Any
 
 from hiro_commons.log import Logger
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
 
 from hirocli.domain.preferences import RetrievalAgentLimits
 from hirocli.services.memory.agent.accumulator import Accumulator
-from hirocli.services.memory.agent.reduce import ReduceOp
 from hirocli.services.memory.agent.search_tool import (
     SearchMemoryArgs,
     SearchMemoryQuery,
     SearchMemoryTool,
+    render_search_result_text,
 )
 from hirocli.services.memory.graphiti_conversation import GraphitiConversationMemory
 
 log = Logger.get("SVC.MEMORY.AGENT.RETRIEVAL")
 
-_VALID_REDUCE_OPS = frozenset(get_args(ReduceOp))
-
-
-class ReduceArgs(BaseModel):
-    """Op-specific args for a declared reduce (typed, NOT a free-form dict — an open object breaks
-    strict json-schema structured output on Gemini/OpenAI). Unused fields stay ``None`` and are
-    dropped before reaching ``apply_reduce``."""
-
-    kind: str | None = None  # distinct_count: which kind to count (edge | entity | episode)
-    subject: str | None = None  # latest: subject filter
-    attribute: str | None = None  # latest: attribute filter
-    anchors: list[str] | None = None  # date_diff: the two anchor descriptions
-
-
-class ReduceSpec(BaseModel):
-    op: ReduceOp = "none"
-    args: ReduceArgs = Field(default_factory=ReduceArgs)
-
-
-class RetrievalFinal(BaseModel):
-    """The dedicated final turn's structured output (design §5.4): the model's declared reduce op
-    plus its free-text answer. Same shape across providers — read on every terminal turn."""
-
-    reduce: ReduceSpec = Field(default_factory=ReduceSpec)
-    answer: str = ""
-
-
-# Appended as the last user turn before the structured call. Carries the AUTHORITATIVE JSON shape
-# (json_mode/DeepSeek needs it spelled out — pydantic field descriptions don't reach the model) and
-# flips the model from "search" to "finalize". Keep in sync with RetrievalFinal / reduce ops.
-_FINAL_TURN_INSTRUCTION = (
-    "You have finished searching. Using ONLY what the searches above returned, produce your final "
-    "response as a single JSON object:\n"
-    '{"reduce": {"op": "<none|distinct_count|order_by_time|latest|date_diff|keep_conflicting>", '
-    '"args": {…}}, "answer": "<concise answer, or \'No information available.\' if unsupported>"}\n'
-    "Pick the reduce op that matches the question's axis and let the system compute it — do NOT "
-    "count, order, or do date math yourself:\n"
-    "  count of distinct things → distinct_count, args {\"kind\": \"edge|entity|episode\"}\n"
-    "  ordering / timeline       → order_by_time, args {}\n"
-    "  current value of something that changed → latest, args {\"subject\": \"…\", \"attribute\": \"…\"}\n"
-    "  duration between two events → date_diff, args {\"anchors\": [\"…\", \"…\"]}\n"
-    "  both sides of an ever/never → keep_conflicting, args {}\n"
-    "  anything else → none, args {}"
+# Appended as the last user turn for the exit-B answer call (tool-free) so the model composes a
+# final answer over everything it found instead of searching again.
+_FINAL_ANSWER_INSTRUCTION = (
+    "You have finished searching. Using ONLY what the searches above returned, give your final "
+    "answer — concise, or 'No information available.' if the searches don't support one."
 )
 
 
 @dataclass
 class RetrievalResult:
     accumulator: Accumulator
-    reduce_op: str
-    reduce_args: dict[str, Any]
     answer_text: str
     transcript: list[dict[str, Any]] = field(default_factory=list)
     # M2: count of failed sub-queries / tool errors across the loop, so the caller can mark the
     # memory_recall ledger node — otherwise a recall that returned nothing because every search
     # errored is indistinguishable from one that genuinely found nothing.
     error_count: int = 0
-    # Set by the caller after it runs ``apply_reduce`` — the deterministic computed result
-    # (count / days / conflict tallies) so the answerer can use it instead of recomputing.
-    reduce_summary: dict[str, Any] = field(default_factory=dict)
 
 
 def _tool_call_id(call: dict[str, Any]) -> str:
@@ -168,55 +120,6 @@ def _normalize_reply_content(content: Any) -> str:
     return str(content or "")
 
 
-def _coerce_final(parsed: Any, raw: Any) -> tuple[str, dict[str, Any], str]:
-    """Normalize the structured final turn into (op, args, answer), tolerating every provider shape.
-
-    ``parsed`` is a :class:`RetrievalFinal` (json_schema/function_calling), a plain ``dict``
-    (json_mode), or ``None`` (parse failed) — in which case we fall back to the raw message text.
-    An unknown op degrades to ``none`` rather than letting ``apply_reduce`` raise downstream."""
-    op = "none"
-    args: dict[str, Any] = {}
-    answer = ""
-
-    if isinstance(parsed, RetrievalFinal):
-        op = parsed.reduce.op
-        args = parsed.reduce.args.model_dump(exclude_none=True)
-        answer = parsed.answer
-    else:
-        data = parsed if isinstance(parsed, dict) else None
-        if data is None and raw is not None:
-            content = _normalize_reply_content(getattr(raw, "content", "")).strip()
-            if content.startswith("{"):
-                try:
-                    data = json.loads(content)
-                except json.JSONDecodeError:
-                    data = None
-            if data is None:
-                # No JSON at all → treat the whole message as the answer, no reduce.
-                return "none", {}, content
-        if isinstance(data, dict):
-            reduce = data.get("reduce")
-            if isinstance(reduce, dict):
-                op = str(reduce.get("op") or "none")
-                # Args live NESTED under "args" — the shape _FINAL_TURN_INSTRUCTION asks for and the
-                # pydantic path reads. Read that first so a compliant json_mode reply isn't misread
-                # as args={"args": {...}} (which silently dropped real args → wrong/failed reduce);
-                # fall back to flat siblings of "op" for models that emit the older inline shape.
-                nested = reduce.get("args")
-                if isinstance(nested, dict):
-                    args = {k: v for k, v in nested.items() if v is not None}
-                else:
-                    args = {
-                        k: v for k, v in reduce.items() if k not in ("op", "args") and v is not None
-                    }
-            answer = str(data.get("answer") or "")
-
-    if op not in _VALID_REDUCE_OPS:
-        log.warning("⚠️ retrieval — unknown reduce op %r from model; using 'none'", op)
-        op = "none"
-    return op, args, str(answer or "")
-
-
 def build_search_memory_langchain_tool(tool: SearchMemoryTool) -> StructuredTool:
     """Wrap :class:`SearchMemoryTool` for ``model.bind_tools``."""
 
@@ -246,7 +149,10 @@ async def _invoke_search_tool(
     try:
         payload = await lc_tool.ainvoke(args)
         if isinstance(payload, dict):
-            return payload, json.dumps(payload, ensure_ascii=False, default=str)
+            # Render the result as plain #facts/#entities/#episodes text, not JSON: ~30% fewer
+            # context tokens at equal fidelity, and the result is re-sent every later turn. The dict
+            # (`payload`) still flows to the trace below, so the trajectory UI/ledger are unchanged.
+            return payload, render_search_result_text(payload)
         return None, str(payload)
     except Exception as exc:
         return None, f"Error: {exc}"
@@ -342,39 +248,23 @@ async def _verbatim_fallback_search(
     return sum(int(sub.get("new") or 0) for sub in payload.get("sub_results") or [])
 
 
-async def _final_structured_turn(
+async def _final_answer_turn(
     *,
     model: BaseChatModel,
     messages: list[AnyMessage],
-) -> tuple[str, dict[str, Any], str, Any]:
-    """One dedicated, tool-free call → declared reduce op + answer (design §5.4, P10).
+) -> tuple[str, Any]:
+    """Exit B only: ONE tool-free call → a plain final answer over the accumulator. We invoke the
+    tools-UNBOUND model (not ``search_model``) so it cannot search again and is forced to answer —
+    provider-uniform, no structured-output schema needed. Never raises (degrades to empty answer).
 
-    Routed through ``with_structured_output_compat`` so DeepSeek thinking mode (which 400s on the
-    forced tool_choice) falls back to ``json_mode``; every other provider uses native json_schema.
-    Never raises — a failed/empty structured turn degrades to ``none`` + empty answer.
-
-    Returns the raw reply message (4th element) too, so the caller can fold this turn's token usage
-    into the ledger — ``include_raw=True`` keeps ``usage_metadata`` on ``out["raw"]``."""
-    from hirocli.domain.model_factory import with_structured_output_compat
-
-    structured = with_structured_output_compat(model, RetrievalFinal, include_raw=True)
-    final_messages = [*messages, HumanMessage(content=_FINAL_TURN_INSTRUCTION)]
+    Returns ``(answer_text, raw_reply)`` — the raw reply carries ``usage_metadata`` for the ledger."""
+    final_messages = [*messages, HumanMessage(content=_FINAL_ANSWER_INSTRUCTION)]
     try:
-        out = await structured.ainvoke(final_messages, config={"run_name": "retrieval_final"})
+        reply = await model.ainvoke(final_messages, config={"run_name": "retrieval_final"})
     except Exception:
-        log.warning("⚠️ retrieval — final structured turn failed; reduce=none", exc_info=True)
-        return "none", {}, "", None
-
-    if isinstance(out, dict):
-        op, args, answer = _coerce_final(out.get("parsed"), out.get("raw"))
-        return op, args, answer, out.get("raw")
-    op, args, answer = _coerce_final(out, None)
-    # M6 hardening: ``out`` here is the bare parsed model (no ``usage_metadata``); only forward it
-    # as the usage-bearing raw message if it actually carries usage, else None. In practice
-    # ``with_structured_output_compat`` always passes ``include_raw=True`` so the dict branch wins —
-    # this keeps the contract explicit if a provider/wrapper ever returns the bare object.
-    raw = out if getattr(out, "usage_metadata", None) else None
-    return op, args, answer, raw
+        log.warning("⚠️ retrieval — final answer turn failed; empty answer", exc_info=True)
+        return "", None
+    return _normalize_reply_content(getattr(reply, "content", "")).strip(), reply
 
 
 async def run_retrieval(
@@ -423,9 +313,11 @@ async def run_retrieval(
     # memory_recall ledger entry at the end (the refactor dropped this, so the node showed $0).
     usage_totals: dict[str, int] = {}
     cumulative_agent_turns = 0
-    # One turn is reserved for the dedicated structured final call (see docstring).
+    # One turn is reserved for the possible exit-B answer turn, so total invocations stay within
+    # max_agent_turns even when the loop never stops on its own.
     max_search_turns = max(0, limits.max_agent_turns - 1)
     search_model = model.bind_tools([lc_tool])
+    last_stop: AIMessage | None = None  # exit A: the no-tool stop turn whose content is the answer
 
     for turn in range(1, max_search_turns + 1):
         cumulative_agent_turns += 1
@@ -438,7 +330,8 @@ async def run_retrieval(
         tool_calls = list(getattr(response, "tool_calls", None) or [])
         messages.append(response)
         if not tool_calls:
-            # Model is done searching — break to the final structured turn.
+            # Exit A — model stopped searching; this turn's content is its final answer.
+            last_stop = response
             break
 
         # Answer EVERY tool_call id with a ToolMessage (real APIs reject the next call otherwise).
@@ -466,36 +359,40 @@ async def run_retrieval(
                 content=content,
             )
 
-    # Degenerate-trajectory floor (design §10): if the loop accumulated nothing, run one verbatim
-    # search with the raw question so recall is never worse than the pre-agentic single-shot
-    # baseline (covers no-search, all-errored, and max_agent_turns=1 trajectories).
-    if acc.size() == 0:
-        log.warning(
-            "⚠️ retrieval — empty accumulator after loop; running verbatim fallback · q='%s'",
-            question[:80],
-        )
-        await _verbatim_fallback_search(
-            question=question,
-            search_tool=search_tool,
-            started_ms=started_ms,
-            turn=cumulative_agent_turns + 1,
-            transcript=transcript,
-        )
-
-    # Dedicated final structured turn (always runs; counts as one invocation).
-    cumulative_agent_turns += 1
-    reduce_op, reduce_args, answer_text, final_raw = await _final_structured_turn(
-        model=model, messages=messages
-    )
-    _accumulate_message_usage(usage_totals, final_raw)
+    # Exit A: the model stopped on its own with a real answer AND it actually searched (acc
+    # populated) → reuse that stop turn as the answer; no extra call, no fallback needed.
+    stop_text = (
+        last_stop.content if isinstance(getattr(last_stop, "content", None), str) else ""
+    ).strip()
+    if stop_text and acc.size() > 0:
+        answer_text = stop_text
+    else:
+        # Exit B (budget exhausted) or an empty/groundless stop. Degenerate floor first (design §10):
+        # if the loop found nothing, run one verbatim search so recall is never worse than the
+        # pre-agentic single-shot baseline; then ONE tool-free answer turn over the accumulator.
+        if acc.size() == 0:
+            log.warning(
+                "⚠️ retrieval — empty accumulator after loop; running verbatim fallback · q='%s'",
+                question[:80],
+            )
+            await _verbatim_fallback_search(
+                question=question,
+                search_tool=search_tool,
+                started_ms=started_ms,
+                turn=cumulative_agent_turns + 1,
+                transcript=transcript,
+            )
+        cumulative_agent_turns += 1
+        answer_text, final_raw = await _final_answer_turn(model=model, messages=messages)
+        _accumulate_message_usage(usage_totals, final_raw)
     # Attribute the loop's total LLM cost to the active memory_recall ledger node (no-op off-ledger).
     _write_recall_usage(model_id=model_id, totals=usage_totals)
     log.info(
-        "✅ retrieval — agent · %d/%d turns · searches=%d · reduce=%s",
+        "✅ retrieval — agent · %d/%d turns · searches=%d · answer_chars=%d",
         cumulative_agent_turns,
         limits.max_agent_turns,
         acc.size(),
-        reduce_op,
+        len(answer_text),
     )
     transcript.append(
         {
@@ -503,7 +400,6 @@ async def run_retrieval(
             "event": "final",
             "turn": cumulative_agent_turns,
             "cumulative_agent_turns": cumulative_agent_turns,
-            "reduce_op": reduce_op,
             "answer_len_chars": len(answer_text),
         }
     )
@@ -518,8 +414,6 @@ async def run_retrieval(
     )
     return RetrievalResult(
         accumulator=acc,
-        reduce_op=reduce_op,
-        reduce_args=reduce_args,
         answer_text=answer_text,
         transcript=transcript,
         error_count=error_count,
@@ -527,9 +421,6 @@ async def run_retrieval(
 
 
 __all__ = [
-    "ReduceArgs",
-    "ReduceSpec",
-    "RetrievalFinal",
     "RetrievalResult",
     "build_search_memory_langchain_tool",
     "run_retrieval",

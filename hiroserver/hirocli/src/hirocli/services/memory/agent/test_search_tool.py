@@ -363,3 +363,52 @@ def test_serialized_field_names_documented_in_retrieval_prompt() -> None:
     assert {"relation", "stated", "as_of", "until", "entity_type"} <= metadata_keys
     for key in sorted(metadata_keys):
         assert f"`{key}`" in PROMPT, f"serialized field {key!r} not documented in the retrieval prompt"
+
+
+def test_render_search_result_text_layout_oneline_and_score_order() -> None:
+    """The model-facing tool result is plain #facts/#entities/#episodes text (token-saver), not JSON:
+    sections per kind, one bullet per item, score-descending, multi-line summaries/episodes collapsed
+    to a single line (option A), and a failed sub-query surfaces its error in the header."""
+    from hirocli.services.memory.agent.search_tool import render_search_result_text
+
+    payload = {
+        "sub_results": [
+            {
+                "sid": 1, "goal": "g1", "query": "q", "temporal": "all", "limit": 20, "hops": 1,
+                "show_expiry": False, "returned": 4, "new": 4, "error": None,
+                "items": [
+                    # deliberately NOT score-sorted, to prove the renderer sorts desc
+                    {"kind": "edge", "id": "e1", "fact": "A scheduled", "score": 0.40,
+                     "relation": "SCHEDULED_FOR", "stated": "2024-05-03", "as_of": "2024-05-11"},
+                    {"kind": "edge", "id": "e2", "fact": "B wants", "score": 0.90,
+                     "relation": "WANTS", "stated": "2024-03-12", "as_of": "2024-03-12"},
+                    {"kind": "entity", "id": "n1", "name": "Coco", "entity_type": "Movie",
+                     "summary": "line one\nline two\nline three", "score": 0.50},
+                    {"kind": "episode", "id": "ep1", "text": "Crystal: hi\nthere", "score": 0.80,
+                     "stated": "2024-03-12"},
+                ],
+            },
+            {
+                "sid": 2, "goal": "boom", "query": "q2", "temporal": "current", "limit": 20,
+                "hops": 1, "show_expiry": False, "returned": 0, "new": 0,
+                "error": "simulated failure", "items": [],
+            },
+        ],
+        "accumulated_total": 4,
+    }
+    text = render_search_result_text(payload)
+    lines = text.splitlines()
+
+    assert "## S1 - g1 (returned 4, new 4)" in lines
+    assert "#facts" in lines and "#entities" in lines and "#episodes" in lines
+    # facts sorted score-desc: WANTS (0.90) before SCHEDULED_FOR (0.40)
+    f_idx = lines.index("#facts")
+    assert lines[f_idx + 1] == "- [2024-03-12] B wants [WANTS / as of 2024-03-12 / score 0.90]"
+    assert lines[f_idx + 2].startswith("- [2024-05-03] A scheduled [SCHEDULED_FOR / as of 2024-05-11")
+    # entity: type shown + multi-line summary collapsed to "; " on ONE line
+    assert "- Coco (Movie): line one; line two; line three [score 0.50]" in lines
+    # episode: newline collapsed to a space on ONE line
+    assert "- [2024-03-12] Crystal: hi there [score 0.80]" in lines
+    # failed sub-query surfaces the error in its header
+    assert "## S2 - boom (returned 0, new 0) ERROR: simulated failure" in lines
+    assert text.rstrip().endswith("(accumulated_total 4)")

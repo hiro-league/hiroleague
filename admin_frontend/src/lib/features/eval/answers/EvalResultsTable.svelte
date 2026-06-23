@@ -231,7 +231,7 @@
                 {/if}
               </div>
               {#if rleg?.retrieval_loop}
-                <span class="font-mono text-[10px] leading-tight text-muted-foreground" title="Searches/turns · recalled facts · reduce op">
+                <span class="font-mono text-[10px] leading-tight text-muted-foreground" title="Searches/turns · recalled facts">
                   {recallCellLabel(rleg)}
                 </span>
               {:else if rleg?.recalled && rleg.recalled.length > 0}

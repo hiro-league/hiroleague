@@ -569,8 +569,8 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
 # Answering INSTRUCTIONS for the MEMORY eval's recall leg (eval_judge.answer_from_context).
 # Eval-only — there is no production equivalent on this path. Markdown-structured (Objective / Core
 # Instructions / Calibrators / Formatting Rules / Validation) and placed in the USER message:
-# answer_from_context appends "## User Question" + "## Recalled Memory Elements" after it (the
-# system prompt is a hardcoded two-line role there, MEMORY_EVAL_ANSWER_SYSTEM_PROMPT).
+# answer_from_context appends "## User Question" + "## Draft Answer" + "## Supporting Evidence"
+# after it (the system prompt is a hardcoded two-line role there, MEMORY_EVAL_ANSWER_SYSTEM_PROMPT).
 # Failure-targeted, from the row-by-row LoCoMo conv-43 analysis (docs/locomo-conv43-eval-analysis.md):
 # the support gate + negative calibrators N1/N3/N4 close the cross-person / premise-transfer
 # failures (P1, 53 rows — the prior "decline only when NOTHING relates" + unconditional commit pair
@@ -590,9 +590,10 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
 # so declines must stay bare (no preamble before the phrase).
 DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = """\
 ## Objective
-Answer the User Question using the Recalled Memory Elements below — context from past
-conversations. Keep facts grounded in that memory, but draw on general world knowledge to reason
-or recommend when memory alone doesn't reach the answer.
+Answer the User Question. You're given a **Draft Answer** from a retrieval pass over the user's
+memory and the **Supporting Evidence** behind it — lead with the draft, grounded in the evidence.
+Draw on general world knowledge only to reason or recommend when memory alone doesn't reach the
+answer.
 
 ## The three dates (any may be missing)
 - **stated** — when it was said; shown as a leading [DATE]. The ONLY date you resolve relative
@@ -617,13 +618,15 @@ or recommend when memory alone doesn't reach the answer.
 - An element supports an answer about a person only if it shows THAT person doing, having, or
   experiencing the thing asked — and the specific thing asked, not a related one.
 - When similar events occur at different dates, the question's timeframe picks the right one — not
-  the order elements appear in. Prefer the LATEST **as of** when facts directly conflict.
+  the order elements appear in. Prefer the LATEST **as of** when facts directly conflict; if
+  recency can't settle it — both stand as of the same time and can't both be true — give both and
+  note the disagreement rather than choosing one.
 - For list or count questions, scan ALL elements — facts, entity summaries, and messages — and
   include every DISTINCT match before answering. A partial list is a wrong answer.
-- If a **## Computed Results** section is present, it is the system's deterministic computation
-  (a count, a duration, conflict tallies) over the recalled elements — report THAT exact value
-  instead of recounting or doing the date math yourself. The elements remain for wording and
-  attribution (e.g. naming the items behind a count).
+- If the draft answer or evidence contains conflicting information worth noting, point out the
+  conflict rather than silently choosing one side.
+- If the draft answer or evidence contains a clear instruction or preference worth noting, reflect
+  it in your response.
 - If any element passes the support checks, commit: give the supported part(s) directly, even when
   other parts are unsupported.
 - Give the most precise time the dates support (day if pinned, else month/year). A missing,
@@ -800,19 +803,23 @@ You retrieve facts from past conversations to answer the user's question. You ca
 memory directly — call `search_memory`. Each call carries a `queries` list of 1..{MAX_PARALLEL_SEARCHES}
 sub-queries — that's how you DECOMPOSE a multi-part question into sub-questions that run together.
 You may call `search_memory` on several turns (one call per turn), observing each return before
-deciding to search again or to answer. You have {MAX_AGENT_TURNS} agent turns total — that
-INCLUDES your final-answer turn, so plan accordingly. If the memory genuinely lacks the detail,
-say so — do not guess.
+deciding to search again or to answer. You have {MAX_AGENT_TURNS} agent turns total. When you are
+done, stop searching: emit a turn with NO tool call whose content IS your final answer — concise,
+or 'No information available.' if the searches don't support one. Do not guess.
 
 ## Element formats
-Results arrive as a mix of three element kinds, each shaped differently — use them accordingly:
-  - edge (fact) → a dated relational claim. JSON fields: `relation` (e.g. PLANS_TO_WATCH), `stated`
-                  (when it was said) and `as_of` (when it became true) — shown whenever the fact has
-                  them — plus `until` (when it stopped being true) only when `show_expiry` is on.
+Each search returns plain-text sections — `#facts`, `#entities`, `#episodes` — one item per line,
+highest score first. Use each kind accordingly:
+  - #facts (edges) → a dated relational claim, rendered `- [stated] <fact> [<relation> / as of <date>
+                  / until <date> / score]`. The `relation` is the link type (e.g. PLANS_TO_WATCH);
+                  `stated` is when it was said; `as_of` is when it became true (both shown whenever
+                  present); `until` (when it stopped being true) appears only when `show_expiry` is on.
                   The ONLY kind that carries validity, so latest / ever-never / change-over-time live here.
-  - entity      → a standing who/what profile (`name` + `entity_type` + `summary`); NO dates —
-                  context, not a timeline; cannot be ordered by time.
-  - episode     → a verbatim conversation turn with ONE `stated` timestamp; no invalidation.
+  - #entities    → a standing who/what profile, rendered `- <name> (<entity_type>): <summary>`, where
+                  `entity_type` is the kind of subject (e.g. Person, Movie) shown when known; NO
+                  dates — context, not a timeline; cannot be ordered by time.
+  - #episodes    → a verbatim conversation turn, rendered `- [stated] <text>` with ONE `stated`
+                  timestamp; no invalidation.
 
 ## Writing a search query
 Turn the question into one or more search queries:
@@ -828,7 +835,7 @@ Turn the question into one or more search queries:
 - Do not invent missing context that the user did not provide.
 To run sub-queries together, put each as a separate entry in the `queries` list of ONE
 `search_memory` call (up to {MAX_PARALLEL_SEARCHES} entries). Each sub-query also takes a short
-`goal` — a brief note of what it's for; it labels the results and feeds the reduce step.
+`goal` — a brief note of what it's for; it labels the results.
 
 ## Refining the query on the next turn
 Search again ONLY when a piece your requirement names is still missing (see "Stopping"). First
@@ -864,13 +871,6 @@ independently per sub-query. Stop only when you can construct the answer (see "S
                  change questions. `stated` and `as_of` are shown without it. Only meaningful
                  with `temporal="all"`.
 
-## Reduce ops (optional, declared on your FINAL turn)
-If the answer needs a precise count, an ordering, the latest value, a duration between two
-facts, or both sides of an "ever/never", request the matching reduce instead of computing it
-yourself — the system runs it deterministically.
-  distinct_count · order_by_time · latest · date_diff · keep_conflicting
-Omit `reduce` (or `op: none`) to answer straight from the deduped accumulator.
-
 ## Positive Calibrators (synthetic; NOT drawn from any benchmark)
 P1 — current value
   q: What's the user's monthly book budget?
@@ -879,19 +879,19 @@ P1 — current value
 
 P2 — change over time
   q: How has the book budget changed?
-  knobs: temporal=all, show_expiry=true, hops=1. reduce.op=order_by_time.
-  behavior: surface current + retired edges with their `as_of` / `until` dates; let the reduce order them.
+  knobs: temporal=all, show_expiry=true, hops=1.
+  behavior: surface current + retired edges with their `as_of` / `until` dates, in time order.
 
 P3 — ever/never
   q: Have they ever mentioned disliking a genre?
   behavior: ONE `search_memory` call with TWO entries in `queries` — one affirming phrasing,
-  one negating phrasing. Then reduce.op=keep_conflicting to present both polarities.
+  one negating phrasing. Read both sub-results and present both polarities.
 
 P4 — decomposition of a plural question
   q: What's the user's current job, their main hobby, and their last trip?
   behavior: ONE `search_memory` call with THREE entries in `queries` — one per sub-question,
   each with its own query (job: temporal=current; hobby: temporal=current; trip:
-  temporal=all, reduce later with `latest`). Read all three sub-results together; answer in one go.
+  temporal=all). Read all three sub-results together; answer in one go.
 
 ## Negative Calibrators (don't burn the search budget badly)
 N1 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
@@ -926,9 +926,7 @@ and a required piece is still missing, abstain in the final turn — do not pad 
 - Did I state what the answer requires and confirm the accumulator supplies every piece —
   rather than stopping just because related facts came back?
 - For a temporal / ever-never question, did I either set show_expiry=true under temporal=all,
-  or include BOTH polarities as two entries in `queries`?
-- For a count / ordering / duration, did I declare the matching reduce op instead of
-  computing it myself?"""
+  or include BOTH polarities as two entries in `queries`?"""
 
 
 # Dotted preference path → built-in default text for every editable system prompt. Exposed in the
@@ -1102,6 +1100,15 @@ class GraphEvalPreferences(BaseModel):
     show_event_time: bool = True
     show_expired_at: bool = False
     show_superseded: bool = False
+    # Answer-context render caps (eval answerer + judge + evidence-check). The recall leg can surface
+    # a large, noisy element set (100s of facts/entities/episodes) that buries the answer-relevant
+    # ones; these bound what reaches the prompt. Each kind is score-ranked desc, the top
+    # ``max_elements_per_kind`` kept, and every element sanitized to ONE line capped at the per-kind
+    # char limit. One global set — applies identically to the answer, judge, and evidence renders.
+    max_elements_per_kind: int = Field(default=30, ge=1, le=200)
+    max_fact_chars: int = Field(default=240, ge=40, le=2000)
+    max_episode_chars: int = Field(default=300, ge=40, le=2000)
+    max_summary_chars: int = Field(default=400, ge=40, le=4000)
     # Agentic retrieval loop caps/clamps (agentic-memory-retrieval-design §5.2). One global
     # value for eval and chat — do not split per surface.
     retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)

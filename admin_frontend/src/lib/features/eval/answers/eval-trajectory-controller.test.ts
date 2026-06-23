@@ -4,8 +4,6 @@ import type { EvalRow } from '$lib/features/eval/shared/eval-row';
 import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
 import {
   decompositionRate,
-  formatReduceLabel,
-  formatReduceOpName,
   recallCellLabel,
   recallFoldLabel,
   recallLoopSaturated,
@@ -33,7 +31,6 @@ function sub(sid: number, overrides: Partial<RetrievalLoop['turns'][0]['sub_quer
 function loop(overrides: Partial<RetrievalLoop> = {}): RetrievalLoop {
   return {
     turns: [{ turn: 1, sub_queries: [sub(1)] }],
-    reduce: { op: 'none', args: {} },
     agent_turns: 2,
     max_agent_turns: 4,
     stopped_reason: 'model_answered',
@@ -63,20 +60,9 @@ function row(leg: Partial<EvalQuestionLeg>): EvalRow {
   };
 }
 
-describe('formatReduceLabel / trajectoryStats', () => {
-  it('formats reduce ops', () => {
-    expect(formatReduceOpName({ op: 'none', args: {} })).toBe('none');
-    expect(formatReduceOpName({ op: 'latest', args: { subject: 'employer' } })).toBe('latest');
-    expect(formatReduceLabel({ op: 'none', args: {} })).toBe('none');
-    expect(formatReduceLabel({ op: 'latest', args: {} })).toBe('latest');
-    expect(formatReduceLabel({ op: 'latest', args: { subject: 'employer' } })).toBe(
-      'latest(subject=employer)'
-    );
-  });
-
+describe('trajectoryStats', () => {
   it('builds footer stats', () => {
     const stats = trajectoryStats(loop(), 3);
-    expect(stats.reduceLabel).toBe('none');
     expect(stats.totalLabel).toBe('2 of 4');
     expect(stats.accumulatedLabel).toBe('3 items');
   });
@@ -108,28 +94,14 @@ describe('recallCellLabel / saturation', () => {
         turns: [
           { turn: 1, sub_queries: [sub(1), sub(2)] },
           { turn: 2, sub_queries: [sub(3)] }
-        ],
-        reduce: { op: 'latest', args: {} }
+        ]
       })
     };
-    expect(recallCellLabel(leg)).toBe('3 turns · 4 facts · latest');
+    expect(recallCellLabel(leg)).toBe('3 turns · 4 facts');
     expect(recallLoopSaturated(leg)).toBe(false);
   });
 
-  it('shows reduce op name only in the recall table cell', () => {
-    const leg: EvalQuestionLeg = {
-      mark: '',
-      elapsed_ms: 0,
-      answer_preview: '',
-      answer: '',
-      run_id: null,
-      recalled: [{ memory: 'a' }],
-      retrieval_loop: loop({ agent_turns: 1, reduce: { op: 'latest', args: { subject: 'employer' } } })
-    };
-    expect(recallCellLabel(leg)).toBe('1 turns · 1 facts · latest');
-  });
-
-  it('includes reduce args in the expanded fold label', () => {
+  it('renders the turns/facts line in the expanded fold label', () => {
     const leg: EvalQuestionLeg = {
       mark: '',
       elapsed_ms: 0,
@@ -137,9 +109,9 @@ describe('recallCellLabel / saturation', () => {
       answer: '',
       run_id: null,
       recalled: [{ memory: 'a' }, { memory: 'b' }],
-      retrieval_loop: loop({ agent_turns: 2, reduce: { op: 'latest', args: { subject: 'employer' } } })
+      retrieval_loop: loop({ agent_turns: 2 })
     };
-    expect(recallFoldLabel(leg)).toBe('2 turns · 2 facts · latest(subject=employer)');
+    expect(recallFoldLabel(leg)).toBe('2 turns · 2 facts');
   });
 
   it('flags cap saturation when agent_turns hits the cap', () => {
@@ -179,12 +151,11 @@ describe('run-level histograms', () => {
 });
 
 describe('trajectoryPaneSnapshot', () => {
-  it('singular question — one turn, one sub-query, reduce none', () => {
+  it('singular question — one turn, one sub-query', () => {
     const snap = trajectoryPaneSnapshot(loop());
     expect(snap.turnHeaders).toEqual(['Turn 1 · 1 sub-query']);
     expect(snap.searchRows).toEqual(['S1 · goal: "goal-1"']);
     expect(snap.footer.total).toBe('2 of 4');
-    expect(snap.footer.reduce).toBe('none');
   });
 
   it('decomposed plural — multi-sub-query turn then follow-up turn', () => {

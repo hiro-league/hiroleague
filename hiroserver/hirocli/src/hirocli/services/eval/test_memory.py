@@ -568,8 +568,6 @@ async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatc
 
     async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
         acc = Accumulator()
-        # Fact mentions the subject so the latest() reduce actually matches it (M3: a non-matching
-        # subject now correctly yields an empty result instead of an arbitrary unrelated edge).
         acc.merge(
             [{"kind": "fact", "uuid": "e1", "memory": "Employer is Brightloom", "valid_at": "2024-01-01"}],
             search_id=1,
@@ -577,14 +575,12 @@ async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatc
         )
         return RetrievalResult(
             accumulator=acc,
-            reduce_op="latest",
-            reduce_args={"subject": "employer"},
             answer_text="",
             transcript=[
                 {"event": "tool_call", "turn": 1, "sub_queries": 2, "cumulative_agent_turns": 1},
                 {"event": "sub_result", "turn": 1, "sid": 1, "returned": 4, "new": 3},
                 {"event": "sub_result", "turn": 1, "sid": 2, "returned": 2, "new": 1},
-                {"event": "final", "turn": 2, "cumulative_agent_turns": 2, "reduce_op": "latest"},
+                {"event": "final", "turn": 2, "cumulative_agent_turns": 2},
             ],
         )
 
@@ -621,7 +617,6 @@ async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatc
     preview = recall_rows[0]["output_preview"]
     assert "searches=2" in preview
     assert "turns=2" in preview
-    assert "reduce=latest" in preview
     assert "Brightloom" in preview
 
     sidecar = tmp_path / "logs" / "retrieval_trace" / "agent" / "trace-run__q_work.jsonl"
@@ -645,8 +640,6 @@ async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None
         )
         return RetrievalResult(
             accumulator=acc,
-            reduce_op="none",
-            reduce_args={},
             answer_text="",
             transcript=[],
         )
@@ -691,10 +684,9 @@ async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None
 
 @pytest.mark.retrieval_agent
 @pytest.mark.asyncio
-async def test_recall_leg_ignores_declared_reduce_op_while_disabled(tmp_path, monkeypatch) -> None:
-    """Reduce ops are DISABLED (see runner_memory): a declared op is ignored and the answerer gets
-    the full deduped/time-sorted set, not the reduced one. Here a `latest` declaration must NOT
-    collapse the two budget edges to the newest — both survive, oldest-first."""
+async def test_recall_leg_returns_full_time_sorted_set(tmp_path, monkeypatch) -> None:
+    """The recall leg hands the answerer the full deduped/time-sorted accumulator (reduce removed):
+    two budget edges both survive, oldest-first."""
     async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
         acc = Accumulator()
         acc.merge(
@@ -719,8 +711,6 @@ async def test_recall_leg_ignores_declared_reduce_op_while_disabled(tmp_path, mo
         )
         return RetrievalResult(
             accumulator=acc,
-            reduce_op="latest",
-            reduce_args={"subject": "budget"},
             answer_text="",
             transcript=[],
         )
@@ -747,56 +737,8 @@ async def test_recall_leg_ignores_declared_reduce_op_while_disabled(tmp_path, mo
     )
 
     recalled = row["legs"]["recall"]["recalled"]
-    # Reduce disabled: the declared "latest" op is ignored; both edges are returned, time-sorted.
+    # The answerer gets the full deduped/time-sorted set — both edges, oldest-first.
     assert [r["memory"] for r in recalled] == ["Budget $40", "Budget $50"]
-
-
-@pytest.mark.retrieval_agent
-@pytest.mark.asyncio
-async def test_recall_leg_malformed_reduce_degrades_not_crashes(tmp_path, monkeypatch) -> None:
-    """H1: a malformed reduce (date_diff declared without anchors) must NOT raise — a question
-    failure propagates up and aborts the WHOLE batch run, so it degrades to a plain recall."""
-
-    async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
-        acc = Accumulator()
-        acc.merge(
-            [{"kind": "fact", "uuid": "e1", "memory": "Brightloom", "fact": "Brightloom"}],
-            search_id=1,
-            goal="",
-        )
-        # date_diff with NO anchors → apply_reduce raises ValueError unless the runner guards it.
-        return RetrievalResult(
-            accumulator=acc,
-            reduce_op="date_diff",
-            reduce_args={},
-            answer_text="",
-            transcript=[],
-        )
-
-    class _RetrievalModelStub:
-        def bind_tools(self, tools):  # noqa: ANN001
-            return self
-
-    monkeypatch.setattr(
-        "hirocli.services.eval.models.build_eval_retrieval_model",
-        lambda _path: (_RetrievalModelStub(), "fake:model"),
-    )
-    monkeypatch.setattr(
-        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
-        _fake_run_retrieval,
-    )
-    mem = _FakeMemory({})
-    # Must not raise; degrades to op=none and still returns the deduped recall.
-    row = await _memory_question(
-        mem,
-        _QUESTIONS[0],
-        workspace_path=tmp_path,
-        user_id=MEMORY_EVAL_USER_ID,
-        character_id="adam",
-    )
-    recalled = row["legs"]["recall"]["recalled"]
-    assert len(recalled) == 1
-    assert recalled[0]["memory"] == "Brightloom"
 
 
 @pytest.mark.asyncio

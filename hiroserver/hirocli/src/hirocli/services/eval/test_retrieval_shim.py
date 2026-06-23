@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from hirocli.services.memory.agent.accumulator import Accumulator
-from hirocli.services.memory.agent.reduce import accumulated_item_to_recall_row, apply_reduce
+from hirocli.services.memory.agent.presentation import accumulated_item_to_recall_row, present_accumulator
 
 
 async def verbatim_recall_shim(
@@ -36,8 +36,7 @@ async def verbatim_recall_shim(
     )
     acc = Accumulator()
     acc.merge(hits, search_id=1, goal="verbatim")
-    reduced = apply_reduce(acc, op="none", args={})
-    recalled_rows = [accumulated_item_to_recall_row(item) for item in reduced.items]
+    recalled_rows = [accumulated_item_to_recall_row(item) for item in present_accumulator(acc)]
     facts = [str(r["memory"]) for r in recalled_rows if str(r.get("memory") or "").strip()]
     return recalled_rows, facts, None
 

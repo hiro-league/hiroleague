@@ -1,9 +1,11 @@
-"""Tests for the bounded retrieval-agent loop (P3; P9 multi-arg tool; P10 dedicated structured final).
+"""Tests for the bounded retrieval-agent loop (P3; P9 multi-arg tool).
 
-P10: the loop runs a tool-bound SEARCH phase (``bind_tools``) for up to ``max_agent_turns - 1``
-turns, then ONE tool-free structured turn (``with_structured_output``) yields the declared reduce
-op + answer. ``ScriptedChatModel`` scripts the final turn via :func:`ai_final` (JSON content the
-fake's ``with_structured_output`` parses).
+Reduce removed (2026-06): the loop runs a tool-bound SEARCH phase (``bind_tools``) and ends two
+ways — exit A (the model emits a no-tool turn whose content IS the answer, reused with no extra
+call) or exit B (the turn budget is exhausted while still searching, so ONE tool-free
+``_final_answer_turn`` composes the answer). ``ScriptedChatModel`` replays responses in order across
+both the bound search turns and the unbound final turn (shared cursor); :func:`ai_final` is a plain
+answer reply, :func:`ai_text` a plain no-tool turn.
 """
 
 from __future__ import annotations
@@ -14,11 +16,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 
 from hirocli.domain.preferences import RetrievalAgentLimits
 from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, ai_final, ai_text
-from hirocli.services.memory.agent.retrieval_agent import _coerce_final, run_retrieval
+from hirocli.services.memory.agent.retrieval_agent import run_retrieval
 from hirocli.services.memory.graphiti_conversation import GraphitiConversationMemory
 
 _PROMPT = "MAX={MAX_AGENT_TURNS} PAR={MAX_PARALLEL_SEARCHES} LIM={MAX_LIMIT}"
@@ -106,19 +107,22 @@ async def _run(*, model, memory, limits=None, question="Q?") -> object:
 
 @pytest.mark.asyncio
 async def test_loop_llm_usage_attributed_to_ledger_entry(tmp_path) -> None:
-    """The loop's own search + final LLM token usage must land on the active memory_recall entry.
+    """The loop's own search + final-answer LLM token usage must land on the active memory_recall
+    entry. Exercised via exit B (3 search turns + the forced answer turn) so both the search-turn
+    and final-turn usage folding are covered.
 
     Regression guard for the agentic-cost fix: before it, run_retrieval drove its own LLM calls but
     never read usage_metadata, so the memory_recall node showed no model/tokens/cost ($0)."""
     from hirocli.runtime.agent_graph.ledger import LedgerSink, current_entry
 
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
-    # search turn (in 8 / out 3) + stop turn (in 10 / out 5) + final turn (in 8 / out 4)
-    # → totals in 26 / out 12, summed across all three LLM calls.
+    # 3 search turns (in 8 / out 3 each) + the exit-B answer turn (in 8 / out 4)
+    # → totals in 32 / out 13, summed across all four LLM calls.
     model = ScriptedChatModel(
         responses=[
-            _search_call(_q("monthly budget")),
-            ai_text("done searching", input_tokens=10, output_tokens=5),
+            _search_call(_q("q1"), call_id="c1"),
+            _search_call(_q("q2"), call_id="c2"),
+            _search_call(_q("q3"), call_id="c3"),
             ai_final("The budget is $50."),
         ]
     )
@@ -132,7 +136,7 @@ async def test_loop_llm_usage_attributed_to_ledger_entry(tmp_path) -> None:
         await run_retrieval(
             question="Q?",
             memory=_memory(graph=graph),
-            limits=RetrievalAgentLimits(),
+            limits=RetrievalAgentLimits(max_agent_turns=4),
             prompt_text=_PROMPT,
             model=model,
             user_id=1,
@@ -144,8 +148,8 @@ async def test_loop_llm_usage_attributed_to_ledger_entry(tmp_path) -> None:
 
     assert entry.model == "openai:gpt-5.4"
     assert entry.provider == "openai"
-    assert entry.input_tokens == 26
-    assert entry.output_tokens == 12
+    assert entry.input_tokens == 32
+    assert entry.output_tokens == 13
 
 
 @pytest.mark.asyncio
@@ -153,13 +157,14 @@ async def test_verbatim_fallback_when_model_never_searches() -> None:
     """H3 floor: a model that emits zero searches must NOT recall nothing — one verbatim search
     with the raw question runs so recall is never worse than the pre-agentic single-shot baseline."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
-    # No search call at all — straight to a final answer.
-    model = ScriptedChatModel(responses=[ai_final("The budget is $50.")])
+    # No search call: a no-tool stop turn (groundless — acc empty), then the exit-B answer turn.
+    model = ScriptedChatModel(responses=[ai_text("Let me answer."), ai_final("The budget is $50.")])
     result = await _run(model=model, memory=_memory(graph=graph), question="What's the budget?")
     # The verbatim fallback populated the accumulator from the raw question.
     assert result.accumulator.size() == 1
     assert len(graph.search_calls) == 1
     assert graph.search_calls[0]["query"] == "What's the budget?"
+    assert result.answer_text == "The budget is $50."
     fallback = [r for r in result.transcript if r.get("sub_queries") or r.get("event") == "sub_result"]
     assert fallback, "fallback search should appear in the transcript"
 
@@ -167,7 +172,7 @@ async def test_verbatim_fallback_when_model_never_searches() -> None:
 @pytest.mark.asyncio
 async def test_verbatim_fallback_covers_max_agent_turns_one() -> None:
     """H3 config trap: max_agent_turns=1 leaves zero search turns — without the floor EVERY question
-    would recall nothing. The verbatim fallback must still run."""
+    would recall nothing. The verbatim fallback must still run, then the answer turn answers."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "fact")])
     model = ScriptedChatModel(responses=[ai_final("answer")])
     result = await _run(
@@ -178,6 +183,7 @@ async def test_verbatim_fallback_covers_max_agent_turns_one() -> None:
     )
     assert result.accumulator.size() == 1
     assert len(graph.search_calls) == 1
+    assert result.answer_text == "answer"
 
 
 @pytest.mark.asyncio
@@ -193,7 +199,9 @@ async def test_no_verbatim_fallback_when_loop_already_recalled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_search_then_final() -> None:
+async def test_exit_a_reuses_stop_turn_no_extra_call() -> None:
+    """Exit A: search, then a no-tool stop turn whose content IS the answer — reused directly, with
+    NO extra model call (the stop turn = 2 invocations total, no forced final turn)."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
     model = ScriptedChatModel(
         responses=[_search_call(_q("monthly budget")), ai_final("The budget is $50.")]
@@ -201,8 +209,9 @@ async def test_single_search_then_final() -> None:
     result = await _run(model=model, memory=_memory(graph=graph))
     assert result.accumulator.size() == 1
     assert result.answer_text == "The budget is $50."
-    assert result.reduce_op == "none"
     assert len(graph.search_calls) == 1
+    final = next(row for row in result.transcript if row["event"] == "final")
+    assert final["cumulative_agent_turns"] == 2  # search turn + the stop turn (no separate final)
 
 
 @pytest.mark.asyncio
@@ -238,8 +247,9 @@ async def test_decomposition_sub_queries_gathered_concurrently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_caps_search_turns_then_final() -> None:
-    """max_agent_turns=4 → 3 tool-bound search turns, then turn 4 is the dedicated structured final."""
+async def test_exit_b_caps_search_turns_then_forces_answer_turn() -> None:
+    """Exit B: max_agent_turns=4 → 3 tool-bound search turns (model never stops), then ONE forced
+    tool-free answer turn composes the answer (turn 4)."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
     model = ScriptedChatModel(
         responses=[
@@ -255,23 +265,24 @@ async def test_caps_search_turns_then_final() -> None:
     assert len(graph.search_calls) == 3
     assert result.answer_text == "forced final"
     final = next(row for row in result.transcript if row["event"] == "final")
-    assert final["cumulative_agent_turns"] == 4  # 3 search turns + the structured final
+    assert final["cumulative_agent_turns"] == 4  # 3 search turns + the forced answer turn
 
 
 @pytest.mark.asyncio
-async def test_counter_counts_search_stop_and_final() -> None:
-    """Early stop: one search turn, one no-tool stop turn, then the structured final = 3 invocations."""
+async def test_exit_a_counter_counts_search_and_stop_only() -> None:
+    """Exit A early stop: one search turn + one no-tool stop turn = 2 invocations, no forced final."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
-    model = ScriptedChatModel(responses=[_search_call(_q("q1")), ai_text("done"), ai_final("answer")])
+    model = ScriptedChatModel(responses=[_search_call(_q("q1")), ai_text("done")])
     result = await _run(model=model, memory=_memory(graph=graph))
+    assert result.answer_text == "done"
     final = next(row for row in result.transcript if row["event"] == "final")
-    assert final["cumulative_agent_turns"] == 3
+    assert final["cumulative_agent_turns"] == 2
 
 
 @pytest.mark.asyncio
-async def test_zero_search_turns_goes_straight_to_final() -> None:
+async def test_zero_search_turns_goes_straight_to_answer_turn() -> None:
     """max_agent_turns=1 → no model search budget; the verbatim fallback floor (H3) still runs one
-    search so recall isn't empty, then the dedicated structured final turn answers."""
+    search so recall isn't empty, then the forced tool-free answer turn answers."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
     model = ScriptedChatModel(responses=[ai_final("only final")])
     result = await _run(
@@ -286,34 +297,9 @@ async def test_zero_search_turns_goes_straight_to_final() -> None:
 
 
 @pytest.mark.asyncio
-async def test_final_reduce_op_parsed() -> None:
-    graph = _SlowFakeGraph(hits=[_hit("e1", "Budget changed")])
-    model = ScriptedChatModel(
-        responses=[_search_call(_q("budget history")), ai_final("Latest budget is $50.", op="latest")]
-    )
-    result = await _run(model=model, memory=_memory(graph=graph))
-    assert result.reduce_op == "latest"
-    assert result.answer_text == "Latest budget is $50."
-
-
-@pytest.mark.asyncio
-async def test_final_reduce_args_propagate() -> None:
-    graph = _SlowFakeGraph(hits=[_hit("e1", "movies")])
-    model = ScriptedChatModel(
-        responses=[
-            _search_call(_q("planned movies")),
-            ai_final("13 movies", op="distinct_count", kind="edge"),
-        ]
-    )
-    result = await _run(model=model, memory=_memory(graph=graph))
-    assert result.reduce_op == "distinct_count"
-    assert result.reduce_args == {"kind": "edge"}
-
-
-@pytest.mark.asyncio
-async def test_no_search_direct_final() -> None:
+async def test_no_search_direct_answer_empty_graph() -> None:
     graph = _SlowFakeGraph()  # no hits
-    model = ScriptedChatModel(responses=[ai_final("No information available.")])
+    model = ScriptedChatModel(responses=[ai_text("nothing found"), ai_final("No information available.")])
     result = await _run(model=model, memory=_memory(graph=graph))
     # The verbatim fallback (H3) still runs as a floor, but the empty graph yields nothing to recall.
     assert len(graph.search_calls) == 1
@@ -344,40 +330,3 @@ async def test_one_failing_sub_query_does_not_abort() -> None:
     errored = [row for row in sub_results if row.get("error")]
     assert len(errored) == 1
     assert "simulated search failure" in errored[0]["error"]
-
-
-# --- _coerce_final: the provider-shape fallback paths (json_mode dict / parse failure) -----------
-
-
-def test_coerce_final_from_json_mode_dict_nested_args() -> None:
-    """DeepSeek json_mode returns a plain dict (not a RetrievalFinal). The model is instructed to
-    nest op args under "args" — they must be read from there, not misread as args={"args": {...}}."""
-    op, args, answer = _coerce_final(
-        {"reduce": {"op": "distinct_count", "args": {"kind": "edge"}}, "answer": "3 movies"}, None
-    )
-    assert op == "distinct_count"
-    assert args == {"kind": "edge"}
-    assert answer == "3 movies"
-
-
-def test_coerce_final_from_json_mode_dict_flat_args_tolerated() -> None:
-    """Older inline shape (args as siblings of op) still degrades gracefully, not silently dropped."""
-    op, args, answer = _coerce_final(
-        {"reduce": {"op": "date_diff", "anchors": ["a", "b"]}, "answer": "5 days"}, None
-    )
-    assert op == "date_diff"
-    assert args == {"anchors": ["a", "b"]}
-    assert answer == "5 days"
-
-
-def test_coerce_final_unknown_op_degrades_to_none() -> None:
-    op, args, answer = _coerce_final({"reduce": {"op": "bogus"}, "answer": "x"}, None)
-    assert op == "none"
-    assert answer == "x"
-
-
-def test_coerce_final_non_json_raw_becomes_answer() -> None:
-    op, args, answer = _coerce_final(None, AIMessage(content="plain prose answer"))
-    assert op == "none"
-    assert args == {}
-    assert answer == "plain prose answer"

@@ -13,7 +13,6 @@ from hirocli.domain.memory import MemoryAddResult
 from hirocli.services.eval.judge import (
     MEMORY_EVAL_ANSWER_SYSTEM_PROMPT,
     _JudgeOutput,
-    _format_computed_block,
     answer_from_context,
     format_recall_context,
     judge_answer,
@@ -91,22 +90,10 @@ async def test_answer_from_context_returns_model_text() -> None:
     assert ans == "The drone is Otto."
 
 
-def test_format_computed_block_renders_op_results() -> None:
-    """The deterministic reduce result (Break-2) becomes an instruction-shaped line the answerer uses."""
-    assert "distinct_count = 13" in _format_computed_block({"op": "distinct_count", "count": 13, "kind": "edge"})
-    assert "date_diff = 5 days" in _format_computed_block({"op": "date_diff", "days": 5})
-    kc = _format_computed_block({"op": "keep_conflicting", "affirming": 2, "negating": 1})
-    assert "2 affirming" in kc and "1 negating" in kc
-    # no-op / empty → no block at all
-    assert _format_computed_block({"op": "none"}) == ""
-    assert _format_computed_block(None) == ""
-    # date_diff with a missing anchor → tells the answerer not to guess
-    assert "not both found" in _format_computed_block({"op": "date_diff", "days": None})
-
-
 @pytest.mark.asyncio
-async def test_answer_from_context_includes_computed_block() -> None:
-    """A declared reduce's computed result is rendered into the user message ahead of the elements."""
+async def test_answer_from_context_includes_draft_answer() -> None:
+    """The retrieval agent's draft answer is rendered into the user message, BEFORE the supporting
+    evidence (lead-with-the-draft layout)."""
     m = _FakeModel(answer="13 movies.")
     await answer_from_context(
         m,
@@ -114,19 +101,19 @@ async def test_answer_from_context_includes_computed_block() -> None:
         question="How many unique movies?",
         context=[{"kind": "fact", "fact": "Watched Soul"}],
         sink=None,
-        computed={"op": "distinct_count", "count": 13, "kind": "edge"},
+        draft_answer="13 unique movies.",
     )
     human = m.last_messages[-1].content
-    assert "## Computed Results" in human
-    assert "distinct_count = 13" in human
-    # the computed block precedes the recalled elements
-    assert human.index("## Computed Results") < human.index("## Recalled Memory Elements")
+    assert "## Draft Answer" in human
+    assert "13 unique movies." in human
+    # the draft precedes the supporting evidence
+    assert human.index("## Draft Answer") < human.index("## Supporting Evidence")
 
 
 @pytest.mark.asyncio
 async def test_answer_from_context_message_layout() -> None:
     """System = hardcoded role; user message = instructions, then ## User Question, then
-    ## Recalled Memory Elements (question BEFORE context — the conv-43 prompt rework)."""
+    ## Supporting Evidence (question BEFORE context — the conv-43 prompt rework)."""
     m = _FakeModel(answer="Otto.")
     await answer_from_context(
         m,
@@ -140,9 +127,50 @@ async def test_answer_from_context_message_layout() -> None:
     assert system == MEMORY_EVAL_ANSWER_SYSTEM_PROMPT
     assert human.startswith("## Objective")
     assert "## User Question\nWhich drone?" in human
-    assert "## Recalled Memory Elements" in human
-    assert human.index("## User Question") < human.index("## Recalled Memory Elements")
+    assert "## Supporting Evidence" in human
+    assert human.index("## User Question") < human.index("## Supporting Evidence")
     assert "Otto is the mascot drone" in human
+
+
+def test_recall_render_caps_sorts_by_score_and_sanitizes() -> None:
+    """format_recall_context: per-kind top-N by score desc, each element one sanitized capped line."""
+    from hirocli.services.eval.judge import RecallRenderOptions
+
+    rows = [
+        {"kind": "fact", "fact": "low relevance fact", "score": 0.1, "stated": "2024-01-01"},
+        {"kind": "fact", "fact": "high relevance fact", "score": 0.9, "stated": "2024-01-02"},
+        {"kind": "fact", "fact": "mid relevance fact", "score": 0.5, "stated": "2024-01-03"},
+        # multi-line + markdown summary that must collapse to one capped line
+        {"kind": "entity", "name": "Crystal", "entity_type": "Person",
+         "summary": "## Heading\nline one\n- bullet two\nmore and more and more text here", "score": 0.7},
+    ]
+    out = format_recall_context(rows, RecallRenderOptions(max_elements_per_kind=2, max_summary_chars=25))
+    fact_lines = [ln for ln in out.splitlines() if ln.startswith("- ") and "fact" in ln]
+    assert len(fact_lines) == 2  # top-2 only
+    assert "high relevance" in fact_lines[0] and "mid relevance" in fact_lines[1]  # score desc
+    assert "low relevance" not in out  # dropped by the cap
+    ent_line = next(ln for ln in out.splitlines() if "Crystal (Person)" in ln)
+    assert "\n" not in ent_line.strip("- ")  # collapsed to one line
+    assert "##" not in ent_line and "- bullet" not in ent_line  # leading markdown stripped
+    assert "…" in ent_line  # capped
+
+
+@pytest.mark.asyncio
+async def test_answer_from_context_blockquotes_draft() -> None:
+    """The draft is blockquoted so its own markdown headers can't collide with the prompt's sections."""
+    m = _FakeModel(answer="ok")
+    await answer_from_context(
+        m,
+        "fake:model",
+        question="q?",
+        context=[{"kind": "fact", "fact": "x"}],
+        sink=None,
+        draft_answer="## Answer\nNo, never.",
+    )
+    human = m.last_messages[-1].content
+    assert "## Draft Answer" in human
+    assert "> ## Answer" in human  # the draft's own header is quoted → inert
+    assert "> No, never." in human
 
 
 def test_recall_metadata_survives_search_to_answer_render() -> None:
@@ -151,7 +179,7 @@ def test_recall_metadata_survives_search_to_answer_render() -> None:
     class of bug that starved/flattened the answerer's context."""
     from hirocli.services.eval.judge import RecallRenderOptions
     from hirocli.services.memory.agent.accumulator import Accumulator
-    from hirocli.services.memory.agent.reduce import accumulated_item_to_recall_row, apply_reduce
+    from hirocli.services.memory.agent.presentation import accumulated_item_to_recall_row, present_accumulator
 
     acc = Accumulator()
     acc.merge(
@@ -171,8 +199,7 @@ def test_recall_metadata_survives_search_to_answer_render() -> None:
         goal="",
     )
 
-    reduced = apply_reduce(acc, op="none")
-    rows = [accumulated_item_to_recall_row(i) for i in reduced.items]
+    rows = [accumulated_item_to_recall_row(i) for i in present_accumulator(acc)]
     rendered = format_recall_context(
         rows, RecallRenderOptions(show_event_time=True, show_expired_at=True)
     )

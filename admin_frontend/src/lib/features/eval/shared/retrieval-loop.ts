@@ -24,7 +24,6 @@ export type RetrievalLoopTurn = {
 
 export type RetrievalLoop = {
   turns: RetrievalLoopTurn[];
-  reduce: { op: string; args: Record<string, unknown> };
   /** Total LLM invocations across the loop, including the final-answer turn. */
   agent_turns: number;
   max_agent_turns: number;

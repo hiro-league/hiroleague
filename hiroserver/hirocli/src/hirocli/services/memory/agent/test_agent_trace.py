@@ -54,17 +54,11 @@ def test_build_retrieval_loop_payload_groups_turns_and_sub_queries() -> None:
         },
         {"event": "final", "turn": 3, "cumulative_agent_turns": 3, "reduce_op": "latest"},
     ]
-    payload = build_retrieval_loop_payload(
-        events,
-        reduce_op="none",
-        reduce_args={"subject": "employer"},
-        max_agent_turns=4,
-    )
+    payload = build_retrieval_loop_payload(events, max_agent_turns=4)
     assert payload is not None
     assert payload["agent_turns"] == 3
     assert payload["max_agent_turns"] == 4
     assert payload["stopped_reason"] == "model_answered"
-    assert payload["reduce"]["op"] == "latest"
     assert len(payload["turns"]) == 2
     assert payload["turns"][0]["sub_queries"][0]["sid"] == 1
     assert len(payload["turns"][0]["sub_queries"]) == 2
@@ -77,7 +71,7 @@ def test_build_retrieval_loop_payload_marks_turn_cap_saturation() -> None:
         {"event": "sub_result", "turn": 1, "sid": 1, "returned": 1, "new": 1, "accumulated_total": 1},
         {"event": "final", "turn": 4, "cumulative_agent_turns": 4, "reduce_op": "none"},
     ]
-    payload = build_retrieval_loop_payload(events, reduce_op="none", reduce_args={}, max_agent_turns=4)
+    payload = build_retrieval_loop_payload(events, max_agent_turns=4)
     assert payload is not None
     assert payload["stopped_reason"] == "max_agent_turns"
 
@@ -91,11 +85,10 @@ def test_summarize_agent_transcript_counts_searches_and_decomposition() -> None:
         {"event": "sub_result", "sid": 3},
         {"event": "final", "cumulative_agent_turns": 3, "reduce_op": "latest"},
     ]
-    summary = summarize_agent_transcript(events, reduce_op="none")
+    summary = summarize_agent_transcript(events)
     assert summary.searches == 3
     assert summary.agent_turns == 3
     assert summary.decomposition_turns == 1
-    assert summary.reduce_op == "latest"
 
 
 def test_format_memory_recall_output_preview_includes_summary_and_facts() -> None:
@@ -106,10 +99,9 @@ def test_format_memory_recall_output_preview_includes_summary_and_facts() -> Non
     ]
     preview = format_memory_recall_output_preview(
         events,
-        reduce_op="none",
         facts_preview="Budget is $50",
     )
-    assert preview.startswith("searches=1 · turns=2 · reduce=none · Budget is $50")
+    assert preview.startswith("searches=1 · turns=2 · Budget is $50")
 
 
 def test_write_agent_retrieval_trace_creates_jsonl_sidecar(tmp_path: Path) -> None:

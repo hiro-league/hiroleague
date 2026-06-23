@@ -38,19 +38,15 @@ class AgentTranscriptSummary:
     searches: int
     agent_turns: int
     decomposition_turns: int
-    reduce_op: str
 
 
 def summarize_agent_transcript(
     events: list[dict[str, Any]],
-    *,
-    reduce_op: str = "none",
 ) -> AgentTranscriptSummary:
     """Derive loop stats from the retrieval-agent transcript rows (P9 event shapes)."""
     searches = 0
     agent_turns = 0
     decomposition_turns = 0
-    resolved_reduce = reduce_op
 
     for row in events:
         event = row.get("event")
@@ -61,21 +57,17 @@ def summarize_agent_transcript(
             searches += 1
         elif event == "final":
             agent_turns = int(row.get("cumulative_agent_turns") or agent_turns)
-            resolved_reduce = str(row.get("reduce_op") or resolved_reduce)
 
     return AgentTranscriptSummary(
         searches=searches,
         agent_turns=agent_turns,
         decomposition_turns=decomposition_turns,
-        reduce_op=resolved_reduce,
     )
 
 
 def build_retrieval_loop_payload(
     events: list[dict[str, Any]],
     *,
-    reduce_op: str,
-    reduce_args: dict[str, Any],
     max_agent_turns: int,
 ) -> dict[str, Any] | None:
     """Shape the admin UI ``retrieval_loop`` block from an agent transcript (P8/P9).
@@ -89,8 +81,6 @@ def build_retrieval_loop_payload(
     turns_by_no: dict[int, dict[str, Any]] = {}
     current_turn = 0
     agent_turns = 0
-    resolved_reduce = reduce_op or "none"
-    resolved_args = dict(reduce_args or {})
     stopped_reason = "model_answered"
 
     for row in events:
@@ -117,7 +107,6 @@ def build_retrieval_loop_payload(
             )
         elif event == "final":
             agent_turns = int(row.get("cumulative_agent_turns") or agent_turns)
-            resolved_reduce = str(row.get("reduce_op") or resolved_reduce)
             stopped_reason = (
                 "max_agent_turns" if agent_turns >= max_agent_turns else "model_answered"
             )
@@ -128,7 +117,6 @@ def build_retrieval_loop_payload(
     turns = [turns_by_no[key] for key in sorted(turns_by_no)]
     return {
         "turns": turns,
-        "reduce": {"op": resolved_reduce, "args": resolved_args},
         "agent_turns": agent_turns,
         "max_agent_turns": max_agent_turns,
         "stopped_reason": stopped_reason,
@@ -138,15 +126,11 @@ def build_retrieval_loop_payload(
 def format_memory_recall_output_preview(
     events: list[dict[str, Any]],
     *,
-    reduce_op: str,
     facts_preview: str,
 ) -> str:
-    """Ledger preview: ``searches=N · turns=M · reduce=<op> · <facts>``."""
-    summary = summarize_agent_transcript(events, reduce_op=reduce_op)
-    head = (
-        f"searches={summary.searches} · turns={summary.agent_turns} · "
-        f"reduce={summary.reduce_op}"
-    )
+    """Ledger preview: ``searches=N · turns=M · <facts>``."""
+    summary = summarize_agent_transcript(events)
+    head = f"searches={summary.searches} · turns={summary.agent_turns}"
     facts = (facts_preview or "").strip()
     if not facts or facts == "(nothing recalled)":
         return head

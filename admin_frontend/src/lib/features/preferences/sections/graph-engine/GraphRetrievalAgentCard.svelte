@@ -18,6 +18,7 @@
   let { ctrl }: Props = $props();
 
   const limits = $derived(ctrl.draft?.graph.eval.retrieval_agent);
+  const evalPrefs = $derived(ctrl.draft?.graph.eval);
   const validationError = $derived(limits ? validateRetrievalAgentLimits(limits) : null);
 
   $effect(() => {
@@ -27,6 +28,11 @@
   function restoreDefaults() {
     if (!ctrl.draft) return;
     ctrl.draft.graph.eval.retrieval_agent = defaultRetrievalAgentLimits();
+    // Answer-context render caps (siblings of retrieval_agent under graph.eval).
+    ctrl.draft.graph.eval.max_elements_per_kind = 30;
+    ctrl.draft.graph.eval.max_fact_chars = 240;
+    ctrl.draft.graph.eval.max_episode_chars = 300;
+    ctrl.draft.graph.eval.max_summary_chars = 400;
     ctrl.markDirty();
   }
 </script>
@@ -108,6 +114,61 @@
         />
       </FormField>
     </div>
+
+    {#if evalPrefs}
+      <p class="text-xs font-medium text-muted-foreground">
+        Answer context — caps the recalled set handed to the answerer + judge (score-ranked top-N
+        per kind, each element sanitized to one capped line).
+      </p>
+      <div class="grid gap-3 md:grid-cols-2">
+        <FormField
+          label="Max elements / kind"
+          hint="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump."
+        >
+          <input
+            type="number"
+            min={1}
+            max={200}
+            class={ADMIN_SELECT_LG}
+            bind:value={evalPrefs.max_elements_per_kind}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+        <FormField label="Max fact chars" hint="Each recalled fact → one sanitized line capped here.">
+          <input
+            type="number"
+            min={40}
+            max={2000}
+            class={ADMIN_SELECT_LG}
+            bind:value={evalPrefs.max_fact_chars}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+        <FormField label="Max message chars" hint="Per-episode/message text cap (one sanitized line).">
+          <input
+            type="number"
+            min={40}
+            max={2000}
+            class={ADMIN_SELECT_LG}
+            bind:value={evalPrefs.max_episode_chars}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+        <FormField
+          label="Max entity summary chars"
+          hint="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest."
+        >
+          <input
+            type="number"
+            min={40}
+            max={4000}
+            class={ADMIN_SELECT_LG}
+            bind:value={evalPrefs.max_summary_chars}
+            oninput={ctrl.markDirty}
+          />
+        </FormField>
+      </div>
+    {/if}
 
     {#if validationError}
       <p class="text-xs text-destructive">{validationError}</p>

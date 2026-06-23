@@ -161,6 +161,12 @@ export type GraphPreferences = {
     show_event_time: boolean;
     show_expired_at: boolean;
     show_superseded: boolean;
+    // Answer-context render caps: per-kind top-N (score-ranked) + per-kind char caps applied to the
+    // answer/judge/evidence renders so the answer-relevant elements aren't buried in a noisy dump.
+    max_elements_per_kind: number;
+    max_fact_chars: number;
+    max_episode_chars: number;
+    max_summary_chars: number;
     // Agentic retrieval loop caps/clamps — one global value for eval and chat.
     retrieval_agent: {
       max_agent_turns: number;
@@ -303,6 +309,10 @@ export const DEFAULT_GRAPH: GraphPreferences = {
     show_event_time: true,
     show_expired_at: false,
     show_superseded: false,
+    max_elements_per_kind: 30,
+    max_fact_chars: 240,
+    max_episode_chars: 300,
+    max_summary_chars: 400,
     retrieval_agent: {
       max_agent_turns: 4,
       max_parallel_searches: 3,

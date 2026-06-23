@@ -8,6 +8,7 @@ surfaces without duplicating logic. Eval-only for now — not registered on the 
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, Literal
 
 from hiro_commons.log import Logger
@@ -153,6 +154,104 @@ def _serialize_item(item: AccumulatedItem) -> dict[str, Any]:
     return row
 
 
+# --- Text rendering of a tool result (replaces the JSON dump fed back to the model) ----------
+# Switched 2026-06: the agent saw each search result as `json.dumps(payload)`. The JSON braces /
+# quotes / repeated key names are ~30% pure token overhead at equal fidelity, and that result is
+# re-sent on every later agent turn — so we render plain `#facts/#entities/#episodes` lines instead,
+# mirroring the eval answerer's layout. The dict still flows to the trace (unchanged); only the
+# model-facing text changes.
+_NEWLINE_RUN = re.compile(r"\s*\n+\s*")
+
+
+def _collapse(text: str, sep: str = " ") -> str:
+    """Flatten internal newlines to ONE line (option A): entity summaries stack several distinct
+    facts on separate lines and episodes carry markdown line breaks — both must render as a single
+    bullet so the per-kind layout stays one-item-per-line for the agent."""
+    return _NEWLINE_RUN.sub(sep, (text or "").strip())
+
+
+def _score_key(item: dict[str, Any]) -> float:
+    """Sort key: items are emitted score-descending within each section (None/absent score last)."""
+    score = item.get("score")
+    return float(score) if isinstance(score, (int, float)) else -1.0
+
+
+def _fact_text_line(item: dict[str, Any]) -> str:
+    """`- [stated] <fact> [<relation> / as of <date> / until <date> / score]` — `until` only when the
+    edge carried it (show_expiry). Mirrors the metadata the answerer's fact line surfaces."""
+    bits: list[str] = []
+    relation = str(item.get("relation") or "").strip()
+    if relation:
+        bits.append(relation)
+    if item.get("as_of"):
+        bits.append(f"as of {item['as_of']}")
+    if item.get("until"):
+        bits.append(f"until {item['until']}")
+    score = item.get("score")
+    if isinstance(score, (int, float)):
+        bits.append(f"score {score:.2f}")
+    body = _collapse(str(item.get("fact") or ""))
+    meta = f" [{' / '.join(bits)}]" if bits else ""
+    stated = str(item.get("stated") or "").strip()
+    return f"- [{stated}] {body}{meta}" if stated else f"- {body}{meta}"
+
+
+def _entity_text_line(item: dict[str, Any]) -> str:
+    """`- <name> (<entity_type>): <summary> [score]` — type only when present; summary collapsed."""
+    name = str(item.get("name") or "").strip()
+    etype = str(item.get("entity_type") or "").strip()
+    head = f"{name} ({etype})" if name and etype else (name or "entity")
+    summary = _collapse(str(item.get("summary") or ""), sep="; ")
+    line = f"- {head}: {summary}" if summary else f"- {head}"
+    score = item.get("score")
+    return f"{line} [score {score:.2f}]" if isinstance(score, (int, float)) else line
+
+
+def _episode_text_line(item: dict[str, Any]) -> str:
+    """`- [stated] <text> [score]` — the verbatim turn, collapsed to one line."""
+    when = str(item.get("stated") or "").strip()
+    body = _collapse(str(item.get("text") or ""))
+    line = f"- [{when}] {body}" if when else f"- {body}"
+    score = item.get("score")
+    return f"{line} [score {score:.2f}]" if isinstance(score, (int, float)) else line
+
+
+# (item kind, section heading, line formatter) — order is the answerer's: facts → entities → messages.
+_TEXT_SECTIONS: tuple[tuple[str, str, Any], ...] = (
+    ("edge", "#facts", _fact_text_line),
+    ("entity", "#entities", _entity_text_line),
+    ("episode", "#episodes", _episode_text_line),
+)
+
+
+def render_search_result_text(payload: dict[str, Any]) -> str:
+    """Render a ``search_memory`` result (a ``SearchMemoryResult`` dump) as plain-text sections
+    instead of JSON. One sub-result block per sub-query: a `## S{sid} - {goal} (returned N, new N)`
+    header (with ` ERROR: …` appended on a failed sub-query), then `#facts`/`#entities`/`#episodes`
+    sections (only the kinds present), one bullet per item, score-descending. Ends with a single
+    `(accumulated_total N)` line. Keeps every metadata field the agent reasons over (relation, dates,
+    score, name, type, summary) — drops only the JSON scaffolding and the unused `id`/`source_episode`."""
+    lines: list[str] = []
+    for sub in payload.get("sub_results") or []:
+        goal = str(sub.get("goal") or "").strip()
+        head = f"## S{sub.get('sid')} - {goal} (returned {sub.get('returned')}, new {sub.get('new')})"
+        if sub.get("error"):
+            head += f" ERROR: {sub['error']}"
+        lines.append(head)
+        items = list(sub.get("items") or [])
+        for kind, heading, fmt in _TEXT_SECTIONS:
+            rows = sorted(
+                (it for it in items if it.get("kind") == kind), key=_score_key, reverse=True
+            )
+            if not rows:
+                continue
+            lines.append(heading)
+            lines.extend(fmt(it) for it in rows)
+        lines.append("")
+    lines.append(f"(accumulated_total {payload.get('accumulated_total')})")
+    return "\n".join(lines)
+
+
 class SearchMemoryTool:
     """Thin clamp + concurrent dispatcher over :class:`GraphitiConversationMemory`.
 
@@ -275,4 +374,5 @@ __all__ = [
     "SearchMemorySubResult",
     "SearchMemoryTool",
     "ValidationError",
+    "render_search_result_text",
 ]

@@ -67,7 +67,7 @@
   {#if recallLeg?.retrieval_loop}
     <div class="flex flex-wrap items-start gap-2 border-t border-border pt-2">
       <span class="min-w-[48px] text-muted-foreground">Loop</span>
-      <span class="font-mono text-[11px] leading-tight text-muted-foreground" title="Searches/turns · recalled facts · reduce op (with args)">
+      <span class="font-mono text-[11px] leading-tight text-muted-foreground" title="Searches/turns · recalled facts">
         {recallFoldLabel(recallLeg)}
       </span>
     </div>

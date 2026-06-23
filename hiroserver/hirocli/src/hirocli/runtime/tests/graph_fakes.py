@@ -170,14 +170,12 @@ def ai_tool_call(name: str, args: dict[str, Any], *, call_id: str = "call_1") ->
     )
 
 
-def ai_final(answer: str, *, op: str = "none", **args: Any) -> AIMessage:
-    """A final-turn structured reply: an ``AIMessage`` whose content is the ``RetrievalFinal`` JSON
-    the dedicated structured turn parses (``{"reduce": {"op", "args"}, "answer"}``)."""
-    import json as _json
-
-    payload = {"reduce": {"op": op, "args": dict(args)}, "answer": answer}
+def ai_final(answer: str) -> AIMessage:
+    """A final answer reply: a plain ``AIMessage`` whose content IS the answer. Reused for both an
+    exit-A stop turn (no tool call) and the exit-B ``_final_answer_turn`` — both return content
+    verbatim now that reduce is gone."""
     return AIMessage(
-        content=_json.dumps(payload),
+        content=answer,
         usage_metadata={"input_tokens": 8, "output_tokens": 4, "total_tokens": 12},
     )
 

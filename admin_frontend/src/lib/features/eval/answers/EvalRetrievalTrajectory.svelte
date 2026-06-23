@@ -78,10 +78,6 @@
   {/each}
   <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 text-xs">
     <span
-      ><span class="text-muted-foreground">Reduce</span>
-      <code class="ml-2 rounded bg-info/15 px-2 py-0.5 text-info">{stats.reduceLabel}</code></span
-    >
-    <span
       ><span class="text-muted-foreground">Stopped</span>
       <span class="ml-2 font-mono">{loop.stopped_reason}</span></span
     >

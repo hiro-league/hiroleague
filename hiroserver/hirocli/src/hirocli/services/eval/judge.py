@@ -20,6 +20,7 @@ answers). Both functions no-op the ledger when ``sink is None`` (tests / CLI).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -83,6 +84,12 @@ class RecallRenderOptions:
     show_event_time: bool = True
     show_expired_at: bool = False
     show_superseded: bool = False
+    # Answer-context render caps (mirror graph.eval.max_*). Each kind is score-ranked desc, the top
+    # ``max_elements_per_kind`` kept, and every element sanitized to one capped line.
+    max_elements_per_kind: int = 30
+    max_fact_chars: int = 240
+    max_episode_chars: int = 300
+    max_summary_chars: int = 400
 
 
 class _JudgeOutput(BaseModel):
@@ -133,28 +140,47 @@ _RECALL_SECTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _sanitize_oneline(text: Any, cap: int) -> str:
+    """Collapse a recalled element's text to ONE capped line so it can't break the prompt layout:
+    newlines/tabs → spaces, strip leading markdown markers (#, -, *, >, `) that would open a fake
+    section or bullet, squeeze whitespace, then truncate to ``cap`` chars with an ellipsis. Raw
+    summaries/episodes are often multi-line or markdown, which otherwise fragments the sections."""
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    s = re.sub(r"^[#>*`\-\s]+", "", s)
+    if cap > 0 and len(s) > cap:
+        s = s[: cap - 1].rstrip() + "…"
+    return s
+
+
+def _score_of(hit: dict[str, Any]) -> float:
+    """Retrieval score for ranking (desc); missing/garbage → 0.0 so it sorts last."""
+    raw = hit.get("score")
+    return float(raw) if isinstance(raw, (int, float)) else 0.0
+
+
 def _format_recall_item(hit: dict[str, Any], render: RecallRenderOptions) -> str:
-    """One recalled item → a prompt line WITH useful metadata, but NOT the retrieval score.
+    """One recalled item → a single sanitized prompt line WITH useful metadata, but NOT the score.
 
     Score is a ranking artifact that doesn't help the model answer (and can bias it), so it stays
     in the ledger/UI only. Metadata kept: relationship + temporal validity (facts), type (entities),
-    timestamp (episodes). ``render`` toggles which temporal annotations appear (graph.eval.show_*)."""
+    timestamp (episodes). Text fields are sanitized to one capped line (graph.eval.max_*_chars);
+    ``render`` toggles which temporal annotations appear (graph.eval.show_*)."""
     kind = str(hit.get("kind") or "fact")
     if kind == "entity":
-        name = str(hit.get("name") or "").strip()
+        name = _sanitize_oneline(hit.get("name") or "", 120)
         etype = str(hit.get("entity_type") or "").strip()
-        summary = str(hit.get("summary") or hit.get("memory") or "").strip()
+        summary = _sanitize_oneline(hit.get("summary") or hit.get("memory") or "", render.max_summary_chars)
         head = f"{name} ({etype})" if name and etype else (name or "entity")
         return f"{head}: {summary}" if summary else head
     if kind == "episode":
         when = str(hit.get("valid_at") or "").strip()
-        body = str(hit.get("memory") or "").strip()
+        body = _sanitize_oneline(hit.get("memory") or "", render.max_episode_chars)
         # A message's leading [DATE] IS its statement date (the episode reference_time) — the
         # anchor for resolving relative phrasing. ALWAYS shown, independent of show_event_time
         # (the as-of/until toggles gate event dates, not the statement date the answerer needs).
         return f"[{when}] {body}" if when else body
     # fact (default): "[stated] fact [RELATION · as of: D · until: D]".
-    fact = str(hit.get("fact") or hit.get("memory") or "").strip()
+    fact = _sanitize_oneline(hit.get("fact") or hit.get("memory") or "", render.max_fact_chars)
     rel = str(hit.get("name") or "").strip()
     stated = str(hit.get("stated") or "").strip()
     valid_at = str(hit.get("valid_at") or "").strip()
@@ -198,6 +224,10 @@ def format_recall_context(
         rows = by_kind.get(kind)
         if not rows:
             continue
+        # Score-rank desc, then keep only the top N per kind so the answer-relevant elements aren't
+        # buried under a long time-sorted dump. (Dates ride on each line, so ordering/temporal
+        # questions can still re-sort by [stated].)
+        rows = sorted(rows, key=_score_of, reverse=True)[: render.max_elements_per_kind]
         lines = "\n".join(f"- {_format_recall_item(h, render)}" for h in rows)
         # Headings are markdown ("### Relevant Facts") — no trailing colon.
         sections.append(f"{heading}\n{lines}")
@@ -267,43 +297,6 @@ async def _ledger_llm_node(
         current_entry.reset(token)
 
 
-def _format_computed_block(computed: "dict[str, Any] | None") -> str:
-    """Render a declared reduce's deterministic result as a short, instruction-shaped line so the
-    answerer USES it instead of recomputing (Break-2, P10). Returns "" for none/empty/no-op."""
-    if not computed:
-        return ""
-    op = str(computed.get("op") or "").strip()
-    if op == "distinct_count":
-        count = computed.get("count")
-        if count is None:
-            return ""
-        kind = str(computed.get("kind") or "item")
-        names = computed.get("names")
-        line = f"- distinct_count = {count} (counting distinct {kind}s). Use this exact number."
-        if isinstance(names, list) and names:
-            line += " Distinct values: " + "; ".join(str(n) for n in names) + "."
-        return line
-    if op == "date_diff":
-        days = computed.get("days")
-        if days is None:
-            return "- date_diff: the two anchor events were not both found — say so; do not guess a duration."
-        return f"- date_diff = {days} days between the two anchor events. Use this exact value."
-    if op == "keep_conflicting":
-        aff = computed.get("affirming")
-        neg = computed.get("negating")
-        if aff is None and neg is None:
-            return ""
-        return (
-            f"- keep_conflicting: {aff} affirming vs {neg} negating fact(s) below — present BOTH "
-            "sides as a contradiction; do not pick one."
-        )
-    if op == "latest":
-        return "- latest: the facts below are already reduced to the most recent value per subject — answer from them."
-    if op == "order_by_time":
-        return "- order_by_time: the facts below are already in chronological order — preserve it."
-    return ""
-
-
 async def answer_from_context(
     model: Any,
     model_id: str,
@@ -313,17 +306,18 @@ async def answer_from_context(
     sink: Any | None = None,
     instructions: str | None = None,
     render: RecallRenderOptions | None = None,
-    computed: "dict[str, Any] | None" = None,
+    draft_answer: str | None = None,
 ) -> str:
-    """Brief answer to ``question`` grounded ONLY in ``context`` — the recalled hits as STRUCTURED
-    rows (``{kind, memory, …metadata}``), rendered into Relevant Facts / Entities / Messages
-    sections so the model sees each kind with its metadata (relationship, temporal validity, type).
+    """Answer ``question`` leading with the retrieval agent's ``draft_answer``, grounded in
+    ``context`` — the recalled hits as STRUCTURED rows (``{kind, memory, …metadata}``), rendered into
+    Relevant Facts / Entities / Messages sections so the model sees each kind with its metadata
+    (relationship, temporal validity, type).
 
-    Message layout (the conv-43 P1/P4 prompt rework): the system prompt is the hardcoded two-line
-    ``MEMORY_EVAL_ANSWER_SYSTEM_PROMPT`` role; ``instructions`` (the run's chosen
-    ``graph.eval.answer_prompts`` profile text, blank ⇒ ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT``) goes
-    in the USER message, followed by "## User Question" and "## Recalled Memory Elements" — the
-    question precedes the context so the model reads the elements knowing the target.
+    Message layout: the system prompt is the hardcoded two-line ``MEMORY_EVAL_ANSWER_SYSTEM_PROMPT``
+    role; ``instructions`` (the run's chosen ``graph.eval.answer_prompts`` profile text, blank ⇒
+    ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT``) goes in the USER message, followed by "## User Question",
+    "## Draft Answer" (the agent's answer over its full search), then "## Supporting Evidence" (the
+    recalled elements) — draft before evidence so position carries the lead-with-the-draft priority.
 
     Ledgered as an ``eval_answer`` node. Empty context ⇒ the model is asked over no elements, so it
     should decline (tests memory recall honestly)."""
@@ -333,13 +327,24 @@ async def answer_from_context(
 
     instr = (instructions or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
     recalled = format_recall_context(context, render) or "(no elements recalled)"
-    computed_block = _format_computed_block(computed)
-    computed_section = f"\n\n## Computed Results\n{computed_block}" if computed_block else ""
+    draft = (draft_answer or "").strip()
+    if draft:
+        # Blockquote every line: fences the draft (a quoted "## x" is inert, not a real section, so
+        # the agent's own markdown can't collide with this prompt's structure) AND sets it apart
+        # visually. The label marks it as the lead candidate without out-shouting the evidence.
+        quoted = "\n".join(f"> {ln}" for ln in draft.splitlines())
+        draft_section = (
+            "\n\n## Draft Answer\n"
+            "*(your primary candidate — verify and refine it against the evidence below)*\n"
+            f"{quoted}"
+        )
+    else:
+        draft_section = ""
     human = (
         f"{instr}\n\n"
         f"## User Question\n{question}"
-        f"{computed_section}\n\n"
-        f"## Recalled Memory Elements\n{recalled}"
+        f"{draft_section}\n\n"
+        f"## Supporting Evidence\n{recalled}"
     )
 
     async def _call() -> tuple[str, Any, str, tuple[str, str]]:

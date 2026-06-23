@@ -213,7 +213,10 @@ async def _recall_via_agent(
     parallel question. When either is omitted (direct ``_memory_question`` test entry, etc.)
     this function loads them from the workspace as a fallback.
     """
-    from hirocli.services.memory.agent.reduce import apply_reduce, accumulated_item_to_recall_row
+    from hirocli.services.memory.agent.presentation import (
+        accumulated_item_to_recall_row,
+        present_accumulator,
+    )
     from hirocli.services.memory.agent.retrieval_agent import run_retrieval
 
     limits = retrieval_limits
@@ -253,45 +256,15 @@ async def _recall_via_agent(
         user_id=user_id,
         character_id=character_id,
     )
-    # ── Reduce ops DISABLED (2026-06) ──────────────────────────────────────────────────────────
-    # Trace analysis across three beam128k_14 runs showed the deterministic reduce ops produce
-    # ~zero clean wins and actively inject WRONG authoritative numbers the answer prompt is told to
-    # trust: distinct_count returned 41 distinct edge-targets vs gold 13 (untyped, can't isolate
-    # "movies"); order_by_time is byte-identical to "none"; date_diff mis-selects anchors; latest /
-    # keep_conflicting are unproven. So force every question onto the deduped/time-sorted baseline
-    # ("none"). The agent may still DECLARE an op on its final turn — we ignore it here. Re-enable by
-    # restoring op=result.reduce_op / args=result.reduce_args below.
-    result.reduce_op = "none"
-    result.reduce_args = {}
-    try:
-        reduced = apply_reduce(
-            result.accumulator,
-            op=result.reduce_op,
-            args=result.reduce_args,
-        )
-    except Exception:
-        # A malformed reduce (e.g. date_diff declared without anchors) must NOT abort the whole eval
-        # run — question failures propagate up and fail the batch (see _unwrap_question_failure). One
-        # question's bad reduce degrades to a plain deduped/time-sorted recall instead of crashing.
-        log.warning(
-            "⚠️ knowledge.eval — reduce '%s' failed; degrading to none · q='%s'",
-            result.reduce_op,
-            _preview(question, 80),
-            exc_info=True,
-        )
-        result.reduce_op = "none"
-        result.reduce_args = {}
-        reduced = apply_reduce(result.accumulator, op="none")
-    # Break-2 fix (P10): carry the deterministic reduce result (count / days / conflict tallies) so
-    # the answerer USES it instead of recomputing — code-executed reduce was pointless when the
-    # summary was dropped here (e.g. distinct_count computed 13 but the answerer recounted to 8).
-    result.reduce_summary = dict(reduced.summary or {})
-    recalled_rows = [accumulated_item_to_recall_row(item) for item in reduced.items]
+    # Reduce removed (2026-06): the answerer composes from the deduped/time-sorted recall plus the
+    # agent's own draft answer (result.answer_text), not a deterministic op.
+    recalled_rows = [
+        accumulated_item_to_recall_row(item) for item in present_accumulator(result.accumulator)
+    ]
     facts = [str(r["memory"]) for r in recalled_rows if str(r.get("memory") or "").strip()]
     log.info(
-        "⬇️ knowledge.eval — recall · items=%d · reduce=%s · q='%s'",
+        "⬇️ knowledge.eval — recall · items=%d · q='%s'",
         len(recalled_rows),
-        result.reduce_op,
         _preview(question, 80),
     )
     return recalled_rows, facts, result
@@ -334,7 +307,6 @@ def _memory_recall_output_preview(
         return facts_preview
     return format_memory_recall_output_preview(
         getattr(retrieval_result, "transcript", None) or [],
-        reduce_op=str(getattr(retrieval_result, "reduce_op", None) or "none"),
         facts_preview=facts_preview,
     )
 
@@ -482,7 +454,8 @@ async def _memory_question(
                     "entities": sum(1 for h in recalled_rows if h.get("kind") == "entity"),
                     "episodes": sum(1 for h in recalled_rows if h.get("kind") == "episode"),
                 }
-        # 2) answer — grounded ONLY in the recalled context (structured: facts/entities/episodes).
+        # 2) answer — leads with the retrieval agent's draft answer, grounded in the recalled
+        #    context (structured: facts/entities/episodes).
         if answer_model is not None:
             answer = await answer_from_context(
                 answer_model,
@@ -493,9 +466,9 @@ async def _memory_question(
                 # Editable graph.eval.memory_answer_prompt (blank → structured default in judge).
                 instructions=answer_instructions,
                 render=render,
-                # Deterministic reduce result (Break-2): the answerer must use the computed
-                # count/duration/etc rather than recomputing from the items.
-                computed=getattr(retrieval_result, "reduce_summary", None),
+                # The agent's own answer over its full search (exit A: its stop turn; exit B: a
+                # forced answer turn) — the answerer leads with it and verifies against the context.
+                draft_answer=getattr(retrieval_result, "answer_text", None),
             )
         # 3) judge — vs the ideal answer (optional step). Gets the SAME recalled context so it can
         # set recall_sufficient (recall-miss vs answering-miss), not just grade vs the ideal. Uses
@@ -560,8 +533,6 @@ async def _memory_question(
             limits = load_preferences(workspace_path).graph.eval.retrieval_agent
         loop_payload = build_retrieval_loop_payload(
             getattr(retrieval_result, "transcript", None) or [],
-            reduce_op=str(getattr(retrieval_result, "reduce_op", None) or "none"),
-            reduce_args=dict(getattr(retrieval_result, "reduce_args", None) or {}),
             max_agent_turns=int(getattr(limits, "max_agent_turns", 4) or 4),
         )
         if loop_payload is not None:
@@ -822,6 +793,10 @@ async def run_memory_eval(
         show_event_time=_eval_prefs.show_event_time,
         show_expired_at=_eval_prefs.show_expired_at,
         show_superseded=_eval_prefs.show_superseded,
+        max_elements_per_kind=_eval_prefs.max_elements_per_kind,
+        max_fact_chars=_eval_prefs.max_fact_chars,
+        max_episode_chars=_eval_prefs.max_episode_chars,
+        max_summary_chars=_eval_prefs.max_summary_chars,
     )
     judged = judge and judge_model is not None
 
