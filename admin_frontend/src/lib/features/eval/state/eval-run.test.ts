@@ -150,7 +150,8 @@ describe('applySnapshot', () => {
       cost_usd: 0,
       is_negative_control: false,
       answered_at: '',
-      evidence_recall: null
+      evidence_recall: null,
+      rubric: []
     }));
     run.applySnapshot(rows, { modes: ['recall'] } as never);
     expect(run.rows.map((r) => r.id)).toEqual(['a', 'b']);

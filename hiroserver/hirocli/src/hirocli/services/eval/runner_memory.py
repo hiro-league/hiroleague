@@ -253,6 +253,16 @@ async def _recall_via_agent(
         user_id=user_id,
         character_id=character_id,
     )
+    # ── Reduce ops DISABLED (2026-06) ──────────────────────────────────────────────────────────
+    # Trace analysis across three beam128k_14 runs showed the deterministic reduce ops produce
+    # ~zero clean wins and actively inject WRONG authoritative numbers the answer prompt is told to
+    # trust: distinct_count returned 41 distinct edge-targets vs gold 13 (untyped, can't isolate
+    # "movies"); order_by_time is byte-identical to "none"; date_diff mis-selects anchors; latest /
+    # keep_conflicting are unproven. So force every question onto the deduped/time-sorted baseline
+    # ("none"). The agent may still DECLARE an op on its final turn — we ignore it here. Re-enable by
+    # restoring op=result.reduce_op / args=result.reduce_args below.
+    result.reduce_op = "none"
+    result.reduce_args = {}
     try:
         reduced = apply_reduce(
             result.accumulator,
@@ -357,6 +367,9 @@ async def _memory_question(
     render: "RecallRenderOptions | None" = None,
     retrieval_limits: Any | None = None,
     retrieval_prompt_text: str = "",
+    # BEAM grading rubric (list of required-element strings) for THIS question, threaded to the
+    # judge alongside the ideal answer. None/empty for LoCoMo/adam → judge grades vs the ideal only.
+    rubric: list[str] | None = None,
 ) -> dict[str, Any]:
     """One memory question, all in ONE Graph Run: **recall** (graph search) → **answer**
     (grounded only in the recalled facts) → optional **judge** (vs the ideal answer).
@@ -499,6 +512,7 @@ async def _memory_question(
                 sink=sink,
                 system_prompt=judge_system_prompt,
                 render=render,
+                rubric=rubric,
             )
             mark, reason = verdict.mark, verdict.reason
             recall_sufficient = verdict.recall_sufficient
@@ -628,6 +642,7 @@ async def _memory_question_task(
     render: "RecallRenderOptions",
     bus: Any,
     evidence_ctx: "EvidenceRecallContext | None" = None,
+    rubric_map: dict[str, list[str]] | None = None,
     retrieval_limits: Any | None = None,
     retrieval_prompt_text: str = "",
 ) -> None:
@@ -661,6 +676,7 @@ async def _memory_question_task(
             metadata={"id": q.get("id")},
             inputs={"question": q.get("question", "")},
         ):
+            rubric = (rubric_map or {}).get(str(q.get("id") or ""))
             row = await _memory_question(
                 memory,
                 q,
@@ -682,7 +698,13 @@ async def _memory_question_task(
                 render=render,
                 retrieval_limits=retrieval_limits,
                 retrieval_prompt_text=retrieval_prompt_text,
+                rubric=rubric,
             )
+    # Rubric (BEAM corpora): inline the question's grading rubric on the row so the live event and
+    # the detail dialog's judge pane can show it. Static corpus data — stripped before persist and
+    # recomputed on read (like evidence_recall below), so it never bloats/stales row_json.
+    if rubric:
+        row["rubric"] = rubric
     # Evidence recall (LoCoMo corpora): score X/Y gold-evidence coverage from THIS question's
     # recalled context and inline it on the row, so the live event carries it (EV column + fold
     # populate as rows stream, not only after the post-run refresh). Best-effort — a scoring
@@ -973,16 +995,21 @@ async def run_memory_eval(
             # recall (the read path computes it post-run, as before). Best-effort: a load failure
             # must never abort the run.
             evidence_ctx = None
+            # Grading rubric (BEAM corpora): load the sidecar's per-question rubric ONCE so each
+            # question can feed it to the judge and inline it on its row. {} for non-BEAM corpora.
+            rubric_map: dict[str, list[str]] = {}
             if questions_path is not None and questions:
                 try:
                     from hirocli.services.eval.locomo import (
                         load_evidence_recall_context,
+                        load_rubric_map,
                     )
 
                     evidence_ctx = load_evidence_recall_context(set_id, Path(questions_path))
+                    rubric_map = load_rubric_map(set_id, Path(questions_path))
                 except Exception:
                     log.warning(
-                        "⚠️ knowledge.eval — evidence-recall context load failed · set=%s",
+                        "⚠️ knowledge.eval — evidence-recall/rubric context load failed · set=%s",
                         set_id,
                         exc_info=True,
                     )
@@ -1017,6 +1044,7 @@ async def run_memory_eval(
                                 render=render,
                                 bus=bus,
                                 evidence_ctx=evidence_ctx,
+                                rubric_map=rubric_map,
                                 retrieval_limits=_retrieval_limits,
                                 retrieval_prompt_text=_retrieval_prompt_text,
                             )

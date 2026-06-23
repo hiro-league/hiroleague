@@ -403,6 +403,7 @@ async def judge_answer(
     sink: Any | None = None,
     system_prompt: str | None = None,
     render: RecallRenderOptions | None = None,
+    rubric: "list[str] | None" = None,
 ) -> JudgeVerdict:
     """Grade ``answer`` against the ideal ``expected_answer`` → :class:`JudgeVerdict`.
 
@@ -428,6 +429,16 @@ async def judge_answer(
     sys_prompt = (system_prompt or "").strip() or DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
     control = "YES — declining is the correct outcome." if is_negative_control else "no"
     recalled = format_recall_context(context, render)
+    # Rubric (BEAM corpora) — the required elements of a correct answer, shown right after the
+    # Ideal Answer so the judge reads both grading references together (co-equal: they describe the
+    # same correct answer). Absent for LoCoMo/adam/knowledge → no Rubric section, judge falls back
+    # to the Ideal Answer alone (the default prompt's rubric rules are inert when none is shown).
+    rubric_lines = [str(c).strip() for c in (rubric or []) if str(c).strip()]
+    rubric_block = (
+        "\n\n## Rubric (required elements)\n" + "\n".join(f"- {c}" for c in rubric_lines)
+        if rubric_lines
+        else ""
+    )
     # Model Answer BEFORE the recalled elements: the verdict is Answer-vs-Ideal, so the judge
     # meets the graded material first; the elements are auxiliary (evidence/recall_sufficient).
     context_block = (
@@ -435,7 +446,8 @@ async def judge_answer(
     )
     human = (
         f"## Question\n{question}\n\n"
-        f"## Ideal Answer\n{expected_answer or '(none given)'}\n\n"
+        f"## Ideal Answer\n{expected_answer or '(none given)'}"
+        f"{rubric_block}\n\n"
         f"## Negative Control\n{control}\n\n"
         f"## Model Answer\n{answer or '(empty)'}"
         f"{context_block}"

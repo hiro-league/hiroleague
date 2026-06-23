@@ -12,7 +12,8 @@
     onToggleNodeRow,
     onOpenNodeDetails,
     onOpenRetrievalTrace,
-    onOpenIngestTrace
+    onOpenIngestTrace,
+    onOpenEvalRow
   }: {
     timeline: GraphLedgerRow[];
     nodeFieldList: readonly (keyof GraphLedgerRow)[];
@@ -25,6 +26,9 @@
     onOpenNodeDetails: (row: GraphLedgerRow) => void;
     onOpenRetrievalTrace?: (row: GraphLedgerRow) => void;
     onOpenIngestTrace?: (row: GraphLedgerRow) => void;
+    /** Open the rich eval-detail dialog for a `memory_recall` node (resolves its run_id → eval
+     *  row). Takes precedence over the bare retrieval-trace marker for that node. */
+    onOpenEvalRow?: (row: GraphLedgerRow) => void;
   } = $props();
 
   /** True when ``row`` is a top-level step (not a nested sub-step). Sub-steps share the
@@ -52,6 +56,13 @@
     if (!onOpenIngestTrace || !isParentStep(row)) return false;
     const step = stepOf(row);
     return Number.isFinite(step) && ingestTraceStepIds.has(step);
+  }
+
+  /** The `memory_recall` parent row gets the rich eval-detail marker instead of the bare
+   *  retrieval-trace one — its run_id resolves to the full eval row (overview / gold + our answer /
+   *  trajectory / counted facts-entities-episodes), with sub-query traces reachable from within. */
+  function rowHasEvalDetail(row: GraphLedgerRow): boolean {
+    return !!onOpenEvalRow && isParentStep(row) && String(row.node ?? '') === 'memory_recall';
   }
 </script>
 
@@ -82,7 +93,23 @@
         >
           {#each nodeFieldList as field (field)}
             <td class="font-mono">
-              {#if field === 'node' && rowHasTrace(row)}
+              {#if field === 'node' && rowHasEvalDetail(row)}
+                <span class="node-cell">
+                  <span>{formatLedgerField(field, row)}</span>
+                  <button
+                    type="button"
+                    class="trace-marker"
+                    title="Open eval detail (overview · gold + our answer · trajectory · facts/entities/episodes)"
+                    aria-label="Open eval detail dialog"
+                    onclick={(ev) => {
+                      ev.stopPropagation();
+                      onOpenEvalRow?.(row);
+                    }}
+                  >
+                    {'ⓘ'}
+                  </button>
+                </span>
+              {:else if field === 'node' && rowHasTrace(row)}
                 <span class="node-cell">
                   <span>{formatLedgerField(field, row)}</span>
                   <button

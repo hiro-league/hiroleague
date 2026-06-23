@@ -163,6 +163,35 @@ class EvalResultStore:
                 )
         return out
 
+    def find_row_by_run_id(self, run_id: str) -> dict[str, Any] | None:
+        """Find the saved question row whose ANY leg ran under ``run_id`` (the per-question graph
+        run id stamped on ``leg.run_id``).
+
+        Backs the Graph-Runs → eval-detail bridge: a ``memory_recall`` graph-run node carries that
+        per-question ``run_id``, and this resolves it back to the full saved row so the rich eval
+        detail dialog can open in place. ``LIKE`` pre-filters candidate rows (run_id is embedded in
+        the JSON), then we confirm by parsing so a substring collision can't return a wrong row.
+        Returns the parsed row dict (with ``corpus_id`` injected) or ``None`` if no row matches."""
+        rid = (run_id or "").strip()
+        if not rid or not self.db_path.exists():
+            return None
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT corpus_id, question_id, row_json FROM memory_eval_results "
+                "WHERE row_json LIKE ?",
+                (f"%{rid}%",),
+            ).fetchall()
+        for r in rows:
+            try:
+                row = json.loads(r["row_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            legs = row.get("legs") if isinstance(row.get("legs"), dict) else {}
+            if any(str((leg or {}).get("run_id") or "") == rid for leg in legs.values()):
+                row["corpus_id"] = r["corpus_id"]
+                return row
+        return None
+
     def clear_corpus(self, corpus_id: str) -> int:
         """Delete all persisted results for ``corpus_id`` (the "Clear results" action).
 

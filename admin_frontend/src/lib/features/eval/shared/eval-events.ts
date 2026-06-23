@@ -117,6 +117,10 @@ export type EvalQuestionPayload = {
   // Evidence recall (LoCoMo corpora) — read-path enrichment, so present on saved-results reads but
   // not on live question_completed events (which fill it in on the post-run results refresh).
   evidence_recall?: EvidenceRecall | null;
+  // Grading rubric (BEAM corpora) — the required-element criteria the judge grades against, shown
+  // beside the gold answer in the detail dialog's judge pane. Sidecar-derived (not persisted);
+  // absent for non-BEAM corpora.
+  rubric?: string[];
 };
 
 /** Per-bucket breakdown, keyed by leg (the per-category / per-difficulty report tables).

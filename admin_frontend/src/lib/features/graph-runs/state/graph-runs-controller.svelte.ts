@@ -40,8 +40,16 @@ import {
 } from '../graph-runs-pure';
 import { graphRunsFetchInitialLedger, graphRunsLoadMoreLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
 import { createGraphRunTraceModel } from './graph-runs-trace-model.svelte';
+import { createRetrievalTraceDialogController } from './retrieval-trace-dialog.svelte';
+import { getEvalRowByRunId } from '$lib/api/eval';
+import { rowFromPayload, type EvalRow } from '$lib/features/eval/shared/eval-row';
+import type { ToastKind } from '$lib/ui/toast-types';
 
-export function createGraphRunsPageController() {
+const NOOP_NOTIFY = (_kind: ToastKind, _message: string): void => {};
+
+export function createGraphRunsPageController(
+  notify: (kind: ToastKind, message: string) => void = NOOP_NOTIFY
+) {
   const uiPrefs = createGraphRunsPreferences();
   let rows = $state<GraphLedgerRow[]>([]);
   let openRunIds = $state<string[]>([]);
@@ -52,6 +60,41 @@ export function createGraphRunsPageController() {
   // Retrieval + ingest trace caches / open-dialog state live in their own sub-model,
   // reactive against the active pane so its derivations recompute on run switch.
   const traces = createGraphRunTraceModel({ getActivePane: () => activePane });
+
+  // --- Eval-detail bridge: open the rich eval row dialog from a `memory_recall` node ----------
+  // The node carries the per-question run_id; we resolve it to the saved eval row and reuse the
+  // Eval panel's detail dialog in place. `rowTraces` drives the (stacked) per-search trace dialog
+  // its Trajectory tab opens — the same controller the Eval panel uses.
+  const rowTraces = createRetrievalTraceDialogController(notify);
+  let activeEvalRow = $state<EvalRow | null>(null);
+  let evalRowLoadingRunId = $state<string | null>(null);
+  const evalRowLegColumns = $derived(activeEvalRow ? Object.keys(activeEvalRow.legs) : []);
+
+  async function openEvalRowForNode(row: GraphLedgerRow) {
+    const runId = String(row.run_id ?? '').trim();
+    if (!runId) return;
+    evalRowLoadingRunId = runId;
+    try {
+      const res = await getEvalRowByRunId(runId);
+      if (res.ok && res.data?.row) {
+        activeEvalRow = rowFromPayload(res.data.row);
+      } else {
+        notify(
+          'error',
+          'No saved eval row found for this recall node (results may have been cleared).'
+        );
+      }
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Failed to load the eval row.');
+    } finally {
+      evalRowLoadingRunId = null;
+    }
+  }
+
+  function closeEvalRow() {
+    activeEvalRow = null;
+    rowTraces.closeTrace();
+  }
 
   let timelineByRun = $state<Record<string, GraphLedgerRow[]>>({});
   let langsmithUrlByRun = $state<Record<string, string | undefined>>({});
@@ -398,6 +441,7 @@ export function createGraphRunsPageController() {
     selectedNodeRowId = null;
     nodeDetailRowId = null;
     traces.resetOpen();
+    closeEvalRow();
     if (!alreadyOpen) {
       await loadRunDetail(runId);
     }
@@ -418,6 +462,7 @@ export function createGraphRunsPageController() {
     selectedNodeRowId = null;
     nodeDetailRowId = null;
     traces.resetOpen();
+    closeEvalRow();
   }
 
   function showRunsOnly() {
@@ -425,6 +470,7 @@ export function createGraphRunsPageController() {
     selectedNodeRowId = null;
     nodeDetailRowId = null;
     traces.resetOpen();
+    closeEvalRow();
   }
 
   function refreshMain() {
@@ -484,6 +530,15 @@ export function createGraphRunsPageController() {
     const focus = ev.target instanceof HTMLElement ? ev.target : null;
     if (focus?.closest('input, textarea, select, [contenteditable="true"]')) return;
     ev.preventDefault();
+    // Eval-detail bridge dialogs close first (the stacked per-search trace, then the row dialog).
+    if (rowTraces.activeTrace !== null) {
+      rowTraces.closeTrace();
+      return;
+    }
+    if (activeEvalRow !== null) {
+      closeEvalRow();
+      return;
+    }
     if (traces.ingestTraceStep !== null) {
       traces.closeIngestTrace();
       return;
@@ -653,6 +708,22 @@ export function createGraphRunsPageController() {
     get traces() {
       return traces;
     },
+    /** Eval-detail bridge surface — the resolved row, its leg columns, the (stacked) trace dialog
+     * controller, and the open/close actions the `memory_recall` marker drives. */
+    get activeEvalRow() {
+      return activeEvalRow;
+    },
+    get evalRowLoadingRunId() {
+      return evalRowLoadingRunId;
+    },
+    get evalRowLegColumns() {
+      return evalRowLegColumns;
+    },
+    get evalRowTraces() {
+      return rowTraces;
+    },
+    openEvalRowForNode,
+    closeEvalRow,
     RUNS_TAB,
     mount,
     dispose,

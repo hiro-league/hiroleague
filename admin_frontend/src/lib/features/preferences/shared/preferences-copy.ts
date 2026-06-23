@@ -24,7 +24,7 @@ export const GRAPH_SEARCH_INDEXING_COPY = {
   searchRecipe:
     'How candidates are ranked/fused WITHIN each leg (orthogonal to Search scope below). RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly. MMR is not compatible with the episodes leg (BM25-only) — disabled when scope includes episodes.',
   searchScope:
-    'Which graph elements memory recall and knowledge retrieval READ from (orthogonal to Search recipe above). Edges = facts between entities (relations). Nodes = per-entity summaries (attribute-style memories, e.g. age, role, mood). Episodes = the raw conversation text of each saved turn — BM25 keyword match only (paraphrases may miss), useful as last-resort recall.',
+    'Which graph elements memory recall and knowledge retrieval READ from (orthogonal to Search recipe above). Edges = facts between entities (relations). Nodes = per-entity summaries (attribute-style memories, e.g. age, role, mood). Episodes = the raw conversation text of each saved turn — BM25 keyword match only (paraphrases may miss), useful as last-resort recall. "Edges + Episodes" keeps the raw turns but drops entity summaries (to test whether entity summaries are redundant with episodes).',
   simMinScore:
     'Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep low (≈0.3) for recall — too high and paraphrased questions (e.g. asking \'wife\' when the stored fact says \'married to\') return no facts at all. Graphiti\'s own default is a strict 0.6. Precision belongs in the reranker\'s Min relevance below, not here.',
   queryTimeout:

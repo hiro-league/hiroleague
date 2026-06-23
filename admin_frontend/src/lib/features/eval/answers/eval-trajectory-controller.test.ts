@@ -58,7 +58,8 @@ function row(leg: Partial<EvalQuestionLeg>): EvalRow {
     cost_usd: 0,
     is_negative_control: false,
     answered_at: '',
-    evidence_recall: null
+    evidence_recall: null,
+    rubric: []
   };
 }
 

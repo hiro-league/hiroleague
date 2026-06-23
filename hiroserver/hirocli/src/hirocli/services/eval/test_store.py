@@ -51,6 +51,24 @@ def test_upsert_read_roundtrip(tmp_path: Path) -> None:
     assert (tmp_path / "knowledge" / "eval_results.db").exists()
 
 
+def test_find_row_by_run_id_resolves_recall_node(tmp_path: Path) -> None:
+    """The Graph-Runs → eval-detail bridge resolves a memory_recall node's run_id back to its row."""
+    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    r1 = _row("q1", "✓")
+    r1["legs"]["recall"]["run_id"] = "memory_eval_q-adam-run42-q1"
+    r2 = _row("q2", "✗")
+    r2["legs"]["recall"]["run_id"] = "memory_eval_q-adam-run42-q2"
+    store.upsert_row("adam", "q1", r1, mark="✓", cost_usd=0.01)
+    store.upsert_row("adam", "q2", r2, mark="✗", cost_usd=0.02)
+
+    found = store.find_row_by_run_id("memory_eval_q-adam-run42-q2")
+    assert found is not None
+    assert found["id"] == "q2"
+    assert found["corpus_id"] == "adam"  # injected so the bridge knows which corpus it came from
+    # A run_id with no saved row (cleared / never run) resolves to None, not a wrong row.
+    assert store.find_row_by_run_id("memory_eval_q-adam-run42-missing") is None
+
+
 def test_rerun_upserts_in_place_and_keeps_others(tmp_path: Path) -> None:
     """Re-running one question overwrites only its row; the rest of the corpus stays."""
     store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")

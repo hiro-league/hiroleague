@@ -121,7 +121,9 @@ def _build_search_config(
             sim_min_score=max(0.0, min(1.0, float(sim_min_score))),
             bfs_max_depth=max(1, int(k_hop)),
         )
-    if scope == "edges_nodes_episodes":
+    # ``edges_and_episodes`` mounts the episodes leg WITHOUT nodes (no node_config above) — the
+    # edges+episodes ablation. ``edges_nodes_episodes`` mounts both.
+    if scope in ("edges_and_episodes", "edges_nodes_episodes"):
         # Episodes leg is BM25-only (graphiti-core). The MMR×episodes combo is rejected at
         # pref-validation; reaching here, ``recipe`` is rrf or cross_encoder → both safe.
         config.episode_config = EpisodeSearchConfig(

@@ -35,6 +35,7 @@ function row(p: Partial<EvalRow> = {}): EvalRow {
     is_negative_control: false,
     answered_at: '',
     evidence_recall: null,
+    rubric: [],
     ...p
   };
 }

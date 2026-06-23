@@ -18,6 +18,9 @@
   import GraphRunsNodeDetailPanel from './GraphRunsNodeDetailPanel.svelte';
   import GraphRunsRetrievalTraceDialog from './GraphRunsRetrievalTraceDialog.svelte';
   import GraphRunsIngestTraceDialog from './GraphRunsIngestTraceDialog.svelte';
+  import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
+  import type { EvalRow } from '$lib/features/eval/shared/eval-row';
+  import type { RetrievalTraceDialogController } from './state/retrieval-trace-dialog.svelte';
 
   let {
     activePane,
@@ -53,7 +56,12 @@
     ingestTraceNavIndex,
     ingestTraceNavTotal,
     onPrevIngestTrace,
-    onNextIngestTrace
+    onNextIngestTrace,
+    activeEvalRow,
+    evalRowLegColumns,
+    evalRowTraces,
+    onOpenEvalRow,
+    onCloseEvalRow
   }: {
     activePane: ActivePane;
     runDetailCardsExpanded: boolean;
@@ -89,6 +97,13 @@
     ingestTraceNavTotal: number;
     onPrevIngestTrace: () => void;
     onNextIngestTrace: () => void;
+    /** Eval-detail bridge — the resolved row (null when closed), its leg columns, the stacked
+     *  per-search trace controller, and open/close handlers for the `memory_recall` marker. */
+    activeEvalRow: EvalRow | null;
+    evalRowLegColumns: string[];
+    evalRowTraces: RetrievalTraceDialogController;
+    onOpenEvalRow: (row: GraphLedgerRow) => void;
+    onCloseEvalRow: () => void;
   } = $props();
 
   const detailHidden = $derived(!isRunDetailPane(activePane));
@@ -153,6 +168,7 @@
         {onOpenNodeDetails}
         {onOpenRetrievalTrace}
         {onOpenIngestTrace}
+        {onOpenEvalRow}
       />
 
       {#if nodeDetailRow}
@@ -167,6 +183,23 @@
 </div>
 
 <GraphRunsRetrievalTraceDialog trace={activeRetrievalTrace} onClose={onCloseRetrievalTrace} />
+
+<!-- Eval-detail bridge: the rich per-question dialog (reused from the Eval panel) opened from a
+     memory_recall node, plus the stacked per-search trace dialog its Trajectory tab opens. -->
+<EvalRowDetailDialog
+  row={activeEvalRow}
+  legColumns={evalRowLegColumns}
+  searchTerm=""
+  recalledTerm=""
+  traces={evalRowTraces}
+  onClose={onCloseEvalRow}
+/>
+<GraphRunsRetrievalTraceDialog
+  trace={evalRowTraces.activeTrace}
+  idealAnswer={evalRowTraces.activeTraceIdeal}
+  llmAnswer={evalRowTraces.activeTraceAnswer}
+  onClose={evalRowTraces.closeTrace}
+/>
 
 <GraphRunsIngestTraceDialog
   trace={activeIngestTrace}

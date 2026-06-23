@@ -17,7 +17,7 @@
   import type { EvidenceRecall, RecalledFact } from '$lib/features/eval/shared/eval-events';
   import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
-  import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
+  import type { RowDetailTraces } from '$lib/features/eval/state/eval-traces.svelte';
 
   interface Props {
     /** The row to show, or null when the dialog is closed. */
@@ -27,7 +27,9 @@
     searchTerm: string;
     /** Recalled-search term (highlights inside the recalled / evidence tables; '' = no highlight). */
     recalledTerm: string;
-    traces: EvalTraces;
+    /** Narrow trace seam — the full Eval panel passes its `EvalTraces`; the Graph-Runs bridge
+     *  passes a lighter controller (no Copy). */
+    traces: RowDetailTraces;
     onClose: () => void;
   }
   let { row, legColumns, searchTerm, recalledTerm, traces, onClose }: Props = $props();
@@ -165,6 +167,18 @@
           <span class="flex-1 italic text-muted-foreground">— (no gold answer)</span>
         {/if}
       </div>
+      <!-- Rubric (BEAM corpora): the required-element criteria the judge grades against, co-equal
+           with the gold answer. Shown only when the corpus ships one (empty for LoCoMo/adam). -->
+      {#if r.rubric.length}
+        <div class="flex flex-wrap gap-2">
+          <span class="min-w-[64px] text-muted-foreground">Rubric</span>
+          <ul class="flex-1 list-disc space-y-0.5 pl-4 text-foreground">
+            {#each r.rubric as criterion (criterion)}
+              <li class="whitespace-pre-wrap"><EvalHighlight text={criterion} term={searchTerm} /></li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
         <div class="flex flex-wrap items-center gap-2">
           <span class="min-w-[64px] text-muted-foreground">Verdict</span>

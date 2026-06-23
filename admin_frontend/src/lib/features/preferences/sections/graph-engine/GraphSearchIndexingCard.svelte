@@ -12,6 +12,13 @@
   };
 
   let { ctrl }: Props = $props();
+
+  // Both episodes-inclusive scopes mount the BM25-only episodes leg, which has no MMR reranker —
+  // mirror the backend's KNOWLEDGE_GRAPH_EPISODE_SCOPES gate so the UI disables MMR for either.
+  const episodesInScope = $derived(
+    ctrl.draft?.graph.search_scope === 'edges_and_episodes' ||
+      ctrl.draft?.graph.search_scope === 'edges_nodes_episodes'
+  );
 </script>
 
 {#if ctrl.draft}
@@ -62,14 +69,12 @@
           <option value="rrf">RRF</option>
           <option
             value="mmr"
-            disabled={ctrl.draft.graph.search_scope === 'edges_nodes_episodes'}
-            title={ctrl.draft.graph.search_scope === 'edges_nodes_episodes'
+            disabled={episodesInScope}
+            title={episodesInScope
               ? 'MMR is not supported when scope includes episodes (episodes are BM25-only and EpisodeReranker has no MMR). Switch scope, or pick RRF / Cross-encoder.'
               : ''}
           >
-            MMR{ctrl.draft.graph.search_scope === 'edges_nodes_episodes'
-              ? ' (n/a with episodes)'
-              : ''}
+            MMR{episodesInScope ? ' (n/a with episodes)' : ''}
           </option>
           <option value="cross_encoder">Cross-encoder</option>
         </select>
@@ -85,6 +90,15 @@
         >
           <option value="edges">Edges (facts only)</option>
           <option value="edges_and_nodes">Edges + Nodes</option>
+          <option
+            value="edges_and_episodes"
+            disabled={ctrl.draft.graph.search_recipe === 'mmr'}
+            title={ctrl.draft.graph.search_recipe === 'mmr'
+              ? 'Episodes leg is BM25-only and EpisodeReranker has no MMR. Switch recipe to RRF or Cross-encoder, then select this scope.'
+              : ''}
+          >
+            Edges + Episodes{ctrl.draft.graph.search_recipe === 'mmr' ? ' (n/a with MMR)' : ''}
+          </option>
           <option
             value="edges_nodes_episodes"
             disabled={ctrl.draft.graph.search_recipe === 'mmr'}

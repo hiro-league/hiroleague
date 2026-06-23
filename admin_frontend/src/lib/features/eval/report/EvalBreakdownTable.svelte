@@ -26,11 +26,11 @@
     bc: Record<string, EvalCategoryStat>;
     cols: string[];
     header: string;
+    /** Collapse state is owned by the parent (EvalReportPane) so it persists across re-mounts. */
+    collapsed: boolean;
+    onToggleCollapsed: () => void;
   }
-  let { title, bc, cols, header }: Props = $props();
-
-  // Each table collapses independently; open by default.
-  let collapsed = $state(false);
+  let { title, bc, cols, header, collapsed, onToggleCollapsed }: Props = $props();
 
   // Answer-mark groups: colored icon + name (mirrors the saved-badge icons).
   const MARK_GROUP_META = [
@@ -100,7 +100,7 @@
 <button
   type="button"
   class="mt-5 flex items-center gap-1.5 font-sans"
-  onclick={() => (collapsed = !collapsed)}
+  onclick={onToggleCollapsed}
   aria-expanded={!collapsed}
 >
   {#if collapsed}

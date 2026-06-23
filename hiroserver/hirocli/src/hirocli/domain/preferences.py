@@ -515,8 +515,19 @@ KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
 # memory + raw-turn fallback). Orthogonal to ``search_recipe`` (which ranks WITHIN each leg).
 #   "edges"                 → EntityEdge facts only (today's behavior; precise, no attribute recall)
 #   "edges_and_nodes"       → + EntityNode.summary  (closes the "Misho turned 50" gap)
+#   "edges_and_episodes"    → + EpisodicNode bodies but NOT entity nodes — raw-turn BM25 recall
+#                             without entity summaries. Added to test whether entity summaries are
+#                             redundant with episodes (kind-dependence ablation: esum-only ≈ 0).
 #   "edges_nodes_episodes"  → + EpisodicNode bodies (last-resort BM25 recall over raw turn text)
-KnowledgeGraphSearchScope = Literal["edges", "edges_and_nodes", "edges_nodes_episodes"]
+KnowledgeGraphSearchScope = Literal[
+    "edges", "edges_and_nodes", "edges_and_episodes", "edges_nodes_episodes"
+]
+# Scopes whose search mounts the episodes (BM25) leg — single source of truth for the
+# MMR×episodes incompatibility gate (graphiti's EpisodeReranker has no MMR).
+KNOWLEDGE_GRAPH_EPISODE_SCOPES: tuple[KnowledgeGraphSearchScope, ...] = (
+    "edges_and_episodes",
+    "edges_nodes_episodes",
+)
 # Entity-extraction ontology at INGEST (built into the graph, so a change needs a re-ingest):
 #   "open"  → pass no entity_types to Graphiti; it extracts freely (everything → base ``Entity``).
 #             Broadest recall — captures activities/interests/media/preferences the typed list omits
@@ -736,18 +747,27 @@ Before finalizing, verify:
 DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = """\
 ## Objective
 Grade a model's Answer to a question about past conversations against the Ideal Answer, and
-report the result as a single JSON object (see Output Fields). Grade ONLY against the Ideal
-Answer — never your own knowledge.
+report the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as
+GUIDANCE on what a complete answer covers — not a checklist to fail on. Grade ONLY against the
+Ideal Answer and Rubric — never your own knowledge.
 
 ## Verdicts
 - pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording —
-  paraphrases, extra detail, and answers MORE specific than the Ideal all pass.
+  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is
+  shown, an Answer that covers its MAIN elements passes — a missing minor element does NOT block
+  a pass.
 - partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision
-  than the Ideal.
-- fail: contradicts the Ideal or answers something else.
+  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but
+  misses a substantial part of what was asked.
+- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element
+  satisfied, the Answer misses the point, or it contradicts a rubric element.
 - abstain: the Answer declines — "No information available." or any other refusal to answer.
 
 ## Core Instructions
+- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.
+  Treat them as a GUIDE, not a pass/fail checklist — the Ideal Answer and the Rubric describe the
+  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states
+  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.
 - Dates: matching the Ideal's month and year passes; a correctly resolved relative date ("next
   month" stated in an August conversation = September) passes; within ~2 weeks passes.
 - Negative Control = YES means declining is the correct outcome: an abstaining Answer is the
@@ -769,7 +789,7 @@ Reply with one JSON object containing exactly these fields, in this order:
 - evidence is checked by exact substring match against the shown elements — an inexact or
   invented quote counts as no evidence and forces recall_sufficient to false.
 - If no Recalled Memory Elements section was shown, set evidence "" and recall_sufficient true.
-- The verdict depends only on Answer vs Ideal."""
+- The verdict depends only on Answer vs Ideal (and Rubric, when shown)."""
 
 
 # System prompt for the agentic memory-retrieval loop (agentic-memory-retrieval-design §5.3).
@@ -794,24 +814,44 @@ Results arrive as a mix of three element kinds, each shaped differently — use 
                   context, not a timeline; cannot be ordered by time.
   - episode     → a verbatim conversation turn with ONE `stated` timestamp; no invalidation.
 
-## Method
-  1. Rephrase the question as a STORED FACT, not as the user asked it — drop "can you",
-     "how many", "walk me through". The index sees facts, not requests.
-  2. **DECOMPOSE if the question is plural.** If it asks about several distinct things
-     (multiple subjects, several time windows, "X and Y and Z", a comparison, a list across
-     unrelated topics), split it into independent sub-questions and put them as multiple entries
-     in the `queries` list of ONE `search_memory` call (up to {MAX_PARALLEL_SEARCHES} entries).
-     Each sub-question gets its own `query` + knobs + `goal`. If the question is singular, a
-     single-entry list is fine.
-  3. Decide the AXIS each (sub-)question lives on: current value/state · change over time ·
-     ever/never · count · ordering · synthesis · something else you name yourself.
-  4. Choose the four knobs to match that axis (see "Knobs" below) — independently per
-     sub-question; they can differ.
-  5. Read what came back. Topically-related facts that don't supply a piece the answer
-     needs are a "wrong axis" miss — rephrase toward the missing piece, don't just widen.
-     If a piece is thin on the right axis, raise `limit` (or `hops`). If a search adds
-     nothing new (`new=0`), the phrasing is exhausted — change the axis, don't repeat it.
-     Stop only when you can construct the answer (see "Stopping").
+## Writing a search query
+Turn the question into one or more search queries:
+- Preserve the exact user intent, not just keywords.
+- Start with one strong query unless the question has multiple meanings, parts, entities, or
+  likely vocabulary mismatch.
+- Make the query hybrid-friendly: natural enough for vector search, compact enough for
+  keyword/BM25.
+- Preserve exact entities: names, products, dates, versions, IDs, error codes, project names.
+- Use document-like wording, not only user chat wording.
+- Expand only obvious aliases/synonyms when they are likely to appear in the source text.
+- Split only when needed: multi-part question, comparison, or separate entities.
+- Do not invent missing context that the user did not provide.
+To run sub-queries together, put each as a separate entry in the `queries` list of ONE
+`search_memory` call (up to {MAX_PARALLEL_SEARCHES} entries). Each sub-query also takes a short
+`goal` — a brief note of what it's for; it labels the results and feeds the reduce step.
+
+## Refining the query on the next turn
+Search again ONLY when a piece your requirement names is still missing (see "Stopping"). First
+read the `returned`/`new` counts and scores your earlier searches echoed back: if the last
+search was mostly already-seen items (low `new`) or surfaced no higher-scoring facts, you have
+SATURATED this line of inquiry — stop and answer from the accumulator rather than refining. When
+a required piece IS still missing, build on the previous query rather than restarting, then:
+- When no results are found, broaden the query and increase result count.
+- When results are irrelevant, narrow with stronger entities/constraints and decrease result count.
+- When scores are weak, rephrase using source/document vocabulary, aliases, or less fragile wording.
+- When the issue may be temporal, include expiry/status handling: ask for current-only, all
+  events, or facts with expiry dates shown.
+- When expired or outdated facts pollute results, search current/non-expired events only.
+- When history/timeline is needed, search all events and show expiry dates/status.
+- When the answer needs multi-hop reasoning across graph entities, expand graph hops gradually.
+- When graph expansion gets noisy, reduce hops or anchor traversal around the strongest entity.
+- When the query was too broad, add the most discriminating missing constraint.
+- When the query was too specific, remove fragile details like exact phrasing or optional filters.
+
+## Choosing the axis & knobs
+For each (sub-)query, name the axis it lives on — current value/state · change over time ·
+ever/never · count · ordering · synthesis — and set the four knobs (below) to match,
+independently per sub-query. Stop only when you can construct the answer (see "Stopping").
 
 ## Knobs (compact reference)
   query        → a stored-fact phrasing of what's needed.
@@ -850,38 +890,39 @@ P3 — ever/never
 P4 — decomposition of a plural question
   q: What's the user's current job, their main hobby, and their last trip?
   behavior: ONE `search_memory` call with THREE entries in `queries` — one per sub-question,
-  each with its own query/goal (job: temporal=current; hobby: temporal=current; trip:
+  each with its own query (job: temporal=current; hobby: temporal=current; trip:
   temporal=all, reduce later with `latest`). Read all three sub-results together; answer in one go.
 
 ## Negative Calibrators (don't burn the search budget badly)
-N1 — `new=0` (or a fuller-but-still-wrong-axis return) + same query + higher limit is NOT
-     progress. When a search adds nothing you can use, the phrasing is wrong; rephrase first,
-     then widen.
-N2 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
+N1 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
      adds distractors.
-N3 — show_expiry=true under temporal=current is wasted — every returned edge is valid-now and
+N2 — show_expiry=true under temporal=current is wasted — every returned edge is valid-now and
      has no `until`.
-N4 — never answer from the question alone. If your turns run out and nothing supports the
+N3 — never answer from the question alone. If your turns run out and nothing supports the
      answer, abstain.
-N5 — do NOT decompose a singular question into N near-duplicate entries in `queries` to "cover
-     more ground." Sub-queries are for genuinely independent sub-questions; three rephrasings of
-     the same question just burns the budget and clogs the accumulator with topical distractors.
-N6 — do NOT put more than {MAX_PARALLEL_SEARCHES} entries in `queries`; the call is rejected and
+N4 — do NOT put more than {MAX_PARALLEL_SEARCHES} entries in `queries`; the call is rejected and
      you waste a turn on the error round-trip.
+N5 — do NOT spend a turn re-confirming facts already in the accumulator. If your last search
+     returned mostly already-seen items (low `new`) and your requirement is met, STOP and answer
+     — "just to be sure" turns waste budget and can surface contradictory facts (e.g. a second,
+     conflicting schedule) that worsen the answer.
 
 ## Stopping & abstaining
 Before you stop, name what the question needs to be answerable — the evidence and HOW it
 combines into the answer: a single value; a set you must enumerate and count; two dated facts
 to compare or subtract; both sides of a claim to confirm or deny; or several facts that
-together imply it. Stop only when the accumulator supplies every piece your own requirement
-names — not merely when related facts came back. If your turns run out and a required piece is
-still missing, abstain in the final turn — do not pad with guesses.
+together imply it. Stop when the accumulator supplies every piece your own requirement names —
+OR, for a set you must enumerate ("all X", "how many unique"), when one decomposed pass has
+surfaced the set and a further search would only re-return facts you already hold: you cannot
+prove a set is exhaustive by searching more, so stop at saturation rather than spiralling. Do
+not search again merely because related facts came back or to re-confirm. If your turns run out
+and a required piece is still missing, abstain in the final turn — do not pad with guesses.
 
 ## Validation (pre-final-turn self-check)
-- Did I rephrase the question into a stored-fact form before the first search?
-- If the question is plural, did I DECOMPOSE it into multiple entries in the `queries` list of
-  one call, instead of an omnibus single query? Conversely, if it's singular, did I avoid
-  near-duplicate sub-queries?
+- Did I write the query per the Writing rules (intent + exact entities + document vocabulary)
+  before the first search?
+- One strong query, splitting into multiple entries only when genuinely multi-part?
+- If I searched again, did I build on my previous query rather than restart or repeat it?
 - Did I state what the answer requires and confirm the accumulator supplies every piece —
   rather than stopping just because related facts came back?
 - For a temporal / ever-never question, did I either set show_expiry=true under temporal=all,
@@ -1204,7 +1245,9 @@ class GraphPreferences(BaseModel):
         valid choice there. We surface this as a validation error (caught by the PATCH route
         and shown in the UI) rather than silently downgrading the episodes leg, so a technical
         user understands why the combo isn't allowed."""
-        if self.search_scope == "edges_nodes_episodes" and self.search_recipe == "mmr":
+        # Any episodes-inclusive scope (edges_and_episodes, edges_nodes_episodes) mounts the
+        # BM25-only episodes leg, which has no MMR reranker — reject the combo for all of them.
+        if self.search_scope in KNOWLEDGE_GRAPH_EPISODE_SCOPES and self.search_recipe == "mmr":
             raise ValueError(
                 "graph.search_recipe='mmr' is not supported when search_scope includes "
                 "episodes (graphiti's episode leg is BM25-only and EpisodeReranker has no "

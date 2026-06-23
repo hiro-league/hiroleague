@@ -35,6 +35,19 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
         answer_tuning_profile: 'tp_answer',
         judge_model: 'judge-model',
         judge_tuning_profile: 'tp_judge',
+        // Retrieval agent (memory recall is agentic) — model unset → falls back to the answer model.
+        retrieval_model: null,
+        retrieval_tuning_profile: 'tp_retrieval',
+        retrieval_agent: {
+          max_agent_turns: 4,
+          max_parallel_searches: 3,
+          limit_default: 20,
+          limit_min: 5,
+          limit_max: 40,
+          hops_max: 2
+        },
+        retrieval_agent_prompts: { default: { label: 'Default agent', locked: true, prompt: '' } },
+        active_retrieval_agent_prompt_id: 'default',
         answer_prompts: {
           default: { label: 'Default (grounded)', locked: true, prompt: '' },
           terse: { label: 'Terse', locked: false, prompt: 'be terse' }
@@ -77,10 +90,19 @@ describe('tuningChips', () => {
 });
 
 describe('modelLines', () => {
-  it('memory includes the Small ingest model + eval answer model', () => {
+  it('memory includes the Small ingest model + the retrieval agent before answer/judge', () => {
     const lines = modelLines(prefs(), MEMORY);
-    expect(lines.map((l) => l.label)).toEqual(['Extraction', 'Small', 'Embedder', 'Answer', 'Judge']);
+    expect(lines.map((l) => l.label)).toEqual([
+      'Extraction',
+      'Small',
+      'Embedder',
+      'Retrieval',
+      'Answer',
+      'Judge'
+    ]);
     expect(lines.find((l) => l.label === 'Answer')?.model).toBe('ans-model');
+    // Retrieval model unset → falls back to the eval answer model.
+    expect(lines.find((l) => l.label === 'Retrieval')?.model).toBe('ans-model');
   });
   it('knowledge omits Small and answers with the production pipeline', () => {
     const lines = modelLines(prefs(), KNOWLEDGE);
@@ -97,10 +119,16 @@ describe('ingestKnobs', () => {
 });
 
 describe('recallKnobs', () => {
-  it('memory shows recall top-k + answer prompt provenance', () => {
+  it('memory shows the retrieval agent knobs before the answer-prompt provenance', () => {
     const labels = recallKnobs(prefs(), MEMORY, 'Terse').map((p) => p.label);
-    expect(labels).toContain('Recall top-k');
+    expect(labels).toContain('Agent turns');
+    expect(labels).toContain('Search limit');
+    expect(labels).toContain('Retrieval prompt');
     expect(labels).toContain('Answer prompt');
+    // The agentic recall agent's knobs precede the answer-step knob; the dead `memory.search.top_k`
+    // (Recall top-k) is gone.
+    expect(labels).not.toContain('Recall top-k');
+    expect(labels.indexOf('Search limit')).toBeLessThan(labels.indexOf('Answer prompt'));
   });
   it('knowledge shows flat retrieval knobs', () => {
     const labels = recallKnobs(prefs(), KNOWLEDGE, '').map((p) => p.label);

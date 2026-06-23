@@ -45,6 +45,11 @@ hiroserver/_smoke_clean_install/
 .dev-sync-cache/
 .smoke-runtime/
 
+# LangSmith trace dumps are huge (tens of MB) and live outside the repo now
+# (see scripts/dump_langsmith_trace.py / $HIRO_TRACE_DIR -> ../hiro-traces).
+# Guard against ever re-committing one into reports/.
+reports/trace_*.json
+
 # HiroAdmin Svelte POC
 admin_frontend/node_modules/
 admin_frontend/.svelte-kit/

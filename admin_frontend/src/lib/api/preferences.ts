@@ -111,10 +111,10 @@ export type GraphPreferences = {
   search_recipe: 'rrf' | 'mmr' | 'cross_encoder';
   // Which graph elements participate in fact recall. Orthogonal to search_recipe (which
   // ranks WITHIN each leg). Default 'edges' = today's behavior; 'edges_and_nodes' adds
-  // EntityNode.summary recall (attribute-style memories); 'edges_nodes_episodes' also adds
-  // raw conversation text via BM25 — last-resort recall, noisier. mmr × episodes is rejected
-  // by the backend cross-field validator.
-  search_scope: 'edges' | 'edges_and_nodes' | 'edges_nodes_episodes';
+  // EntityNode.summary recall (attribute-style memories); 'edges_and_episodes' adds raw
+  // conversation text via BM25 WITHOUT entity nodes (edges+episodes ablation); 'edges_nodes_episodes'
+  // adds both. mmr × episodes is rejected by the backend cross-field validator.
+  search_scope: 'edges' | 'edges_and_nodes' | 'edges_and_episodes' | 'edges_nodes_episodes';
   // Ingest-time extraction ontology. 'open' = no entity types (Graphiti extracts freely, broadest
   // recall); 'typed' = pin the 5-type vocabulary (precise, drops off-type facts). Re-ingest to apply.
   entity_ontology: 'open' | 'typed';

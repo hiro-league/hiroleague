@@ -1,0 +1,1032 @@
+[
+ {
+  "qid": "tr_02",
+  "cat": "tr",
+  "verdict": "fail",
+  "rs": false,
+  "nturns": 3,
+  "nsub": 4,
+  "gmax": 0.84765625,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal finalizes movie list for family weekend",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 52,
+    "top": 0.828125
+   },
+   {
+    "turn": 0,
+    "q": "Mason suggests adding game night",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.84765625
+   },
+   {
+    "turn": 1,
+    "q": "Mason suggested adding game night on May 11",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 1,
+    "top": 0.2490234375
+   },
+   {
+    "turn": 2,
+    "q": "Mason communicated suggestion to add game night",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 10,
+    "top": 0.5
+   }
+  ]
+ },
+ {
+  "qid": "msr_01",
+  "cat": "msr",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 3,
+  "nsub": 7,
+  "gmax": 0.89453125,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal plans to watch a movie during a family movie marathon",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 48,
+    "top": 0.89453125
+   },
+   {
+    "turn": 0,
+    "q": "Crystal mentioned a movie title for April 6 or April 7",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.83984375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal mentioned a movie title for April 8",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 59,
+    "new": 12,
+    "top": 0.44921875
+   },
+   {
+    "turn": 1,
+    "q": "Crystal scheduled or planned a movie for April 8 2024",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 12,
+    "top": 0.5078125
+   },
+   {
+    "turn": 1,
+    "q": "Crystal planned or scheduled a movie for the May 11-12 2024 family marathon",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 20,
+    "top": 0.85546875
+   },
+   {
+    "turn": 1,
+    "q": "Crystal planned or scheduled a movie for the June 15 2024 movie marathon",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 13,
+    "top": 0.72265625
+   },
+   {
+    "turn": 2,
+    "q": "placeholder final turn",
+    "temporal": "current",
+    "limit": 10,
+    "hops": 1,
+    "returned": 27,
+    "new": 23,
+    "top": 0.3984375
+   }
+  ]
+ },
+ {
+  "qid": "eo_01",
+  "cat": "eo",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 3,
+  "nsub": 6,
+  "gmax": 0.9375,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal planned a movie marathon",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.92578125
+   },
+   {
+    "turn": 1,
+    "q": "Crystal brought up a planning detail for a movie marathon",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 1,
+    "returned": 90,
+    "new": 33,
+    "top": 0.734375
+   },
+   {
+    "turn": 1,
+    "q": "Crystal mentioned a movie marathon detail like snacks, budget, attendees, or platform",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 1,
+    "returned": 89,
+    "new": 47,
+    "top": 0.8359375
+   },
+   {
+    "turn": 2,
+    "q": "Crystal planned a movie marathon for April 6-7 starting at 3 PM with breaks",
+    "temporal": "all",
+    "limit": 10,
+    "hops": 1,
+    "returned": 30,
+    "new": 8,
+    "top": 0.91796875
+   },
+   {
+    "turn": 2,
+    "q": "Crystal finalized an 8-movie watchlist including Soul Paddington 2 and adjusted the snack budget",
+    "temporal": "all",
+    "limit": 10,
+    "hops": 1,
+    "returned": 30,
+    "new": 7,
+    "top": 0.466796875
+   },
+   {
+    "turn": 2,
+    "q": "Crystal planned a movie marathon for June 15 with Teleparty virtual guests",
+    "temporal": "all",
+    "limit": 10,
+    "hops": 1,
+    "returned": 30,
+    "new": 11,
+    "top": 0.9375
+   }
+  ]
+ },
+ {
+  "qid": "tr_01",
+  "cat": "tr",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 2,
+  "nsub": 3,
+  "gmax": 0.9375,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal had a meeting at the Montserrat Film Office",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 50,
+    "new": 50,
+    "top": 0.9375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal finished watching all the movies despite the nap delay",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 49,
+    "top": 0.9296875
+   },
+   {
+    "turn": 1,
+    "q": "placeholder",
+    "temporal": "all",
+    "limit": 10,
+    "hops": 1,
+    "returned": 20,
+    "new": 20,
+    "top": 0.408203125
+   }
+  ]
+ },
+ {
+  "qid": "if_02",
+  "cat": "if",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 3,
+  "gmax": 0.75,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal likes or enjoys eating these snacks",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.734375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal has dietary restrictions, food allergies, or food preferences",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 50,
+    "top": 0.72265625
+   },
+   {
+    "turn": 0,
+    "q": "I recommended a snack to Crystal",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 18,
+    "top": 0.75
+   }
+  ]
+ },
+ {
+  "qid": "cr_02",
+  "cat": "cr",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 2,
+  "gmax": 0.7734375,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal invited Mason to a family movie event",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.7734375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal invited Michael to a family movie event",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 12,
+    "top": 0.65234375
+   }
+  ]
+ },
+ {
+  "qid": "eo_02",
+  "cat": "eo",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 3,
+  "gmax": 0.859375,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal contributes an idea for movie night",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 43,
+    "top": 0.76953125
+   },
+   {
+    "turn": 0,
+    "q": "Crystal suggests something for movie night",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.8515625
+   },
+   {
+    "turn": 0,
+    "q": "Crystal plans to bring something to movie night",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 20,
+    "top": 0.859375
+   }
+  ]
+ },
+ {
+  "qid": "ku_01",
+  "cat": "ku",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 1,
+  "gmax": 0.87890625,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal's snack budget for ordering themed treats for the movie marathon",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.87890625
+   }
+  ]
+ },
+ {
+  "qid": "ku_02",
+  "cat": "ku",
+  "verdict": "fail",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 1,
+  "gmax": 0.9296875,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal ordered cupcakes for the event",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 58,
+    "new": 58,
+    "top": 0.9296875
+   }
+  ]
+ },
+ {
+  "qid": "abst_02",
+  "cat": "abst",
+  "verdict": "abstain",
+  "rs": false,
+  "nturns": 3,
+  "nsub": 4,
+  "gmax": 0.6796875,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Emily shared a homemade popcorn seasoning mix recipe with ingredients",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 59,
+    "new": 59,
+    "top": 0.6796875
+   },
+   {
+    "turn": 1,
+    "q": "Emily's popcorn seasoning mix contains ingredients",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 1,
+    "returned": 89,
+    "new": 34,
+    "top": 0.48828125
+   },
+   {
+    "turn": 1,
+    "q": "Emily shared the recipe for her popcorn seasoning",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 2,
+    "returned": 89,
+    "new": 18,
+    "top": 0.53515625
+   },
+   {
+    "turn": 2,
+    "q": "Emily's seasoning recipe contains spices herbs or flavorings",
+    "temporal": "all",
+    "limit": 40,
+    "hops": 2,
+    "returned": 104,
+    "new": 33,
+    "top": 0.322265625
+   }
+  ]
+ },
+ {
+  "qid": "msr_02",
+  "cat": "msr",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 3,
+  "nsub": 9,
+  "gmax": 0.90625,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal subscribes to streaming services",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 49,
+    "top": 0.734375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal allocates snack budget for family movie weekend",
+    "temporal": "current",
+    "limit": 15,
+    "hops": 1,
+    "returned": 45,
+    "new": 45,
+    "top": 0.90625
+   },
+   {
+    "turn": 0,
+    "q": "Crystal saved money on rental discounts or rental savings",
+    "temporal": "all",
+    "limit": 15,
+    "hops": 1,
+    "returned": 34,
+    "new": 30,
+    "top": 0.78125
+   },
+   {
+    "turn": 1,
+    "q": "Crystal has a monthly entertainment budget",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 2,
+    "returned": 58,
+    "new": 25,
+    "top": 0.82421875
+   },
+   {
+    "turn": 1,
+    "q": "Crystal pays for internet plan and streaming devices support simultaneous streams",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 28,
+    "top": 0.62890625
+   },
+   {
+    "turn": 1,
+    "q": "streaming platforms support simultaneous device limits and exclusive content",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 24,
+    "top": 0.44921875
+   },
+   {
+    "turn": 2,
+    "q": "Crystal upgraded internet to 200 Mbps plan for $20 per month",
+    "temporal": "current",
+    "limit": 10,
+    "hops": 1,
+    "returned": 30,
+    "new": 5,
+    "top": 0.875
+   },
+   {
+    "turn": 2,
+    "q": "Netflix allows streaming on specific number of devices simultaneously",
+    "temporal": "current",
+    "limit": 10,
+    "hops": 1,
+    "returned": 30,
+    "new": 4,
+    "top": 0.60546875
+   },
+   {
+    "turn": 2,
+    "q": "Crystal pays monthly for entertainment projector rental or other recurring costs",
+    "temporal": "current",
+    "limit": 10,
+    "hops": 1,
+    "returned": 30,
+    "new": 3,
+    "top": 0.55859375
+   }
+  ]
+ },
+ {
+  "qid": "abst_01",
+  "cat": "abst",
+  "verdict": "abstain",
+  "rs": true,
+  "nturns": 3,
+  "nsub": 5,
+  "gmax": 0.9140625,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "10 AM meeting at Montserrat Film Office on March 20 discussed",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 52,
+    "new": 52,
+    "top": 0.9140625
+   },
+   {
+    "turn": 1,
+    "q": "meeting at Montserrat Film Office on March 20 discussed film projects",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 2,
+    "returned": 69,
+    "new": 26,
+    "top": 0.388671875
+   },
+   {
+    "turn": 1,
+    "q": "March 20 2024 Montserrat Film Office meeting recap outcome",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 2,
+    "returned": 85,
+    "new": 42,
+    "top": 0.35546875
+   },
+   {
+    "turn": 2,
+    "q": "after the meeting at Montserrat Film Office Crystal discussed what happened",
+    "temporal": "all",
+    "limit": 40,
+    "hops": 3,
+    "returned": 92,
+    "new": 46,
+    "top": 0.515625
+   },
+   {
+    "turn": 2,
+    "q": "Montserrat Film Office meeting March 20 discussed film production project deal",
+    "temporal": "all",
+    "limit": 40,
+    "hops": 3,
+    "returned": 96,
+    "new": 26,
+    "top": 0.279296875
+   }
+  ]
+ },
+ {
+  "qid": "sum_02",
+  "cat": "sum",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 2,
+  "nsub": 5,
+  "gmax": 0.79296875,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "the project status changed",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 24,
+    "new": 24,
+    "top": 0.41796875
+   },
+   {
+    "turn": 0,
+    "q": "a project milestone was reached",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 24,
+    "new": 20,
+    "top": 0.388671875
+   },
+   {
+    "turn": 0,
+    "q": "the project had a deadline or deliverable",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 38,
+    "new": 35,
+    "top": 0.69140625
+   },
+   {
+    "turn": 1,
+    "q": "the project was completed or finished",
+    "temporal": "all",
+    "limit": 25,
+    "hops": 2,
+    "returned": 33,
+    "new": 26,
+    "top": 0.65234375
+   },
+   {
+    "turn": 1,
+    "q": "Crystal started or planned a project",
+    "temporal": "all",
+    "limit": 25,
+    "hops": 2,
+    "returned": 63,
+    "new": 59,
+    "top": 0.79296875
+   }
+  ]
+ },
+ {
+  "qid": "ie_02",
+  "cat": "ie",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 2,
+  "nsub": 6,
+  "gmax": 0.86328125,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal and her partner share interests in specific genres, themes, or activities",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 58,
+    "new": 58,
+    "top": 0.7578125
+   },
+   {
+    "turn": 0,
+    "q": "Movie recommendations were given to Crystal and her partner for an evening together",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 23,
+    "top": 0.58203125
+   },
+   {
+    "turn": 0,
+    "q": "Shared interests between Crystal and her partner influenced the movie recommendations",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 53,
+    "top": 0.734375
+   },
+   {
+    "turn": 1,
+    "q": "A classic film was recommended for Crystal and Thomas to watch together on their movie night",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 32,
+    "top": 0.86328125
+   },
+   {
+    "turn": 1,
+    "q": "Crystal and Thomas share a love for classic films and met at a film festival",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 24,
+    "top": 0.66015625
+   },
+   {
+    "turn": 1,
+    "q": "The Assistant recommended a movie to Crystal based on her and Thomas's shared preferences or history",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 2,
+    "returned": 60,
+    "new": 26,
+    "top": 0.62109375
+   }
+  ]
+ },
+ {
+  "qid": "pf_02",
+  "cat": "pf",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 2,
+  "nsub": 6,
+  "gmax": 0.9140625,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Michelle's favorite movie genres or directors",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.71875
+   },
+   {
+    "turn": 0,
+    "q": "movies Michelle has already watched",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 16,
+    "top": 0.62109375
+   },
+   {
+    "turn": 0,
+    "q": "movies Michelle plans to watch",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 44,
+    "top": 0.74609375
+   },
+   {
+    "turn": 1,
+    "q": "Tom Hanks voiced character in Toy Story",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 2,
+    "returned": 47,
+    "new": 43,
+    "top": 0.57421875
+   },
+   {
+    "turn": 1,
+    "q": "family animated movies available on Disney+ suitable for a 6-year-old",
+    "temporal": "current",
+    "limit": 25,
+    "hops": 2,
+    "returned": 75,
+    "new": 58,
+    "top": 0.85546875
+   },
+   {
+    "turn": 1,
+    "q": "movies with Spanish language options to support bilingual learning",
+    "temporal": "current",
+    "limit": 25,
+    "hops": 2,
+    "returned": 75,
+    "new": 61,
+    "top": 0.9140625
+   }
+  ]
+ },
+ {
+  "qid": "if_01",
+  "cat": "if",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 2,
+  "nsub": 6,
+  "gmax": 0.93359375,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal plans to watch a movie",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 42,
+    "top": 0.93359375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal likes the movie genre",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.7421875
+   },
+   {
+    "turn": 0,
+    "q": "Crystal's favorite movie or director",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 35,
+    "top": 0.75390625
+   },
+   {
+    "turn": 1,
+    "q": "Crystal has already watched a movie",
+    "temporal": "all",
+    "limit": 30,
+    "hops": 1,
+    "returned": 89,
+    "new": 38,
+    "top": 0.9140625
+   },
+   {
+    "turn": 1,
+    "q": "movie was recommended to Crystal",
+    "temporal": "current",
+    "limit": 30,
+    "hops": 1,
+    "returned": 90,
+    "new": 53,
+    "top": 0.83203125
+   },
+   {
+    "turn": 1,
+    "q": "Crystal has a streaming subscription",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 49,
+    "top": 0.8828125
+   }
+  ]
+ },
+ {
+  "qid": "ie_01",
+  "cat": "ie",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 2,
+  "gmax": 0.5546875,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "parents live X miles away from Crystal",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 56,
+    "new": 19,
+    "top": 0.43359375
+   },
+   {
+    "turn": 0,
+    "q": "parents live in town",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 53,
+    "new": 53,
+    "top": 0.5546875
+   }
+  ]
+ },
+ {
+  "qid": "sum_01",
+  "cat": "sum",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 3,
+  "gmax": 0.8671875,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal planned a family movie event",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 59,
+    "new": 59,
+    "top": 0.8671875
+   },
+   {
+    "turn": 0,
+    "q": "Crystal organized a family movie activity or outing",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 35,
+    "top": 0.84375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal had a family movie night or watched a movie with family",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 35,
+    "top": 0.8359375
+   }
+  ]
+ },
+ {
+  "qid": "cr_01",
+  "cat": "cr",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 2,
+  "gmax": 0.87109375,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "Crystal created a watchlist for family movie marathons",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 60,
+    "top": 0.87109375
+   },
+   {
+    "turn": 0,
+    "q": "Crystal has never created a watchlist for family movie marathons",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 4,
+    "top": 0.26171875
+   }
+  ]
+ },
+ {
+  "qid": "pf_01",
+  "cat": "pf",
+  "verdict": "pass",
+  "rs": true,
+  "nturns": 1,
+  "nsub": 3,
+  "gmax": 0.87890625,
+  "subq": [
+   {
+    "turn": 0,
+    "q": "user plans to watch a movie with their family",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 59,
+    "new": 59,
+    "top": 0.87890625
+   },
+   {
+    "turn": 0,
+    "q": "user's family enjoys a specific movie genre",
+    "temporal": "current",
+    "limit": 20,
+    "hops": 1,
+    "returned": 60,
+    "new": 45,
+    "top": 0.7421875
+   },
+   {
+    "turn": 0,
+    "q": "user mentioned a movie they liked or enjoyed",
+    "temporal": "all",
+    "limit": 20,
+    "hops": 1,
+    "returned": 59,
+    "new": 38,
+    "top": 0.69921875
+   }
+  ]
+ }
+]

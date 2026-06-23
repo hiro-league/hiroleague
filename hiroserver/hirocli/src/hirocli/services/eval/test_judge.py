@@ -382,3 +382,31 @@ async def test_judge_prompt_includes_recalled_context() -> None:
     assert "## Recalled Memory Elements" in human and "Otto is the mascot drone" in human
     assert "## Model Answer" in human
     assert human.index("## Model Answer") < human.index("## Recalled Memory Elements")
+
+
+@pytest.mark.asyncio
+async def test_judge_prompt_includes_rubric_when_present() -> None:
+    """A BEAM rubric is rendered as a bulleted ## Rubric block right after the Ideal Answer
+    (co-equal grading reference) and before the Negative Control."""
+    m = _FakeModel(verdict="pass")
+    await judge_answer(
+        m, "fake:model", question="sprint?", answer="Ends March 29.", expected_answer="March 29.",
+        rubric=["LLM response should state: March 29", "LLM response should state: two-week sprint"],
+        sink=None,
+    )
+    human = m.last_messages[-1].content
+    assert "## Rubric (required elements)" in human
+    assert "- LLM response should state: March 29" in human
+    assert "- LLM response should state: two-week sprint" in human
+    # Positioned between the Ideal Answer and the Negative Control.
+    assert human.index("## Ideal Answer") < human.index("## Rubric") < human.index("## Negative Control")
+
+
+@pytest.mark.asyncio
+async def test_judge_prompt_omits_rubric_when_absent() -> None:
+    """No rubric (LoCoMo/adam/knowledge) → no ## Rubric section at all."""
+    m = _FakeModel(verdict="pass")
+    await judge_answer(
+        m, "fake:model", question="q", answer="a", expected_answer="a", sink=None,
+    )
+    assert "## Rubric" not in m.last_messages[-1].content

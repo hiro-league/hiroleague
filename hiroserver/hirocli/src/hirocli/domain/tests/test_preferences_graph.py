@@ -78,6 +78,21 @@ def test_k_hop_bounds() -> None:
         GraphPreferences(k_hop=4)
 
 
+def test_search_scope_accepts_edges_and_episodes() -> None:
+    # New edges+episodes ablation scope (episodes WITHOUT entity nodes).
+    prefs = GraphPreferences(search_scope="edges_and_episodes", search_recipe="rrf")
+    assert prefs.search_scope == "edges_and_episodes"
+
+
+def test_mmr_rejected_for_all_episodes_scopes() -> None:
+    # MMR has no EpisodeReranker, so it's invalid for EVERY episodes-inclusive scope.
+    for scope in ("edges_and_episodes", "edges_nodes_episodes"):
+        with pytest.raises(ValidationError, match="mmr"):
+            GraphPreferences(search_scope=scope, search_recipe="mmr")
+    # …but fine with rrf / cross_encoder.
+    assert GraphPreferences(search_scope="edges_and_episodes", search_recipe="cross_encoder")
+
+
 def test_embedder_resolver_falls_back_to_knowledge_default() -> None:
     prefs = WorkspacePreferences()
     # Unset graph embedder → shares the knowledge dense embedder (G8).

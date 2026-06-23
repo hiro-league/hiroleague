@@ -598,6 +598,21 @@ async def eval_results(
                 log.warning(
                     "knowledge eval evidence-recall enrichment failed · %s", str(exc), exc_info=True
                 )
+            # Grading rubric (BEAM corpora): read-path enrichment from the corpus sidecar, so saved
+            # results show the rubric in the detail dialog's judge pane without a re-run. Not
+            # persisted (recomputed here, like evidence_recall). Best-effort.
+            try:
+                from hirocli.services.eval.locomo import load_rubric_map
+
+                rubric_map = load_rubric_map(cid, qpath)
+                for row in merged:
+                    rubric = rubric_map.get(str(row.get("id") or ""))
+                    if rubric:
+                        row["rubric"] = rubric
+            except Exception as exc:
+                log.warning(
+                    "knowledge eval rubric enrichment failed · %s", str(exc), exc_info=True
+                )
         summary = summarize_memory_rows(merged, run_id=f"saved-{cid}")
         # The merged snapshot spans many runs, so summarize_memory_rows can't know a single ingest
         # cost (it leaves ingest_cost_usd=0). Override with the persisted CUMULATIVE ingest spend so
@@ -727,6 +742,39 @@ async def eval_results_clear(
         return _success({"removed": removed})
     except Exception as exc:
         log.error("knowledge eval results clear failed · %s", str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@eval_router.get("/eval/row")
+async def eval_row_by_run(
+    workspace_id: SelectedWorkspaceIdDep,
+    run_id: str = "",
+) -> dict[str, Any]:
+    """Resolve ONE saved memory-eval question row by its per-question graph ``run_id``.
+
+    Backs the Graph-Runs → eval-detail bridge: a ``memory_recall`` node in a graph run carries the
+    per-question ``run_id``, and this returns that question's full saved row (legs / answer /
+    recall / gold / ...) so the rich eval detail dialog can open in place over the graph run.
+    Memory track only — it's the only track that persists per-question rows. Returns ``{row}``
+    (``row`` is ``null`` when no saved row ran under that id, e.g. results were cleared)."""
+    rid = (run_id or "").strip()
+    if not rid:
+        return envelope_failure("run_id is required to look up an eval row.")
+    from hirocli.services.eval.store import get_eval_result_store
+
+    try:
+        entry, _ = resolve_workspace(workspace_id)
+        workspace_path = Path(entry.path)
+        row = get_eval_result_store(workspace_path).find_row_by_run_id(rid)
+        if row is None:
+            return _success({"row": None})
+        # Spine defaults so the row renders standalone (the bridge shows one question, not a bank).
+        row.setdefault("track", "memory")
+        row.setdefault("index", 0)
+        row.setdefault("total", 1)
+        return _success({"row": row})
+    except Exception as exc:
+        log.error("knowledge eval row-by-run read failed · %s", str(exc), exc_info=True)
         return envelope_failure(str(exc))
 
 

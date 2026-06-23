@@ -262,6 +262,43 @@ def load_evidence_recall_context(
     )
 
 
+def load_rubric_map(corpus_id: str, questions_path: Path) -> dict[str, list[str]]:
+    """Per-question grading rubric (``questions[qid].rubric``) from the corpus sidecar.
+
+    BEAM ships a ``rubric`` (list of required-statement strings, e.g. "LLM response should
+    state: …") beside each question's ``evidence`` in ``<stem>.beam.yaml``; LoCoMo/adam have
+    none. Returns ``{qid: [criterion, …]}`` for every question that lists a non-empty rubric,
+    and ``{}`` when the sidecar is missing/unreadable or carries no rubrics (non-BEAM corpora).
+
+    Static corpus data — reused to feed the judge at run time AND to enrich the results read for
+    display; never persisted (recomputed on read, like ``evidence_recall``). Best-effort: any
+    read/parse failure logs and yields ``{}`` rather than breaking the run or the results read."""
+    sidecar = _sidecar_path(corpus_id, questions_path)
+    if not sidecar.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(sidecar.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        log.warning(
+            "⚠️ knowledge.eval — rubric sidecar unreadable · corpus=%s · path=%s",
+            corpus_id,
+            sidecar,
+            exc_info=True,
+        )
+        return {}
+    questions = raw.get("questions") if isinstance(raw, dict) else None
+    if not isinstance(questions, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for qid, meta in questions.items():
+        if not isinstance(meta, dict):
+            continue
+        rubric = [str(c).strip() for c in (meta.get("rubric") or []) if str(c).strip()]
+        if rubric:
+            out[str(qid)] = rubric
+    return out
+
+
 def compute_evidence_recall_map(
     *,
     corpus_id: str,

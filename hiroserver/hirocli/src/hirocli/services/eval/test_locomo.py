@@ -10,6 +10,7 @@ from hirocli.services.eval.locomo import (
     build_locomo_results_export,
     compute_evidence_recall_map,
     load_evidence_recall_context,
+    load_rubric_map,
 )
 
 
@@ -267,3 +268,58 @@ def test_evidence_recall_context_none_without_sidecar(tmp_path: Path) -> None:
     questions = tmp_path / "plain.questions.yaml"
     questions.write_text("- id: q1\n  question: Q?\n  expected_answer: A\n", encoding="utf-8")
     assert load_evidence_recall_context("plain", questions) is None
+
+
+def _write_beam_files(tmp_path: Path) -> Path:
+    """A minimal BEAM corpus: questions bank + ``.beam.yaml`` sidecar carrying per-question rubrics."""
+    questions = tmp_path / "beam128k_01.questions.yaml"
+    questions.write_text(
+        "- id: beam128k_01_ie_01\n  question: 'When does my sprint end?'\n"
+        "  expected_answer: March 29.\n"
+        "- id: beam128k_01_ie_02\n  question: 'How did I organize the sprint?'\n"
+        "  expected_answer: Backend first week, frontend second.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beam128k_01.beam.yaml").write_text(
+        """
+questions:
+  beam128k_01_ie_01:
+    rubric:
+    - 'LLM response should state: March 29'
+    evidence:
+      episode_ids: [beam128k_01_m0028]
+  beam128k_01_ie_02:
+    rubric:
+    - 'LLM response should state: backend tasks in the first week'
+    - 'LLM response should state: frontend tasks in the second week'
+    evidence:
+      episode_ids: [beam128k_01_m0029]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    return questions
+
+
+def test_load_rubric_map_reads_beam_sidecar(tmp_path: Path) -> None:
+    """BEAM ``.beam.yaml`` rubrics load keyed by question id, in sidecar order, criteria trimmed."""
+    qpath = _write_beam_files(tmp_path)
+    rubrics = load_rubric_map("beam128k_01", qpath)
+    assert rubrics == {
+        "beam128k_01_ie_01": ["LLM response should state: March 29"],
+        "beam128k_01_ie_02": [
+            "LLM response should state: backend tasks in the first week",
+            "LLM response should state: frontend tasks in the second week",
+        ],
+    }
+
+
+def test_load_rubric_map_empty_without_sidecar_or_rubrics(tmp_path: Path) -> None:
+    """No sidecar (or a sidecar with no rubrics, e.g. LoCoMo) → empty map, so non-BEAM corpora
+    simply carry no rubric — never an error."""
+    # LoCoMo sidecar has evidence but no rubric field → empty map.
+    locomo_q = _write_locomo_files(tmp_path)
+    assert load_rubric_map("locomo_conv_43", locomo_q) == {}
+    # A bare corpus with no sidecar at all → empty map.
+    plain = tmp_path / "plain.questions.yaml"
+    plain.write_text("- id: q1\n  question: Q?\n  expected_answer: A\n", encoding="utf-8")
+    assert load_rubric_map("plain", plain) == {}

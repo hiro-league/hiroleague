@@ -8,7 +8,7 @@
   import { legLabel, traceableLeg } from '$lib/features/eval/shared/eval-display';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
-  import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
+  import type { RowDetailTraces } from '$lib/features/eval/state/eval-traces.svelte';
 
   let {
     r,
@@ -21,7 +21,7 @@
     mode: string;
     leg: EvalRow['legs'][string];
     legIdx: number;
-    traces: EvalTraces;
+    traces: RowDetailTraces;
   } = $props();
 </script>
 
@@ -50,11 +50,13 @@
     <ExternalLink size={10} aria-hidden="true" />{mode}
   </a>
 {/if}
-{#if legIdx === 0}
+{#if legIdx === 0 && traces.copyRowForAI}
+  <!-- Copy-for-AI needs the EvalModel (run modes / corpus / log dir), so it's absent on the
+       Graph-Runs bridge controller; the button hides there rather than erroring. -->
   <button
     type="button"
     class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/5"
-    onclick={() => void traces.copyRowForAI(r)}
+    onclick={() => void traces.copyRowForAI?.(r)}
     title="Copy a Markdown brief (answer + judge + recalled facts inline, ledger-file pointers for the full traces) to paste into your AI agent"
   >
     {#if traces.copiedRow === r.index}

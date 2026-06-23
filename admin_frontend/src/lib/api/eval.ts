@@ -227,6 +227,19 @@ export function listEvalResults(
   });
 }
 
+/** Resolve ONE saved memory-eval question row by its per-question graph ``run_id``. Backs the
+ *  Graph-Runs → eval-detail bridge (a ``memory_recall`` node carries that run_id). ``row`` is null
+ *  when no saved row ran under that id (e.g. results cleared, or graph tracing only). */
+export function getEvalRowByRunId(
+  runId: string
+): Promise<ApiResponse<{ row: EvalQuestionPayload | null }>> {
+  const qs = new URLSearchParams({ run_id: runId });
+  return apiRequest<{ row: EvalQuestionPayload | null }>(`/eval/row?${qs.toString()}`, {
+    method: 'GET',
+    timeoutMs: 15000
+  });
+}
+
 /** One corpus's row in the benchmark results summary table. ``summary`` is the same
  *  aggregate the per-corpus Report uses (null until the corpus has saved rows). */
 export type BenchmarkCorpusResult = {

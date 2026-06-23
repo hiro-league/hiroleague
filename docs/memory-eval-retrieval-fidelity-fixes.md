@@ -6,7 +6,7 @@ their original design intent, then rerun the eval.
 **Origin:** trace inspection of run `beam128k_14` (LangSmith public trace
 `63fe3d56-d36f-4364-b401-e1c9152e997f`), questions `ie_01` (happy path) and `msr_01` ("how many
 unique movies…", a fail). Dump + tooling: `scripts/dump_langsmith_trace.py`,
-`reports/trace_beam128k_14.json`.
+`../hiro-traces/trace_beam128k_14.json` (trace dumps live outside the repo; see `$HIRO_TRACE_DIR`).
 
 > **Development mode:** no backward compatibility / no migration / no wrappers (project rule). These
 > are corrections to a defective in-development feature.

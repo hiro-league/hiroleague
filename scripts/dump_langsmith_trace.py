@@ -12,20 +12,39 @@ tree of runs (with inputs/outputs resolved) to a JSON file.
 Usage:
     python scripts/dump_langsmith_trace.py <share-url-or-token> [-o out.json]
 
+Output goes to the trace folder (these dumps are huge and are kept out of the
+hiroleague repo): $HIRO_TRACE_DIR, defaulting to the sibling ``../hiro-traces``
+dir. A bare ``-o name.json`` lands there too; pass a path with a directory
+component to write elsewhere.
+
 Stdlib only -- no langsmith SDK or API key required.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 API_BASE = "https://api.smith.langchain.com/public"
 BATCH = 50  # ids per runs/query request
+
+
+def trace_dir() -> Path:
+    """Where to write trace dumps. Kept outside the repo because these files are
+    huge (tens of MB each); $HIRO_TRACE_DIR overrides the default sibling dir.
+    """
+    env = os.environ.get("HIRO_TRACE_DIR")
+    if env:
+        return Path(env).expanduser()
+    # scripts/dump_langsmith_trace.py -> repo root is parents[1]; siblings live
+    # next to the repo under D:\projects (../hiro-traces).
+    return Path(__file__).resolve().parents[1].parent / "hiro-traces"
 
 
 def extract_token(url_or_token: str) -> str:
@@ -178,7 +197,11 @@ def build_tree(root_id: str, runs: list[dict]) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("url", help="Public trace URL (.../public/<token>/r) or bare token")
-    ap.add_argument("-o", "--out", help="Output JSON path (default: trace_<token8>.json)")
+    ap.add_argument(
+        "-o",
+        "--out",
+        help="Output JSON name/path (default: trace_<token8>.json in $HIRO_TRACE_DIR / ../hiro-traces)",
+    )
     ap.add_argument(
         "--no-s3",
         action="store_true",
@@ -195,7 +218,13 @@ def main() -> None:
         print(f"  resolved {n} S3-offloaded payloads", file=sys.stderr)
     tree = build_tree(root["id"], runs)
 
-    out = args.out or f"trace_{token[:8]}.json"
+    # Default into the (out-of-repo) trace folder. A bare -o name lands there
+    # too; an -o with a directory component is honored as given.
+    dest = trace_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    name = args.out or f"trace_{token[:8]}.json"
+    out_path = Path(name)
+    out = str(out_path) if out_path.parent != Path(".") else str(dest / out_path.name)
     payload = {
         "share_token": token,
         "source_url": f"https://smith.langchain.com/public/{token}/r",

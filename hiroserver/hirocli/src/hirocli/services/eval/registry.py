@@ -270,11 +270,12 @@ class EvalRunRegistry:
             from hirocli.services.eval.store import get_eval_result_store
 
             leg = (row.get("legs") or {}).get("recall") or {}
-            # Drop the live-emitted evidence_recall before persisting: it's read-path derived
-            # (recomputed from the LoCoMo sidecar + saved `recalled` on every results read), and
-            # its `items` carry full episode bodies — persisting them would bloat row_json with
-            # redundant, potentially-stale text. The in-memory replay row keeps it (live display).
-            stored = {k: v for k, v in row.items() if k != "evidence_recall"}
+            # Drop the live-emitted evidence_recall + rubric before persisting: both are read-path
+            # derived (recomputed from the corpus sidecar on every results read — evidence_recall
+            # from `recalled`, rubric is static BEAM corpus data). Persisting them would bloat
+            # row_json with redundant, potentially-stale data. The in-memory replay row keeps them
+            # (live display).
+            stored = {k: v for k, v in row.items() if k not in ("evidence_recall", "rubric")}
             store = get_eval_result_store(Path(workspace_path))
             store.upsert_row(
                 corpus_id,

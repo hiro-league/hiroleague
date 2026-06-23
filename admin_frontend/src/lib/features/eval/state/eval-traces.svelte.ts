@@ -11,10 +11,9 @@
 import { goto } from '$app/navigation';
 import {
   getGraphRunIngestTrace,
-  getGraphRunRetrievalTrace,
-  type IngestTraceRecord,
-  type RetrievalTraceRecord
+  type IngestTraceRecord
 } from '$lib/api/graph-runs';
+import { createRetrievalTraceDialogController } from '$lib/features/graph-runs/state/retrieval-trace-dialog.svelte';
 import { exportEvalResultsLocomo } from '$lib/api/eval';
 import { seedGraphEpisodeFocus } from '$lib/features/knowledge/graph/knowledge-graph-prefs';
 import { formatEvalRowForAI } from '$lib/features/eval/shared/eval-clipboard';
@@ -32,78 +31,27 @@ export type EvalTracesCtx = {
   getNotify: () => (kind: ToastKind, message: string) => void;
 };
 
+/** The trace surface the per-row detail dialog (`EvalRowDetailDialog` + `EvalLegActions` +
+ *  trajectory) actually needs. A narrow seam so the dialog can mount under the FULL `EvalTraces`
+ *  (Eval panel) OR under the Graph-Runs bridge's lighter controller — which has no `EvalModel`, so
+ *  `copyRowForAI`/`copiedRow` are optional and the Copy button hides when absent. */
+export interface RowDetailTraces {
+  openTrace(runId: string, ideal?: string, answer?: string, question?: string): unknown;
+  openTraceForSubQuery(runId: string, sid: number, ideal?: string, answer?: string): unknown;
+  readonly traceLoadingRunId: string | null;
+  readonly traceLoadingSid: number | null;
+  copyRowForAI?(r: EvalRow): unknown;
+  readonly copiedRow?: number | null;
+}
+
 export function createEvalTraces(ctx: EvalTracesCtx) {
   const { eval_ } = ctx;
   const notify = (kind: ToastKind, message: string) => ctx.getNotify()(kind, message);
 
   // --- Retrieval pipeline trace (graph legs only) -------------------------------------------
-  let activeTrace = $state<RetrievalTraceRecord | null>(null);
-  // Ideal + model answer for the trace's question, surfaced in the dialog header.
-  let activeTraceIdeal = $state('');
-  let activeTraceAnswer = $state('');
-  let traceLoadingRunId = $state<string | null>(null);
-  // Per-sub-query loading (agentic recall): the trajectory's per-search Trace buttons share one
-  // run_id, so a run-keyed spinner would light them all — key the spinner on the sub-query sid.
-  let traceLoadingSid = $state<number | null>(null);
-
-  // Open the run's retrieval pipeline trace for the global (per-leg) Trace button.
-  // Agentic recall writes one trace PER concurrent sub-query, so a run can hold several; prefer
-  // the trace whose query is the original question, else the lowest-sid search (deterministic —
-  // concurrent sub-queries are written in nondeterministic order, so "last" was a coin flip).
-  async function openTrace(runId: string, ideal = '', answer = '', question = '') {
-    traceLoadingRunId = runId;
-    try {
-      const res = await getGraphRunRetrievalTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
-      if (traces.length > 0) {
-        const q = question.trim();
-        const matched = q ? traces.find((t) => (t.query ?? '').trim() === q) : undefined;
-        const lowestSid = [...traces].sort((a, b) => (a.sid ?? 0) - (b.sid ?? 0))[0];
-        activeTrace = matched ?? lowestSid;
-        activeTraceIdeal = ideal;
-        activeTraceAnswer = answer;
-      } else {
-        notify(
-          'error',
-          'No retrieval trace recorded for this run (graph tracing may have been off).'
-        );
-      }
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
-    } finally {
-      traceLoadingRunId = null;
-    }
-  }
-
-  // Open the pipeline trace for ONE agentic sub-query (the trajectory tab's per-search button).
-  // Matches on the stamped `sid` — the reliable key now that the backend tags each sub-query's
-  // trace (concurrent writes mean list order ≠ sid order, so we can't index positionally).
-  async function openTraceForSubQuery(runId: string, sid: number, ideal = '', answer = '') {
-    traceLoadingSid = sid;
-    try {
-      const res = await getGraphRunRetrievalTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
-      const matched = traces.find((t) => t.sid === sid);
-      if (matched) {
-        activeTrace = matched;
-        activeTraceIdeal = ideal;
-        activeTraceAnswer = answer;
-      } else {
-        notify(
-          'error',
-          `No pipeline trace recorded for search S${sid} (graph tracing may have been off).`
-        );
-      }
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
-    } finally {
-      traceLoadingSid = null;
-    }
-  }
-
-  function closeTrace() {
-    activeTrace = null;
-  }
+  // The open/close + sid/query-matching logic is shared with the Graph-Runs → eval-detail bridge,
+  // so it lives in a standalone controller; this panel just re-exposes its surface.
+  const rt = createRetrievalTraceDialogController(notify);
 
   // --- Ingest (graph-build) pipeline trace --------------------------------------------------
   let activeIngestTrace = $state<IngestTraceRecord | null>(null);
@@ -247,25 +195,25 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
   }
 
   return {
-    // Retrieval trace surface.
+    // Retrieval trace surface — delegated to the shared dialog controller.
     get activeTrace() {
-      return activeTrace;
+      return rt.activeTrace;
     },
     get activeTraceIdeal() {
-      return activeTraceIdeal;
+      return rt.activeTraceIdeal;
     },
     get activeTraceAnswer() {
-      return activeTraceAnswer;
+      return rt.activeTraceAnswer;
     },
     get traceLoadingRunId() {
-      return traceLoadingRunId;
+      return rt.traceLoadingRunId;
     },
     get traceLoadingSid() {
-      return traceLoadingSid;
+      return rt.traceLoadingSid;
     },
-    openTrace,
-    openTraceForSubQuery,
-    closeTrace,
+    openTrace: rt.openTrace,
+    openTraceForSubQuery: rt.openTraceForSubQuery,
+    closeTrace: rt.closeTrace,
     // Ingest trace surface.
     get activeIngestTrace() {
       return activeIngestTrace;

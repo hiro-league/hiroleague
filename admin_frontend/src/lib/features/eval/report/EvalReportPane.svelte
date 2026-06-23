@@ -12,6 +12,11 @@
   import { fmtCost, pct } from '$lib/features/eval/shared/eval-format';
   import { orderedDifficulty } from '$lib/features/eval/shared/eval-display';
   import EvalBreakdownTable from '$lib/features/eval/report/EvalBreakdownTable.svelte';
+  import {
+    readEvalReportSections,
+    writeEvalReportSections,
+    type EvalReportSection
+  } from '$lib/features/eval/report/eval-report-prefs';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
@@ -42,8 +47,13 @@
     return `correct ${best}/${total} · ${pct(best, total)} · score ${pct(bestScore, total)}`;
   });
 
-  // Per-corpus summary table collapse + the scroll target for the per-corpus detail.
-  let benchTableCollapsed = $state(false);
+  // Per-report-section expand/collapse — persisted so the tab reopens the way the user left it
+  // (the pane re-mounts on every sub-tab switch and rebuilds these tables on every corpus change).
+  let sections = $state(readEvalReportSections());
+  $effect(() => writeEvalReportSections(sections));
+  const toggleSection = (id: EvalReportSection) => (sections[id] = !sections[id]);
+
+  // Scroll target for the per-corpus detail.
   let reportDetailEl = $state<HTMLElement | null>(null);
   async function selectCorpusAndScroll(id: string) {
     const ok = await onSelectCorpus(id);
@@ -70,6 +80,8 @@
           bc={bench.total.by_category}
           cols={bench.total.modes}
           header="Category"
+          collapsed={sections.benchCategory}
+          onToggleCollapsed={() => toggleSection('benchCategory')}
         />
       {/if}
       {#if bench.total.by_difficulty && Object.keys(bench.total.by_difficulty).length > 0}
@@ -78,6 +90,8 @@
           bc={orderedDifficulty(bench.total.by_difficulty)}
           cols={bench.total.modes}
           header="Difficulty"
+          collapsed={sections.benchDifficulty}
+          onToggleCollapsed={() => toggleSection('benchDifficulty')}
         />
       {/if}
     {/if}
@@ -85,17 +99,17 @@
     <button
       type="button"
       class="mt-2 flex items-center gap-1.5 font-sans"
-      onclick={() => (benchTableCollapsed = !benchTableCollapsed)}
-      aria-expanded={!benchTableCollapsed}
+      onclick={() => toggleSection('benchByCorpus')}
+      aria-expanded={!sections.benchByCorpus}
     >
-      {#if benchTableCollapsed}
+      {#if sections.benchByCorpus}
         <ChevronRight size={15} aria-hidden="true" />
       {:else}
         <ChevronDown size={15} aria-hidden="true" />
       {/if}
       <span class="text-sm font-semibold">{bench.benchmark.label} · By corpus</span>
     </button>
-    {#if !benchTableCollapsed}
+    {#if !sections.benchByCorpus}
       <AdminTableShell class="mt-1">
         <thead class={ADMIN_TABLE_HEAD}>
           <tr>
@@ -187,6 +201,8 @@
         bc={eval_.summary.by_category}
         cols={eval_.summary.modes}
         header="Category"
+        collapsed={sections.detailCategory}
+        onToggleCollapsed={() => toggleSection('detailCategory')}
       />
     {/if}
     {#if eval_.summary.by_difficulty && Object.keys(eval_.summary.by_difficulty).length > 0}
@@ -195,6 +211,8 @@
         bc={orderedDifficulty(eval_.summary.by_difficulty)}
         cols={eval_.summary.modes}
         header="Difficulty"
+        collapsed={sections.detailDifficulty}
+        onToggleCollapsed={() => toggleSection('detailDifficulty')}
       />
     {/if}
   {/if}

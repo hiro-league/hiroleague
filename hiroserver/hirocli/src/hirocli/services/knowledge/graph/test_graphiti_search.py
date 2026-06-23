@@ -186,6 +186,29 @@ async def test_recipe_k_hop_min_relevance_thread_into_config() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scope_edges_and_episodes_mounts_episodes_not_nodes() -> None:
+    """The edges+episodes ablation scope must mount the episodes leg but NOT the node (entity)
+    leg — so retrieval reads raw turns without entity summaries."""
+    g = _FakeGraphiti([_Edge(["c1"], "f")])
+    await search_chunk_ids(g, "q", group_id="kb_main", scope="edges_and_episodes")
+    config = g.calls[0]["config"]
+    assert config.episode_config is not None  # episodes leg mounted
+    assert config.node_config is None  # entity leg NOT mounted (the whole point)
+    assert config.edge_config is not None  # edges always present
+
+
+@pytest.mark.asyncio
+async def test_scope_edges_and_nodes_does_not_mount_episodes() -> None:
+    """Regression guard: edges+nodes must NOT mount the episodes leg (only edges+episodes
+    and edges+nodes+episodes do)."""
+    g = _FakeGraphiti([_Edge(["c1"], "f")])
+    await search_chunk_ids(g, "q", group_id="kb_main", scope="edges_and_nodes")
+    config = g.calls[0]["config"]
+    assert config.node_config is not None
+    assert config.episode_config is None
+
+
+@pytest.mark.asyncio
 async def test_sim_min_score_defaults_below_graphiti_strict_floor() -> None:
     """The cosine candidate floor must default below graphiti's hardcoded 0.6 — that
     strict default is exactly what made paraphrase-distant fact searches return 0/0."""

@@ -71,6 +71,10 @@ export const PREF_KEYS = {
   evalQuestionConcurrency: 'hiro.admin.eval.questionConcurrency',
   /** Eval Corpus tab: render episode bodies as Markdown (default off). */
   evalCorpusMarkdown: 'hiro.admin.eval.corpusMarkdown',
+  /** Eval Reports tab: expand/collapse of each report section (benchmark overview tables,
+   *  By-corpus summary, per-corpus detail tables) — JSON blob, localStorage, so the tab reopens
+   *  with the same sections folded (the tables re-mount on every sub-tab switch / corpus change). */
+  evalReportSections: 'hiro.admin.eval.reportSections',
   /** Graph tab: the four "Graph options" layout sliders (JSON blob). */
   knowledgeGraphOptions: 'hiro.admin.knowledge.graphOptions',
   /** Graph tab: hidden node types (CSV) — sessionStorage; no URL param (not shareable). */

@@ -691,7 +691,10 @@ async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None
 
 @pytest.mark.retrieval_agent
 @pytest.mark.asyncio
-async def test_recall_leg_applies_declared_reduce_op(tmp_path, monkeypatch) -> None:
+async def test_recall_leg_ignores_declared_reduce_op_while_disabled(tmp_path, monkeypatch) -> None:
+    """Reduce ops are DISABLED (see runner_memory): a declared op is ignored and the answerer gets
+    the full deduped/time-sorted set, not the reduced one. Here a `latest` declaration must NOT
+    collapse the two budget edges to the newest — both survive, oldest-first."""
     async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
         acc = Accumulator()
         acc.merge(
@@ -744,8 +747,8 @@ async def test_recall_leg_applies_declared_reduce_op(tmp_path, monkeypatch) -> N
     )
 
     recalled = row["legs"]["recall"]["recalled"]
-    assert len(recalled) == 1
-    assert recalled[0]["memory"] == "Budget $50"
+    # Reduce disabled: the declared "latest" op is ignored; both edges are returned, time-sorted.
+    assert [r["memory"] for r in recalled] == ["Budget $40", "Budget $50"]
 
 
 @pytest.mark.retrieval_agent

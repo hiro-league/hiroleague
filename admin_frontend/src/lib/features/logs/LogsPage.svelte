@@ -24,13 +24,14 @@
   // header chrome (folder button, counts, collapse chevron) can read them.
   const prefs = createLogsPreferences();
   const logsCtrl = createLogsPageController({ prefs });
-  // Graph runs (second tab) — runs-only controller.
-  const runsCtrl = createGraphRunsPageController();
   // Primary `?tab=logs|runs` pill.
   const tabPrefs = createLogsTabPreferences();
 
   const toasts = createToastNotifier();
   const notify = toasts.notify;
+  // Graph runs (second tab) — runs-only controller. `notify` drives the eval-detail bridge's
+  // load/trace toasts.
+  const runsCtrl = createGraphRunsPageController(notify);
 
   const isRunsTab = $derived(tabPrefs.activeTab === 'runs');
   const pageTitle = $derived(isRunsTab ? 'Graph runs' : 'Logs');
@@ -180,6 +181,11 @@
       ingestTraceNavTotal={runsCtrl.traces.ingestTraceNavTotal}
       onPrevIngestTrace={runsCtrl.traces.prevIngestTrace}
       onNextIngestTrace={runsCtrl.traces.nextIngestTrace}
+      activeEvalRow={runsCtrl.activeEvalRow}
+      evalRowLegColumns={runsCtrl.evalRowLegColumns}
+      evalRowTraces={runsCtrl.evalRowTraces}
+      onOpenEvalRow={(row) => void runsCtrl.openEvalRowForNode(row)}
+      onCloseEvalRow={runsCtrl.closeEvalRow}
     />
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />

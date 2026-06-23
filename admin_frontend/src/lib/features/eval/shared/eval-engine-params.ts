@@ -66,6 +66,17 @@ export function modelLines(prefs: WorkspacePreferences, cfg: EvalTrackConfig): M
   // back to the knowledge answering model when unset.
   const answering = a.model_resolved ?? a.model;
   const ev = g.eval;
+  // Memory recall is fully agentic (runner_memory._recall_via_agent → run_retrieval), so surface the
+  // RETRIEVAL AGENT's model FIRST — before the answer/judge models. Its model falls back to the eval
+  // answer model, then the knowledge answering model (resolve_eval_retrieval_llm). Memory-only: the
+  // knowledge track answers with the production pipeline and has no retrieval agent.
+  if (cfg.track === 'memory')
+    out.push({
+      label: 'Retrieval',
+      model: dash(ev.retrieval_model || ev.answer_model || answering),
+      tuning: tuningChips(prefs, ev.retrieval_tuning_profile),
+      group: 'recall'
+    });
   out.push({
     label: 'Answer',
     model: dash(cfg.track === 'memory' ? ev.answer_model || answering : answering),
@@ -97,6 +108,16 @@ export function answerPromptOptions(
     out.push({ id, label: p.label });
   }
   return out;
+}
+
+/** The active retrieval-agent system prompt's label — provenance for the agentic recall leg (mirrors
+ *  answerPromptLabelFor). Resolves `active_retrieval_agent_prompt_id` against the prompt library,
+ *  falling back to the locked default profile, then 'Default'. */
+function retrievalAgentPromptLabel(prefs: WorkspacePreferences): string {
+  const ev = prefs.graph.eval;
+  const id = (ev.active_retrieval_agent_prompt_id || '').trim() || 'default';
+  const lib = ev.retrieval_agent_prompts ?? {};
+  return lib[id]?.label ?? lib['default']?.label ?? 'Default';
 }
 
 /** The selected profile's label — the run's answer-prompt provenance, for the settings strip. */
@@ -145,7 +166,15 @@ export function recallKnobs(
     out.push({ label: 'Rerank floor', value: String(g.reranker.min_relevance) });
   }
   if (cfg.track === 'memory') {
-    out.push({ label: 'Recall top-k', value: String(prefs.memory.search.top_k) });
+    // Memory recall is fully agentic: show the retrieval AGENT's loop caps + active system prompt
+    // BEFORE the answer-step knob. The old `memory.search.top_k` is dead on this path — the agent's
+    // search tool draws its per-query limit from `retrieval_agent.limit_default` (search_tool._run_one),
+    // so it's replaced by the agent's Search limit here.
+    const ra = g.eval.retrieval_agent;
+    out.push({ label: 'Agent turns', value: String(ra.max_agent_turns) });
+    out.push({ label: 'Parallel', value: String(ra.max_parallel_searches) });
+    out.push({ label: 'Search limit', value: String(ra.limit_default) });
+    out.push({ label: 'Retrieval prompt', value: retrievalAgentPromptLabel(prefs) });
     out.push({ label: 'Answer prompt', value: answerPromptLabel });
   } else {
     const r = prefs.knowledge.retrieval;

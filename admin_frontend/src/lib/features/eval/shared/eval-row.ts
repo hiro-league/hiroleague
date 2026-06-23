@@ -42,6 +42,9 @@ export type EvalRow = {
   // Evidence recall (LoCoMo corpora) — null on non-LoCoMo corpora and on live rows until the
   // post-run results refresh (it's computed on the read path, not emitted by live events).
   evidence_recall: EvidenceRecall | null;
+  // Grading rubric (BEAM corpora) — required-element criteria shown beside the gold answer in the
+  // detail dialog's judge pane; empty for non-BEAM corpora.
+  rubric: string[];
 };
 
 export function rowFromPayload(p: EvalQuestionPayload): EvalRow {
@@ -61,6 +64,7 @@ export function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     cost_usd: p.cost_usd ?? 0,
     is_negative_control: p.is_negative_control ?? false,
     answered_at: p.answered_at ?? '',
-    evidence_recall: p.evidence_recall ?? null
+    evidence_recall: p.evidence_recall ?? null,
+    rubric: p.rubric ?? []
   };
 }
