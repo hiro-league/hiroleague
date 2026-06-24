@@ -309,32 +309,37 @@
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat.",
     "model_kind": "chat"
   },
   "graph.extraction_tuning_profile": {
     "path": "graph.extraction_tuning_profile",
     "nullable": false,
     "type": "string",
-    "default": "graphiti_extraction"
+    "default": "graphiti_extraction",
+    "description": "Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs."
   },
   "graph.small_model": {
     "path": "graph.small_model",
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Cheaper model for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Null falls back to the extraction model.",
     "model_kind": "chat"
   },
   "graph.small_tuning_profile": {
     "path": "graph.small_tuning_profile",
     "nullable": false,
     "type": "string",
-    "default": "graphiti_small"
+    "default": "graphiti_small",
+    "description": "Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps)."
   },
   "graph.embedder_model": {
     "path": "graph.embedder_model",
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Embeds entity names + facts into the graph. Null shares the knowledge embedding model. Shared across memory + knowledge graph data \u2014 changing it re-indexes everything.",
     "model_kind": "embedding"
   },
   "graph.temporal_default": {
@@ -345,13 +350,15 @@
     "enum": [
       "current",
       "all"
-    ]
+    ],
+    "description": "Default time lens at retrieval. Current = only facts valid now (superseded facts hidden). Include historical = also surface invalidated facts. Overridable per query."
   },
   "graph.k_hop": {
     "path": "graph.k_hop",
     "nullable": false,
     "type": "integer",
     "default": 1,
+    "description": "Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost.",
     "min": 1,
     "max": 3
   },
@@ -364,7 +371,8 @@
       "rrf",
       "mmr",
       "cross_encoder"
-    ]
+    ],
+    "description": "How candidates are ranked/fused WITHIN each leg (orthogonal to Search scope below). RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly. MMR is not compatible with the episodes leg (BM25-only) \u2014 disabled when scope includes episodes."
   },
   "graph.search_scope": {
     "path": "graph.search_scope",
@@ -376,7 +384,8 @@
       "edges_and_nodes",
       "edges_and_episodes",
       "edges_nodes_episodes"
-    ]
+    ],
+    "description": "Which graph elements memory recall and knowledge retrieval READ from (orthogonal to Search recipe above). Edges = facts between entities (relations). Nodes = per-entity summaries (attribute-style memories, e.g. age, role, mood). Episodes = the raw conversation text of each saved turn \u2014 BM25 keyword match only (paraphrases may miss), useful as last-resort recall. \"Edges + Episodes\" keeps the raw turns but drops entity summaries (to test whether entity summaries are redundant with episodes)."
   },
   "graph.entity_ontology": {
     "path": "graph.entity_ontology",
@@ -386,13 +395,15 @@
     "enum": [
       "open",
       "typed"
-    ]
+    ],
+    "description": "Which entity types extraction may use. Open = no predefined types; the model extracts freely (everything becomes a generic Entity) \u2014 broadest recall, captures activities, interests, media, and preferences. Typed = pin the 5-type vocabulary (Person / Place / Organization / Event / Object) \u2014 more precise, but drops first-person facts that don't fit those types. Changing this rebuilds the graph at the next ingest, so a re-ingest is required to take effect."
   },
   "graph.custom_extraction_instructions": {
     "path": "graph.custom_extraction_instructions",
     "nullable": false,
     "type": "string",
-    "default": "Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity."
+    "default": "Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity.",
+    "description": "Optional domain-generic guidance injected verbatim into Graphiti's entity + fact extraction prompts. Use it to steer what gets captured \u2014 e.g. capture first-person preferences, goals, habits and activities as facts even when only the speaker is named, treating the activity / topic / object as the second entity. Keep it generic (no dataset-specific rules). Blank = none. Applied at ingest, so a re-ingest is required to take effect."
   },
   "graph.sim_min_score": {
     "path": "graph.sim_min_score",
@@ -400,6 +411,7 @@
     "type": "number",
     "default": 0.3,
     "step": 0.05,
+    "description": "Minimum cosine similarity (0\u20131) for a fact to even become a search candidate. Keep low (\u22480.3) for recall \u2014 too high and paraphrased questions (e.g. asking 'wife' when the stored fact says 'married to') return no facts at all. Graphiti's own default is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here.",
     "min": 0.0,
     "max": 1.0
   },
@@ -408,6 +420,7 @@
     "nullable": false,
     "type": "integer",
     "default": 60,
+    "description": "Hard ceiling on any single graph (Kuzu) query \u2014 writes, index rebuilds, and Graph-tab reads. Protects the server from a stuck index-rebuild checkpoint that can otherwise freeze the whole admin UI for minutes; a bounded failure is retried and logged instead. Keep above your slowest legitimate operation (index rebuilds take seconds). 0 = unlimited.",
     "min": 0,
     "max": 600
   },
@@ -420,13 +433,15 @@
       "off",
       "ledger",
       "trace"
-    ]
+    ],
+    "description": "How much the graph engine records to Graph Runs (ingest + retrieval). Off = nothing \u2014 no ledger rows, tracer, or usage sinks (spares CPU; graph cost is NOT tracked). Ledger = one priced roll-up row per episode (ingest) and per search (rerank), so token cost still folds into the run total \u2014 the production default. Trace = Ledger plus a deep per-stage sidecar (the \u2317 retrieval/ingest trace dialogs) for debugging. Replaces the old Rich/Compact detail and the trace env vars."
   },
   "graph.reranker.model_id": {
     "path": "graph.reranker.model_id",
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model (one model to manage). Local models must be downloaded first.",
     "model_kind": "rerank"
   },
   "graph.reranker.min_relevance": {
@@ -435,6 +450,7 @@
     "type": "number",
     "default": 0.0,
     "step": 0.05,
+    "description": "Drop facts whose cross-encoder relevance is below this (0\u20131). 0 = keep all. Ignored by RRF/MMR.",
     "min": 0.0,
     "max": 1.0
   },
@@ -442,7 +458,8 @@
     "path": "graph.reranker.device",
     "nullable": true,
     "type": "string",
-    "default": null
+    "default": null,
+    "description": "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models."
   },
   "graph.eval.answer_prompts": {
     "path": "graph.eval.answer_prompts",
@@ -461,39 +478,45 @@
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)",
     "model_kind": "chat"
   },
   "graph.eval.answer_tuning_profile": {
     "path": "graph.eval.answer_tuning_profile",
     "nullable": false,
     "type": "string",
-    "default": "knowledge_answering"
+    "default": "knowledge_answering",
+    "description": "Tuning profile (temperature / max-tokens / thinking) for the eval answer model."
   },
   "graph.eval.judge_model": {
     "path": "graph.eval.judge_model",
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat.",
     "model_kind": "chat"
   },
   "graph.eval.judge_tuning_profile": {
     "path": "graph.eval.judge_tuning_profile",
     "nullable": false,
     "type": "string",
-    "default": "knowledge_answering"
+    "default": "knowledge_answering",
+    "description": "Tuning profile for the judge model. Lower temperature = more repeatable grading."
   },
   "graph.eval.retrieval_model": {
     "path": "graph.eval.retrieval_model",
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model \u2192 default chat.",
     "model_kind": "chat"
   },
   "graph.eval.retrieval_tuning_profile": {
     "path": "graph.eval.retrieval_tuning_profile",
     "nullable": false,
     "type": "string",
-    "default": "knowledge_answering"
+    "default": "knowledge_answering",
+    "description": "Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model."
   },
   "graph.eval.show_event_time": {
     "path": "graph.eval.show_event_time",

@@ -5,7 +5,6 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { TUNING_PROFILES_COPY } from '$lib/features/preferences/shared/preferences-copy';
   import { tuningProfileSectionBodyId } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
     PREFERENCE_TAB_IDS,
@@ -18,6 +17,12 @@
   };
 
   let { ctrl }: Props = $props();
+
+  // Card-local hint: `num_ctx` is a dynamic per-profile key (tuning_profiles.*), not a flat
+  // schema-map field, so its copy can't live on a backend `Field(description=...)` like the rest.
+  const CONTEXT_WINDOW_HINT =
+    'Local providers only (Ollama num_ctx). Blank = provider default (Ollama: 2048). ' +
+    "Don't set to the full model window — large values use a lot of memory.";
 
   /** Freeze list order while a name field is focused so label sort does not steal focus. */
   let nameEditProfileId = $state<string | null>(null);
@@ -167,7 +172,7 @@
             </FormField>
             <FormField
               label="Context window"
-              hint={TUNING_PROFILES_COPY.contextWindow}
+              hint={CONTEXT_WINDOW_HINT}
             >
               <input
                 type="number"

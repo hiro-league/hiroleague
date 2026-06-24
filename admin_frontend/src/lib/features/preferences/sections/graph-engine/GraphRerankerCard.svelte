@@ -2,7 +2,6 @@
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { GRAPH_RERANKER_COPY } from '$lib/features/preferences/shared/preferences-copy';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
@@ -37,7 +36,6 @@
         path="graph.reranker.model_id"
         embedded
         label="Reranker model"
-        hint={GRAPH_RERANKER_COPY.model}
         selectedId={ctrl.draft.graph.reranker.model_id}
       />
       <div class="grid gap-3 md:grid-cols-2">
@@ -45,14 +43,12 @@
           {ctrl}
           path="graph.reranker.min_relevance"
           label="Min relevance"
-          hint={GRAPH_RERANKER_COPY.minRelevance}
           bind:value={ctrl.draft.graph.reranker.min_relevance}
         />
         <PrefTextField
           {ctrl}
           path="graph.reranker.device"
           label="Device (local only)"
-          hint={GRAPH_RERANKER_COPY.device}
           placeholder="auto"
           bind:value={ctrl.draft.graph.reranker.device}
         />

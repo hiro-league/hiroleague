@@ -581,13 +581,32 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     """
 
     # null → fall back to the shared knowledge reranker model id.
-    model_id: str | None = Field(default=None, json_schema_extra={"model_kind": "rerank"})
+    model_id: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "rerank"},
+        description=(
+            "Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge "
+            "Reranker model (one model to manage). Local models must be downloaded first."
+        ),
+    )
     # Drop facts whose post-rerank relevance is below this (maps to Graphiti
     # ``SearchConfig.reranker_min_score``). 0.0 = keep all. Cross-encoder only —
     # RRF/MMR scores are rank-fusion artifacts, so this is ignored for those recipes.
-    min_relevance: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05})
+    min_relevance: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={"step": 0.05},
+        description="Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.",
+    )
     # Local torch lane only (sentence-transformers); ignored by cloud + ONNX models.
-    device: str | None = None
+    device: str | None = Field(
+        default=None,
+        description=(
+            "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). "
+            "Blank = auto. Ignored by cloud + ONNX models."
+        ),
+    )
 
 
 # Answering INSTRUCTIONS for the MEMORY eval's recall leg (eval_judge.answer_from_context).
@@ -1107,17 +1126,49 @@ class GraphEvalPreferences(BaseModel):
     # workspace is unchanged. The defaults reuse the ``knowledge_answering`` tuning profile —
     # set them apart to tune the answer step and the judge independently. The memory-eval answer
     # step uses ``answer_*``; the LLM judge (both tracks) uses ``judge_*``.
-    answer_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
-    answer_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
-    judge_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
-    judge_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    answer_model: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "chat"},
+        description=(
+            "Model the memory-eval answer step uses to answer from recalled context. Null "
+            "falls back to the knowledge answering model, then default chat. (Knowledge-track "
+            "answers always use the production answering pipeline, not this.)"
+        ),
+    )
+    answer_tuning_profile: str = Field(
+        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        description="Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
+    )
+    judge_model: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "chat"},
+        description=(
+            "Model the LLM judge uses to grade answers against the ideal (both tracks). Null "
+            "falls back to the knowledge answering model, then default chat."
+        ),
+    )
+    judge_tuning_profile: str = Field(
+        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        description="Tuning profile for the judge model. Lower temperature = more repeatable grading.",
+    )
     # The agentic retrieval loop (memory track) gets its OWN model + tuning profile. ``None`` falls
     # back to the eval ANSWER model (the loop borrowed it before it had its own preference): the
     # resolver chains retrieval_model → answer_model → knowledge.answering.model → llm.default_chat,
     # so an unset workspace is unchanged. Lets the retrieval/tool-calling step use a different model
     # (e.g. a cheaper or higher-reasoning one) than the final answer step.
-    retrieval_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
-    retrieval_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    retrieval_model: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "chat"},
+        description=(
+            "Model the agentic retrieval loop uses to plan searches and call the search_memory "
+            "tool (memory track). Null falls back to the eval answer model, then the knowledge "
+            "answering model → default chat."
+        ),
+    )
+    retrieval_tuning_profile: str = Field(
+        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        description="Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
+    )
     # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
     # line carries, and whether episodes keep their [date] prefix. ``show_event_time`` (valid_at,
     # labeled "event_time") also governs the episode [date]; ``show_expired_at`` (invalid_at) and
@@ -1197,29 +1248,104 @@ class GraphPreferences(BaseModel):
 
     backend: KnowledgeGraphBackend = "off"
     # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
-    extraction_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
-    extraction_tuning_profile: str = DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID
-    small_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
-    small_tuning_profile: str = DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID
+    extraction_model: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "chat"},
+        description=(
+            "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. "
+            "Must be structured-output-capable. Null falls back to the answering model, then "
+            "default chat."
+        ),
+    )
+    extraction_tuning_profile: str = Field(
+        default=DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
+        description=(
+            "Tuning profile (temperature / max-tokens / thinking) for the extraction model. "
+            "Ships deterministic so extraction stays repeatable across runs."
+        ),
+    )
+    small_model: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "chat"},
+        description=(
+            "Cheaper model for Graphiti's sub-steps — node dedupe, entity summaries, timestamps. "
+            "Null falls back to the extraction model."
+        ),
+    )
+    small_tuning_profile: str = Field(
+        default=DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
+        description="Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
+    )
     # ``None`` → shares the knowledge dense embedder (decision G8).
-    embedder_model: str | None = Field(default=None, json_schema_extra={"model_kind": "embedding"})
+    embedder_model: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "embedding"},
+        description=(
+            "Embeds entity names + facts into the graph. Null shares the knowledge embedding "
+            "model. Shared across memory + knowledge graph data — changing it re-indexes "
+            "everything."
+        ),
+    )
     # Default temporal lens at retrieval: current facts only vs include historical.
-    temporal_default: KnowledgeGraphTemporalDefault = "current"
+    temporal_default: KnowledgeGraphTemporalDefault = Field(
+        default="current",
+        description=(
+            "Default time lens at retrieval. Current = only facts valid now (superseded facts "
+            "hidden). Include historical = also surface invalidated facts. Overridable per query."
+        ),
+    )
     # Retrieval expansion radius (hops) when gathering related facts/chunks.
-    k_hop: int = Field(default=1, ge=1, le=3)
+    k_hop: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+        description=(
+            "Relationship hops out from matched entities when gathering related facts. 1 = "
+            "direct neighbors only (precise); higher reaches further at more noise/cost."
+        ),
+    )
     # Graphiti search rerank recipe for the fact-search leg.
-    search_recipe: KnowledgeGraphSearchRecipe = "rrf"
+    search_recipe: KnowledgeGraphSearchRecipe = Field(
+        default="rrf",
+        description=(
+            "How candidates are ranked/fused WITHIN each leg (orthogonal to Search scope below). "
+            "RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder "
+            "= highest quality, slowest/most costly. MMR is not compatible with the episodes leg "
+            "(BM25-only) — disabled when scope includes episodes."
+        ),
+    )
     # Which graph elements the fact-search reads from (decision: extends D3). Default keeps
     # today's behavior; lift to ``edges_and_nodes`` to recall attribute memories that live on
     # ``EntityNode.summary`` (e.g. "Misho turned 50…"). ``edges_nodes_episodes`` also matches
     # raw conversation text via BM25 — useful as a last-resort recall when structured layers
     # miss; precision suffers. See :meth:`_validate_search_scope_recipe` for the MMR×episodes
     # incompatibility (graphiti-core's ``EpisodeReranker`` has no MMR).
-    search_scope: KnowledgeGraphSearchScope = "edges"
+    search_scope: KnowledgeGraphSearchScope = Field(
+        default="edges",
+        description=(
+            "Which graph elements memory recall and knowledge retrieval READ from (orthogonal "
+            "to Search recipe above). Edges = facts between entities (relations). Nodes = "
+            "per-entity summaries (attribute-style memories, e.g. age, role, mood). Episodes = "
+            "the raw conversation text of each saved turn — BM25 keyword match only (paraphrases "
+            "may miss), useful as last-resort recall. \"Edges + Episodes\" keeps the raw turns "
+            "but drops entity summaries (to test whether entity summaries are redundant with "
+            "episodes)."
+        ),
+    )
     # Extraction ontology at ingest. "open" (default) extracts freely (broadest recall — captures
     # activities/interests/media/preferences); "typed" pins the 5-type vocabulary (precise, but
     # drops facts that don't fit). Changing this needs a re-ingest to rebuild the graph.
-    entity_ontology: KnowledgeGraphEntityOntology = "open"
+    entity_ontology: KnowledgeGraphEntityOntology = Field(
+        default="open",
+        description=(
+            "Which entity types extraction may use. Open = no predefined types; the model "
+            "extracts freely (everything becomes a generic Entity) — broadest recall, captures "
+            "activities, interests, media, and preferences. Typed = pin the 5-type vocabulary "
+            "(Person / Place / Organization / Event / Object) — more precise, but drops "
+            "first-person facts that don't fit those types. Changing this rebuilds the graph at "
+            "the next ingest, so a re-ingest is required to take effect."
+        ),
+    )
     # Domain-generic extra instructions injected verbatim into Graphiti's node + edge extraction
     # prompts (graphiti-core's ``custom_extraction_instructions`` slot — a first-class add_episode
     # param, not a prompt hack). Defaults to a nudge for the no-edge class we keep dropping —
@@ -1233,6 +1359,14 @@ class GraphPreferences(BaseModel):
             "the second entity."
         ),
         max_length=2000,
+        description=(
+            "Optional domain-generic guidance injected verbatim into Graphiti's entity + fact "
+            "extraction prompts. Use it to steer what gets captured — e.g. capture first-person "
+            "preferences, goals, habits and activities as facts even when only the speaker is "
+            "named, treating the activity / topic / object as the second entity. Keep it generic "
+            "(no dataset-specific rules). Blank = none. Applied at ingest, so a re-ingest is "
+            "required to take effect."
+        ),
     )
     # Cosine *candidate* floor for the fact-search leg (maps to Graphiti
     # ``EdgeSearchConfig.sim_min_score``). A fact only becomes a search candidate if its
@@ -1242,7 +1376,18 @@ class GraphPreferences(BaseModel):
     # comes back empty. Keep low for RECALL (the reranker.min_relevance below is where
     # precision belongs); raise toward 0.6 to tighten candidates. Applies to all recipes
     # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
-    sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0, json_schema_extra={"step": 0.05})
+    sim_min_score: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={"step": 0.05},
+        description=(
+            "Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep "
+            "low (≈0.3) for recall — too high and paraphrased questions (e.g. asking 'wife' when "
+            "the stored fact says 'married to') return no facts at all. Graphiti's own default "
+            "is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here."
+        ),
+    )
     # Hard ceiling (seconds) on any single Kuzu query — applied to the shared writer pool AND
     # the snapshot read connections. Bounds the pathological case where a CHECKPOINT (triggered
     # by an FTS rebuild) waits minutes for a concurrent read transaction to leave — observed to
@@ -1250,12 +1395,33 @@ class GraphPreferences(BaseModel):
     # bound the stall dies in ~query_timeout_s and the non-fatal FTS retry absorbs the failure.
     # Sized above legit operations (per-episode writes are sub-second; a full FTS rebuild is
     # seconds at current scale) but far below Kuzu's internal wait. 0 = unlimited.
-    query_timeout_s: int = Field(default=60, ge=0, le=600)
+    query_timeout_s: int = Field(
+        default=60,
+        ge=0,
+        le=600,
+        description=(
+            "Hard ceiling on any single graph (Kuzu) query — writes, index rebuilds, and "
+            "Graph-tab reads. Protects the server from a stuck index-rebuild checkpoint that can "
+            "otherwise freeze the whole admin UI for minutes; a bounded failure is retried and "
+            "logged instead. Keep above your slowest legitimate operation (index rebuilds take "
+            "seconds). 0 = unlimited."
+        ),
+    )
     # Graph observability tier (docs §12.2): ``off`` = no graphiti ledger/tracer/sinks;
     # ``ledger`` = one priced roll-up row per episode/search (cost folds — prod default);
     # ``trace`` = + deep per-stage JSONL sidecars. Replaces the former ``ledger_detail``
     # (compact/rich) AND the HIRO_GRAPH_TRACE_RETRIEVAL/INGEST env vars (one dial now).
-    observability: GraphObservability = "ledger"
+    observability: GraphObservability = Field(
+        default="ledger",
+        description=(
+            "How much the graph engine records to Graph Runs (ingest + retrieval). Off = nothing "
+            "— no ledger rows, tracer, or usage sinks (spares CPU; graph cost is NOT tracked). "
+            "Ledger = one priced roll-up row per episode (ingest) and per search (rerank), so "
+            "token cost still folds into the run total — the production default. Trace = Ledger "
+            "plus a deep per-stage sidecar (the ⌗ retrieval/ingest trace dialogs) for debugging. "
+            "Replaces the old Rich/Compact detail and the trace env vars."
+        ),
+    )
     # Cross-encoder reranker for the fact-search leg (only when search_recipe='cross_encoder').
     reranker: KnowledgeGraphRerankerPreferences = Field(
         default_factory=KnowledgeGraphRerankerPreferences

@@ -56,32 +56,101 @@ export type LanguagePolicy = "match_query" | "prefer_english" | "prefer_arabic";
 export type Prompt1 = string;
 export type DefaultOn = boolean;
 export type Backend = "off" | "graphiti";
+/**
+ * The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat.
+ */
 export type ExtractionModel = string | null;
+/**
+ * Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs.
+ */
 export type ExtractionTuningProfile = string;
+/**
+ * Cheaper model for Graphiti's sub-steps — node dedupe, entity summaries, timestamps. Null falls back to the extraction model.
+ */
 export type SmallModel = string | null;
+/**
+ * Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).
+ */
 export type SmallTuningProfile = string;
+/**
+ * Embeds entity names + facts into the graph. Null shares the knowledge embedding model. Shared across memory + knowledge graph data — changing it re-indexes everything.
+ */
 export type EmbedderModel = string | null;
+/**
+ * Default time lens at retrieval. Current = only facts valid now (superseded facts hidden). Include historical = also surface invalidated facts. Overridable per query.
+ */
 export type TemporalDefault = "current" | "all";
+/**
+ * Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost.
+ */
 export type KHop = number;
+/**
+ * How candidates are ranked/fused WITHIN each leg (orthogonal to Search scope below). RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder = highest quality, slowest/most costly. MMR is not compatible with the episodes leg (BM25-only) — disabled when scope includes episodes.
+ */
 export type SearchRecipe = "rrf" | "mmr" | "cross_encoder";
+/**
+ * Which graph elements memory recall and knowledge retrieval READ from (orthogonal to Search recipe above). Edges = facts between entities (relations). Nodes = per-entity summaries (attribute-style memories, e.g. age, role, mood). Episodes = the raw conversation text of each saved turn — BM25 keyword match only (paraphrases may miss), useful as last-resort recall. "Edges + Episodes" keeps the raw turns but drops entity summaries (to test whether entity summaries are redundant with episodes).
+ */
 export type SearchScope = "edges" | "edges_and_nodes" | "edges_and_episodes" | "edges_nodes_episodes";
+/**
+ * Which entity types extraction may use. Open = no predefined types; the model extracts freely (everything becomes a generic Entity) — broadest recall, captures activities, interests, media, and preferences. Typed = pin the 5-type vocabulary (Person / Place / Organization / Event / Object) — more precise, but drops first-person facts that don't fit those types. Changing this rebuilds the graph at the next ingest, so a re-ingest is required to take effect.
+ */
 export type EntityOntology = "open" | "typed";
+/**
+ * Optional domain-generic guidance injected verbatim into Graphiti's entity + fact extraction prompts. Use it to steer what gets captured — e.g. capture first-person preferences, goals, habits and activities as facts even when only the speaker is named, treating the activity / topic / object as the second entity. Keep it generic (no dataset-specific rules). Blank = none. Applied at ingest, so a re-ingest is required to take effect.
+ */
 export type CustomExtractionInstructions = string;
+/**
+ * Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep low (≈0.3) for recall — too high and paraphrased questions (e.g. asking 'wife' when the stored fact says 'married to') return no facts at all. Graphiti's own default is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here.
+ */
 export type SimMinScore = number;
+/**
+ * Hard ceiling on any single graph (Kuzu) query — writes, index rebuilds, and Graph-tab reads. Protects the server from a stuck index-rebuild checkpoint that can otherwise freeze the whole admin UI for minutes; a bounded failure is retried and logged instead. Keep above your slowest legitimate operation (index rebuilds take seconds). 0 = unlimited.
+ */
 export type QueryTimeoutS = number;
+/**
+ * How much the graph engine records to Graph Runs (ingest + retrieval). Off = nothing — no ledger rows, tracer, or usage sinks (spares CPU; graph cost is NOT tracked). Ledger = one priced roll-up row per episode (ingest) and per search (rerank), so token cost still folds into the run total — the production default. Trace = Ledger plus a deep per-stage sidecar (the ⌗ retrieval/ingest trace dialogs) for debugging. Replaces the old Rich/Compact detail and the trace env vars.
+ */
 export type Observability = "off" | "ledger" | "trace";
+/**
+ * Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model (one model to manage). Local models must be downloaded first.
+ */
 export type ModelId1 = string | null;
+/**
+ * Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.
+ */
 export type MinRelevance = number;
+/**
+ * Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models.
+ */
 export type Device1 = string | null;
 export type Label = string;
 export type Locked = boolean;
 export type Prompt2 = string;
 export type JudgePrompt = string;
+/**
+ * Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)
+ */
 export type AnswerModel = string | null;
+/**
+ * Tuning profile (temperature / max-tokens / thinking) for the eval answer model.
+ */
 export type AnswerTuningProfile = string;
+/**
+ * Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat.
+ */
 export type JudgeModel = string | null;
+/**
+ * Tuning profile for the judge model. Lower temperature = more repeatable grading.
+ */
 export type JudgeTuningProfile = string;
+/**
+ * Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model → default chat.
+ */
 export type RetrievalModel = string | null;
+/**
+ * Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.
+ */
 export type RetrievalTuningProfile = string;
 export type ShowEventTime = boolean;
 export type ShowExpiredAt = boolean;

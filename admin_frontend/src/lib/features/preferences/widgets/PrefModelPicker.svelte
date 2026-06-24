@@ -7,12 +7,17 @@
     type PrefModelIdPath,
     type PrefModelKind
   } from '$lib/features/preferences/shared/preferences-model-picker';
+  import {
+    preferenceFieldMeta,
+    preferenceHint
+  } from '$lib/features/preferences/shared/preferences-schema';
 
   type Props = {
     ctrl: PreferencesController;
     kind: PrefModelKind;
     path: PrefModelIdPath;
     label: string;
+    /** Overrides the schema description; omit to use the field's backend `description`. */
     hint?: string;
     selectedId?: string | null;
     busy?: boolean;
@@ -25,7 +30,7 @@
     kind,
     path,
     label,
-    hint = '',
+    hint: hintOverride,
     selectedId = null,
     busy,
     embedded = false,
@@ -35,6 +40,7 @@
   const catalog = $derived(prefModelCatalog(ctrl, kind));
   const empty = $derived(PREF_MODEL_EMPTY_LABELS[kind]);
   const pickerBusy = $derived(busy ?? ctrl.busy);
+  const hint = $derived(hintOverride ?? preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, path)) ?? '');
 </script>
 
 <SingleModelPicker

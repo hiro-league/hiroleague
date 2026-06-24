@@ -2,10 +2,6 @@
   import Badge from '$lib/components/ui/badge.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import {
-    preferenceFieldMeta,
-    preferenceHint
-  } from '$lib/features/preferences/shared/preferences-schema';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
@@ -16,10 +12,6 @@
   };
 
   let { ctrl }: Props = $props();
-
-  const embedderMeta = $derived(
-    preferenceFieldMeta(ctrl.fieldSchema, 'knowledge.default_embedding_model')
-  );
 </script>
 
 {#if ctrl.draft}
@@ -40,7 +32,6 @@
       path="knowledge.default_embedding_model"
       embedded
       label="Knowledge embedding model"
-      hint={preferenceHint(embedderMeta)}
       selectedId={ctrl.draft.knowledge.default_embedding_model}
       busy={ctrl.busy || Boolean(ctrl.draft.knowledge.default_embedding_model_locked)}
     />

@@ -1,7 +1,6 @@
 <script lang="ts">
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { GRAPH_EVAL_MODELS_COPY } from '$lib/features/preferences/shared/preferences-copy';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
@@ -27,13 +26,12 @@
       labelled
       embedded
       label="Eval answer model"
-      hint={GRAPH_EVAL_MODELS_COPY.answerModel}
       selectedId={ctrl.draft.graph.eval.answer_model}
     />
     <TuningProfileSelect
       {ctrl}
       label="Eval answer profile"
-      hint={GRAPH_EVAL_MODELS_COPY.answerProfile}
+      path="graph.eval.answer_tuning_profile"
       class="max-w-md"
       bind:value={ctrl.draft.graph.eval.answer_tuning_profile}
     />
@@ -45,13 +43,12 @@
       labelled
       embedded
       label="Eval judge model"
-      hint={GRAPH_EVAL_MODELS_COPY.judgeModel}
       selectedId={ctrl.draft.graph.eval.judge_model}
     />
     <TuningProfileSelect
       {ctrl}
       label="Eval judge profile"
-      hint={GRAPH_EVAL_MODELS_COPY.judgeProfile}
+      path="graph.eval.judge_tuning_profile"
       class="max-w-md"
       bind:value={ctrl.draft.graph.eval.judge_tuning_profile}
     />
@@ -63,13 +60,12 @@
       labelled
       embedded
       label="Retrieval agent model"
-      hint={GRAPH_EVAL_MODELS_COPY.retrievalModel}
       selectedId={ctrl.draft.graph.eval.retrieval_model}
     />
     <TuningProfileSelect
       {ctrl}
       label="Retrieval agent profile"
-      hint={GRAPH_EVAL_MODELS_COPY.retrievalProfile}
+      path="graph.eval.retrieval_tuning_profile"
       class="max-w-md"
       bind:value={ctrl.draft.graph.eval.retrieval_tuning_profile}
     />

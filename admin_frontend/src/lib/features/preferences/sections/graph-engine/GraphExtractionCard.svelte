@@ -3,7 +3,10 @@
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { GRAPH_EXTRACTION_COPY } from '$lib/features/preferences/shared/preferences-copy';
+  import {
+    preferenceFieldMeta,
+    preferenceHint
+  } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
@@ -24,7 +27,7 @@
   >
     <FormField
       label="Extraction ontology"
-      hint={GRAPH_EXTRACTION_COPY.entityOntology}
+      hint={preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, 'graph.entity_ontology'))}
       class="max-w-md"
     >
       <select
@@ -39,7 +42,9 @@
 
     <FormField
       label="Extraction instructions"
-      hint={GRAPH_EXTRACTION_COPY.customInstructions}
+      hint={preferenceHint(
+        preferenceFieldMeta(ctrl.fieldSchema, 'graph.custom_extraction_instructions')
+      )}
     >
       <textarea
         class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
@@ -58,13 +63,12 @@
       labelled
       embedded
       label="Extraction model"
-      hint={GRAPH_EXTRACTION_COPY.extractionModel}
       selectedId={ctrl.draft.graph.extraction_model}
     />
     <TuningProfileSelect
       {ctrl}
       label="Extraction profile"
-      hint={GRAPH_EXTRACTION_COPY.extractionProfile}
+      path="graph.extraction_tuning_profile"
       class="max-w-md"
       bind:value={ctrl.draft.graph.extraction_tuning_profile}
     />
@@ -76,13 +80,12 @@
       labelled
       embedded
       label="Smaller extraction model"
-      hint={GRAPH_EXTRACTION_COPY.smallModel}
       selectedId={ctrl.draft.graph.small_model}
     />
     <TuningProfileSelect
       {ctrl}
       label="Smaller extraction profile"
-      hint={GRAPH_EXTRACTION_COPY.smallProfile}
+      path="graph.small_tuning_profile"
       class="max-w-md"
       bind:value={ctrl.draft.graph.small_tuning_profile}
     />
@@ -94,7 +97,6 @@
       labelled
       embedded
       label="Embedder model"
-      hint={GRAPH_EXTRACTION_COPY.embedderModel}
       selectedId={ctrl.draft.graph.embedder_model}
     />
   </SectionCardMuted>

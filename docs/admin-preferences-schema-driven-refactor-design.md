@@ -4,7 +4,9 @@
 >
 > **Status:** the **high-impact** items `#1`–`#3` (§4–§6) are **implemented and green**. The
 > **medium** items `#4`–`#6` (§7–§9) are **not yet built** and are written as step-by-step
-> implementation guidance. The **lower** items `#7`–`#8` remain design-only.
+> implementation guidance. The **lower** items `#7`–`#8` (§10–§11) are now also written as
+> step-by-step guidance — note `#8`'s **backend metadata half is already shipped** (`model_kind`
+> is emitted in the field map today), so it is a frontend-only consolidation.
 >
 > Scope: the **Preferences** admin feature only (`admin_frontend/src/lib/features/preferences/**`,
 > `admin_frontend/src/lib/api/preferences.ts`, and the backend model
@@ -74,9 +76,10 @@ Existing abstractions worth keeping/building on: `PrefModelPicker.svelte`, `Sett
 
 ### 🟡 Lower — consistency & polish
 7. **Schema-driven inline validation** — show `ge/le` and cross-field errors before save instead of
-   round-tripping a 422.
+   round-tripping a 422. *(detailed in §10)*
 8. **Unify model-picker dispatch** — move "this field is a model of kind X" into schema metadata
-   (`json_schema_extra={"model_kind": "chat"}`) so the picker self-configures from the path.
+   (`json_schema_extra={"model_kind": "chat"}`) so the picker self-configures from the path. The
+   backend metadata is already shipped; this is now a frontend-only cleanup. *(detailed in §11)*
 
 ### Sequencing
 
@@ -90,8 +93,9 @@ Existing abstractions worth keeping/building on: `PrefModelPicker.svelte`, `Sett
 ```
 
 `#1` is the keystone: it aligns the read path with the already-schema-driven write path, and almost
-everything else gets cheaper once it exists. This document details `#1`–`#3` (§4–§6, **shipped**) and
-`#4`–`#6` (§7–§9, **next work, written for a step-by-step implementer**).
+everything else gets cheaper once it exists. This document details `#1`–`#3` (§4–§6, **shipped**),
+`#4`–`#6` (§7–§9), and `#7`–`#8` (§10–§11) — the last two groups **written for a step-by-step
+implementer**.
 
 > **Status (2026-06-24):** `#1`–`#3` have **landed**. The schema endpoint, codegen, and schema-driven
 > save policy are in the tree and green. The medium sections below build *on top of* that shipped
@@ -479,7 +483,239 @@ renaming a backend field (after regen) breaks every stale card reference at `npm
 
 ---
 
-## 10. Net effect
+## 10. Detail — #7: Schema-driven inline validation
+
+> **For the implementer.** Today a value the backend will reject (a number past `ge`/`le`, or a
+> cross-field combination like `limit_min > limit_max`) is **only** caught when Save fires the PATCH
+> and the server returns a **422** — the user loses their place and gets a generic toast. This item
+> moves both checks **client-side**, surfaced **at the field** and **before** Save is enabled.
+>
+> **Crucial:** part of the wiring already exists — do **not** rebuild it. `ctrl.setSectionError(id,
+> message)` writes into a `sectionErrors` map; `ctrl.hasSectionErrors` is derived from it; and
+> **`canSave` already gates on `!hasSectionErrors`** (controller §`canSave`). The cross-field half is
+> already demonstrated end-to-end in `GraphRetrievalAgentCard.svelte` + `retrieval-agent-limits.ts`.
+> Your job is to (a) add the **single-field bounds** half driven by schema, and (b) generalize the
+> existing cross-field pattern — not to invent a new error channel.
+
+### 10.1 The two validation classes — and why only one comes from schema
+
+| Class | Example | Source of truth | Expressible in JSON Schema? |
+|---|---|---|---|
+| **Single-field bounds** | `chunk_size` must be `100…6000` | `Field(ge, le)` → `meta.min`/`meta.max` | **Yes** — already in the field map |
+| **Cross-field** | `limit_min ≤ limit_default ≤ limit_max` | pydantic `@model_validator` | **No** (per §4.5) — stays hand-mirrored |
+
+Single-field bounds are **derivable** — the schema map already carries `min`/`max`/`step` for every
+numeric leaf, and `PrefNumberField` already passes them to the `<input>`. But HTML `min`/`max` on a
+number input only constrain the **spinner arrows**; a user can still **type or paste** `9999` and the
+input accepts it. That out-of-range value sits in the draft until Save → 422. Closing that gap is the
+whole single-field task.
+
+Cross-field rules are **not** in JSON Schema (§4.5 is explicit: do not try to encode arbitrary
+`@model_validator` logic). They stay a small hand-written mirror of the pydantic validator, exactly
+like `validateRetrievalAgentLimits` mirrors `RetrievalAgentLimits._coherent_limits` today. This item
+does **not** auto-derive them — it only standardizes how they report.
+
+### 10.2 Single-field bounds — the schema-driven half (build this)
+
+1. **Add a checker helper** next to the existing bounds/hint helpers in
+   `features/preferences/shared/preferences-schema.ts`:
+
+   ```ts
+   /** Schema-derived ge/le violation message for a numeric leaf, or null when in range. */
+   export function preferenceNumberError(
+     meta: PreferenceFieldMeta | null | undefined,
+     value: number | undefined | null
+   ): string | null {
+     if (meta == null || value == null || Number.isNaN(value)) return null; // empty handled by nullable/required
+     if (meta.min != null && value < meta.min) return `Must be ≥ ${meta.min}`;
+     if (meta.max != null && value > meta.max) return `Must be ≤ ${meta.max}`;
+     return null;
+   }
+   ```
+
+   Keep the message text terse and consistent — these render in the same `text-xs text-destructive`
+   slot the cross-field error already uses (`GraphRetrievalAgentCard.svelte` line ~130).
+
+2. **Teach `PrefNumberField` to report.** The primitive (`widgets/PrefNumberField.svelte`) already
+   derives `meta` and binds `value`. Add a derived error and (a) render it inline, (b) push it into the
+   controller so Save is gated. Reporting must key by the field's `path` so two bad fields don't clobber
+   each other:
+
+   ```svelte
+   const fieldError = $derived(preferenceNumberError(meta, value));
+   // Register/clear this field's blocking error by path; clean up on unmount (collapsed card).
+   $effect(() => {
+     ctrl.setFieldError(path, fieldError);
+     return () => ctrl.setFieldError(path, null);
+   });
+   ```
+   …and under the `<input>`:
+   ```svelte
+   {#if fieldError}<p class="text-xs text-destructive">{fieldError}</p>{/if}
+   ```
+
+3. **Add the per-field error registry to the controller.** `sectionErrors` is keyed by an arbitrary
+   *section* id; field errors want to be keyed by *path* and there are many of them. Add a sibling
+   `fieldErrors` map rather than overloading `sectionErrors`, and fold it into the existing gate so you
+   change `canSave` in **one** place:
+
+   ```ts
+   let fieldErrors = $state<Record<string, string | null>>({});
+   function setFieldError(path: string, message: string | null) {
+     if (fieldErrors[path] === message) return;           // same guard shape as setSectionError
+     fieldErrors = { ...fieldErrors, [path]: message };
+   }
+   const hasBlockingErrors = $derived(
+     Object.values(sectionErrors).some((m) => m) || Object.values(fieldErrors).some((m) => m)
+   );
+   // canSave: swap hasSectionErrors → hasBlockingErrors
+   ```
+   Expose `setFieldError` on the returned controller object alongside `setSectionError`.
+
+### 10.3 Cross-field — generalize the existing pattern (don't auto-derive)
+
+The Retrieval Agent card is the template. For any other card with a pydantic `@model_validator` worth
+mirroring:
+
+1. Write a pure `validateX(slice): string | null` in a card-local `*-limits.ts`, **mirroring the
+   pydantic check** (cite the validator name in a comment, as `retrieval-agent-limits.ts` cites
+   `_coherent_limits` — so the two are findable together when one changes).
+2. In the card, `const err = $derived(validateX(slice))` and
+   `$effect(() => ctrl.setSectionError('<sectionId>', err))`.
+3. Render `{#if err}<p class="text-xs text-destructive">{err}</p>{/if}`.
+
+Do **not** try to read cross-field rules out of the schema — they aren't there (§4.5). Only mirror the
+handful that already have a pydantic `@model_validator`; everything else still relies on the 422 as the
+backstop, which is fine.
+
+### 10.4 Gotchas / decisions
+
+- **Empty vs out-of-range.** A blank number input yields `undefined`; that's "unset", not "out of
+  range" — `preferenceNumberError` returns `null` for it. Required-ness is the backend's job; don't
+  invent a "required" error here.
+- **Unmount on collapse.** `SectionCardMuted` is `collapsible`; confirm whether collapsing unmounts the
+  inputs. The `$effect` cleanup (`return () => ctrl.setFieldError(path, null)`) makes either behavior
+  safe — a collapsed, previously-invalid field must not keep Save disabled forever.
+- **The 422 stays the backstop.** Client validation is UX, not security. The PATCH endpoint still
+  validates; keep its error handling. Don't remove the toast path in `savePreferences`.
+- **Don't gate on HTML `:invalid`.** Relying on the browser's constraint-validation pseudo-class is
+  flakier than the explicit derived check and won't cover cross-field — use the controller registry as
+  the single source for "can we save".
+- **Reuse the destructive style.** Every error line is `class="text-xs text-destructive"` to match the
+  shipped cross-field message — don't introduce a new error component.
+
+### 10.5 Done-when
+
+- `preferenceNumberError` exists and is unit-tested (in-range → `null`; below `min` / above `max` →
+  message; `undefined`/`NaN` → `null`).
+- Typing an out-of-range value in any migrated `PrefNumberField` shows an inline message **and**
+  disables Save (no 422 reachable for a pure bounds violation).
+- The controller exposes `setFieldError`; `canSave` gates on a single `hasBlockingErrors` covering both
+  section and field errors.
+- A collapsed card with a previously-invalid field does **not** leave Save stuck disabled.
+
+---
+
+## 11. Detail — #8: Unify model-picker dispatch from schema
+
+> **For the implementer.** A model field (e.g. `graph.extraction_model`) needs to know *which* model
+> kind it accepts (`chat`, `embedding`, `rerank`, …) so the picker shows the right catalog. Today that
+> kind is **hand-passed at every call site** (`<PrefModelPicker kind="chat" path="graph.extraction_model"/>`),
+> even though the same fact lives at `path` in the schema. This item makes the picker read its kind from
+> schema so the redundant `kind=` prop disappears and can't drift from the backend.
+>
+> **Already shipped — do not redo it.** The backend metadata half is in the tree: `model_kind` is in
+> `_META_KEYS` (`preferences_schema.py`), emitted into the flat field map, typed on
+> `PreferenceFieldMeta` (`api/preferences-schema.ts`), declared via `json_schema_extra={"model_kind":
+> "…"}` on the model fields in `preferences.py`, and already consumed by `preferences-edits-policy.ts`
+> (`coercePreferenceLeafValue` keys nullable-coercion off `meta.model_kind`). So `#8` is now a **pure
+> frontend consolidation** — the schema already tells you the kind at every model path.
+
+### 11.1 What stays, what changes
+
+| Surface | File | Action |
+|---|---|---|
+| `model_kind` in field map | `preferences_schema.py`, `preferences.py` | **Done** — leave it |
+| `kind` derivation | `widgets/PrefModelPicker.svelte` | **Change** — derive from `meta.model_kind`, make the prop optional |
+| `kind="…"` at call sites | ~8 cards, ~13 `<PrefModelPicker>` usages | **Delete** the `kind=` line |
+| `prefModelCatalog(ctrl, kind)` switch | `shared/preferences-model-picker.ts` | **Keep** — it maps kind → controller catalog stores; legit runtime dispatch, now fed by schema |
+| `applyModelIdToDraft` switch + `PrefModelIdPath` | `shared/preferences-model-picker.ts` | **Keep for now** (see 11.3) — it owns the `default_embedding_model_locked` guard + exhaustiveness |
+
+### 11.2 Make the picker self-configure (the core change)
+
+In `PrefModelPicker.svelte`, make `kind` optional and fall back to schema, narrowing the meta's
+`string` `model_kind` to `PrefModelKind`:
+
+```svelte
+type Props = { ctrl; path: PrefModelIdPath; label; /* … */ kind?: PrefModelKind };
+const kind = $derived<PrefModelKind>(
+  kindProp ?? (preferenceFieldMeta(ctrl.fieldSchema, path)?.model_kind as PrefModelKind)
+);
+$effect(() => {
+  // Loud in dev: a model path with no model_kind in the schema is a backend tagging bug,
+  // not a silent fallback to 'chat'.
+  if (!kind) console.error(`PrefModelPicker: no model_kind for path "${path}"`);
+});
+```
+
+`ctrl.fieldSchema` already falls back to the committed mirror when the live fetch failed (controller
+`effectiveFieldSchema`), so `model_kind` is **always** available — no need for a hardcoded default kind.
+Then delete every `kind="…"` line from the call sites (`ModelsSection`, `KnowledgeRerankerCard`,
+`GraphEvalModelsCard`, `KnowledgeEmbeddingChunkingCard`, `GraphExtractionCard`, `KnowledgeAnsweringCard`,
+`GraphRerankerCard`). Do it **one card per commit** (Svelte skill §9) and verify the picker still shows
+the right catalog on the Vite dev site (`http://localhost:5173`, per AGENTS.md).
+
+### 11.3 The `applyModelIdToDraft` switch — keep, don't force a path-write adapter
+
+It's tempting to also delete the big switch in `preferences-model-picker.ts` and write the id by dotted
+path (`writePath(draft, path, id)`, §7.5). **Resist that for the first pass**, because the switch earns
+its keep:
+
+- It hosts the **one genuine special case** — `knowledge.default_embedding_model` is a no-op write when
+  `default_embedding_model_locked` (returns `false` so `setModelId` skips `markDirty`). A blind
+  path-write would silently mutate a locked field.
+- Its `default: never` is an **exhaustiveness guard**: adding a `PrefModelIdPath` without a case is a
+  compile error (the comment at the bottom says exactly this), so a new model field can't silently
+  no-op on select.
+
+If you later want to shrink it, the safe shape is: generic `writePath` for the common case **plus** an
+explicit `if (path === 'knowledge.default_embedding_model' && draft.knowledge.default_embedding_model_locked)
+return false;` guard — but that's optional polish, not part of #8's win.
+
+### 11.4 Tie into #6 (typed paths) and add a guard test
+
+- Per §9.2, `PrefModelIdPath` should become a **subset** of the generated `PreferencePath`. Keep
+  `PrefModelIdPath` hand-written (it still gates the `applyModelIdToDraft` exhaustiveness — a different
+  guarantee), but add a type-level assertion so the two can't diverge:
+  ```ts
+  const _isSubset: PrefModelIdPath extends PreferencePath ? true : never = true;
+  ```
+- Add a unit test (extend `preferences-model-picker.test.ts`): **every** `PrefModelIdPath` has a
+  `model_kind` in `PREFERENCES_FIELD_SCHEMA`, and that kind is a valid `PrefModelKind`. This is the
+  contract that lets the picker drop its `kind` prop safely — if someone adds a model path but forgets
+  the backend `json_schema_extra`, the test fails instead of the picker silently rendering an empty
+  catalog.
+
+### 11.5 Gotchas / decisions
+
+- **`model_kind` is `string` in the meta type.** Narrow it to `PrefModelKind` at the boundary (the
+  `as PrefModelKind` cast + the test in 11.4 is the safety net). Don't widen `PrefModelKind`.
+- **Keep `prefModelCatalog`'s `default: never`.** It's a second exhaustiveness guard over the kinds; a
+  new kind without a catalog store should fail to compile.
+- **No backend change needed.** Per the no-backward-compatibility rule, there's nothing to migrate — the
+  metadata is already emitted. This item only removes frontend duplication.
+
+### 11.6 Done-when
+
+- `PrefModelPicker` derives `kind` from `meta.model_kind`; the `kind` prop is optional (or removed).
+- **Zero** `kind="…"` props remain on `<PrefModelPicker>` in `sections/**`.
+- A test asserts every `PrefModelIdPath` carries a valid `model_kind` in the committed field schema, and
+  `PrefModelIdPath ⊆ PreferencePath`.
+- `npm run check` green; each model picker on the Vite dev site still lists the correct catalog.
+
+---
+
+## 12. Net effect
 
 After #1–#3, "add a preference" collapses toward **backend-only** for the data contract:
 
@@ -497,8 +733,13 @@ edits. The read path becomes as schema-driven as the write path already is.
 > `*_COPY` object at a time), then **#4** (§7 — migrate cards one per commit, simplest first). #4 and #5
 > interleave naturally: migrating a card to a primitive (#4) is the moment its `*_COPY` import disappears
 > (#5).
+>
+> **Lower work (#7–#8) comes after #4**, because both build on the migrated primitives: #7 (§10) adds the
+> inline-error render + `setFieldError` push *inside* `PrefNumberField`, and #8 (§11) removes the `kind=`
+> prop *as each card's* `<PrefModelPicker>` is touched. Neither blocks the others — #8 is small and can
+> land any time since its backend metadata already exists.
 
-## 11. Related
+## 13. Related
 
 - `AGENTS.md` → "Adding a `preferences.json` field" — the current manual round-trip this design aims to shorten.
 - `../hiro-docs/mintdocs/architecture/misc/preferences.mdx` — `preferences.json`, validated writes, the

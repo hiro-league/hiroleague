@@ -9,7 +9,6 @@
     GRAPH_TEMPORAL_DEFAULT_LABELS
   } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { GRAPH_SEARCH_INDEXING_COPY } from '$lib/features/preferences/shared/preferences-copy';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
@@ -78,7 +77,6 @@
         {ctrl}
         path="graph.temporal_default"
         label="Temporal lens (default)"
-        hint={GRAPH_SEARCH_INDEXING_COPY.temporalDefault}
         options={GRAPH_TEMPORAL_DEFAULT_LABELS}
         bind:value={ctrl.draft.graph.temporal_default}
       />
@@ -86,7 +84,6 @@
         {ctrl}
         path="graph.k_hop"
         label="Expansion hops (k)"
-        hint={GRAPH_SEARCH_INDEXING_COPY.kHop}
         bind:value={ctrl.draft.graph.k_hop}
       />
     </div>
@@ -95,7 +92,6 @@
         {ctrl}
         path="graph.search_recipe"
         label="Search recipe"
-        hint={GRAPH_SEARCH_INDEXING_COPY.searchRecipe}
         options={searchRecipeOptions}
         bind:value={ctrl.draft.graph.search_recipe}
       />
@@ -103,7 +99,6 @@
         {ctrl}
         path="graph.search_scope"
         label="Search scope"
-        hint={GRAPH_SEARCH_INDEXING_COPY.searchScope}
         options={searchScopeOptions}
         bind:value={ctrl.draft.graph.search_scope}
       />
@@ -113,14 +108,12 @@
         {ctrl}
         path="graph.sim_min_score"
         label="Candidate similarity floor"
-        hint={GRAPH_SEARCH_INDEXING_COPY.simMinScore}
         bind:value={ctrl.draft.graph.sim_min_score}
       />
       <PrefNumberField
         {ctrl}
         path="graph.query_timeout_s"
         label="Query timeout (seconds)"
-        hint={GRAPH_SEARCH_INDEXING_COPY.queryTimeout}
         bind:value={ctrl.draft.graph.query_timeout_s}
       />
     </div>
@@ -128,7 +121,6 @@
       {ctrl}
       path="graph.observability"
       label="Graph observability"
-      hint={GRAPH_SEARCH_INDEXING_COPY.observability}
       options={GRAPH_OBSERVABILITY_LABELS}
       class="max-w-md"
       bind:value={ctrl.draft.graph.observability}
