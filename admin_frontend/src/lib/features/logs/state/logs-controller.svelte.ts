@@ -1,4 +1,4 @@
-import { tick } from 'svelte';
+import { tick, untrack } from 'svelte';
 import { listDevices, type DeviceRow } from '$lib/api/channels-devices';
 import {
   clearLogs,
@@ -128,9 +128,17 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
 
   const activeRow = $derived(rowSelection.selected);
 
+  // Sync selection candidates to the visible rows. Re-run only when ``visibleRows``
+  // changes — the candidate write + reconcile read inside are untracked, otherwise the
+  // effect reads and writes ``candidates`` in one pass and loops forever (the freshly
+  // sorted ``visibleRows`` array is never ref-equal to the stored $state proxy, so each
+  // assignment re-triggers the effect → effect_update_depth_exceeded).
   $effect(() => {
-    rowSelection.setCandidates(visibleRows);
-    rowSelection.reconcile();
+    const next = visibleRows;
+    untrack(() => {
+      rowSelection.setCandidates(next);
+      rowSelection.reconcile();
+    });
   });
 
   const scopeMsgChipStripeByRowKey = $derived.by(() => {

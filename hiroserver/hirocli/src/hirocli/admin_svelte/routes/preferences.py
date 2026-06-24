@@ -16,6 +16,7 @@ from hirocli.domain.preferences import (
     knowledge_answering_model_source,
     resolve_knowledge_answering_llm,
 )
+from hirocli.domain.preferences_schema import workspace_preferences_schema_payload
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.preferences_runtime import (
     PreferencePathError,
@@ -67,6 +68,19 @@ def _prefs_payload(
 
 def _sections_payload() -> list[dict[str, Any]]:
     return [section.model_dump(mode="json") for section in PREFERENCE_SECTIONS]
+
+
+@preferences_router.get("/preferences/schema")
+async def get_preferences_schema() -> dict[str, Any]:
+    """Static field metadata for the admin preferences UI (bounds, defaults, hints)."""
+    try:
+        return {
+            "ok": True,
+            "error": None,
+            "data": workspace_preferences_schema_payload(),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "data": None}
 
 
 @preferences_router.get("/preferences")

@@ -19,6 +19,7 @@ import {
   type TuningProfile,
   type WorkspacePreferences
 } from '$lib/api/preferences';
+import { getPreferencesSchema } from '$lib/api/preferences-schema';
 import {
   cancelKnowledgeReranker,
   downloadKnowledgeReranker,
@@ -35,6 +36,8 @@ import {
   editsForSave,
   preferencesAreDirty
 } from '$lib/features/preferences/state/preferences-edits';
+import { PREFERENCES_FIELD_SCHEMA } from '$lib/api/preferences-field-schema';
+import type { PreferencesSchemaMap } from '$lib/features/preferences/shared/preferences-schema';
 import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
 import type { ToastKind } from '$lib/ui/toast-types';
 
@@ -52,6 +55,7 @@ export function createPreferencesController(notify: Notify) {
   // preferences payload. Powers the "Restore default" button: a cleared prompt persists "" and
   // the backend default only fills absent keys, so the UI can't recover the text on its own.
   let promptDefaults = $state<Record<string, string>>({});
+  let fieldSchema = $state<PreferencesSchemaMap | null>(null);
   let baseline = $state<WorkspacePreferences | null>(null);
   let draft = $state<WorkspacePreferences | null>(null);
   let forceClean = $state(false);
@@ -81,9 +85,13 @@ export function createPreferencesController(notify: Notify) {
   );
   let catalogAllProviders = $state<CatalogProviderRow[]>([]);
 
+  const effectiveFieldSchema = $derived<PreferencesSchemaMap>(
+    fieldSchema ?? PREFERENCES_FIELD_SCHEMA
+  );
+
   const dirty = $derived.by(() => {
     if (forceClean || !baseline || !draft) return false;
-    return preferencesAreDirty(baseline, draft);
+    return preferencesAreDirty(baseline, draft, effectiveFieldSchema);
   });
 
   const hasSectionErrors = $derived(
@@ -236,7 +244,8 @@ export function createPreferencesController(notify: Notify) {
       locked: false,
       temperature: 0.7,
       max_tokens: 2048,
-      thinking: null
+      thinking: null,
+      num_ctx: null
     };
     markDirty();
   }
@@ -264,7 +273,8 @@ export function createPreferencesController(notify: Notify) {
         locked: true,
         temperature: 0.7,
         max_tokens: 2048,
-        thinking: null
+        thinking: null,
+        num_ctx: null
       };
     } else if (id === 'memory_extraction') {
       draft.tuning_profiles[id] = {
@@ -272,7 +282,8 @@ export function createPreferencesController(notify: Notify) {
         locked: true,
         temperature: 0,
         max_tokens: 8192,
-        thinking: 'low'
+        thinking: 'low',
+        num_ctx: null
       };
     } else if (id === 'knowledge_answering') {
       draft.tuning_profiles[id] = {
@@ -280,7 +291,8 @@ export function createPreferencesController(notify: Notify) {
         locked: true,
         temperature: 0.2,
         max_tokens: 1600,
-        thinking: null
+        thinking: null,
+        num_ctx: null
       };
     }
     markDirty();
@@ -292,6 +304,7 @@ export function createPreferencesController(notify: Notify) {
     try {
       const [
         prefsPayload,
+        schemaPayload,
         chatPayload,
         sttPayload,
         ttsPayload,
@@ -301,6 +314,7 @@ export function createPreferencesController(notify: Notify) {
         providersPayload
       ] = await Promise.all([
         getPreferences(),
+        getPreferencesSchema(),
         listCatalogModels({ model_kind: 'chat' }),
         listCatalogModels({ model_kind: 'stt' }),
         listCatalogModels({ model_kind: 'tts' }),
@@ -311,6 +325,7 @@ export function createPreferencesController(notify: Notify) {
       ]);
       sections = prefsPayload.data.sections ?? [];
       promptDefaults = prefsPayload.data.prompt_defaults ?? {};
+      fieldSchema = schemaPayload.ok ? (schemaPayload.data.fields ?? null) : null;
       const prefs = prefsPayload.data.preferences;
       setDraftFromServer(prefs);
       rerankCatalogOptions = rerankPayload.data.models;
@@ -358,7 +373,7 @@ export function createPreferencesController(notify: Notify) {
 
   async function savePreferences() {
     if (!draft || !baseline || !canSave) return;
-    const edits = editsForSave(baseline, draft);
+    const edits = editsForSave(baseline, draft, effectiveFieldSchema);
     if (Object.keys(edits).length === 0) return;
     busy = true;
     try {
@@ -404,6 +419,9 @@ export function createPreferencesController(notify: Notify) {
     },
     get promptDefaults() {
       return promptDefaults;
+    },
+    get fieldSchema() {
+      return fieldSchema;
     },
     get dirty() {
       return dirty;

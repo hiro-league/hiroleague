@@ -7,7 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "svelte-kit sync && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "gen:prefs-types": "node scripts/gen-preferences-types.mjs",
+    "check:prefs-types": "node scripts/check-preferences-types.mjs",
+    "check": "npm run check:prefs-types && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "node scripts/run-vitest.mjs run",
     "package:python": "npm run build"
   },
@@ -20,6 +22,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",
+    "json-schema-to-typescript": "^15.0.4",
     "shadcn-svelte": "^1.2.7",
     "svelte": "^5.43.14",
     "svelte-check": "^4.3.3",

@@ -1,0 +1,1196 @@
+{
+  "$defs": {
+    "AnswerPromptProfile": {
+      "description": "A named mem-eval answer-prompt recipe \u2014 the answer analog of ``ImageProfile`` / tuning\nprofiles. A run picks which profile's instruction block the memory-eval recall leg uses\n(``eval_judge.answer_from_context`` places it in the user message ahead of the question +\nrecalled elements). Memory-track only \u2014 the knowledge track answers with the production\npipeline, so it has no answer-prompt library.\n\nNo structured-output contract applies (unlike the judge): the answer step is plain free-text\ngeneration. The one soft convention \u2014 the decline phrase \"No information available.\" \u2014 stays\nEMBEDDED in each profile body (the abstain label detector + the judge key on it); an author\nediting a duplicated profile is responsible for keeping it. Blank ``prompt`` \u21d2 the runtime\nfalls back to ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT`` (see ``resolve_answer_prompt``).",
+      "properties": {
+        "label": {
+          "default": "",
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "locked": {
+          "default": false,
+          "title": "Locked",
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": "",
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "title": "AnswerPromptProfile",
+      "type": "object",
+      "required": [
+        "label",
+        "locked",
+        "prompt"
+      ]
+    },
+    "ChatPreferences": {
+      "description": "Chat-answering behavior (the chat model answers; not the Ask knowledge answerer).",
+      "properties": {
+        "instructions": {
+          "default": "## Instructions\n- This is a conversation between you (the character) and the user.\n- Use the **Knowledge retrieved** (from the workspace knowledge base) and **Memories retrieved** below as optional background.\n- You choose what is relevant \u2014 you do not need to use all, or any, of it.\n- source rank and score suggest the search relevancy of the knowledge item to the user message/context\n- Answer **Last User Message** in your own style.",
+          "title": "Instructions",
+          "type": "string"
+        },
+        "max_messages": {
+          "default": 6,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Messages",
+          "type": "integer"
+        },
+        "cite_sources": {
+          "default": false,
+          "title": "Cite Sources",
+          "type": "boolean"
+        },
+        "tools_enabled": {
+          "default": true,
+          "title": "Tools Enabled",
+          "type": "boolean"
+        },
+        "preferred_answering_language": {
+          "default": "en",
+          "title": "Preferred Answering Language",
+          "type": "string"
+        }
+      },
+      "title": "ChatPreferences",
+      "type": "object",
+      "required": [
+        "instructions",
+        "max_messages",
+        "cite_sources",
+        "tools_enabled",
+        "preferred_answering_language"
+      ]
+    },
+    "GraphEvalPreferences": {
+      "description": "Eval-only answering knobs, surfaced under the shared Graphiti engine settings.\n\n``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval\nrecall leg (``eval_judge.answer_from_context`` places the chosen one in the user message ahead\nof the question and the recalled elements; the system prompt there is a hardcoded two-line\nrole). A run selects one by id in the eval panel \u2014 see ``resolve_answer_prompt``.\nThe knowledge-eval legs intentionally have no answer-prompt library:\nthey run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION\n``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real\nbehavior). The admin UI surfaces that production prompt alongside this one for convenience.\n\n``judge_prompt`` is the grading system prompt for the LLM judge (``eval_judge.judge_answer``),\nshared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.",
+      "properties": {
+        "answer_prompts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AnswerPromptProfile"
+          },
+          "title": "Answer Prompts",
+          "type": "object",
+          "writeWhole": true
+        },
+        "judge_prompt": {
+          "default": "## Objective\nGrade a model's Answer to a question about past conversations against the Ideal Answer, and\nreport the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as\nGUIDANCE on what a complete answer covers \u2014 not a checklist to fail on. Grade ONLY against the\nIdeal Answer and Rubric \u2014 never your own knowledge.\n\n## Verdicts\n- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording \u2014\n  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is\n  shown, an Answer that covers its MAIN elements passes \u2014 a missing minor element does NOT block\n  a pass.\n- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision\n  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but\n  misses a substantial part of what was asked.\n- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element\n  satisfied, the Answer misses the point, or it contradicts a rubric element.\n- abstain: the Answer declines \u2014 \"No information available.\" or any other refusal to answer.\n\n## Core Instructions\n- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.\n  Treat them as a GUIDE, not a pass/fail checklist \u2014 the Ideal Answer and the Rubric describe the\n  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states\n  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.\n- Dates: matching the Ideal's month and year passes; a correctly resolved relative date (\"next\n  month\" stated in an August conversation = September) passes; within ~2 weeks passes.\n- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the\n  right result, and a confident Answer is fail.\n- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict \u2014\n  use them only to fill evidence, recall_sufficient, and grounded.\n\n## Output Fields\nReply with one JSON object containing exactly these fields, in this order:\n- \"evidence\" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that\n  contain the information needed to answer; \"\" if no such line exists.\n- \"recall_sufficient\" (boolean): true only if evidence quotes a real line that supplies the\n  answer; false otherwise.\n- \"grounded\" (boolean): whether the Answer is supported by the Recalled Memory Elements.\n- \"reason\" (string): one short sentence justifying the verdict.\n- \"verdict\" (string): one of \"pass\", \"partial\", \"fail\", \"abstain\".\n\n## Validation\n- evidence is checked by exact substring match against the shown elements \u2014 an inexact or\n  invented quote counts as no evidence and forces recall_sufficient to false.\n- If no Recalled Memory Elements section was shown, set evidence \"\" and recall_sufficient true.\n- The verdict depends only on Answer vs Ideal (and Rubric, when shown).",
+          "title": "Judge Prompt",
+          "type": "string"
+        },
+        "answer_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Answer Model"
+        },
+        "answer_tuning_profile": {
+          "default": "knowledge_answering",
+          "title": "Answer Tuning Profile",
+          "type": "string"
+        },
+        "judge_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Judge Model"
+        },
+        "judge_tuning_profile": {
+          "default": "knowledge_answering",
+          "title": "Judge Tuning Profile",
+          "type": "string"
+        },
+        "retrieval_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Retrieval Model"
+        },
+        "retrieval_tuning_profile": {
+          "default": "knowledge_answering",
+          "title": "Retrieval Tuning Profile",
+          "type": "string"
+        },
+        "show_event_time": {
+          "default": true,
+          "title": "Show Event Time",
+          "type": "boolean"
+        },
+        "show_expired_at": {
+          "default": false,
+          "title": "Show Expired At",
+          "type": "boolean"
+        },
+        "show_superseded": {
+          "default": false,
+          "title": "Show Superseded",
+          "type": "boolean"
+        },
+        "max_elements_per_kind": {
+          "default": 30,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Max Elements Per Kind",
+          "type": "integer"
+        },
+        "max_fact_chars": {
+          "default": 240,
+          "maximum": 2000,
+          "minimum": 40,
+          "title": "Max Fact Chars",
+          "type": "integer"
+        },
+        "max_episode_chars": {
+          "default": 300,
+          "maximum": 2000,
+          "minimum": 40,
+          "title": "Max Episode Chars",
+          "type": "integer"
+        },
+        "max_summary_chars": {
+          "default": 400,
+          "maximum": 4000,
+          "minimum": 40,
+          "title": "Max Summary Chars",
+          "type": "integer"
+        },
+        "retrieval_agent": {
+          "$ref": "#/$defs/RetrievalAgentLimits"
+        },
+        "retrieval_agent_prompts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AnswerPromptProfile"
+          },
+          "title": "Retrieval Agent Prompts",
+          "type": "object",
+          "writeWhole": true
+        },
+        "active_retrieval_agent_prompt_id": {
+          "default": "default",
+          "title": "Active Retrieval Agent Prompt Id",
+          "type": "string"
+        }
+      },
+      "title": "GraphEvalPreferences",
+      "type": "object",
+      "required": [
+        "answer_prompts",
+        "judge_prompt",
+        "answer_model",
+        "answer_tuning_profile",
+        "judge_model",
+        "judge_tuning_profile",
+        "retrieval_model",
+        "retrieval_tuning_profile",
+        "show_event_time",
+        "show_expired_at",
+        "show_superseded",
+        "max_elements_per_kind",
+        "max_fact_chars",
+        "max_episode_chars",
+        "max_summary_chars",
+        "retrieval_agent",
+        "retrieval_agent_prompts",
+        "active_retrieval_agent_prompt_id"
+      ]
+    },
+    "GraphPreferences": {
+      "description": "Graphiti-backed temporal knowledge graph (the pivot from the earlier L3 graph slice).\n\n``backend`` is the master switch: ``off`` = flat Qdrant only (today); ``graphiti``\n= answer from graph facts; ``mix`` = fuse graph facts with Qdrant passages (the\nrecommended path, decision G4). Every other field is an admin-settable knob \u2014 no\nhardcoded params. See docs/knowledge-graphiti-pivot-design.md \u00a79\u201310.",
+      "properties": {
+        "backend": {
+          "default": "off",
+          "enum": [
+            "off",
+            "graphiti"
+          ],
+          "title": "Backend",
+          "type": "string"
+        },
+        "extraction_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Extraction Model"
+        },
+        "extraction_tuning_profile": {
+          "default": "graphiti_extraction",
+          "title": "Extraction Tuning Profile",
+          "type": "string"
+        },
+        "small_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Small Model"
+        },
+        "small_tuning_profile": {
+          "default": "graphiti_small",
+          "title": "Small Tuning Profile",
+          "type": "string"
+        },
+        "embedder_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "embedding",
+          "title": "Embedder Model"
+        },
+        "temporal_default": {
+          "default": "current",
+          "enum": [
+            "current",
+            "all"
+          ],
+          "title": "Temporal Default",
+          "type": "string"
+        },
+        "k_hop": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "K Hop",
+          "type": "integer"
+        },
+        "search_recipe": {
+          "default": "rrf",
+          "enum": [
+            "rrf",
+            "mmr",
+            "cross_encoder"
+          ],
+          "title": "Search Recipe",
+          "type": "string"
+        },
+        "search_scope": {
+          "default": "edges",
+          "enum": [
+            "edges",
+            "edges_and_nodes",
+            "edges_and_episodes",
+            "edges_nodes_episodes"
+          ],
+          "title": "Search Scope",
+          "type": "string"
+        },
+        "entity_ontology": {
+          "default": "open",
+          "enum": [
+            "open",
+            "typed"
+          ],
+          "title": "Entity Ontology",
+          "type": "string"
+        },
+        "custom_extraction_instructions": {
+          "default": "Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity.",
+          "maxLength": 2000,
+          "title": "Custom Extraction Instructions",
+          "type": "string"
+        },
+        "sim_min_score": {
+          "default": 0.3,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "step": 0.05,
+          "title": "Sim Min Score",
+          "type": "number"
+        },
+        "query_timeout_s": {
+          "default": 60,
+          "maximum": 600,
+          "minimum": 0,
+          "title": "Query Timeout S",
+          "type": "integer"
+        },
+        "observability": {
+          "default": "ledger",
+          "enum": [
+            "off",
+            "ledger",
+            "trace"
+          ],
+          "title": "Observability",
+          "type": "string"
+        },
+        "reranker": {
+          "$ref": "#/$defs/KnowledgeGraphRerankerPreferences"
+        },
+        "eval": {
+          "$ref": "#/$defs/GraphEvalPreferences"
+        },
+        "view": {
+          "$ref": "#/$defs/GraphViewPreferences"
+        }
+      },
+      "title": "GraphPreferences",
+      "type": "object",
+      "required": [
+        "backend",
+        "extraction_model",
+        "extraction_tuning_profile",
+        "small_model",
+        "small_tuning_profile",
+        "embedder_model",
+        "temporal_default",
+        "k_hop",
+        "search_recipe",
+        "search_scope",
+        "entity_ontology",
+        "custom_extraction_instructions",
+        "sim_min_score",
+        "query_timeout_s",
+        "observability",
+        "reranker",
+        "eval",
+        "view"
+      ]
+    },
+    "GraphViewPreferences": {
+      "description": "Admin graph-VIZ display knobs for the shared Knowledge/Memories Graph tab.\n\nPure frontend-display settings: they tune how the force-graph view's per-node-type\nfilter dropdowns behave, NOT how facts are extracted, searched, or retrieved. The\ngraph engine ignores everything here.",
+      "properties": {
+        "large_type_threshold": {
+          "default": 200,
+          "maximum": 10000,
+          "minimum": 10,
+          "title": "Large Type Threshold",
+          "type": "integer"
+        }
+      },
+      "title": "GraphViewPreferences",
+      "type": "object",
+      "required": [
+        "large_type_threshold"
+      ]
+    },
+    "ImageProfile": {
+      "description": "Named image-generation recipe: model + diffusion params + prompt scaffolding.\n\nThe scaffolding fields (``style_prefix`` / ``style_suffix``) wrap the caller's prompt\nso a profile is a reusable *recipe*, not just numbers \u2014 the image analog of\n``tts_instructions``. ``size`` is a hint; fixed-resolution providers (flux-1-schnell:\n1024x1024) ignore it. Hard limits (max steps, prompt length) live in the catalog and\nare clamped by the provider implementation.",
+      "properties": {
+        "label": {
+          "default": "",
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "locked": {
+          "default": false,
+          "title": "Locked",
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "steps": {
+          "default": 4,
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Steps",
+          "type": "integer"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "style_prefix": {
+          "default": "",
+          "title": "Style Prefix",
+          "type": "string"
+        },
+        "style_suffix": {
+          "default": "",
+          "title": "Style Suffix",
+          "type": "string"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        }
+      },
+      "title": "ImageProfile",
+      "type": "object",
+      "required": [
+        "label",
+        "locked",
+        "model",
+        "steps",
+        "size",
+        "style_prefix",
+        "style_suffix",
+        "seed"
+      ]
+    },
+    "KnowledgeAnsweringPreferences": {
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Model"
+        },
+        "prompt": {
+          "default": "Use the provided knowledge context as your only source of facts; do not invent or assume anything that is not supported by it.\n\nAnswer every part of the question that the context supports. Partial answers are expected and welcome \u2014 never withhold a supported part just because another part is unsupported.\n\nIf a part of the question is not covered by the context, give the parts you can and briefly note what is missing. Do not reply with only 'I don't know' when any part of the question is supported by the context.",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "cite_sources": {
+          "default": true,
+          "title": "Cite Sources",
+          "type": "boolean"
+        },
+        "language_policy": {
+          "default": "match_query",
+          "enum": [
+            "match_query",
+            "prefer_english",
+            "prefer_arabic"
+          ],
+          "title": "Language Policy",
+          "type": "string"
+        }
+      },
+      "title": "KnowledgeAnsweringPreferences",
+      "type": "object",
+      "required": [
+        "model",
+        "prompt",
+        "cite_sources",
+        "language_policy"
+      ]
+    },
+    "KnowledgeChunkingMarkdownPreferences": {
+      "properties": {
+        "respect_headings": {
+          "default": true,
+          "description": "Split chunks at markdown headings when ingesting documents.",
+          "title": "Respect Headings",
+          "type": "boolean"
+        }
+      },
+      "title": "KnowledgeChunkingMarkdownPreferences",
+      "type": "object",
+      "required": [
+        "respect_headings"
+      ]
+    },
+    "KnowledgeChunkingPreferences": {
+      "properties": {
+        "chunk_size": {
+          "default": 1200,
+          "description": "Target size per chunk at document ingest (characters).",
+          "maximum": 8000,
+          "minimum": 200,
+          "title": "Chunk Size",
+          "type": "integer"
+        },
+        "chunk_overlap": {
+          "default": 150,
+          "description": "Overlap between consecutive chunks. Must stay smaller than chunk size.",
+          "maximum": 2000,
+          "minimum": 0,
+          "title": "Chunk Overlap",
+          "type": "integer"
+        },
+        "embed_structural_context": {
+          "default": true,
+          "description": "Prefix each chunk's embedded text with its document title and heading path so every chunk \u2014 including continuation pieces \u2014 carries its section context. Applies to new ingests; changing this requires re-ingesting existing documents.",
+          "title": "Embed Structural Context",
+          "type": "boolean"
+        },
+        "markdown": {
+          "$ref": "#/$defs/KnowledgeChunkingMarkdownPreferences"
+        }
+      },
+      "title": "KnowledgeChunkingPreferences",
+      "type": "object",
+      "required": [
+        "chunk_size",
+        "chunk_overlap",
+        "embed_structural_context",
+        "markdown"
+      ]
+    },
+    "KnowledgeGraphRerankerPreferences": {
+      "description": "Cross-encoder reranker for the graph fact-search leg.\n\nOnly takes effect when ``GraphPreferences.search_recipe == 'cross_encoder'``\n(the admin UI greys this whole group out otherwise). Every field is resolved by the\nSAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and\nlocal (FlashRank/FastEmbed/sentence-transformers) models are both available \u2014 and a\nlocal model that was never downloaded fails fast, degrading the fact search to RRF\n(no silent fetch). ``model_id`` null = reuse the knowledge reranker model\n(``knowledge.retrieval.reranker.model_id``) \u2014 one model to manage (the G8 play).",
+      "properties": {
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "rerank",
+          "title": "Model Id"
+        },
+        "min_relevance": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "step": 0.05,
+          "title": "Min Relevance",
+          "type": "number"
+        },
+        "device": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device"
+        }
+      },
+      "title": "KnowledgeGraphRerankerPreferences",
+      "type": "object",
+      "required": [
+        "model_id",
+        "min_relevance",
+        "device"
+      ]
+    },
+    "KnowledgePreferences": {
+      "properties": {
+        "default_embedding_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Null uses the local multilingual FastEmbed default shown above.",
+          "model_kind": "embedding",
+          "title": "Default Embedding Model"
+        },
+        "default_tuning_profile": {
+          "default": "knowledge_answering",
+          "title": "Default Tuning Profile",
+          "type": "string"
+        },
+        "chunking": {
+          "$ref": "#/$defs/KnowledgeChunkingPreferences"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/KnowledgeRetrievalPreferences"
+        },
+        "answering": {
+          "$ref": "#/$defs/KnowledgeAnsweringPreferences"
+        },
+        "rewrite": {
+          "$ref": "#/$defs/KnowledgeRewritePreferences"
+        }
+      },
+      "title": "KnowledgePreferences",
+      "type": "object",
+      "required": [
+        "default_embedding_model",
+        "default_tuning_profile",
+        "chunking",
+        "retrieval",
+        "answering",
+        "rewrite"
+      ]
+    },
+    "KnowledgeRerankerPreferences": {
+      "description": "Cross-encoder reranker over retrieved candidates (precision step).\n\nPrefs-only, default off. ``model_id`` is a catalog ``provider:model`` (cloud: Voyage /\nCohere) OR a local-registry id (FlashRank / FastEmbed / sentence-transformers). It is\nresolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` \u2014 the same way\n``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a\nswap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local\ntorch lane only and are ignored by cloud models. ``model_id`` null = no reranker (retrieval\norder used as-is) even when ``enabled`` is true.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "rerank",
+          "title": "Model Id"
+        },
+        "top_n": {
+          "default": 8,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Top N",
+          "type": "integer"
+        },
+        "device": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device"
+        },
+        "batch_size": {
+          "default": 32,
+          "maximum": 512,
+          "minimum": 1,
+          "title": "Batch Size",
+          "type": "integer"
+        }
+      },
+      "title": "KnowledgeRerankerPreferences",
+      "type": "object",
+      "required": [
+        "enabled",
+        "model_id",
+        "top_n",
+        "device",
+        "batch_size"
+      ]
+    },
+    "KnowledgeRetrievalPreferences": {
+      "properties": {
+        "top_k": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Top K",
+          "type": "integer"
+        },
+        "min_score": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "step": 0.05,
+          "title": "Min Score",
+          "type": "number"
+        },
+        "hybrid": {
+          "default": true,
+          "title": "Hybrid",
+          "type": "boolean"
+        },
+        "sparse_model": {
+          "default": "Qdrant/bm25",
+          "minLength": 1,
+          "title": "Sparse Model",
+          "type": "string"
+        },
+        "prefetch_limit": {
+          "default": 40,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Prefetch Limit",
+          "type": "integer"
+        },
+        "reranker": {
+          "$ref": "#/$defs/KnowledgeRerankerPreferences"
+        }
+      },
+      "title": "KnowledgeRetrievalPreferences",
+      "type": "object",
+      "required": [
+        "top_k",
+        "min_score",
+        "hybrid",
+        "sparse_model",
+        "prefetch_limit",
+        "reranker"
+      ]
+    },
+    "KnowledgeRewritePreferences": {
+      "properties": {
+        "prompt": {
+          "default": "Rewrite the user's question into one clean, standalone search query.\n\nFix typos and normalize informal or dialectal phrasing into clear formal language, but do NOT change the meaning or add information that is not in the question.\n\nIf a conversation is provided, resolve references (pronouns, 'the second one', 'his brother') against it so the query stands alone without the conversation.\n\nCopy proper nouns, names, dates, and identifiers VERBATIM into `keywords` \u2014 never translate or 'correct' a name.\n\nSet `knowledge_needed` to false when the message is just a greeting, farewell, thanks, acknowledgement, or small talk and clearly does not ask for stored information; otherwise true. Do not invent facts or answer the question.\n\nRespond with a JSON object containing exactly these fields:\n- `standalone_query` (string): the rewritten standalone search query.\n- `keywords` (array of strings): proper nouns, names, dates, and identifiers copied verbatim.\n- `knowledge_needed` (boolean): false only for greetings/thanks/small talk, otherwise true.\n- `entities` (array of strings): named entities the question asks about (people, places, organizations) and qualified relational mentions like 'my sister' or 'mom'; empty when the question references no specific entity (e.g. 'what is photosynthesis?').",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "default_on": {
+          "default": false,
+          "title": "Default On",
+          "type": "boolean"
+        }
+      },
+      "title": "KnowledgeRewritePreferences",
+      "type": "object",
+      "required": [
+        "prompt",
+        "default_on"
+      ]
+    },
+    "LLMPreferences": {
+      "description": "Which catalog models to use when the workspace has credentials for them.",
+      "properties": {
+        "default_chat": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "title": "Default Chat"
+        },
+        "default_stt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "stt",
+          "title": "Default Stt"
+        },
+        "default_tts": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "tts",
+          "title": "Default Tts"
+        },
+        "default_image_gen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "model_kind": "chat",
+          "preferencesSaveSkip": true,
+          "title": "Default Image Gen"
+        },
+        "default_tuning_profile": {
+          "default": "balanced_chat",
+          "title": "Default Tuning Profile",
+          "type": "string"
+        },
+        "default_image_profile": {
+          "default": "image_playground",
+          "preferencesSaveSkip": true,
+          "title": "Default Image Profile",
+          "type": "string"
+        }
+      },
+      "title": "LLMPreferences",
+      "type": "object",
+      "required": [
+        "default_chat",
+        "default_stt",
+        "default_tts",
+        "default_image_gen",
+        "default_tuning_profile",
+        "default_image_profile"
+      ]
+    },
+    "MediaPreferences": {
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/ModalityFlags"
+        },
+        "output": {
+          "$ref": "#/$defs/ModalityFlags"
+        }
+      },
+      "title": "MediaPreferences",
+      "type": "object",
+      "required": [
+        "input",
+        "output"
+      ]
+    },
+    "MemoryExtractionPreferences": {
+      "description": "Whether the agent stores new long-term memories after a reply (memory_out).",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "MemoryExtractionPreferences",
+      "type": "object",
+      "required": [
+        "enabled"
+      ]
+    },
+    "MemoryPreferences": {
+      "description": "Agent memory settings \u2014 a thin feature layer over the shared Graphiti graph engine.\n\nGated purely by ``enabled``; the engine (extraction model, embedder, search) comes from\nthe top-level ``graph`` preferences, and ``create_memory_service`` degrades to ``None``\nwhen that engine can't be built. The mem0-legacy model / embedder / reranker fields are\ngone (mem0 \u2192 Graphiti, Phase 5).",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "default_tuning_profile": {
+          "default": "memory_extraction",
+          "title": "Default Tuning Profile",
+          "type": "string"
+        },
+        "user_name": {
+          "default": "",
+          "maxLength": 120,
+          "title": "User Name",
+          "type": "string"
+        },
+        "search": {
+          "$ref": "#/$defs/MemorySearchPreferences"
+        },
+        "extraction": {
+          "$ref": "#/$defs/MemoryExtractionPreferences"
+        }
+      },
+      "title": "MemoryPreferences",
+      "type": "object",
+      "required": [
+        "enabled",
+        "default_tuning_profile",
+        "user_name",
+        "search",
+        "extraction"
+      ]
+    },
+    "MemorySearchPreferences": {
+      "description": "Retrieval-time tuning for ``MemoryService.search``.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "top_k": {
+          "default": 8,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Top K",
+          "type": "integer"
+        }
+      },
+      "title": "MemorySearchPreferences",
+      "type": "object",
+      "required": [
+        "enabled",
+        "top_k"
+      ]
+    },
+    "ModalityFlags": {
+      "properties": {
+        "voice": {
+          "default": false,
+          "title": "Voice",
+          "type": "boolean"
+        },
+        "image": {
+          "default": false,
+          "title": "Image",
+          "type": "boolean"
+        },
+        "video": {
+          "default": false,
+          "title": "Video",
+          "type": "boolean"
+        },
+        "file": {
+          "default": false,
+          "title": "File",
+          "type": "boolean"
+        }
+      },
+      "title": "ModalityFlags",
+      "type": "object",
+      "required": [
+        "voice",
+        "image",
+        "video",
+        "file"
+      ]
+    },
+    "RetrievalAgentLimits": {
+      "description": "Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity).",
+      "properties": {
+        "max_agent_turns": {
+          "default": 4,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Agent Turns",
+          "type": "integer"
+        },
+        "max_parallel_searches": {
+          "default": 3,
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Max Parallel Searches",
+          "type": "integer"
+        },
+        "limit_default": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit Default",
+          "type": "integer"
+        },
+        "limit_min": {
+          "default": 10,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit Min",
+          "type": "integer"
+        },
+        "limit_max": {
+          "default": 40,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit Max",
+          "type": "integer"
+        },
+        "hops_max": {
+          "default": 3,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Hops Max",
+          "type": "integer"
+        }
+      },
+      "title": "RetrievalAgentLimits",
+      "type": "object",
+      "required": [
+        "max_agent_turns",
+        "max_parallel_searches",
+        "limit_default",
+        "limit_min",
+        "limit_max",
+        "hops_max"
+      ]
+    },
+    "TuningProfile": {
+      "description": "Named tuning preset shared by chat, memory, and knowledge answering.",
+      "properties": {
+        "temperature": {
+          "default": 0.7,
+          "maximum": 2.0,
+          "minimum": 0.0,
+          "step": 0.1,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "max_tokens": {
+          "default": 1024,
+          "minimum": 1,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinking"
+        },
+        "num_ctx": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Num Ctx"
+        },
+        "label": {
+          "default": "",
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "locked": {
+          "default": false,
+          "title": "Locked",
+          "type": "boolean"
+        }
+      },
+      "title": "TuningProfile",
+      "type": "object",
+      "required": [
+        "temperature",
+        "max_tokens",
+        "thinking",
+        "num_ctx",
+        "label",
+        "locked"
+      ]
+    }
+  },
+  "description": "Root preferences object persisted as preferences.json.",
+  "properties": {
+    "version": {
+      "default": 3,
+      "readOnly": true,
+      "title": "Version",
+      "type": "integer"
+    },
+    "llm": {
+      "$ref": "#/$defs/LLMPreferences"
+    },
+    "media": {
+      "$ref": "#/$defs/MediaPreferences"
+    },
+    "memory": {
+      "$ref": "#/$defs/MemoryPreferences"
+    },
+    "knowledge": {
+      "$ref": "#/$defs/KnowledgePreferences"
+    },
+    "graph": {
+      "$ref": "#/$defs/GraphPreferences"
+    },
+    "chat": {
+      "$ref": "#/$defs/ChatPreferences"
+    },
+    "tuning_profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/TuningProfile"
+      },
+      "title": "Tuning Profiles",
+      "type": "object",
+      "writeWhole": true
+    },
+    "image_profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ImageProfile"
+      },
+      "preferencesSaveSkip": true,
+      "title": "Image Profiles",
+      "type": "object"
+    }
+  },
+  "title": "WorkspacePreferences",
+  "type": "object",
+  "required": [
+    "version",
+    "llm",
+    "media",
+    "memory",
+    "knowledge",
+    "graph",
+    "chat",
+    "tuning_profiles",
+    "image_profiles"
+  ]
+}

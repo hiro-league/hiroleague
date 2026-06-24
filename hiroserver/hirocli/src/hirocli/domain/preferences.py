@@ -143,7 +143,8 @@ ThinkingLevel = Literal["off", "minimal", "low", "medium", "high"]
 class ModelTuning(BaseModel):
     """Provider-neutral runtime model tuning."""
 
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    # step: float inputs in the admin UI read granularity from schema metadata (no hardcoded step).
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, json_schema_extra={"step": 0.1})
     max_tokens: int = Field(default=1024, ge=1)
     thinking: ThinkingLevel | None = None
     # Context-window size for local providers (Ollama `num_ctx`). Ollama silently defaults to 2048
@@ -300,12 +301,18 @@ def default_image_profiles() -> dict[str, ImageProfile]:
 class LLMPreferences(BaseModel):
     """Which catalog models to use when the workspace has credentials for them."""
 
-    default_chat: str | None = None
-    default_stt: str | None = None
-    default_tts: str | None = None
-    default_image_gen: str | None = None
+    default_chat: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
+    default_stt: str | None = Field(default=None, json_schema_extra={"model_kind": "stt"})
+    default_tts: str | None = Field(default=None, json_schema_extra={"model_kind": "tts"})
+    default_image_gen: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "chat", "preferencesSaveSkip": True},
+    )
     default_tuning_profile: str = DEFAULT_CHAT_TUNING_PROFILE_ID
-    default_image_profile: str = DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID
+    default_image_profile: str = Field(
+        default=DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID,
+        json_schema_extra={"preferencesSaveSkip": True},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -439,16 +446,33 @@ DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = (
 
 
 class KnowledgeChunkingMarkdownPreferences(BaseModel):
-    respect_headings: bool = True
+    respect_headings: bool = Field(
+        default=True,
+        description="Split chunks at markdown headings when ingesting documents.",
+    )
 
 
 class KnowledgeChunkingPreferences(BaseModel):
-    chunk_size: int = Field(default=1200, ge=200, le=8000)
-    chunk_overlap: int = Field(default=150, ge=0, le=2000)
-    # Prefix each chunk's *embedded* text (dense + BM25) with its document title and heading
-    # breadcrumb so every chunk carries structural context — including heading-less continuation
-    # pieces. Ingest-time only (the stored payload text is unchanged); flipping it needs a re-ingest.
-    embed_structural_context: bool = True
+    chunk_size: int = Field(
+        default=1200,
+        ge=200,
+        le=8000,
+        description="Target size per chunk at document ingest (characters).",
+    )
+    chunk_overlap: int = Field(
+        default=150,
+        ge=0,
+        le=2000,
+        description="Overlap between consecutive chunks. Must stay smaller than chunk size.",
+    )
+    embed_structural_context: bool = Field(
+        default=True,
+        description=(
+            "Prefix each chunk's embedded text with its document title and heading path so every chunk "
+            "— including continuation pieces — carries its section context. Applies to new ingests; "
+            "changing this requires re-ingesting existing documents."
+        ),
+    )
     markdown: KnowledgeChunkingMarkdownPreferences = Field(default_factory=KnowledgeChunkingMarkdownPreferences)
 
     @model_validator(mode="after")
@@ -471,7 +495,7 @@ class KnowledgeRerankerPreferences(BaseModel):
     """
 
     enabled: bool = False
-    model_id: str | None = None
+    model_id: str | None = Field(default=None, json_schema_extra={"model_kind": "rerank"})
     top_n: int = Field(default=8, ge=1, le=100)
     device: str | None = None
     batch_size: int = Field(default=32, ge=1, le=512)
@@ -479,7 +503,7 @@ class KnowledgeRerankerPreferences(BaseModel):
 
 class KnowledgeRetrievalPreferences(BaseModel):
     top_k: int = Field(default=20, ge=1, le=100)
-    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05})
     # Hybrid retrieval: fuse the dense vector with a BM25 sparse vector via Qdrant RRF.
     # Sparse vectors are always stored at ingest, so this is a pure query-time toggle
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
@@ -492,7 +516,7 @@ class KnowledgeRetrievalPreferences(BaseModel):
 
 
 class KnowledgeAnsweringPreferences(BaseModel):
-    model: str | None = None
+    model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     # Base answer-generation system prompt. Editable; blank falls back to the relaxed default
     # (partial answers allowed, no bare "I don't know" when any part is supported). The citation
     # and language clauses are appended at runtime from the fields below.
@@ -557,11 +581,11 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     """
 
     # null → fall back to the shared knowledge reranker model id.
-    model_id: str | None = None
+    model_id: str | None = Field(default=None, json_schema_extra={"model_kind": "rerank"})
     # Drop facts whose post-rerank relevance is below this (maps to Graphiti
     # ``SearchConfig.reranker_min_score``). 0.0 = keep all. Cross-encoder only —
     # RRF/MMR scores are rank-fusion artifacts, so this is ignored for those recipes.
-    min_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_relevance: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05})
     # Local torch lane only (sentence-transformers); ignored by cloud + ONNX models.
     device: str | None = None
 
@@ -1072,7 +1096,10 @@ class GraphEvalPreferences(BaseModel):
     # ``memory_answer_prompt`` scalar — no-backward-compat, no migration). A run picks one by id
     # in the eval panel; ``resolve_answer_prompt`` maps id → instruction text with a default
     # fallback. The ``default`` profile is locked and carries the built-in default text.
-    answer_prompts: dict[str, AnswerPromptProfile] = Field(default_factory=default_answer_prompts)
+    answer_prompts: dict[str, AnswerPromptProfile] = Field(
+        default_factory=default_answer_prompts,
+        json_schema_extra={"writeWhole": True},
+    )
     judge_prompt: str = DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
     # Answer + judge each get their OWN model + tuning profile (split from the single shared
     # answering model the eval used before). ``*_model`` of ``None`` falls back through
@@ -1080,16 +1107,16 @@ class GraphEvalPreferences(BaseModel):
     # workspace is unchanged. The defaults reuse the ``knowledge_answering`` tuning profile —
     # set them apart to tune the answer step and the judge independently. The memory-eval answer
     # step uses ``answer_*``; the LLM judge (both tracks) uses ``judge_*``.
-    answer_model: str | None = None
+    answer_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     answer_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
-    judge_model: str | None = None
+    judge_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     judge_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     # The agentic retrieval loop (memory track) gets its OWN model + tuning profile. ``None`` falls
     # back to the eval ANSWER model (the loop borrowed it before it had its own preference): the
     # resolver chains retrieval_model → answer_model → knowledge.answering.model → llm.default_chat,
     # so an unset workspace is unchanged. Lets the retrieval/tool-calling step use a different model
     # (e.g. a cheaper or higher-reasoning one) than the final answer step.
-    retrieval_model: str | None = None
+    retrieval_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     retrieval_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
     # line carries, and whether episodes keep their [date] prefix. ``show_event_time`` (valid_at,
@@ -1114,7 +1141,8 @@ class GraphEvalPreferences(BaseModel):
     retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
     # Named library of retrieval-agent system prompts (mirrors answer_prompts).
     retrieval_agent_prompts: dict[str, AnswerPromptProfile] = Field(
-        default_factory=default_retrieval_agent_prompts
+        default_factory=default_retrieval_agent_prompts,
+        json_schema_extra={"writeWhole": True},
     )
     active_retrieval_agent_prompt_id: str = DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
 
@@ -1169,12 +1197,12 @@ class GraphPreferences(BaseModel):
 
     backend: KnowledgeGraphBackend = "off"
     # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
-    extraction_model: str | None = None
+    extraction_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     extraction_tuning_profile: str = DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID
-    small_model: str | None = None
+    small_model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     small_tuning_profile: str = DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID
     # ``None`` → shares the knowledge dense embedder (decision G8).
-    embedder_model: str | None = None
+    embedder_model: str | None = Field(default=None, json_schema_extra={"model_kind": "embedding"})
     # Default temporal lens at retrieval: current facts only vs include historical.
     temporal_default: KnowledgeGraphTemporalDefault = "current"
     # Retrieval expansion radius (hops) when gathering related facts/chunks.
@@ -1214,7 +1242,7 @@ class GraphPreferences(BaseModel):
     # comes back empty. Keep low for RECALL (the reranker.min_relevance below is where
     # precision belongs); raise toward 0.6 to tighten candidates. Applies to all recipes
     # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
-    sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0)
+    sim_min_score: float = Field(default=0.3, ge=0.0, le=1.0, json_schema_extra={"step": 0.05})
     # Hard ceiling (seconds) on any single Kuzu query — applied to the shared writer pool AND
     # the snapshot read connections. Bounds the pathological case where a CHECKPOINT (triggered
     # by an FTS rebuild) waits minutes for a concurrent read transaction to leave — observed to
@@ -1264,7 +1292,11 @@ class GraphPreferences(BaseModel):
 
 
 class KnowledgePreferences(BaseModel):
-    default_embedding_model: str | None = None
+    default_embedding_model: str | None = Field(
+        default=None,
+        description="Null uses the local multilingual FastEmbed default shown above.",
+        json_schema_extra={"model_kind": "embedding"},
+    )
     default_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
     chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
@@ -1320,7 +1352,7 @@ class ChatPreferences(BaseModel):
 class WorkspacePreferences(BaseModel):
     """Root preferences object persisted as preferences.json."""
 
-    version: int = 3
+    version: int = Field(default=3, json_schema_extra={"readOnly": True})
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
@@ -1330,8 +1362,14 @@ class WorkspacePreferences(BaseModel):
     # reads as shared, not owned by knowledge. Qdrant knowledge prefs stay under ``knowledge``.
     graph: GraphPreferences = Field(default_factory=GraphPreferences)
     chat: ChatPreferences = Field(default_factory=ChatPreferences)
-    tuning_profiles: dict[str, TuningProfile] = Field(default_factory=default_tuning_profiles)
-    image_profiles: dict[str, ImageProfile] = Field(default_factory=default_image_profiles)
+    tuning_profiles: dict[str, TuningProfile] = Field(
+        default_factory=default_tuning_profiles,
+        json_schema_extra={"writeWhole": True},
+    )
+    image_profiles: dict[str, ImageProfile] = Field(
+        default_factory=default_image_profiles,
+        json_schema_extra={"preferencesSaveSkip": True},
+    )
 
     @model_validator(mode="after")
     def _validate_tuning_profiles(self) -> "WorkspacePreferences":

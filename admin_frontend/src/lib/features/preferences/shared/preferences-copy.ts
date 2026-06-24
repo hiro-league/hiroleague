@@ -60,7 +60,6 @@ export const GRAPH_VIEW_COPY = {
 } as const;
 
 export const KNOWLEDGE_COPY = {
-  embedderModel: 'Null uses the local multilingual FastEmbed default shown above.',
   graphBackend:
     'Master switch for knowledge retrieval. Off = today\'s flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph\'s facts.'
 } as const;

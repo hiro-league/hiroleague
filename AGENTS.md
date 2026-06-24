@@ -16,9 +16,9 @@ Check the admin UI from the **Vite dev site at `http://localhost:5173`** (usuall
 A new preference is not done when the backend model has it — it must be **representable and editable in the Preferences admin UI**, and it must actually **persist on Save**. Do the whole round-trip, in order:
 
 1. **Backend model** — add the field to the right model in `hiroserver/hirocli/src/hirocli/domain/preferences.py` (with `Field(...)` bounds/default). The PATCH endpoint is **schema-driven** (`preferences_runtime._set_path` walks the pydantic model), so a new field becomes a valid write path automatically — no backend allow-list to update.
-2. **Frontend type + default** — add it to the matching type **and** the default object in `admin_frontend/src/lib/api/preferences.ts`.
+2. **Regenerate frontend types** — from `admin_frontend/`, run `npm run gen:prefs-types` (updates `src/lib/api/generated/*` from the Pydantic model). `npm run check` fails if these artifacts are stale. API-only computed fields (e.g. `*_resolved`) go in `preferences-types.ts`, not the generated file.
 3. **UI control** — add an input bound to `ctrl.draft.<section>.<field>` in the correct `admin_frontend/src/lib/features/preferences/sections/**/*.svelte` card (with `oninput={ctrl.markDirty}` or `onchange={ctrl.markDirty}`). **If you're unsure which section/tab a field belongs in, ask the user — do not guess.**
-4. **Save payload** — `editsForSave` in `admin_frontend/src/lib/features/preferences/state/preferences-edits.ts` structurally diffs baseline vs draft, so a new bound field is picked up automatically. Only add to `SKIP_PATHS` if the field is read-only/computed, or to `WHOLE_OBJECT_PATHS` / nullable-path sets when the backend expects a special write shape. Run `npm run test:unit -- preferences-edits` after changing those rules.
+4. **Save payload** — `editsForSave` structurally diffs baseline vs draft using `/preferences/schema` field metadata (`readOnly`, `writeWhole`, `preferencesSaveSkip`, nullable + `model_kind`). A new bound field is picked up automatically; you should not edit path-set allow-lists in `preferences-edits.ts`. Run `npm run test:unit -- preferences-edits` after changing save policy helpers.
 
 Run `npm run check` (admin_frontend) and the preferences tests after, and remember a backend field change needs a **server restart** to take effect.
 

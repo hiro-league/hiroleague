@@ -1,0 +1,688 @@
+{
+  "version": {
+    "path": "version",
+    "nullable": false,
+    "type": "integer",
+    "default": 3,
+    "readOnly": true
+  },
+  "llm.default_chat": {
+    "path": "llm.default_chat",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "llm.default_stt": {
+    "path": "llm.default_stt",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "stt"
+  },
+  "llm.default_tts": {
+    "path": "llm.default_tts",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "tts"
+  },
+  "llm.default_image_gen": {
+    "path": "llm.default_image_gen",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "preferencesSaveSkip": true,
+    "model_kind": "chat"
+  },
+  "llm.default_tuning_profile": {
+    "path": "llm.default_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "balanced_chat"
+  },
+  "llm.default_image_profile": {
+    "path": "llm.default_image_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "image_playground",
+    "preferencesSaveSkip": true
+  },
+  "media.input.voice": {
+    "path": "media.input.voice",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.input.image": {
+    "path": "media.input.image",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.input.video": {
+    "path": "media.input.video",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.input.file": {
+    "path": "media.input.file",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.output.voice": {
+    "path": "media.output.voice",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.output.image": {
+    "path": "media.output.image",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.output.video": {
+    "path": "media.output.video",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "media.output.file": {
+    "path": "media.output.file",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "memory.enabled": {
+    "path": "memory.enabled",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "memory.default_tuning_profile": {
+    "path": "memory.default_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "memory_extraction"
+  },
+  "memory.user_name": {
+    "path": "memory.user_name",
+    "nullable": false,
+    "type": "string",
+    "default": ""
+  },
+  "memory.search.enabled": {
+    "path": "memory.search.enabled",
+    "nullable": false,
+    "type": "boolean",
+    "default": true
+  },
+  "memory.search.top_k": {
+    "path": "memory.search.top_k",
+    "nullable": false,
+    "type": "integer",
+    "default": 8,
+    "min": 1,
+    "max": 100
+  },
+  "memory.extraction.enabled": {
+    "path": "memory.extraction.enabled",
+    "nullable": false,
+    "type": "boolean",
+    "default": true
+  },
+  "knowledge.default_embedding_model": {
+    "path": "knowledge.default_embedding_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "description": "Null uses the local multilingual FastEmbed default shown above.",
+    "model_kind": "embedding"
+  },
+  "knowledge.default_tuning_profile": {
+    "path": "knowledge.default_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "knowledge_answering"
+  },
+  "knowledge.chunking.chunk_size": {
+    "path": "knowledge.chunking.chunk_size",
+    "nullable": false,
+    "type": "integer",
+    "default": 1200,
+    "description": "Target size per chunk at document ingest (characters).",
+    "min": 200,
+    "max": 8000
+  },
+  "knowledge.chunking.chunk_overlap": {
+    "path": "knowledge.chunking.chunk_overlap",
+    "nullable": false,
+    "type": "integer",
+    "default": 150,
+    "description": "Overlap between consecutive chunks. Must stay smaller than chunk size.",
+    "min": 0,
+    "max": 2000
+  },
+  "knowledge.chunking.embed_structural_context": {
+    "path": "knowledge.chunking.embed_structural_context",
+    "nullable": false,
+    "type": "boolean",
+    "default": true,
+    "description": "Prefix each chunk's embedded text with its document title and heading path so every chunk \u2014 including continuation pieces \u2014 carries its section context. Applies to new ingests; changing this requires re-ingesting existing documents."
+  },
+  "knowledge.chunking.markdown.respect_headings": {
+    "path": "knowledge.chunking.markdown.respect_headings",
+    "nullable": false,
+    "type": "boolean",
+    "default": true,
+    "description": "Split chunks at markdown headings when ingesting documents."
+  },
+  "knowledge.retrieval.top_k": {
+    "path": "knowledge.retrieval.top_k",
+    "nullable": false,
+    "type": "integer",
+    "default": 20,
+    "min": 1,
+    "max": 100
+  },
+  "knowledge.retrieval.min_score": {
+    "path": "knowledge.retrieval.min_score",
+    "nullable": false,
+    "type": "number",
+    "default": 0.0,
+    "step": 0.05,
+    "min": 0.0,
+    "max": 1.0
+  },
+  "knowledge.retrieval.hybrid": {
+    "path": "knowledge.retrieval.hybrid",
+    "nullable": false,
+    "type": "boolean",
+    "default": true
+  },
+  "knowledge.retrieval.sparse_model": {
+    "path": "knowledge.retrieval.sparse_model",
+    "nullable": false,
+    "type": "string",
+    "default": "Qdrant/bm25"
+  },
+  "knowledge.retrieval.prefetch_limit": {
+    "path": "knowledge.retrieval.prefetch_limit",
+    "nullable": false,
+    "type": "integer",
+    "default": 40,
+    "min": 1,
+    "max": 500
+  },
+  "knowledge.retrieval.reranker.enabled": {
+    "path": "knowledge.retrieval.reranker.enabled",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "knowledge.retrieval.reranker.model_id": {
+    "path": "knowledge.retrieval.reranker.model_id",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "rerank"
+  },
+  "knowledge.retrieval.reranker.top_n": {
+    "path": "knowledge.retrieval.reranker.top_n",
+    "nullable": false,
+    "type": "integer",
+    "default": 8,
+    "min": 1,
+    "max": 100
+  },
+  "knowledge.retrieval.reranker.device": {
+    "path": "knowledge.retrieval.reranker.device",
+    "nullable": true,
+    "type": "string",
+    "default": null
+  },
+  "knowledge.retrieval.reranker.batch_size": {
+    "path": "knowledge.retrieval.reranker.batch_size",
+    "nullable": false,
+    "type": "integer",
+    "default": 32,
+    "min": 1,
+    "max": 512
+  },
+  "knowledge.answering.model": {
+    "path": "knowledge.answering.model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "knowledge.answering.prompt": {
+    "path": "knowledge.answering.prompt",
+    "nullable": false,
+    "type": "string",
+    "default": "Use the provided knowledge context as your only source of facts; do not invent or assume anything that is not supported by it.\n\nAnswer every part of the question that the context supports. Partial answers are expected and welcome \u2014 never withhold a supported part just because another part is unsupported.\n\nIf a part of the question is not covered by the context, give the parts you can and briefly note what is missing. Do not reply with only 'I don't know' when any part of the question is supported by the context."
+  },
+  "knowledge.answering.cite_sources": {
+    "path": "knowledge.answering.cite_sources",
+    "nullable": false,
+    "type": "boolean",
+    "default": true
+  },
+  "knowledge.answering.language_policy": {
+    "path": "knowledge.answering.language_policy",
+    "nullable": false,
+    "type": "string",
+    "default": "match_query",
+    "enum": [
+      "match_query",
+      "prefer_english",
+      "prefer_arabic"
+    ]
+  },
+  "knowledge.rewrite.prompt": {
+    "path": "knowledge.rewrite.prompt",
+    "nullable": false,
+    "type": "string",
+    "default": "Rewrite the user's question into one clean, standalone search query.\n\nFix typos and normalize informal or dialectal phrasing into clear formal language, but do NOT change the meaning or add information that is not in the question.\n\nIf a conversation is provided, resolve references (pronouns, 'the second one', 'his brother') against it so the query stands alone without the conversation.\n\nCopy proper nouns, names, dates, and identifiers VERBATIM into `keywords` \u2014 never translate or 'correct' a name.\n\nSet `knowledge_needed` to false when the message is just a greeting, farewell, thanks, acknowledgement, or small talk and clearly does not ask for stored information; otherwise true. Do not invent facts or answer the question.\n\nRespond with a JSON object containing exactly these fields:\n- `standalone_query` (string): the rewritten standalone search query.\n- `keywords` (array of strings): proper nouns, names, dates, and identifiers copied verbatim.\n- `knowledge_needed` (boolean): false only for greetings/thanks/small talk, otherwise true.\n- `entities` (array of strings): named entities the question asks about (people, places, organizations) and qualified relational mentions like 'my sister' or 'mom'; empty when the question references no specific entity (e.g. 'what is photosynthesis?')."
+  },
+  "knowledge.rewrite.default_on": {
+    "path": "knowledge.rewrite.default_on",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "graph.backend": {
+    "path": "graph.backend",
+    "nullable": false,
+    "type": "string",
+    "default": "off",
+    "enum": [
+      "off",
+      "graphiti"
+    ]
+  },
+  "graph.extraction_model": {
+    "path": "graph.extraction_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "graph.extraction_tuning_profile": {
+    "path": "graph.extraction_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "graphiti_extraction"
+  },
+  "graph.small_model": {
+    "path": "graph.small_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "graph.small_tuning_profile": {
+    "path": "graph.small_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "graphiti_small"
+  },
+  "graph.embedder_model": {
+    "path": "graph.embedder_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "embedding"
+  },
+  "graph.temporal_default": {
+    "path": "graph.temporal_default",
+    "nullable": false,
+    "type": "string",
+    "default": "current",
+    "enum": [
+      "current",
+      "all"
+    ]
+  },
+  "graph.k_hop": {
+    "path": "graph.k_hop",
+    "nullable": false,
+    "type": "integer",
+    "default": 1,
+    "min": 1,
+    "max": 3
+  },
+  "graph.search_recipe": {
+    "path": "graph.search_recipe",
+    "nullable": false,
+    "type": "string",
+    "default": "rrf",
+    "enum": [
+      "rrf",
+      "mmr",
+      "cross_encoder"
+    ]
+  },
+  "graph.search_scope": {
+    "path": "graph.search_scope",
+    "nullable": false,
+    "type": "string",
+    "default": "edges",
+    "enum": [
+      "edges",
+      "edges_and_nodes",
+      "edges_and_episodes",
+      "edges_nodes_episodes"
+    ]
+  },
+  "graph.entity_ontology": {
+    "path": "graph.entity_ontology",
+    "nullable": false,
+    "type": "string",
+    "default": "open",
+    "enum": [
+      "open",
+      "typed"
+    ]
+  },
+  "graph.custom_extraction_instructions": {
+    "path": "graph.custom_extraction_instructions",
+    "nullable": false,
+    "type": "string",
+    "default": "Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity."
+  },
+  "graph.sim_min_score": {
+    "path": "graph.sim_min_score",
+    "nullable": false,
+    "type": "number",
+    "default": 0.3,
+    "step": 0.05,
+    "min": 0.0,
+    "max": 1.0
+  },
+  "graph.query_timeout_s": {
+    "path": "graph.query_timeout_s",
+    "nullable": false,
+    "type": "integer",
+    "default": 60,
+    "min": 0,
+    "max": 600
+  },
+  "graph.observability": {
+    "path": "graph.observability",
+    "nullable": false,
+    "type": "string",
+    "default": "ledger",
+    "enum": [
+      "off",
+      "ledger",
+      "trace"
+    ]
+  },
+  "graph.reranker.model_id": {
+    "path": "graph.reranker.model_id",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "rerank"
+  },
+  "graph.reranker.min_relevance": {
+    "path": "graph.reranker.min_relevance",
+    "nullable": false,
+    "type": "number",
+    "default": 0.0,
+    "step": 0.05,
+    "min": 0.0,
+    "max": 1.0
+  },
+  "graph.reranker.device": {
+    "path": "graph.reranker.device",
+    "nullable": true,
+    "type": "string",
+    "default": null
+  },
+  "graph.eval.answer_prompts": {
+    "path": "graph.eval.answer_prompts",
+    "nullable": false,
+    "type": "object",
+    "writeWhole": true
+  },
+  "graph.eval.judge_prompt": {
+    "path": "graph.eval.judge_prompt",
+    "nullable": false,
+    "type": "string",
+    "default": "## Objective\nGrade a model's Answer to a question about past conversations against the Ideal Answer, and\nreport the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as\nGUIDANCE on what a complete answer covers \u2014 not a checklist to fail on. Grade ONLY against the\nIdeal Answer and Rubric \u2014 never your own knowledge.\n\n## Verdicts\n- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording \u2014\n  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is\n  shown, an Answer that covers its MAIN elements passes \u2014 a missing minor element does NOT block\n  a pass.\n- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision\n  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but\n  misses a substantial part of what was asked.\n- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element\n  satisfied, the Answer misses the point, or it contradicts a rubric element.\n- abstain: the Answer declines \u2014 \"No information available.\" or any other refusal to answer.\n\n## Core Instructions\n- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.\n  Treat them as a GUIDE, not a pass/fail checklist \u2014 the Ideal Answer and the Rubric describe the\n  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states\n  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.\n- Dates: matching the Ideal's month and year passes; a correctly resolved relative date (\"next\n  month\" stated in an August conversation = September) passes; within ~2 weeks passes.\n- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the\n  right result, and a confident Answer is fail.\n- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict \u2014\n  use them only to fill evidence, recall_sufficient, and grounded.\n\n## Output Fields\nReply with one JSON object containing exactly these fields, in this order:\n- \"evidence\" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that\n  contain the information needed to answer; \"\" if no such line exists.\n- \"recall_sufficient\" (boolean): true only if evidence quotes a real line that supplies the\n  answer; false otherwise.\n- \"grounded\" (boolean): whether the Answer is supported by the Recalled Memory Elements.\n- \"reason\" (string): one short sentence justifying the verdict.\n- \"verdict\" (string): one of \"pass\", \"partial\", \"fail\", \"abstain\".\n\n## Validation\n- evidence is checked by exact substring match against the shown elements \u2014 an inexact or\n  invented quote counts as no evidence and forces recall_sufficient to false.\n- If no Recalled Memory Elements section was shown, set evidence \"\" and recall_sufficient true.\n- The verdict depends only on Answer vs Ideal (and Rubric, when shown)."
+  },
+  "graph.eval.answer_model": {
+    "path": "graph.eval.answer_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "graph.eval.answer_tuning_profile": {
+    "path": "graph.eval.answer_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "knowledge_answering"
+  },
+  "graph.eval.judge_model": {
+    "path": "graph.eval.judge_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "graph.eval.judge_tuning_profile": {
+    "path": "graph.eval.judge_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "knowledge_answering"
+  },
+  "graph.eval.retrieval_model": {
+    "path": "graph.eval.retrieval_model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "model_kind": "chat"
+  },
+  "graph.eval.retrieval_tuning_profile": {
+    "path": "graph.eval.retrieval_tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "knowledge_answering"
+  },
+  "graph.eval.show_event_time": {
+    "path": "graph.eval.show_event_time",
+    "nullable": false,
+    "type": "boolean",
+    "default": true
+  },
+  "graph.eval.show_expired_at": {
+    "path": "graph.eval.show_expired_at",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "graph.eval.show_superseded": {
+    "path": "graph.eval.show_superseded",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "graph.eval.max_elements_per_kind": {
+    "path": "graph.eval.max_elements_per_kind",
+    "nullable": false,
+    "type": "integer",
+    "default": 30,
+    "min": 1,
+    "max": 200
+  },
+  "graph.eval.max_fact_chars": {
+    "path": "graph.eval.max_fact_chars",
+    "nullable": false,
+    "type": "integer",
+    "default": 240,
+    "min": 40,
+    "max": 2000
+  },
+  "graph.eval.max_episode_chars": {
+    "path": "graph.eval.max_episode_chars",
+    "nullable": false,
+    "type": "integer",
+    "default": 300,
+    "min": 40,
+    "max": 2000
+  },
+  "graph.eval.max_summary_chars": {
+    "path": "graph.eval.max_summary_chars",
+    "nullable": false,
+    "type": "integer",
+    "default": 400,
+    "min": 40,
+    "max": 4000
+  },
+  "graph.eval.retrieval_agent.max_agent_turns": {
+    "path": "graph.eval.retrieval_agent.max_agent_turns",
+    "nullable": false,
+    "type": "integer",
+    "default": 4,
+    "min": 1,
+    "max": 10
+  },
+  "graph.eval.retrieval_agent.max_parallel_searches": {
+    "path": "graph.eval.retrieval_agent.max_parallel_searches",
+    "nullable": false,
+    "type": "integer",
+    "default": 3,
+    "min": 1,
+    "max": 5
+  },
+  "graph.eval.retrieval_agent.limit_default": {
+    "path": "graph.eval.retrieval_agent.limit_default",
+    "nullable": false,
+    "type": "integer",
+    "default": 20,
+    "min": 1,
+    "max": 100
+  },
+  "graph.eval.retrieval_agent.limit_min": {
+    "path": "graph.eval.retrieval_agent.limit_min",
+    "nullable": false,
+    "type": "integer",
+    "default": 10,
+    "min": 1,
+    "max": 100
+  },
+  "graph.eval.retrieval_agent.limit_max": {
+    "path": "graph.eval.retrieval_agent.limit_max",
+    "nullable": false,
+    "type": "integer",
+    "default": 40,
+    "min": 1,
+    "max": 100
+  },
+  "graph.eval.retrieval_agent.hops_max": {
+    "path": "graph.eval.retrieval_agent.hops_max",
+    "nullable": false,
+    "type": "integer",
+    "default": 3,
+    "min": 1,
+    "max": 3
+  },
+  "graph.eval.retrieval_agent_prompts": {
+    "path": "graph.eval.retrieval_agent_prompts",
+    "nullable": false,
+    "type": "object",
+    "writeWhole": true
+  },
+  "graph.eval.active_retrieval_agent_prompt_id": {
+    "path": "graph.eval.active_retrieval_agent_prompt_id",
+    "nullable": false,
+    "type": "string",
+    "default": "default"
+  },
+  "graph.view.large_type_threshold": {
+    "path": "graph.view.large_type_threshold",
+    "nullable": false,
+    "type": "integer",
+    "default": 200,
+    "min": 10,
+    "max": 10000
+  },
+  "chat.instructions": {
+    "path": "chat.instructions",
+    "nullable": false,
+    "type": "string",
+    "default": "## Instructions\n- This is a conversation between you (the character) and the user.\n- Use the **Knowledge retrieved** (from the workspace knowledge base) and **Memories retrieved** below as optional background.\n- You choose what is relevant \u2014 you do not need to use all, or any, of it.\n- source rank and score suggest the search relevancy of the knowledge item to the user message/context\n- Answer **Last User Message** in your own style."
+  },
+  "chat.max_messages": {
+    "path": "chat.max_messages",
+    "nullable": false,
+    "type": "integer",
+    "default": 6,
+    "min": 1,
+    "max": 100
+  },
+  "chat.cite_sources": {
+    "path": "chat.cite_sources",
+    "nullable": false,
+    "type": "boolean",
+    "default": false
+  },
+  "chat.tools_enabled": {
+    "path": "chat.tools_enabled",
+    "nullable": false,
+    "type": "boolean",
+    "default": true
+  },
+  "chat.preferred_answering_language": {
+    "path": "chat.preferred_answering_language",
+    "nullable": false,
+    "type": "string",
+    "default": "en"
+  },
+  "tuning_profiles": {
+    "path": "tuning_profiles",
+    "nullable": false,
+    "type": "object",
+    "writeWhole": true
+  },
+  "image_profiles": {
+    "path": "image_profiles",
+    "nullable": false,
+    "type": "object",
+    "preferencesSaveSkip": true
+  },
+  "knowledge.default_embedding_model_resolved": {
+    "path": "knowledge.default_embedding_model_resolved",
+    "type": "string",
+    "readOnly": true
+  },
+  "knowledge.default_embedding_model_locked": {
+    "path": "knowledge.default_embedding_model_locked",
+    "type": "boolean",
+    "readOnly": true
+  },
+  "knowledge.answering.model_resolved": {
+    "path": "knowledge.answering.model_resolved",
+    "type": "string",
+    "nullable": true,
+    "readOnly": true
+  },
+  "knowledge.answering.model_resolved_source": {
+    "path": "knowledge.answering.model_resolved_source",
+    "type": "string",
+    "nullable": true,
+    "readOnly": true
+  },
+  "graph.embedder_model_resolved": {
+    "path": "graph.embedder_model_resolved",
+    "type": "string",
+    "nullable": true,
+    "readOnly": true
+  }
+}
