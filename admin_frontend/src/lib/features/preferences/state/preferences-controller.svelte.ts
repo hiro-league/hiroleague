@@ -421,7 +421,9 @@ export function createPreferencesController(notify: Notify) {
       return promptDefaults;
     },
     get fieldSchema() {
-      return fieldSchema;
+      // Live schema when loaded, else the committed mirror — so the Pref* field primitives keep
+      // their bounds/hints even if GET /preferences/schema failed (never expose the raw null).
+      return effectiveFieldSchema;
     },
     get dirty() {
       return dirty;

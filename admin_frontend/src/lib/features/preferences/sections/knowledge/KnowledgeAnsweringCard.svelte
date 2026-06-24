@@ -1,13 +1,13 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import { KNOWLEDGE_LANGUAGE_POLICY_LABELS } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { knowledgeAnsweringModelHint } from '$lib/features/preferences/shared/preferences-helpers';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
-  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
+  import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
+  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
 
   type Props = {
@@ -52,21 +52,19 @@
       allows partial answers and avoids a bare "I don't know" when the context covers part of the
       question. The citation and language settings below are appended automatically.
     </p>
-    <SettingToggle
+    <PrefToggleField
+      {ctrl}
+      path="knowledge.answering.cite_sources"
       label="Cite sources"
       bind:checked={ctrl.draft.knowledge.answering.cite_sources}
-      onchange={ctrl.markDirty}
     />
-    <FormField label="Language policy" class="max-w-md">
-      <select
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.knowledge.answering.language_policy}
-        onchange={ctrl.markDirty}
-      >
-        <option value="match_query">Match query</option>
-        <option value="prefer_english">Prefer English</option>
-        <option value="prefer_arabic">Prefer Arabic</option>
-      </select>
-    </FormField>
+    <PrefSelectField
+      {ctrl}
+      path="knowledge.answering.language_policy"
+      label="Language policy"
+      options={KNOWLEDGE_LANGUAGE_POLICY_LABELS}
+      class="max-w-md"
+      bind:value={ctrl.draft.knowledge.answering.language_policy}
+    />
   </SectionCardMuted>
 {/if}

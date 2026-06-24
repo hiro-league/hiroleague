@@ -54,16 +54,6 @@ export const GRAPH_RERANKER_COPY = {
     'Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models.'
 } as const;
 
-export const GRAPH_VIEW_COPY = {
-  largeTypeThreshold:
-    'In the Graph tab\'s per-type node filter, a type with more instances than this shows a \'many instances\' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.'
-} as const;
-
-export const KNOWLEDGE_COPY = {
-  graphBackend:
-    'Master switch for knowledge retrieval. Off = today\'s flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph\'s facts.'
-} as const;
-
 export const TUNING_PROFILES_COPY = {
   contextWindow:
     'Local providers only (Ollama num_ctx). Blank = provider default (Ollama: 2048). Don\'t set to the full model window — large values use a lot of memory.'

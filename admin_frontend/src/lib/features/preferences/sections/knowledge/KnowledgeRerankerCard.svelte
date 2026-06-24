@@ -4,7 +4,7 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
-  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
+  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -20,10 +20,11 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeReranker}
   >
-    <SettingToggle
+    <PrefToggleField
+      {ctrl}
+      path="knowledge.retrieval.reranker.enabled"
       label="Enable reranking"
       bind:checked={ctrl.draft.knowledge.retrieval.reranker.enabled}
-      onchange={ctrl.markDirty}
     />
     <PrefModelPicker
       {ctrl}

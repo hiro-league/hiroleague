@@ -1,10 +1,8 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { GRAPH_VIEW_COPY } from '$lib/features/preferences/shared/preferences-copy';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -20,19 +18,13 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphView}
   >
-    <FormField
+    <PrefNumberField
+      {ctrl}
+      path="graph.view.large_type_threshold"
       label="Large node-type warning threshold"
-      hint={GRAPH_VIEW_COPY.largeTypeThreshold}
+      hint="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only."
       class="max-w-md"
-    >
-      <input
-        type="number"
-        min="10"
-        max="10000"
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.graph.view.large_type_threshold}
-        oninput={ctrl.markDirty}
-      />
-    </FormField>
+      bind:value={ctrl.draft.graph.view.large_type_threshold}
+    />
   </SectionCardMuted>
 {/if}

@@ -10,7 +10,7 @@
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
-  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
+  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -37,10 +37,11 @@
         bodyId={PREFERENCES_SECTION_BODY_IDS.mediaInput}
       >
         {#each modalityKeys as key (key)}
-          <SettingToggle
+          <PrefToggleField
+            {ctrl}
+            path={`media.input.${key}`}
             label={modalityLabels[key]}
             bind:checked={ctrl.draft.media.input[key]}
-            onchange={ctrl.markDirty}
           />
         {/each}
       </SectionCardMuted>
@@ -51,10 +52,11 @@
         bodyId={PREFERENCES_SECTION_BODY_IDS.mediaOutput}
       >
         {#each modalityKeys as key (key)}
-          <SettingToggle
+          <PrefToggleField
+            {ctrl}
+            path={`media.output.${key}`}
             label={modalityLabels[key]}
             bind:checked={ctrl.draft.media.output[key]}
-            onchange={ctrl.markDirty}
           />
         {/each}
       </SectionCardMuted>

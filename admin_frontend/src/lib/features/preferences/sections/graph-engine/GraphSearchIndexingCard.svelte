@@ -1,11 +1,18 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import type { PrefSelectOption } from '$lib/features/preferences/shared/preferences-field-options';
+  import {
+    GRAPH_OBSERVABILITY_LABELS,
+    GRAPH_SEARCH_RECIPE_LABELS,
+    GRAPH_SEARCH_SCOPE_LABELS,
+    GRAPH_TEMPORAL_DEFAULT_LABELS
+  } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import { GRAPH_SEARCH_INDEXING_COPY } from '$lib/features/preferences/shared/preferences-copy';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
-  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
+  import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
+  import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
+  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -19,6 +26,44 @@
     ctrl.draft?.graph.search_scope === 'edges_and_episodes' ||
       ctrl.draft?.graph.search_scope === 'edges_nodes_episodes'
   );
+
+  const searchRecipeOptions = $derived.by((): PrefSelectOption[] => {
+    const mmrDisabled = episodesInScope;
+    return [
+      { value: 'rrf', label: GRAPH_SEARCH_RECIPE_LABELS.rrf },
+      {
+        value: 'mmr',
+        label: `${GRAPH_SEARCH_RECIPE_LABELS.mmr}${mmrDisabled ? ' (n/a with episodes)' : ''}`,
+        disabled: mmrDisabled,
+        title: mmrDisabled
+          ? 'MMR is not supported when scope includes episodes (episodes are BM25-only and EpisodeReranker has no MMR). Switch scope, or pick RRF / Cross-encoder.'
+          : undefined
+      },
+      { value: 'cross_encoder', label: GRAPH_SEARCH_RECIPE_LABELS.cross_encoder }
+    ];
+  });
+
+  const searchScopeOptions = $derived.by((): PrefSelectOption[] => {
+    const mmrRecipe = ctrl.draft?.graph.search_recipe === 'mmr';
+    const episodesDisabledTitle =
+      'Episodes leg is BM25-only and EpisodeReranker has no MMR. Switch recipe to RRF or Cross-encoder, then select this scope.';
+    return [
+      { value: 'edges', label: GRAPH_SEARCH_SCOPE_LABELS.edges },
+      { value: 'edges_and_nodes', label: GRAPH_SEARCH_SCOPE_LABELS.edges_and_nodes },
+      {
+        value: 'edges_and_episodes',
+        label: `${GRAPH_SEARCH_SCOPE_LABELS.edges_and_episodes}${mmrRecipe ? ' (n/a with MMR)' : ''}`,
+        disabled: mmrRecipe,
+        title: mmrRecipe ? episodesDisabledTitle : undefined
+      },
+      {
+        value: 'edges_nodes_episodes',
+        label: `${GRAPH_SEARCH_SCOPE_LABELS.edges_nodes_episodes}${mmrRecipe ? ' (n/a with MMR)' : ''}`,
+        disabled: mmrRecipe,
+        title: mmrRecipe ? episodesDisabledTitle : undefined
+      }
+    ];
+  });
 </script>
 
 {#if ctrl.draft}
@@ -29,134 +74,65 @@
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngine}
   >
     <div class="grid gap-3 md:grid-cols-2">
-      <FormField
+      <PrefSelectField
+        {ctrl}
+        path="graph.temporal_default"
         label="Temporal lens (default)"
         hint={GRAPH_SEARCH_INDEXING_COPY.temporalDefault}
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.temporal_default}
-          onchange={ctrl.markDirty}
-        >
-          <option value="current">Current facts only</option>
-          <option value="all">Include historical</option>
-        </select>
-      </FormField>
-      <FormField
+        options={GRAPH_TEMPORAL_DEFAULT_LABELS}
+        bind:value={ctrl.draft.graph.temporal_default}
+      />
+      <PrefNumberField
+        {ctrl}
+        path="graph.k_hop"
         label="Expansion hops (k)"
         hint={GRAPH_SEARCH_INDEXING_COPY.kHop}
-      >
-        <input
-          type="number"
-          min="1"
-          max="3"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.k_hop}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
+        bind:value={ctrl.draft.graph.k_hop}
+      />
     </div>
     <div class="grid gap-4 md:grid-cols-2">
-      <FormField
+      <PrefSelectField
+        {ctrl}
+        path="graph.search_recipe"
         label="Search recipe"
         hint={GRAPH_SEARCH_INDEXING_COPY.searchRecipe}
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.search_recipe}
-          onchange={ctrl.markDirty}
-        >
-          <option value="rrf">RRF</option>
-          <option
-            value="mmr"
-            disabled={episodesInScope}
-            title={episodesInScope
-              ? 'MMR is not supported when scope includes episodes (episodes are BM25-only and EpisodeReranker has no MMR). Switch scope, or pick RRF / Cross-encoder.'
-              : ''}
-          >
-            MMR{episodesInScope ? ' (n/a with episodes)' : ''}
-          </option>
-          <option value="cross_encoder">Cross-encoder</option>
-        </select>
-      </FormField>
-      <FormField
+        options={searchRecipeOptions}
+        bind:value={ctrl.draft.graph.search_recipe}
+      />
+      <PrefSelectField
+        {ctrl}
+        path="graph.search_scope"
         label="Search scope"
         hint={GRAPH_SEARCH_INDEXING_COPY.searchScope}
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.search_scope}
-          onchange={ctrl.markDirty}
-        >
-          <option value="edges">Edges (facts only)</option>
-          <option value="edges_and_nodes">Edges + Nodes</option>
-          <option
-            value="edges_and_episodes"
-            disabled={ctrl.draft.graph.search_recipe === 'mmr'}
-            title={ctrl.draft.graph.search_recipe === 'mmr'
-              ? 'Episodes leg is BM25-only and EpisodeReranker has no MMR. Switch recipe to RRF or Cross-encoder, then select this scope.'
-              : ''}
-          >
-            Edges + Episodes{ctrl.draft.graph.search_recipe === 'mmr' ? ' (n/a with MMR)' : ''}
-          </option>
-          <option
-            value="edges_nodes_episodes"
-            disabled={ctrl.draft.graph.search_recipe === 'mmr'}
-            title={ctrl.draft.graph.search_recipe === 'mmr'
-              ? 'Episodes leg is BM25-only and EpisodeReranker has no MMR. Switch recipe to RRF or Cross-encoder, then select this scope.'
-              : ''}
-          >
-            Edges + Nodes + Episodes{ctrl.draft.graph.search_recipe === 'mmr'
-              ? ' (n/a with MMR)'
-              : ''}
-          </option>
-        </select>
-      </FormField>
+        options={searchScopeOptions}
+        bind:value={ctrl.draft.graph.search_scope}
+      />
     </div>
     <div class="grid gap-4 md:grid-cols-2">
-      <FormField
+      <PrefNumberField
+        {ctrl}
+        path="graph.sim_min_score"
         label="Candidate similarity floor"
         hint={GRAPH_SEARCH_INDEXING_COPY.simMinScore}
-      >
-        <input
-          type="number"
-          min="0"
-          max="1"
-          step="0.05"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.sim_min_score}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
-      <FormField
+        bind:value={ctrl.draft.graph.sim_min_score}
+      />
+      <PrefNumberField
+        {ctrl}
+        path="graph.query_timeout_s"
         label="Query timeout (seconds)"
         hint={GRAPH_SEARCH_INDEXING_COPY.queryTimeout}
-      >
-        <input
-          type="number"
-          min="0"
-          max="600"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.query_timeout_s}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
+        bind:value={ctrl.draft.graph.query_timeout_s}
+      />
     </div>
-    <FormField
+    <PrefSelectField
+      {ctrl}
+      path="graph.observability"
       label="Graph observability"
       hint={GRAPH_SEARCH_INDEXING_COPY.observability}
+      options={GRAPH_OBSERVABILITY_LABELS}
       class="max-w-md"
-    >
-      <select
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.graph.observability}
-        onchange={ctrl.markDirty}
-      >
-        <option value="off">Off (no graph ledger)</option>
-        <option value="ledger">Ledger (cost + roll-up · default)</option>
-        <option value="trace">Trace (+ deep per-stage sidecars)</option>
-      </select>
-    </FormField>
+      bind:value={ctrl.draft.graph.observability}
+    />
 
     <fieldset class="grid gap-2 border-0 p-0">
       <legend class="font-sans text-sm font-medium">Eval recalled-context format</legend>
@@ -166,36 +142,39 @@
         <code>Maya lives in Berlin [LIVES_IN · event_time: 2022-01-01]</code>. Eval-only; applied
         identically to the answer, judge, and evidence-check renders.
       </p>
-      <SettingToggle
+      <PrefToggleField
+        {ctrl}
+        path="graph.eval.show_event_time"
         label="Show event_time (valid date)"
         bind:checked={ctrl.draft.graph.eval.show_event_time}
-        onchange={ctrl.markDirty}
       >
         {#snippet details()}
           Adds <code>event_time: &lt;valid_at&gt;</code> to each fact. Also governs the
           <span class="font-medium">[date]</span> prefix on recalled messages (episodes).
         {/snippet}
-      </SettingToggle>
-      <SettingToggle
+      </PrefToggleField>
+      <PrefToggleField
+        {ctrl}
+        path="graph.eval.show_expired_at"
         label="Show expired_at (invalid date)"
         bind:checked={ctrl.draft.graph.eval.show_expired_at}
-        onchange={ctrl.markDirty}
       >
         {#snippet details()}
           Adds <code>expired_at: &lt;invalid_at&gt;</code> when a fact has been invalidated —
           the upper bound of its validity window.
         {/snippet}
-      </SettingToggle>
-      <SettingToggle
+      </PrefToggleField>
+      <PrefToggleField
+        {ctrl}
+        path="graph.eval.show_superseded"
         label="Show SUPERSEDED flag"
         bind:checked={ctrl.draft.graph.eval.show_superseded}
-        onchange={ctrl.markDirty}
       >
         {#snippet details()}
           Tags facts that a newer fact has replaced. Only visible when the retrieval temporal
           lens is set to include historical facts.
         {/snippet}
-      </SettingToggle>
+      </PrefToggleField>
     </fieldset>
   </SectionCardMuted>
 {/if}

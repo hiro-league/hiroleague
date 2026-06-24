@@ -1,5 +1,4 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
@@ -8,8 +7,9 @@
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
-  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
+  import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
+  import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
+  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -35,49 +35,45 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.agentChatSettings}
     >
-      <FormField label="Your name" class="max-w-sm">
-        <input
-          type="text"
-          maxlength="120"
-          placeholder="e.g. Misho"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.memory.user_name}
-          disabled={ctrl.busy}
-          oninput={ctrl.markDirty}
-        />
-        <span class="text-xs text-muted-foreground">
-          Anchors your remembered facts to a named person in the memory graph (instead of a generic
-          “User”). <strong>Set this once, early.</strong> Changing it later won’t rename existing
-          memories — it starts a separate identity and fragments recall. Leave blank to use “User”.
-        </span>
-      </FormField>
-
-      <FormField label="Max retained messages" class="max-w-sm">
-        <input
-          type="number"
-          min="1"
-          max="100"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.chat.max_messages}
-          oninput={ctrl.markDirty}
-        />
-        <span class="text-xs text-muted-foreground">
-          Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).
-        </span>
-      </FormField>
-
-      <SettingToggle
-        label="Cite knowledge sources in chat replies"
-        bind:checked={ctrl.draft.chat.cite_sources}
+      <PrefTextField
+        {ctrl}
+        path="memory.user_name"
+        label="Your name"
+        class="max-w-sm"
+        maxlength={120}
+        placeholder="e.g. Misho"
         disabled={ctrl.busy}
-        onchange={ctrl.markDirty}
+        bind:value={ctrl.draft.memory.user_name}
+      />
+      <span class="text-xs text-muted-foreground">
+        Anchors your remembered facts to a named person in the memory graph (instead of a generic
+        “User”). <strong>Set this once, early.</strong> Changing it later won’t rename existing
+        memories — it starts a separate identity and fragments recall. Leave blank to use “User”.
+      </span>
+
+      <PrefNumberField
+        {ctrl}
+        path="chat.max_messages"
+        label="Max retained messages"
+        class="max-w-sm"
+        hint="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval)."
+        bind:value={ctrl.draft.chat.max_messages}
       />
 
-      <SettingToggle
-        label="Enable agent tools in chat"
-        bind:checked={ctrl.draft.chat.tools_enabled}
+      <PrefToggleField
+        {ctrl}
+        path="chat.cite_sources"
+        label="Cite knowledge sources in chat replies"
         disabled={ctrl.busy}
-        onchange={ctrl.markDirty}
+        bind:checked={ctrl.draft.chat.cite_sources}
+      />
+
+      <PrefToggleField
+        {ctrl}
+        path="chat.tools_enabled"
+        label="Enable agent tools in chat"
+        disabled={ctrl.busy}
+        bind:checked={ctrl.draft.chat.tools_enabled}
       />
     </SectionCardMuted>
 
@@ -90,41 +86,40 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.memoryRetrieval}
     >
-      <SettingToggle
+      <PrefToggleField
+        {ctrl}
+        path="memory.enabled"
         label="Enable agent memory"
-        bind:checked={ctrl.draft.memory.enabled}
         disabled={ctrl.busy}
-        onchange={ctrl.markDirty}
+        bind:checked={ctrl.draft.memory.enabled}
       />
 
-      <SettingToggle
+      <PrefToggleField
+        {ctrl}
+        path="memory.extraction.enabled"
         label="Remember new facts after each reply"
+        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+        class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
         bind:checked={ctrl.draft.memory.extraction.enabled}
-        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-        class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
-        onchange={ctrl.markDirty}
       />
 
-      <SettingToggle
+      <PrefToggleField
+        {ctrl}
+        path="memory.search.enabled"
         label="Recall memories before each reply"
-        bind:checked={ctrl.draft.memory.search.enabled}
         disabled={ctrl.busy || !ctrl.draft.memory.enabled}
         class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
-        onchange={ctrl.markDirty}
+        bind:checked={ctrl.draft.memory.search.enabled}
       />
 
-      <FormField label="Memories to recall (top K)" class="max-w-xs">
-        <input
-          type="number"
-          min="1"
-          max="100"
-          step="1"
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.memory.search.top_k}
-          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
+      <PrefNumberField
+        {ctrl}
+        path="memory.search.top_k"
+        label="Memories to recall (top K)"
+        class="max-w-xs"
+        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+        bind:value={ctrl.draft.memory.search.top_k}
+      />
     </SectionCardMuted>
 
     <SectionCardMuted

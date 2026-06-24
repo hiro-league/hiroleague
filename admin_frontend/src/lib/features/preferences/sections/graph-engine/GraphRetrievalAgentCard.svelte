@@ -1,15 +1,13 @@
 <script lang="ts">
   import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import {
     defaultRetrievalAgentLimits,
-    RETRIEVAL_AGENT_LIMIT_BOUNDS,
     validateRetrievalAgentLimits
   } from '$lib/features/preferences/sections/graph-engine/retrieval-agent-limits';
+  import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -45,74 +43,50 @@
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphRetrievalAgent}
   >
     <div class="grid gap-3 md:grid-cols-3">
-      <FormField
+      <PrefNumberField
+        {ctrl}
+        path="graph.eval.retrieval_agent.max_agent_turns"
         label="Max agent turns"
         hint="How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call."
-      >
-        <input
-          type="number"
-          min={RETRIEVAL_AGENT_LIMIT_BOUNDS.max_agent_turns.min}
-          max={RETRIEVAL_AGENT_LIMIT_BOUNDS.max_agent_turns.max}
-          class={ADMIN_SELECT_LG}
-          bind:value={limits.max_agent_turns}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
-      <FormField
+        bind:value={limits.max_agent_turns}
+      />
+      <PrefNumberField
+        {ctrl}
+        path="graph.eval.retrieval_agent.max_parallel_searches"
         label="Max parallel searches"
         hint="Sub-queries per search_memory call — global for eval and chat."
-      >
-        <input
-          type="number"
-          min={RETRIEVAL_AGENT_LIMIT_BOUNDS.max_parallel_searches.min}
-          max={RETRIEVAL_AGENT_LIMIT_BOUNDS.max_parallel_searches.max}
-          class={ADMIN_SELECT_LG}
-          bind:value={limits.max_parallel_searches}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
-      <FormField label="Hops max" hint="Upper bound the tool accepts per search (1–3).">
-        <input
-          type="number"
-          min={RETRIEVAL_AGENT_LIMIT_BOUNDS.hops_max.min}
-          max={RETRIEVAL_AGENT_LIMIT_BOUNDS.hops_max.max}
-          class={ADMIN_SELECT_LG}
-          bind:value={limits.hops_max}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
+        bind:value={limits.max_parallel_searches}
+      />
+      <PrefNumberField
+        {ctrl}
+        path="graph.eval.retrieval_agent.hops_max"
+        label="Hops max"
+        hint="Upper bound the tool accepts per search (1–3)."
+        bind:value={limits.hops_max}
+      />
     </div>
     <div class="grid gap-3 md:grid-cols-3">
-      <FormField label="Limit default" hint="Starting num_results per search_memory call.">
-        <input
-          type="number"
-          min={RETRIEVAL_AGENT_LIMIT_BOUNDS.limit_default.min}
-          max={RETRIEVAL_AGENT_LIMIT_BOUNDS.limit_default.max}
-          class={ADMIN_SELECT_LG}
-          bind:value={limits.limit_default}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
-      <FormField label="Limit min" hint="Soft floor when the tool clamps limit.">
-        <input
-          type="number"
-          min={RETRIEVAL_AGENT_LIMIT_BOUNDS.limit_min.min}
-          max={RETRIEVAL_AGENT_LIMIT_BOUNDS.limit_min.max}
-          class={ADMIN_SELECT_LG}
-          bind:value={limits.limit_min}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
-      <FormField label="Limit max" hint="Soft ceiling when the tool clamps limit.">
-        <input
-          type="number"
-          min={RETRIEVAL_AGENT_LIMIT_BOUNDS.limit_max.min}
-          max={RETRIEVAL_AGENT_LIMIT_BOUNDS.limit_max.max}
-          class={ADMIN_SELECT_LG}
-          bind:value={limits.limit_max}
-          oninput={ctrl.markDirty}
-        />
-      </FormField>
+      <PrefNumberField
+        {ctrl}
+        path="graph.eval.retrieval_agent.limit_default"
+        label="Limit default"
+        hint="Starting num_results per search_memory call."
+        bind:value={limits.limit_default}
+      />
+      <PrefNumberField
+        {ctrl}
+        path="graph.eval.retrieval_agent.limit_min"
+        label="Limit min"
+        hint="Soft floor when the tool clamps limit."
+        bind:value={limits.limit_min}
+      />
+      <PrefNumberField
+        {ctrl}
+        path="graph.eval.retrieval_agent.limit_max"
+        label="Limit max"
+        hint="Soft ceiling when the tool clamps limit."
+        bind:value={limits.limit_max}
+      />
     </div>
 
     {#if evalPrefs}
@@ -121,52 +95,34 @@
         per kind, each element sanitized to one capped line).
       </p>
       <div class="grid gap-3 md:grid-cols-2">
-        <FormField
+        <PrefNumberField
+          {ctrl}
+          path="graph.eval.max_elements_per_kind"
           label="Max elements / kind"
           hint="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump."
-        >
-          <input
-            type="number"
-            min={1}
-            max={200}
-            class={ADMIN_SELECT_LG}
-            bind:value={evalPrefs.max_elements_per_kind}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
-        <FormField label="Max fact chars" hint="Each recalled fact → one sanitized line capped here.">
-          <input
-            type="number"
-            min={40}
-            max={2000}
-            class={ADMIN_SELECT_LG}
-            bind:value={evalPrefs.max_fact_chars}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
-        <FormField label="Max message chars" hint="Per-episode/message text cap (one sanitized line).">
-          <input
-            type="number"
-            min={40}
-            max={2000}
-            class={ADMIN_SELECT_LG}
-            bind:value={evalPrefs.max_episode_chars}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
-        <FormField
+          bind:value={evalPrefs.max_elements_per_kind}
+        />
+        <PrefNumberField
+          {ctrl}
+          path="graph.eval.max_fact_chars"
+          label="Max fact chars"
+          hint="Each recalled fact → one sanitized line capped here."
+          bind:value={evalPrefs.max_fact_chars}
+        />
+        <PrefNumberField
+          {ctrl}
+          path="graph.eval.max_episode_chars"
+          label="Max message chars"
+          hint="Per-episode/message text cap (one sanitized line)."
+          bind:value={evalPrefs.max_episode_chars}
+        />
+        <PrefNumberField
+          {ctrl}
+          path="graph.eval.max_summary_chars"
           label="Max entity summary chars"
           hint="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest."
-        >
-          <input
-            type="number"
-            min={40}
-            max={4000}
-            class={ADMIN_SELECT_LG}
-            bind:value={evalPrefs.max_summary_chars}
-            oninput={ctrl.markDirty}
-          />
-        </FormField>
+          bind:value={evalPrefs.max_summary_chars}
+        />
       </div>
     {/if}
 

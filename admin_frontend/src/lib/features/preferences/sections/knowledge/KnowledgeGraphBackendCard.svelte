@@ -1,10 +1,9 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { KNOWLEDGE_COPY } from '$lib/features/preferences/shared/preferences-copy';
+  import { GRAPH_BACKEND_LABELS } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -20,20 +19,15 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraphBackend}
   >
-    <FormField
+    <PrefSelectField
+      {ctrl}
+      path="graph.backend"
       label="Graph backend"
-      hint={KNOWLEDGE_COPY.graphBackend}
+      hint="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts."
+      options={GRAPH_BACKEND_LABELS}
       class="max-w-md"
-    >
-      <select
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.graph.backend}
-        onchange={ctrl.markDirty}
-      >
-        <option value="off">Off — flat Qdrant only</option>
-        <option value="graphiti">Graphiti — graph facts (recommended)</option>
-      </select>
-    </FormField>
+      bind:value={ctrl.draft.graph.backend}
+    />
     <p class="text-xs text-muted-foreground">
       The graph engine itself — extraction/small models, embedder, search recipe, and reranker —
       is shared with Agent Memory and configured in the <span class="font-medium">Graph Engine</span>
