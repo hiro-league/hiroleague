@@ -1,5 +1,6 @@
 import { createActiveProvidersStore } from '$lib/catalog/active-providers/active-providers-store.svelte';
 import { listGateways, listWorkspaces, type GatewayRow, type WorkspaceRow } from '$lib/api/server';
+import { featureErrorFrom } from '$lib/runtime/feature-errors';
 import { activeProviderDisplayNames, activeProviderOverflowCount } from '../shared/dashboard-derive';
 import { findGatewayLink, type GatewayLink } from '../shared/dashboard-gateway';
 
@@ -37,7 +38,7 @@ export function createDashboardController() {
       workspaces = workspacePayload.data;
       gateways = gatewayPayload.data;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Unable to load dashboard status.';
+      error = featureErrorFrom(err, 'Unable to load dashboard status.');
       workspaces = [];
       gateways = [];
     } finally {

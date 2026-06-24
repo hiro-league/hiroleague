@@ -1,32 +1,31 @@
 <script lang="ts">
   /**
-   * Notice rendered while the main HiroServer HTTP listener is still coming up.
+   * App-level notice while the main HiroServer HTTP listener is unavailable.
    *
-   * Surface this on any panel whose primary action goes through
-   * ``post_invoke_sync`` (today: chat send). The banner subscribes to the
-   * shared ``serverReadiness`` store and disappears the moment readiness
-   * flips to true.
-   *
-   * Mounting the component is enough to keep the poll loop alive — it calls
-   * ``subscribe()`` on mount.
+   * Mount once in AdminShell (which also calls ``serverReadiness.subscribe()``).
+   * Feature panels that gate actions on ``serverReadiness.ready`` do not need their
+   * own copy of this banner.
    */
-  import { onMount } from 'svelte';
   import { Loader2 } from '@lucide/svelte';
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
-    /** Override the default copy. */
-    message?: string;
+    /** Override the default "still starting" copy. */
+    startingMessage?: string;
+    /** Override the default "was up, now retrying" copy. */
+    unavailableMessage?: string;
     class?: string;
   };
 
   let {
-    message = 'HiroServer is still starting up — message send will become available momentarily.',
+    startingMessage = 'HiroServer is still starting up — actions that need the main HTTP listener will become available momentarily.',
+    unavailableMessage = 'HiroServer is temporarily unreachable — retrying automatically.',
     class: className
   }: Props = $props();
 
-  onMount(() => serverReadiness.subscribe());
+  const title = $derived(serverReadiness.everReady ? 'Server unavailable' : 'Server starting…');
+  const message = $derived(serverReadiness.everReady ? unavailableMessage : startingMessage);
 </script>
 
 {#if !serverReadiness.ready}
@@ -40,7 +39,7 @@
   >
     <Loader2 class="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
     <div class="flex-1 leading-snug">
-      <strong class="font-sans">Server starting…</strong>
+      <strong class="font-sans">{title}</strong>
       <span class="block">{message}</span>
     </div>
   </div>

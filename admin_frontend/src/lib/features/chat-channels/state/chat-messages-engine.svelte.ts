@@ -1,6 +1,7 @@
 import { browser } from '$app/environment';
 import { untrack } from 'svelte';
 import { listChatMessages, type ChatHistoryMessage } from '$lib/api/chat-channels';
+import { createPoller } from '$lib/state/create-poller.svelte';
 import {
   cursorFromMessages,
   mergeChatHistoryMessages,
@@ -58,7 +59,7 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
   let pageMessagesActive = $state(false);
   let overlayActive = $state(false);
 
-  let pollTimer: number | null = null;
+  let pollDisposer: (() => void) | null = null;
   let pollTickInFlight = false;
   let optimisticMessagePk = -1;
 
@@ -88,18 +89,23 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
     return pollIntervalForStreak(pollErrorStreak);
   }
 
+  function buildMessagesPoller() {
+    return createPoller(() => pollMessagesOnce(), {
+      intervalMs: currentPollIntervalMs(),
+      pauseWhenHidden: true,
+      immediate: true
+    });
+  }
+
   function startPolling() {
-    if (!browser || pollTimer !== null) return;
-    void pollMessagesOnce();
-    pollTimer = window.setInterval(() => {
-      void pollMessagesOnce();
-    }, currentPollIntervalMs());
+    if (!browser || pollDisposer !== null) return;
+    pollDisposer = buildMessagesPoller().start();
   }
 
   function stopPolling() {
-    if (pollTimer !== null) {
-      window.clearInterval(pollTimer);
-      pollTimer = null;
+    if (pollDisposer !== null) {
+      pollDisposer();
+      pollDisposer = null;
     }
     syncing = false;
   }
@@ -107,9 +113,7 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
   function restartPollingTimer() {
     if (!browser || !liveUpdatesEligible) return;
     stopPolling();
-    pollTimer = window.setInterval(() => {
-      void pollMessagesOnce();
-    }, currentPollIntervalMs());
+    pollDisposer = buildMessagesPoller().start();
   }
 
   function resetPollErrors() {

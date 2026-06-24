@@ -10,23 +10,21 @@
   import type { CatalogProviderRow } from '$lib/api/catalog';
   import ProviderFreeOffersBadge from '$lib/features/catalog/shared/ProviderFreeOffersBadge.svelte';
   import { catalogFreeOffersByProviderId } from '$lib/features/catalog/shared/provider-free-offers';
-  import type { ToastKind } from '$lib/ui/toast-types';
   import ActiveProvidersAddDialog from './active-providers-add-dialog.svelte';
   import ActiveProvidersRemoveDialog from './active-providers-remove-dialog.svelte';
   import type { ActiveProvidersStore } from './active-providers-store.svelte';
 
-  type Notify = (kind: ToastKind, message: string) => void;
-
+  // The store owns its own `notify` (threaded in by the controller), so the panel no longer
+  // forwards one to the mutation methods.
   type Props = {
     store: ActiveProvidersStore;
-    notify: Notify;
     /** Bundled catalog providers — used to show free-offer badges beside configured rows. */
     catalogProviders?: CatalogProviderRow[];
     /** Switch to Models tab with this provider filter (same as Catalog providers tab). */
     onOpenModelsForProvider?: (providerId: string) => void | Promise<void>;
   };
 
-  let { store, notify, catalogProviders = [], onOpenModelsForProvider }: Props = $props();
+  let { store, catalogProviders = [], onOpenModelsForProvider }: Props = $props();
 
   const freeOffersByProviderId = $derived(catalogFreeOffersByProviderId(catalogProviders));
 
@@ -45,10 +43,10 @@
       <Button variant="outline" disabled={store.busy} onclick={() => void store.load()}>
         <RefreshCw size={15} /> Refresh
       </Button>
-      <Button variant="outline" disabled={store.busy} onclick={() => void store.scanEnvironment(notify)}>
+      <Button variant="outline" disabled={store.busy} onclick={() => void store.scanEnvironment()}>
         <Search size={15} /> Scan environment
       </Button>
-      <Button disabled={store.busy} onclick={() => void store.openAddDialog(notify)}>
+      <Button disabled={store.busy} onclick={() => void store.openAddDialog()}>
         <Plus size={15} /> Add provider
       </Button>
     </div>
@@ -188,8 +186,8 @@
   checking={store.checking}
   checkResult={store.checkResult}
   onClose={() => store.closeDialog()}
-  onSubmit={() => void store.submitAddProvider(notify)}
-  onTest={() => void store.testConnection(notify)}
+  onSubmit={() => void store.submitAddProvider()}
+  onTest={() => void store.testConnection()}
   onProviderIdChange={(value) => {
     // Switching provider re-prefills the suggested endpoint for local providers (blank for cloud).
     const next = store.addableProviders.find((provider) => provider.id === value);
@@ -213,5 +211,5 @@
   busy={store.busy}
   provider={store.selectedProvider}
   onClose={() => store.closeDialog()}
-  onSubmit={() => void store.submitRemoveProvider(notify)}
+  onSubmit={() => void store.submitRemoveProvider()}
 />

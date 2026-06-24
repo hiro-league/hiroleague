@@ -32,6 +32,7 @@ import {
   type ScopeMsgOrdinalState
 } from '../shared/logs-ordinal';
 import { createTextSearch } from '$lib/search/create-text-search.svelte';
+import { createListSelection } from '$lib/state/create-resource.svelte';
 
 const INITIAL_TAIL_LINES = 500;
 const LOG_SEARCH_DEBOUNCE_MS = 250;
@@ -79,7 +80,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   let searchBusy = $state(false);
   let clearingLogs = $state(false);
   let initialized = $state(false);
-  let activeRowKey = $state<string | null>(null);
+  const rowSelection = createListSelection<RenderLogRow, string>({ getId: (row) => row._rowKey });
 
   let polling = false;
   let searchFetchGeneration = 0;
@@ -125,9 +126,12 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     return [...filtered].sort((a, b) => compareLogRows(a, b, col) * direction);
   });
 
-  const activeRow = $derived(
-    activeRowKey ? visibleRows.find((row) => row._rowKey === activeRowKey) ?? null : null
-  );
+  const activeRow = $derived(rowSelection.selected);
+
+  $effect(() => {
+    rowSelection.setCandidates(visibleRows);
+    rowSelection.reconcile();
+  });
 
   const scopeMsgChipStripeByRowKey = $derived.by(() => {
     void scopeMsgOrdinalVersion;
@@ -142,17 +146,17 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
 
   $effect(() => {
     if (!prefs.detailPanelOpen || activeRow !== null || visibleRows.length === 0) return;
-    activeRowKey = visibleRows[0]!._rowKey;
+    rowSelection.select(visibleRows[0]!._rowKey);
   });
 
   function setActiveRow(row: RenderLogRow | null) {
-    activeRowKey = row?._rowKey ?? null;
+    rowSelection.select(row?._rowKey ?? null);
   }
 
   function toggleDetailPanel() {
     prefs.detailPanelOpen = !prefs.detailPanelOpen;
     if (prefs.detailPanelOpen && activeRow === null && visibleRows.length > 0) {
-      activeRowKey = visibleRows[0]!._rowKey;
+      rowSelection.select(visibleRows[0]!._rowKey);
     }
   }
 
@@ -264,12 +268,12 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     if (prevRowKey) {
       const logId = logIdFromRowKey(prevRowKey);
       const row = nextRows.find((r) => r.id === logId && rowPassesFilters(r, ctx));
-      activeRowKey = row ? row._rowKey : null;
+      rowSelection.select(row ? row._rowKey : null);
       return;
     }
-    if (nextRows.length > 0 && !activeRowKey) {
+    if (nextRows.length > 0 && !rowSelection.selectedId) {
       const visible = nextRows.filter((r) => rowPassesFilters(r, ctx));
-      if (visible.length > 0) activeRowKey = visible[0]!._rowKey;
+      if (visible.length > 0) rowSelection.select(visible[0]!._rowKey);
     }
   }
 
@@ -282,7 +286,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       await fetchFilteredRows(trimmed);
       return;
     }
-    const prevRowKey = activeRowKey;
+    const prevRowKey = rowSelection.selectedId;
     const payload = await tailLogs(buildTailRequestBody());
     rows = withRenderKeys(payload.data.rows);
     fileOffsets = payload.data.file_offsets;
@@ -306,12 +310,12 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       if (myGen !== searchFetchGeneration) return;
       rows = withRenderKeys(payload.data.rows);
       fileOffsets = {};
-      activeRowKey = rows[0]?._rowKey ?? null;
+      rowSelection.select(rows[0]?._rowKey ?? null);
     } catch (err) {
       if (myGen !== searchFetchGeneration) return;
       error = err instanceof Error ? err.message : 'Search failed.';
       rows = [];
-      activeRowKey = null;
+      rowSelection.select(null);
     } finally {
       if (myGen === searchFetchGeneration) {
         searchBusy = false;
@@ -401,7 +405,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       await clearLogs();
       rows = [];
       fileOffsets = {};
-      activeRowKey = null;
+      rowSelection.select(null);
       await reloadRows();
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to clear logs.';
@@ -413,8 +417,8 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
 
   function moveActiveRow(delta: number, getScroller: () => HTMLElement | null) {
     if (visibleRows.length === 0) return;
-    const currentIndex = activeRowKey
-      ? visibleRows.findIndex((row) => row._rowKey === activeRowKey)
+    const currentIndex = rowSelection.selectedId
+      ? visibleRows.findIndex((row) => row._rowKey === rowSelection.selectedId)
       : -1;
     const nextIndex =
       currentIndex < 0
@@ -517,10 +521,10 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       return initialized;
     },
     get activeRowKey() {
-      return activeRowKey;
+      return rowSelection.selectedId;
     },
     set activeRowKey(v: string | null) {
-      activeRowKey = v;
+      rowSelection.selectedId = v;
     },
     // Getters: object literal shorthand for $derived would freeze initial values (state_referenced_locally).
     get availableSources() {

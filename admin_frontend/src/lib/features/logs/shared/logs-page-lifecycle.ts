@@ -1,3 +1,4 @@
+import { createPoller } from '$lib/state/create-poller.svelte';
 import type { LogsPageController } from '../state/logs-controller.svelte';
 import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 
@@ -25,10 +26,13 @@ export function setupLogsPageRuntime(opts: {
 }) {
   const { prefs, ctrl, urlMsgId } = opts;
 
-  prefs.hydrateFromSession();
   prefs.scopeMsgId = scopeMsgIdAfterHydrate(prefs.scopeMsgId, urlMsgId);
   void ctrl.initialize();
-  const interval = window.setInterval(() => void ctrl.poll(), LOGS_POLL_INTERVAL_MS);
+  const logsPoller = createPoller(() => ctrl.poll(), {
+    intervalMs: LOGS_POLL_INTERVAL_MS,
+    pauseWhenHidden: true
+  });
+  const stopPoll = logsPoller.start();
 
   // Close log details on Escape from anywhere on the page while the panel is open (stable
   // handler reference required for removeEventListener in teardown).
@@ -41,7 +45,7 @@ export function setupLogsPageRuntime(opts: {
 
   return () => {
     window.removeEventListener('keydown', onDocumentKeydown);
-    window.clearInterval(interval);
+    stopPoll();
     ctrl.dispose();
   };
 }

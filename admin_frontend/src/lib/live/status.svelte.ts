@@ -1,6 +1,7 @@
 import { browser } from '$app/environment';
 import { base } from '$app/paths';
 import type { GatewayRow, WorkspaceRow } from '$lib/api/server';
+import { createDegradedDetector } from '$lib/live/degraded.svelte';
 
 export type WorkspaceStatusState = 'stopped' | 'running_disconnected' | 'connected';
 
@@ -21,6 +22,7 @@ function createLiveStatusStore() {
   let payload = $state<AdminStatusPayload | null>(null);
   let connected = $state(false);
   let error = $state<string | null>(null);
+  const degrade = createDegradedDetector();
   let source: EventSource | null = null;
   // Remember the last requested workspace + whether the store is "active" so we can drop the
   // connection while the tab is hidden and transparently re-establish it on refocus.
@@ -52,11 +54,13 @@ function createLiveStatusStore() {
     source.addEventListener('status', (event) => {
       connected = true;
       error = null;
+      degrade.onConnected();
       emit(JSON.parse((event as MessageEvent).data) as AdminStatusPayload);
     });
     source.onerror = () => {
       connected = false;
       error = 'Live status disconnected.';
+      degrade.onDisconnected();
     };
   }
 
@@ -65,6 +69,7 @@ function createLiveStatusStore() {
     source?.close();
     source = null;
     connected = false;
+    degrade.onReset();
   }
 
   if (typeof document !== 'undefined') {
@@ -74,6 +79,7 @@ function createLiveStatusStore() {
         source?.close();
         source = null;
         connected = false;
+        degrade.onReset();
       } else if (active && !source) {
         start(activeWorkspace);
       }
@@ -97,6 +103,9 @@ function createLiveStatusStore() {
     },
     get error() {
       return error;
+    },
+    get degraded() {
+      return degrade.degraded;
     },
     start,
     stop,

@@ -7,17 +7,30 @@ import {
   stopGateway,
   type GatewayRow
 } from '$lib/api/server';
+import { createMutation, createResource } from '$lib/state/create-resource.svelte';
 import type { Notify } from '$lib/ui/toast-types';
 
 export type GatewayDialog = 'create' | 'stop' | 'remove' | null;
 
 export function createGatewayStore(notify: Notify) {
-  let rows = $state<GatewayRow[]>([]);
-  let loading = $state(true);
-  let busy = $state(false);
+  const listResource = createResource(
+    async (): Promise<GatewayRow[]> => {
+      const payload = await listGateways();
+      return payload.data;
+    },
+    {
+      initial: [],
+      initialLoading: true,
+      errorPrefix: 'Failed to load gateways.'
+    }
+  );
+
   let error = $state<string | null>(null);
+  let hydrated = $state(false);
   let dialog = $state<GatewayDialog>(null);
   let selected = $state<GatewayRow | null>(null);
+  let busy = $state(false);
+
   let createForm = $state({
     name: '',
     desktopPublicKey: '',
@@ -29,40 +42,27 @@ export function createGatewayStore(notify: Notify) {
   });
   let removeForm = $state({ purge: false });
 
-  const runningCount = $derived(rows.filter((row) => row.running).length);
+  const runningCount = $derived(listResource.data.filter((row) => row.running).length);
 
   function rowsChanged(nextRows: GatewayRow[]) {
-    return JSON.stringify(rows) !== JSON.stringify(nextRows);
+    return JSON.stringify(listResource.data) !== JSON.stringify(nextRows);
   }
 
   async function load(options: { silent?: boolean } = {}) {
     if (options.silent && busy) return;
+    await listResource.load({ silent: options.silent });
     if (!options.silent) {
-      loading = true;
+      error = listResource.error;
     }
-    try {
-      const payload = await listGateways();
-      if (rowsChanged(payload.data)) {
-        rows = payload.data;
-      }
-      error = null;
-    } catch (err) {
-      if (!options.silent) {
-        error = err instanceof Error ? err.message : 'Failed to load gateways.';
-      }
-    } finally {
-      if (!options.silent) {
-        loading = false;
-      }
-    }
+    hydrated = true;
   }
 
   function applyLiveRows(nextRows: GatewayRow[], nextError: string | null) {
     if (rowsChanged(nextRows)) {
-      rows = nextRows;
+      listResource.replace(nextRows);
     }
     error = nextError;
-    loading = false;
+    hydrated = true;
   }
 
   function closeDialog() {
@@ -102,20 +102,27 @@ export function createGatewayStore(notify: Notify) {
   async function submitCreate() {
     busy = true;
     try {
-      const result = await createGateway({
-        name: createForm.name,
-        desktop_public_key: createForm.desktopPublicKey,
-        port: Number(createForm.port),
-        host: createForm.host.trim() || '0.0.0.0',
-        make_default: createForm.makeDefault,
-        skip_autostart: createForm.skipAutostart,
-        elevated_task: createForm.elevatedTask
-      });
-      notify('success', result.data ?? 'Gateway created.');
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Create gateway failed.');
+      await createMutation(
+        () =>
+          createGateway({
+            name: createForm.name,
+            desktop_public_key: createForm.desktopPublicKey,
+            port: Number(createForm.port),
+            host: createForm.host.trim() || '0.0.0.0',
+            make_default: createForm.makeDefault,
+            skip_autostart: createForm.skipAutostart,
+            elevated_task: createForm.elevatedTask
+          }),
+        {
+          notify,
+          successMsg: (result) => result.data ?? 'Gateway created.',
+          errorPrefix: 'Create gateway failed.',
+          onDone: async () => {
+            resetDialog();
+            await load();
+          }
+        }
+      ).run();
     } finally {
       busy = false;
     }
@@ -124,16 +131,20 @@ export function createGatewayStore(notify: Notify) {
   async function start(row: GatewayRow) {
     busy = true;
     try {
-      const result = await startGateway(row.name);
-      notify(
-        result.data.already_running ? 'warning' : 'success',
-        result.data.already_running
-          ? `Gateway '${row.name}' is already running.`
-          : `Gateway '${row.name}' started (PID ${result.data.pid}).`
-      );
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Start gateway failed.');
+      await createMutation(() => startGateway(row.name), {
+        notify,
+        successMsg: (result) =>
+          result.data.already_running
+            ? undefined
+            : `Gateway '${row.name}' started (PID ${result.data.pid}).`,
+        errorPrefix: 'Start gateway failed.',
+        onDone: async (result) => {
+          if (result.data.already_running) {
+            notify('warning', `Gateway '${row.name}' is already running.`);
+          }
+          await load();
+        }
+      }).run();
     } finally {
       busy = false;
     }
@@ -143,17 +154,19 @@ export function createGatewayStore(notify: Notify) {
     if (!selected) return;
     busy = true;
     try {
-      const result = await stopGateway(selected.name);
-      notify(
-        result.data ? 'success' : 'warning',
-        result.data
-          ? `Gateway '${selected.name}' stopped.`
-          : `Gateway '${selected.name}' was not running.`
-      );
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Stop gateway failed.');
+      await createMutation(() => stopGateway(selected!.name), {
+        notify,
+        successMsg: (result) =>
+          result.data ? `Gateway '${selected!.name}' stopped.` : undefined,
+        errorPrefix: 'Stop gateway failed.',
+        onDone: async (result) => {
+          if (!result.data) {
+            notify('warning', `Gateway '${selected!.name}' was not running.`);
+          }
+          resetDialog();
+          await load();
+        }
+      }).run();
     } finally {
       busy = false;
     }
@@ -163,12 +176,15 @@ export function createGatewayStore(notify: Notify) {
     if (!selected) return;
     busy = true;
     try {
-      const result = await removeGateway(selected.name, removeForm.purge);
-      notify('success', result.data ?? 'Gateway removed.');
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Remove gateway failed.');
+      await createMutation(() => removeGateway(selected!.name, removeForm.purge), {
+        notify,
+        successMsg: (result) => result.data ?? 'Gateway removed.',
+        errorPrefix: 'Remove gateway failed.',
+        onDone: async () => {
+          resetDialog();
+          await load();
+        }
+      }).run();
     } finally {
       busy = false;
     }
@@ -195,10 +211,10 @@ export function createGatewayStore(notify: Notify) {
 
   return {
     get rows() {
-      return rows;
+      return listResource.data;
     },
     get loading() {
-      return loading;
+      return !hydrated;
     },
     get busy() {
       return busy;

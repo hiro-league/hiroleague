@@ -12,7 +12,7 @@
   import KnowledgeIngestPanel from './ingest/KnowledgeIngestPanel.svelte';
   import { KNOWLEDGE_TABS, type KnowledgeTabId } from './shared/knowledge-pure';
   import { createKnowledgePageController } from './state/knowledge-controller.svelte';
-  import { knowledgeEventStream } from './shared/knowledge-event-stream.svelte';
+  import LiveDegradedBanner from '$lib/live/LiveDegradedBanner.svelte';
 
   /** Thin composition root: delegates orchestration to `state/knowledge-controller.svelte.ts`. */
   const tabPrefs = createKnowledgePreferences();
@@ -68,19 +68,7 @@
     <InlineDestructiveAlert message={ctl.error} />
   {/if}
 
-  <!-- Live-events connection health. `degraded` flips on when the single shared SSE
-       stream can't (re)connect within its grace window — most often the browser's
-       per-origin connection budget is exhausted by too many open admin tabs. We say so
-       explicitly rather than letting live updates silently stop / requests freeze. -->
-  {#if knowledgeEventStream.degraded}
-    <div
-      role="status"
-      class="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
-    >
-      Live updates are disconnected — the browser may be out of connections. Close some
-      other Hiro Admin browser tabs and they’ll resume automatically.
-    </div>
-  {/if}
+  <LiveDegradedBanner />
 
   {#if tabPrefs.activeTab === 'ingest'}
     <KnowledgeIngestPanel {ctl} />

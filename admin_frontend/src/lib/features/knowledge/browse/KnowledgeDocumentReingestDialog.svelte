@@ -12,6 +12,7 @@
     KNOWLEDGE_BROWSE_BULK_DIALOG_AFFECTED_LIST,
     KNOWLEDGE_BROWSE_BULK_DIALOG_BODY
   } from '$lib/features/knowledge/shared/knowledge-ui';
+  import { createPoller } from '$lib/state/create-poller.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
 
   type Props = {
@@ -71,19 +72,24 @@
 
   function waitForJobTerminal(jobId: string): Promise<KnowledgeJobData | null> {
     return new Promise((resolve) => {
-      const started = Date.now();
-      const interval = setInterval(() => {
-        const job = ingest.job;
-        if (job?.job_id === jobId && job.status !== 'running') {
-          clearInterval(interval);
-          resolve(job);
-          return;
-        }
-        if (Date.now() - started > 600_000) {
-          clearInterval(interval);
-          resolve(null);
-        }
-      }, 250);
+      const deadline = Date.now() + 600_000;
+      let poller!: ReturnType<typeof createPoller>;
+      poller = createPoller(
+        () => {
+          const job = ingest.job;
+          if (job?.job_id === jobId && job.status !== 'running') {
+            poller.stop();
+            resolve(job);
+            return;
+          }
+          if (Date.now() > deadline) {
+            poller.stop();
+            resolve(null);
+          }
+        },
+        { intervalMs: 250, immediate: true }
+      );
+      poller.start();
     });
   }
 

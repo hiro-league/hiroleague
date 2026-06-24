@@ -164,16 +164,18 @@ export function createMemoriesPageController() {
   });
 
   async function loadChatChannels() {
-    const response = await listChatChannels();
-    if (response.ok && response.data) {
-      chatChannels = response.data;
+    try {
+      chatChannels = (await listChatChannels()).data;
+    } catch {
+      // apiRequest throws on failure; leave the last loaded channels visible.
     }
   }
 
   async function loadCharacters() {
-    const response = await listCharacters();
-    if (response.ok && response.data) {
-      characters = response.data;
+    try {
+      characters = (await listCharacters()).data;
+    } catch {
+      // apiRequest throws on failure; leave the last loaded characters visible.
     }
   }
 
@@ -195,8 +197,11 @@ export function createMemoriesPageController() {
   // knowledge / memory / eval). Failure is non-fatal — the dropdown just stays at its default
   // "All memory" option; the list itself is unaffected.
   async function loadMemoryGroups() {
-    const res = await listKnowledgeGraphGroups();
-    if (res.ok && res.data) memoryGroups = res.data.groups;
+    try {
+      memoryGroups = (await listKnowledgeGraphGroups()).data.groups;
+    } catch {
+      // Non-fatal — dropdown keeps its default when groups fail to load.
+    }
   }
 
   function closeMemoryJsonDialog() {

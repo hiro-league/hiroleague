@@ -6,6 +6,7 @@ import {
   type MetricsUiFrame
 } from '$lib/api/metrics';
 import type { Notify } from '$lib/ui/toast-types';
+import { createPoller } from '$lib/state/create-poller.svelte';
 import { appendMetricsChartPoint, type MetricsChartPoint } from '../shared/metrics-chart';
 import {
   emptyMetricsChartSeries,
@@ -126,10 +127,13 @@ export function createMetricsController(opts: { notify: Notify }) {
     void applyConfig(enabled, intervalValue);
   }
 
+  const metricsPoller = createPoller(() => loadTick(), {
+    intervalMs: POLL_INTERVAL_MS,
+    immediate: true
+  });
+
   function startPolling() {
-    void loadTick(true);
-    const timer = window.setInterval(() => void loadTick(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    return metricsPoller.start();
   }
 
   return {

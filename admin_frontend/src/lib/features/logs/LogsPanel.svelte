@@ -67,25 +67,6 @@
   }
 
   $effect(() => {
-    if (!ctrl.initialized) return;
-    void prefs.paused;
-    void prefs.sortColumn;
-    void prefs.sortDir;
-    void prefs.activeSources;
-    void prefs.activeChannel;
-    void prefs.levelFilter;
-    void prefs.searchText;
-    void prefs.scopeDeviceId;
-    void prefs.scopeMsgId;
-    void prefs.scopeMethod;
-    void prefs.detailPanelOpen;
-    void prefs.controlsCollapsed;
-    void prefs.lastSessionOnly;
-    void prefs.logTimeRange;
-    prefs.persistToSession();
-  });
-
-  $effect(() => {
     ctrl.rows.length;
     ctrl.visibleRows.length;
     prefs.sortColumn;

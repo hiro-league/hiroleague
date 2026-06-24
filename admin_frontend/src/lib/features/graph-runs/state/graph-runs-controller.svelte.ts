@@ -24,6 +24,7 @@ import {
   GRAPH_RUN_NODE_TABLE_FIELDS,
   type GraphLedgerRow
 } from '$lib/api/graph-runs';
+import { createPoller } from '$lib/state/create-poller.svelte';
 import {
   formatAgentElapsedMs,
   formatUsdCostDisplay
@@ -109,7 +110,7 @@ export function createGraphRunsPageController(
   let error = $state('');
 
   let offsets: Record<string, number> = {};
-  let timer: ReturnType<typeof setInterval> | null = null;
+  const runsPoller = createPoller(() => poll(), { intervalMs: 2500, pauseWhenHidden: true });
   let hasMoreRuns = $state(false);
   let historySkipFromEnd = $state(0);
   let loadingMoreRuns = $state(false);
@@ -289,26 +290,32 @@ export function createGraphRunsPageController(
     }
     titleCharacter = null;
     let cancelled = false;
-    void getCharacter(cid).then((res) => {
-      if (cancelled) return;
-      titleCharacter = res.ok && res.data ? res.data : null;
-    });
+    void getCharacter(cid)
+      .then((res) => {
+        if (cancelled) return;
+        titleCharacter = res.data;
+      })
+      .catch(() => {
+        if (!cancelled) titleCharacter = null;
+      });
     return () => {
       cancelled = true;
     };
   });
 
   async function loadChatChannels() {
-    const response = await listChatChannels();
-    if (response.ok && response.data) {
-      chatChannels = response.data;
+    try {
+      chatChannels = (await listChatChannels()).data;
+    } catch {
+      // apiRequest throws on failure; leave the last loaded channels visible.
     }
   }
 
   async function loadCharacters() {
-    const response = await listCharacters();
-    if (response.ok && response.data) {
-      characters = response.data;
+    try {
+      characters = (await listCharacters()).data;
+    } catch {
+      // apiRequest throws on failure; leave the last loaded characters visible.
     }
   }
 
@@ -359,11 +366,12 @@ export function createGraphRunsPageController(
   }
 
   async function resolveLangsmithUrl(runId: string) {
-    const res = await getGraphRunLangsmithUrl(runId);
-    if (activeRunId !== runId) return;
-    if (res.ok && res.data) {
+    try {
+      const res = await getGraphRunLangsmithUrl(runId);
+      if (activeRunId !== runId) return;
       langsmithUrlByRun[runId] = res.data.langsmith_url ?? undefined;
-    } else {
+    } catch {
+      if (activeRunId !== runId) return;
       langsmithUrlByRun[runId] = undefined;
     }
     langsmithUrlByRun = { ...langsmithUrlByRun };
@@ -372,15 +380,15 @@ export function createGraphRunsPageController(
   async function loadRunDetail(runId: string) {
     langsmithUrlByRun[runId] = undefined;
     langsmithUrlByRun = { ...langsmithUrlByRun };
-    const response = await getGraphRun(runId);
-    if (response.ok && response.data) {
+    try {
+      const response = await getGraphRun(runId);
       timelineByRun[runId] = response.data.rows;
       aggregateByRun[runId] = response.data.aggregate ?? null;
       timelineByRun = { ...timelineByRun };
       aggregateByRun = { ...aggregateByRun };
       void resolveLangsmithUrl(runId);
       traces.loadFor(runId);
-    } else if (!response.ok) {
+    } catch {
       timelineByRun[runId] = [];
       aggregateByRun[runId] = null;
       timelineByRun = { ...timelineByRun };
@@ -524,17 +532,12 @@ export function createGraphRunsPageController(
     void loadChatChannels();
     void loadCharacters();
     uiPrefs.initialize();
-    timer = setInterval(poll, 2500);
+    const stopPoll = runsPoller.start();
     window.addEventListener('keydown', onEscapeKey);
-    return dispose;
-  }
-
-  function dispose(): void {
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-    window.removeEventListener('keydown', onEscapeKey);
+    return () => {
+      stopPoll();
+      window.removeEventListener('keydown', onEscapeKey);
+    };
   }
 
   return {
@@ -675,7 +678,6 @@ export function createGraphRunsPageController(
     closeEvalRow,
     RUNS_TAB,
     mount,
-    dispose,
     showRunsOnly,
     openRunTab,
     closeRunTab,

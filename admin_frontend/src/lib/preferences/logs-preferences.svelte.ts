@@ -1,6 +1,7 @@
 import {
   isTrafficClass,
   LOG_LEVELS,
+  LOG_TIME_RANGES,
   TRAFFIC_CLASSES,
   type LogLevel,
   type LogSourceFilter,
@@ -9,234 +10,156 @@ import {
 } from '$lib/api/logs';
 import {
   isLogLevel,
-  isLogSortColumn,
   isLogSourceFilter,
-  isLogTimeRange,
   LOGS_PREF_SESSION_KEY,
   type LogSortColumn,
-  type LogSortDir,
-  type LogsPrefsSnapshot
+  type LogSortDir
 } from '$lib/features/logs/shared/logs-ui';
+import {
+  jsonArrayField,
+  jsonBoolField,
+  jsonEnumField,
+  jsonRecordCodec,
+  jsonStringField,
+  type FieldSchema
+} from '$lib/state/codecs';
+import { createPersistentRecord } from '$lib/state/create-persistent-state.svelte';
+
+/** Session-backed logs UI preferences — all fields required (defaults fill gaps on decode). */
+type LogsPrefs = {
+  paused: boolean;
+  sortColumn: LogSortColumn;
+  sortDir: LogSortDir;
+  activeSources: LogSourceFilter[];
+  activeChannel: string;
+  levelFilter: LogLevel[];
+  searchText: string;
+  scopeDeviceId: string;
+  scopeMsgId: string;
+  scopeMethod: string;
+  trafficClassFilter: TrafficClass[];
+  detailPanelOpen: boolean;
+  controlsCollapsed: boolean;
+  lastSessionOnly: boolean;
+  logTimeRange: LogTimeRange;
+};
+
+const LOGS_PREFS_DEFAULTS: LogsPrefs = {
+  paused: false,
+  sortColumn: 'time',
+  sortDir: 'desc',
+  activeSources: [],
+  activeChannel: '',
+  levelFilter: [...LOG_LEVELS],
+  searchText: '',
+  scopeDeviceId: '',
+  scopeMsgId: '',
+  scopeMethod: '',
+  trafficClassFilter: [...TRAFFIC_CLASSES],
+  detailPanelOpen: false,
+  controlsCollapsed: false,
+  lastSessionOnly: true,
+  logTimeRange: '1h'
+};
+
+const logsPrefsSchema: FieldSchema<LogsPrefs> = {
+  paused: jsonBoolField(LOGS_PREFS_DEFAULTS.paused),
+  sortColumn: jsonEnumField<LogSortColumn>(
+    ['time', 'level', 'source', 'module', 'class', 'subclass', 'message'],
+    LOGS_PREFS_DEFAULTS.sortColumn
+  ),
+  sortDir: jsonEnumField<LogSortDir>(['asc', 'desc'], LOGS_PREFS_DEFAULTS.sortDir),
+  activeSources: jsonArrayField(
+    (item): item is LogSourceFilter => typeof item === 'string' && isLogSourceFilter(item),
+    LOGS_PREFS_DEFAULTS.activeSources
+  ),
+  activeChannel: {
+    decode(raw) {
+      if (typeof raw === 'string') return raw;
+      if (Array.isArray(raw) && raw[0]) return String(raw[0]);
+      return LOGS_PREFS_DEFAULTS.activeChannel;
+    },
+    encode: (v) => v
+  },
+  levelFilter: jsonArrayField(
+    (item): item is LogLevel => typeof item === 'string' && isLogLevel(item),
+    LOGS_PREFS_DEFAULTS.levelFilter
+  ),
+  searchText: jsonStringField(''),
+  scopeDeviceId: jsonStringField(''),
+  scopeMsgId: jsonStringField(''),
+  scopeMethod: jsonStringField(''),
+  trafficClassFilter: jsonArrayField(
+    (item): item is TrafficClass => typeof item === 'string' && isTrafficClass(item),
+    LOGS_PREFS_DEFAULTS.trafficClassFilter
+  ),
+  detailPanelOpen: jsonBoolField(LOGS_PREFS_DEFAULTS.detailPanelOpen),
+  controlsCollapsed: jsonBoolField(LOGS_PREFS_DEFAULTS.controlsCollapsed),
+  lastSessionOnly: jsonBoolField(LOGS_PREFS_DEFAULTS.lastSessionOnly),
+  logTimeRange: jsonEnumField<LogTimeRange>(LOG_TIME_RANGES, LOGS_PREFS_DEFAULTS.logTimeRange)
+};
+
+const logsPrefsCodec = jsonRecordCodec(logsPrefsSchema, LOGS_PREFS_DEFAULTS);
 
 /** Session-backed logs UI preferences (filters, layout toggles). */
 export function createLogsPreferences() {
-  let paused = $state(false);
-  // Table column sort (replaces the old newest/oldest toggle). Default newest-first.
-  let sortColumn = $state<LogSortColumn>('time');
-  let sortDir = $state<LogSortDir>('desc');
-  let activeSources = $state<LogSourceFilter[]>([]);
-  let activeChannel = $state('');
-  let levelFilter = $state<LogLevel[]>([...LOG_LEVELS]);
-  let searchText = $state('');
-  let scopeDeviceId = $state('');
-  let scopeMsgId = $state('');
-  let scopeMethod = $state('');
-  // Traffic facet defaults to all classes selected (= show everything); clearing
-  // hides classed rows. See rowPassesFilters.
-  let trafficClassFilter = $state<TrafficClass[]>([...TRAFFIC_CLASSES]);
-  let detailPanelOpen = $state(false);
-  let controlsCollapsed = $state(false);
-  /** When true, initial tail starts at latest Hiro Server startup line (time range ignored on server). */
-  let lastSessionOnly = $state(true);
-  let logTimeRange = $state<LogTimeRange>('1h');
-
-  function hydrateFromSession() {
-    const raw = sessionStorage.getItem(LOGS_PREF_SESSION_KEY);
-    if (!raw) return;
-    try {
-      const prefs = JSON.parse(raw) as LogsPrefsSnapshot;
-      paused = Boolean(prefs.paused);
-      sortColumn = isLogSortColumn(prefs.sortColumn) ? prefs.sortColumn : 'time';
-      sortDir = prefs.sortDir === 'asc' ? 'asc' : 'desc';
-      activeSources = (prefs.activeSources ?? []).filter(isLogSourceFilter);
-      activeChannel =
-        typeof prefs.activeChannel === 'string'
-          ? prefs.activeChannel
-          : Array.isArray(prefs.activeChannels)
-            ? prefs.activeChannels[0] ?? ''
-            : '';
-      levelFilter = (prefs.levelFilter ?? [...LOG_LEVELS]).filter(isLogLevel);
-      searchText = String(prefs.searchText ?? '');
-      scopeDeviceId = String(prefs.scopeDeviceId ?? '');
-      scopeMsgId = String(prefs.scopeMsgId ?? '');
-      scopeMethod = String(prefs.scopeMethod ?? '');
-      trafficClassFilter = Array.isArray(prefs.trafficClassFilter)
-        ? prefs.trafficClassFilter.filter(isTrafficClass)
-        : [...TRAFFIC_CLASSES];
-      detailPanelOpen = Boolean(prefs.detailPanelOpen);
-      controlsCollapsed = Boolean(prefs.controlsCollapsed);
-      lastSessionOnly =
-        typeof prefs.lastSessionOnly === 'boolean' ? prefs.lastSessionOnly : true;
-      const tr = prefs.logTimeRange;
-      logTimeRange = typeof tr === 'string' && isLogTimeRange(tr) ? tr : '1h';
-    } catch {
-      sessionStorage.removeItem(LOGS_PREF_SESSION_KEY);
-    }
-  }
-
-  function persistToSession() {
-    const snapshot: LogsPrefsSnapshot = {
-      paused,
-      sortColumn,
-      sortDir,
-      activeSources,
-      activeChannel,
-      levelFilter,
-      searchText,
-      scopeDeviceId,
-      scopeMsgId,
-      scopeMethod,
-      trafficClassFilter,
-      detailPanelOpen,
-      controlsCollapsed,
-      lastSessionOnly,
-      logTimeRange
-    };
-    sessionStorage.setItem(LOGS_PREF_SESSION_KEY, JSON.stringify(snapshot));
-  }
+  const prefs = createPersistentRecord({
+    key: LOGS_PREF_SESSION_KEY,
+    tier: 'session',
+    codec: logsPrefsCodec,
+    defaults: LOGS_PREFS_DEFAULTS
+  });
 
   function sourceIsActive(source: LogSourceFilter) {
-    return activeSources.includes(source);
+    return prefs.activeSources.includes(source);
   }
 
   function levelIsActive(level: LogLevel) {
-    return levelFilter.includes(level);
+    return prefs.levelFilter.includes(level);
   }
 
   function toggleSource(source: LogSourceFilter) {
-    activeSources = sourceIsActive(source)
-      ? activeSources.filter((item) => item !== source)
-      : [...activeSources, source];
+    prefs.activeSources = sourceIsActive(source)
+      ? prefs.activeSources.filter((item) => item !== source)
+      : [...prefs.activeSources, source];
   }
 
   function toggleLevel(level: LogLevel) {
-    levelFilter = levelIsActive(level)
-      ? levelFilter.filter((item) => item !== level)
-      : [...levelFilter, level];
+    prefs.levelFilter = levelIsActive(level)
+      ? prefs.levelFilter.filter((item) => item !== level)
+      : [...prefs.levelFilter, level];
   }
 
   function trafficClassIsActive(tc: TrafficClass) {
-    return trafficClassFilter.includes(tc);
+    return prefs.trafficClassFilter.includes(tc);
   }
 
   function toggleTrafficClass(tc: TrafficClass) {
-    trafficClassFilter = trafficClassIsActive(tc)
-      ? trafficClassFilter.filter((item) => item !== tc)
-      : [...trafficClassFilter, tc];
+    prefs.trafficClassFilter = trafficClassIsActive(tc)
+      ? prefs.trafficClassFilter.filter((item) => item !== tc)
+      : [...prefs.trafficClassFilter, tc];
   }
 
   /** Click a column header: same column flips direction, new column starts at a
    * sensible default (time descending = newest first, text columns ascending). */
   function toggleSortColumn(col: LogSortColumn) {
-    if (sortColumn === col) {
-      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    if (prefs.sortColumn === col) {
+      prefs.sortDir = prefs.sortDir === 'asc' ? 'desc' : 'asc';
     } else {
-      sortColumn = col;
-      sortDir = col === 'time' ? 'desc' : 'asc';
+      prefs.sortColumn = col;
+      prefs.sortDir = col === 'time' ? 'desc' : 'asc';
     }
   }
 
   function togglePause() {
-    paused = !paused;
+    prefs.paused = !prefs.paused;
   }
 
   function toggleControlsCollapsed() {
-    controlsCollapsed = !controlsCollapsed;
+    prefs.controlsCollapsed = !prefs.controlsCollapsed;
   }
 
-  return {
-    get paused() {
-      return paused;
-    },
-    set paused(v: boolean) {
-      paused = v;
-    },
-    get sortColumn() {
-      return sortColumn;
-    },
-    set sortColumn(v: LogSortColumn) {
-      sortColumn = v;
-    },
-    get sortDir() {
-      return sortDir;
-    },
-    set sortDir(v: LogSortDir) {
-      sortDir = v;
-    },
-    get activeSources() {
-      return activeSources;
-    },
-    set activeSources(v: LogSourceFilter[]) {
-      activeSources = v;
-    },
-    get activeChannel() {
-      return activeChannel;
-    },
-    set activeChannel(v: string) {
-      activeChannel = v;
-    },
-    get levelFilter() {
-      return levelFilter;
-    },
-    set levelFilter(v: LogLevel[]) {
-      levelFilter = v;
-    },
-    get searchText() {
-      return searchText;
-    },
-    set searchText(v: string) {
-      searchText = v;
-    },
-    get scopeDeviceId() {
-      return scopeDeviceId;
-    },
-    set scopeDeviceId(v: string) {
-      scopeDeviceId = v;
-    },
-    get scopeMsgId() {
-      return scopeMsgId;
-    },
-    set scopeMsgId(v: string) {
-      scopeMsgId = v;
-    },
-    get scopeMethod() {
-      return scopeMethod;
-    },
-    set scopeMethod(v: string) {
-      scopeMethod = v;
-    },
-    get trafficClassFilter() {
-      return trafficClassFilter;
-    },
-    set trafficClassFilter(v: TrafficClass[]) {
-      trafficClassFilter = v;
-    },
-    get detailPanelOpen() {
-      return detailPanelOpen;
-    },
-    set detailPanelOpen(v: boolean) {
-      detailPanelOpen = v;
-    },
-    get controlsCollapsed() {
-      return controlsCollapsed;
-    },
-    set controlsCollapsed(v: boolean) {
-      controlsCollapsed = v;
-    },
-    get lastSessionOnly() {
-      return lastSessionOnly;
-    },
-    set lastSessionOnly(v: boolean) {
-      lastSessionOnly = v;
-    },
-    get logTimeRange() {
-      return logTimeRange;
-    },
-    set logTimeRange(v: LogTimeRange) {
-      logTimeRange = v;
-    },
-    hydrateFromSession,
-    persistToSession,
+  return Object.assign(prefs, {
     sourceIsActive,
     levelIsActive,
     trafficClassIsActive,
@@ -246,7 +169,7 @@ export function createLogsPreferences() {
     toggleSortColumn,
     togglePause,
     toggleControlsCollapsed
-  };
+  });
 }
 
 export type LogsPreferences = ReturnType<typeof createLogsPreferences>;

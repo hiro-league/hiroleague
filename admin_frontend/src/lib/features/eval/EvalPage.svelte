@@ -7,7 +7,7 @@
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
-  import { knowledgeEventStream } from '$lib/features/knowledge/shared/knowledge-event-stream.svelte';
+  import LiveDegradedBanner from '$lib/live/LiveDegradedBanner.svelte';
   import { createEvalPreferences } from '$lib/preferences/eval-preferences.svelte';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
@@ -88,19 +88,7 @@
     <InlineDestructiveAlert message={error} />
   {/if}
 
-  <!-- Live-events connection health. `degraded` flips on when the single shared SSE
-       stream can't (re)connect within its grace window — most often the browser's
-       per-origin connection budget is exhausted by too many open admin tabs. We say so
-       explicitly rather than letting live updates silently stop / requests freeze. -->
-  {#if knowledgeEventStream.degraded}
-    <div
-      role="status"
-      class="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
-    >
-      Live updates are disconnected — the browser may be out of connections. Close some
-      other Hiro Admin browser tabs and they’ll resume automatically.
-    </div>
-  {/if}
+  <LiveDegradedBanner />
 
   <EvalPanel {eval_} notify={toasts.notify} />
 </AdminPageHeader>

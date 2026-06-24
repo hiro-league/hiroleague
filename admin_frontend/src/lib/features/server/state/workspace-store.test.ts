@@ -17,6 +17,13 @@ vi.mock('$lib/api/server', () => ({
   openPath: vi.fn()
 }));
 
+vi.mock('$lib/runtime/feature-errors', () => ({
+  featureErrorFrom: (err: unknown, fallback = 'Request failed.') => {
+    if (err instanceof Error) return err.message;
+    return fallback;
+  }
+}));
+
 import * as api from '$lib/api/server';
 import { createWorkspaceStore } from './workspace-store.svelte';
 

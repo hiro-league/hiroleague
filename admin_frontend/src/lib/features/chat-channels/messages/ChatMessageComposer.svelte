@@ -4,9 +4,9 @@
   import Button from '$lib/components/ui/button.svelte';
   import ChatComposerOptions from '$lib/features/chat-channels/messages/ChatComposerOptions.svelte';
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
-  import ServerStartingBanner from '$lib/runtime/ServerStartingBanner.svelte';
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
   import { ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
+  import { createPoller } from '$lib/state/create-poller.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -63,13 +63,16 @@
 
   /** Tick while recording so elapsed seconds update without touching controller state. */
   let recordingNowPerf = $state(0);
+  const recordingElapsedPoller = createPoller(
+    () => {
+      recordingNowPerf = performance.now();
+    },
+    { intervalMs: 250, immediate: true }
+  );
   $effect(() => {
     if (ctrl.recordingStartedAt === null) return;
     recordingNowPerf = performance.now();
-    const id = window.setInterval(() => {
-      recordingNowPerf = performance.now();
-    }, 250);
-    return () => window.clearInterval(id);
+    return recordingElapsedPoller.start();
   });
 
   const recordingElapsedLabel = $derived.by(() => {
@@ -82,7 +85,6 @@
 </script>
 
 <div class={cn('shrink-0 font-sans text-sm', dense ? 'space-y-1.5' : 'space-y-2 border-border border-t pt-3')}>
-  <ServerStartingBanner />
   {#if !compactComposer}
     <ChatComposerOptions {ctrl} onPickQuickPrompt={applyQuickPrompt} />
   {/if}

@@ -191,103 +191,146 @@ const num = (v: unknown, def: number): number => {
   return Number.isFinite(n) ? n : def;
 };
 
-/** Read persisted options, clamped to valid ranges; defaults when absent/corrupt. */
-export function readGraphOptions(): GraphOptions {
-  const raw = readLocalString(PREF_KEYS.knowledgeGraphOptions);
+/** Parse + clamp a stored graph-options JSON blob; defaults when absent/corrupt. */
+export function decodeGraphOptionsRaw(raw: string | null): GraphOptions {
   if (!raw) return { ...GRAPH_OPTION_DEFAULTS };
   try {
-    const p = JSON.parse(raw) as Partial<GraphOptions>;
-    return {
-      linkStrength: clamp(num(p.linkStrength, GRAPH_OPTION_DEFAULTS.linkStrength), 0, 1),
-      linkDistance: clamp(num(p.linkDistance, GRAPH_OPTION_DEFAULTS.linkDistance), 20, 300),
-      centerStrength: clamp(
-        num(p.centerStrength, GRAPH_OPTION_DEFAULTS.centerStrength),
-        CENTER_STRENGTH_MIN,
-        CENTER_STRENGTH_MAX
-      ),
-      radialRing: clamp(
-        num(p.radialRing, GRAPH_OPTION_DEFAULTS.radialRing),
-        RADIAL_RING_MIN,
-        RADIAL_RING_MAX
-      ),
-      curveAmount: clamp(num(p.curveAmount, GRAPH_OPTION_DEFAULTS.curveAmount), 0, 1),
-      chargeStrength: clamp(
-        num(p.chargeStrength, GRAPH_OPTION_DEFAULTS.chargeStrength),
-        CHARGE_STRENGTH_MIN,
-        CHARGE_STRENGTH_MAX
-      ),
-      hubSeparation: clamp(
-        num(p.hubSeparation, GRAPH_OPTION_DEFAULTS.hubSeparation),
-        HUB_SEPARATION_MIN,
-        HUB_SEPARATION_MAX
-      ),
-      hubSpacing: clamp(
-        num(p.hubSpacing, GRAPH_OPTION_DEFAULTS.hubSpacing),
-        HUB_SPACING_MIN,
-        HUB_SPACING_MAX
-      ),
-      collideScale: clamp(
-        num(p.collideScale, GRAPH_OPTION_DEFAULTS.collideScale),
-        COLLIDE_SCALE_MIN,
-        COLLIDE_SCALE_MAX
-      ),
-      nodeFadeStart: clamp(
-        num(p.nodeFadeStart, GRAPH_OPTION_DEFAULTS.nodeFadeStart),
-        NODE_FADE_MIN,
-        NODE_FADE_MAX
-      ),
-      nodeFadeFull: clamp(
-        num(p.nodeFadeFull, GRAPH_OPTION_DEFAULTS.nodeFadeFull),
-        NODE_FADE_MIN,
-        NODE_FADE_MAX
-      ),
-      nodeRevealLo: clamp(
-        num(p.nodeRevealLo, GRAPH_OPTION_DEFAULTS.nodeRevealLo),
-        NODE_REVEAL_ZOOM_MIN,
-        NODE_REVEAL_ZOOM_MAX
-      ),
-      nodeRevealHi: clamp(
-        num(p.nodeRevealHi, GRAPH_OPTION_DEFAULTS.nodeRevealHi),
-        NODE_REVEAL_ZOOM_MIN,
-        NODE_REVEAL_ZOOM_MAX
-      ),
-      nodeSizeMin: clamp(
-        num(p.nodeSizeMin, GRAPH_OPTION_DEFAULTS.nodeSizeMin),
-        NODE_SIZE_BOUND_MIN,
-        NODE_SIZE_BOUND_MAX
-      ),
-      nodeSizeMax: clamp(
-        num(p.nodeSizeMax, GRAPH_OPTION_DEFAULTS.nodeSizeMax),
-        NODE_SIZE_BOUND_MIN,
-        NODE_SIZE_BOUND_MAX
-      ),
-      searchFocusMode: SEARCH_FOCUS_MODES.includes(p.searchFocusMode as SearchFocusMode)
-        ? (p.searchFocusMode as SearchFocusMode)
-        : GRAPH_OPTION_DEFAULTS.searchFocusMode,
-      selectionFocusMode: SELECTION_FOCUS_MODES.includes(p.selectionFocusMode as SelectionFocusMode)
-        ? (p.selectionFocusMode as SelectionFocusMode)
-        : GRAPH_OPTION_DEFAULTS.selectionFocusMode,
-      edgeZoomMin: clamp(num(p.edgeZoomMin, GRAPH_OPTION_DEFAULTS.edgeZoomMin), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
-      edgeZoomMax: clamp(num(p.edgeZoomMax, GRAPH_OPTION_DEFAULTS.edgeZoomMax), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
-      edgeFontMin: clamp(num(p.edgeFontMin, GRAPH_OPTION_DEFAULTS.edgeFontMin), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
-      edgeFontMax: clamp(num(p.edgeFontMax, GRAPH_OPTION_DEFAULTS.edgeFontMax), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
-      nodeZoomMin: clamp(num(p.nodeZoomMin, GRAPH_OPTION_DEFAULTS.nodeZoomMin), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
-      nodeZoomMax: clamp(num(p.nodeZoomMax, GRAPH_OPTION_DEFAULTS.nodeZoomMax), LABEL_ZOOM_BOUND_MIN, LABEL_ZOOM_BOUND_MAX),
-      nodeFontMin: clamp(num(p.nodeFontMin, GRAPH_OPTION_DEFAULTS.nodeFontMin), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
-      nodeFontMax: clamp(num(p.nodeFontMax, GRAPH_OPTION_DEFAULTS.nodeFontMax), LABEL_FONT_BOUND_MIN, LABEL_FONT_BOUND_MAX),
-      edgeLabelMax: clamp(
-        Math.round(num(p.edgeLabelMax, GRAPH_OPTION_DEFAULTS.edgeLabelMax)),
-        EDGE_LABEL_MAX_MIN,
-        EDGE_LABEL_MAX_MAX
-      )
-    };
+    return clampGraphOptionsPartial(JSON.parse(raw) as Partial<GraphOptions>);
   } catch {
     return { ...GRAPH_OPTION_DEFAULTS };
   }
 }
 
+export function encodeGraphOptions(opts: GraphOptions): string {
+  return JSON.stringify(opts);
+}
+
+function clampGraphOptionsPartial(p: Partial<GraphOptions>): GraphOptions {
+  return {
+    linkStrength: clamp(num(p.linkStrength, GRAPH_OPTION_DEFAULTS.linkStrength), 0, 1),
+    linkDistance: clamp(num(p.linkDistance, GRAPH_OPTION_DEFAULTS.linkDistance), 20, 300),
+    centerStrength: clamp(
+      num(p.centerStrength, GRAPH_OPTION_DEFAULTS.centerStrength),
+      CENTER_STRENGTH_MIN,
+      CENTER_STRENGTH_MAX
+    ),
+    radialRing: clamp(
+      num(p.radialRing, GRAPH_OPTION_DEFAULTS.radialRing),
+      RADIAL_RING_MIN,
+      RADIAL_RING_MAX
+    ),
+    curveAmount: clamp(num(p.curveAmount, GRAPH_OPTION_DEFAULTS.curveAmount), 0, 1),
+    chargeStrength: clamp(
+      num(p.chargeStrength, GRAPH_OPTION_DEFAULTS.chargeStrength),
+      CHARGE_STRENGTH_MIN,
+      CHARGE_STRENGTH_MAX
+    ),
+    hubSeparation: clamp(
+      num(p.hubSeparation, GRAPH_OPTION_DEFAULTS.hubSeparation),
+      HUB_SEPARATION_MIN,
+      HUB_SEPARATION_MAX
+    ),
+    hubSpacing: clamp(
+      num(p.hubSpacing, GRAPH_OPTION_DEFAULTS.hubSpacing),
+      HUB_SPACING_MIN,
+      HUB_SPACING_MAX
+    ),
+    collideScale: clamp(
+      num(p.collideScale, GRAPH_OPTION_DEFAULTS.collideScale),
+      COLLIDE_SCALE_MIN,
+      COLLIDE_SCALE_MAX
+    ),
+    nodeFadeStart: clamp(
+      num(p.nodeFadeStart, GRAPH_OPTION_DEFAULTS.nodeFadeStart),
+      NODE_FADE_MIN,
+      NODE_FADE_MAX
+    ),
+    nodeFadeFull: clamp(
+      num(p.nodeFadeFull, GRAPH_OPTION_DEFAULTS.nodeFadeFull),
+      NODE_FADE_MIN,
+      NODE_FADE_MAX
+    ),
+    nodeRevealLo: clamp(
+      num(p.nodeRevealLo, GRAPH_OPTION_DEFAULTS.nodeRevealLo),
+      NODE_REVEAL_ZOOM_MIN,
+      NODE_REVEAL_ZOOM_MAX
+    ),
+    nodeRevealHi: clamp(
+      num(p.nodeRevealHi, GRAPH_OPTION_DEFAULTS.nodeRevealHi),
+      NODE_REVEAL_ZOOM_MIN,
+      NODE_REVEAL_ZOOM_MAX
+    ),
+    nodeSizeMin: clamp(
+      num(p.nodeSizeMin, GRAPH_OPTION_DEFAULTS.nodeSizeMin),
+      NODE_SIZE_BOUND_MIN,
+      NODE_SIZE_BOUND_MAX
+    ),
+    nodeSizeMax: clamp(
+      num(p.nodeSizeMax, GRAPH_OPTION_DEFAULTS.nodeSizeMax),
+      NODE_SIZE_BOUND_MIN,
+      NODE_SIZE_BOUND_MAX
+    ),
+    searchFocusMode: SEARCH_FOCUS_MODES.includes(p.searchFocusMode as SearchFocusMode)
+      ? (p.searchFocusMode as SearchFocusMode)
+      : GRAPH_OPTION_DEFAULTS.searchFocusMode,
+    selectionFocusMode: SELECTION_FOCUS_MODES.includes(p.selectionFocusMode as SelectionFocusMode)
+      ? (p.selectionFocusMode as SelectionFocusMode)
+      : GRAPH_OPTION_DEFAULTS.selectionFocusMode,
+    edgeZoomMin: clamp(
+      num(p.edgeZoomMin, GRAPH_OPTION_DEFAULTS.edgeZoomMin),
+      LABEL_ZOOM_BOUND_MIN,
+      LABEL_ZOOM_BOUND_MAX
+    ),
+    edgeZoomMax: clamp(
+      num(p.edgeZoomMax, GRAPH_OPTION_DEFAULTS.edgeZoomMax),
+      LABEL_ZOOM_BOUND_MIN,
+      LABEL_ZOOM_BOUND_MAX
+    ),
+    edgeFontMin: clamp(
+      num(p.edgeFontMin, GRAPH_OPTION_DEFAULTS.edgeFontMin),
+      LABEL_FONT_BOUND_MIN,
+      LABEL_FONT_BOUND_MAX
+    ),
+    edgeFontMax: clamp(
+      num(p.edgeFontMax, GRAPH_OPTION_DEFAULTS.edgeFontMax),
+      LABEL_FONT_BOUND_MIN,
+      LABEL_FONT_BOUND_MAX
+    ),
+    nodeZoomMin: clamp(
+      num(p.nodeZoomMin, GRAPH_OPTION_DEFAULTS.nodeZoomMin),
+      LABEL_ZOOM_BOUND_MIN,
+      LABEL_ZOOM_BOUND_MAX
+    ),
+    nodeZoomMax: clamp(
+      num(p.nodeZoomMax, GRAPH_OPTION_DEFAULTS.nodeZoomMax),
+      LABEL_ZOOM_BOUND_MIN,
+      LABEL_ZOOM_BOUND_MAX
+    ),
+    nodeFontMin: clamp(
+      num(p.nodeFontMin, GRAPH_OPTION_DEFAULTS.nodeFontMin),
+      LABEL_FONT_BOUND_MIN,
+      LABEL_FONT_BOUND_MAX
+    ),
+    nodeFontMax: clamp(
+      num(p.nodeFontMax, GRAPH_OPTION_DEFAULTS.nodeFontMax),
+      LABEL_FONT_BOUND_MIN,
+      LABEL_FONT_BOUND_MAX
+    ),
+    edgeLabelMax: clamp(
+      Math.round(num(p.edgeLabelMax, GRAPH_OPTION_DEFAULTS.edgeLabelMax)),
+      EDGE_LABEL_MAX_MIN,
+      EDGE_LABEL_MAX_MAX
+    )
+  };
+}
+
+/** Read persisted options, clamped to valid ranges; defaults when absent/corrupt. */
+export function readGraphOptions(): GraphOptions {
+  return decodeGraphOptionsRaw(readLocalString(PREF_KEYS.knowledgeGraphOptions));
+}
+
 export function writeGraphOptions(opts: GraphOptions): void {
-  writeLocalString(PREF_KEYS.knowledgeGraphOptions, JSON.stringify(opts));
+  writeLocalString(PREF_KEYS.knowledgeGraphOptions, encodeGraphOptions(opts));
 }
 
 // ── Graph-options section collapse state ───────────────────────────────────

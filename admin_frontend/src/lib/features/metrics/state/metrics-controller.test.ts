@@ -149,7 +149,8 @@ describe('createMetricsController — polling lifecycle', () => {
   it('startPolling returns an interval teardown function', () => {
     const clearInterval = vi.fn();
     const setInterval = vi.fn(() => 42);
-    vi.stubGlobal('window', { setInterval, clearInterval });
+    vi.stubGlobal('setInterval', setInterval);
+    vi.stubGlobal('clearInterval', clearInterval);
 
     const { ctrl } = setup();
     const teardown = ctrl.startPolling();

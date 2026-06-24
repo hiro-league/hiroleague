@@ -22,13 +22,11 @@
  */
 import { base } from '$app/paths';
 import { PREF_KEYS } from '$lib/preferences/keys';
+import { createDegradedDetector } from '$lib/live/degraded.svelte';
 
 type Handler = (event: MessageEvent) => void;
 
 const KNOWLEDGE_EVENTS_PATH = '/api/knowledge/events';
-// Grace period before we call the stream "degraded": EventSource auto-reconnects on
-// transient blips, so we only warn if it stays down past this window.
-const DEGRADE_GRACE_MS = 8000;
 
 function currentWorkspace(): string | null {
   return typeof localStorage === 'undefined'
@@ -49,10 +47,7 @@ function createKnowledgeEventStream() {
   const domListeners = new Map<string, (e: MessageEvent) => void>();
 
   let connected = $state(false);
-  // True once the stream has failed to (re)connect for DEGRADE_GRACE_MS — surfaced to the
-  // UI as a "live updates unavailable, likely too many open tabs" warning.
-  let degraded = $state(false);
-  let degradeTimer: ReturnType<typeof setTimeout> | null = null;
+  const degrade = createDegradedDetector();
 
   function totalHandlers(): number {
     let n = 0;
@@ -72,13 +67,6 @@ function createKnowledgeEventStream() {
     source.addEventListener(type, fn);
   }
 
-  function clearDegradeTimer(): void {
-    if (degradeTimer) {
-      clearTimeout(degradeTimer);
-      degradeTimer = null;
-    }
-  }
-
   function open(): void {
     if (typeof EventSource === 'undefined') return; // SSR guard
     // A backgrounded tab must NOT hold a connection — browsers cap HTTP/1.1 at ~6 per
@@ -93,20 +81,11 @@ function createKnowledgeEventStream() {
     for (const type of handlers.keys()) attachDomListener(type);
     src.onopen = () => {
       connected = true;
-      degraded = false;
-      clearDegradeTimer();
+      degrade.onConnected();
     };
     src.onerror = () => {
       connected = false;
-      // EventSource auto-reconnects; only warn if it stays down past the grace window.
-      // A persistent failure here most often means the browser's per-origin HTTP/1.1
-      // connection cap is exhausted (too many admin tabs / streams open).
-      if (!degradeTimer) {
-        degradeTimer = setTimeout(() => {
-          degradeTimer = null;
-          if (!connected) degraded = true;
-        }, DEGRADE_GRACE_MS);
-      }
+      degrade.onDisconnected();
     };
   }
 
@@ -115,8 +94,7 @@ function createKnowledgeEventStream() {
     source = null;
     domListeners.clear();
     connected = false;
-    clearDegradeTimer();
-    degraded = false;
+    degrade.onReset();
   }
 
   function ensureOpen(): void {
@@ -173,7 +151,7 @@ function createKnowledgeEventStream() {
       return connected;
     },
     get degraded() {
-      return degraded;
+      return degrade.degraded;
     }
   };
 }

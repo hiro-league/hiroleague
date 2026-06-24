@@ -55,7 +55,6 @@
   {#if ctrl.activeTab === 'active-providers'}
     <ActiveProvidersPanel
       store={ctrl.activeProvidersStore}
-      notify={toasts.notify}
       catalogProviders={ctrl.providers}
       onOpenModelsForProvider={(providerId) => void ctrl.openModelsForProvider(providerId)}
     />

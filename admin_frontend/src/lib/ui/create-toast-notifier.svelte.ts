@@ -14,6 +14,7 @@
  * `docs/admin-frontend-refactor-plan.md` §3.1 and §4 (Phase 2).
  */
 import type { ToastKind, ToastMessage } from './toast-types';
+import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
 
 const DEFAULT_TIMEOUT_MS = 4500;
 
@@ -36,6 +37,8 @@ export function createToastNotifier(timeoutMs: number = DEFAULT_TIMEOUT_MS): Toa
   }
 
   function notify(kind: ToastKind, message: string) {
+    // Shell banner owns server-outage messaging — skip redundant error toasts.
+    if (kind === 'error' && !serverReadiness.ready) return;
     if (handle) {
       window.clearTimeout(handle);
     }

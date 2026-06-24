@@ -29,6 +29,7 @@
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import Button from '$lib/components/ui/button.svelte';
   import { liveStatus, type WorkspaceStatusState } from '$lib/live/status.svelte';
+  import { knowledgeEventStream } from '$lib/features/knowledge/shared/knowledge-event-stream.svelte';
   import { createShellPreferences } from '$lib/preferences/shell-preferences.svelte';
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
@@ -38,6 +39,9 @@
   import GlobalChatOverlay from '$lib/features/chat-channels/overlay/GlobalChatOverlay.svelte';
   import ChatChannelClearMessagesModal from '$lib/features/chat-channels/modals/ChatChannelClearMessagesModal.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { globalToast } from '$lib/ui/global-toast.svelte';
+  import ServerStartingBanner from '$lib/runtime/ServerStartingBanner.svelte';
+  import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
 
   let {
     activePath = 'dashboard',
@@ -50,11 +54,19 @@
   // global overlay both reuse this exact instance via getChatEngine().
   const chatEngine = getChatEngine();
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
+  /** Tracks SSE connect/disconnect so we can nudge the readiness poller on drop. */
+  let liveWasConnected = false;
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
   const headerWorkspaceName = $derived(adminConfig.workspace_name ?? 'unknown');
   const headerStatus = $derived(liveStatus.payload?.workspace_status ?? 'stopped');
   const headerStatusLabel = $derived(
     liveStatus.payload?.workspace_status_label ?? 'Workspace status unavailable'
+  );
+  const liveDegraded = $derived(liveStatus.degraded || knowledgeEventStream.degraded);
+  const headerDotLabel = $derived(
+    liveDegraded
+      ? 'Live updates disconnected — close extra Hiro Admin tabs or wait for reconnect.'
+      : headerStatusLabel
   );
 
   const groups = $derived(
@@ -105,6 +117,7 @@
   onMount(() => {
     prefs.initialize();
     liveStatus.start(prefs.selectedWorkspace);
+    serverReadiness.subscribe();
     getAdminConfig()
       .then((payload) => {
         adminConfig = payload.data ?? DEFAULT_ADMIN_CONFIG;
@@ -112,6 +125,19 @@
       .catch(() => {
         adminConfig = DEFAULT_ADMIN_CONFIG;
       });
+  });
+
+  $effect(() => {
+    const connected = liveStatus.connected;
+    // Only treat an SSE drop as a possible outage when the tab is visible. A hidden tab
+    // deliberately closes its stream (see the status store's visibilitychange handler),
+    // which is not a server drop — marking stale there would spuriously poll while
+    // backgrounded and flash the "Server unavailable" banner on refocus.
+    const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+    if (liveWasConnected && !connected && visible) {
+      serverReadiness.markStale();
+    }
+    liveWasConnected = connected;
   });
 </script>
 
@@ -236,9 +262,13 @@
         Control Room
       </h1>
       <span
-        class={cn('size-2.5 shrink-0 rounded-full', statusDotClass(headerStatus))}
-        title={headerStatusLabel}
-        aria-label={headerStatusLabel}
+        class={cn(
+          'size-2.5 shrink-0 rounded-full',
+          statusDotClass(headerStatus),
+          liveDegraded && 'ring-2 ring-amber-400 ring-offset-1 ring-offset-background animate-pulse'
+        )}
+        title={headerDotLabel}
+        aria-label={headerDotLabel}
       ></span>
       <div class="ml-auto flex items-center gap-2">
         <button
@@ -299,6 +329,12 @@
       </div>
     </header>
 
+    {#if !serverReadiness.ready}
+      <div class={cn('border-b border-amber-500/20 bg-amber-500/5', ADMIN_SHELL_HEADER_PADDING)}>
+        <ServerStartingBanner />
+      </div>
+    {/if}
+
     <main class={cn(ADMIN_SHELL_CONTENT_PADDING, mainClass)}>
       {@render children?.()}
     </main>
@@ -310,6 +346,7 @@
 <GlobalChatOverlay />
 
 <ToastHost toast={chatEngine.toast} />
+<ToastHost toast={globalToast.toast} />
 
 <ChatChannelClearMessagesModal
   open={chatEngine.clearMessagesConfirmOpen}

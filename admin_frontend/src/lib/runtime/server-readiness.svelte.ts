@@ -16,6 +16,7 @@
  */
 
 import { getRuntimeStatus, type RuntimeStatus } from '$lib/api/runtime';
+import { registerServerStaleHandler } from './server-stale-signal';
 
 const POLL_INTERVAL_MS = 1000;
 const POLL_INTERVAL_MAX_MS = 4000;
@@ -24,6 +25,8 @@ export type ServerReadinessStore = ReturnType<typeof createServerReadinessStore>
 
 function createServerReadinessStore() {
   let ready = $state(false);
+  /** True once the main HTTP listener has reported ready at least once this session. */
+  let everReady = $state(false);
   let status = $state<RuntimeStatus | null>(null);
   let lastError = $state<string | null>(null);
   let polling = $state(false);
@@ -45,6 +48,7 @@ function createServerReadinessStore() {
       ready = Boolean(payload.data.ready);
       lastError = null;
       if (ready) {
+        everReady = true;
         backoffMs = POLL_INTERVAL_MS;
       }
     } catch (err) {
@@ -105,9 +109,14 @@ function createServerReadinessStore() {
     clearTimer();
   }
 
+  registerServerStaleHandler(markStale);
+
   return {
     get ready() {
       return ready;
+    },
+    get everReady() {
+      return everReady;
     },
     get status() {
       return status;

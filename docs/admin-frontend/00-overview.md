@@ -17,7 +17,7 @@
 > (repo rule, explicitly abided). Introducing a primitive = migrate call sites directly and
 > delete the old code.
 >
-> **Status.** 🟡 Proposed — awaiting review. Nothing built yet.
+> **Status.** 🟢 **Built** — primitives in `src/lib/state/`; rollout across controllers ongoing.
 
 ---
 
@@ -25,23 +25,23 @@
 
 The **presentational layer is unified** (page chrome, tables, dialogs, `Inline*`, tokens,
 data-driven nav, thin routes, vertical slices, Svelte-free graph engine). The gap is one
-level down: **the behavioral layer has almost no shared abstractions.** The team proved the
-pattern works (`useTableSort`, `useTableFilters`, `createTabPreferences`) but never extended
-it to async/state/persistence/search — where the real repetition lives.
+level down: **the behavioral layer now has shared primitives, but most controllers still
+hand-roll load/mutation/persistence.** The team proved the pattern works (`useTableSort`,
+`useTableFilters`, `createTabPreferences`) and extended it to async/state/persistence/search.
 
 ```
 PRESENTATIONAL (what things look like)         BEHAVIORAL (what things do)
 ─────────────────────────────────────         ───────────────────────────────
 ✓ AdminPageHeader / TabStrip / SectionCard     ✓ useTableSort / useTableFilters
 ✓ AdminTableShell / FilterBar / Dialog         ✓ createTabPreferences
-✓ Inline* feedback / Toast / Markdown          ✗ createResource / createMutation     ← MISSING
-✓ admin-tokens.ts (layout classes)             ✗ createPersistentState (codec)       ← MISSING
-✗ status color tokens (ok/warn/info)  ← GAP    ✗ createTextSearch / one highlighter  ← MISSING
-✗ DetailPanelShell / use-clipboard    ← GAP    ✗ createPoller / unified teardown     ← MISSING
+✓ Inline* feedback / Toast / Markdown          ✓ createResource / createMutation / createListSelection
+✓ admin-tokens.ts (layout classes)             ✓ createPersistentState + codecs (jsonRecordCodec)
+✗ status color tokens (ok/warn/info)  ← GAP    ✓ createTextSearch / one highlighter  (lib/search/)
+✗ DetailPanelShell / use-clipboard    ← GAP    ✓ createPoller / unified teardown
                                                ✗ global error boundary / offline     ← MISSING
 
-Net: UI unified; behavior copy-pasted — 111 try/catch blocks, 0 shared resource helpers,
-     4 highlight implementations, ~9 search-predicate copies, 5 bespoke pollers.
+Net: UI unified; behavior mostly copy-pasted still — ~30+ controllers not yet on primitives,
+     search unified; persistence/polling partially migrated.
 ```
 
 ## 2. The design docs (index)
@@ -77,7 +77,7 @@ Real but small — one-liners, fix opportunistically, don't need their own doc:
 - **Tab-plumbing boilerplate** — `create<X>Preferences()` → `onMount(initialize)` → `afterNavigate(syncActiveTabFromUrl)` copied in ~6 pages; a `createTabbedPage()` helper removes the forget-`syncActiveTabFromUrl` footgun.
 - **API helpers** — 4 hand-rolled empty-skipping `URLSearchParams` builders (`catalog.ts:111`, `knowledge.ts:441`, `logs.ts:135`, `eval.ts:98`) → one `queryString()`; scattered magic-number timeouts → named tiers (`TIMEOUTS.quickProbe/standard/heavyLLM`) in `api/client.ts`.
 - **Blob/SSE base-URL** — workspace-header + base-URL logic re-implemented for blobs (`chat-channels.ts:217`) and both SSE singletons; export `apiUrl()`/`workspaceHeaders()`/`apiRequestBlob()` from `client.ts`.
-- **`bool01` storage** — `chat-channels-ui-prefs.svelte.ts:22` + `chat-overlay-store.svelte.ts:19` re-roll `'1'/'0'` booleans + quota try/catch; add a `bool01` codec to `storage.ts`.
+- **`bool01` storage** — migrated to `boolCodec(..., 'bool01')` in chat UI prefs + overlay store.
 - **Scoped-style cleanups** — `MemoriesPanel` cell styles + `ValidityPill.svelte:28` re-implement plain utilities/colors → tokens (see [styling-tokens.md](styling-tokens.md)).
 - **`1180px` magic breakpoint** — used twice (`AdminMasterDetail.svelte:26`, `MemoriesPanel.svelte:234`) for the same master/detail split; promote to a named breakpoint if a 3rd use appears.
 - **Adherence stragglers** — ~9 hand-rolled empty states bypass `InlineEmptyState`; 3 destructive-outline buttons want a button variant (see [shared-components.md](shared-components.md)).

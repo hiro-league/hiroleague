@@ -13,7 +13,13 @@ import {
   updateWorkspace,
   type WorkspaceRow
 } from '$lib/api/server';
+import { createMutation, createResource } from '$lib/state/create-resource.svelte';
 import type { Notify } from '$lib/ui/toast-types';
+
+type WorkspaceListSnapshot = {
+  rows: WorkspaceRow[];
+  hostingWorkspaceId: string | null;
+};
 
 export type WorkspaceDialog =
   | 'create'
@@ -26,13 +32,26 @@ export type WorkspaceDialog =
   | null;
 
 export function createWorkspaceStore(notify: Notify) {
-  let rows = $state<WorkspaceRow[]>([]);
-  let hostingWorkspaceId = $state<string | null>(null);
-  let loading = $state(true);
-  let busy = $state(false);
+  const listResource = createResource(
+    async (): Promise<WorkspaceListSnapshot> => {
+      const payload = await listWorkspaces();
+      return {
+        rows: payload.data,
+        hostingWorkspaceId: payload.hosting_workspace_id ?? null
+      };
+    },
+    {
+      initial: { rows: [], hostingWorkspaceId: null },
+      initialLoading: true,
+      errorPrefix: 'Failed to load workspaces.'
+    }
+  );
+
   let error = $state<string | null>(null);
+  let hydrated = $state(false);
   let dialog = $state<WorkspaceDialog>(null);
   let selected = $state<WorkspaceRow | null>(null);
+  let busy = $state(false);
 
   let createForm = $state({ name: '', path: '' });
   let editForm = $state({ name: '', gatewayUrl: '', setDefault: false });
@@ -50,39 +69,23 @@ export function createWorkspaceStore(notify: Notify) {
   let copiedText = $state('');
   let copiedTimer = $state<number | null>(null);
 
-  const configuredCount = $derived(rows.filter((row) => row.is_configured).length);
-  const runningCount = $derived(rows.filter((row) => row.running).length);
+  const configuredCount = $derived(listResource.data.rows.filter((row) => row.is_configured).length);
+  const runningCount = $derived(listResource.data.rows.filter((row) => row.running).length);
 
   function rowsChanged(nextRows: WorkspaceRow[], nextHostingWorkspaceId: string | null) {
     return (
-      hostingWorkspaceId !== nextHostingWorkspaceId ||
-      JSON.stringify(rows) !== JSON.stringify(nextRows)
+      listResource.data.hostingWorkspaceId !== nextHostingWorkspaceId ||
+      JSON.stringify(listResource.data.rows) !== JSON.stringify(nextRows)
     );
   }
 
   async function load(options: { silent?: boolean } = {}) {
     if (options.silent && busy) return;
+    await listResource.load({ silent: options.silent });
     if (!options.silent) {
-      loading = true;
+      error = listResource.error;
     }
-    try {
-      const payload = await listWorkspaces();
-      const nextRows = payload.data;
-      const nextHostingWorkspaceId = payload.hosting_workspace_id ?? null;
-      if (rowsChanged(nextRows, nextHostingWorkspaceId)) {
-        rows = nextRows;
-        hostingWorkspaceId = nextHostingWorkspaceId;
-      }
-      error = null;
-    } catch (err) {
-      if (!options.silent) {
-        error = err instanceof Error ? err.message : 'Failed to load workspaces.';
-      }
-    } finally {
-      if (!options.silent) {
-        loading = false;
-      }
-    }
+    hydrated = true;
   }
 
   function applyLiveRows(
@@ -91,11 +94,10 @@ export function createWorkspaceStore(notify: Notify) {
     nextError: string | null
   ) {
     if (rowsChanged(nextRows, nextHostingWorkspaceId)) {
-      rows = nextRows;
-      hostingWorkspaceId = nextHostingWorkspaceId;
+      listResource.replace({ rows: nextRows, hostingWorkspaceId: nextHostingWorkspaceId });
     }
     error = nextError;
-    loading = false;
+    hydrated = true;
   }
 
   function closeDialog() {
@@ -131,7 +133,7 @@ export function createWorkspaceStore(notify: Notify) {
 
   function openRestart(row: WorkspaceRow) {
     selected = row;
-    restartForm = { admin: row.id === hostingWorkspaceId };
+    restartForm = { admin: row.id === listResource.data.hostingWorkspaceId };
     dialog = 'restart';
   }
 
@@ -151,15 +153,22 @@ export function createWorkspaceStore(notify: Notify) {
   async function submitCreate() {
     busy = true;
     try {
-      const result = await createWorkspace({
-        name: createForm.name,
-        path: createForm.path.trim() || null
-      });
-      notify('success', result.data ?? 'Workspace created.');
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Create failed.');
+      await createMutation(
+        () =>
+          createWorkspace({
+            name: createForm.name,
+            path: createForm.path.trim() || null
+          }),
+        {
+          notify,
+          successMsg: (result) => result.data ?? 'Workspace created.',
+          errorPrefix: 'Create failed.',
+          onDone: async () => {
+            resetDialog();
+            await load();
+          }
+        }
+      ).run();
     } finally {
       busy = false;
     }
@@ -169,17 +178,24 @@ export function createWorkspaceStore(notify: Notify) {
     if (!selected) return;
     busy = true;
     try {
-      const result = await updateWorkspace(selected.id, {
-        name: editForm.name.trim() || null,
-        gateway_url: editForm.gatewayUrl.trim() || null,
-        set_default: editForm.setDefault,
-        previous_display_name: selected.name
-      });
-      notify('success', result.data ?? 'Workspace updated.');
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Update failed.');
+      await createMutation(
+        () =>
+          updateWorkspace(selected!.id, {
+            name: editForm.name.trim() || null,
+            gateway_url: editForm.gatewayUrl.trim() || null,
+            set_default: editForm.setDefault,
+            previous_display_name: selected!.name
+          }),
+        {
+          notify,
+          successMsg: (result) => result.data ?? 'Workspace updated.',
+          errorPrefix: 'Update failed.',
+          onDone: async () => {
+            resetDialog();
+            await load();
+          }
+        }
+      ).run();
     } finally {
       busy = false;
     }
@@ -189,12 +205,15 @@ export function createWorkspaceStore(notify: Notify) {
     if (!selected) return;
     busy = true;
     try {
-      const result = await removeWorkspace(selected.id, removeForm.purge);
-      notify('success', result.data ?? 'Workspace removed.');
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Remove failed.');
+      await createMutation(() => removeWorkspace(selected!.id, removeForm.purge), {
+        notify,
+        successMsg: (result) => result.data ?? 'Workspace removed.',
+        errorPrefix: 'Remove failed.',
+        onDone: async () => {
+          resetDialog();
+          await load();
+        }
+      }).run();
     } finally {
       busy = false;
     }
@@ -204,17 +223,18 @@ export function createWorkspaceStore(notify: Notify) {
     if (!selected) return;
     busy = true;
     try {
-      await restartWorkspace(selected.id, restartForm.admin);
-      notify(
-        'success',
-        selected.id === hostingWorkspaceId
-          ? 'Restarting current workspace. The admin UI should return shortly.'
-          : `Workspace '${selected.name}' restarted.`
-      );
-      resetDialog();
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Restart failed.');
+      await createMutation(() => restartWorkspace(selected!.id, restartForm.admin), {
+        notify,
+        successMsg: () =>
+          selected!.id === listResource.data.hostingWorkspaceId
+            ? 'Restarting current workspace. The admin UI should return shortly.'
+            : `Workspace '${selected!.name}' restarted.`,
+        errorPrefix: 'Restart failed.',
+        onDone: async () => {
+          resetDialog();
+          await load();
+        }
+      }).run();
     } finally {
       busy = false;
     }
@@ -224,18 +244,25 @@ export function createWorkspaceStore(notify: Notify) {
     if (!selected) return;
     busy = true;
     try {
-      const result = await setupWorkspace(selected.id, {
-        gateway_url: setupForm.gatewayUrl,
-        http_port: setupForm.httpPort.trim() ? Number(setupForm.httpPort) : null,
-        skip_autostart: setupForm.skipAutostart,
-        start_server: setupForm.startServer,
-        elevated_task: setupForm.elevatedTask
-      });
-      setupPublicKey = result.data.desktop_pub;
-      dialog = 'setup-key';
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Setup failed.');
+      await createMutation(
+        () =>
+          setupWorkspace(selected!.id, {
+            gateway_url: setupForm.gatewayUrl,
+            http_port: setupForm.httpPort.trim() ? Number(setupForm.httpPort) : null,
+            skip_autostart: setupForm.skipAutostart,
+            start_server: setupForm.startServer,
+            elevated_task: setupForm.elevatedTask
+          }),
+        {
+          notify,
+          errorPrefix: 'Setup failed.',
+          onDone: async (result) => {
+            setupPublicKey = result.data.desktop_pub;
+            dialog = 'setup-key';
+            await load();
+          }
+        }
+      ).run();
     } finally {
       busy = false;
     }
@@ -244,16 +271,20 @@ export function createWorkspaceStore(notify: Notify) {
   async function start(row: WorkspaceRow) {
     busy = true;
     try {
-      const result = await startWorkspace(row.id);
-      notify(
-        result.data.already_running ? 'warning' : 'success',
-        result.data.already_running
-          ? `'${result.data.name}' is already running.`
-          : `'${result.data.name}' started (PID ${result.data.pid}).`
-      );
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Start failed.');
+      await createMutation(() => startWorkspace(row.id), {
+        notify,
+        successMsg: (result) =>
+          result.data.already_running
+            ? undefined
+            : `'${result.data.name}' started (PID ${result.data.pid}).`,
+        errorPrefix: 'Start failed.',
+        onDone: async (result) => {
+          if (result.data.already_running) {
+            notify('warning', `'${result.data.name}' is already running.`);
+          }
+          await load();
+        }
+      }).run();
     } finally {
       busy = false;
     }
@@ -262,11 +293,12 @@ export function createWorkspaceStore(notify: Notify) {
   async function stop(row: WorkspaceRow) {
     busy = true;
     try {
-      const result = await stopWorkspace(row.id);
-      notify('success', result.data ?? `'${row.name}' stopped.`);
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Stop failed.');
+      await createMutation(() => stopWorkspace(row.id), {
+        notify,
+        successMsg: (result) => result.data ?? `'${row.name}' stopped.`,
+        errorPrefix: 'Stop failed.',
+        onDone: () => load()
+      }).run();
     } finally {
       busy = false;
     }
@@ -334,13 +366,13 @@ export function createWorkspaceStore(notify: Notify) {
 
   return {
     get rows() {
-      return rows;
+      return listResource.data.rows;
     },
     get hostingWorkspaceId() {
-      return hostingWorkspaceId;
+      return listResource.data.hostingWorkspaceId;
     },
     get loading() {
-      return loading;
+      return !hydrated;
     },
     get busy() {
       return busy;

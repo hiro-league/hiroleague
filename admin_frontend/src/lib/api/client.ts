@@ -1,5 +1,6 @@
 import { base } from '$app/paths';
 import { PREF_KEYS } from '$lib/preferences/keys';
+import { signalServerMaybeUnavailable } from '$lib/runtime/server-stale-signal';
 
 export type ApiResponse<T> = {
   ok: boolean;
@@ -19,6 +20,12 @@ type RequestOptions = {
   // Combined with the internal timeout controller below.
   signal?: AbortSignal;
 };
+
+/** Kick the shared readiness poller — skip the poller's own probe to avoid a feedback loop. */
+function maybeMarkServerStale(path: string): void {
+  if (path === '/runtime/status') return;
+  signalServerMaybeUnavailable();
+}
 
 export async function apiRequest<T>(
   path: string,
@@ -62,23 +69,39 @@ export async function apiRequest<T>(
   } catch (err) {
     // Our timeout fired → readable, actionable message (the request never completed,
     // often because too many open tabs/SSE streams saturate the browser connection pool).
+    // NOTE: do NOT mark the server stale on timeout. In this app a timeout overwhelmingly
+    // means the per-origin connection pool is saturated (too many tabs), not a server
+    // outage — and the readiness probe would travel the same saturated pool and also time
+    // out, leaving a sticky-yet-false "Server unavailable" banner. Genuine outages are
+    // caught by the connection-refused (network) and 5xx branches below.
     if (timedOut) {
       throw new Error(
         `Request timed out after ${Math.round(timeoutMs / 1000)}s — the server may be busy or ` +
           `too many browser tabs are open (each holds a live event stream). Close extra tabs and retry.`
       );
     }
-    throw err; // caller-initiated cancel (component unmount / superseded) or a genuine network error
+    // Caller-initiated cancel (component unmount / superseded) — not a server outage.
+    if (options.signal?.aborted) {
+      throw err;
+    }
+    maybeMarkServerStale(path);
+    throw err;
   }
 
   let payload: ApiResponse<T>;
   try {
     payload = (await response.json()) as ApiResponse<T>;
   } catch {
+    if (response.status >= 500) {
+      maybeMarkServerStale(path);
+    }
     throw new Error(`HTTP ${response.status}`);
   }
 
   if (!response.ok || !payload.ok) {
+    if (response.status >= 500) {
+      maybeMarkServerStale(path);
+    }
     throw new Error(payload.error ?? `HTTP ${response.status}`);
   }
 
