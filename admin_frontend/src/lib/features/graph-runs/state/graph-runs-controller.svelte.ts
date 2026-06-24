@@ -14,6 +14,8 @@
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow } from '$lib/api/characters';
 import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
+import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
+import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
 import {
   getGraphRun,
   getGraphRunLangsmithUrl,
@@ -34,7 +36,8 @@ import {
   isKnowledgeStandaloneRun,
   isGraphIngestRun,
   graphRunKindLabel,
-  graphRunKindMatchesFilter,
+  filterGraphRunsRows,
+  GRAPH_RUNS_FILTER_KEYS,
   type ActivePane,
   type GraphRunKindFilter,
 } from '../graph-runs-pure';
@@ -114,13 +117,15 @@ export function createGraphRunsPageController(
   let selectedNodeRowId = $state<string | null>(null);
   let nodeDetailRowId = $state<string | null>(null);
 
-  let previewSearch = $state('');
-  let filterCharacterId = $state('');
-  let filterChannelId = $state('');
-  let filterStatus = $state('');
-  let filterRunKind = $state<GraphRunKindFilter>('');
+  const tableFilters = useTableFilters({
+    keys: GRAPH_RUNS_FILTER_KEYS,
+    urlSync: true
+  });
 
-  const previewSearchNeedle = $derived(previewSearch.trim().toLowerCase());
+  function setGraphRunsFilter(key: (typeof GRAPH_RUNS_FILTER_KEYS)[number], value: string) {
+    tableFilters.set(key, value);
+    preserveStickyAnchorAround();
+  }
 
   const characterMap = $derived.by((): Record<string, CharacterRow> => {
     const m: Record<string, CharacterRow> = {};
@@ -139,63 +144,16 @@ export function createGraphRunsPageController(
   );
 
   const channelsForFilterDropdown = $derived.by(() => {
-    const cid = filterCharacterId.trim();
+    const cid = tableFilters.filters.gr_char.trim();
     const base = cid ? chatChannels.filter((c) => c.character_id === cid) : [...chatChannels];
     return base.sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  const statusesForFilterDropdown = $derived.by((): { value: string; label: string }[] => {
-    const raw = new Set<string>();
-    let anyEmpty = false;
-    for (const r of rows) {
-      const s = String(r.status ?? '').trim();
-      if (s === '') anyEmpty = true;
-      else raw.add(s);
-    }
-    const out: { value: string; label: string }[] = [];
-    if (anyEmpty) out.push({ value: '__empty__', label: '(no status)' });
-    for (const s of [...raw].sort((a, b) => a.localeCompare(b))) {
-      out.push({ value: s, label: s });
-    }
-    return out;
-  });
+  const statusesForFilterDropdown = $derived.by(() =>
+    distinctOptionsWithSentinel(rows, (r) => String(r.status ?? ''), { emptyLabel: '(no status)' })
+  );
 
-  const visibleRows = $derived.by(() => {
-    const q = previewSearchNeedle;
-    const charF = filterCharacterId.trim();
-    const chanF = filterChannelId.trim();
-    const stF = filterStatus;
-    const kindF = filterRunKind;
-    const sorted = [...rows].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
-    let filtered = sorted;
-    if (kindF) {
-      filtered = filtered.filter((r) => graphRunKindMatchesFilter(String(r.run_id ?? ''), kindF));
-    }
-    if (charF) {
-      filtered = filtered.filter((r) => String(r.character_id ?? '').trim() === charF);
-    }
-    if (chanF) {
-      const n = Number(chanF);
-      if (Number.isFinite(n)) {
-        filtered = filtered.filter((r) => r.chat_channel_id === n);
-      }
-    }
-    if (stF) {
-      if (stF === '__empty__') {
-        filtered = filtered.filter((r) => !String(r.status ?? '').trim());
-      } else {
-        filtered = filtered.filter((r) => String(r.status ?? '').trim() === stF);
-      }
-    }
-    if (q) {
-      filtered = filtered.filter((r) => {
-        const inp = String(r.input_preview ?? '').toLowerCase();
-        const outp = String(r.output_preview ?? '').toLowerCase();
-        return inp.includes(q) || outp.includes(q);
-      });
-    }
-    return filtered.slice(0, 500);
-  });
+  const visibleRows = $derived.by(() => filterGraphRunsRows(rows, tableFilters.filters));
 
   const timeline = $derived(activePane === RUNS_TAB ? [] : (timelineByRun[activePane] ?? []));
 
@@ -295,14 +253,14 @@ export function createGraphRunsPageController(
 
   /* Narrowing character filter makes the selected channel invalid — clear channel so the table doesn’t go empty silently. */
   $effect(() => {
-    const cid = filterCharacterId.trim();
-    const chSel = filterChannelId.trim();
+    const cid = tableFilters.filters.gr_char.trim();
+    const chSel = tableFilters.filters.gr_chan.trim();
     if (!chSel) return;
     const num = Number(chSel);
     if (!Number.isFinite(num)) return;
     const chan = channelById.get(num);
     if (cid && chan && chan.character_id !== cid) {
-      filterChannelId = '';
+      tableFilters.set('gr_chan', '');
     }
   });
 
@@ -590,40 +548,34 @@ export function createGraphRunsPageController(
       return uiPrefs.runDetailCardsExpanded;
     },
     get filterCharacterId() {
-      return filterCharacterId;
+      return tableFilters.filters.gr_char;
     },
     set filterCharacterId(v: string) {
-      filterCharacterId = v;
-      // Filter changes shrink the rendered list; preserve sticky chrome y-pos.
-      preserveStickyAnchorAround();
+      setGraphRunsFilter('gr_char', v);
     },
     get filterChannelId() {
-      return filterChannelId;
+      return tableFilters.filters.gr_chan;
     },
     set filterChannelId(v: string) {
-      filterChannelId = v;
-      preserveStickyAnchorAround();
+      setGraphRunsFilter('gr_chan', v);
     },
     get filterStatus() {
-      return filterStatus;
+      return tableFilters.filters.gr_status;
     },
     set filterStatus(v: string) {
-      filterStatus = v;
-      preserveStickyAnchorAround();
+      setGraphRunsFilter('gr_status', v);
     },
     get filterRunKind() {
-      return filterRunKind;
+      return tableFilters.filters.gr_kind as GraphRunKindFilter;
     },
     set filterRunKind(v: GraphRunKindFilter) {
-      filterRunKind = v;
-      preserveStickyAnchorAround();
+      setGraphRunsFilter('gr_kind', v);
     },
     get previewSearch() {
-      return previewSearch;
+      return tableFilters.filters.gr_q;
     },
     set previewSearch(v: string) {
-      previewSearch = v;
-      preserveStickyAnchorAround();
+      setGraphRunsFilter('gr_q', v);
     },
     get error() {
       return error;
@@ -636,9 +588,6 @@ export function createGraphRunsPageController(
     },
     get visibleRows() {
       return visibleRows;
-    },
-    get previewSearchNeedle() {
-      return previewSearchNeedle;
     },
     get charactersForFilterDropdown() {
       return charactersForFilterDropdown;

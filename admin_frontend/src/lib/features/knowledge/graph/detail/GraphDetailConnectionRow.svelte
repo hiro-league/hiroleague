@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Building2, CalendarDays, Circle, MapPin, Package, Spline, User } from '@lucide/svelte';
   import { cn } from '$lib/utils';
-  import GraphDetailHighlight from './GraphDetailHighlight.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
 
   type ConnRow = {
     navKind: 'node' | 'edge';
@@ -52,11 +52,11 @@
   <RowIcon size={13} class="mt-0.5 flex-none text-muted-foreground" aria-hidden="true" />
   <div class="min-w-0 flex-1">
     <div class={cn('truncate font-medium', row.invalid && 'text-muted-foreground line-through')} title={row.title}>
-      <GraphDetailHighlight text={row.title} {search} />
+      <Highlight text={row.title} query={search} />
     </div>
     {#if row.subtitle}
       <div class="truncate text-[11px] text-muted-foreground" title={row.subtitle}>
-        <GraphDetailHighlight text={row.subtitle} {search} />
+        <Highlight text={row.subtitle} query={search} />
       </div>
     {/if}
   </div>

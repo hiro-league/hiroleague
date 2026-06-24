@@ -9,11 +9,12 @@
   (toggleable). A header search box filters + highlights across all tables.
 -->
 <script lang="ts">
-  import { Scissors, Search } from '@lucide/svelte';
+  import { Scissors } from '@lucide/svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import EvalHighlight from '$lib/features/eval/shared/EvalHighlight.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
   import EvalLegActions from '$lib/features/eval/answers/EvalLegActions.svelte';
   import EvalRecalledTable from '$lib/features/eval/answers/EvalRecalledTable.svelte';
   import { fmtCost, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
@@ -160,15 +161,13 @@
 
       <!-- Dialog toolbar: search (filters + highlights the tables) · trimmed/full text toggle. -->
       <div class="flex items-center gap-2 border-b border-border pb-3">
-        <div class="flex flex-1 items-center gap-2 rounded-md border border-input bg-muted/30 px-2 py-1">
-          <Search size={14} class="shrink-0 text-muted-foreground" aria-hidden="true" />
-          <input
-            type="search"
-            bind:value={q}
-            placeholder="Search facts, entities, episodes…"
-            class="w-full bg-transparent text-xs text-foreground outline-none"
-          />
-        </div>
+        <SearchInput
+          variant="inline"
+          class="min-w-0 flex-1 border-input bg-muted/30 shadow-none"
+          inputClass="text-xs text-foreground"
+          bind:value={q}
+          placeholder="Search facts, entities, episodes…"
+        />
         <Button
           variant="outline"
           size="sm"
@@ -288,7 +287,7 @@
       <div class="flex flex-wrap gap-2">
         <span class="min-w-[64px] text-muted-foreground">Gold Answer</span>
         {#if r.gold}
-          <span class="flex-1 whitespace-pre-wrap text-foreground"><EvalHighlight text={r.gold} term={overviewTerm} /></span>
+          <span class="flex-1 whitespace-pre-wrap text-foreground"><Highlight text={r.gold} query={overviewTerm} /></span>
         {:else}
           <span class="flex-1 italic text-muted-foreground">— (no gold answer)</span>
         {/if}
@@ -300,7 +299,7 @@
           <span class="min-w-[64px] text-muted-foreground">Rubric</span>
           <ul class="flex-1 list-disc space-y-0.5 pl-4 text-foreground">
             {#each r.rubric as criterion (criterion)}
-              <li class="whitespace-pre-wrap"><EvalHighlight text={criterion} term={overviewTerm} /></li>
+              <li class="whitespace-pre-wrap"><Highlight text={criterion} query={overviewTerm} /></li>
             {/each}
           </ul>
         </div>
@@ -308,14 +307,14 @@
       {#if leg.reason}
         <div class="flex flex-wrap gap-2">
           <span class="min-w-[64px] text-muted-foreground">Reason</span>
-          <span class="flex-1 text-foreground"><EvalHighlight text={leg.reason} term={overviewTerm} /></span>
+          <span class="flex-1 text-foreground"><Highlight text={leg.reason} query={overviewTerm} /></span>
         </div>
       {/if}
       {#if mode === 'recall'}
         <div class="flex flex-wrap gap-2">
           <span class="min-w-[64px] text-muted-foreground">Evidence</span>
           {#if leg.evidence}
-            <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500"><EvalHighlight text={leg.evidence} term={overviewTerm} /></span>
+            <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500"><Highlight text={leg.evidence} query={overviewTerm} /></span>
           {:else}
             <span class="italic text-muted-foreground">— none quoted</span>
           {/if}
@@ -326,7 +325,7 @@
       <div class="flex flex-wrap gap-2">
         <span class="min-w-[64px] text-muted-foreground">Our Answer</span>
         {#if leg.answer}
-          <span class="flex-1 whitespace-pre-wrap text-foreground"><EvalHighlight text={leg.answer} term={overviewTerm} /></span>
+          <span class="flex-1 whitespace-pre-wrap text-foreground"><Highlight text={leg.answer} query={overviewTerm} /></span>
         {:else}
           <span class="flex-1 italic text-muted-foreground">— (no answer)</span>
         {/if}
@@ -372,9 +371,9 @@
               {/if}
             </td>
             <td class="max-w-[32rem] px-2 py-1">
-              <span class="font-mono text-[11px] text-muted-foreground"><EvalHighlight text={it.dia_id || it.short_id || it.episode_id} term={q} /></span>
+              <span class="font-mono text-[11px] text-muted-foreground"><Highlight text={it.dia_id || it.short_id || it.episode_id} query={q} /></span>
               {#if it.text}
-                <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold"><EvalHighlight text={it.speaker} term={q} />:</span> {/if}<EvalHighlight text={it.text} term={q} /></span>
+                <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold"><Highlight text={it.speaker} query={q} />:</span> {/if}<Highlight text={it.text} query={q} /></span>
               {:else}
                 <span class="block italic text-muted-foreground">(episode text unavailable)</span>
               {/if}

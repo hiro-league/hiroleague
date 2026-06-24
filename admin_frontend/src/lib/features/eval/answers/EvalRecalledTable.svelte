@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import Badge from '$lib/components/ui/badge.svelte';
-  import EvalHighlight from '$lib/features/eval/shared/EvalHighlight.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
   import { fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import type { EvalRecallRender, RecalledFact } from '$lib/features/eval/shared/eval-events';
   import {
@@ -148,11 +148,11 @@
           {#if kind === 'fact'}
             <td class="max-w-[24rem] px-2 py-1">
               <span class={trimmed ? '' : 'whitespace-pre-wrap'} title={row.fact || row.memory}>
-                <EvalHighlight text={itemText(row.fact || row.memory, cap, trimmed)} term={search} />
+                <Highlight text={itemText(row.fact || row.memory, cap, trimmed)} query={search} />
               </span>
             </td>
             <td class="px-2 py-1 font-mono text-[11px] text-muted-foreground">
-              {#if row.name}<EvalHighlight text={row.name} term={search} />{:else}—{/if}
+              {#if row.name}<Highlight text={row.name} query={search} />{:else}—{/if}
             </td>
             <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{row.valid_at || '—'}</td>
             <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{row.invalid_at || '—'}</td>
@@ -164,13 +164,13 @@
           {:else if kind === 'entity'}
             <td class="max-w-[28rem] px-2 py-1">
               {#if row.name}<span class="font-semibold"
-                  ><EvalHighlight text={entityName(row.name, trimmed)} term={search} /></span
+                  ><Highlight text={entityName(row.name, trimmed)} query={search} /></span
                 >{/if}
               <span
                 class="block text-muted-foreground {trimmed ? '' : 'whitespace-pre-wrap'}"
                 title={row.summary || row.memory}
               >
-                <EvalHighlight text={itemText(row.summary || row.memory, cap, trimmed)} term={search} />
+                <Highlight text={itemText(row.summary || row.memory, cap, trimmed)} query={search} />
               </span>
             </td>
             <td class="px-2 py-1">
@@ -181,7 +181,7 @@
           {:else}
             <td class="max-w-[32rem] px-2 py-1">
               <span class={trimmed ? '' : 'whitespace-pre-wrap'} title={row.memory}>
-                <EvalHighlight text={itemText(row.memory, cap, trimmed)} term={search} />
+                <Highlight text={itemText(row.memory, cap, trimmed)} query={search} />
               </span>
             </td>
             <td class="px-2 py-1 font-mono text-[11px] tabular-nums"

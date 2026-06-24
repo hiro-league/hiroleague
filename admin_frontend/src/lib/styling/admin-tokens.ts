@@ -161,6 +161,10 @@ export const ADMIN_SELECT_SM = cn(
   'focus:border-ring focus:ring-2 focus:ring-inset focus:ring-ring'
 );
 
+/** Destructive icon button for clearing a single filter (AdminFilterBarSelect + LogsFiltersPanel). */
+export const FILTER_CLEAR_ICON_BTN =
+  'size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive';
+
 /** Multi-line message / notes fields. */
 export const ADMIN_TEXTAREA = cn(
   'min-h-11 w-full resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-snug outline-none',

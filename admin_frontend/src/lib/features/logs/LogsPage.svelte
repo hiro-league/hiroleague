@@ -134,7 +134,6 @@
       error={runsCtrl.error}
       visibleRows={runsCtrl.visibleRows}
       openRunIds={runsCtrl.openRunIds}
-      previewSearchNeedle={runsCtrl.previewSearchNeedle}
       charactersForFilterDropdown={runsCtrl.charactersForFilterDropdown}
       channelsForFilterDropdown={runsCtrl.channelsForFilterDropdown}
       statusesForFilterDropdown={runsCtrl.statusesForFilterDropdown}

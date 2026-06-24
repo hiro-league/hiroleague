@@ -16,7 +16,6 @@ import {
   sortArrowGlyph,
   sortItems,
   sortValue,
-  splitHighlight,
   stageHeadLabel,
   stageMatchCount,
   stageMetaSummary
@@ -80,16 +79,6 @@ describe('itemText / search', () => {
       'Bob Person s x'
     );
     expect(itemText(item({ content: 'hi', source: 'msg', uuid: 'x' }), 'episode')).toBe('hi msg x');
-  });
-
-  it('splitHighlight marks matches case-insensitively, leaves non-matches whole', () => {
-    expect(splitHighlight('Alice and alice', 'alice')).toEqual([
-      { text: 'Alice', hit: true },
-      { text: ' and ', hit: false },
-      { text: 'alice', hit: true }
-    ]);
-    expect(splitHighlight('nothing', '')).toEqual([{ text: 'nothing', hit: false }]);
-    expect(splitHighlight(null, 'x')).toEqual([{ text: '', hit: false }]);
   });
 
   it('counts distinct lane matches and per-stage matches', () => {

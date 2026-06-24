@@ -3,65 +3,69 @@ import {
   searchGraphChunks,
   type GraphEpisode
 } from '$lib/api/knowledge';
+import { createTextSearch } from '$lib/search/create-text-search.svelte';
 import { SEARCH_DEBOUNCE_MS } from './graph-types';
 import { readEpisodeSel, writeEpisodeSel } from './graph-persistence';
 
 export function createGraphSearch(deps: {
   getActiveGroupId: () => string | null;
 }) {
-  let searchQuery = $state('');
   let matchedChunkIds = $state<Set<string>>(new Set());
   let episodes = $state<GraphEpisode[]>([]);
   let episodesBusy = $state(false);
   let episodeChunkIds = $state<Set<string>>(new Set());
   let searchBusy = $state(false);
   let searchAbort: AbortController | null = null;
-  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function scheduleChunkSearch(term: string): void {
-    if (searchTimer) clearTimeout(searchTimer);
+  function clearChunkMatches(): void {
     searchAbort?.abort();
     searchAbort = null;
-    if (!term) {
-      searchBusy = false;
-      return;
-    }
-    searchBusy = true;
-    searchTimer = setTimeout(() => {
-      const ctrl = new AbortController();
-      searchAbort = ctrl;
-      void (async () => {
-        try {
-          const res = await searchGraphChunks(term, ctrl.signal);
-          if (ctrl.signal.aborted) return;
-          matchedChunkIds = new Set(res.data?.point_ids ?? []);
-        } catch (err) {
-          if (ctrl.signal.aborted) return;
-          console.error('graph chunk-text search failed', err);
-          matchedChunkIds = new Set();
-        } finally {
-          if (!ctrl.signal.aborted) searchBusy = false;
-        }
-      })();
-    }, SEARCH_DEBOUNCE_MS);
+    matchedChunkIds = new Set();
+    searchBusy = false;
   }
 
+  async function runChunkSearch(term: string): Promise<void> {
+    searchAbort?.abort();
+    const ctrl = new AbortController();
+    searchAbort = ctrl;
+    searchBusy = true;
+    try {
+      const res = await searchGraphChunks(term, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      matchedChunkIds = new Set(res.data?.point_ids ?? []);
+    } catch (err) {
+      if (ctrl.signal.aborted) return;
+      console.error('graph chunk-text search failed', err);
+      matchedChunkIds = new Set();
+    } finally {
+      if (!ctrl.signal.aborted) searchBusy = false;
+    }
+  }
+
+  const textSearch = createTextSearch({
+    debounceMs: SEARCH_DEBOUNCE_MS,
+    onCommit: (q) => {
+      const term = q.trim();
+      if (!term) {
+        clearChunkMatches();
+        return;
+      }
+      void runChunkSearch(term);
+    }
+  });
+
   function search(query: string): void {
-    searchQuery = query;
-    if (!query.trim()) matchedChunkIds = new Set();
-    scheduleChunkSearch(query.trim());
+    if (!query.trim()) clearChunkMatches();
+    textSearch.set(query);
   }
 
   function clearSearch(): void {
-    search('');
+    textSearch.clear();
   }
 
   function teardownSearch(): void {
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = null;
-    searchAbort?.abort();
-    searchAbort = null;
-    searchBusy = false;
+    textSearch.teardown();
+    clearChunkMatches();
   }
 
   async function loadEpisodes(): Promise<void> {
@@ -99,11 +103,11 @@ export function createGraphSearch(deps: {
     episodeChunkIds = new Set();
   }
 
-  const searchActive = $derived(searchQuery.trim().length > 0 || episodeChunkIds.size > 0);
+  const searchActive = $derived(textSearch.query.trim().length > 0 || episodeChunkIds.size > 0);
 
   return {
     get searchQuery() {
-      return searchQuery;
+      return textSearch.query;
     },
     get matchedChunkIds() {
       return matchedChunkIds;

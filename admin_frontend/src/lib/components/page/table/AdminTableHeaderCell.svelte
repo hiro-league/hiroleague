@@ -8,10 +8,11 @@
     sort: TableSortController<TCol>;
     class?: string;
     sortable?: boolean;
+    title?: string;
     children: import('svelte').Snippet;
   };
 
-  let { column, sort, class: className, sortable = true, children }: Props = $props();
+  let { column, sort, class: className, sortable = true, title = '', children }: Props = $props();
 </script>
 
 <th class={cn('px-3 py-2 text-left', className)} aria-sort={sortable ? sort.ariaSort(column) : undefined}>
@@ -20,9 +21,10 @@
       type="button"
       class="inline-flex items-center gap-1 font-inherit uppercase hover:text-foreground"
       onclick={() => sort.toggle(column)}
+      {title}
     >
       {@render children()}
-      {#if sort.sortBy === column}
+      {#if sort.sortBy === column && sort.direction !== 'none'}
         {#if sort.direction === 'asc'}
           <ArrowUp size={12} aria-hidden="true" />
         {:else}

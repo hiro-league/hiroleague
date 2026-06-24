@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
-  import EvalHighlight from '$lib/features/eval/shared/EvalHighlight.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
 
   interface Props {
     text: string;
@@ -58,7 +58,7 @@
 </script>
 
 <div class="min-w-0 flex-1">
-  <div bind:this={clampEl} class="clamp" class:clamp--open={open}><EvalHighlight {text} term={searchTerm} /></div>
+  <div bind:this={clampEl} class="clamp" class:clamp--open={open}><Highlight {text} query={searchTerm} /></div>
   {#if overflows || open}
     <button type="button" class="clamp-toggle" onclick={() => (open = !open)}>
       {#if open}<ChevronUp size={11} aria-hidden="true" />less{:else}<ChevronDown size={11} aria-hidden="true" />more{/if}

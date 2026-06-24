@@ -10,6 +10,7 @@ import {
   type LowConnTreatment,
   type MaxConnBy
 } from './graph-types';
+import { rowMatches } from '$lib/search/match';
 
 /** Parse an ISO timestamp to epoch ms, or null when absent/unparseable. */
 export function epoch(iso: string | null): number | null {
@@ -243,27 +244,22 @@ function chunkMatched(c: string, ctx: MatchContext): boolean {
 }
 
 export function computeMatchedNodeIds(nodes: GraphNodeDTO[], ctx: MatchContext): Set<string> {
-  const q = ctx.searchQuery.trim().toLowerCase();
+  const q = ctx.searchQuery.trim();
   if (!q && ctx.matchedChunkIds.size === 0 && ctx.episodeChunkIds.size === 0) return new Set();
   const out = new Set<string>();
   for (const n of nodes) {
-    const textHit =
-      !!q &&
-      (n.name.toLowerCase().includes(q) ||
-        n.aliases.some((a) => a.toLowerCase().includes(q)));
+    const textHit = !!q && rowMatches(n, ctx.searchQuery, (node) => [node.name, ...node.aliases]);
     if (textHit || n.chunk_ids.some((c) => chunkMatched(c, ctx))) out.add(n.id);
   }
   return out;
 }
 
 export function computeMatchedEdgeIds(links: GraphEdgeDTO[], ctx: MatchContext): Set<string> {
-  const q = ctx.searchQuery.trim().toLowerCase();
+  const q = ctx.searchQuery.trim();
   if (!q && ctx.matchedChunkIds.size === 0 && ctx.episodeChunkIds.size === 0) return new Set();
   const out = new Set<string>();
   for (const e of links) {
-    const textHit =
-      !!q &&
-      (e.rel_type.toLowerCase().includes(q) || (e.fact ?? '').toLowerCase().includes(q));
+    const textHit = !!q && rowMatches(e, ctx.searchQuery, (edge) => [edge.rel_type, edge.fact ?? '']);
     if (textHit || e.chunk_ids.some((c) => chunkMatched(c, ctx))) out.add(e.id);
   }
   return out;

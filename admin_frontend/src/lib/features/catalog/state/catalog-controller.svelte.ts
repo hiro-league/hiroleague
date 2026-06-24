@@ -14,6 +14,7 @@ import {
 import { preserveStickyAnchor } from '$lib/components/page/table/preserve-sticky-anchor';
 import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
 import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
+import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import { createCatalogPreferences } from '$lib/preferences/catalog-preferences.svelte';
 import type { CatalogTabPreference } from '$lib/preferences/keys';
 import type { ToastKind } from '$lib/ui/toast-types';
@@ -113,7 +114,7 @@ export function createCatalogController(notify: Notify) {
     sortProviders(
       providers,
       providerSort.sortBy,
-      providerSort.direction,
+      asTableSortDirection(providerSort.direction),
       configuredWorkspaceProviderIds
     )
   );
@@ -130,7 +131,7 @@ export function createCatalogController(notify: Notify) {
     sortModels(
       filteredModels,
       modelSort.sortBy,
-      modelSort.direction,
+      asTableSortDirection(modelSort.direction),
       providerLabels,
       configuredWorkspaceProviderIds
     )

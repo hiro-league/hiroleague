@@ -15,6 +15,7 @@ import { listKnowledgeGraphGroups, type GraphGroup } from '$lib/api/knowledge';
 import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
 import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
 import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
+import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import {
   DEFAULT_MEMORY_SORT,
   MEMORY_FILTER_KEYS,
@@ -63,7 +64,7 @@ export function createMemoriesPageController() {
     directionParam: 'mem_sort_dir'
   });
 
-  const memorySearchNeedle = $derived(tableFilters.filters.mem_q.trim().toLowerCase());
+  const memorySearchQuery = $derived(tableFilters.filters.mem_q);
 
   const characterMap = $derived.by((): Record<string, CharacterRow> => {
     const m: Record<string, CharacterRow> = {};
@@ -86,7 +87,7 @@ export function createMemoriesPageController() {
   });
 
   const sortedMemoriesRows = $derived(
-    sortMemories(memoriesRows, sort.sortBy, sort.direction, {
+    sortMemories(memoriesRows, sort.sortBy, asTableSortDirection(sort.direction), {
       characterMap,
       channelById,
       groupLabelById: memoryGroupLabelById
@@ -104,7 +105,7 @@ export function createMemoriesPageController() {
       memoryRowPassesFilters(row, {
         characterId: tableFilters.filters.mem_char,
         sourceFilter: tableFilters.filters.mem_source,
-        searchNeedle: memorySearchNeedle,
+        searchQuery: memorySearchQuery,
         dateFromMs: memoryDateFromMs,
         dateToMs: memoryDateToMs,
         characterMap,
@@ -132,7 +133,7 @@ export function createMemoriesPageController() {
       tableFilters.filters.mem_source.trim() !== '' ||
       tableFilters.filters.mem_from.trim() !== '' ||
       tableFilters.filters.mem_to.trim() !== '' ||
-      memorySearchNeedle !== ''
+      memorySearchQuery.trim() !== ''
   );
 
   /**

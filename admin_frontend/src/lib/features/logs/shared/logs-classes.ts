@@ -5,10 +5,6 @@ import { cn } from '$lib/utils';
 export const LOGS_FILTER_CHIP_LAYOUT =
   'h-6 min-h-6 shrink-0 rounded-full border px-2.5 py-0 text-[0.62rem] font-semibold leading-none gap-1';
 
-/** Destructive icon button for clearing a single filter (shared by LogsFiltersPanel + FilterSelectWithClear). */
-export const FILTER_CLEAR_ICON_BTN =
-  'size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive';
-
 /** Per-level hue (no weight) — use for icons where label stays regular body text. */
 const LEVEL_COLOR: Record<LogLevel, string> = {
   DEBUG: 'text-sky-400',

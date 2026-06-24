@@ -4,38 +4,6 @@
  */
 import type { GraphEdgeDTO } from '$lib/api/knowledge';
 
-/** One run of text, flagged as a search match or not — rendered with <mark> when match. */
-export type TextPart = { text: string; match: boolean };
-
-/** Split `text` into matched/unmatched runs for case-insensitive `query` highlighting.
- *  Empty/blank query → the whole string as one non-match run (so callers render plainly).
- *  Avoids `{@html}`: the component renders each part as a real text node. */
-export function highlightParts(text: string, query: string): TextPart[] {
-  const q = query.trim();
-  if (!q || !text) return [{ text, match: false }];
-  const hay = text.toLowerCase();
-  const needle = q.toLowerCase();
-  const parts: TextPart[] = [];
-  let i = 0;
-  while (i < text.length) {
-    const idx = hay.indexOf(needle, i);
-    if (idx === -1) {
-      parts.push({ text: text.slice(i), match: false });
-      break;
-    }
-    if (idx > i) parts.push({ text: text.slice(i, idx), match: false });
-    parts.push({ text: text.slice(idx, idx + needle.length), match: true });
-    i = idx + needle.length;
-  }
-  return parts;
-}
-
-/** Case-insensitive substring test (blank query never matches). */
-export function hasMatch(text: string, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  return q ? text.toLowerCase().includes(q) : false;
-}
-
 /** One row in the Connections tab when an ENTITY is selected: the edge + its other endpoint. */
 export type NodeConnection = {
   edgeId: string;

@@ -9,6 +9,7 @@ import type { GraphLedgerRow } from '$lib/api/graph-runs';
 import {
   adminLogsUrlForInboundId,
   fieldLabel,
+  filterGraphRunsRows,
   formatCost,
   formatLedgerField,
   formatSecondsCardValue,
@@ -16,7 +17,6 @@ import {
   graphRunKindMatchesFilter,
   graphRunPageUrl,
   graphRunTabId,
-  highlightPreviewSegments,
   isChatAgentRun,
   isGraphIngestRun,
   isGraphNodeSubstep,
@@ -29,6 +29,7 @@ import {
   runStatusDataValue,
   trimRunIdForList
 } from './graph-runs-pure';
+import { DISTINCT_EMPTY_VALUE } from '$lib/components/page/table/distinct-options';
 
 const ledger = (p: Partial<GraphLedgerRow> = {}): GraphLedgerRow => p as unknown as GraphLedgerRow;
 const character = (p: Partial<CharacterRow> = {}): CharacterRow => p as unknown as CharacterRow;
@@ -119,20 +120,6 @@ describe('fieldLabel', () => {
   });
 });
 
-describe('highlightPreviewSegments', () => {
-  it('splits into hit/non-hit slices, case-insensitive, preserving original casing', () => {
-    expect(highlightPreviewSegments('Alice and alice', 'alice')).toEqual([
-      { text: 'Alice', hit: true },
-      { text: ' and ', hit: false },
-      { text: 'alice', hit: true }
-    ]);
-  });
-
-  it('returns a single non-hit slice when there is no match', () => {
-    expect(highlightPreviewSegments('nothing here', 'zzz')).toEqual([{ text: 'nothing here', hit: false }]);
-  });
-});
-
 describe('trimRunIdForList', () => {
   it('keeps short ids, elides long ones', () => {
     expect(trimRunIdForList('chat-123')).toBe('chat-123');
@@ -206,5 +193,31 @@ describe('listRowCharacter / listRowChannelName', () => {
 describe('adminLogsUrlForInboundId', () => {
   it('builds the logs deep link with an encoded msg_id', () => {
     expect(adminLogsUrlForInboundId('inb 1')).toBe('/logs?msg_id=inb%201');
+  });
+});
+
+describe('filterGraphRunsRows', () => {
+  it('filters by preview search and status sentinel', () => {
+    const rows = [
+      { id: '1', ts: 2, status: '', input_preview: 'hello', output_preview: '' },
+      { id: '2', ts: 1, status: 'ok', input_preview: 'other', output_preview: '' }
+    ] as import('$lib/api/graph-runs').GraphLedgerRow[];
+    const filtered = filterGraphRunsRows(rows, {
+      gr_q: 'hello',
+      gr_char: '',
+      gr_chan: '',
+      gr_status: '',
+      gr_kind: ''
+    });
+    expect(filtered.map((r) => r.id)).toEqual(['1']);
+
+    const emptyStatus = filterGraphRunsRows(rows, {
+      gr_q: '',
+      gr_char: '',
+      gr_chan: '',
+      gr_status: DISTINCT_EMPTY_VALUE,
+      gr_kind: ''
+    });
+    expect(emptyStatus.map((r) => r.id)).toEqual(['1']);
   });
 });

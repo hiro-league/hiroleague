@@ -1,7 +1,7 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
-  import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
@@ -33,9 +33,10 @@
 </script>
 
 <AdminFilterBar class="flex-wrap items-end">
-  <AdminFilterBarSearch
+  <SearchInput
     label="Title"
-    bind:value={browse.browseTitle}
+    value={browse.browseTitle}
+    onValueChange={(v) => (browse.browseTitle = v)}
     placeholder="Search title"
     class="w-[10rem] shrink-0"
   />

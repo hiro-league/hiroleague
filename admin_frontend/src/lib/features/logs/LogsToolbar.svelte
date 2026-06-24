@@ -1,19 +1,10 @@
 <script lang="ts">
-  import {
-    ChevronDown,
-    ChevronUp,
-    PanelRightClose,
-    PanelRightOpen,
-    Pause,
-    Play,
-    Search,
-    Trash2,
-    X
-  } from '@lucide/svelte';
+  import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen, Pause, Play, Trash2 } from '@lucide/svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import type { LogTimeRange } from '$lib/api/logs';
   import Button from '$lib/components/ui/button.svelte';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
-  import { ADMIN_INPUT, ADMIN_SEARCH_FIELD } from '$lib/styling/admin-tokens';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { LOG_LEVELS, LOG_TIME_RANGES } from '$lib/api/logs';
   import type { LogsPageController } from './state/logs-controller.svelte';
@@ -81,25 +72,12 @@
         />
       {/snippet}
     </AdminIconToggleGroup>
-    <label class={ADMIN_SEARCH_FIELD}>
-      <Search size={15} class="text-muted-foreground" />
-      <input
-        class="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-        placeholder="Search logs..."
-        value={prefs.searchText}
-        oninput={ctrl.onSearchInput}
-      />
-      {#if prefs.searchText}
-        <button
-          class="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
-          type="button"
-          aria-label="Clear search"
-          onclick={() => void ctrl.clearSearch()}
-        >
-          <X size={14} />
-        </button>
-      {/if}
-    </label>
+    <SearchInput
+      variant="inline"
+      value={prefs.searchText}
+      onValueChange={ctrl.onSearchInput}
+      placeholder="Search logs..."
+    />
     <Button
       variant="outline"
       size="icon"

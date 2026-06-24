@@ -6,6 +6,8 @@ import { base } from '$app/paths';
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
 import type { GraphLedgerRow } from '$lib/api/graph-runs';
+import { DISTINCT_EMPTY_VALUE } from '$lib/components/page/table/distinct-options';
+import { rowMatches } from '$lib/search/match';
 import {
   formatAgentElapsedMs,
   formatTokenCount,
@@ -74,6 +76,84 @@ export function graphRunKindMatchesFilter(runId: string, filter: GraphRunKindFil
   if (filter === 'knowledge') return isKnowledgeStandaloneRun(runId);
   if (filter === 'chat') return isChatAgentRun(runId);
   return true;
+}
+
+/** URL-synced graph-runs ledger filter keys (`gr_*`). */
+export const GRAPH_RUNS_FILTER_KEYS = [
+  'gr_q',
+  'gr_char',
+  'gr_chan',
+  'gr_status',
+  'gr_kind'
+] as const;
+export type GraphRunsFilterKey = (typeof GRAPH_RUNS_FILTER_KEYS)[number];
+export type GraphRunsFilterState = Record<GraphRunsFilterKey, string>;
+
+export function graphRunsFiltersFromRecord(filters: GraphRunsFilterState): {
+  previewSearch: string;
+  filterCharacterId: string;
+  filterChannelId: string;
+  filterStatus: string;
+  filterRunKind: GraphRunKindFilter;
+} {
+  return {
+    previewSearch: filters.gr_q,
+    filterCharacterId: filters.gr_char,
+    filterChannelId: filters.gr_chan,
+    filterStatus: filters.gr_status,
+    filterRunKind: filters.gr_kind as GraphRunKindFilter
+  };
+}
+
+/** Client-side ledger row filter (newest-first sort + 500-row cap). */
+export function filterGraphRunsRows(
+  rows: GraphLedgerRow[],
+  filters: GraphRunsFilterState,
+  opts?: { limit?: number }
+): GraphLedgerRow[] {
+  const {
+    previewSearch: q,
+    filterCharacterId: charF,
+    filterChannelId: chanF,
+    filterStatus: stF,
+    filterRunKind: kindF
+  } = graphRunsFiltersFromRecord(filters);
+  const limit = opts?.limit ?? 500;
+
+  const sorted = [...rows].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+  let filtered = sorted;
+
+  if (kindF) {
+    filtered = filtered.filter((r) => graphRunKindMatchesFilter(String(r.run_id ?? ''), kindF));
+  }
+  const charTrim = charF.trim();
+  if (charTrim) {
+    filtered = filtered.filter((r) => String(r.character_id ?? '').trim() === charTrim);
+  }
+  const chanTrim = chanF.trim();
+  if (chanTrim) {
+    const n = Number(chanTrim);
+    if (Number.isFinite(n)) {
+      filtered = filtered.filter((r) => r.chat_channel_id === n);
+    }
+  }
+  if (stF) {
+    if (stF === DISTINCT_EMPTY_VALUE) {
+      filtered = filtered.filter((r) => !String(r.status ?? '').trim());
+    } else {
+      filtered = filtered.filter((r) => String(r.status ?? '').trim() === stF);
+    }
+  }
+  const query = q.trim();
+  if (query) {
+    filtered = filtered.filter((r) =>
+      rowMatches(r, query, (row) => [
+        String(row.input_preview ?? ''),
+        String(row.output_preview ?? '')
+      ])
+    );
+  }
+  return filtered.slice(0, limit);
 }
 
 export function isGraphNodeSubstep(nodeName: string): boolean {
@@ -195,32 +275,6 @@ export function listRowChannelName(row: GraphLedgerRow, channelById: Map<number,
   const n = ch?.name?.trim();
   if (n) return n;
   return `Channel ${row.chat_channel_id}`;
-}
-
-/**
- * Split preview text into alternating plain / hit slices for ``<mark>`` (case-insensitive).
- * Slices come from the original string so casing in the cell stays as stored in the ledger.
- */
-export function highlightPreviewSegments(
-  text: string,
-  needleLower: string
-): { text: string; hit: boolean }[] {
-  const hay = String(text ?? '');
-  const hayLower = hay.toLowerCase();
-  const out: { text: string; hit: boolean }[] = [];
-  let i = 0;
-  const nLen = needleLower.length;
-  while (i < hay.length) {
-    const j = hayLower.indexOf(needleLower, i);
-    if (j === -1) {
-      if (i < hay.length) out.push({ text: hay.slice(i), hit: false });
-      break;
-    }
-    if (j > i) out.push({ text: hay.slice(i, j), hit: false });
-    out.push({ text: hay.slice(j, j + nLen), hit: true });
-    i = j + nLen;
-  }
-  return out;
 }
 
 /** Trimmed run id for dense tables; full id on control ``title``. */

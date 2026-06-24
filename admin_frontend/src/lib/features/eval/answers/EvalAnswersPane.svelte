@@ -5,7 +5,7 @@
   controls-bar height var the table's sticky thead pins beneath.
 -->
 <script lang="ts">
-  import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical, X } from '@lucide/svelte';
+  import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -16,10 +16,9 @@
   import EvalResultsTable from '$lib/features/eval/answers/EvalResultsTable.svelte';
   import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
   import EvalNotRunList from '$lib/features/eval/answers/EvalNotRunList.svelte';
-  import {
-    EVAL_TOOLBAR_SEARCH,
-    EVAL_TOOLBAR_SEARCH_INPUT
-  } from '$lib/features/eval/shared/eval-table-ui';
+  import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
+  import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import {
     EVAL_ANSWER_FILTER_KEYS,
     evalAnswerFilterOrAll,
@@ -31,11 +30,12 @@
     rowMatchesMark,
     sortGroupRows,
     type AnsFlag,
-    type AnsMark
+    type AnsMark,
+    type AnsSortKey
   } from '$lib/features/eval/shared/eval-derive';
+  import { matchesQuery, rowMatches } from '$lib/search/match';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
-  import { useEvalAnswerSort } from '$lib/features/eval/state/eval-answer-sort.svelte';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import {
@@ -50,7 +50,14 @@
   }
   let { eval_, cfg, traces }: Props = $props();
 
-  const sort = useEvalAnswerSort();
+  type EvalAnswerSortColumn = Exclude<AnsSortKey, 'none'>;
+
+  const sort = useTableSort<EvalAnswerSortColumn>({
+    defaultBy: 'time',
+    defaultDirection: 'none',
+    allowed: ['recall', 'time', 'difficulty', 'evidence', 'mark'],
+    threeState: true
+  });
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
   // Toolbar progress (memory recalled/elapsed live on the retrieval-loop bar once complete).
@@ -132,26 +139,19 @@
     tableFilters.set('ans_mark', value === 'all' ? '' : value);
   }
   // Distinct categories among the answer rows (first-seen order) for the type filter dropdown.
-  const ansCategoryOptions = $derived.by(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const r of eval_.rows) {
-      const c = r.category || '';
-      if (c && !seen.has(c)) {
-        seen.add(c);
-        out.push(c);
-      }
-    }
-    return out;
-  });
+  const ansCategoryOptions = $derived(
+    distinctOptionsWithSentinel(eval_.rows, (r) => r.category || undefined, { sort: false }).map(
+      (o) => o.value
+    )
+  );
   const filteredAnswerRows = $derived.by(() => {
-    const term = ansSearch.trim().toLowerCase();
+    const q = ansSearch.trim();
     return eval_.rows.filter((r) => {
       if (ansCategory !== 'all' && (r.category || '') !== ansCategory) return false;
       if (ansDifficulty !== 'all' && (r.difficulty || 'unspecified') !== ansDifficulty) return false;
       if (cfg.showRecallColumn && !rowMatchesFlag(r, ansFlag)) return false;
       if (!rowMatchesMark(r, ansMark)) return false;
-      if (term && !rowHaystack(r, ansSearchRecalled).includes(term)) return false;
+      if (q && !matchesQuery(rowHaystack(r, ansSearchRecalled), q)) return false;
       return true;
     });
   });
@@ -159,7 +159,7 @@
   // --- Flat results list (sorted) -----------------------------------------------------------
   const resultRows = $derived.by<EvalRow[]>(() => {
     const sorted = [...filteredAnswerRows].sort((a, b) => a.index - b.index);
-    return sortGroupRows(sorted, sort.sortKey, sort.sortDir);
+    return sortGroupRows(sorted, sort.sortBy, sort.direction);
   });
 
   function expandAllFolds() {
@@ -206,12 +206,15 @@
   const notRunQuestions = $derived.by(() => {
     // Answer-attribute filters (verdict / recall flag) can't match an un-run question → hide the list.
     if (ansMark !== 'all' || ansFlag !== 'all') return [];
-    const term = ansSearch.trim().toLowerCase();
-    return eval_.questions.filter((q) => {
-      if (answeredIds.has(q.id)) return false;
-      if (ansCategory !== 'all' && (q.category || '') !== ansCategory) return false;
-      if (ansDifficulty !== 'all' && (q.difficulty || 'unspecified') !== ansDifficulty) return false;
-      if (term && !`${q.question} ${q.id} ${q.category} ${q.subcategory ?? ''}`.toLowerCase().includes(term))
+    const q = ansSearch.trim();
+    return eval_.questions.filter((qRow) => {
+      if (answeredIds.has(qRow.id)) return false;
+      if (ansCategory !== 'all' && (qRow.category || '') !== ansCategory) return false;
+      if (ansDifficulty !== 'all' && (qRow.difficulty || 'unspecified') !== ansDifficulty) return false;
+      if (
+        q &&
+        !rowMatches(qRow, q, (row) => [row.question, row.id, row.category, row.subcategory ?? ''])
+      )
         return false;
       return true;
     });
@@ -253,28 +256,15 @@
         · {filteredAnswerRows.length}/{eval_.rows.length} shown{/if}
     </span>
     <AdminFilterBar class="ml-auto items-center gap-2">
-      <label
-        class={EVAL_TOOLBAR_SEARCH}
-        title="Searches the answer surface — question, ideal, answers, judge reason/evidence. Enable “Recalled” to also search every folded table: recalled facts/entities/episodes and the evidence-recall episodes."
-      >
-        <input
-          class={EVAL_TOOLBAR_SEARCH_INPUT}
-          placeholder="Search answers…"
-          value={ansSearch}
-          oninput={(e) => setAnsSearch(e.currentTarget.value)}
-        />
-        {#if ansSearch.trim()}
-          <button
-            type="button"
-            class="grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground"
-            onclick={() => setAnsSearch('')}
-            title="Clear search"
-            aria-label="Clear search"
-          >
-            <X size={12} aria-hidden="true" />
-          </button>
-        {/if}
-      </label>
+      <SearchInput
+        variant="inline"
+        class="h-8 w-48 min-w-0 shadow-xs"
+        inputClass="text-xs"
+        placeholder="Search answers…"
+        aria-label="Search answers"
+        value={ansSearch}
+        onValueChange={setAnsSearch}
+      />
       <label
         class="flex cursor-pointer select-none items-center gap-1.5 font-sans text-xs text-muted-foreground"
         title="Also search inside every folded table: the recalled facts/entities/episodes and the evidence-recall episodes"

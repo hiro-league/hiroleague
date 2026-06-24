@@ -18,6 +18,7 @@ import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
 import { connectKnowledgeJobEvents } from '../shared/knowledge-events';
 import { upsertRecentJobRecord } from '../shared/knowledge-jobs';
 import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
+import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import {
   buildIngestMetadata,
   DEFAULT_SCANNED_FILE_SORT,
@@ -81,7 +82,11 @@ export function createKnowledgeIngestModel(deps: {
   const readyFiles = $derived(files.filter((file) => file.supported && !file.already_ingested));
   const visibleFiles = $derived(showOnlySupported ? supportedFiles : files);
   const sortedVisibleFiles = $derived(
-    sortScannedFiles(visibleFiles, fileSort.sortBy, fileSort.direction)
+    sortScannedFiles(
+      visibleFiles,
+      fileSort.sortBy,
+      asTableSortDirection(fileSort.direction)
+    )
   );
   const allSupportedSelected = $derived(
     supportedFiles.length > 0 && supportedFiles.every((file) => selected[file.path])

@@ -1,3 +1,5 @@
+import { matchesQuery } from '$lib/search/match';
+
 export type GraphFilterOption = { value: string; label: string; weight: number };
 
 export function sortFilterOptions(
@@ -15,9 +17,8 @@ export function filterOptionsBySearch(
   options: GraphFilterOption[],
   search: string
 ): GraphFilterOption[] {
-  const q = search.trim().toLowerCase();
-  if (!q) return options;
-  return options.filter((o) => o.label.toLowerCase().includes(q));
+  if (!search.trim()) return options;
+  return options.filter((o) => matchesQuery(o.label, search));
 }
 
 /** "all N" when fully selected, "0/N" when empty, "k/N" partial. */

@@ -1,9 +1,5 @@
 <script lang="ts">
-  import { X } from '@lucide/svelte';
-  import {
-    EVAL_TOOLBAR_SEARCH,
-    EVAL_TOOLBAR_SEARCH_INPUT
-  } from '$lib/features/eval/shared/eval-table-ui';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import EvalCorpusExtractionFilters from '$lib/features/eval/view/corpus-review/EvalCorpusExtractionFilters.svelte';
   import type { CorpusExtractionFilters } from '$lib/features/eval/state/eval-corpus-extraction-filters.svelte';
 
@@ -46,25 +42,14 @@
   class="sticky z-10 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border bg-background px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90"
   style="top: {stickyTop};"
 >
-  <label class={EVAL_TOOLBAR_SEARCH}>
-    <input
-      class={EVAL_TOOLBAR_SEARCH_INPUT}
-      placeholder="Search episodes…"
-      value={search}
-      oninput={(e) => onSearchChange(e.currentTarget.value)}
-    />
-    {#if search.trim()}
-      <button
-        type="button"
-        class="grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground"
-        onclick={() => onSearchChange('')}
-        title="Clear search"
-        aria-label="Clear search"
-      >
-        <X size={12} aria-hidden="true" />
-      </button>
-    {/if}
-  </label>
+  <SearchInput
+    variant="inline"
+    class="h-8 w-48 min-w-0 shadow-xs"
+    inputClass="text-xs"
+    placeholder="Search episodes…"
+    value={search}
+    onValueChange={onSearchChange}
+  />
   {#if hasExtraction}
     <EvalCorpusExtractionFilters {filters} />
   {/if}

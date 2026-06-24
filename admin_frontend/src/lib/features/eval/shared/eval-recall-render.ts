@@ -6,6 +6,7 @@
  * truth, in lockstep with the backend (`services/eval/judge.py`).
  */
 import type { EvalRecallRender, RecalledFact } from '$lib/features/eval/shared/eval-events';
+import { rowMatches } from '$lib/search/match';
 
 /** Caps for legs/runs predating the stamped `render` field (mirror the graph.eval pref defaults). */
 export const DEFAULT_RECALL_RENDER: EvalRecallRender = {
@@ -81,9 +82,8 @@ export function recalledSearchText(row: RecalledFact): string {
 
 /** Case-insensitive substring match of a recalled row against the search term ('' ⇒ matches all). */
 export function recalledMatches(row: RecalledFact, term: string): boolean {
-  const t = term.trim().toLowerCase();
-  if (!t) return true;
-  return recalledSearchText(row).toLowerCase().includes(t);
+  if (!term.trim()) return true;
+  return rowMatches(row, term, (r) => [recalledSearchText(r)]);
 }
 
 /** Tab badge text: "sent/total" normally, "shown/total" while searching (shown = rows that match). */

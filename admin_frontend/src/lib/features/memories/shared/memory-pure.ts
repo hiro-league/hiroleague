@@ -10,8 +10,10 @@
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
 import type { TableSortDirection } from '$lib/components/page/table/table-sort-utils';
+import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
 import { formatCompactDateTime, parseFlexibleDate } from '$lib/format/compact-datetime';
 import { shortGraphId } from '$lib/format/short-graph-id';
+import { rowMatches } from '$lib/search/match';
 
 export function memoryPrimaryText(m: Record<string, unknown>): string {
   const raw = m.memory ?? m.text ?? m.content ?? m['data'];
@@ -209,31 +211,25 @@ export function memoryChunkIds(row: Record<string, unknown>): string[] {
 }
 
 /** Case-insensitive substring match across common memory row fields (Memories search). */
-export function memoryRowMatchesSearchNeedle(
+export function memoryRowMatchesSearch(
   row: Record<string, unknown>,
-  needleLower: string,
+  query: string,
   characterMap: Record<string, CharacterRow>,
   channelById: Map<number, ChatChannelRow>
 ): boolean {
-  if (!needleLower) return true;
-  const primary = memoryPrimaryText(row).toLowerCase();
-  const id = memoryId(row).toLowerCase();
-  const src = String(memoryField(row, 'source') ?? '').toLowerCase();
-  const chName = memoryChannelName(row, channelById).toLowerCase();
-  const charName = memoryCharacter(row, characterMap, channelById).name.toLowerCase();
-  return (
-    primary.includes(needleLower) ||
-    id.includes(needleLower) ||
-    src.includes(needleLower) ||
-    chName.includes(needleLower) ||
-    charName.includes(needleLower)
-  );
+  return rowMatches(row, query, (r) => [
+    memoryPrimaryText(r),
+    memoryId(r),
+    String(memoryField(r, 'source') ?? ''),
+    memoryChannelName(r, channelById),
+    memoryCharacter(r, characterMap, channelById).name
+  ]);
 }
 
 export type MemoryRowFilterOpts = {
   characterId: string;
   sourceFilter: string;
-  searchNeedle: string;
+  searchQuery: string;
   // Date-range scope (ms epoch, NaN when unset) — also defines a delete scope on the pane.
   dateFromMs: number;
   dateToMs: number;
@@ -262,7 +258,7 @@ export function memoryRowPassesFilters(row: Record<string, unknown>, opts: Memor
     if (rowSrc !== srcF.trim()) return false;
   }
 
-  if (opts.searchNeedle && !memoryRowMatchesSearchNeedle(row, opts.searchNeedle, opts.characterMap, opts.channelById)) {
+  if (opts.searchQuery.trim() && !memoryRowMatchesSearch(row, opts.searchQuery, opts.characterMap, opts.channelById)) {
     return false;
   }
   return true;
@@ -277,19 +273,9 @@ export function memoryRowPassesFilters(row: Record<string, unknown>, opts: Memor
 export function memorySourceOptions(
   rows: Record<string, unknown>[]
 ): { value: string; label: string }[] {
-  const raw = new Set<string>();
-  let anyEmpty = false;
-  for (const row of rows) {
-    const s = String(memoryField(row, 'source') ?? '').trim();
-    if (s === '') anyEmpty = true;
-    else raw.add(s);
-  }
-  const out: { value: string; label: string }[] = [];
-  if (anyEmpty) out.push({ value: '__empty__', label: '(no source)' });
-  for (const s of [...raw].sort((a, b) => a.localeCompare(b))) {
-    out.push({ value: s, label: s });
-  }
-  return out;
+  return distinctOptionsWithSentinel(rows, (row) => String(memoryField(row, 'source') ?? ''), {
+    emptyLabel: '(no source)'
+  });
 }
 
 /**

@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { GraphEdgeDTO } from '$lib/api/knowledge';
 import {
   collapsedEdges,
-  connectionsForNode,
-  hasMatch,
-  highlightParts
+  connectionsForNode
 } from './graph-detail-helpers';
 
 const edge = (over: Partial<GraphEdgeDTO>): GraphEdgeDTO => ({
@@ -20,29 +18,6 @@ const edge = (over: Partial<GraphEdgeDTO>): GraphEdgeDTO => ({
   expired_at: null,
   created_at: null,
   ...over
-});
-
-describe('highlightParts', () => {
-  it('blank query → one non-match run (renders plainly)', () => {
-    expect(highlightParts('hello', '  ')).toEqual([{ text: 'hello', match: false }]);
-  });
-
-  it('splits a case-insensitive match into runs', () => {
-    expect(highlightParts('Hello World', 'world')).toEqual([
-      { text: 'Hello ', match: false },
-      { text: 'World', match: true }
-    ]);
-  });
-
-  it('flags every occurrence', () => {
-    const parts = highlightParts('a-A-a', 'a');
-    expect(parts.filter((p) => p.match).map((p) => p.text)).toEqual(['a', 'A', 'a']);
-  });
-
-  it('hasMatch is case-insensitive and false for blank', () => {
-    expect(hasMatch('Foo Bar', 'bar')).toBe(true);
-    expect(hasMatch('Foo Bar', '   ')).toBe(false);
-  });
 });
 
 describe('connectionsForNode', () => {

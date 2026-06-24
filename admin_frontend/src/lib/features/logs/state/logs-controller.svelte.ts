@@ -31,8 +31,10 @@ import {
   syncScopeMsgOrdinalsFromRows,
   type ScopeMsgOrdinalState
 } from '../shared/logs-ordinal';
+import { createTextSearch } from '$lib/search/create-text-search.svelte';
 
 const INITIAL_TAIL_LINES = 500;
+const LOG_SEARCH_DEBOUNCE_MS = 250;
 
 /** API + polling orchestration for the logs page (prefs own session-restored filter state). */
 export function createLogsPageController(opts: { prefs: LogsPreferences }) {
@@ -80,8 +82,15 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   let activeRowKey = $state<string | null>(null);
 
   let polling = false;
-  let searchTimer: number | null = null;
   let searchFetchGeneration = 0;
+
+  const textSearch = createTextSearch({
+    debounceMs: LOG_SEARCH_DEBOUNCE_MS,
+    onCommit: (q) => {
+      void runSearchFromInput(q);
+    }
+  });
+  textSearch.sync(prefs.searchText);
 
   /** Per page visit: stable 1,2,3… per distinct ``scope_msg_id`` (survives row filters; see sync effect). */
   const scopeMsgOrdinalState: ScopeMsgOrdinalState = createScopeMsgOrdinalState();
@@ -335,15 +344,11 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     }
   }
 
-  async function runSearchFromInput() {
-    const trimmed = prefs.searchText.trim();
+  async function runSearchFromInput(committedQuery?: string) {
+    const trimmed = (committedQuery ?? prefs.searchText).trim();
     const scopeActive =
       !!prefs.scopeDeviceId.trim() || !!prefs.scopeMsgId.trim() || !!prefs.scopeMethod.trim();
     if (!trimmed && !scopeActive) {
-      if (searchTimer) {
-        window.clearTimeout(searchTimer);
-        searchTimer = null;
-      }
       loading = true;
       try {
         await reloadRows();
@@ -354,34 +359,17 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       }
       return;
     }
-    await fetchFilteredRows();
+    await fetchFilteredRows(trimmed);
   }
 
-  function onSearchInput(event: Event) {
-    prefs.searchText = (event.currentTarget as HTMLInputElement).value;
-    if (searchTimer) {
-      window.clearTimeout(searchTimer);
-    }
-    searchTimer = window.setTimeout(() => {
-      searchTimer = null;
-      void runSearchFromInput();
-    }, 250);
+  function onSearchInput(value: string) {
+    prefs.searchText = value;
+    textSearch.set(value);
   }
 
   async function clearSearch() {
     prefs.searchText = '';
-    if (searchTimer) {
-      window.clearTimeout(searchTimer);
-      searchTimer = null;
-    }
-    loading = true;
-    try {
-      await reloadRows();
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
-    } finally {
-      loading = false;
-    }
+    textSearch.clear();
   }
 
   async function clearAllFilters() {
@@ -390,10 +378,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     prefs.scopeMsgId = '';
     prefs.scopeMethod = '';
     prefs.trafficClassFilter = [...TRAFFIC_CLASSES];
-    if (searchTimer) {
-      window.clearTimeout(searchTimer);
-      searchTimer = null;
-    }
+    textSearch.sync('');
     searchFetchGeneration += 1;
     loading = true;
     error = null;
@@ -468,10 +453,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
   }
 
   function dispose() {
-    if (searchTimer) {
-      window.clearTimeout(searchTimer);
-      searchTimer = null;
-    }
+    textSearch.teardown();
     resetScopeMsgOrdinalState(scopeMsgOrdinalState);
     scopeMsgOrdinalVersion++;
   }

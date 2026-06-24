@@ -14,6 +14,7 @@
   import { Combobox } from 'bits-ui';
   import { Check, ChevronsUpDown, Search } from '@lucide/svelte';
   import { cn } from '$lib/utils';
+  import { matchesQuery } from '$lib/search/match';
   import { comboboxOpenAtTop } from './combobox-open-top';
 
   // `keywords` (optional) extends the search match beyond the visible label — e.g. a full id
@@ -53,9 +54,7 @@
   const filtered = $derived(
     search.trim() === ''
       ? options
-      : options.filter((o) =>
-          `${o.label} ${o.keywords ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())
-        )
+      : options.filter((o) => matchesQuery(`${o.label} ${o.keywords ?? ''}`, search))
   );
   const total = $derived(options.length);
   const summary = $derived(

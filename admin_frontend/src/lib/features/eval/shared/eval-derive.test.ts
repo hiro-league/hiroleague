@@ -96,7 +96,7 @@ describe('sortGroupRows', () => {
 
   it('returns the input unchanged when sort is off', () => {
     const rows = [a, b, c];
-    expect(sortGroupRows(rows, 'none', 'asc')).toBe(rows);
+    expect(sortGroupRows(rows, 'time', 'none')).toBe(rows);
   });
   it('sorts ascending by difficulty rank', () => {
     expect(sortGroupRows([a, b, c], 'difficulty', 'asc').map((r) => r.index)).toEqual([1, 2, 0]);

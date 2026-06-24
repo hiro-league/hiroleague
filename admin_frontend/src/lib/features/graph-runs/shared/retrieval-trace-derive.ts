@@ -9,6 +9,7 @@ import type {
   RetrievalTraceItem,
   RetrievalTraceStage
 } from '$lib/api/graph-runs';
+import { matchesQuery } from '$lib/search/match';
 import { isCurrent } from './trace-format';
 
 // ── Lane model ────────────────────────────────────────────────────────────────────────
@@ -123,42 +124,15 @@ export function itemText(item: RetrievalTraceItem, lane: string): string {
   return [item.content, item.source, item.uuid].filter(Boolean).join(' ');
 }
 
-// Split a cell's plain text into matched / unmatched segments so matches can be wrapped in
-// <mark> without ever touching {@html} (the text stays data-bound, so it can't inject markup).
-export function splitHighlight(
-  text: string | null | undefined,
-  query: string
-): { text: string; hit: boolean }[] {
-  const value = text ?? '';
-  const q = query.trim();
-  if (!q || !value) return [{ text: value, hit: false }];
-  const haystack = value.toLowerCase();
-  const needle = q.toLowerCase();
-  const out: { text: string; hit: boolean }[] = [];
-  let i = 0;
-  while (i < value.length) {
-    const at = haystack.indexOf(needle, i);
-    if (at === -1) {
-      out.push({ text: value.slice(i), hit: false });
-      break;
-    }
-    if (at > i) out.push({ text: value.slice(i, at), hit: false });
-    out.push({ text: value.slice(at, at + needle.length), hit: true });
-    i = at + needle.length;
-  }
-  return out;
-}
-
 /** Per-lane count of DISTINCT matching items (by uuid) — shown next to each tab while searching. */
 export function laneMatchCounts(lanes: Lane[], query: string): Map<string, number> {
   const m = new Map<string, number>();
-  const q = query.trim().toLowerCase();
-  if (!q) return m;
+  if (!query.trim()) return m;
   for (const lane of lanes) {
     const hits = new Set<string>();
     for (const { stage } of lane.stages) {
       for (const item of stage.items) {
-        if (itemText(item, lane.lane).toLowerCase().includes(q)) hits.add(item.uuid);
+        if (matchesQuery(itemText(item, lane.lane), query)) hits.add(item.uuid);
       }
     }
     m.set(lane.lane, hits.size);
@@ -168,11 +142,10 @@ export function laneMatchCounts(lanes: Lane[], query: string): Map<string, numbe
 
 /** How many of a stage's rows match the current search (drives the highlighted count pill). */
 export function stageMatchCount(stage: RetrievalTraceStage, laneKey: string, query: string): number {
-  const q = query.trim().toLowerCase();
-  if (!q) return 0;
+  if (!query.trim()) return 0;
   let n = 0;
   for (const item of stage.items) {
-    if (itemText(item, laneKey).toLowerCase().includes(q)) n++;
+    if (matchesQuery(itemText(item, laneKey), query)) n++;
   }
   return n;
 }

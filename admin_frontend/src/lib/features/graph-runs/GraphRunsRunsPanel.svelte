@@ -3,7 +3,7 @@
   import type { CharacterRow } from '$lib/api/characters';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
-  import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
@@ -11,7 +11,8 @@
   import Button from '$lib/components/ui/button.svelte';
   import { FileText } from '@lucide/svelte';
   import { formatCompactDateTime } from '$lib/format/compact-datetime';
-  import { GRAPH_RUNS_PREVIEW_HIGHLIGHT_MARK } from './shared/graph-runs-ui';
+  import Highlight from '$lib/search/Highlight.svelte';
+  import { matchesQuery } from '$lib/search/match';
   import {
     graphRunsDateCellClass,
     graphRunsLogsIconLinkClass,
@@ -24,7 +25,6 @@
     adminLogsUrlForInboundId,
     formatCost,
     graphRunKindLabel,
-    highlightPreviewSegments,
     listRowChannelName,
     listRowCharacter,
     GRAPH_RUNS_PANEL_IDS,
@@ -43,7 +43,6 @@
     error,
     visibleRows,
     openRunIds,
-    previewSearchNeedle,
     charactersForFilterDropdown,
     channelsForFilterDropdown,
     statusesForFilterDropdown,
@@ -63,7 +62,6 @@
     error: string;
     visibleRows: GraphLedgerRow[];
     openRunIds: string[];
-    previewSearchNeedle: string;
     charactersForFilterDropdown: CharacterRow[];
     channelsForFilterDropdown: ChatChannelRow[];
     statusesForFilterDropdown: { value: string; label: string }[];
@@ -131,7 +129,7 @@
         class="min-w-[10rem]"
         options={statusesForFilterDropdown}
       />
-      <AdminFilterBarSearch
+      <SearchInput
         label="Preview search"
         bind:value={previewSearch}
         placeholder="Search input / output previews…"
@@ -201,19 +199,15 @@
             </div>
           </td>
           <td class={graphRunsPreviewCellClass} title={inputPreviewTooltip}>
-            {#if previewSearchNeedle && String(row.input_preview ?? '').toLowerCase().includes(previewSearchNeedle)}
-              {#each highlightPreviewSegments(String(row.input_preview ?? ''), previewSearchNeedle) as seg, i (`${row.id}-in-${i}`)}
-                {#if seg.hit}<mark class={GRAPH_RUNS_PREVIEW_HIGHLIGHT_MARK}>{seg.text}</mark>{:else}{seg.text}{/if}
-              {/each}
+            {#if matchesQuery(String(row.input_preview ?? ''), previewSearch)}
+              <Highlight text={String(row.input_preview ?? '')} query={previewSearch} />
             {:else}
               {row.input_preview}
             {/if}
           </td>
           <td class={graphRunsPreviewCellClass} title={outputPreviewTooltip}>
-            {#if previewSearchNeedle && String(row.output_preview ?? '').toLowerCase().includes(previewSearchNeedle)}
-              {#each highlightPreviewSegments(String(row.output_preview ?? ''), previewSearchNeedle) as seg, i (`${row.id}-out-${i}`)}
-                {#if seg.hit}<mark class={GRAPH_RUNS_PREVIEW_HIGHLIGHT_MARK}>{seg.text}</mark>{:else}{seg.text}{/if}
-              {/each}
+            {#if matchesQuery(String(row.output_preview ?? ''), previewSearch)}
+              <Highlight text={String(row.output_preview ?? '')} query={previewSearch} />
             {:else}
               {row.output_preview}
             {/if}

@@ -68,21 +68,21 @@ export function rowMarkRank(r: EvalRow): number {
 /** Apply the active sort to a group's rows (stable on index); identity when sort is off. */
 export function sortGroupRows(
   rows: EvalRow[],
-  sortKey: AnsSortKey,
-  sortDir: 'asc' | 'desc'
+  sortBy: Exclude<AnsSortKey, 'none'>,
+  sortDir: 'asc' | 'desc' | 'none'
 ): EvalRow[] {
-  if (sortKey === 'none') return rows;
+  if (sortDir === 'none') return rows;
   const sign = sortDir === 'asc' ? 1 : -1;
   const keyFn =
-    sortKey === 'recall'
+    sortBy === 'recall'
       ? rowRecallRank
-      : sortKey === 'time'
+      : sortBy === 'time'
         ? (r: EvalRow) => timeMs(r.answered_at)
-        : sortKey === 'difficulty'
+        : sortBy === 'difficulty'
           ? rowDiffRank
-          : sortKey === 'evidence'
+          : sortBy === 'evidence'
             ? rowEvidenceRank
-            : rowMarkRank; // 'mark'
+            : rowMarkRank;
   return [...rows].sort((a, b) => sign * (keyFn(a) - keyFn(b)) || a.index - b.index);
 }
 

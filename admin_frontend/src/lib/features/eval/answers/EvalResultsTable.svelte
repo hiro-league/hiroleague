@@ -1,15 +1,16 @@
 <!--
   Unified results table: selection, #, Question, Type, Difficulty, Ideal, optional recall flag /
   evidence / answer-type columns, per-leg answer, optional Δ, Time. Rows are rendered as a single
-  flat list (sort owned by EvalAnswersPane via useEvalAnswerSort). Expanding a row reveals
+  flat list (sort owned by EvalAnswersPane via useTableSort). Expanding a row reveals
   EvalResultRowDetail.
 -->
 <script lang="ts">
   import { ChevronRight, CircleSlash, Flag, LoaderCircle } from '@lucide/svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
-  import EvalAnswerTableHeaderCell from '$lib/features/eval/answers/EvalAnswerTableHeaderCell.svelte';
-  import EvalHighlight from '$lib/features/eval/shared/EvalHighlight.svelte';
+  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
   import EvalResultRowDetail from '$lib/features/eval/answers/EvalResultRowDetail.svelte';
   import { EVAL_ANSWERS_TABLE_STICKY_TOP } from '$lib/features/eval/shared/eval-table-ui';
   import { fmtDateTime, fmtTime } from '$lib/features/eval/shared/eval-format';
@@ -26,7 +27,7 @@
   } from '$lib/features/eval/shared/eval-display';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
-  import type { EvalAnswerSortController } from '$lib/features/eval/state/eval-answer-sort.svelte';
+  import type { AnsSortKey } from '$lib/features/eval/shared/eval-derive';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import {
@@ -45,7 +46,7 @@
     showEvidenceCol: boolean;
     resultsColspan: number;
     resultRows: EvalRow[];
-    sort: EvalAnswerSortController;
+    sort: TableSortController<Exclude<AnsSortKey, 'none'>>;
     expandedRows: Set<number>;
     toggleRow: (index: number) => void;
     /** Open the giant detail dialog for a row (from the answer-type / answer cell). */
@@ -140,29 +141,29 @@
       <th class="px-3 py-2 text-left">Type</th>
       <th class="px-3 py-2 text-left">Question</th>
       {#if showRecallCol}
-        <EvalAnswerTableHeaderCell
+        <AdminTableHeaderCell
           column="recall"
           {sort}
           class="text-center"
           title="Sort by judge recall-sufficiency · loop stats when agentic retrieval ran"
         >
           <Flag size={12} aria-hidden="true" />
-        </EvalAnswerTableHeaderCell>
+        </AdminTableHeaderCell>
       {/if}
       {#if showEvidenceCol}
-        <EvalAnswerTableHeaderCell
+        <AdminTableHeaderCell
           column="evidence"
           {sort}
           class="text-center"
           title="Sort by evidence recall — gold evidence episodes the recall covered (LoCoMo corpora)"
         >
           Ev
-        </EvalAnswerTableHeaderCell>
+        </AdminTableHeaderCell>
       {/if}
       {#each legColumns as mode (mode)}
         {#if cfg.showAnswerTypeColumn}
-          <EvalAnswerTableHeaderCell column="mark" {sort} title="Sort by answer type"
-            >Answer type</EvalAnswerTableHeaderCell
+          <AdminTableHeaderCell column="mark" {sort} title="Sort by answer type"
+            >Answer type</AdminTableHeaderCell
           >
         {:else}
           <th class="px-3 py-2 text-left">{legLabel(mode)} answer</th>
@@ -171,11 +172,11 @@
       {#if showDelta}
         <th class="px-3 py-2 text-center" title="best graph leg vs flat">&#916;</th>
       {/if}
-      <EvalAnswerTableHeaderCell column="difficulty" {sort} title="Sort by Difficulty"
-        >Difficulty</EvalAnswerTableHeaderCell
+      <AdminTableHeaderCell column="difficulty" {sort} title="Sort by Difficulty"
+        >Difficulty</AdminTableHeaderCell
       >
-      <EvalAnswerTableHeaderCell column="time" {sort} class="text-right" title="Sort by eval time"
-        >Time</EvalAnswerTableHeaderCell
+      <AdminTableHeaderCell column="time" {sort} class="text-right" title="Sort by eval time"
+        >Time</AdminTableHeaderCell
       >
     </tr>
   </thead>
@@ -217,7 +218,7 @@
               class="mt-0.5 shrink-0 text-muted-foreground transition-transform {isExpanded ? 'rotate-90' : ''}"
               aria-hidden="true"
             />
-            <span class="line-clamp-2" title={r.question}><EvalHighlight text={r.question} term={searchTerm} /></span>
+            <span class="line-clamp-2" title={r.question}><Highlight text={r.question} query={searchTerm} /></span>
           </button>
         </td>
         {#if showRecallCol}
@@ -292,7 +293,7 @@
                   {#if isCorrectAbstention(leg.mark, r.is_negative_control)}
                     <span class="mt-0.5 inline-flex text-muted-foreground" title="Abstained — declined on this negative-control question (counts as a pass)"><CircleSlash class="size-3.5" aria-label="Abstained" /></span>
                   {/if}
-                  <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{#if leg.answer}<EvalHighlight text={leg.answer} term={searchTerm} />{:else}— (no answer){/if}</span>
+                  <span class="line-clamp-2 text-sm" title={leg.answer || ''}>{#if leg.answer}<Highlight text={leg.answer} query={searchTerm} />{:else}— (no answer){/if}</span>
                 </button>
               {:else}
                 <span class="text-xs text-muted-foreground">—</span>

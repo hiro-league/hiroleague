@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { X } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
   import { isTrafficClass, TRAFFIC_CLASSES } from '$lib/api/logs';
+  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import MultiSelectFilter, {
     type MultiSelectOption
   } from '$lib/components/ui/multi-select-filter.svelte';
+  import Button from '$lib/components/ui/button.svelte';
+  import { X } from '@lucide/svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
-  import FilterSelectWithClear from './shared/FilterSelectWithClear.svelte';
-  import { FILTER_CLEAR_ICON_BTN } from './shared/logs-classes';
+  import { FILTER_CLEAR_ICON_BTN } from '$lib/styling/admin-tokens';
   import {
     SOURCE_LABELS,
     TRAFFIC_CLASS_LABELS,
@@ -21,13 +21,8 @@
     ctrl: LogsPageController;
   };
 
-  // Collapse region/id owned by the parent sticky toolbar (LogsPage) so the whole
-  // controls line — toolbar buttons + these filters — collapses together. Level now
-  // lives on the search/toolbar line (LogsPage); the rest of the filters live here.
   let { prefs, ctrl }: Props = $props();
 
-  // Source + Traffic both use the searchable multi-select (graph-tab "Edges" widget).
-  // Both store the explicit set of SHOWN values, so Select-all / Clear map 1:1.
   const sourceOptions = $derived<MultiSelectOption[]>(
     ctrl.availableSources.map((s) => ({ value: s, label: SOURCE_LABELS[s] }))
   );
@@ -42,12 +37,23 @@
   function onTrafficSelectedChange(values: string[]) {
     prefs.trafficClassFilter = values.filter(isTrafficClass);
   }
+
+  const channelOptions = $derived(
+    (ctrl.layout?.available_channels ?? []).map((channel) => ({ value: channel, label: channel }))
+  );
+  const deviceOptions = $derived(
+    ctrl.devicesForLogs.map((dev) => {
+      const fullLabel = dev.device_name?.trim() || dev.device_id;
+      const truncatedLabel = fullLabel.length > 20 ? `${fullLabel.slice(0, 19)}…` : fullLabel;
+      return { value: dev.device_id, label: truncatedLabel, title: fullLabel };
+    })
+  );
+  const methodOptions = $derived(ctrl.logMethods.map((m) => ({ value: m, label: m })));
 </script>
 
 <div class="grid min-w-0 gap-3">
   <div class="min-w-0 overflow-x-auto pb-0.5">
     <div class="flex flex-col gap-3">
-      <!-- Line 1: Source · Channel · device · request types · Traffic -->
       <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
         <MultiSelectFilter
           label="Source"
@@ -58,63 +64,43 @@
         />
 
         {#if ctrl.channelsVisible && ctrl.layout && ctrl.layout.available_channels.length}
-          <FilterSelectWithClear
+          <AdminFilterBarSelect
+            layout="inline"
             label="Channel:"
+            clearable
             bind:value={prefs.activeChannel}
+            options={channelOptions}
+            placeholder="All channels"
             selectClass="min-w-44"
-            titleClear="Clear channel filter"
-            ariaLabelClear="Clear channel filter"
             onClear={() => {
               prefs.activeChannel = '';
             }}
-          >
-            {#snippet options()}
-              <option value="">All channels</option>
-              {#each ctrl.layout!.available_channels as channel (channel)}
-                <option value={channel}>{channel}</option>
-              {/each}
-            {/snippet}
-          </FilterSelectWithClear>
+          />
         {/if}
 
-        <FilterSelectWithClear
+        <AdminFilterBarSelect
+          layout="inline"
+          clearable
           bind:value={prefs.scopeDeviceId}
+          options={deviceOptions}
+          placeholder="All devices"
           selectClass="min-w-48"
           title="Filter logs by device (only devices seen in currently loaded log rows)"
-          titleClear="Clear device filter"
-          ariaLabelClear="Clear device filter"
           onClear={() => ctrl.removeScopeDevice()}
-          onChange={() => void ctrl.afterScopeChange()}
-        >
-          {#snippet options()}
-            <option value="">All devices</option>
-            {#each ctrl.devicesForLogs as dev (dev.device_id)}
-              {@const fullLabel = dev.device_name?.trim() || dev.device_id}
-              {@const truncatedLabel =
-                fullLabel.length > 20 ? `${fullLabel.slice(0, 19)}…` : fullLabel}
-              <option value={dev.device_id} title={fullLabel}>
-                {truncatedLabel}
-              </option>
-            {/each}
-          {/snippet}
-        </FilterSelectWithClear>
+          onValueChange={() => void ctrl.afterScopeChange()}
+        />
 
-        <FilterSelectWithClear
+        <AdminFilterBarSelect
+          layout="inline"
+          clearable
           bind:value={prefs.scopeMethod}
+          options={methodOptions}
+          placeholder="All request types"
           selectClass="min-w-44 font-mono"
           title="Filter by JSON-RPC method seen in recent logs"
-          titleClear="Clear request type filter"
-          ariaLabelClear="Clear request type filter"
           onClear={() => ctrl.removeScopeMethod()}
-          onChange={() => void ctrl.afterScopeChange()}
-        >
-          {#snippet options()}
-            <option value="">All request types</option>
-            {#each ctrl.logMethods as m (m)}
-              <option value={m}>{m}</option>
-            {/each}
-          {/snippet}
-        </FilterSelectWithClear>
+          onValueChange={() => void ctrl.afterScopeChange()}
+        />
 
         <MultiSelectFilter
           label="Traffic"
@@ -125,7 +111,6 @@
         />
       </div>
 
-      <!-- Line 2: Message (only when a message filter is set) -->
       {#if prefs.scopeMsgId.trim()}
         <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <div class="flex min-w-0 items-center gap-2">

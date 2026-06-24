@@ -15,9 +15,12 @@ import {
   KNOWLEDGE_CHUNK_PAGE_SIZE,
   optionalInt,
   sortDocuments,
+  KNOWLEDGE_BROWSE_FILTER_KEYS,
   type DocumentSortColumn
 } from '../shared/knowledge-pure';
 import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
+import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
+import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
 function tagsFromChunks(chunks: KnowledgeChunk[]): string[] {
@@ -38,13 +41,10 @@ export function createKnowledgeBrowseModel(deps: {
   setError: (message: string | null) => void;
   onReingest: (documentId: string) => Promise<void | KnowledgeJobData | null>;
 }) {
-  let browseStatus = $state('');
-  let browseOwnerKind = $state('');
-  let browseOwnerId = $state('');
-  let browseCategoryId = $state('');
-  let browseSubcategoryId = $state('');
-  let browseTags = $state<string[]>([]);
-  let browseTitle = $state('');
+  const tableFilters = useTableFilters({
+    keys: KNOWLEDGE_BROWSE_FILTER_KEYS,
+    urlSync: true
+  });
   let detailTags = $state<string[]>([]);
   let loadingDocs = $state(false);
   let documents = $state<KnowledgeDocument[]>([]);
@@ -65,7 +65,12 @@ export function createKnowledgeBrowseModel(deps: {
   });
 
   const sortedDocuments = $derived(
-    sortDocuments(documents, documentSort.sortBy, documentSort.direction, deps.options.categoryLabel)
+    sortDocuments(
+      documents,
+      documentSort.sortBy,
+      asTableSortDirection(documentSort.direction),
+      deps.options.categoryLabel
+    )
   );
 
   const allDocumentsSelected = $derived(
@@ -80,7 +85,9 @@ export function createKnowledgeBrowseModel(deps: {
   const selectedDocumentRows = $derived(documents.filter((doc) => selectedDocuments[doc.id]));
 
   const browseSubcategories = $derived(
-    deps.options.categories.filter((category) => category.parent_id === optionalInt(browseCategoryId))
+    deps.options.categories.filter(
+      (category) => category.parent_id === optionalInt(tableFilters.filters.kb_category)
+    )
   );
   const activeDocumentSubcategories = $derived.by(() => {
     const doc = activeDocument;
@@ -117,6 +124,11 @@ export function createKnowledgeBrowseModel(deps: {
     else deselectAllDocuments();
   }
 
+  function setBrowseFilter(key: (typeof KNOWLEDGE_BROWSE_FILTER_KEYS)[number], value: string) {
+    tableFilters.set(key, value);
+    queueLoadDocuments();
+  }
+
   function queueLoadDocuments() {
     if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
     filterDebounceTimer = setTimeout(() => {
@@ -131,16 +143,16 @@ export function createKnowledgeBrowseModel(deps: {
   }
 
   function handleBrowseOwnerKindChange() {
-    if (!browseOwnerKind) {
-      browseOwnerId = '';
-    } else if (browseOwnerKind === 'system') {
-      browseOwnerId = '0';
-    } else if (browseOwnerKind === 'character') {
-      browseOwnerId = String(deps.options.characters[0]?.id ?? '');
+    const kind = tableFilters.filters.kb_owner_kind;
+    if (!kind) {
+      setBrowseFilter('kb_owner_id', '');
+    } else if (kind === 'system') {
+      setBrowseFilter('kb_owner_id', '0');
+    } else if (kind === 'character') {
+      setBrowseFilter('kb_owner_id', String(deps.options.characters[0]?.id ?? ''));
     } else {
-      browseOwnerId = String(deps.options.users[0]?.id ?? '');
+      setBrowseFilter('kb_owner_id', String(deps.options.users[0]?.id ?? ''));
     }
-    queueLoadDocuments();
   }
 
   function handleDetailOwnerKindChange() {
@@ -159,37 +171,26 @@ export function createKnowledgeBrowseModel(deps: {
       clearTimeout(filterDebounceTimer);
       filterDebounceTimer = undefined;
     }
-    browseStatus = '';
-    browseOwnerKind = '';
-    browseOwnerId = '';
-    browseCategoryId = '';
-    browseSubcategoryId = '';
-    browseTags = [];
-    browseTitle = '';
+    tableFilters.reset();
     void loadDocuments();
   }
 
   const hasBrowseFilters = $derived(
-    browseStatus !== '' ||
-      browseOwnerKind !== '' ||
-      browseOwnerId !== '' ||
-      browseCategoryId !== '' ||
-      browseSubcategoryId !== '' ||
-      browseTags.length > 0 ||
-      browseTitle.trim() !== ''
+    Object.values(tableFilters.filters).some((v) => v.trim() !== '')
   );
 
   async function loadDocuments() {
     loadingDocs = true;
+    const f = tableFilters.filters;
     try {
       const payload = await listKnowledgeDocuments({
-        status: browseStatus,
-        owner_kind: browseOwnerKind || undefined,
-        owner_id: browseOwnerKind ? browseOwnerId : undefined,
-        category_id: optionalInt(browseCategoryId),
-        subcategory_id: optionalInt(browseSubcategoryId),
-        tag: browseTags[0],
-        title: browseTitle,
+        status: f.kb_status,
+        owner_kind: f.kb_owner_kind || undefined,
+        owner_id: f.kb_owner_kind ? f.kb_owner_id : undefined,
+        category_id: optionalInt(f.kb_category),
+        subcategory_id: optionalInt(f.kb_subcategory),
+        tag: f.kb_tag || undefined,
+        title: f.kb_title,
         limit: 100
       });
       documents = payload.data.documents;
@@ -344,52 +345,47 @@ export function createKnowledgeBrowseModel(deps: {
 
   return {
     get browseStatus() {
-      return browseStatus;
+      return tableFilters.filters.kb_status;
     },
     set browseStatus(v: string) {
-      browseStatus = v;
-      queueLoadDocuments();
+      setBrowseFilter('kb_status', v);
     },
     get browseOwnerKind() {
-      return browseOwnerKind;
+      return tableFilters.filters.kb_owner_kind;
     },
     set browseOwnerKind(v: string) {
-      browseOwnerKind = v;
+      tableFilters.set('kb_owner_kind', v);
     },
     get browseOwnerId() {
-      return browseOwnerId;
+      return tableFilters.filters.kb_owner_id;
     },
     set browseOwnerId(v: string) {
-      browseOwnerId = v;
-      queueLoadDocuments();
+      setBrowseFilter('kb_owner_id', v);
     },
     get browseCategoryId() {
-      return browseCategoryId;
+      return tableFilters.filters.kb_category;
     },
     set browseCategoryId(v: string) {
-      browseCategoryId = v;
-      queueLoadDocuments();
+      setBrowseFilter('kb_category', v);
     },
     get browseSubcategoryId() {
-      return browseSubcategoryId;
+      return tableFilters.filters.kb_subcategory;
     },
     set browseSubcategoryId(v: string) {
-      browseSubcategoryId = v;
-      queueLoadDocuments();
+      setBrowseFilter('kb_subcategory', v);
     },
     get browseTags() {
-      return browseTags;
+      const tag = tableFilters.filters.kb_tag.trim();
+      return tag ? [tag] : [];
     },
     set browseTags(v: string[]) {
-      browseTags = v;
-      queueLoadDocuments();
+      setBrowseFilter('kb_tag', v[0] ?? '');
     },
     get browseTitle() {
-      return browseTitle;
+      return tableFilters.filters.kb_title;
     },
     set browseTitle(v: string) {
-      browseTitle = v;
-      queueLoadDocuments();
+      setBrowseFilter('kb_title', v);
     },
     get detailTags() {
       return detailTags;

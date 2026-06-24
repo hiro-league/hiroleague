@@ -14,7 +14,7 @@
   import { shortGraphId } from '$lib/format/short-graph-id';
   import ClampCell from '../shared/ClampCell.svelte';
   import FlowNav from '../shared/FlowNav.svelte';
-  import HighlightText from '../shared/HighlightText.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
   import StageCard from '../shared/StageCard.svelte';
   import TraceTable from '../shared/TraceTable.svelte';
   import ValidityPill from '../shared/ValidityPill.svelte';
@@ -90,7 +90,7 @@
     sortItems(stage.items, sortByStage.get(index));
 </script>
 
-{#snippet hl(text: string | null | undefined)}<HighlightText {text} query={search} />{/snippet}
+{#snippet hl(text: string | null | undefined)}<Highlight {text} query={search} />{/snippet}
 
 {#snippet sortTh(index: number, key: string, label: string, cls: string, title: string)}
   <th

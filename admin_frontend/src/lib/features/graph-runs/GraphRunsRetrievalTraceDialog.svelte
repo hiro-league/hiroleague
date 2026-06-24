@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Search, Settings2 } from '@lucide/svelte';
+  import { Settings2 } from '@lucide/svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { RetrievalTraceRecord } from '$lib/api/graph-runs';
   import ExpandCollapseButtons from './shared/ExpandCollapseButtons.svelte';
@@ -110,12 +111,12 @@
   {#snippet headActions()}
     {#if trace}
       <div class="trace-search">
-        <Search size={14} aria-hidden="true" class="trace-search__icon" />
-        <input
-          type="search"
-          class="trace-search__input"
-          placeholder="Search facts, entities, episodes…"
+        <SearchInput
+          variant="inline"
+          class="trace-search__shell min-w-0 flex-1 border-0 bg-transparent p-0 shadow-none"
+          inputClass="trace-search__input"
           bind:value={search}
+          placeholder="Search facts, entities, episodes…"
         />
       </div>
     {/if}
@@ -243,12 +244,12 @@
     background: color-mix(in srgb, var(--muted-foreground) 6%, transparent);
   }
 
-  .trace-search :global(.trace-search__icon) {
-    flex: none;
-    color: var(--muted-foreground);
+  .trace-search :global(.trace-search__shell) {
+    flex: 1;
+    min-width: 0;
   }
 
-  .trace-search__input {
+  .trace-search :global(input) {
     flex: 1;
     min-width: 0;
     appearance: none;

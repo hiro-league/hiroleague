@@ -50,6 +50,18 @@ export function knowledgeTabHref(tab: KnowledgeTabId, basePath = ''): string {
 
 export const KNOWLEDGE_BROWSE_HREF = knowledgeTabHref('browse');
 
+/** URL-synced knowledge browse filter keys (`kb_*`). */
+export const KNOWLEDGE_BROWSE_FILTER_KEYS = [
+  'kb_title',
+  'kb_status',
+  'kb_owner_kind',
+  'kb_owner_id',
+  'kb_category',
+  'kb_subcategory',
+  'kb_tag'
+] as const;
+export type KnowledgeBrowseFilterKey = (typeof KNOWLEDGE_BROWSE_FILTER_KEYS)[number];
+
 /** Browse chunk list page size; fetch one extra to detect a further page. */
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 100;
 export const KNOWLEDGE_CHUNK_FETCH_SIZE = KNOWLEDGE_CHUNK_PAGE_SIZE + 1;

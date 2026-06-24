@@ -3,6 +3,7 @@
   import { LoaderCircle, Plus, X } from '@lucide/svelte';
   import * as Popover from '$lib/components/ui/popover/index.js';
   import { cn } from '$lib/utils';
+  import { matchesQuery } from '$lib/search/match';
 
   type TagOption = { id: number; name: string };
 
@@ -31,7 +32,6 @@
   const listboxId = `creatable-tags-listbox-${crypto.randomUUID()}`;
 
   const trimmedSearch = $derived(search.trim());
-  const normalizedSearch = $derived(trimmedSearch.toLowerCase());
 
   function namesEqual(a: string, b: string) {
     return a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
@@ -44,8 +44,8 @@
   const availableOptions = $derived(options.filter((option) => !isSelected(option.name)));
 
   const filteredOptions = $derived(
-    normalizedSearch
-      ? availableOptions.filter((option) => option.name.toLowerCase().includes(normalizedSearch))
+    trimmedSearch
+      ? availableOptions.filter((option) => matchesQuery(option.name, search))
       : availableOptions
   );
 

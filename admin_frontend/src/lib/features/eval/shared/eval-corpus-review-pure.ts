@@ -1,4 +1,5 @@
 import type { CorpusEpisodeExtraction, EvalEpisode } from '$lib/api/eval';
+import { rowMatches } from '$lib/search/match';
 
 /** Collapsed episode bodies clamp to this many text lines until expanded. */
 export const CORPUS_CLAMP_LINES = 6;
@@ -46,9 +47,8 @@ export function filterCorpusEpisodes(
   maxEnt: number,
   maxFact: number
 ): EvalEpisode[] {
-  const term = search.trim().toLowerCase();
-  let list = term
-    ? episodes.filter((ep) => `${ep.body} ${ep.speaker} ${ep.id}`.toLowerCase().includes(term))
+  let list = search.trim()
+    ? episodes.filter((ep) => rowMatches(ep, search, (row) => [row.body, row.speaker, row.id]))
     : episodes;
   if (!extraction || !isCorpusExtractionFilterActive(state)) return list;
 

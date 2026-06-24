@@ -1,13 +1,13 @@
-import { cycleTableSort, tableSortAria, type TableSortDirection } from './table-sort-utils';
+import { cycleTableSort, tableSortAria, type TableSortDirection, type TableSortDirectionWithNone } from './table-sort-utils';
 
-export type { TableSortDirection, AriaSortValue } from './table-sort-utils';
+export type { TableSortDirection, TableSortDirectionWithNone, AriaSortValue } from './table-sort-utils';
 
 export type TableSortController<TCol extends string> = {
   readonly sortBy: TCol;
-  readonly direction: TableSortDirection;
+  readonly direction: TableSortDirectionWithNone;
   toggle: (column: TCol) => void;
   ariaSort: (column: TCol) => ReturnType<typeof tableSortAria>;
-  setSort: (column: TCol, direction: TableSortDirection) => void;
+  setSort: (column: TCol, direction: TableSortDirectionWithNone) => void;
 };
 
 type UrlSyncOpts = {
@@ -18,26 +18,24 @@ type UrlSyncOpts = {
 function readSortFromUrl<TCol extends string>(
   allowed: readonly TCol[],
   defaultBy: TCol,
-  defaultDirection: TableSortDirection,
+  defaultDirection: TableSortDirection | TableSortDirectionWithNone,
   params: URLSearchParams,
   keys: UrlSyncOpts
-): { sortBy: TCol; direction: TableSortDirection } {
+): { sortBy: TCol; direction: TableSortDirectionWithNone } {
   const sortParam = keys.sortParam ?? 'sort';
   const directionParam = keys.directionParam ?? 'sort_dir';
   const rawSort = params.get(sortParam);
   const rawDir = params.get(directionParam);
   const sortBy =
     rawSort && (allowed as readonly string[]).includes(rawSort) ? (rawSort as TCol) : defaultBy;
-  // Honor both explicit directions from the URL; only fall back to the default when the
-  // value is absent/garbage. Treating only `desc` as explicit silently dropped `asc` links.
-  const direction: TableSortDirection =
-    rawDir === 'desc' || rawDir === 'asc' ? rawDir : defaultDirection;
+  const direction: TableSortDirectionWithNone =
+    rawDir === 'desc' || rawDir === 'asc' || rawDir === 'none' ? rawDir : defaultDirection;
   return { sortBy, direction };
 }
 
 function writeSortToUrl(
   sortBy: string,
-  direction: TableSortDirection,
+  direction: TableSortDirectionWithNone,
   keys: UrlSyncOpts
 ) {
   if (typeof window === 'undefined') return;
@@ -51,13 +49,15 @@ function writeSortToUrl(
 
 export function useTableSort<TCol extends string>(opts: {
   defaultBy: TCol;
-  defaultDirection?: TableSortDirection;
+  defaultDirection?: TableSortDirection | TableSortDirectionWithNone;
   allowed: readonly TCol[];
   urlSync?: boolean;
   sortParam?: string;
   directionParam?: string;
+  threeState?: boolean;
 }): TableSortController<TCol> {
   const defaultDirection = opts.defaultDirection ?? 'asc';
+  const threeState = opts.threeState ?? false;
   const urlKeys: UrlSyncOpts = {
     sortParam: opts.sortParam,
     directionParam: opts.directionParam
@@ -75,7 +75,7 @@ export function useTableSort<TCol extends string>(opts: {
       : { sortBy: opts.defaultBy, direction: defaultDirection };
 
   let sortBy = $state<TCol>(initial.sortBy);
-  let direction = $state<TableSortDirection>(initial.direction);
+  let direction = $state<TableSortDirectionWithNone>(initial.direction);
 
   // Keep in-memory sort aligned with the address bar when the user navigates
   // browser history (back/forward). Without this, popstate leaves the URL and the
@@ -98,7 +98,7 @@ export function useTableSort<TCol extends string>(opts: {
     });
   }
 
-  function setSort(column: TCol, nextDirection: TableSortDirection) {
+  function setSort(column: TCol, nextDirection: TableSortDirectionWithNone) {
     sortBy = column;
     direction = nextDirection;
     if (opts.urlSync) {
@@ -107,7 +107,7 @@ export function useTableSort<TCol extends string>(opts: {
   }
 
   function toggle(column: TCol) {
-    const next = cycleTableSort(sortBy, direction, column);
+    const next = cycleTableSort(sortBy, direction, column, { threeState });
     setSort(next.sortBy, next.direction);
   }
 

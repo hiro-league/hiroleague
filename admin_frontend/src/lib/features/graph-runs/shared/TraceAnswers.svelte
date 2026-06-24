@@ -1,5 +1,5 @@
 <script lang="ts">
-  import HighlightText from './HighlightText.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
 
   // The retrieval dialog header question line. Gold / our answers live on the Overview tab.
   let { question, query }: { question: string; query: string } = $props();
@@ -8,7 +8,7 @@
 <div class="trace-answers">
   <div class="trace-answer">
     <span class="trace-answer__label trace-answer__label--q">Question</span>
-    <span class="trace-answer__text"><HighlightText text={question} {query} /></span>
+    <span class="trace-answer__text"><Highlight text={question} {query} /></span>
   </div>
 </div>
 

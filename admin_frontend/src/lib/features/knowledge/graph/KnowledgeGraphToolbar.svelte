@@ -6,7 +6,7 @@
    * / reframe / fullscreen). Search orchestration (debounce + backend lookup) lives in the
    * model; this just binds the input to graph.search / graph.clearSearch.
    */
-  import { Search, X } from '@lucide/svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import { cn } from '$lib/utils';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import KnowledgeGraphFilterBar from './KnowledgeGraphFilterBar.svelte';
@@ -29,12 +29,12 @@
   const knowledgeGroupId = $derived(graph.groups().find((g) => g.kind === 'knowledge')?.id ?? '');
 
   function onSearchInput(value: string): void {
-    onSearchReframe(); // a new query is an intentional reframe → re-enable focus fit
+    onSearchReframe();
+    if (value.trim().length === 0) {
+      graph.clearSearch();
+      return;
+    }
     graph.search(value);
-  }
-  function onClear(): void {
-    onSearchReframe(); // clearing reframes (full set if 'hide' was relaying out)
-    graph.clearSearch();
   }
 
   // Episode multi-select options, in corpus order (backend sorts by chunk_id). The episode ID
@@ -102,44 +102,15 @@
     {#if graph.nodes().length > 0}
       <!-- Unified search: highlights matching nodes/edges (by name/alias, relation/fact, or
            chunk text) with an amber ring and frames them in view — never hides the rest. -->
-      <div class="relative">
-        <Search
-          size={14}
-          class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <input
-          type="search"
-          value={graph.searchQuery()}
-          oninput={(e) => onSearchInput(e.currentTarget.value)}
-          placeholder="Search graph…"
-          aria-label="Search nodes, edges, and chunk text"
-          class="h-8 w-44 rounded-md border bg-background pl-7 pr-16 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:w-52 [&::-webkit-search-cancel-button]:hidden"
-        />
-        <!-- Count + clear belong to the TEXT box, so gate on the query (not searchActive, which
-             is also true on an episode-only selection — that would show a no-op X here). -->
-        {#if graph.searchQuery().trim().length > 0}
-          <div class="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
-            <span
-              class="tabular-nums text-[10px] font-medium {graph.matchCount() > 0
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-muted-foreground'}"
-              title={`${graph.matchCount()} match${graph.matchCount() === 1 ? '' : 'es'}${graph.searchBusy() ? ' (searching chunks…)' : ''}`}
-            >
-              {graph.searchBusy() ? '…' : graph.matchCount()}
-            </span>
-            <button
-              type="button"
-              onclick={onClear}
-              class="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="Clear search"
-              title="Clear search"
-            >
-              <X size={13} aria-hidden="true" />
-            </button>
-          </div>
-        {/if}
-      </div>
+      <SearchInput
+        variant="compact"
+        value={graph.searchQuery()}
+        onValueChange={onSearchInput}
+        placeholder="Search graph…"
+        aria-label="Search nodes, edges, and chunk text"
+        count={graph.matchCount()}
+        busy={graph.searchBusy()}
+      />
     {/if}
   </div>
 </div>

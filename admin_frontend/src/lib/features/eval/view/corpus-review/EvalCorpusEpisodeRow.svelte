@@ -3,7 +3,7 @@
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { Microscope, Share2 } from '@lucide/svelte';
   import type { CorpusEpisodeExtraction, EvalEpisode } from '$lib/api/eval';
-  import { highlightSegments } from '$lib/features/eval/shared/eval-highlight';
+  import Highlight from '$lib/search/Highlight.svelte';
   import { approxTokens, fmtCompact, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import { CORPUS_CLAMP_MAX_HEIGHT } from '$lib/features/eval/shared/eval-corpus-review-pure';
 
@@ -108,9 +108,7 @@
       <MarkdownPreview markdown={ep.body} compact class="text-[13px]" />
     {:else}
       <p class="whitespace-pre-wrap font-sans text-[13px] leading-6">
-        {#each highlightSegments(ep.body, search) as seg}
-          {#if seg.hit}<mark class="rounded bg-amber-200 text-inherit dark:bg-amber-500/40">{seg.text}</mark>{:else}{seg.text}{/if}
-        {/each}
+        <Highlight text={ep.body} query={search} />
       </p>
     {/if}
   </div>

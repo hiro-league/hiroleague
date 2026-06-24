@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
-  import HighlightText from './HighlightText.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
 
   // A potentially-long table cell (entity summary / episode content) clamped to 3 lines with a
   // more/less toggle, search matches still highlighted. Owns its own open state — the retrieval
@@ -14,7 +14,7 @@
   const isLong = $derived((text?.length ?? 0) > 140);
 </script>
 
-<div class="clamp" class:clamp--open={open}><HighlightText {text} {query} /></div>
+<div class="clamp" class:clamp--open={open}><Highlight {text} {query} /></div>
 {#if isLong}
   <button type="button" class="clamp-toggle" onclick={() => (open = !open)}>
     {#if open}<ChevronUp size={11} aria-hidden="true" />less{:else}<ChevronDown size={11} aria-hidden="true" />more{/if}

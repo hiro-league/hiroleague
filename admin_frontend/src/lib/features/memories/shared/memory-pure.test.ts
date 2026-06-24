@@ -18,7 +18,7 @@ import {
   memoryKindLabel,
   memoryMetadata,
   memoryPrimaryText,
-  memoryRowMatchesSearchNeedle,
+  memoryRowMatchesSearch,
   memoryRowPassesFilters,
   memorySharedLabel,
   memorySortSeconds,
@@ -216,18 +216,18 @@ describe('memoryGroupId + memoryChunkIds', () => {
   });
 });
 
-describe('memoryRowMatchesSearchNeedle', () => {
+describe('memoryRowMatchesSearch', () => {
   const charMap = { c1: character({ id: 'c1', name: 'Ada' }) };
   const byId = new Map([[1, channel({ id: 1, name: 'General' })]]);
 
   it('matches across text, id, source, channel and character names', () => {
     const row: Row = { id: 'mem-1', memory: 'likes coffee', source: 'chat', agent_id: 'c1', channel_id: 1 };
-    expect(memoryRowMatchesSearchNeedle(row, '', charMap, byId)).toBe(true);
-    expect(memoryRowMatchesSearchNeedle(row, 'coffee', charMap, byId)).toBe(true);
-    expect(memoryRowMatchesSearchNeedle(row, 'mem-1', charMap, byId)).toBe(true);
-    expect(memoryRowMatchesSearchNeedle(row, 'ada', charMap, byId)).toBe(true);
-    expect(memoryRowMatchesSearchNeedle(row, 'general', charMap, byId)).toBe(true);
-    expect(memoryRowMatchesSearchNeedle(row, 'absent', charMap, byId)).toBe(false);
+    expect(memoryRowMatchesSearch(row, 'coffee', charMap, byId)).toBe(true);
+    expect(memoryRowMatchesSearch(row, 'mem-1', charMap, byId)).toBe(true);
+    expect(memoryRowMatchesSearch(row, 'ada', charMap, byId)).toBe(true);
+    expect(memoryRowMatchesSearch(row, 'general', charMap, byId)).toBe(true);
+    expect(memoryRowMatchesSearch(row, 'absent', charMap, byId)).toBe(false);
+    expect(memoryRowMatchesSearch(row, '   ', charMap, byId)).toBe(false);
   });
 });
 
@@ -239,7 +239,7 @@ describe('memoryRowPassesFilters', () => {
     return {
       characterId: '',
       sourceFilter: '',
-      searchNeedle: '',
+      searchQuery: '',
       dateFromMs: NaN,
       dateToMs: NaN,
       characterMap: charMap,
@@ -269,8 +269,8 @@ describe('memoryRowPassesFilters', () => {
 
   it('applies the search needle last', () => {
     const row: Row = { memory: 'likes tea', agent_id: 'c1' };
-    expect(memoryRowPassesFilters(row, opts({ searchNeedle: 'tea' }))).toBe(true);
-    expect(memoryRowPassesFilters(row, opts({ searchNeedle: 'coffee' }))).toBe(false);
+    expect(memoryRowPassesFilters(row, opts({ searchQuery: 'tea' }))).toBe(true);
+    expect(memoryRowPassesFilters(row, opts({ searchQuery: 'coffee' }))).toBe(false);
   });
 });
 

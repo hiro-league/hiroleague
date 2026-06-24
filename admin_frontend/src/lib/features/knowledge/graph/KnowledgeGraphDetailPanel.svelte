@@ -23,11 +23,10 @@
     Package,
     PanelLeft,
     PanelRight,
-    Search,
     Spline,
-    User,
-    X
+    User
   } from '@lucide/svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import { cn } from '$lib/utils';
   import {
     fetchGraphChunksDetail,
@@ -37,10 +36,11 @@
   } from '$lib/api/knowledge';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import { colorFor, humanizeRelType } from './knowledge-graph-style';
-  import { collapsedEdges, connectionsForNode, hasMatch } from './graph-detail-helpers';
+  import { collapsedEdges, connectionsForNode } from './graph-detail-helpers';
+  import { matchesQuery, rowMatches } from '$lib/search/match';
   import GraphDetailConnectionsTab from './detail/GraphDetailConnectionsTab.svelte';
   import GraphDetailEpisodesTab from './detail/GraphDetailEpisodesTab.svelte';
-  import GraphDetailHighlight from './detail/GraphDetailHighlight.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
 
   type AggregateSelection = {
     id: string;
@@ -158,7 +158,7 @@
   });
   const filteredConnections = $derived(
     search.trim()
-      ? connections.filter((c) => hasMatch(c.title, search) || hasMatch(c.subtitle, search))
+      ? connections.filter((c) => rowMatches(c, search, (c) => [c.title, c.subtitle]))
       : connections
   );
 
@@ -172,7 +172,7 @@
   const chunkGroups = $derived.by(() => {
     const groups = new Map<string, GraphChunkDetail[]>();
     for (const c of chunkDetails) {
-      if (search.trim() && !hasMatch(c.text, search)) continue;
+      if (search.trim() && !matchesQuery(c.text, search)) continue;
       const title = c.document_title || c.document_id || 'Unknown document';
       const list = groups.get(title);
       if (list) list.push(c);
@@ -182,7 +182,7 @@
   });
   const matchedChunkCount = $derived(chunkGroups.reduce((n, g) => n + g.chunks.length, 0));
   const summaryShowFull = $derived(
-    summaryExpanded || (search.trim().length > 0 && hasMatch(summaryText, search))
+    summaryExpanded || (search.trim().length > 0 && matchesQuery(summaryText, search))
   );
 
   $effect(() => {
@@ -271,7 +271,7 @@
     {@const shown =
       summaryShowFull || !long ? summaryText : summaryText.slice(0, SUMMARY_SNIPPET_CHARS) + '…'}
     <div class={cn('rounded-md bg-muted/40 p-2 text-xs text-muted-foreground', edge && 'italic')}>
-      {#if edge}“{/if}<GraphDetailHighlight text={shown} {search} />{#if edge}”{/if}
+      {#if edge}“{/if}<Highlight text={shown} query={search} />{#if edge}”{/if}
       {#if long}
         <button
           type="button"
@@ -301,31 +301,15 @@
     {@render detailHeader(accent, HeaderIcon, headerType, headerName)}
 
     <div class="flex flex-none flex-col gap-2 border-b p-3">
-      <div class="relative">
-        <Search
-          size={13}
-          class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <input
-          type="search"
-          bind:value={search}
-          placeholder="Search episodes &amp; connections…"
-          aria-label="Search episode text, summary and connections"
-          class="h-7 w-full rounded-md border bg-background pl-7 pr-7 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden"
-        />
-        {#if search}
-          <button
-            type="button"
-            onclick={() => (search = '')}
-            class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label="Clear search"
-            title="Clear search"
-          >
-            <X size={13} aria-hidden="true" />
-          </button>
-        {/if}
-      </div>
+      <SearchInput
+        variant="field"
+        bind:value={search}
+        size="sm"
+        inputClass="h-7 text-xs [&::-webkit-search-cancel-button]:hidden"
+        class="w-full min-w-0"
+        placeholder="Search episodes & connections…"
+        aria-label="Search episode text, summary and connections"
+      />
 
       {#if node && node.aliases.length}
         <div class="text-xs">

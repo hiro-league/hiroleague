@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CalendarDays, FileText } from '@lucide/svelte';
   import type { GraphChunkDetail, GraphEdgeDTO } from '$lib/api/knowledge';
-  import GraphDetailHighlight from './GraphDetailHighlight.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
 
   let {
     edge,
@@ -108,7 +108,7 @@
                 </div>
               {/if}
               <p class="whitespace-pre-wrap break-words text-foreground/90">
-                <GraphDetailHighlight text={body} {search} />
+                <Highlight text={body} query={search} />
               </p>
               {#if long}
                 <button

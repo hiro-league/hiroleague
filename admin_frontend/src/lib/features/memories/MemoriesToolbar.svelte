@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RefreshCw, Trash2 } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
-  import AdminFilterBarSearch from '$lib/components/page/table/AdminFilterBarSearch.svelte';
+  import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -80,7 +80,7 @@
           oninput={(e) => setFilter('mem_to', e.currentTarget.value)}
         />
       </FormField>
-      <AdminFilterBarSearch
+      <SearchInput
         label="Search"
         value={filters.mem_q}
         onValueChange={(v) => setFilter('mem_q', v)}
