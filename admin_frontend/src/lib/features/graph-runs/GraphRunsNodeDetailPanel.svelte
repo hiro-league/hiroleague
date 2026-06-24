@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { X } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import DetailFieldGrid, {
+    type DetailFieldRow
+  } from '$lib/components/page/DetailFieldGrid.svelte';
+  import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
   import { fieldLabel, formatLedgerField, previewMultiline } from './graph-runs-pure';
 
@@ -14,7 +16,7 @@
     onClose: () => void;
   } = $props();
 
-  const detailRows: readonly (readonly (keyof GraphLedgerRow)[])[] = [
+  const detailRowFields: readonly (readonly (keyof GraphLedgerRow)[])[] = [
     ['status', 'elapsed_ms'],
     ['chat_channel_id', 'device_id'],
     ['provider'],
@@ -37,6 +39,7 @@
     ['ts'],
     ['node_attempt', 'branch_index']
   ];
+
   const headerStep = $derived(formatLedgerField('step_index', row));
   const headerNode = $derived(String(row.node ?? '').trim() || '-');
   const headerCost = $derived(formatLedgerField('cost_usd', row));
@@ -57,46 +60,43 @@
   function isPreviewField(field: keyof GraphLedgerRow): boolean {
     return field === 'input_preview' || field === 'output_preview';
   }
+
+  const gridRows = $derived.by((): DetailFieldRow[] =>
+    detailRowFields.map((rowFields) =>
+      rowFields.map((field) => {
+        const preview = isPreviewField(field);
+        const formatted = formatLedgerField(field, row);
+        return {
+          label: fieldLabel(field),
+          labelTitle: field,
+          value: preview ? previewMultiline(formatted) : formatted,
+          valueTitle: preview ? previewMultiline(formatted) : undefined,
+          wrap: shouldWrapField(field),
+          preview
+        };
+      })
+    )
+  );
 </script>
 
-<aside
-  class="node-detail-panel flex min-h-0 flex-col overflow-hidden rounded-md border bg-card/80"
-  aria-label="Graph run node details"
+<DetailPanelShell
+  ariaLabel="Graph run node details"
+  class="bg-card/80"
+  closeLabel="Close node details"
+  {onClose}
 >
-  <div class="flex min-w-0 items-center justify-between gap-3 border-b px-3 py-2.5">
+  {#snippet title()}
     <h3 class="node-detail-title">
       <span class="accent-text-gradient">Step {headerStep}</span>
       <span class="node-detail-title-node" title={headerNode}>{headerNode}</span>
       <span class="node-detail-title-cost" title="Cost">{headerCost}</span>
     </h3>
-    <Button variant="ghost" size="icon" class="size-8 shrink-0" aria-label="Close node details" onclick={onClose}>
-      <X size={15} />
-    </Button>
-  </div>
+  {/snippet}
 
-  <div class="min-h-0 flex-1 overflow-auto p-3 font-sans">
-    <dl class="node-detail-rows">
-      {#each detailRows as rowFields, rowIndex (rowIndex)}
-        <div class="node-detail-row" class:node-detail-row--single={rowFields.length === 1}>
-          {#each rowFields as field (field)}
-            <div class="node-detail-field" class:node-detail-field--single={rowFields.length === 1}>
-            <dt title={field}>{fieldLabel(field)}</dt>
-            <dd
-              class:node-detail-field__value--wrap={shouldWrapField(field)}
-              class:node-detail-field__value--preview={isPreviewField(field)}
-              title={isPreviewField(field) ? previewMultiline(formatLedgerField(field, row)) : undefined}
-            >
-              {isPreviewField(field)
-                ? previewMultiline(formatLedgerField(field, row))
-                : formatLedgerField(field, row)}
-            </dd>
-          </div>
-          {/each}
-        </div>
-      {/each}
-    </dl>
-  </div>
-</aside>
+  {#snippet children()}
+    <DetailFieldGrid rows={gridRows} />
+  {/snippet}
+</DetailPanelShell>
 
 <style>
   .node-detail-title {
@@ -131,76 +131,5 @@
     background: var(--muted, #f1f5f9);
     padding: 1px 7px;
     color: var(--muted-foreground, #64748b);
-  }
-
-  .node-detail-rows {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-  }
-
-  .node-detail-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .node-detail-row--single {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .node-detail-field {
-    min-width: 0;
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--muted, #f1f5f9) 42%, transparent);
-    padding: 7px 8px;
-  }
-
-  .node-detail-field dt,
-  .node-detail-field dd {
-    min-width: 0;
-    margin: 0;
-  }
-
-  .node-detail-field dt {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--muted-foreground, #64748b);
-    font-size: 10px;
-    font-weight: 800;
-    line-height: 1.2;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-  }
-
-  .node-detail-field dd {
-    margin-top: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family:
-      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    font-size: 12px;
-    line-height: 1.25;
-    color: var(--foreground, #0f172a);
-  }
-
-  /* Base ``dd`` uses nowrap + ellipsis; wrap must reset those or previews stay one line. */
-  .node-detail-field dd.node-detail-field__value--wrap {
-    overflow: visible;
-    text-overflow: unset;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    line-height: 1.4;
-  }
-
-  .node-detail-field dd.node-detail-field__value--preview {
-    max-height: min(14rem, 35vh);
-    overflow-x: hidden;
-    overflow-y: auto;
   }
 </style>

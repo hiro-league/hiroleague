@@ -6,6 +6,7 @@
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
   import KnowledgeAskCompareView from '$lib/features/knowledge/ask/KnowledgeAskCompareView.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
@@ -169,16 +170,18 @@
       <!-- L3 compare-mode: render the two-leg side-by-side view. -->
       <KnowledgeAskCompareView compareResult={ask.compareResult} />
     {:else if inCompareMode}
-      <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
-        Ask a question to compare flat vs graph-augmented retrieval side-by-side.
-        {#if !ask.askRewrite}
-          <br /><span class="text-xs">Tip: enable Rewrite — graph mode needs entities from the rewrite step.</span>
-        {/if}
-      </div>
+      <InlineEmptyState
+        message="Ask a question to compare flat vs graph-augmented retrieval side-by-side."
+        hint={!ask.askRewrite
+          ? 'Tip: enable Rewrite — graph mode needs entities from the rewrite step.'
+          : undefined}
+        class="border-solid bg-background px-3 py-8"
+      />
     {:else if ask.answerResult?.no_results}
-      <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
-        No sources matched. Relax filters or lower the minimum score.
-      </div>
+      <InlineEmptyState
+        message="No sources matched. Relax filters or lower the minimum score."
+        class="border-solid bg-background px-3 py-8"
+      />
     {:else if ask.answerResult}
       <article class="grid gap-3 rounded-md border bg-background p-4">
         <div class="flex flex-wrap items-center gap-2">
@@ -228,9 +231,10 @@
         <p class="whitespace-pre-wrap font-sans text-sm leading-6">{ask.answerResult.answer}</p>
       </article>
     {:else}
-      <div class="rounded-md border px-3 py-8 text-center font-sans text-sm text-muted-foreground">
-        Ask a question to retrieve cited sources.
-      </div>
+      <InlineEmptyState
+        message="Ask a question to retrieve cited sources."
+        class="border-solid bg-background px-3 py-8"
+      />
     {/if}
   </KnowledgeCollapsibleSectionCard>
 

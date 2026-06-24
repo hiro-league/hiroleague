@@ -12,6 +12,7 @@
   } from '@lucide/svelte';
   import type { LogTimeRange } from '$lib/api/logs';
   import Button from '$lib/components/ui/button.svelte';
+  import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
   import { ADMIN_INPUT, ADMIN_SEARCH_FIELD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { LOG_LEVELS, LOG_TIME_RANGES } from '$lib/api/logs';
@@ -54,31 +55,32 @@
     }
     void ctrl.reloadLiveTail();
   }
+  const logLevelOptions = $derived(
+    LOG_LEVELS.map((level) => ({
+      value: level,
+      label: `${prefs.levelIsActive(level) ? 'Hide' : 'Show'} ${level} logs`
+    }))
+  );
 </script>
 
 <div class="flex flex-col gap-3">
   <div class="flex min-w-0 flex-wrap items-center gap-2">
-    <div class="flex items-center gap-1" role="group" aria-label="Filter log levels">
-      <span class="font-sans text-sm font-semibold text-muted-foreground">Level:</span>
-      {#each LOG_LEVELS as level (level)}
-        {@const active = prefs.levelIsActive(level)}
-        <Button
-          size="icon"
-          variant={active ? 'secondary' : 'ghost'}
-          class="size-7 shrink-0 shadow-none"
-          title={level}
-          aria-label={`${active ? 'Hide' : 'Show'} ${level} logs`}
-          aria-pressed={active}
-          onclick={() => prefs.toggleLevel(level)}
-        >
-          <LogLevelIcon
-            level={level}
-            size={14}
-            class={cn('shrink-0', active ? logLevelAccentClass(level) : 'opacity-40')}
-          />
-        </Button>
-      {/each}
-    </div>
+    <AdminIconToggleGroup
+      label="Level:"
+      layout="inline"
+      appearance="toolbar"
+      options={logLevelOptions}
+      isSelected={(level) => prefs.levelIsActive(level as (typeof LOG_LEVELS)[number])}
+      onToggle={(level) => prefs.toggleLevel(level as (typeof LOG_LEVELS)[number])}
+    >
+      {#snippet optionContent(option, active)}
+        <LogLevelIcon
+          level={option.value as (typeof LOG_LEVELS)[number]}
+          size={14}
+          class={cn('shrink-0', active ? logLevelAccentClass(option.value as (typeof LOG_LEVELS)[number]) : 'opacity-40')}
+        />
+      {/snippet}
+    </AdminIconToggleGroup>
     <label class={ADMIN_SEARCH_FIELD}>
       <Search size={15} class="text-muted-foreground" />
       <input

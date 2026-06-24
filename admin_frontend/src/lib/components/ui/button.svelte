@@ -3,7 +3,7 @@
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';
 
-  type Variant = 'default' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+  type Variant = 'default' | 'secondary' | 'outline' | 'ghost' | 'destructive' | 'destructive-outline';
   type Size = 'default' | 'sm' | 'icon';
 
   let {
@@ -21,7 +21,9 @@
     outline: 'border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground',
     ghost: 'hover:bg-accent hover:text-accent-foreground',
     destructive:
-      'bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20'
+      'bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20',
+    'destructive-outline':
+      'border border-destructive/50 bg-background text-destructive shadow-xs hover:bg-destructive/10 hover:text-destructive'
   };
 
   const sizes: Record<Size, string> = {

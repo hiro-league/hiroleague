@@ -74,9 +74,9 @@
       </select>
     {/if}
     <Button
-      variant="outline"
+      variant="destructive-outline"
       size="icon"
-      class="border-destructive/60 text-destructive hover:bg-destructive/10"
+      class="size-8"
       disabled={ctrl.busy || !ctrl.selectedChannelId || ctrl.channelsLoading}
       onclick={() => ctrl.openClearMessagesModal()}
       aria-label="Clear channel"

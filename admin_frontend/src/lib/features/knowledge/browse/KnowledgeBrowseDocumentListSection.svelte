@@ -7,6 +7,7 @@
   import type { KnowledgeOptionsModel } from '$lib/features/knowledge/state/knowledge-options.svelte';
   import { KNOWLEDGE_SECTION_CARD, KNOWLEDGE_SECTION_TITLE } from '$lib/features/knowledge/shared/knowledge-ui';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -80,17 +81,16 @@
   {#if browse.loadingDocs && browse.documents.length === 0}
     <InlineLoading label="Loading documents…" />
   {:else if browse.documents.length === 0}
-    <div
-      class="flex flex-wrap items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background/40 px-4 py-6 text-center"
-    >
-      <p class="font-sans text-sm text-muted-foreground">No documents</p>
-      {#if browse.hasBrowseFilters}
-        <Button variant="outline" class="h-8" onclick={() => browse.clearBrowseFilters()}>
-          <FilterX size={15} />
-          Clear
-        </Button>
-      {/if}
-    </div>
+    <InlineEmptyState message="No documents">
+      {#snippet actions()}
+        {#if browse.hasBrowseFilters}
+          <Button variant="outline" class="h-8" onclick={() => browse.clearBrowseFilters()}>
+            <FilterX size={15} />
+            Clear
+          </Button>
+        {/if}
+      {/snippet}
+    </InlineEmptyState>
   {:else}
     <KnowledgeBrowseDocumentsTable {browse} {options} {onPreview} {onOpenChunks} />
   {/if}

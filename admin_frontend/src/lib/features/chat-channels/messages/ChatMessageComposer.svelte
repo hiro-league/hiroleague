@@ -132,8 +132,8 @@
         <Send size={20} />
       </Button>
       <Button
-        variant="outline"
-        class="h-11 min-w-11 shrink-0 self-stretch border-destructive/50 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        variant="destructive-outline"
+        class="h-11 min-w-11 shrink-0 self-stretch px-0"
         title="Record voice message"
         disabled={ctrl.composingBusy}
         aria-label="Record voice message"

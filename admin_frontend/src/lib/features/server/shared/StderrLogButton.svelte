@@ -21,8 +21,7 @@
 {#if exists}
   <Button
     size="sm"
-    variant="outline"
-    class={recent ? 'border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive' : ''}
+    variant={recent ? 'destructive-outline' : 'outline'}
     title={stderrTitle(mtime, size)}
     {onclick}
   >

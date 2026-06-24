@@ -11,7 +11,7 @@
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import MutedStatusLine from '$lib/features/chat-channels/shared/MutedStatusLine.svelte';
+  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { cn } from '$lib/utils';
 
@@ -157,7 +157,7 @@
     {:else}
       <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
         {#if liveUpdatesPaused}
-          <MutedStatusLine text="Live updates paused - retrying" class="shrink-0" />
+          <InlineWarningAlert message="Live updates paused - retrying" class="shrink-0" />
         {/if}
         {#if messages.length === 0}
           <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center">

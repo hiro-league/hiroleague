@@ -1,5 +1,5 @@
 <script lang="ts">
-  import MetricCard from '../shared/MetricCard.svelte';
+  import MetricCard from '$lib/components/page/MetricCard.svelte';
   import Sparkline from '../shared/Sparkline.svelte';
   import type { MetricsCardSpec } from '../shared/metrics-card-config';
   import { frameString } from '../shared/metrics-display';

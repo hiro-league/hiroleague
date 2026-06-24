@@ -2,6 +2,7 @@
   import { FilterX } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import {
@@ -13,7 +14,6 @@
     MODEL_KIND_FILTER_IDS,
     MODEL_KIND_FILTER_UI
   } from '$lib/features/catalog/shared/catalog-filter-ui';
-  import { cn } from '$lib/utils';
 
   type Props = {
     ctrl: CatalogController;
@@ -34,6 +34,30 @@
       label: option || 'All classes'
     }))
   );
+
+  const kindOptions = $derived(
+    MODEL_KIND_FILTER_IDS.map((kind) => ({
+      value: kind,
+      label: MODEL_KIND_FILTER_UI[kind].title,
+      Icon: MODEL_KIND_FILTER_UI[kind].Icon
+    }))
+  );
+
+  const hostingOptions = $derived(
+    HOSTING_FILTER_IDS.map((hosting) => ({
+      value: hosting,
+      label: HOSTING_FILTER_UI[hosting].title,
+      Icon: HOSTING_FILTER_UI[hosting].Icon
+    }))
+  );
+
+  const availabilityOptions = $derived(
+    AVAILABILITY_FILTER_IDS.map((availability) => ({
+      value: availability,
+      label: AVAILABILITY_FILTER_UI[availability].title,
+      dotClass: AVAILABILITY_FILTER_UI[availability].circleClass
+    }))
+  );
 </script>
 
 <AdminFilterBar class="items-end">
@@ -48,35 +72,14 @@
       void ctrl.applyModelFilters();
     }}
   />
-  <div class="grid min-w-[10rem] gap-1 font-sans text-xs font-semibold text-muted-foreground">
-    <span id="catalog-kind-filters-label">Kind</span>
-    <div
-      class="flex h-9 items-center justify-center gap-0.5 rounded-md border bg-background px-1"
-      role="group"
-      aria-labelledby="catalog-kind-filters-label"
-    >
-      {#each MODEL_KIND_FILTER_IDS as kind (kind)}
-        {@const { Icon, title } = MODEL_KIND_FILTER_UI[kind]}
-        {@const on = ctrl.isModelKindSelected(kind)}
-        <button
-          type="button"
-          class={cn(
-            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors',
-            on
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground opacity-55 hover:opacity-100',
-            on && 'border-primary/20'
-          )}
-          title={title}
-          aria-label={title}
-          aria-pressed={on}
-          onclick={() => void ctrl.toggleModelKindFilter(kind)}
-        >
-          <Icon size={16} strokeWidth={on ? 2.25 : 2} aria-hidden="true" />
-        </button>
-      {/each}
-    </div>
-  </div>
+  <AdminIconToggleGroup
+    label="Kind"
+    labelId="catalog-kind-filters-label"
+    options={kindOptions}
+    isSelected={(kind) => ctrl.isModelKindSelected(kind as (typeof MODEL_KIND_FILTER_IDS)[number])}
+    onToggle={(kind) => void ctrl.toggleModelKindFilter(kind as (typeof MODEL_KIND_FILTER_IDS)[number])}
+    groupClass="min-w-[10rem]"
+  />
   <AdminFilterBarSelect
     label="Class"
     value={ctrl.modelFilters.filters.model_class}
@@ -88,62 +91,26 @@
       void ctrl.applyModelFilters();
     }}
   />
-  <div class="grid min-w-[10rem] gap-1 font-sans text-xs font-semibold text-muted-foreground">
-    <span id="catalog-hosting-filters-label">Hosting</span>
-    <div
-      class="flex h-9 items-center justify-center gap-0.5 rounded-md border bg-background px-1"
-      role="group"
-      aria-labelledby="catalog-hosting-filters-label"
-    >
-      {#each HOSTING_FILTER_IDS as hosting (hosting)}
-        {@const { Icon, title } = HOSTING_FILTER_UI[hosting]}
-        {@const on = ctrl.isHostingSelected(hosting)}
-        <button
-          type="button"
-          class={cn(
-            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors',
-            on
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground opacity-55 hover:opacity-100',
-            on && 'border-primary/20'
-          )}
-          title={title}
-          aria-label={title}
-          aria-pressed={on}
-          onclick={() => void ctrl.toggleHostingFilter(hosting)}
-        >
-          <Icon size={16} strokeWidth={on ? 2.25 : 2} aria-hidden="true" />
-        </button>
-      {/each}
-    </div>
-  </div>
-  <div class="grid min-w-[6.5rem] gap-1 font-sans text-xs font-semibold text-muted-foreground">
-    <span id="catalog-availability-filters-label">Online</span>
-    <div
-      class="flex h-9 items-center justify-center gap-1 rounded-md border bg-background px-1.5"
-      role="group"
-      aria-labelledby="catalog-availability-filters-label"
-    >
-      {#each AVAILABILITY_FILTER_IDS as availability (availability)}
-        {@const { title, circleClass } = AVAILABILITY_FILTER_UI[availability]}
-        {@const on = ctrl.isAvailabilitySelected(availability)}
-        <button
-          type="button"
-          class={cn(
-            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors',
-            on ? 'bg-primary/10 shadow-sm' : 'opacity-55 hover:opacity-100',
-            on && 'border-primary/20'
-          )}
-          title={title}
-          aria-label={title}
-          aria-pressed={on}
-          onclick={() => ctrl.toggleAvailabilityFilter(availability)}
-        >
-          <span class={cn('size-2 rounded-full', circleClass)} aria-hidden="true"></span>
-        </button>
-      {/each}
-    </div>
-  </div>
+  <AdminIconToggleGroup
+    label="Hosting"
+    labelId="catalog-hosting-filters-label"
+    options={hostingOptions}
+    isSelected={(hosting) => ctrl.isHostingSelected(hosting as (typeof HOSTING_FILTER_IDS)[number])}
+    onToggle={(hosting) => void ctrl.toggleHostingFilter(hosting as (typeof HOSTING_FILTER_IDS)[number])}
+    groupClass="min-w-[10rem]"
+  />
+  <AdminIconToggleGroup
+    label="Online"
+    labelId="catalog-availability-filters-label"
+    activeStyle="muted"
+    options={availabilityOptions}
+    isSelected={(availability) =>
+      ctrl.isAvailabilitySelected(availability as (typeof AVAILABILITY_FILTER_IDS)[number])}
+    onToggle={(availability) =>
+      ctrl.toggleAvailabilityFilter(availability as (typeof AVAILABILITY_FILTER_IDS)[number])}
+    groupClass="min-w-[6.5rem]"
+    containerClass="gap-1 px-1.5"
+  />
   <div class="flex items-end">
     <Button
       variant="outline"
