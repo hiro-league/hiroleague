@@ -63,14 +63,16 @@
 <KnowledgeDocumentReingestDialog bind:open={ui.reingestOpen} documents={ui.reingestTargets} ingest={ctl.ingest} />
 
 <KnowledgeBrowseDeleteDialog
-  bind:open={ui.deleteOpen}
+  open={ui.deleteOpen}
+  onOpenChange={(next) => (ui.deleteOpen = next)}
   documents={ui.deleteTargets}
   deleting={ui.deleting}
   onConfirm={ui.confirmDeleteDocuments}
 />
 
 <KnowledgeBrowseRemoveGraphDialog
-  bind:open={ui.removeGraphOpen}
+  open={ui.removeGraphOpen}
+  onOpenChange={(next) => (ui.removeGraphOpen = next)}
   documents={ui.removeGraphTargets}
   removing={ui.removingGraph}
   onConfirm={ui.confirmRemoveFromGraph}

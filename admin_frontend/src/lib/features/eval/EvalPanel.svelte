@@ -335,7 +335,8 @@
 
 <!-- Clear-results confirm — gates the memory track's destructive on-disk delete of saved results. -->
 <EvalClearResultsConfirmDialog
-  bind:open={clearConfirmOpen}
+  open={clearConfirmOpen}
+  onOpenChange={(next) => (clearConfirmOpen = next)}
   corpusName={eval_.selectedCorpus?.name ?? ''}
   savedCount={eval_.savedCount}
   onConfirm={() => {

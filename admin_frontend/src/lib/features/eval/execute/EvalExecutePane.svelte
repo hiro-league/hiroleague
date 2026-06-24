@@ -175,7 +175,8 @@
 
 <!-- Rebuild-graph wipe confirm — gates the Ingest button when a wipe is armed on a graphed corpus. -->
 <EvalRebuildConfirmDialog
-  bind:open={confirmOpen}
+  open={confirmOpen}
+  onOpenChange={(next) => (confirmOpen = next)}
   track={eval_.track}
   corpusName={eval_.selectedCorpus?.name ?? ''}
   onConfirm={() => {
