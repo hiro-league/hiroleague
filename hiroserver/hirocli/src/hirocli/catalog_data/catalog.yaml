@@ -602,6 +602,30 @@ models:
       pricing_updated_at: "2026-05-14"
       pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-pro-preview
 
+  # Gemini 3.5 Flash — GA (no -preview suffix), launched at I/O 2026. Direct successor to
+  # gemini-3-flash-preview: same balanced chat + STT (audio-in) role, 1M context. Audio input
+  # is billed above text input; Google has not published a separate 3.5 audio rate, so the
+  # audio_input rate below mirrors the 2x ratio of the sibling 3.x rows (estimate — verify).
+  - id: google:gemini-3.5-flash
+    provider_id: google
+    display_name: Gemini 3.5 Flash
+    released_at: "2026-05-19"
+    model_kind: chat
+    extra_kinds: [stt]
+    model_class: balanced
+    context_window: 1048576
+    modalities: [text, image_in, audio_in, video_in]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    notes: GA (not preview). Adjustable thinking (minimal–high). Audio input billed higher than text — see pricing page; audio_input rate below is an estimate pending a published 3.5 figure.
+    pricing:
+      input_per_1m_tokens: 1.50
+      cached_input_per_1m_tokens: 0.15
+      output_per_1m_tokens: 9.00
+      # STT audio input billed higher than text (docs/model_pricing.md); 2x estimate (no published 3.5 rate).
+      audio_input_per_1m_tokens: 3.00
+      pricing_updated_at: "2026-06-24"
+      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.5-flash
+
   - id: google:gemini-embedding-001
     provider_id: google
     display_name: Gemini Embedding 001

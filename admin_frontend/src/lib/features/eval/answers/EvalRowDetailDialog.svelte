@@ -3,18 +3,38 @@
   Evidence recall / Facts / Entities / Episodes / Trajectory, plus per-leg stats + action buttons.
   Single column for the memory recall leg; side-by-side for knowledge legs. Opened from the
   ANSWER TYPE cell or the slim fold's "Open details" button.
+
+  Recalled tables (Facts/Entities/Episodes) render via EvalRecalledTable so they mirror what the
+  answerer saw: ordered by score, capped-out items struck through, text trimmed to the eval caps
+  (toggleable). A header search box filters + highlights across all tables.
 -->
 <script lang="ts">
+  import { Scissors, Search } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import EvalHighlight from '$lib/features/eval/shared/EvalHighlight.svelte';
   import EvalLegActions from '$lib/features/eval/answers/EvalLegActions.svelte';
+  import EvalRecalledTable from '$lib/features/eval/answers/EvalRecalledTable.svelte';
   import { fmtCost, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import { markLabel, markTitle, markVariant } from '$lib/features/eval/shared/eval-display';
+  import {
+    ariaSort,
+    DEFAULT_RECALL_RENDER,
+    nextSort,
+    recalledTabCount,
+    sortArrow,
+    sortRows,
+    type SortState
+  } from '$lib/features/eval/shared/eval-recall-render';
   import TraceTabs, { type TraceTab } from '$lib/features/graph-runs/shared/TraceTabs.svelte';
   import EvalRetrievalTrajectory from '$lib/features/eval/answers/EvalRetrievalTrajectory.svelte';
-  import type { EvidenceRecall, RecalledFact } from '$lib/features/eval/shared/eval-events';
+  import type {
+    EvalRecallRender,
+    EvidenceRecall,
+    EvidenceRecallItem,
+    RecalledFact
+  } from '$lib/features/eval/shared/eval-events';
   import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { RowDetailTraces } from '$lib/features/eval/state/eval-traces.svelte';
@@ -25,7 +45,7 @@
     legColumns: string[];
     /** Active answer-search term (highlights the answer surface). */
     searchTerm: string;
-    /** Recalled-search term (highlights inside the recalled / evidence tables; '' = no highlight). */
+    /** Recalled-search term (seeds the dialog's own search box on open; '' = none). */
     recalledTerm: string;
     /** Narrow trace seam — the full Eval panel passes its `EvalTraces`; the Graph-Runs bridge
      *  passes a lighter controller (no Copy). */
@@ -40,6 +60,25 @@
   let activeTabs = $state<Record<string, FoldTabKey>>({});
   // Search-id highlight driven from the Trajectory tab (dims non-matching facts).
   let trajectorySearchId = $state<number | null>(null);
+  // Dialog-local search (filters + highlights the recalled / evidence tables). Seeded from the
+  // externally-passed recalled term whenever a new row opens.
+  let q = $state('');
+  // Trim each recalled item's text to the eval cap (default ON = what the answerer saw) vs. full text.
+  let trimmed = $state(true);
+  // Evidence table sort (the recalled tables own their own sort state inside EvalRecalledTable).
+  const EVIDENCE_DEFAULT_SORT: SortState = { key: 'score', dir: -1 };
+  let evidenceSort = $state<SortState>({ ...EVIDENCE_DEFAULT_SORT });
+
+  $effect(() => {
+    void row;
+    q = recalledTerm;
+    evidenceSort = { ...EVIDENCE_DEFAULT_SORT };
+  });
+
+  const searching = $derived(q.trim().length > 0);
+  // The header box, when typed in, also drives the Overview highlight; otherwise the external
+  // answer-search term still highlights the answer surface.
+  const overviewTerm = $derived(searching ? q : searchTerm);
 
   function recalledOf(items: RecalledFact[] | undefined) {
     const arr = items ?? [];
@@ -55,16 +94,23 @@
     leg: { answer?: string | null; mark?: string | null; reason?: string | null; retrieval_loop?: RetrievalLoop },
     gold: string | undefined,
     evidence: EvidenceRecall | null | undefined,
-    counts: { facts: number; entities: number; episodes: number; trajectory?: string }
+    recalled: { facts: RecalledFact[]; entities: RecalledFact[]; episodes: RecalledFact[] },
+    render: EvalRecallRender,
+    term: string,
+    trajectory: string | undefined
   ): TraceTab[] {
+    const cap = render.max_elements_per_kind;
     const out: TraceTab[] = [];
     if (gold || leg.answer || leg.mark || leg.reason) out.push({ key: 'judge', label: 'Overview' });
     if (mode === 'recall' && evidence && evidence.total > 0)
       out.push({ key: 'evidence', label: 'Evidence recall', count: `${evidence.matched}/${evidence.total}` });
-    if (counts.facts > 0) out.push({ key: 'facts', label: 'Facts', count: String(counts.facts) });
-    if (counts.entities > 0) out.push({ key: 'entities', label: 'Entities', count: String(counts.entities) });
-    if (counts.episodes > 0) out.push({ key: 'episodes', label: 'Episodes', count: String(counts.episodes) });
-    if (counts.trajectory) out.push({ key: 'trajectory', label: 'Trajectory', count: counts.trajectory });
+    if (recalled.facts.length > 0)
+      out.push({ key: 'facts', label: 'Facts', count: recalledTabCount(recalled.facts, cap, term) });
+    if (recalled.entities.length > 0)
+      out.push({ key: 'entities', label: 'Entities', count: recalledTabCount(recalled.entities, cap, term) });
+    if (recalled.episodes.length > 0)
+      out.push({ key: 'episodes', label: 'Episodes', count: recalledTabCount(recalled.episodes, cap, term) });
+    if (trajectory) out.push({ key: 'trajectory', label: 'Trajectory', count: trajectory });
     return out;
   }
 
@@ -73,6 +119,35 @@
     if (picked && tabs.some((t) => t.key === picked)) return picked;
     return (tabs[0]?.key as FoldTabKey) ?? 'judge';
   }
+
+  // --- Evidence table sort/filter (kept inline — its shape differs from the recalled kinds). ------
+  function evAccessor(it: EvidenceRecallItem, key: string): string | number {
+    switch (key) {
+      case 'status':
+        return it.matched ? 1 : 0;
+      case 'evidence':
+        return `${it.dia_id || it.short_id || it.episode_id || ''} ${it.speaker || ''} ${it.text || ''}`;
+      case 'when':
+        return it.when || '';
+      case 'via':
+        return it.matched_via || '';
+      case 'score':
+        return typeof it.score === 'number' ? it.score : -1;
+      default:
+        return '';
+    }
+  }
+  function evMatches(it: EvidenceRecallItem, term: string): boolean {
+    const t = term.trim().toLowerCase();
+    if (!t) return true;
+    return [it.dia_id, it.short_id, it.episode_id, it.speaker, it.text, it.matched_via]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(t);
+  }
+  const evidenceRows = (ev: EvidenceRecall): EvidenceRecallItem[] =>
+    sortRows(ev.items.filter((it) => evMatches(it, q)), evidenceSort, evAccessor);
 </script>
 
 <Dialog.Root open={row !== null} onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -83,17 +158,39 @@
         <Dialog.Title class="line-clamp-2 pr-8">{r.question}</Dialog.Title>
       </Dialog.Header>
 
+      <!-- Dialog toolbar: search (filters + highlights the tables) · trimmed/full text toggle. -->
+      <div class="flex items-center gap-2 border-b border-border pb-3">
+        <div class="flex flex-1 items-center gap-2 rounded-md border border-input bg-muted/30 px-2 py-1">
+          <Search size={14} class="shrink-0 text-muted-foreground" aria-hidden="true" />
+          <input
+            type="search"
+            bind:value={q}
+            placeholder="Search facts, entities, episodes…"
+            class="w-full bg-transparent text-xs text-foreground outline-none"
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-pressed={trimmed}
+          title={trimmed
+            ? 'Showing trimmed item text (as sent to eval). Click to show full text.'
+            : 'Showing full item text. Click to trim it to the eval caps (as sent to eval).'}
+          onclick={() => (trimmed = !trimmed)}
+        >
+          <Scissors size={14} aria-hidden="true" />
+          <span class="text-xs">{trimmed ? 'Trimmed' : 'Full text'}</span>
+        </Button>
+      </div>
+
       <div class="grid flex-1 content-start gap-4 overflow-y-auto pr-1 {legColumns.length > 1 ? 'md:grid-cols-2' : ''}">
         {#each legColumns as mode, legIdx (mode)}
           {#if r.legs[mode]}
             {@const leg = r.legs[mode]}
             {@const recalled = recalledOf(leg.recalled)}
-            {@const tabs = tabsForLeg(mode, leg, r.gold, r.evidence_recall, {
-              facts: recalled.facts.length,
-              entities: recalled.entities.length,
-              episodes: recalled.episodes.length,
-              trajectory: leg.retrieval_loop ? `${leg.retrieval_loop.agent_turns}` : undefined
-            })}
+            {@const render = leg.render ?? DEFAULT_RECALL_RENDER}
+            {@const tabs = tabsForLeg(mode, leg, r.gold, r.evidence_recall, recalled, render, q,
+              leg.retrieval_loop ? `${leg.retrieval_loop.agent_turns}` : undefined)}
             {@const active = activeFor(mode, tabs)}
             <div class="grid content-start gap-2">
               <!-- Tabs (left) · leg meta + trace/Graph-Run/copy (right), then the active tab below. -->
@@ -125,11 +222,11 @@
               {:else if active === 'evidence' && r.evidence_recall}
                 {@render evidencePane(r.evidence_recall)}
               {:else if active === 'facts'}
-                {@render factsPane(recalled.facts, trajectorySearchId)}
+                <EvalRecalledTable rows={recalled.facts} kind="fact" {render} {trimmed} search={q} dimSearchId={trajectorySearchId} />
               {:else if active === 'entities'}
-                {@render entitiesPane(recalled.entities)}
+                <EvalRecalledTable rows={recalled.entities} kind="entity" {render} {trimmed} search={q} />
               {:else if active === 'episodes'}
-                {@render episodesPane(recalled.episodes)}
+                <EvalRecalledTable rows={recalled.episodes} kind="episode" {render} {trimmed} search={q} />
               {:else if active === 'trajectory' && leg.retrieval_loop}
                 <EvalRetrievalTrajectory
                   loop={leg.retrieval_loop}
@@ -153,32 +250,13 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Overview — gold reference answer, verdict + recall sufficiency + grounded, judge reason,
-     (memory only) quoted evidence, then our LLM answer. -->
+<!-- Overview — verdict/recall/grounded up top, then gold reference + judge reason, (memory only)
+     quoted evidence, a divider, and finally our LLM answer. -->
 {#snippet judgePane(mode: string, leg: EvalRow['legs'][string])}
   {#if row}
     {@const r = row}
     <div class="grid gap-2 text-xs leading-5">
-      <div class="flex flex-wrap gap-2">
-        <span class="min-w-[64px] text-muted-foreground">Gold Answer</span>
-        {#if r.gold}
-          <span class="flex-1 whitespace-pre-wrap text-foreground"><EvalHighlight text={r.gold} term={searchTerm} /></span>
-        {:else}
-          <span class="flex-1 italic text-muted-foreground">— (no gold answer)</span>
-        {/if}
-      </div>
-      <!-- Rubric (BEAM corpora): the required-element criteria the judge grades against, co-equal
-           with the gold answer. Shown only when the corpus ships one (empty for LoCoMo/adam). -->
-      {#if r.rubric.length}
-        <div class="flex flex-wrap gap-2">
-          <span class="min-w-[64px] text-muted-foreground">Rubric</span>
-          <ul class="flex-1 list-disc space-y-0.5 pl-4 text-foreground">
-            {#each r.rubric as criterion (criterion)}
-              <li class="whitespace-pre-wrap"><EvalHighlight text={criterion} term={searchTerm} /></li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
+      <!-- Verdict · recall sufficiency · grounded — moved to the top so the outcome reads first. -->
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
         <div class="flex flex-wrap items-center gap-2">
           <span class="min-w-[64px] text-muted-foreground">Verdict</span>
@@ -207,26 +285,48 @@
           {/if}
         </div>
       </div>
+      <div class="flex flex-wrap gap-2">
+        <span class="min-w-[64px] text-muted-foreground">Gold Answer</span>
+        {#if r.gold}
+          <span class="flex-1 whitespace-pre-wrap text-foreground"><EvalHighlight text={r.gold} term={overviewTerm} /></span>
+        {:else}
+          <span class="flex-1 italic text-muted-foreground">— (no gold answer)</span>
+        {/if}
+      </div>
+      <!-- Rubric (BEAM corpora): the required-element criteria the judge grades against, co-equal
+           with the gold answer. Shown only when the corpus ships one (empty for LoCoMo/adam). -->
+      {#if r.rubric.length}
+        <div class="flex flex-wrap gap-2">
+          <span class="min-w-[64px] text-muted-foreground">Rubric</span>
+          <ul class="flex-1 list-disc space-y-0.5 pl-4 text-foreground">
+            {#each r.rubric as criterion (criterion)}
+              <li class="whitespace-pre-wrap"><EvalHighlight text={criterion} term={overviewTerm} /></li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
       {#if leg.reason}
         <div class="flex flex-wrap gap-2">
           <span class="min-w-[64px] text-muted-foreground">Reason</span>
-          <span class="flex-1 text-foreground"><EvalHighlight text={leg.reason} term={searchTerm} /></span>
+          <span class="flex-1 text-foreground"><EvalHighlight text={leg.reason} term={overviewTerm} /></span>
         </div>
       {/if}
       {#if mode === 'recall'}
         <div class="flex flex-wrap gap-2">
           <span class="min-w-[64px] text-muted-foreground">Evidence</span>
           {#if leg.evidence}
-            <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500"><EvalHighlight text={leg.evidence} term={searchTerm} /></span>
+            <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500"><EvalHighlight text={leg.evidence} term={overviewTerm} /></span>
           {:else}
             <span class="italic text-muted-foreground">— none quoted</span>
           {/if}
         </div>
       {/if}
+      <!-- Divider before our answer, so the model's output is visually separated from the references. -->
+      <hr class="my-1 border-border" />
       <div class="flex flex-wrap gap-2">
         <span class="min-w-[64px] text-muted-foreground">Our Answer</span>
         {#if leg.answer}
-          <span class="flex-1 whitespace-pre-wrap text-foreground"><EvalHighlight text={leg.answer} term={searchTerm} /></span>
+          <span class="flex-1 whitespace-pre-wrap text-foreground"><EvalHighlight text={leg.answer} term={overviewTerm} /></span>
         {:else}
           <span class="flex-1 italic text-muted-foreground">— (no answer)</span>
         {/if}
@@ -235,21 +335,34 @@
   {/if}
 {/snippet}
 
-<!-- Evidence recall (LoCoMo): gold evidence episodes, each matched or missed against recall. -->
+<!-- Evidence recall (LoCoMo): gold evidence episodes, each matched or missed against recall.
+     Sticky sortable header; filtered + highlighted by the dialog search (no cap/trim — evidence is
+     gold-vs-recall, not items sent to the answerer). -->
+{#snippet evTh(key: string, label: string, align: 'left' | 'right', title: string)}
+  <th
+    class="sticky top-0 z-10 cursor-pointer select-none bg-muted px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground {align === 'right' ? 'text-right' : 'text-left'}"
+    aria-sort={ariaSort(evidenceSort, key)}
+    title={title || 'Click to sort'}
+    onclick={() => (evidenceSort = nextSort(evidenceSort, key, EVIDENCE_DEFAULT_SORT))}
+  >
+    {label}<span class="ml-1 text-[9px] text-primary">{sortArrow(evidenceSort, key)}</span>
+  </th>
+{/snippet}
+
 {#snippet evidencePane(ev: EvidenceRecall)}
-  <div class="overflow-x-auto rounded-md border">
+  <div class="max-h-[60vh] overflow-auto rounded-md border">
     <table class="w-full border-collapse font-sans text-xs">
-      <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <thead>
         <tr>
-          <th class="px-2 py-1 text-left">Status</th>
-          <th class="px-2 py-1 text-left">Evidence</th>
-          <th class="px-2 py-1 text-left">When</th>
-          <th class="px-2 py-1 text-left">Via</th>
-          <th class="px-2 py-1 text-right">Score</th>
+          {@render evTh('status', 'Status', 'left', '')}
+          {@render evTh('evidence', 'Evidence', 'left', '')}
+          {@render evTh('when', 'When', 'left', '')}
+          {@render evTh('via', 'Via', 'left', '')}
+          {@render evTh('score', 'Score', 'right', '')}
         </tr>
       </thead>
       <tbody>
-        {#each ev.items as it, i (it.episode_id || i)}
+        {#each evidenceRows(ev) as it, i (it.episode_id || i)}
           <tr class="border-t align-top">
             <td class="whitespace-nowrap px-2 py-1">
               {#if it.matched}
@@ -259,9 +372,9 @@
               {/if}
             </td>
             <td class="max-w-[32rem] px-2 py-1">
-              <span class="font-mono text-[11px] text-muted-foreground"><EvalHighlight text={it.dia_id || it.short_id || it.episode_id} term={recalledTerm} /></span>
+              <span class="font-mono text-[11px] text-muted-foreground"><EvalHighlight text={it.dia_id || it.short_id || it.episode_id} term={q} /></span>
               {#if it.text}
-                <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold"><EvalHighlight text={it.speaker} term={recalledTerm} />:</span> {/if}<EvalHighlight text={it.text} term={recalledTerm} /></span>
+                <span class="line-clamp-3" title={it.text}>{#if it.speaker}<span class="font-semibold"><EvalHighlight text={it.speaker} term={q} />:</span> {/if}<EvalHighlight text={it.text} term={q} /></span>
               {:else}
                 <span class="block italic text-muted-foreground">(episode text unavailable)</span>
               {/if}
@@ -273,103 +386,9 @@
             <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">{it.score != null ? it.score.toFixed(3) : '—'}</td>
           </tr>
         {/each}
-      </tbody>
-    </table>
-  </div>
-{/snippet}
-
-{#snippet factsPane(facts: RecalledFact[], selectedSearchId: number | null)}
-  <div class="overflow-x-auto rounded-md border">
-    <table class="w-full border-collapse font-sans text-xs">
-      <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-        <tr>
-          <th class="px-2 py-1 text-left">Fact</th>
-          <th class="px-2 py-1 text-left">Relationship</th>
-          <th class="px-2 py-1 text-left">Valid from</th>
-          <th class="px-2 py-1 text-left">Invalid at</th>
-          <th class="px-2 py-1 text-left">Status</th>
-          <th class="px-2 py-1 text-right">Score</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each facts as f, i (i)}
-          {@const dimmed = selectedSearchId != null && f.search_id != null && f.search_id !== selectedSearchId}
-          <tr class="border-t align-top {dimmed ? 'opacity-35' : ''}">
-            <td class="max-w-[24rem] px-2 py-1">
-              <span class="line-clamp-3" title={f.fact || f.memory}><EvalHighlight text={f.fact || f.memory} term={recalledTerm} /></span>
-            </td>
-            <td class="px-2 py-1 font-mono text-[11px] text-muted-foreground">{#if f.name}<EvalHighlight text={f.name} term={recalledTerm} />{:else}—{/if}</td>
-            <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.valid_at || '—'}</td>
-            <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{f.invalid_at || '—'}</td>
-            <td class="px-2 py-1">
-              {#if f.superseded}
-                <Badge variant="warning">superseded</Badge>
-              {:else}
-                <Badge variant="success">active</Badge>
-              {/if}
-            </td>
-            <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
-              {f.score != null ? f.score.toFixed(3) : '—'}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </div>
-{/snippet}
-
-{#snippet entitiesPane(entities: RecalledFact[])}
-  <div class="overflow-x-auto rounded-md border">
-    <table class="w-full border-collapse font-sans text-xs">
-      <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-        <tr>
-          <th class="px-2 py-1 text-left">Entity</th>
-          <th class="px-2 py-1 text-left">Type</th>
-          <th class="px-2 py-1 text-right">Score</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each entities as e, i (i)}
-          <tr class="border-t align-top">
-            <td class="max-w-[28rem] px-2 py-1">
-              {#if e.name}<span class="font-semibold"><EvalHighlight text={e.name} term={recalledTerm} /></span>{/if}
-              <span class="line-clamp-2 text-muted-foreground" title={e.summary || e.memory}><EvalHighlight text={e.summary || e.memory} term={recalledTerm} /></span>
-            </td>
-            <td class="px-2 py-1">
-              {#if e.entity_type}<Badge variant="outline" class="font-sans normal-case">{e.entity_type}</Badge>{:else}<span class="text-muted-foreground">—</span>{/if}
-            </td>
-            <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
-              {e.score != null ? e.score.toFixed(3) : '—'}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </div>
-{/snippet}
-
-{#snippet episodesPane(episodes: RecalledFact[])}
-  <div class="overflow-x-auto rounded-md border">
-    <table class="w-full border-collapse font-sans text-xs">
-      <thead class="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-        <tr>
-          <th class="px-2 py-1 text-left">Episode</th>
-          <th class="px-2 py-1 text-left">When</th>
-          <th class="px-2 py-1 text-right">Score</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each episodes as ep, i (i)}
-          <tr class="border-t align-top">
-            <td class="max-w-[32rem] px-2 py-1">
-              <span class="line-clamp-3" title={ep.memory}><EvalHighlight text={ep.memory} term={recalledTerm} /></span>
-            </td>
-            <td class="px-2 py-1 font-mono text-[11px] tabular-nums">{ep.valid_at ? fmtEpisodeDate(ep.valid_at) : '—'}</td>
-            <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
-              {ep.score != null ? ep.score.toFixed(3) : '—'}
-            </td>
-          </tr>
-        {/each}
+        {#if evidenceRows(ev).length === 0}
+          <tr><td class="px-2 py-3 text-center text-muted-foreground" colspan="5">No evidence matches “{q}”.</td></tr>
+        {/if}
       </tbody>
     </table>
   </div>

@@ -522,6 +522,15 @@ async def _memory_question(
         "grounded": grounded,
         "evidence": evidence,
         "cost_usd": cost_usd,
+        # Render caps the answerer actually used (graph.eval.max_*). Stamped per-run so the admin
+        # detail dialog can faithfully replicate what was sent to eval — strike the items capped out
+        # (top-K per kind by score) and trim each item's text — instead of guessing from live prefs.
+        "render": {
+            "max_elements_per_kind": render.max_elements_per_kind,
+            "max_fact_chars": render.max_fact_chars,
+            "max_episode_chars": render.max_episode_chars,
+            "max_summary_chars": render.max_summary_chars,
+        },
     }
     if retrieval_result is not None:
         from hirocli.services.memory.agent.agent_trace import build_retrieval_loop_payload

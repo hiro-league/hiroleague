@@ -215,6 +215,26 @@ async def test_exit_a_reuses_stop_turn_no_extra_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exit_a_reuses_block_content_stop_turn() -> None:
+    """Provider parity: Gemini/Anthropic return the stop turn's content as a LIST of blocks
+    ([{"type":"text","text":...}]). Exit A must flatten and reuse it — a str-only guard regressed
+    this to forcing the exit-B answer turn on EVERY question (a duplicate answer call)."""
+    from langchain_core.messages import AIMessage
+
+    graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
+    block_stop = AIMessage(
+        content=[{"type": "text", "text": "The budget is $50."}],
+        usage_metadata={"input_tokens": 8, "output_tokens": 4, "total_tokens": 12},
+    )
+    model = ScriptedChatModel(responses=[_search_call(_q("monthly budget")), block_stop])
+    result = await _run(model=model, memory=_memory(graph=graph))
+    assert result.answer_text == "The budget is $50."  # flattened from blocks, reused
+    assert len(graph.search_calls) == 1
+    final = next(row for row in result.transcript if row["event"] == "final")
+    assert final["cumulative_agent_turns"] == 2  # search + stop only — NO forced final turn
+
+
+@pytest.mark.asyncio
 async def test_decomposition_sub_queries_gathered_concurrently() -> None:
     graph = _SlowFakeGraph(delay_s=0.1, hits=[_hit("e1", "fact")])
     model = ScriptedChatModel(

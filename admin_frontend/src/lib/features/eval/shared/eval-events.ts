@@ -42,6 +42,17 @@ export type RecalledFact = {
   summary?: string;
 };
 
+/** The answer-context render caps the eval run actually used (graph.eval.max_*), stamped onto the
+ *  recall leg so the detail dialog can replicate what was sent to the answerer: only the top
+ *  ``max_elements_per_kind`` items per kind (by score) reach it, each text field trimmed to its
+ *  per-kind char cap. Absent on legs/runs older than this field — callers fall back to defaults. */
+export type EvalRecallRender = {
+  max_elements_per_kind: number;
+  max_fact_chars: number;
+  max_episode_chars: number;
+  max_summary_chars: number;
+};
+
 /** One gold evidence episode for a question (from the LoCoMo sidecar) + whether the recalled
  *  context covered it. ``matched_via`` is the kind of recalled item that covered it
  *  ('episode' | 'fact' | 'entity'), '' when missed. ``text``/``speaker``/``when`` are best-effort
@@ -88,6 +99,9 @@ export type EvalQuestionLeg = {
   evidence?: string;
   /** Agentic retrieval loop summary (memory eval rows after P5/P8). */
   retrieval_loop?: RetrievalLoop;
+  /** The render caps the answerer used for THIS leg (graph.eval.max_*) — drives the detail dialog's
+   *  cap-strike + trim view so it mirrors what was actually sent to eval. */
+  render?: EvalRecallRender;
 };
 
 /** Payload shape of ``eval.question_completed`` events (unified).

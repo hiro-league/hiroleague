@@ -37,7 +37,12 @@ class SearchMemoryQuery(BaseModel):
     # M1 fix: ``None`` means "model omitted limit" → resolve to the admin pref ``limit_default``
     # in ``_run_one`` (was a hardcoded ``20`` that shadowed the editable pref, making it inert).
     limit: int | None = None
-    hops: Literal[1, 2, 3] = 1
+    # Numeric bound (ge/le) instead of ``Literal[1, 2, 3]``: an integer Literal becomes a JSON-schema
+    # integer ``enum``, which langchain_google_genai converts to a genai ``Schema`` whose ``enum`` is
+    # typed ``list[str]`` — so a Gemini retrieval model 400s with "Input should be a valid string"
+    # (3 errors, one per enum value). ``ge``/``le`` render as ``minimum``/``maximum`` (provider-safe),
+    # and ``hops`` is soft-clamped to ``hops_max`` at runtime anyway, so the strict enum isn't needed.
+    hops: int = Field(default=1, ge=1, le=3)
     show_expiry: bool = False
     goal: str = ""
 

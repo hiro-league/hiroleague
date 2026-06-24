@@ -27,6 +27,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemM
 from langchain_core.tools import StructuredTool
 
 from hirocli.domain.preferences import RetrievalAgentLimits
+from hirocli.runtime.agent_graph.graph_kit import normalize_reply_content
 from hirocli.services.memory.agent.accumulator import Accumulator
 from hirocli.services.memory.agent.search_tool import (
     SearchMemoryArgs,
@@ -102,22 +103,6 @@ def _write_recall_usage(*, model_id: str, totals: dict[str, int]) -> None:
     # a bare/blank model misses the catalog and prices as $0 while still showing the token counts.
     provider = model_id.partition(":")[0] if ":" in model_id else ""
     observe(usage={"provider": provider, "model": model_id, **totals})
-
-
-def _normalize_reply_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict):
-                text = block.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "".join(parts)
-    return str(content or "")
 
 
 def build_search_memory_langchain_tool(tool: SearchMemoryTool) -> StructuredTool:
@@ -264,7 +249,7 @@ async def _final_answer_turn(
     except Exception:
         log.warning("⚠️ retrieval — final answer turn failed; empty answer", exc_info=True)
         return "", None
-    return _normalize_reply_content(getattr(reply, "content", "")).strip(), reply
+    return normalize_reply_content(getattr(reply, "content", "")).strip(), reply
 
 
 async def run_retrieval(
@@ -325,7 +310,7 @@ async def run_retrieval(
         # Fold this search turn's tokens in before any coercion (usage rides on the raw reply).
         _accumulate_message_usage(usage_totals, response)
         if not isinstance(response, AIMessage):
-            response = AIMessage(content=_normalize_reply_content(response))
+            response = AIMessage(content=normalize_reply_content(response))
 
         tool_calls = list(getattr(response, "tool_calls", None) or [])
         messages.append(response)
@@ -361,9 +346,10 @@ async def run_retrieval(
 
     # Exit A: the model stopped on its own with a real answer AND it actually searched (acc
     # populated) → reuse that stop turn as the answer; no extra call, no fallback needed.
-    stop_text = (
-        last_stop.content if isinstance(getattr(last_stop, "content", None), str) else ""
-    ).strip()
+    # Flatten the stop turn via the SHARED normalizer, NOT isinstance(str): Gemini/Anthropic
+    # return content as a LIST of blocks ([{"type":"text","text":...}]), so a str-only check left
+    # stop_text empty and forced the exit-B answer turn on EVERY question (duplicate answer call).
+    stop_text = normalize_reply_content(last_stop.content).strip() if last_stop is not None else ""
     if stop_text and acc.size() > 0:
         answer_text = stop_text
     else:
