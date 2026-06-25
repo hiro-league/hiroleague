@@ -16,7 +16,7 @@ from pathlib import Path
 
 from hiro_commons.keys import public_key_to_b64
 from hiro_commons.log import Logger
-from hiro_commons.process import is_running, read_pid
+from hiro_commons.process import read_pid, read_running_pid
 
 from ..domain.config import Config, load_config, load_state, master_key_path, save_config
 from ..domain.crypto import load_or_create_master_key
@@ -219,8 +219,8 @@ class StartTool(Tool):
 
         config = load_config(workspace_path)
 
-        pid = read_pid(workspace_path, PID_FILENAME)
-        if pid and is_running(pid):
+        pid = read_running_pid(workspace_path, PID_FILENAME)
+        if pid:
             return StartResult(
                 workspace=entry.name,
                 workspace_path=str(workspace_path),
@@ -258,9 +258,9 @@ class StopTool(Tool):
 
     def execute(self, workspace: str | None = None) -> StopResult:
         entry, _, workspace_path = ctrl.resolve_or_create(workspace)
-        pid = read_pid(workspace_path, PID_FILENAME)
-        was_running = pid is not None and is_running(pid)
-        ctrl.stop_server(workspace_path)
+        # Report what actually happened — stop_server identity-checks the pid, so a stale/recycled
+        # pid file yields was_running=False ("not running") instead of a false "Server stopped".
+        was_running, pid = ctrl.stop_server(workspace_path)
         return StopResult(workspace=entry.name, was_running=was_running, pid=pid)
 
 
@@ -303,8 +303,8 @@ class RestartTool(Tool):
             )
 
         config = load_config(workspace_path)
-        pid = read_pid(workspace_path, PID_FILENAME)
-        was_running = pid is not None and is_running(pid)
+        pid = read_running_pid(workspace_path, PID_FILENAME)
+        was_running = pid is not None
 
         if was_running:
             if os.getpid() == pid:
@@ -370,8 +370,8 @@ class StatusTool(Tool):
         for ws_id in ids:
             ws_entry = registry.workspaces[ws_id]
             ws_path = Path(ws_entry.path)
-            pid = read_pid(ws_path, PID_FILENAME)
-            running = is_running(pid)
+            pid = read_running_pid(ws_path, PID_FILENAME)
+            running = pid is not None
             state = load_state(ws_path)
             config = load_config(ws_path)
             entries.append(
@@ -617,8 +617,8 @@ class UpgradeTool(Tool):
         try:
             entry, _, workspace_path = ctrl.resolve_or_create(workspace)
             server_workspace = entry.name
-            server_pid = read_pid(workspace_path, PID_FILENAME)
-            server_was_running = server_pid is not None and is_running(server_pid)
+            server_pid = read_running_pid(workspace_path, PID_FILENAME)
+            server_was_running = server_pid is not None
             if server_was_running and (workspace_path / "config.json").exists():
                 config_for_restart = load_config(workspace_path)
         except WorkspaceError:

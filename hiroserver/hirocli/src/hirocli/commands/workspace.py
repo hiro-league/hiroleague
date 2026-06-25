@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from hiro_commons.process import is_running, read_pid
+from hiro_commons.process import read_running_pid
 from rich.console import Console
 from rich.table import Table
 
@@ -61,8 +61,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
 
         for ws in result.workspaces:
             workspace_path = Path(ws["path"])
-            pid = read_pid(workspace_path, PID_FILENAME)
-            running = is_running(pid)
+            pid = read_running_pid(workspace_path, PID_FILENAME)
+            running = pid is not None
 
             default_marker = "[cyan]*[/cyan]" if ws["is_default"] else ""
             setup_str = "[green]configured[/green]" if ws["is_configured"] else "[yellow]needs setup[/yellow]"
@@ -376,8 +376,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1)
 
         workspace_path = Path(result.path)
-        pid = read_pid(workspace_path, PID_FILENAME)
-        running = is_running(pid)
+        pid = read_running_pid(workspace_path, PID_FILENAME)
+        running = pid is not None
 
         table = Table(
             title=f"Workspace: {result.name}",

@@ -17,7 +17,8 @@ const paths = [
   'src/lib/api/generated/preferences.generated.ts',
   'src/lib/api/generated/workspace-preferences.defaults.json',
   'src/lib/api/generated/workspace-preferences.defaults.ts',
-  'src/lib/api/generated/preferences-field-schema.json'
+  'src/lib/api/generated/preferences-field-schema.json',
+  'src/lib/api/generated/preferences-paths.generated.ts'
 ];
 
 try {

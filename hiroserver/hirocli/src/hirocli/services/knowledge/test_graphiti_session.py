@@ -18,7 +18,15 @@ class _FakeService:
     def __init__(self) -> None:
         self.close_calls = 0
 
-    async def search_chunk_ids(self, query: str, *, num_results: int, temporal: str):
+    async def search_chunk_ids(
+        self,
+        query: str,
+        *,
+        num_results: int,
+        temporal: str,
+        k_hop: int | None = None,
+        show_expiry: bool = False,
+    ):
         return SimpleNamespace(
             chunk_ids=["c1"],
             facts=["fact"],
@@ -31,7 +39,15 @@ class _FakeService:
 
 
 class _BoomService(_FakeService):
-    async def search_chunk_ids(self, query: str, *, num_results: int, temporal: str):
+    async def search_chunk_ids(
+        self,
+        query: str,
+        *,
+        num_results: int,
+        temporal: str,
+        k_hop: int | None = None,
+        show_expiry: bool = False,
+    ):
         raise RuntimeError("search boom")
 
 

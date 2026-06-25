@@ -173,6 +173,7 @@
             <FormField
               label="Context window"
               hint={CONTEXT_WINDOW_HINT}
+              hintTooltip
             >
               <input
                 type="number"

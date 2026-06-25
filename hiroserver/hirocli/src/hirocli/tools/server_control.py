@@ -17,7 +17,7 @@ from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
 from hiro_commons.process import (
     find_workspace_root,
     is_running,
-    read_pid,
+    read_running_pid,
     remove_pid,
     spawn_detached,
     stop_process,
@@ -60,8 +60,8 @@ def start_server(
     load_or_create_master_key(workspace_path, filename=config.master_key_file)
     ensure_mandatory_devices_channel(workspace_path, config)
 
-    pid = read_pid(workspace_path, PID_FILENAME)
-    if pid and is_running(pid):
+    pid = read_running_pid(workspace_path, PID_FILENAME)
+    if pid:
         return pid  # already running — caller decides what to tell the user
 
     if foreground:
@@ -104,10 +104,12 @@ def stop_server(workspace_path: Path) -> tuple[bool, int | None]:
 
     Returns ``(was_running, pid)``.
     """
-    pid = read_pid(workspace_path, PID_FILENAME)
-    if pid is None or not is_running(pid):
-        remove_pid(workspace_path, PID_FILENAME)
-        return False, pid
+    # read_running_pid verifies process identity and clears a stale pid file, so a recycled PID
+    # (crashed server, PID reused by another process) reports as not-running instead of falsely
+    # "stopped" — and we never try to kill a process that isn't ours.
+    pid = read_running_pid(workspace_path, PID_FILENAME)
+    if pid is None:
+        return False, None
 
     config = load_config(workspace_path)
     if graceful_http_stop(config.http_port, pid, workspace_path):

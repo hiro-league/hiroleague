@@ -4,19 +4,20 @@
   import {
     preferenceFieldMeta,
     preferenceHint,
-    preferenceNumberBounds
+    preferenceNumberBounds,
+    type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
-    path: string;
+    path: PreferencePath;
     label: string;
     value?: number;
     class?: string;
     inputClass?: string;
     disabled?: boolean;
-    /** Overrides schema description until copy is backend-owned (#5). */
+    /** Optional override of the schema description (rare card-local copy). */
     hint?: string;
   };
 
@@ -36,7 +37,7 @@
   const hint = $derived(hintOverride ?? preferenceHint(meta));
 </script>
 
-<FormField {label} {hint} class={className}>
+<FormField {label} {hint} hintTooltip class={className}>
   <input
     type="number"
     min={bounds.min}

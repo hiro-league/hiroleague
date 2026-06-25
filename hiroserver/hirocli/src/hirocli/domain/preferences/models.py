@@ -19,8 +19,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
-from .credential_store import CredentialStore
-from .events import DomainEvent, DomainEventType, get_domain_event_bus
+from ..credential_store import CredentialStore
+from ..events import DomainEvent, DomainEventType, get_domain_event_bus
+from ..prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -403,28 +404,10 @@ DEFAULT_KNOWLEDGE_SPARSE_MODEL = "Qdrant/bm25"
 # falls back to this constant when the stored prompt is blank. Scope is normalization +
 # literal-keyword extraction; the conversation-history clause is a no-op for admin Ask (which
 # passes no history) and active in chat (where history is supplied for reference resolution).
-DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
-    "Rewrite the user's question into one clean, standalone search query.\n\n"
-    "Fix typos and normalize informal or dialectal phrasing into clear formal language, "
-    "but do NOT change the meaning or add information that is not in the question.\n\n"
-    "If a conversation is provided, resolve references (pronouns, 'the second one', "
-    "'his brother') against it so the query stands alone without the conversation.\n\n"
-    "Copy proper nouns, names, dates, and identifiers VERBATIM into `keywords` — never "
-    "translate or 'correct' a name.\n\n"
-    "Set `knowledge_needed` to false when the message is just a greeting, farewell, thanks, "
-    "acknowledgement, or small talk and clearly does not ask for stored information; otherwise "
-    "true. Do not invent facts or answer the question.\n\n"
-    # The output shape is spelled out in the prompt (not left to the schema alone) because some
-    # providers — e.g. DeepSeek thinking mode — fall back to JSON-mode structured output, which
-    # never sees the pydantic field descriptions; the model knows the fields only from this text.
-    "Respond with a JSON object containing exactly these fields:\n"
-    "- `standalone_query` (string): the rewritten standalone search query.\n"
-    "- `keywords` (array of strings): proper nouns, names, dates, and identifiers copied verbatim.\n"
-    "- `knowledge_needed` (boolean): false only for greetings/thanks/small talk, otherwise true.\n"
-    "- `entities` (array of strings): named entities the question asks about (people, places, "
-    "organizations) and qualified relational mentions like 'my sister' or 'mom'; empty when the "
-    "question references no specific entity (e.g. 'what is photosynthesis?')."
-)
+# Text lives in prompts/knowledge_rewrite.md (the output shape is spelled out in the prompt — not
+# left to the schema alone — because some providers, e.g. DeepSeek thinking mode, fall back to
+# JSON-mode structured output that never sees the pydantic field descriptions).
+DEFAULT_KNOWLEDGE_REWRITE_PROMPT = load_prompt("knowledge_rewrite")
 
 
 # System prompt for the answer-generation step. Editable in preferences; the answer node falls
@@ -434,15 +417,7 @@ DEFAULT_KNOWLEDGE_REWRITE_PROMPT = (
 # supported. Safe because the empty-context case is gated upstream by ``no_results`` and never
 # reaches this prompt. Citation + language clauses are appended at runtime from the other answering
 # prefs, so they are intentionally not part of this text.
-DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = (
-    "Use the provided knowledge context as your only source of facts; "
-    "do not invent or assume anything that is not supported by it.\n\n"
-    "Answer every part of the question that the context supports. Partial answers are expected "
-    "and welcome — never withhold a supported part just because another part is unsupported.\n\n"
-    "If a part of the question is not covered by the context, give the parts you can and briefly "
-    "note what is missing. Do not reply with only 'I don't know' when any part of the question is "
-    "supported by the context."
-)
+DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = load_prompt("knowledge_answering")
 
 
 class KnowledgeChunkingMarkdownPreferences(BaseModel):
@@ -496,14 +471,14 @@ class KnowledgeRerankerPreferences(BaseModel):
 
     enabled: bool = False
     model_id: str | None = Field(default=None, json_schema_extra={"model_kind": "rerank"})
-    top_n: int = Field(default=8, ge=1, le=100)
+    top_n: int = Field(default=8, ge=1, le=100, description="Final returned results if using rerank (top N).")
     device: str | None = None
     batch_size: int = Field(default=32, ge=1, le=512)
 
 
 class KnowledgeRetrievalPreferences(BaseModel):
-    top_k: int = Field(default=20, ge=1, le=100)
-    min_score: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05})
+    top_k: int = Field(default=20, ge=1, le=100, description="Fused results from hybrid search or direct results from dense only search (after applying minimum score).")
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05}, description="Applies only to dense (Vector search) branch.")
     # Hybrid retrieval: fuse the dense vector with a BM25 sparse vector via Qdrant RRF.
     # Sparse vectors are always stored at ingest, so this is a pure query-time toggle
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
@@ -511,7 +486,7 @@ class KnowledgeRetrievalPreferences(BaseModel):
     hybrid: bool = True
     sparse_model: str = Field(default=DEFAULT_KNOWLEDGE_SPARSE_MODEL, min_length=1)
     # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.
-    prefetch_limit: int = Field(default=40, ge=1, le=500)
+    prefetch_limit: int = Field(default=40, ge=1, le=500, description="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).")
     reranker: KnowledgeRerankerPreferences = Field(default_factory=KnowledgeRerankerPreferences)
 
 
@@ -631,151 +606,7 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
 # The decline phrase "No information available." is load-bearing: the abstain detector in
 # answer_from_context and LoCoMo's negative-control convention key on the answer's leading text,
 # so declines must stay bare (no preamble before the phrase).
-DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = """\
-## Objective
-Answer the User Question. You're given a **Draft Answer** from a retrieval pass over the user's
-memory and the **Supporting Evidence** behind it — lead with the draft, grounded in the evidence.
-Draw on general world knowledge only to reason or recommend when memory alone doesn't reach the
-answer.
-
-## The three dates (any may be missing)
-- **stated** — when it was said; shown as a leading [DATE]. The ONLY date you resolve relative
-  time phrases against.
-- **as of** — when the fact became TRUE. Already absolute.
-- **until** — when the fact stopped being true. Already absolute.
-
-## Element formats
-- Relevant Facts — "[stated] fact text [RELATION · as of: D · until: D]" (only the dates that
-  exist are shown).
-- Relevant Entities — "NAME (TYPE): SUMMARY". The summary fuses many details and the answer is
-  often there.
-- Relevant Messages — "[stated] TEXT".
-
-## Core rule
-- Resolve a relative phrase ("five years ago", "next month") ONLY against the **stated** [DATE];
-  report the absolute value, never the phrase.
-- **as of** / **until** are already resolved — when asked when a fact began or ended, report them
-  directly; never re-apply a relative phrase to them.
-- Read every provided element — facts, and any entities or messages present. The answer is often
-  spread across several, including chains through another person, place, or thing; combine them.
-- An element supports an answer about a person only if it shows THAT person doing, having, or
-  experiencing the thing asked — and the specific thing asked, not a related one.
-- When similar events occur at different dates, the question's timeframe picks the right one — not
-  the order elements appear in. Prefer the LATEST **as of** when facts directly conflict; if
-  recency can't settle it — both stand as of the same time and can't both be true — give both and
-  note the disagreement rather than choosing one.
-- For list or count questions, scan ALL elements — facts, entity summaries, and messages — and
-  include every DISTINCT match before answering. A partial list is a wrong answer.
-- If the draft answer or evidence contains conflicting information worth noting, point out the
-  conflict rather than silently choosing one side.
-- If the draft answer or evidence contains a clear instruction or preference worth noting, reflect
-  it in your response.
-- If any element passes the support checks, commit: give the supported part(s) directly, even when
-  other parts are unsupported.
-- Give the most precise time the dates support (day if pinned, else month/year). A missing,
-  relative, or low-precision date is NEVER itself a reason to decline.
-
-## Positive Calibrators
-P1 — computed dates are grounded
-
-q: When did Maya start pottery?
-
-r: [2024-06-20] Maya has been doing pottery for five years.
-
-a: 2019.
-
-behavior: no **as of**, so resolve "five years" against the stated date (2024 − 5); a computed
-date is grounded, not invented.
-
-P2 — commit to the supported part
-
-q: Where and when did Alex get his dog?
-
-r: [2024-04-15] Alex adopted his dog from a shelter.
-
-a: From a shelter.
-
-behavior: "where" is supported; an unsupported "when" is no reason to decline everything.
-
-P3 — answer at the supported granularity
-
-q: When did Maya live abroad?
-
-r: Maya was on an exchange program in Lisbon. [as of: 2022-09-01 · until: 2023-06-30]
-
-a: September 2022 to June 2023.
-
-behavior: report the as of → until window directly — coarser-but-correct beats over-precision or
-a decline.
-
-## Negative Calibrators
-N1 — already-resolved date, not re-subtracted
-
-q: What year did John start surfing?
-
-r: [2023-07-16] John started surfing five years ago. [STARTED · as of: 2018-07-16]
-
-✗ 2013   ✓ 2018
-
-behavior: **as of** is the resolved event date — report it; do NOT re-apply "five years ago" to it.
-
-N2 — relative time echoed verbatim
-
-q: When is Maya moving to Berlin?
-
-r: [2024-03-12] Maya plans to move to Berlin next month.
-
-✗ Next month   ✓ April 2024
-
-behavior: resolve relative wording against the stated date; never echo it.
-
-N3 — cross-person transfer
-
-q: Which company did Alex join?
-
-r: [2024-05-02] Sara joined Acme Corp as a designer.
-
-✗ Acme Corp   ✗ Sara joined Acme Corp   ✓ No information available.
-
-behavior: the only joining fact is Sara's — reusing it for Alex, or dropping the name to hide the
-mismatch, are both wrong.
-
-N4 — related fact bent to the question
-
-q: What band did Alex start?
-
-r: [2024-02-10] Alex joined a weekly jazz jam group.
-
-✗ A jazz jam group   ✓ No information available.
-
-behavior: joining a jam group is not starting a band; a related fact is not reshaped to fit the
-question.
-
-N5 — asking is not doing
-
-q: How did Sara's marathon go?
-
-r: [2024-05-12] Sara: That's awesome! How was your marathon?
-
-✗ It went well…   ✓ No information available.
-
-behavior: Sara only asked; a question or reaction is never the person's own experience.
-
-## Formatting
-- Answer directly; no preamble. For a single-fact question, be terse (a short phrase or value).
-  For list / count / "which / what … (all)" questions, completeness outranks brevity — list every
-  matching element; do not stop at the first few.
-- Dates: absolute only — exact day if pinned, else month + year; "the week of {date}" for week
-  questions.
-- Name the person the answer is about.
-- Decline (reply exactly: No information available.) only when neither the memory nor related
-  world knowledge can answer.
-
-## Validation
-Before finalizing, verify:
-- every claim traces to an element about the right person and the right thing;
-- no relative time wording remains in the answer;
-- list/count answers include every matching element found."""
+DEFAULT_MEMORY_EVAL_ANSWER_PROMPT = load_prompt("memory_eval_answer")
 
 
 # Grading system prompt for the eval LLM judge (eval_judge.judge_answer). Shared by both eval
@@ -790,186 +621,12 @@ Before finalizing, verify:
 # with_structured_output_compat falls back to json_mode there, where pydantic field descriptions
 # never reach the model — this section is the only schema it sees. Abstain keys on the answer
 # prompt's decline phrase "No information available." (plus any other refusal).
-DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = """\
-## Objective
-Grade a model's Answer to a question about past conversations against the Ideal Answer, and
-report the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as
-GUIDANCE on what a complete answer covers — not a checklist to fail on. Grade ONLY against the
-Ideal Answer and Rubric — never your own knowledge.
-
-## Verdicts
-- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording —
-  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is
-  shown, an Answer that covers its MAIN elements passes — a missing minor element does NOT block
-  a pass.
-- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision
-  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but
-  misses a substantial part of what was asked.
-- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element
-  satisfied, the Answer misses the point, or it contradicts a rubric element.
-- abstain: the Answer declines — "No information available." or any other refusal to answer.
-
-## Core Instructions
-- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.
-  Treat them as a GUIDE, not a pass/fail checklist — the Ideal Answer and the Rubric describe the
-  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states
-  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.
-- Dates: matching the Ideal's month and year passes; a correctly resolved relative date ("next
-  month" stated in an August conversation = September) passes; within ~2 weeks passes.
-- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the
-  right result, and a confident Answer is fail.
-- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict —
-  use them only to fill evidence, recall_sufficient, and grounded.
-
-## Output Fields
-Reply with one JSON object containing exactly these fields, in this order:
-- "evidence" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that
-  contain the information needed to answer; "" if no such line exists.
-- "recall_sufficient" (boolean): true only if evidence quotes a real line that supplies the
-  answer; false otherwise.
-- "grounded" (boolean): whether the Answer is supported by the Recalled Memory Elements.
-- "reason" (string): one short sentence justifying the verdict.
-- "verdict" (string): one of "pass", "partial", "fail", "abstain".
-
-## Validation
-- evidence is checked by exact substring match against the shown elements — an inexact or
-  invented quote counts as no evidence and forces recall_sufficient to false.
-- If no Recalled Memory Elements section was shown, set evidence "" and recall_sufficient true.
-- The verdict depends only on Answer vs Ideal (and Rubric, when shown)."""
+DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = load_prompt("memory_eval_judge")
 
 
 # System prompt for the agentic memory-retrieval loop (agentic-memory-retrieval-design §5.3).
 # Resolved from ``graph.eval.retrieval_agent_prompts``; blank profile text falls back here.
-DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT = """\
-## Objective
-You retrieve facts from past conversations to answer the user's question. You cannot read the
-memory directly — call `search_memory`. Each call carries a `queries` list of 1..{MAX_PARALLEL_SEARCHES}
-sub-queries — that's how you DECOMPOSE a multi-part question into sub-questions that run together.
-You may call `search_memory` on several turns (one call per turn), observing each return before
-deciding to search again or to answer. You have {MAX_AGENT_TURNS} agent turns total. When you are
-done, stop searching: emit a turn with NO tool call whose content IS your final answer — concise,
-or 'No information available.' if the searches don't support one. Do not guess.
-
-## Element formats
-Each search returns plain-text sections — `#facts`, `#entities`, `#episodes` — one item per line,
-highest score first. Use each kind accordingly:
-  - #facts (edges) → a dated relational claim, rendered `- [stated] <fact> [<relation> / as of <date>
-                  / until <date> / score]`. The `relation` is the link type (e.g. PLANS_TO_WATCH);
-                  `stated` is when it was said; `as_of` is when it became true (both shown whenever
-                  present); `until` (when it stopped being true) appears only when `show_expiry` is on.
-                  The ONLY kind that carries validity, so latest / ever-never / change-over-time live here.
-  - #entities    → a standing who/what profile, rendered `- <name> (<entity_type>): <summary>`, where
-                  `entity_type` is the kind of subject (e.g. Person, Movie) shown when known; NO
-                  dates — context, not a timeline; cannot be ordered by time.
-  - #episodes    → a verbatim conversation turn, rendered `- [stated] <text>` with ONE `stated`
-                  timestamp; no invalidation.
-
-## Writing a search query
-Turn the question into one or more search queries:
-- Preserve the exact user intent, not just keywords.
-- Start with one strong query unless the question has multiple meanings, parts, entities, or
-  likely vocabulary mismatch.
-- Make the query hybrid-friendly: natural enough for vector search, compact enough for
-  keyword/BM25.
-- Preserve exact entities: names, products, dates, versions, IDs, error codes, project names.
-- Use document-like wording, not only user chat wording.
-- Expand only obvious aliases/synonyms when they are likely to appear in the source text.
-- Split only when needed: multi-part question, comparison, or separate entities.
-- Do not invent missing context that the user did not provide.
-To run sub-queries together, put each as a separate entry in the `queries` list of ONE
-`search_memory` call (up to {MAX_PARALLEL_SEARCHES} entries). Each sub-query also takes a short
-`goal` — a brief note of what it's for; it labels the results.
-
-## Refining the query on the next turn
-Search again ONLY when a piece your requirement names is still missing (see "Stopping"). First
-read the `returned`/`new` counts and scores your earlier searches echoed back: if the last
-search was mostly already-seen items (low `new`) or surfaced no higher-scoring facts, you have
-SATURATED this line of inquiry — stop and answer from the accumulator rather than refining. When
-a required piece IS still missing, build on the previous query rather than restarting, then:
-- When no results are found, broaden the query and increase result count.
-- When results are irrelevant, narrow with stronger entities/constraints and decrease result count.
-- When scores are weak, rephrase using source/document vocabulary, aliases, or less fragile wording.
-- When the issue may be temporal, include expiry/status handling: ask for current-only, all
-  events, or facts with expiry dates shown.
-- When expired or outdated facts pollute results, search current/non-expired events only.
-- When history/timeline is needed, search all events and show expiry dates/status.
-- When the answer needs multi-hop reasoning across graph entities, expand graph hops gradually.
-- When graph expansion gets noisy, reduce hops or anchor traversal around the strongest entity.
-- When the query was too broad, add the most discriminating missing constraint.
-- When the query was too specific, remove fragile details like exact phrasing or optional filters.
-
-## Choosing the axis & knobs
-For each (sub-)query, name the axis it lives on — current value/state · change over time ·
-ever/never · count · ordering · synthesis — and set the four knobs (below) to match,
-independently per sub-query. Stop only when you can construct the answer (see "Stopping").
-
-## Knobs (compact reference)
-  query        → a stored-fact phrasing of what's needed.
-  temporal     → "current" for the state that holds now; "all" when the question is about
-                 change over time, or whether something ever/never happened.
-  limit        → start at the default; raise (up to {MAX_LIMIT}) only when a piece is on the
-                 right axis but thin AND rephrasing didn't help.
-  hops         → 1 direct; 2 if the answer links one entity to another; 3 for two links.
-  show_expiry  → true to ALSO see `until` (when a fact stopped being true) on edges — for timeline /
-                 change questions. `stated` and `as_of` are shown without it. Only meaningful
-                 with `temporal="all"`.
-
-## Positive Calibrators (synthetic; NOT drawn from any benchmark)
-P1 — current value
-  q: What's the user's monthly book budget?
-  knobs: temporal=current, limit=20, hops=1, show_expiry=false. No reduce.
-  behavior: one search, take the valid-now edge; answer.
-
-P2 — change over time
-  q: How has the book budget changed?
-  knobs: temporal=all, show_expiry=true, hops=1.
-  behavior: surface current + retired edges with their `as_of` / `until` dates, in time order.
-
-P3 — ever/never
-  q: Have they ever mentioned disliking a genre?
-  behavior: ONE `search_memory` call with TWO entries in `queries` — one affirming phrasing,
-  one negating phrasing. Read both sub-results and present both polarities.
-
-P4 — decomposition of a plural question
-  q: What's the user's current job, their main hobby, and their last trip?
-  behavior: ONE `search_memory` call with THREE entries in `queries` — one per sub-question,
-  each with its own query (job: temporal=current; hobby: temporal=current; trip:
-  temporal=all). Read all three sub-results together; answer in one go.
-
-## Negative Calibrators (don't burn the search budget badly)
-N1 — hops=3 only when the answer chains TWO entities. Otherwise it just slows the search and
-     adds distractors.
-N2 — show_expiry=true under temporal=current is wasted — every returned edge is valid-now and
-     has no `until`.
-N3 — never answer from the question alone. If your turns run out and nothing supports the
-     answer, abstain.
-N4 — do NOT put more than {MAX_PARALLEL_SEARCHES} entries in `queries`; the call is rejected and
-     you waste a turn on the error round-trip.
-N5 — do NOT spend a turn re-confirming facts already in the accumulator. If your last search
-     returned mostly already-seen items (low `new`) and your requirement is met, STOP and answer
-     — "just to be sure" turns waste budget and can surface contradictory facts (e.g. a second,
-     conflicting schedule) that worsen the answer.
-
-## Stopping & abstaining
-Before you stop, name what the question needs to be answerable — the evidence and HOW it
-combines into the answer: a single value; a set you must enumerate and count; two dated facts
-to compare or subtract; both sides of a claim to confirm or deny; or several facts that
-together imply it. Stop when the accumulator supplies every piece your own requirement names —
-OR, for a set you must enumerate ("all X", "how many unique"), when one decomposed pass has
-surfaced the set and a further search would only re-return facts you already hold: you cannot
-prove a set is exhaustive by searching more, so stop at saturation rather than spiralling. Do
-not search again merely because related facts came back or to re-confirm. If your turns run out
-and a required piece is still missing, abstain in the final turn — do not pad with guesses.
-
-## Validation (pre-final-turn self-check)
-- Did I write the query per the Writing rules (intent + exact entities + document vocabulary)
-  before the first search?
-- One strong query, splitting into multiple entries only when genuinely multi-part?
-- If I searched again, did I build on my previous query rather than restart or repeat it?
-- Did I state what the answer requires and confirm the accumulator supplies every piece —
-  rather than stopping just because related facts came back?
-- For a temporal / ever-never question, did I either set show_expiry=true under temporal=all,
-  or include BOTH polarities as two entries in `queries`?"""
+DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT = load_prompt("memory_eval_retrieval_agent")
 
 
 # Dotted preference path → built-in default text for every editable system prompt. Exposed in the
@@ -1065,14 +722,14 @@ class RetrievalAgentLimits(BaseModel):
     # (every invocation costs tokens). On the last allowed turn the model is invoked without tools
     # so it must answer. (P9 rename: was ``max_searches``; the counter advances per turn, not per
     # dispatched search call.)
-    max_agent_turns: int = Field(default=4, ge=1, le=10)
+    max_agent_turns: int = Field(default=4, ge=1, le=10, description="How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.")
     # Sub-queries per single ``search_memory`` call (the decomposition fan-out). Enforced by the
     # tool against the configured value; one global value for eval and chat.
-    max_parallel_searches: int = Field(default=3, ge=1, le=5)
-    limit_default: int = Field(default=20, ge=1, le=100)
-    limit_min: int = Field(default=10, ge=1, le=100)
-    limit_max: int = Field(default=40, ge=1, le=100)
-    hops_max: int = Field(default=3, ge=1, le=3)
+    max_parallel_searches: int = Field(default=3, ge=1, le=5, description="Sub-queries per search_memory call — global for eval and chat.")
+    limit_default: int = Field(default=20, ge=1, le=100, description="Starting num_results per search_memory call.")
+    limit_min: int = Field(default=10, ge=1, le=100, description="Soft floor when the tool clamps limit.")
+    limit_max: int = Field(default=40, ge=1, le=100, description="Soft ceiling when the tool clamps limit.")
+    hops_max: int = Field(default=3, ge=1, le=3, description="Upper bound the tool accepts per search (1–3).")
 
     @model_validator(mode="after")
     def _coherent_limits(self) -> "RetrievalAgentLimits":
@@ -1092,7 +749,7 @@ class GraphViewPreferences(BaseModel):
     # A node TYPE whose instance count exceeds this shows a "many instances" perf
     # heads-up inside its per-type filter dropdown (the dropdown still lists + searches
     # every instance — this only flags very large types so the user reaches for search).
-    large_type_threshold: int = Field(default=200, ge=10, le=10000)
+    large_type_threshold: int = Field(default=200, ge=10, le=10000, description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
 
 
 class GraphEvalPreferences(BaseModel):
@@ -1183,10 +840,10 @@ class GraphEvalPreferences(BaseModel):
     # ones; these bound what reaches the prompt. Each kind is score-ranked desc, the top
     # ``max_elements_per_kind`` kept, and every element sanitized to ONE line capped at the per-kind
     # char limit. One global set — applies identically to the answer, judge, and evidence renders.
-    max_elements_per_kind: int = Field(default=30, ge=1, le=200)
-    max_fact_chars: int = Field(default=240, ge=40, le=2000)
-    max_episode_chars: int = Field(default=300, ge=40, le=2000)
-    max_summary_chars: int = Field(default=400, ge=40, le=4000)
+    max_elements_per_kind: int = Field(default=30, ge=1, le=200, description="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.")
+    max_fact_chars: int = Field(default=240, ge=40, le=2000, description="Each recalled fact → one sanitized line capped here.")
+    max_episode_chars: int = Field(default=300, ge=40, le=2000, description="Per-episode/message text cap (one sanitized line).")
+    max_summary_chars: int = Field(default=400, ge=40, le=4000, description="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.")
     # Agentic retrieval loop caps/clamps (agentic-memory-retrieval-design §5.2). One global
     # value for eval and chat — do not split per surface.
     retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
@@ -1195,7 +852,7 @@ class GraphEvalPreferences(BaseModel):
         default_factory=default_retrieval_agent_prompts,
         json_schema_extra={"writeWhole": True},
     )
-    active_retrieval_agent_prompt_id: str = DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+    active_retrieval_agent_prompt_id: str = Field(default=DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, description="Which retrieval-agent system prompt the loop uses.")
 
     @model_validator(mode="after")
     def _reseed_locked_prompt_profiles(self) -> "GraphEvalPreferences":
@@ -1246,7 +903,7 @@ class GraphPreferences(BaseModel):
     hardcoded params. See docs/knowledge-graphiti-pivot-design.md §9–10.
     """
 
-    backend: KnowledgeGraphBackend = "off"
+    backend: KnowledgeGraphBackend = Field(default="off", description="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.")
     # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
     extraction_model: str | None = Field(
         default=None,
@@ -1477,16 +1134,7 @@ class KnowledgePreferences(BaseModel):
 # General chat-answering instructions injected (in the current user turn) ahead of the question.
 # Authored as Markdown in the Admin → Preferences → Agent editor; sent to the model as text.
 # Not knowledge-specific — these are how the character should answer, regardless of retrieval.
-DEFAULT_CHAT_INSTRUCTIONS = (
-    "## Instructions\n"
-    "- This is a conversation between you (the character) and the user.\n"
-    "- Use the **Knowledge retrieved** (from the workspace knowledge base) and "
-    "**Memories retrieved** below as optional background.\n"
-    "- You choose what is relevant — you do not need to use all, or any, of it.\n"
-    "- source rank and score suggest the search relevancy of the knowledge item to the "
-    "user message/context\n"
-    "- Answer **Last User Message** in your own style."
-)
+DEFAULT_CHAT_INSTRUCTIONS = load_prompt("chat_instructions")
 
 
 class ChatPreferences(BaseModel):
@@ -1497,7 +1145,7 @@ class ChatPreferences(BaseModel):
     instructions: str = DEFAULT_CHAT_INSTRUCTIONS
     # Conversation-history window kept per turn by trim_history (short-term context). Feeds the chat
     # answer + memory/knowledge retrieval — a chat-answering concern, not a long-term memory one.
-    max_messages: int = Field(default=DEFAULT_MAX_HISTORY_MESSAGES, ge=1, le=100)
+    max_messages: int = Field(default=DEFAULT_MAX_HISTORY_MESSAGES, ge=1, le=100, description="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).")
     # When on, chat instructs the model to cite knowledge inline as [n] AND surfaces the source list
     # to the client (citation bridge on graph.reply.completed). Moved here from knowledge.chat.
     cite_sources: bool = False
@@ -1596,736 +1244,3 @@ class WorkspacePreferences(BaseModel):
 # I/O — the only code that touches the file
 # ---------------------------------------------------------------------------
 
-
-def preferences_file(workspace_path: Path) -> Path:
-    return workspace_path / PREFERENCES_FILENAME
-
-
-def load_preferences(workspace_path: Path) -> WorkspacePreferences:
-    f = preferences_file(workspace_path)
-    if f.exists():
-        return WorkspacePreferences.model_validate_json(f.read_text(encoding="utf-8"))
-    # Missing file: use structural defaults and persist so the workspace always has a real prefs file.
-    prefs = WorkspacePreferences()
-    save_preferences(workspace_path, prefs)
-    logger.info(
-        "⚠️ Persisted preferences — workspace · defaults (preferences.json was missing)",
-        extra={
-            "content_hint": "structural defaults written to disk",
-            "workspace_path": str(workspace_path.resolve()),
-        },
-    )
-    return prefs
-
-
-def _prune_default_prompts(data: dict[str, Any]) -> None:
-    """Drop any editable prompt field whose value still equals its built-in default, in-place.
-
-    Keeps a prompt left at (or restored to) default absent from preferences.json so it re-applies
-    the code constant on load (a real reset that tracks future default edits). Only the known
-    ``PROMPT_DEFAULTS`` paths are considered; a missing parent or non-default value is left alone."""
-    for path, default_text in PROMPT_DEFAULTS.items():
-        parts = path.split(".")
-        node: Any = data
-        for part in parts[:-1]:
-            node = node.get(part) if isinstance(node, dict) else None
-            if not isinstance(node, dict):
-                break
-        else:
-            leaf = parts[-1]
-            if isinstance(node, dict) and node.get(leaf) == default_text:
-                node.pop(leaf, None)
-
-
-def save_preferences(
-    workspace_path: Path,
-    prefs: WorkspacePreferences,
-    *,
-    previous: WorkspacePreferences | None = None,
-) -> None:
-    """Persist ``prefs`` and publish ``preferences.saved`` with a precise diff.
-
-    ``previous`` is the in-memory state before this write; callers that already
-    hold it (e.g. ``WorkspacePreferencesRuntime.update_many``) should pass it
-    to skip an extra disk read. When omitted, the existing file is parsed (if
-    present) so the published ``effective_changes`` reflects real value
-    transitions, not just "the file was rewritten".
-    """
-    workspace_path.mkdir(parents=True, exist_ok=True)
-
-    if previous is None:
-        # Reading the file directly avoids ``load_preferences``' "write defaults
-        # if missing" side effect, which would recurse through save_preferences.
-        f = preferences_file(workspace_path)
-        if f.exists():
-            try:
-                previous = WorkspacePreferences.model_validate_json(
-                    f.read_text(encoding="utf-8")
-                )
-            except Exception:
-                previous = None
-
-    effective_changes = compute_effective_changes(previous, prefs)
-    _validate_pre_save_transition(workspace_path, effective_changes)
-
-    # Prune editable prompt fields still at their built-in default so they stay ABSENT from the
-    # file and re-apply the code constant on every load — a true reset that auto-tracks future
-    # default edits, instead of "Restore default" persisting a pinned copy (model_dump_json would
-    # otherwise materialize every field). Only PROMPT_DEFAULTS paths are touched; all else dumps full.
-    data = prefs.model_dump(mode="json")
-    _prune_default_prompts(data)
-    preferences_file(workspace_path).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8",
-    )
-    _notify_preferences_saved(
-        workspace_path, prefs, effective_changes=effective_changes,
-    )
-
-
-def _validate_pre_save_transition(
-    workspace_path: Path,
-    effective_changes: dict[str, tuple[Any, Any]],
-) -> None:
-    transition = effective_changes.get("knowledge.default_embedding_model")
-    if transition is None:
-        return
-    old_value, new_value = transition
-    if old_value == new_value:
-        return
-    from hirocli.services.knowledge import count_knowledge_points
-
-    if count_knowledge_points(workspace_path) > 0:
-        raise ValueError(
-            "knowledge.default_embedding_model cannot be changed while the knowledge collection has points. "
-            "Delete all knowledge documents first."
-        )
-
-
-# ---------------------------------------------------------------------------
-# Resolution — which canonical model id + tuning for a purpose?
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ResolvedModel:
-    """Resolved chat/STT/TTS model from preferences + availability."""
-
-    model_id: str
-    temperature: float
-    max_tokens: int
-    thinking: ThinkingLevel | None = None
-    # Local-provider context window (Ollama num_ctx); None = provider default. See ModelTuning.num_ctx.
-    num_ctx: int | None = None
-
-
-@dataclass(frozen=True)
-class ResolvedVoiceForSynthesis:
-    """Voice selection for ``TTSService.synthesize`` (short catalog model name)."""
-
-    model: str
-    voice: str = ""
-    instructions: str = ""
-
-
-def _profile_tuning(prefs: WorkspacePreferences, profile_id: str) -> TuningProfile:
-    profile = prefs.tuning_profiles.get(profile_id)
-    if profile is None:
-        raise ValueError(f"Unknown tuning profile: {profile_id}")
-    return profile
-
-
-def resolve_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    purpose: LLMPurpose = "chat",
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Return the default model for ``purpose`` if set, in catalog, and available.
-
-    Availability requires the model's provider to be configured in the credential store.
-    When ``credential_store`` is provided (e.g. AgentManager), it is reused to avoid
-    repeated keyring/doc loads.
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    attr = f"default_{purpose}"
-    model_id: str | None = getattr(prefs.llm, attr, None)
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None:
-        return None
-    expected_kind = {"chat": "chat", "stt": "stt", "tts": "tts"}[purpose]
-    if not spec.supports_kind(expected_kind):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_llm: workspace path not in registry — %s", workspace_path)
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, prefs.llm.default_tuning_profile)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
-    )
-
-
-@dataclass(frozen=True)
-class ResolvedImageGen:
-    """Resolved image-generation call parameters: profile values + per-call overrides."""
-
-    model_id: str
-    profile_id: str
-    steps: int
-    size: str | None
-    style_prefix: str
-    style_suffix: str
-    seed: int | None
-
-
-def resolve_image_gen(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    profile_id: str | None = None,
-    model_override: str | None = None,
-    steps_override: int | None = None,
-    seed_override: int | None = None,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedImageGen | None:
-    """Resolve the image-gen model + params for a call.
-
-    Resolution order (design doc): call overrides > named image profile >
-    ``llm.default_image_gen`` > catalog/credential availability. Returns None when no
-    image_gen model is selected or its provider has no credentials — same contract as
-    :func:`resolve_llm`.
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    pid = (profile_id or "").strip() or prefs.llm.default_image_profile
-    profile = prefs.image_profiles.get(pid)
-    if profile is None:
-        raise ValueError(f"Unknown image profile: {pid}")
-
-    model_id = (model_override or "").strip() or profile.model or prefs.llm.default_image_gen
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind("image_gen"):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_image_gen: workspace path not in registry — %s", workspace_path)
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    return ResolvedImageGen(
-        model_id=model_id,
-        profile_id=pid,
-        steps=steps_override if steps_override is not None else profile.steps,
-        size=profile.size,
-        style_prefix=profile.style_prefix,
-        style_suffix=profile.style_suffix,
-        seed=seed_override if seed_override is not None else profile.seed,
-    )
-
-
-def compose_image_prompt(resolved: ResolvedImageGen, prompt: str) -> str:
-    """Wrap the caller's prompt with the profile's style scaffolding."""
-    parts = [resolved.style_prefix.strip(), prompt.strip(), resolved.style_suffix.strip()]
-    return ", ".join(p for p in parts if p)
-
-
-def knowledge_answering_model_source(prefs: WorkspacePreferences) -> str | None:
-    """Preference path that supplies the answering model id (D16 tooltip)."""
-    if prefs.knowledge.answering.model:
-        return "knowledge.answering.model"
-    if prefs.llm.default_chat:
-        return "llm.default_chat"
-    return None
-
-
-def _resolve_knowledge_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    tuning_profile_id: str,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the knowledge chat model (catalog + credentials) with a given tuning profile.
-
-    The model id is shared across knowledge LLM steps (explicit ``knowledge.answering.model``
-    else ``llm.default_chat``); only the tuning profile differs (answering vs rewrite).
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    explicit = (prefs.knowledge.answering.model or "").strip() or None
-    model_id = explicit or prefs.llm.default_chat
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind("chat"):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug(
-                "_resolve_knowledge_llm: workspace path not in registry — %s",
-                workspace_path,
-            )
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, tuning_profile_id)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
-    )
-
-
-def resolve_knowledge_answering_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the knowledge answering chat model with catalog, credentials, and tuning."""
-    return _resolve_knowledge_llm(
-        prefs,
-        workspace_path,
-        tuning_profile_id=prefs.knowledge.default_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_knowledge_rewrite_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the model for the query-rewrite step: same model, ``knowledge_rewrite`` tuning."""
-    return _resolve_knowledge_llm(
-        prefs,
-        workspace_path,
-        tuning_profile_id=DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_knowledge_graph_extraction_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """L3 — resolve the model for graph extraction (entities+relations per chunk).
-
-    Same answering-model resolution path; only the tuning profile differs
-    (``knowledge_graph_extraction`` — temp=0, generous max_tokens, no reasoning).
-    """
-    return _resolve_knowledge_llm(
-        prefs,
-        workspace_path,
-        tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_knowledge_graph_disambiguation_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """L3 — resolve the model for the LLM disambiguation step of the resolver.
-
-    Called only when the deterministic ladder (exact → fuzzy) cannot decide
-    confidently. Tiny output budget — see the tuning profile.
-    """
-    return _resolve_knowledge_llm(
-        prefs,
-        workspace_path,
-        tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def _resolve_graphiti_model(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    explicit_model: str | None,
-    tuning_profile_id: str,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve a Graphiti model tier.
-
-    Model id chain: explicit graph override (``knowledge.graph.*_model``) →
-    ``knowledge.answering.model`` → ``llm.default_chat``. Availability checks mirror
-    :func:`_resolve_knowledge_llm` (catalog + provider credentials). The tuning
-    profile is the per-tier graphiti profile.
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    explicit = (explicit_model or "").strip() or None
-    answering = (prefs.knowledge.answering.model or "").strip() or None
-    model_id = explicit or answering or prefs.llm.default_chat
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind("chat"):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug(
-                "_resolve_graphiti_model: workspace path not in registry — %s", workspace_path
-            )
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, tuning_profile_id)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
-    )
-
-
-def resolve_graphiti_extraction_model(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Graphiti pivot — the main extraction + edge tier (``ModelSize.medium``)."""
-    return _resolve_graphiti_model(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.extraction_model,
-        tuning_profile_id=prefs.graph.extraction_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_graphiti_small_model(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Graphiti pivot — the cheap sub-step tier (``ModelSize.small``).
-
-    Falls back to the extraction model id when ``small_model`` is unset, so a single
-    configured model still drives both tiers (with their separate tuning profiles).
-    """
-    explicit = prefs.graph.small_model or prefs.graph.extraction_model
-    return _resolve_graphiti_model(
-        prefs,
-        workspace_path,
-        explicit_model=explicit,
-        tuning_profile_id=prefs.graph.small_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
-    """Return ``(profile_id, prompt_text)`` for the agentic retrieval loop."""
-    return prefs.graph.eval.resolve_retrieval_agent_prompt()
-
-
-def resolve_eval_answer_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the memory-eval ANSWER model — its own model override + tuning profile, separate
-    from the judge. Model chain: ``graph.eval.answer_model`` → ``knowledge.answering.model`` →
-    ``llm.default_chat`` (mirrors the graphiti tiers)."""
-    return _resolve_graphiti_model(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.eval.answer_model,
-        tuning_profile_id=prefs.graph.eval.answer_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_eval_judge_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the eval JUDGE model (both tracks) — its own model override + tuning profile,
-    separate from the answer. Same fallback chain as :func:`resolve_eval_answer_llm`."""
-    return _resolve_graphiti_model(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.eval.judge_model,
-        tuning_profile_id=prefs.graph.eval.judge_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_eval_retrieval_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the agentic-retrieval model (memory track) — its own model override + tuning
-    profile. Model chain: ``graph.eval.retrieval_model`` → ``graph.eval.answer_model`` →
-    ``knowledge.answering.model`` → ``llm.default_chat``. The answer-model tier preserves prior
-    behavior (the retrieval loop borrowed the answer model before it had a dedicated preference),
-    so an unset ``retrieval_model`` resolves to exactly the same model as the answer step."""
-    return _resolve_graphiti_model(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.eval.retrieval_model or prefs.graph.eval.answer_model,
-        tuning_profile_id=prefs.graph.eval.retrieval_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str:
-    """Graphiti pivot — the embedder model id for node/fact embeddings.
-
-    ``knowledge.graph.embedder_model`` when set, else the shared knowledge dense
-    embedder (decision G8). Pure preference read — no availability check (the
-    embedder is resolved by ``create_embedding_model`` at bootstrap)."""
-    return (
-        prefs.graph.embedder_model_resolved
-        or prefs.knowledge.default_embedding_model_resolved
-    )
-
-
-def resolve_character_llm(
-    ordered_model_ids: list[str],
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    tuning_profile: str | None = None,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Pick the first **available** chat model from a character's ``llm_models`` list.
-
-    Falls back to ``resolve_llm(..., "chat")`` when the list is empty or no id is usable.
-    Availability matches ``resolve_llm`` (catalog + credential store).
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_character_llm: workspace path not in registry — %s", workspace_path)
-            return resolve_llm(prefs, workspace_path, "chat", workspace_id=workspace_id)
-        store = CredentialStore(workspace_path, wid)
-
-    cat = get_model_catalog()
-    ams = AvailableModelsService(cat, store)
-    requested_profile_id = (tuning_profile or "").strip()
-    if requested_profile_id and requested_profile_id not in prefs.tuning_profiles:
-        logger.warning(
-            "Character tuning profile missing; falling back to workspace chat profile",
-            extra={
-                "tuning_profile": requested_profile_id,
-                "fallback": prefs.llm.default_tuning_profile,
-            },
-        )
-    profile_id = (
-        requested_profile_id
-        if requested_profile_id in prefs.tuning_profiles
-        else prefs.llm.default_tuning_profile
-    )
-    seen: set[str] = set()
-    for mid in ordered_model_ids:
-        if not mid or mid in seen:
-            continue
-        seen.add(mid)
-        spec = cat.get_model(mid)
-        if spec is None or spec.model_kind != "chat":
-            continue
-        if not ams.is_model_available(mid):
-            continue
-        tuning = _profile_tuning(prefs, profile_id)
-        return ResolvedModel(
-            model_id=mid,
-            temperature=tuning.temperature,
-            max_tokens=tuning.max_tokens,
-            thinking=tuning.thinking,
-            num_ctx=tuning.num_ctx,
-        )
-    fallback = resolve_llm(
-        prefs,
-        workspace_path,
-        "chat",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-    if fallback is None:
-        return None
-    tuning = _profile_tuning(prefs, profile_id)
-    return ResolvedModel(
-        model_id=fallback.model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
-    )
-
-
-def resolve_character_voice(
-    ordered_voice_model_ids: list[str],
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-    tts_instructions: str = "",
-    tts_voice_by_provider: dict[str, str] | None = None,
-) -> ResolvedVoiceForSynthesis | None:
-    """Pick the first **available** TTS model from ``voice_models``; else workspace ``default_tts``.
-
-    Returns catalog short model id plus optional voice preset / instructions for ``TTSService``.
-    Character-level ``tts_voice_by_provider`` maps catalog ``provider_id`` to one preset id per provider;
-    ``tts_instructions`` is a single optional global style hint for synthesis.
-    """
-    from .available_models import AvailableModelsService
-    from .model_catalog import get_model_catalog
-    from .workspace import workspace_id_for_path
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    cat = get_model_catalog()
-    ams = AvailableModelsService(cat, store)
-
-    voice_map = dict(tts_voice_by_provider or {})
-    instructions = (tts_instructions or "").strip()
-
-    def _voice_for_provider(provider_id: str) -> str:
-        raw = voice_map.get(provider_id, "")
-        return str(raw).strip()
-
-    seen: set[str] = set()
-    for mid in ordered_voice_model_ids:
-        if not mid or mid in seen:
-            continue
-        seen.add(mid)
-        spec = cat.get_model(mid)
-        if spec is None or not spec.supports_kind("tts"):
-            continue
-        if not ams.is_model_available(mid):
-            continue
-        short = mid.split(":", 1)[1]
-        pid = spec.provider_id or ""
-        voice_preset = _voice_for_provider(pid)
-        return ResolvedVoiceForSynthesis(model=short, voice=voice_preset, instructions=instructions)
-
-    tts_entry = resolve_llm(
-        prefs,
-        workspace_path,
-        "tts",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-    if tts_entry is None:
-        return None
-    spec = cat.get_model(tts_entry.model_id)
-    if spec is None or not spec.supports_kind("tts"):
-        return None
-    short = tts_entry.model_id.split(":", 1)[1]
-    pid = spec.provider_id or ""
-    voice_preset = _voice_for_provider(pid)
-    return ResolvedVoiceForSynthesis(model=short, voice=voice_preset, instructions=instructions)

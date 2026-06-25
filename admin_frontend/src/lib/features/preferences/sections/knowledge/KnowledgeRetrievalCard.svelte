@@ -49,14 +49,12 @@
         {ctrl}
         path="knowledge.retrieval.min_score"
         label="Minimum score (Dense only)"
-        hint="Applies only to dense (Vector search) branch"
         bind:value={ctrl.draft.knowledge.retrieval.min_score}
       />
       <PrefNumberField
         {ctrl}
         path="knowledge.retrieval.top_k"
         label="Search/fused results (top K)"
-        hint="Fused results from hybrid search or direct results from dense only search (after applying minimum score)"
         bind:value={ctrl.draft.knowledge.retrieval.top_k}
       />
       <div class={cn(!hybridPrefetchActive && 'opacity-50')}>
@@ -64,7 +62,6 @@
           {ctrl}
           path="knowledge.retrieval.prefetch_limit"
           label="Candidates per branch"
-          hint="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only)"
           disabled={ctrl.busy || !hybridPrefetchActive}
           bind:value={ctrl.draft.knowledge.retrieval.prefetch_limit}
         />
@@ -74,7 +71,6 @@
           {ctrl}
           path="knowledge.retrieval.reranker.top_n"
           label="Rerank results (top N)"
-          hint="Final returned results if using rerank (top N)"
           disabled={ctrl.busy || !rerankTopNActive}
           bind:value={ctrl.draft.knowledge.retrieval.reranker.top_n}
         />

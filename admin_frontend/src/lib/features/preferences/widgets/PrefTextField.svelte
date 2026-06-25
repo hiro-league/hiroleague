@@ -1,12 +1,16 @@
 <script lang="ts">
   import FormField from '$lib/components/ui/form-field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { preferenceFieldMeta, preferenceHint } from '$lib/features/preferences/shared/preferences-schema';
+  import {
+    preferenceFieldMeta,
+    preferenceHint,
+    type PreferencePath
+  } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
-    path: string;
+    path: PreferencePath;
     label: string;
     value?: string | null;
     class?: string;
@@ -14,7 +18,7 @@
     disabled?: boolean;
     placeholder?: string;
     maxlength?: number;
-    /** Overrides schema description until copy is backend-owned (#5). */
+    /** Optional override of the schema description (rare card-local copy). */
     hint?: string;
   };
 
@@ -35,7 +39,7 @@
   const hint = $derived(hintOverride ?? preferenceHint(meta));
 </script>
 
-<FormField {label} {hint} class={className}>
+<FormField {label} {hint} hintTooltip class={className}>
   <input
     type="text"
     class={inputClass}

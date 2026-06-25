@@ -4,16 +4,20 @@
    */
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';
+  import FieldHelp from '$lib/components/ui/field-help.svelte';
 
   let {
     label,
     hint,
+    hintTooltip = false,
     class: className = '',
     children
   }: {
     label?: string;
     // Optional help text rendered below the control (reused across settings forms).
     hint?: string;
+    // When true, render `hint` as a help icon + tooltip next to the label instead of inline below.
+    hintTooltip?: boolean;
     class?: string;
     children: Snippet;
   } = $props();
@@ -21,10 +25,20 @@
 
 <label class={cn('admin-ui-form-field grid gap-1.5 text-left', className)}>
   {#if label?.trim()}
-    <span class="font-sans text-sm font-semibold leading-snug text-muted-foreground">{label}</span>
+    <span
+      class={cn(
+        'font-sans text-sm font-semibold leading-snug text-muted-foreground',
+        hint?.trim() && hintTooltip && 'inline-flex items-center gap-1.5'
+      )}
+    >
+      {label}
+      {#if hint?.trim() && hintTooltip}
+        <FieldHelp text={hint} />
+      {/if}
+    </span>
   {/if}
   {@render children()}
-  {#if hint?.trim()}
+  {#if hint?.trim() && !hintTooltip}
     <span class="font-sans text-xs leading-snug text-muted-foreground">{hint}</span>
   {/if}
 </label>

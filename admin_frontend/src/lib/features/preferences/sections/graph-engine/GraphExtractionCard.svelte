@@ -28,6 +28,7 @@
     <FormField
       label="Extraction ontology"
       hint={preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, 'graph.entity_ontology'))}
+      hintTooltip
       class="max-w-md"
     >
       <select
@@ -45,6 +46,7 @@
       hint={preferenceHint(
         preferenceFieldMeta(ctrl.fieldSchema, 'graph.custom_extraction_instructions')
       )}
+      hintTooltip
     >
       <textarea
         class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"

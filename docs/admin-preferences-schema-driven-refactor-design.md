@@ -2,11 +2,11 @@
 
 > **Initial-development mode:** no backward compatibility, no migration, no wrappers.
 >
-> **Status:** the **high-impact** items `#1`–`#3` (§4–§6) are **implemented and green**. The
-> **medium** items `#4`–`#6` (§7–§9) are **not yet built** and are written as step-by-step
-> implementation guidance. The **lower** items `#7`–`#8` (§10–§11) are now also written as
-> step-by-step guidance — note `#8`'s **backend metadata half is already shipped** (`model_kind`
-> is emitted in the field map today), so it is a frontend-only consolidation.
+> **Status:** the **high-impact** items `#1`–`#3` (§4–§6) **and** the **medium** items `#4`–`#6`
+> (§7–§9) are **implemented and green**. The **lower** items `#7`–`#8` (§10–§11) are written as
+> step-by-step guidance but **not yet built** — note `#8`'s **backend metadata half is already
+> shipped** (`model_kind` is emitted in the field map today), so it is a frontend-only
+> consolidation.
 >
 > Scope: the **Preferences** admin feature only (`admin_frontend/src/lib/features/preferences/**`,
 > `admin_frontend/src/lib/api/preferences.ts`, and the backend model

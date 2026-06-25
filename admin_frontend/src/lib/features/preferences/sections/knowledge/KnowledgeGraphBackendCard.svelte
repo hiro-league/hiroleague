@@ -23,7 +23,6 @@
       {ctrl}
       path="graph.backend"
       label="Graph backend"
-      hint="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts."
       options={GRAPH_BACKEND_LABELS}
       class="max-w-md"
       bind:value={ctrl.draft.graph.backend}

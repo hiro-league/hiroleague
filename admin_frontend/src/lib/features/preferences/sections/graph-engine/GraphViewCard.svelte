@@ -22,7 +22,6 @@
       {ctrl}
       path="graph.view.large_type_threshold"
       label="Large node-type warning threshold"
-      hint="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only."
       class="max-w-md"
       bind:value={ctrl.draft.graph.view.large_type_threshold}
     />

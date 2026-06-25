@@ -6,17 +6,21 @@
     normalizePrefSelectOptions,
     type PrefSelectOption
   } from '$lib/features/preferences/shared/preferences-field-options';
-  import { preferenceFieldMeta, preferenceHint } from '$lib/features/preferences/shared/preferences-schema';
+  import {
+    preferenceFieldMeta,
+    preferenceHint,
+    type PreferencePath
+  } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
-    path: string;
+    path: PreferencePath;
     label: string;
     value?: string;
     options: PrefSelectOption[] | Record<string, string>;
     class?: string;
-    /** Overrides schema description until copy is backend-owned (#5). */
+    /** Optional override of the schema description (rare card-local copy). */
     hint?: string;
   };
 
@@ -39,7 +43,7 @@
   });
 </script>
 
-<FormField {label} {hint} class={className}>
+<FormField {label} {hint} hintTooltip class={className}>
   <select class={ADMIN_SELECT_LG} bind:value onchange={ctrl.markDirty}>
     {#each resolvedOptions as option (option.value)}
       <option value={option.value} disabled={option.disabled} title={option.title}>

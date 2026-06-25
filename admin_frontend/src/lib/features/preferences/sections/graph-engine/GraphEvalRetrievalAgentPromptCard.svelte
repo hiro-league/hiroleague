@@ -2,6 +2,10 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import {
+    preferenceFieldMeta,
+    preferenceHint
+  } from '$lib/features/preferences/shared/preferences-schema';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import EvalRetrievalAgentPromptLibrary from '$lib/features/preferences/widgets/EvalRetrievalAgentPromptLibrary.svelte';
@@ -29,7 +33,10 @@
     <FormField
       label="Active prompt profile"
       class="max-w-md"
-      hint="Which retrieval-agent system prompt the loop uses."
+      hint={preferenceHint(
+        preferenceFieldMeta(ctrl.fieldSchema, 'graph.eval.active_retrieval_agent_prompt_id')
+      )}
+      hintTooltip
     >
       <select
         class={ADMIN_SELECT_LG}

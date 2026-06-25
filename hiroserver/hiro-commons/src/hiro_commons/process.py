@@ -161,9 +161,23 @@ def channel_pid_file(
     return base_path / channels_dir / f"{channel_name}.pid"
 
 
+def _proc_create_time(pid: int) -> float | None:
+    """Process creation timestamp, used as a recycle-proof identity for a PID."""
+    try:
+        import psutil
+
+        return psutil.Process(pid).create_time()
+    except Exception:
+        return None
+
+
 def write_pid(base_path: Path, pid_filename: str, pid: int | None = None) -> None:
+    # Line 1: pid. Line 2 (optional): the process create-time, so a later reader can tell our
+    # process apart from a different process that the OS later assigned the same recycled PID.
     pid = pid or os.getpid()
-    pid_file(base_path, pid_filename).write_text(str(pid), encoding="utf-8")
+    create_time = _proc_create_time(pid)
+    payload = str(pid) if create_time is None else f"{pid}\n{create_time}"
+    pid_file(base_path, pid_filename).write_text(payload, encoding="utf-8")
 
 
 def read_pid(base_path: Path, pid_filename: str) -> int | None:
@@ -171,9 +185,30 @@ def read_pid(base_path: Path, pid_filename: str) -> int | None:
     if not target.exists():
         return None
     try:
-        return int(target.read_text(encoding="utf-8").strip())
-    except (ValueError, OSError):
+        # First line only — the file may also carry a create-time on line 2.
+        return int(target.read_text(encoding="utf-8").splitlines()[0].strip())
+    except (ValueError, OSError, IndexError):
         return None
+
+
+def read_pid_record(base_path: Path, pid_filename: str) -> tuple[int | None, float | None]:
+    """Return ``(pid, create_time)`` from the pid file. ``create_time`` is ``None`` for
+    legacy single-line files (then liveness falls back to PID existence only)."""
+    target = pid_file(base_path, pid_filename)
+    if not target.exists():
+        return None, None
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+        pid = int(lines[0].strip())
+    except (ValueError, OSError, IndexError):
+        return None, None
+    create_time: float | None = None
+    if len(lines) > 1 and lines[1].strip():
+        try:
+            create_time = float(lines[1].strip())
+        except ValueError:
+            create_time = None
+    return pid, create_time
 
 
 def remove_pid(base_path: Path, pid_filename: str) -> None:
@@ -183,9 +218,7 @@ def remove_pid(base_path: Path, pid_filename: str) -> None:
         pass
 
 
-def is_running(pid: int | None) -> bool:
-    if pid is None:
-        return False
+def _pid_exists(pid: int) -> bool:
     if sys.platform == "win32":
         try:
             result = subprocess.run(
@@ -204,6 +237,35 @@ def is_running(pid: int | None) -> bool:
         return True
     except (ProcessLookupError, PermissionError):
         return False
+
+
+def is_running(pid: int | None, create_time: float | None = None) -> bool:
+    """True if ``pid`` is live. When ``create_time`` is given, also require the live process to
+    have that creation timestamp — this rejects a recycled PID now owned by an unrelated process
+    (e.g. a crashed server's PID later reused by svchost). Fails closed if it can't be verified."""
+    if pid is None:
+        return False
+    if not _pid_exists(pid):
+        return False
+    if create_time is not None:
+        live = _proc_create_time(pid)
+        if live is None or abs(live - create_time) > 1.0:
+            return False
+    return True
+
+
+def read_running_pid(base_path: Path, pid_filename: str) -> int | None:
+    """Return the recorded pid only if that exact process is still alive (identity-verified).
+
+    Defeats stale-pid-file false positives from PID recycling; clears the pid file when the
+    recorded process is gone so status/start/stop stop reporting a dead server as running."""
+    pid, create_time = read_pid_record(base_path, pid_filename)
+    if pid is None:
+        return None
+    if is_running(pid, create_time):
+        return pid
+    remove_pid(base_path, pid_filename)
+    return None
 
 
 def kill_process(pid: int) -> bool:
@@ -255,10 +317,12 @@ def remove_channel_pid(
 
 
 def stop_process(base_path: Path, pid_filename: str) -> bool:
-    pid = read_pid(base_path, pid_filename)
+    pid, create_time = read_pid_record(base_path, pid_filename)
     if pid is None:
         return False
-    if not is_running(pid):
+    if not is_running(pid, create_time):
+        # Recorded process is gone (or the PID was recycled to something else) — clear the stale
+        # file; never taskkill a PID we can't confirm is ours.
         remove_pid(base_path, pid_filename)
         return False
     killed = kill_process(pid)

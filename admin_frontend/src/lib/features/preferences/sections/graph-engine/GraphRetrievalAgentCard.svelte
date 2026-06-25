@@ -47,21 +47,18 @@
         {ctrl}
         path="graph.eval.retrieval_agent.max_agent_turns"
         label="Max agent turns"
-        hint="How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call."
         bind:value={limits.max_agent_turns}
       />
       <PrefNumberField
         {ctrl}
         path="graph.eval.retrieval_agent.max_parallel_searches"
         label="Max parallel searches"
-        hint="Sub-queries per search_memory call — global for eval and chat."
         bind:value={limits.max_parallel_searches}
       />
       <PrefNumberField
         {ctrl}
         path="graph.eval.retrieval_agent.hops_max"
         label="Hops max"
-        hint="Upper bound the tool accepts per search (1–3)."
         bind:value={limits.hops_max}
       />
     </div>
@@ -70,21 +67,18 @@
         {ctrl}
         path="graph.eval.retrieval_agent.limit_default"
         label="Limit default"
-        hint="Starting num_results per search_memory call."
         bind:value={limits.limit_default}
       />
       <PrefNumberField
         {ctrl}
         path="graph.eval.retrieval_agent.limit_min"
         label="Limit min"
-        hint="Soft floor when the tool clamps limit."
         bind:value={limits.limit_min}
       />
       <PrefNumberField
         {ctrl}
         path="graph.eval.retrieval_agent.limit_max"
         label="Limit max"
-        hint="Soft ceiling when the tool clamps limit."
         bind:value={limits.limit_max}
       />
     </div>
@@ -99,28 +93,24 @@
           {ctrl}
           path="graph.eval.max_elements_per_kind"
           label="Max elements / kind"
-          hint="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump."
           bind:value={evalPrefs.max_elements_per_kind}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.max_fact_chars"
           label="Max fact chars"
-          hint="Each recalled fact → one sanitized line capped here."
           bind:value={evalPrefs.max_fact_chars}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.max_episode_chars"
           label="Max message chars"
-          hint="Per-episode/message text cap (one sanitized line)."
           bind:value={evalPrefs.max_episode_chars}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.max_summary_chars"
           label="Max entity summary chars"
-          hint="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest."
           bind:value={evalPrefs.max_summary_chars}
         />
       </div>

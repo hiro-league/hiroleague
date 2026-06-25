@@ -56,7 +56,6 @@
         path="chat.max_messages"
         label="Max retained messages"
         class="max-w-sm"
-        hint="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval)."
         bind:value={ctrl.draft.chat.max_messages}
       />
 

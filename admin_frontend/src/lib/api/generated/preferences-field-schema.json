@@ -185,6 +185,7 @@
     "nullable": false,
     "type": "integer",
     "default": 20,
+    "description": "Fused results from hybrid search or direct results from dense only search (after applying minimum score).",
     "min": 1,
     "max": 100
   },
@@ -194,6 +195,7 @@
     "type": "number",
     "default": 0.0,
     "step": 0.05,
+    "description": "Applies only to dense (Vector search) branch.",
     "min": 0.0,
     "max": 1.0
   },
@@ -214,6 +216,7 @@
     "nullable": false,
     "type": "integer",
     "default": 40,
+    "description": "Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).",
     "min": 1,
     "max": 500
   },
@@ -235,6 +238,7 @@
     "nullable": false,
     "type": "integer",
     "default": 8,
+    "description": "Final returned results if using rerank (top N).",
     "min": 1,
     "max": 100
   },
@@ -302,7 +306,8 @@
     "enum": [
       "off",
       "graphiti"
-    ]
+    ],
+    "description": "Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts."
   },
   "graph.extraction_model": {
     "path": "graph.extraction_model",
@@ -541,6 +546,7 @@
     "nullable": false,
     "type": "integer",
     "default": 30,
+    "description": "Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.",
     "min": 1,
     "max": 200
   },
@@ -549,6 +555,7 @@
     "nullable": false,
     "type": "integer",
     "default": 240,
+    "description": "Each recalled fact \u2192 one sanitized line capped here.",
     "min": 40,
     "max": 2000
   },
@@ -557,6 +564,7 @@
     "nullable": false,
     "type": "integer",
     "default": 300,
+    "description": "Per-episode/message text cap (one sanitized line).",
     "min": 40,
     "max": 2000
   },
@@ -565,6 +573,7 @@
     "nullable": false,
     "type": "integer",
     "default": 400,
+    "description": "Per-entity summary cap (one sanitized line) \u2014 entity summaries are the longest/noisiest.",
     "min": 40,
     "max": 4000
   },
@@ -573,6 +582,7 @@
     "nullable": false,
     "type": "integer",
     "default": 4,
+    "description": "How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.",
     "min": 1,
     "max": 10
   },
@@ -581,6 +591,7 @@
     "nullable": false,
     "type": "integer",
     "default": 3,
+    "description": "Sub-queries per search_memory call \u2014 global for eval and chat.",
     "min": 1,
     "max": 5
   },
@@ -589,6 +600,7 @@
     "nullable": false,
     "type": "integer",
     "default": 20,
+    "description": "Starting num_results per search_memory call.",
     "min": 1,
     "max": 100
   },
@@ -597,6 +609,7 @@
     "nullable": false,
     "type": "integer",
     "default": 10,
+    "description": "Soft floor when the tool clamps limit.",
     "min": 1,
     "max": 100
   },
@@ -605,6 +618,7 @@
     "nullable": false,
     "type": "integer",
     "default": 40,
+    "description": "Soft ceiling when the tool clamps limit.",
     "min": 1,
     "max": 100
   },
@@ -613,6 +627,7 @@
     "nullable": false,
     "type": "integer",
     "default": 3,
+    "description": "Upper bound the tool accepts per search (1\u20133).",
     "min": 1,
     "max": 3
   },
@@ -626,13 +641,15 @@
     "path": "graph.eval.active_retrieval_agent_prompt_id",
     "nullable": false,
     "type": "string",
-    "default": "default"
+    "default": "default",
+    "description": "Which retrieval-agent system prompt the loop uses."
   },
   "graph.view.large_type_threshold": {
     "path": "graph.view.large_type_threshold",
     "nullable": false,
     "type": "integer",
     "default": 200,
+    "description": "In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance \u2014 this only flags very large types. Display-only.",
     "min": 10,
     "max": 10000
   },
@@ -647,6 +664,7 @@
     "nullable": false,
     "type": "integer",
     "default": 6,
+    "description": "Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).",
     "min": 1,
     "max": 100
   },

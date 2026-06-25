@@ -38,6 +38,7 @@
         },
         "max_messages": {
           "default": 6,
+          "description": "Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).",
           "maximum": 100,
           "minimum": 1,
           "title": "Max Messages",
@@ -162,6 +163,7 @@
         },
         "max_elements_per_kind": {
           "default": 30,
+          "description": "Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.",
           "maximum": 200,
           "minimum": 1,
           "title": "Max Elements Per Kind",
@@ -169,6 +171,7 @@
         },
         "max_fact_chars": {
           "default": 240,
+          "description": "Each recalled fact \u2192 one sanitized line capped here.",
           "maximum": 2000,
           "minimum": 40,
           "title": "Max Fact Chars",
@@ -176,6 +179,7 @@
         },
         "max_episode_chars": {
           "default": 300,
+          "description": "Per-episode/message text cap (one sanitized line).",
           "maximum": 2000,
           "minimum": 40,
           "title": "Max Episode Chars",
@@ -183,6 +187,7 @@
         },
         "max_summary_chars": {
           "default": 400,
+          "description": "Per-entity summary cap (one sanitized line) \u2014 entity summaries are the longest/noisiest.",
           "maximum": 4000,
           "minimum": 40,
           "title": "Max Summary Chars",
@@ -201,6 +206,7 @@
         },
         "active_retrieval_agent_prompt_id": {
           "default": "default",
+          "description": "Which retrieval-agent system prompt the loop uses.",
           "title": "Active Retrieval Agent Prompt Id",
           "type": "string"
         }
@@ -233,6 +239,7 @@
       "properties": {
         "backend": {
           "default": "off",
+          "description": "Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.",
           "enum": [
             "off",
             "graphiti"
@@ -418,6 +425,7 @@
       "properties": {
         "large_type_threshold": {
           "default": 200,
+          "description": "In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance \u2014 this only flags very large types. Display-only.",
           "maximum": 10000,
           "minimum": 10,
           "title": "Large Type Threshold",
@@ -724,6 +732,7 @@
         },
         "top_n": {
           "default": 8,
+          "description": "Final returned results if using rerank (top N).",
           "maximum": 100,
           "minimum": 1,
           "title": "Top N",
@@ -763,6 +772,7 @@
       "properties": {
         "top_k": {
           "default": 20,
+          "description": "Fused results from hybrid search or direct results from dense only search (after applying minimum score).",
           "maximum": 100,
           "minimum": 1,
           "title": "Top K",
@@ -770,6 +780,7 @@
         },
         "min_score": {
           "default": 0.0,
+          "description": "Applies only to dense (Vector search) branch.",
           "maximum": 1.0,
           "minimum": 0.0,
           "step": 0.05,
@@ -789,6 +800,7 @@
         },
         "prefetch_limit": {
           "default": 40,
+          "description": "Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).",
           "maximum": 500,
           "minimum": 1,
           "title": "Prefetch Limit",
@@ -1035,6 +1047,7 @@
       "properties": {
         "max_agent_turns": {
           "default": 4,
+          "description": "How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.",
           "maximum": 10,
           "minimum": 1,
           "title": "Max Agent Turns",
@@ -1042,6 +1055,7 @@
         },
         "max_parallel_searches": {
           "default": 3,
+          "description": "Sub-queries per search_memory call \u2014 global for eval and chat.",
           "maximum": 5,
           "minimum": 1,
           "title": "Max Parallel Searches",
@@ -1049,6 +1063,7 @@
         },
         "limit_default": {
           "default": 20,
+          "description": "Starting num_results per search_memory call.",
           "maximum": 100,
           "minimum": 1,
           "title": "Limit Default",
@@ -1056,6 +1071,7 @@
         },
         "limit_min": {
           "default": 10,
+          "description": "Soft floor when the tool clamps limit.",
           "maximum": 100,
           "minimum": 1,
           "title": "Limit Min",
@@ -1063,6 +1079,7 @@
         },
         "limit_max": {
           "default": 40,
+          "description": "Soft ceiling when the tool clamps limit.",
           "maximum": 100,
           "minimum": 1,
           "title": "Limit Max",
@@ -1070,6 +1087,7 @@
         },
         "hops_max": {
           "default": 3,
+          "description": "Upper bound the tool accepts per search (1\u20133).",
           "maximum": 3,
           "minimum": 1,
           "title": "Hops Max",

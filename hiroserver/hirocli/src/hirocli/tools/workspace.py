@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hiro_commons.keys import generate_private_key, private_key_to_pem, public_key_to_b64
-from hiro_commons.process import is_running, read_pid
+from hiro_commons.process import read_running_pid
 
 from ..constants import PID_FILENAME
 from ..domain.config import load_config, load_state
@@ -197,8 +197,8 @@ class WorkspaceRemoveTool(Tool):
         entry, registry = resolve_workspace(workspace)
         ws_path = Path(entry.path)
 
-        pid = read_pid(ws_path, PID_FILENAME)
-        if is_running(pid):
+        pid = read_running_pid(ws_path, PID_FILENAME)
+        if pid:
             raise WorkspaceError(
                 f"Workspace '{entry.name}' is currently running (PID {pid}). "
                 "Stop it before removing."

@@ -1,10 +1,14 @@
 import type { PreferenceFieldMeta } from '$lib/api/preferences-schema';
+import type { PreferencePath } from '$lib/api/generated/preferences-paths.generated';
 
+export type { PreferencePath };
 export type PreferencesSchemaMap = Record<string, PreferenceFieldMeta>;
 
+// #6: `path` is the generated dotted-path union, so a typo or renamed field is a compile error.
+// Returns null when the live schema lacks the path (still possible if the server is older).
 export function preferenceFieldMeta(
   schema: PreferencesSchemaMap | null | undefined,
-  path: string
+  path: PreferencePath
 ): PreferenceFieldMeta | null {
   return schema?.[path] ?? null;
 }

@@ -39,13 +39,25 @@ export type EmbedStructuralContext = boolean;
  * Split chunks at markdown headings when ingesting documents.
  */
 export type RespectHeadings = boolean;
+/**
+ * Fused results from hybrid search or direct results from dense only search (after applying minimum score).
+ */
 export type TopK1 = number;
+/**
+ * Applies only to dense (Vector search) branch.
+ */
 export type MinScore = number;
 export type Hybrid = boolean;
 export type SparseModel = string;
+/**
+ * Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).
+ */
 export type PrefetchLimit = number;
 export type Enabled3 = boolean;
 export type ModelId = string | null;
+/**
+ * Final returned results if using rerank (top N).
+ */
 export type TopN = number;
 export type Device = string | null;
 export type BatchSize = number;
@@ -55,6 +67,9 @@ export type CiteSources = boolean;
 export type LanguagePolicy = "match_query" | "prefer_english" | "prefer_arabic";
 export type Prompt1 = string;
 export type DefaultOn = boolean;
+/**
+ * Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.
+ */
 export type Backend = "off" | "graphiti";
 /**
  * The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat.
@@ -155,19 +170,58 @@ export type RetrievalTuningProfile = string;
 export type ShowEventTime = boolean;
 export type ShowExpiredAt = boolean;
 export type ShowSuperseded = boolean;
+/**
+ * Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.
+ */
 export type MaxElementsPerKind = number;
+/**
+ * Each recalled fact → one sanitized line capped here.
+ */
 export type MaxFactChars = number;
+/**
+ * Per-episode/message text cap (one sanitized line).
+ */
 export type MaxEpisodeChars = number;
+/**
+ * Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.
+ */
 export type MaxSummaryChars = number;
+/**
+ * How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.
+ */
 export type MaxAgentTurns = number;
+/**
+ * Sub-queries per search_memory call — global for eval and chat.
+ */
 export type MaxParallelSearches = number;
+/**
+ * Starting num_results per search_memory call.
+ */
 export type LimitDefault = number;
+/**
+ * Soft floor when the tool clamps limit.
+ */
 export type LimitMin = number;
+/**
+ * Soft ceiling when the tool clamps limit.
+ */
 export type LimitMax = number;
+/**
+ * Upper bound the tool accepts per search (1–3).
+ */
 export type HopsMax = number;
+/**
+ * Which retrieval-agent system prompt the loop uses.
+ */
 export type ActiveRetrievalAgentPromptId = string;
+/**
+ * In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.
+ */
 export type LargeTypeThreshold = number;
 export type Instructions = string;
+/**
+ * Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).
+ */
 export type MaxMessages = number;
 export type CiteSources1 = boolean;
 export type ToolsEnabled = boolean;

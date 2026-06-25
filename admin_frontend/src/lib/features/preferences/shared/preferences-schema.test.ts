@@ -4,7 +4,7 @@ import {
   preferenceHint,
   preferenceNumberBounds
 } from './preferences-schema';
-import type { PreferencesSchemaMap } from './preferences-schema';
+import type { PreferencePath, PreferencesSchemaMap } from './preferences-schema';
 
 const FIXTURE: PreferencesSchemaMap = {
   'knowledge.chunking.chunk_size': {
@@ -19,7 +19,9 @@ const FIXTURE: PreferencesSchemaMap = {
 describe('preferences-schema helpers', () => {
   it('looks up field meta by dotted path', () => {
     expect(preferenceFieldMeta(FIXTURE, 'knowledge.chunking.chunk_size')?.min).toBe(200);
-    expect(preferenceFieldMeta(FIXTURE, 'missing')).toBeNull();
+    // Cast: typed paths are compile-checked, but a path absent from the live schema can still
+    // happen at runtime (older server), so the null branch is still exercised.
+    expect(preferenceFieldMeta(FIXTURE, 'missing' as PreferencePath)).toBeNull();
   });
 
   it('maps number bounds and hints from meta', () => {

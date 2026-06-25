@@ -1,5 +1,6 @@
 import type { CatalogModelRow } from '$lib/api/catalog';
 import type { WorkspacePreferences } from '$lib/api/preferences';
+import type { PreferencePath } from '$lib/api/generated/preferences-paths.generated';
 import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
 
 export type PrefModelKind = 'chat' | 'stt' | 'tts' | 'embedding' | 'rerank';
@@ -18,6 +19,10 @@ export type PrefModelIdPath =
   | 'graph.eval.answer_model'
   | 'graph.eval.judge_model'
   | 'graph.eval.retrieval_model';
+
+// #6: every model-id path must be a real preference path. This alias fails to compile if the
+// hand-written PrefModelIdPath union ever drifts from the generated PreferencePath set.
+type _AssertModelPathsArePreferencePaths<T extends PreferencePath = PrefModelIdPath> = T;
 
 export const PREF_MODEL_EMPTY_LABELS: Record<
   PrefModelKind,
