@@ -1,6 +1,10 @@
 <script lang="ts">
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import {
+    modalityKeys,
+    modalityLabels
+  } from '$lib/features/preferences/shared/preferences-constants';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
     PREFERENCE_TAB_IDS,
@@ -8,7 +12,9 @@
   } from '$lib/features/preferences/shared/preferences-tabs';
   import ReloadCatalogButton from '$lib/features/preferences/widgets/ReloadCatalogButton.svelte';
   import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
+  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
 
   type Props = {
@@ -45,21 +51,24 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.modelsChat}
     >
-      <PrefModelPicker
-        {ctrl}
-        kind="chat"
-        path="llm.default_chat"
-        embedded
-        label="Default chat model"
-        selectedId={ctrl.draft.llm.default_chat}
-      />
-      <TuningProfileSelect
-        {ctrl}
-        label="Default chat model profile"
-        class="max-w-md"
-        value={ctrl.draft.llm.default_tuning_profile}
-        scope="llm"
-      />
+      <PrefFieldGrid>
+        <div class="grid gap-3">
+          <PrefModelPicker
+            {ctrl}
+            kind="chat"
+            path="llm.default_chat"
+            embedded
+            label="Default chat model"
+            selectedId={ctrl.draft.llm.default_chat}
+          />
+          <TuningProfileSelect
+            {ctrl}
+            label="Default chat model profile"
+            value={ctrl.draft.llm.default_tuning_profile}
+            scope="llm"
+          />
+        </div>
+      </PrefFieldGrid>
     </SectionCardMuted>
 
     <SectionCardMuted
@@ -93,5 +102,46 @@
         selectedId={ctrl.draft.llm.default_tts}
       />
     </SectionCardMuted>
+
+    <!-- Media modalities — merged in from the former standalone Media tab. -->
+    {#if ctrl.sectionDescription('media')}
+      <p class="text-sm text-muted-foreground">{ctrl.sectionDescription('media')}</p>
+    {/if}
+
+    <div class="grid gap-4 lg:grid-cols-2">
+      <SectionCardMuted
+        title="Input modalities"
+        collapsible
+        bodyId={PREFERENCES_SECTION_BODY_IDS.mediaInput}
+      >
+        <PrefFieldGrid>
+          {#each modalityKeys as key (key)}
+            <PrefToggleField
+              {ctrl}
+              path={`media.input.${key}`}
+              label={modalityLabels[key]}
+              bind:checked={ctrl.draft.media.input[key]}
+            />
+          {/each}
+        </PrefFieldGrid>
+      </SectionCardMuted>
+
+      <SectionCardMuted
+        title="Output modalities"
+        collapsible
+        bodyId={PREFERENCES_SECTION_BODY_IDS.mediaOutput}
+      >
+        <PrefFieldGrid>
+          {#each modalityKeys as key (key)}
+            <PrefToggleField
+              {ctrl}
+              path={`media.output.${key}`}
+              label={modalityLabels[key]}
+              bind:checked={ctrl.draft.media.output[key]}
+            />
+          {/each}
+        </PrefFieldGrid>
+      </SectionCardMuted>
+    </div>
   {/if}
 </div>

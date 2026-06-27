@@ -2,6 +2,7 @@
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
@@ -38,7 +39,7 @@
         label="Reranker model"
         selectedId={ctrl.draft.graph.reranker.model_id}
       />
-      <div class="grid gap-3 md:grid-cols-2">
+      <PrefFieldGrid>
         <PrefNumberField
           {ctrl}
           path="graph.reranker.min_relevance"
@@ -52,7 +53,7 @@
           placeholder="auto"
           bind:value={ctrl.draft.graph.reranker.device}
         />
-      </div>
+      </PrefFieldGrid>
     </fieldset>
   </SectionCardMuted>
 {/if}

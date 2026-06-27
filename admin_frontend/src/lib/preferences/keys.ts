@@ -113,8 +113,8 @@ export type GraphPanelSidePreference = 'auto' | 'left' | 'right';
 export type LogsPrimaryTabPreference = 'logs' | 'runs';
 export type PreferencesTabPreference =
   | 'models'
-  | 'media'
   | 'knowledge'
   | 'graph-engine'
+  | 'eval'
   | 'agent'
   | 'tuning-profiles';

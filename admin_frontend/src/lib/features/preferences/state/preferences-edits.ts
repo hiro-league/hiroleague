@@ -12,6 +12,38 @@ export function cloneWorkspacePreferences(prefs: WorkspacePreferences): Workspac
   return JSON.parse(JSON.stringify(prefs)) as WorkspacePreferences;
 }
 
+/** Read a dotted preference path (e.g. "knowledge.answering.prompt") out of a prefs object. */
+export function getPreferenceByPath(
+  prefs: WorkspacePreferences | null | undefined,
+  path: string
+): unknown {
+  let node: unknown = prefs;
+  for (const part of path.split('.')) {
+    if (node == null || typeof node !== 'object') return undefined;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return node;
+}
+
+/**
+ * Write a dotted preference path in-place. Used by per-prompt dialog saves to surgically commit a
+ * single backend-saved path into baseline/draft without clobbering other pending draft edits.
+ */
+export function setPreferenceByPath(
+  prefs: WorkspacePreferences,
+  path: string,
+  value: unknown
+): void {
+  const parts = path.split('.');
+  let node: Record<string, unknown> = prefs as unknown as Record<string, unknown>;
+  for (const part of parts.slice(0, -1)) {
+    const next = node[part];
+    if (next == null || typeof next !== 'object') return;
+    node = next as Record<string, unknown>;
+  }
+  node[parts[parts.length - 1]] = value;
+}
+
 function valuesEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }

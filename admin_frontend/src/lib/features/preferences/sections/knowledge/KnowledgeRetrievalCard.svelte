@@ -6,6 +6,7 @@
     knowledgeRerankTopNActive
   } from '$lib/features/preferences/shared/preferences-helpers';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
   import { cn } from '$lib/utils';
@@ -44,7 +45,7 @@
       Fusion — recovers exact terms, proper nouns, and Arabic surface forms. Sparse model:
       <code>{ctrl.draft.knowledge.retrieval.sparse_model}</code> (local, no extra setup).
     </p>
-    <div class="grid gap-3 md:grid-cols-2">
+    <PrefFieldGrid>
       <PrefNumberField
         {ctrl}
         path="knowledge.retrieval.min_score"
@@ -75,6 +76,6 @@
           bind:value={ctrl.draft.knowledge.retrieval.reranker.top_n}
         />
       </div>
-    </div>
+    </PrefFieldGrid>
   </SectionCardMuted>
 {/if}

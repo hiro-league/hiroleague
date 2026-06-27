@@ -34,7 +34,9 @@ import {
 import {
   cloneWorkspacePreferences,
   editsForSave,
-  preferencesAreDirty
+  getPreferenceByPath,
+  preferencesAreDirty,
+  setPreferenceByPath
 } from '$lib/features/preferences/state/preferences-edits';
 import { PREFERENCES_FIELD_SCHEMA } from '$lib/api/preferences-field-schema';
 import type { PreferencesSchemaMap } from '$lib/features/preferences/shared/preferences-schema';
@@ -250,6 +252,29 @@ export function createPreferencesController(notify: Notify) {
     markDirty();
   }
 
+  // Duplicate any profile (built-in or custom) into a new editable custom profile. The table view
+  // makes "clone the closest preset, then tweak" the happy path for creating a profile.
+  function duplicateProfile(id: string) {
+    if (!draft) return;
+    const source = draft.tuning_profiles[id];
+    if (!source) return;
+    let index = Object.keys(draft.tuning_profiles).length + 1;
+    let newId = `custom_${index}`;
+    while (draft.tuning_profiles[newId]) {
+      index += 1;
+      newId = `custom_${index}`;
+    }
+    draft.tuning_profiles[newId] = {
+      label: `${source.label.trim() || id} (copy)`,
+      locked: false,
+      temperature: source.temperature,
+      max_tokens: source.max_tokens,
+      thinking: source.thinking,
+      num_ctx: source.num_ctx
+    };
+    markDirty();
+  }
+
   function deleteProfile(id: string) {
     if (!draft) return;
     const profile = draft.tuning_profiles[id];
@@ -296,6 +321,63 @@ export function createPreferencesController(notify: Notify) {
       };
     }
     markDirty();
+  }
+
+  // Persist a SINGLE tuning profile to the backend immediately (the inline profile editor's
+  // "Update"), independent of the page-level Save. Editing a shared profile applies to every
+  // model referencing it. We diff just this profile's subtree so only its changed leaves PATCH,
+  // then commit the result into both baseline and draft — leaving any other pending draft edits
+  // untouched (so this never silently saves unrelated changes, and the page stays accurately dirty).
+  async function saveProfileNow(id: string, next: TuningProfile) {
+    if (!draft || !baseline || !draft.tuning_profiles[id]) return;
+    busy = true;
+    try {
+      const probe = cloneWorkspacePreferences(baseline);
+      probe.tuning_profiles[id] = next;
+      const edits = editsForSave(baseline, probe, effectiveFieldSchema);
+      if (Object.keys(edits).length === 0) return;
+      const payload = await patchPreferences(edits);
+      const saved = payload.data.preferences.tuning_profiles[id] ?? next;
+      baseline.tuning_profiles[id] = JSON.parse(JSON.stringify(saved)) as TuningProfile;
+      draft.tuning_profiles[id] = JSON.parse(JSON.stringify(saved)) as TuningProfile;
+      notify('success', 'Tuning profile saved.');
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Save failed.');
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Persist one or more prompt paths to the backend IMMEDIATELY from a prompt-editor dialog,
+  // independent of the page-level Save. The prompt cards no longer bind ctrl.draft directly (the
+  // dialog edits a local working copy), so these paths normally sit equal in baseline and draft;
+  // here we PATCH just the given edits and commit the server-effective values back into BOTH
+  // baseline and draft for exactly those paths — leaving any other pending draft edits untouched
+  // (so the page stays accurately dirty and never silently saves unrelated changes). Returns true
+  // on success. `edits` is a dotted-path → value map (single prompt string, or whole writeWhole
+  // dict for a prompt library), matching the page-save payload shape.
+  async function saveDialogEdits(edits: Record<string, unknown>): Promise<boolean> {
+    if (!draft || !baseline || Object.keys(edits).length === 0) return false;
+    busy = true;
+    try {
+      const payload = await patchPreferences(edits);
+      const saved = payload.data.preferences;
+      for (const path of Object.keys(edits)) {
+        const value = getPreferenceByPath(saved, path);
+        // Clone so baseline and draft never share a mutable reference for the committed path.
+        setPreferenceByPath(baseline, path, JSON.parse(JSON.stringify(value ?? null)));
+        setPreferenceByPath(draft, path, JSON.parse(JSON.stringify(value ?? null)));
+      }
+      promptDefaults = payload.data.prompt_defaults ?? promptDefaults;
+      sections = payload.data.sections ?? sections;
+      notify('success', 'Prompt saved.');
+      return true;
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Save failed.');
+      return false;
+    } finally {
+      busy = false;
+    }
   }
 
   async function loadAll() {
@@ -480,8 +562,11 @@ export function createPreferencesController(notify: Notify) {
     setDefaultTuningProfile,
     updateProfile,
     createProfile,
+    duplicateProfile,
     deleteProfile,
     resetLockedProfile,
+    saveProfileNow,
+    saveDialogEdits,
     loadAll,
     reloadCatalog,
     savePreferences,

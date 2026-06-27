@@ -3,6 +3,7 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { GRAPH_BACKEND_LABELS } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
 
   type Props = {
@@ -19,14 +20,15 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeGraphBackend}
   >
-    <PrefSelectField
-      {ctrl}
-      path="graph.backend"
-      label="Graph backend"
-      options={GRAPH_BACKEND_LABELS}
-      class="max-w-md"
-      bind:value={ctrl.draft.graph.backend}
-    />
+    <PrefFieldGrid>
+      <PrefSelectField
+        {ctrl}
+        path="graph.backend"
+        label="Graph backend"
+        options={GRAPH_BACKEND_LABELS}
+        bind:value={ctrl.draft.graph.backend}
+      />
+    </PrefFieldGrid>
     <p class="text-xs text-muted-foreground">
       The graph engine itself — extraction/small models, embedder, search recipe, and reranker —
       is shared with Agent Memory and configured in the <span class="font-medium">Graph Engine</span>

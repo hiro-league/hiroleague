@@ -1,9 +1,9 @@
 /** Page-level preference tabs (`?tab=` on `/preferences`). */
 export type PreferenceTabId =
   | 'models'
-  | 'media'
   | 'knowledge'
   | 'graph-engine'
+  | 'eval'
   | 'agent'
   | 'tuning-profiles';
 
@@ -13,39 +13,41 @@ export const PREFERENCE_TABLIST_LABEL = 'Preference sections';
 
 export const PREFERENCE_TAB_IDS: Record<PreferenceTabId, string> = {
   models: 'preferences-tab-models',
-  media: 'preferences-tab-media',
   knowledge: 'preferences-tab-knowledge',
   'graph-engine': 'preferences-tab-graph-engine',
+  eval: 'preferences-tab-eval',
   agent: 'preferences-tab-agent',
   'tuning-profiles': 'preferences-tab-tuning-profiles'
 };
 
 export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
   models: 'preferences-panel-models',
-  media: 'preferences-panel-media',
   knowledge: 'preferences-panel-knowledge',
   'graph-engine': 'preferences-panel-graph-engine',
+  eval: 'preferences-panel-eval',
   agent: 'preferences-panel-agent',
   'tuning-profiles': 'preferences-panel-tuning-profiles'
 };
 
 export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
-  { id: 'models', label: 'Models' },
+  { id: 'models', label: 'General' },
   { id: 'agent', label: 'Agent' },
-  { id: 'knowledge', label: 'Knowledge' },
   { id: 'graph-engine', label: 'Graph Engine' },
-  { id: 'tuning-profiles', label: 'Model Profiles' },
-  { id: 'media', label: 'Media' }
+  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'eval', label: 'Eval' },
+  { id: 'tuning-profiles', label: 'Model Profiles' }
 ];
 
 /** Legacy `#preferences-*` scroll anchors from the pre-tab layout. */
 export const LEGACY_PREFERENCE_HASH_TO_TAB: Record<string, PreferenceTabId> = {
   'preferences-models': 'models',
-  'preferences-media': 'media',
+  // Media settings were merged into the General (models) tab; keep the legacy anchor working.
+  'preferences-media': 'models',
   // Agent Memory tab was merged into the Agent tab; keep the legacy anchor working.
   'preferences-memory': 'agent',
   'preferences-knowledge': 'knowledge',
   'preferences-graph-engine': 'graph-engine',
+  'preferences-eval': 'eval',
   'preferences-agent': 'agent',
   'preferences-tuning-profiles': 'tuning-profiles'
 };

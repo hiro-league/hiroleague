@@ -8,6 +8,7 @@
     preferenceHint
   } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
 
@@ -25,21 +26,22 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphExtraction}
   >
-    <FormField
-      label="Extraction ontology"
-      hint={preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, 'graph.entity_ontology'))}
-      hintTooltip
-      class="max-w-md"
-    >
-      <select
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.graph.entity_ontology}
-        onchange={ctrl.markDirty}
+    <PrefFieldGrid>
+      <FormField
+        label="Extraction ontology"
+        hint={preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, 'graph.entity_ontology'))}
+        hintTooltip
       >
-        <option value="open">Open (no predefined types)</option>
-        <option value="typed">Typed (Person / Place / Organization / Event / Object)</option>
-      </select>
-    </FormField>
+        <select
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.entity_ontology}
+          onchange={ctrl.markDirty}
+        >
+          <option value="open">Open (no predefined types)</option>
+          <option value="typed">Typed (Person / Place / Organization / Event / Object)</option>
+        </select>
+      </FormField>
+    </PrefFieldGrid>
 
     <FormField
       label="Extraction instructions"
@@ -58,48 +60,52 @@
       ></textarea>
     </FormField>
 
-    <PrefModelPicker
-      {ctrl}
-      kind="chat"
-      path="graph.extraction_model"
-      labelled
-      embedded
-      label="Extraction model"
-      selectedId={ctrl.draft.graph.extraction_model}
-    />
-    <TuningProfileSelect
-      {ctrl}
-      label="Extraction profile"
-      path="graph.extraction_tuning_profile"
-      class="max-w-md"
-      bind:value={ctrl.draft.graph.extraction_tuning_profile}
-    />
+    <PrefFieldGrid>
+      <div class="grid gap-3">
+        <PrefModelPicker
+          {ctrl}
+          kind="chat"
+          path="graph.extraction_model"
+          labelled
+          embedded
+          label="Extraction model"
+          selectedId={ctrl.draft.graph.extraction_model}
+        />
+        <TuningProfileSelect
+          {ctrl}
+          label="Extraction profile"
+          path="graph.extraction_tuning_profile"
+          bind:value={ctrl.draft.graph.extraction_tuning_profile}
+        />
+      </div>
 
-    <PrefModelPicker
-      {ctrl}
-      kind="chat"
-      path="graph.small_model"
-      labelled
-      embedded
-      label="Smaller extraction model"
-      selectedId={ctrl.draft.graph.small_model}
-    />
-    <TuningProfileSelect
-      {ctrl}
-      label="Smaller extraction profile"
-      path="graph.small_tuning_profile"
-      class="max-w-md"
-      bind:value={ctrl.draft.graph.small_tuning_profile}
-    />
+      <div class="grid gap-3">
+        <PrefModelPicker
+          {ctrl}
+          kind="chat"
+          path="graph.small_model"
+          labelled
+          embedded
+          label="Smaller extraction model"
+          selectedId={ctrl.draft.graph.small_model}
+        />
+        <TuningProfileSelect
+          {ctrl}
+          label="Smaller extraction profile"
+          path="graph.small_tuning_profile"
+          bind:value={ctrl.draft.graph.small_tuning_profile}
+        />
+      </div>
 
-    <PrefModelPicker
-      {ctrl}
-      kind="embedding"
-      path="graph.embedder_model"
-      labelled
-      embedded
-      label="Embedder model"
-      selectedId={ctrl.draft.graph.embedder_model}
-    />
+      <PrefModelPicker
+        {ctrl}
+        kind="embedding"
+        path="graph.embedder_model"
+        labelled
+        embedded
+        label="Embedder model"
+        selectedId={ctrl.draft.graph.embedder_model}
+      />
+    </PrefFieldGrid>
   </SectionCardMuted>
 {/if}

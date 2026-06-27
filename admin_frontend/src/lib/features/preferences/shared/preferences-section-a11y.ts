@@ -15,18 +15,20 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   knowledgeAnsweringModel: 'preferences-section-knowledge-answering-model',
   knowledgeRewrite: 'preferences-section-knowledge-rewrite',
   knowledgeGraphBackend: 'preferences-section-knowledge-graph-backend',
-  // Graph-engine tab: each model/profile and each eval prompt now lives in its own collapsible
-  // section (so they need their own stable body ids).
+  // Graph-engine tab: each model/profile and the retrieval-agent prompt live in their own
+  // collapsible section (so they need their own stable body ids). `graphEvalModels` now holds the
+  // retrieval-agent model/profile (eval answer/judge models moved to the Eval tab).
   graphExtraction: 'preferences-section-graph-extraction',
   graphEvalModels: 'preferences-section-graph-eval-models',
   graphEngine: 'preferences-section-graph-engine',
   graphEngineReranker: 'preferences-section-graph-engine-reranker',
   graphView: 'preferences-section-graph-view',
-  graphEvalMemAnswerPrompt: 'preferences-section-graph-eval-mem-answer-prompt',
   graphRetrievalAgent: 'preferences-section-graph-retrieval-agent',
   graphEvalRetrievalAgentPrompt: 'preferences-section-graph-eval-retrieval-agent-prompt',
-  graphEvalJudgePrompt: 'preferences-section-graph-eval-judge-prompt',
-  graphEvalKnowledgePrompt: 'preferences-section-graph-eval-knowledge-prompt'
+  // Eval tab: answer/judge models + the mem-eval answer/judge prompts.
+  evalModels: 'preferences-section-eval-models',
+  evalMemAnswerPrompt: 'preferences-section-eval-mem-answer-prompt',
+  evalJudgePrompt: 'preferences-section-eval-judge-prompt'
 } as const;
 
 export function tuningProfileSectionBodyId(profileId: string): string {

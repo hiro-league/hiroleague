@@ -9,6 +9,7 @@
     GRAPH_TEMPORAL_DEFAULT_LABELS
   } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
@@ -72,7 +73,7 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphEngine}
   >
-    <div class="grid gap-3 md:grid-cols-2">
+    <PrefFieldGrid>
       <PrefSelectField
         {ctrl}
         path="graph.temporal_default"
@@ -86,8 +87,6 @@
         label="Expansion hops (k)"
         bind:value={ctrl.draft.graph.k_hop}
       />
-    </div>
-    <div class="grid gap-4 md:grid-cols-2">
       <PrefSelectField
         {ctrl}
         path="graph.search_recipe"
@@ -102,8 +101,6 @@
         options={searchScopeOptions}
         bind:value={ctrl.draft.graph.search_scope}
       />
-    </div>
-    <div class="grid gap-4 md:grid-cols-2">
       <PrefNumberField
         {ctrl}
         path="graph.sim_min_score"
@@ -116,15 +113,14 @@
         label="Query timeout (seconds)"
         bind:value={ctrl.draft.graph.query_timeout_s}
       />
-    </div>
-    <PrefSelectField
-      {ctrl}
-      path="graph.observability"
-      label="Graph observability"
-      options={GRAPH_OBSERVABILITY_LABELS}
-      class="max-w-md"
-      bind:value={ctrl.draft.graph.observability}
-    />
+      <PrefSelectField
+        {ctrl}
+        path="graph.observability"
+        label="Graph observability"
+        options={GRAPH_OBSERVABILITY_LABELS}
+        bind:value={ctrl.draft.graph.observability}
+      />
+    </PrefFieldGrid>
 
     <fieldset class="grid gap-2 border-0 p-0">
       <legend class="font-sans text-sm font-medium">Eval recalled-context format</legend>
@@ -134,39 +130,29 @@
         <code>Maya lives in Berlin [LIVES_IN · event_time: 2022-01-01]</code>. Eval-only; applied
         identically to the answer, judge, and evidence-check renders.
       </p>
-      <PrefToggleField
-        {ctrl}
-        path="graph.eval.show_event_time"
-        label="Show event_time (valid date)"
-        bind:checked={ctrl.draft.graph.eval.show_event_time}
-      >
-        {#snippet details()}
-          Adds <code>event_time: &lt;valid_at&gt;</code> to each fact. Also governs the
-          <span class="font-medium">[date]</span> prefix on recalled messages (episodes).
-        {/snippet}
-      </PrefToggleField>
-      <PrefToggleField
-        {ctrl}
-        path="graph.eval.show_expired_at"
-        label="Show expired_at (invalid date)"
-        bind:checked={ctrl.draft.graph.eval.show_expired_at}
-      >
-        {#snippet details()}
-          Adds <code>expired_at: &lt;invalid_at&gt;</code> when a fact has been invalidated —
-          the upper bound of its validity window.
-        {/snippet}
-      </PrefToggleField>
-      <PrefToggleField
-        {ctrl}
-        path="graph.eval.show_superseded"
-        label="Show SUPERSEDED flag"
-        bind:checked={ctrl.draft.graph.eval.show_superseded}
-      >
-        {#snippet details()}
-          Tags facts that a newer fact has replaced. Only visible when the retrieval temporal
-          lens is set to include historical facts.
-        {/snippet}
-      </PrefToggleField>
+      <PrefFieldGrid>
+        <PrefToggleField
+          {ctrl}
+          path="graph.eval.show_event_time"
+          label="Show event_time (valid date)"
+          hint="Adds 'event_time: <valid_at>' to each fact. Also governs the [date] prefix on recalled messages (episodes)."
+          bind:checked={ctrl.draft.graph.eval.show_event_time}
+        />
+        <PrefToggleField
+          {ctrl}
+          path="graph.eval.show_expired_at"
+          label="Show expired_at (invalid date)"
+          hint="Adds 'expired_at: <invalid_at>' when a fact has been invalidated — the upper bound of its validity window."
+          bind:checked={ctrl.draft.graph.eval.show_expired_at}
+        />
+        <PrefToggleField
+          {ctrl}
+          path="graph.eval.show_superseded"
+          label="Show SUPERSEDED flag"
+          hint="Tags facts that a newer fact has replaced. Only visible when the retrieval temporal lens is set to include historical facts."
+          bind:checked={ctrl.draft.graph.eval.show_superseded}
+        />
+      </PrefFieldGrid>
     </fieldset>
   </SectionCardMuted>
 {/if}

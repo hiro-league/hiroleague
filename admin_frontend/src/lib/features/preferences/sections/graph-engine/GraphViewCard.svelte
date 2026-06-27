@@ -2,6 +2,7 @@
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
 
   type Props = {
@@ -18,12 +19,13 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphView}
   >
-    <PrefNumberField
-      {ctrl}
-      path="graph.view.large_type_threshold"
-      label="Large node-type warning threshold"
-      class="max-w-md"
-      bind:value={ctrl.draft.graph.view.large_type_threshold}
-    />
+    <PrefFieldGrid>
+      <PrefNumberField
+        {ctrl}
+        path="graph.view.large_type_threshold"
+        label="Large node-type warning threshold"
+        bind:value={ctrl.draft.graph.view.large_type_threshold}
+      />
+    </PrefFieldGrid>
   </SectionCardMuted>
 {/if}

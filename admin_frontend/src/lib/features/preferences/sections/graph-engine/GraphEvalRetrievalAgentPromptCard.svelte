@@ -8,7 +8,8 @@
   } from '$lib/features/preferences/shared/preferences-schema';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
-  import EvalRetrievalAgentPromptLibrary from '$lib/features/preferences/widgets/EvalRetrievalAgentPromptLibrary.svelte';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
+  import PromptLibraryField from '$lib/features/preferences/widgets/prompts/PromptLibraryField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -25,38 +26,39 @@
 
 {#if ctrl.draft}
   <SectionCardMuted
-    title="Mem Eval Retrieval Agent Prompt"
-    description="System prompt library for the agentic memory-retrieval loop. Eval-only; blank custom text falls back to the built-in default at runtime."
+    title="Retrieval Agent Prompt"
+    description="System prompt library for the agentic memory-retrieval loop. Blank custom text falls back to the built-in default at runtime."
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphEvalRetrievalAgentPrompt}
   >
-    <FormField
-      label="Active prompt profile"
-      class="max-w-md"
-      hint={preferenceHint(
-        preferenceFieldMeta(ctrl.fieldSchema, 'graph.eval.active_retrieval_agent_prompt_id')
-      )}
-      hintTooltip
-    >
-      <select
-        class={ADMIN_SELECT_LG}
-        bind:value={ctrl.draft.graph.eval.active_retrieval_agent_prompt_id}
-        onchange={ctrl.markDirty}
+    <PrefFieldGrid>
+      <FormField
+        label="Active prompt profile"
+        hint={preferenceHint(
+          preferenceFieldMeta(ctrl.fieldSchema, 'graph.eval.active_retrieval_agent_prompt_id')
+        )}
+        hintTooltip
       >
-        {#each activePromptEntries as [id, profile] (id)}
-          <option value={id}>{profile.label}{profile.locked ? ' 🔒' : ''}</option>
-        {/each}
-      </select>
-    </FormField>
+        <select
+          class={ADMIN_SELECT_LG}
+          bind:value={ctrl.draft.graph.eval.active_retrieval_agent_prompt_id}
+          onchange={ctrl.markDirty}
+        >
+          {#each activePromptEntries as [id, profile] (id)}
+            <option value={id}>{profile.label}{profile.locked ? ' 🔒' : ''}</option>
+          {/each}
+        </select>
+      </FormField>
+    </PrefFieldGrid>
 
-    <EvalRetrievalAgentPromptLibrary {ctrl} />
-
-    <p class="text-xs text-muted-foreground">
-      Drives the memory eval's <span class="font-medium">recall</span> leg. Placeholders
-      <span class="font-medium">{`{MAX_AGENT_TURNS}`}</span>,
-      <span class="font-medium">{`{MAX_PARALLEL_SEARCHES}`}</span>, and
-      <span class="font-medium">{`{MAX_LIMIT}`}</span> are filled from the
-      <span class="font-medium">Retrieval Agent</span> caps card at runtime.
-    </p>
+    <PromptLibraryField
+      {ctrl}
+      dictPath="graph.eval.retrieval_agent_prompts"
+      label="Retrieval Agent Prompt"
+      hint={"Drives the memory eval's recall leg. Placeholders {MAX_AGENT_TURNS}, {MAX_PARALLEL_SEARCHES}, and {MAX_LIMIT} are filled from the Retrieval Agent caps card at runtime."}
+      ariaLabel="Mem-eval retrieval agent prompt (markdown)"
+      editorLabel="Retrieval agent prompt editor"
+      activeIdPath="graph.eval.active_retrieval_agent_prompt_id"
+    />
   </SectionCardMuted>
 {/if}

@@ -9,7 +9,8 @@
     ariaLabel,
     value = $bindable(''),
     defaultValue,
-    onInput
+    onInput,
+    minHeightClass = 'min-h-[18rem]'
   }: {
     editorLabel: string;
     previewLabel: string;
@@ -23,6 +24,8 @@
     defaultValue?: string;
     /** Called after each keystroke so parents can mark the form dirty. */
     onInput?: () => void;
+    /** Min-height utility for the editor + preview panes (taller inside the prompt dialog). */
+    minHeightClass?: string;
   } = $props();
 
   const isAtDefault = $derived(defaultValue !== undefined && value === defaultValue);
@@ -58,7 +61,8 @@
   <div class="grid gap-4 lg:grid-cols-2 lg:items-start">
     <textarea
       class={cn(
-        'w-full min-h-[18rem] resize-y rounded-lg border-2 border-input',
+        'w-full resize-y rounded-lg border-2 border-input',
+        minHeightClass,
         'bg-[color-mix(in_oklab,var(--muted)_45%,var(--background))] px-4 py-3 font-mono text-sm leading-relaxed',
         'text-foreground shadow-[inset_0_1px_2px_rgb(0_0_0_/_0.06)] outline-none transition-[border-color,box-shadow]',
         'hover:border-[color-mix(in_oklab,var(--primary)_35%,var(--input))]',
@@ -69,7 +73,12 @@
       bind:value
       oninput={() => onInput?.()}
     ></textarea>
-    <div class="rounded-lg border-2 border-primary/20 bg-card p-4 text-sm shadow-sm">
+    <div
+      class={cn(
+        'overflow-auto rounded-lg border-2 border-primary/20 bg-card p-4 text-sm shadow-sm',
+        minHeightClass
+      )}
+    >
       <MarkdownPreview markdown={value} compact />
     </div>
   </div>

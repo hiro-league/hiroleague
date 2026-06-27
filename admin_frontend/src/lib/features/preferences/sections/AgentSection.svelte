@@ -1,5 +1,5 @@
 <script lang="ts">
-  import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
+  import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
@@ -7,6 +7,7 @@
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
@@ -35,45 +36,45 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.agentChatSettings}
     >
-      <PrefTextField
-        {ctrl}
-        path="memory.user_name"
-        label="Your name"
-        class="max-w-sm"
-        maxlength={120}
-        placeholder="e.g. Misho"
-        disabled={ctrl.busy}
-        bind:value={ctrl.draft.memory.user_name}
-      />
+      <PrefFieldGrid>
+        <PrefTextField
+          {ctrl}
+          path="memory.user_name"
+          label="Your name"
+          maxlength={120}
+          placeholder="e.g. Misho"
+          disabled={ctrl.busy}
+          bind:value={ctrl.draft.memory.user_name}
+        />
+        <PrefNumberField
+          {ctrl}
+          path="chat.max_messages"
+          label="Max retained messages"
+          bind:value={ctrl.draft.chat.max_messages}
+        />
+      </PrefFieldGrid>
       <span class="text-xs text-muted-foreground">
         Anchors your remembered facts to a named person in the memory graph (instead of a generic
         “User”). <strong>Set this once, early.</strong> Changing it later won’t rename existing
         memories — it starts a separate identity and fragments recall. Leave blank to use “User”.
       </span>
 
-      <PrefNumberField
-        {ctrl}
-        path="chat.max_messages"
-        label="Max retained messages"
-        class="max-w-sm"
-        bind:value={ctrl.draft.chat.max_messages}
-      />
-
-      <PrefToggleField
-        {ctrl}
-        path="chat.cite_sources"
-        label="Cite knowledge sources in chat replies"
-        disabled={ctrl.busy}
-        bind:checked={ctrl.draft.chat.cite_sources}
-      />
-
-      <PrefToggleField
-        {ctrl}
-        path="chat.tools_enabled"
-        label="Enable agent tools in chat"
-        disabled={ctrl.busy}
-        bind:checked={ctrl.draft.chat.tools_enabled}
-      />
+      <PrefFieldGrid>
+        <PrefToggleField
+          {ctrl}
+          path="chat.cite_sources"
+          label="Cite knowledge sources in chat replies"
+          disabled={ctrl.busy}
+          bind:checked={ctrl.draft.chat.cite_sources}
+        />
+        <PrefToggleField
+          {ctrl}
+          path="chat.tools_enabled"
+          label="Enable agent tools in chat"
+          disabled={ctrl.busy}
+          bind:checked={ctrl.draft.chat.tools_enabled}
+        />
+      </PrefFieldGrid>
     </SectionCardMuted>
 
     <!-- Consolidated here from the removed "Agent Memory" tab — these toggles bound to the same
@@ -93,32 +94,31 @@
         bind:checked={ctrl.draft.memory.enabled}
       />
 
-      <PrefToggleField
-        {ctrl}
-        path="memory.extraction.enabled"
-        label="Remember new facts after each reply"
-        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-        class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
-        bind:checked={ctrl.draft.memory.extraction.enabled}
-      />
-
-      <PrefToggleField
-        {ctrl}
-        path="memory.search.enabled"
-        label="Recall memories before each reply"
-        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-        class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
-        bind:checked={ctrl.draft.memory.search.enabled}
-      />
-
-      <PrefNumberField
-        {ctrl}
-        path="memory.search.top_k"
-        label="Memories to recall (top K)"
-        class="max-w-xs"
-        disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-        bind:value={ctrl.draft.memory.search.top_k}
-      />
+      <PrefFieldGrid>
+        <PrefToggleField
+          {ctrl}
+          path="memory.extraction.enabled"
+          label="Remember new facts after each reply"
+          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+          class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
+          bind:checked={ctrl.draft.memory.extraction.enabled}
+        />
+        <PrefToggleField
+          {ctrl}
+          path="memory.search.enabled"
+          label="Recall memories before each reply"
+          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+          class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
+          bind:checked={ctrl.draft.memory.search.enabled}
+        />
+        <PrefNumberField
+          {ctrl}
+          path="memory.search.top_k"
+          label="Memories to recall (top K)"
+          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
+          bind:value={ctrl.draft.memory.search.top_k}
+        />
+      </PrefFieldGrid>
     </SectionCardMuted>
 
     <SectionCardMuted
@@ -127,12 +127,12 @@
       collapsible
       bodyId={PREFERENCES_SECTION_BODY_IDS.agentChatInstructions}
     >
-      <MarkdownEditorPreview
-        editorLabel="Instructions markdown editor"
-        previewLabel="Preview"
+      <PromptField
+        {ctrl}
+        path="chat.instructions"
+        label="Chat instructions"
         ariaLabel="Chat answering instructions (markdown)"
-        bind:value={ctrl.draft.chat.instructions}
-        onInput={ctrl.markDirty}
+        editorLabel="Instructions markdown editor"
       />
     </SectionCardMuted>
   {/if}

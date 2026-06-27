@@ -8,9 +8,9 @@ import { createTabPreferences } from './create-tab-preferences.svelte';
 
 const ALLOWED: readonly PreferencesTabPreference[] = [
   'models',
-  'media',
   'knowledge',
   'graph-engine',
+  'eval',
   'agent',
   'tuning-profiles'
 ] as const;

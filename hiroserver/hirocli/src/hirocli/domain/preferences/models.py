@@ -644,6 +644,8 @@ PROMPT_DEFAULTS: dict[str, str] = {
     "knowledge.rewrite.prompt": DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
     "graph.eval.judge_prompt": DEFAULT_MEMORY_EVAL_JUDGE_PROMPT,
 }
+# ``chat.instructions`` is registered with PROMPT_DEFAULTS after its default constant is defined
+# below (DEFAULT_CHAT_INSTRUCTIONS) — see the registration just under that definition.
 
 
 class AnswerPromptProfile(BaseModel):
@@ -1135,6 +1137,11 @@ class KnowledgePreferences(BaseModel):
 # Authored as Markdown in the Admin → Preferences → Agent editor; sent to the model as text.
 # Not knowledge-specific — these are how the character should answer, regardless of retrieval.
 DEFAULT_CHAT_INSTRUCTIONS = load_prompt("chat_instructions")
+
+# Registered here (not in the PROMPT_DEFAULTS literal above) because the constant is defined only
+# now. Exposes the built-in chat instructions to the admin prompt-editor "Restore default" button
+# and lets a value equal to the default prune from preferences.json like the other prompt defaults.
+PROMPT_DEFAULTS["chat.instructions"] = DEFAULT_CHAT_INSTRUCTIONS
 
 
 class ChatPreferences(BaseModel):

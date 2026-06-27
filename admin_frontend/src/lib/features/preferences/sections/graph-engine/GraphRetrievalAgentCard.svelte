@@ -7,6 +7,7 @@
     defaultRetrievalAgentLimits,
     validateRetrievalAgentLimits
   } from '$lib/features/preferences/sections/graph-engine/retrieval-agent-limits';
+  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
 
   type Props = {
@@ -42,7 +43,7 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphRetrievalAgent}
   >
-    <div class="grid gap-3 md:grid-cols-3">
+    <PrefFieldGrid>
       <PrefNumberField
         {ctrl}
         path="graph.eval.retrieval_agent.max_agent_turns"
@@ -61,8 +62,6 @@
         label="Hops max"
         bind:value={limits.hops_max}
       />
-    </div>
-    <div class="grid gap-3 md:grid-cols-3">
       <PrefNumberField
         {ctrl}
         path="graph.eval.retrieval_agent.limit_default"
@@ -81,14 +80,14 @@
         label="Limit max"
         bind:value={limits.limit_max}
       />
-    </div>
+    </PrefFieldGrid>
 
     {#if evalPrefs}
       <p class="text-xs font-medium text-muted-foreground">
         Answer context — caps the recalled set handed to the answerer + judge (score-ranked top-N
         per kind, each element sanitized to one capped line).
       </p>
-      <div class="grid gap-3 md:grid-cols-2">
+      <PrefFieldGrid>
         <PrefNumberField
           {ctrl}
           path="graph.eval.max_elements_per_kind"
@@ -113,7 +112,7 @@
           label="Max entity summary chars"
           bind:value={evalPrefs.max_summary_chars}
         />
-      </div>
+      </PrefFieldGrid>
     {/if}
 
     {#if validationError}

@@ -1,11 +1,8 @@
 <script lang="ts">
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import GraphEvalJudgePromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalJudgePromptCard.svelte';
-  import GraphEvalKnowledgePromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalKnowledgePromptCard.svelte';
-  import GraphEvalMemAnswerPromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalMemAnswerPromptCard.svelte';
   import GraphEvalRetrievalAgentPromptCard from '$lib/features/preferences/sections/graph-engine/GraphEvalRetrievalAgentPromptCard.svelte';
   import GraphRetrievalAgentCard from '$lib/features/preferences/sections/graph-engine/GraphRetrievalAgentCard.svelte';
-  import GraphEvalModelsCard from '$lib/features/preferences/sections/graph-engine/GraphEvalModelsCard.svelte';
+  import GraphRetrievalAgentModelCard from '$lib/features/preferences/sections/graph-engine/GraphRetrievalAgentModelCard.svelte';
   import GraphExtractionCard from '$lib/features/preferences/sections/graph-engine/GraphExtractionCard.svelte';
   import GraphRerankerCard from '$lib/features/preferences/sections/graph-engine/GraphRerankerCard.svelte';
   import GraphSearchIndexingCard from '$lib/features/preferences/sections/graph-engine/GraphSearchIndexingCard.svelte';
@@ -41,14 +38,11 @@
 
   {#if ctrl.draft}
     <GraphExtractionCard {ctrl} />
-    <GraphEvalModelsCard {ctrl} />
     <GraphSearchIndexingCard {ctrl} />
     <GraphRerankerCard {ctrl} />
-    <GraphEvalMemAnswerPromptCard {ctrl} />
     <GraphRetrievalAgentCard {ctrl} />
+    <GraphRetrievalAgentModelCard {ctrl} />
     <GraphEvalRetrievalAgentPromptCard {ctrl} />
-    <GraphEvalJudgePromptCard {ctrl} />
-    <GraphEvalKnowledgePromptCard {ctrl} />
     <GraphViewCard {ctrl} />
   {/if}
 </div>
