@@ -3,7 +3,7 @@
   import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import { onMount, setContext } from 'svelte';
-  import { ChevronsDownUp, ChevronsUpDown, RotateCcw, Save } from '@lucide/svelte';
+  import { ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, RotateCcw, Save } from '@lucide/svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
@@ -26,6 +26,10 @@
     PREFERENCE_TABS,
     type PreferenceTabId
   } from '$lib/features/preferences/shared/preferences-tabs';
+  import {
+    createAdvancedVisibility,
+    provideAdvancedVisibility
+  } from '$lib/features/preferences/shared/preferences-advanced.svelte';
   import { createPreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { createPreferencesTabPreferences } from '$lib/preferences/preferences-tab-preferences.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
@@ -36,6 +40,9 @@
 
   const toasts = createToastNotifier();
   const ctrl = createPreferencesController(toasts.notify);
+  // Global "show advanced" toggle, shared with every field gate via context (session-persisted).
+  const advancedVis = createAdvancedVisibility();
+  provideAdvancedVisibility(advancedVis);
   const tabPrefs = createPreferencesTabPreferences();
   const sectionRegistry = createCollapsibleSectionRegistry();
   setContext(COLLAPSIBLE_SECTION_REGISTRY, sectionRegistry);
@@ -116,6 +123,24 @@
               </Button>
             {/if}
             {#if ctrl.draft && !ctrl.loading}
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-muted-foreground hover:text-foreground"
+                type="button"
+                aria-pressed={advancedVis.showAdvanced}
+                aria-label={advancedVis.showAdvanced
+                  ? 'Hide advanced settings'
+                  : 'Show advanced settings'}
+                title={advancedVis.showAdvanced ? 'Hide advanced settings' : 'Show advanced settings'}
+                onclick={() => advancedVis.toggle()}
+              >
+                {#if advancedVis.showAdvanced}
+                  <Eye size={17} strokeWidth={2} aria-hidden="true" />
+                {:else}
+                  <EyeOff size={17} strokeWidth={2} aria-hidden="true" />
+                {/if}
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"

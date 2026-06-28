@@ -7,9 +7,11 @@
     type PrefModelIdPath,
     type PrefModelKind
   } from '$lib/features/preferences/shared/preferences-model-picker';
+  import { usePrefFieldVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
   import {
     preferenceFieldMeta,
-    preferenceHint
+    preferenceHint,
+    preferenceIsAdvanced
   } from '$lib/features/preferences/shared/preferences-schema';
 
   type Props = {
@@ -23,6 +25,8 @@
     busy?: boolean;
     embedded?: boolean;
     labelled?: boolean;
+    /** Inherited default model id shown in the empty box for override pickers (e.g. rerankers). */
+    emptyFallbackId?: string | null;
   };
 
   let {
@@ -34,15 +38,19 @@
     selectedId = null,
     busy,
     embedded = false,
-    labelled = false
+    labelled = false,
+    emptyFallbackId = null
   }: Props = $props();
 
   const catalog = $derived(prefModelCatalog(ctrl, kind));
   const empty = $derived(PREF_MODEL_EMPTY_LABELS[kind]);
   const pickerBusy = $derived(busy ?? ctrl.busy);
-  const hint = $derived(hintOverride ?? preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, path)) ?? '');
+  const meta = $derived(preferenceFieldMeta(ctrl.fieldSchema, path));
+  const hint = $derived(hintOverride ?? preferenceHint(meta) ?? '');
+  const vis = usePrefFieldVisibility(() => preferenceIsAdvanced(meta));
 </script>
 
+{#if vis.visible}
 <SingleModelPicker
   {embedded}
   {labelled}
@@ -56,5 +64,7 @@
   busy={pickerBusy}
   emptyProviders={empty.emptyProviders}
   emptyModelsForProvider={empty.emptyModelsForProvider}
+  {emptyFallbackId}
   onSelect={(id) => ctrl.setModelId(path, id)}
 />
+{/if}

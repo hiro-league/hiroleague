@@ -1,6 +1,6 @@
 <script lang="ts">
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
@@ -13,7 +13,7 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Query Rewrite (Ask Tab/Chat Agent)"
     description="Optional LLM step that rewrites a question before retrieval — normalizes wording and extracts literal keywords. Reuses the answering model; toggled per query on the Ask tab."
     collapsible
@@ -33,5 +33,5 @@
       ariaLabel="Knowledge query rewrite prompt (markdown)"
       editorLabel="Rewrite prompt editor"
     />
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

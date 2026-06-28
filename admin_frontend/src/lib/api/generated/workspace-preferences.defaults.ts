@@ -8,6 +8,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "default_chat": null,
     "default_stt": null,
     "default_tts": null,
+    "default_reranker": null,
+    "default_embedder": null,
     "default_image_gen": null,
     "default_tuning_profile": "balanced_chat",
     "default_image_profile": "image_playground"

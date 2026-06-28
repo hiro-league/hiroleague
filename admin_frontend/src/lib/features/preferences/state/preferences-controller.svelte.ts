@@ -21,9 +21,13 @@ import {
 } from '$lib/api/preferences';
 import { getPreferencesSchema } from '$lib/api/preferences-schema';
 import {
+  cancelKnowledgeEmbedder,
   cancelKnowledgeReranker,
+  downloadKnowledgeEmbedder,
   downloadKnowledgeReranker,
+  listKnowledgeEmbedders,
   listKnowledgeRerankers,
+  type LocalEmbedderRow,
   type LocalRerankerRow
 } from '$lib/api/knowledge';
 import type { ThinkingValue } from '$lib/features/preferences/shared/preferences-constants';
@@ -67,7 +71,13 @@ export function createPreferencesController(notify: Notify) {
   let chatOptions = $state<CatalogModelRow[]>([]);
   let sttOptions = $state<CatalogModelRow[]>([]);
   let ttsOptions = $state<CatalogModelRow[]>([]);
-  let embeddingOptions = $state<CatalogModelRow[]>([]);
+  // Embedding: cloud models from the catalog; local FastEmbed models from the local-models source
+  // (provider "local"). embeddingPickerOptions merges both for SingleModelPicker; localEmbedders
+  // carries the live download status used by the inline download affordance (same as rerankers).
+  let embeddingCatalogOptions = $state<CatalogModelRow[]>([]);
+  let embeddingLocalOptions = $state<CatalogModelRow[]>([]);
+  let localEmbedders = $state<LocalEmbedderRow[]>([]);
+  let embedderDownloading = $state<string | null>(null);
   // Knowledge reranker: cloud models come from the catalog; local in-process models from the
   // local-models source (provider "local"). rerankPickerOptions merges both for SingleModelPicker;
   // localRerankers carries the live download status used by the inline download affordance.
@@ -76,6 +86,13 @@ export function createPreferencesController(notify: Notify) {
   let localRerankers = $state<LocalRerankerRow[]>([]);
   let rerankerDownloading = $state<string | null>(null);
 
+  const embeddingPickerOptions = $derived<CatalogModelRow[]>([
+    ...embeddingCatalogOptions,
+    ...embeddingLocalOptions
+  ]);
+  const embedderBusy = $derived(
+    embedderDownloading !== null || localEmbedders.some((m) => m.status === 'downloading')
+  );
   const rerankPickerOptions = $derived<CatalogModelRow[]>([
     ...rerankCatalogOptions,
     ...rerankLocalOptions
@@ -203,6 +220,63 @@ export function createPreferencesController(notify: Notify) {
       await cancelKnowledgeReranker(modelId);
       const refreshed = await listKnowledgeRerankers();
       localRerankers = refreshed.data.local ?? localRerankers;
+      notify('info', 'Download cancelled.');
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Cancel failed.');
+    }
+  }
+
+  // Local embedder downloads — same lifecycle as rerankers (poll status + byte progress).
+  async function pollEmbedder(modelId: string, notifyOnDone: boolean) {
+    if (polling.has(modelId)) return;
+    polling.add(modelId);
+    try {
+      for (let i = 0; i < 1200; i++) {
+        const refreshed = await listKnowledgeEmbedders();
+        localEmbedders = refreshed.data.local ?? localEmbedders;
+        const row = localEmbedders.find((m) => m.id === modelId);
+        if (!row || row.downloaded || row.status === 'ready') {
+          if (notifyOnDone) notify('success', 'Embedder downloaded.');
+          return;
+        }
+        if (row.status === 'error') {
+          if (notifyOnDone) notify('error', row.error || 'Embedder download failed.');
+          return;
+        }
+        if (row.status !== 'downloading') return;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    } catch {
+      // Transient fetch error while polling — stop quietly; the next page load resumes.
+    } finally {
+      polling.delete(modelId);
+    }
+  }
+
+  async function downloadEmbedder(modelId: string) {
+    if (embedderDownloading) return;
+    embedderDownloading = modelId;
+    try {
+      await downloadKnowledgeEmbedder(modelId);
+      await pollEmbedder(modelId, true);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Embedder download failed.');
+    } finally {
+      embedderDownloading = null;
+    }
+  }
+
+  function resumeEmbedderPolling() {
+    for (const row of localEmbedders) {
+      if (row.status === 'downloading') void pollEmbedder(row.id, false);
+    }
+  }
+
+  async function cancelEmbedder(modelId: string) {
+    try {
+      await cancelKnowledgeEmbedder(modelId);
+      const refreshed = await listKnowledgeEmbedders();
+      localEmbedders = refreshed.data.local ?? localEmbedders;
       notify('info', 'Download cancelled.');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Cancel failed.');
@@ -393,6 +467,7 @@ export function createPreferencesController(notify: Notify) {
         embeddingPayload,
         rerankPayload,
         localRerankPayload,
+        localEmbedderPayload,
         providersPayload
       ] = await Promise.all([
         getPreferences(),
@@ -403,6 +478,7 @@ export function createPreferencesController(notify: Notify) {
         listCatalogModels({ model_kind: 'embedding' }),
         listCatalogModels({ model_kind: 'rerank' }),
         listKnowledgeRerankers(),
+        listKnowledgeEmbedders(),
         listCatalogProviders()
       ]);
       sections = prefsPayload.data.sections ?? [];
@@ -422,10 +498,13 @@ export function createPreferencesController(notify: Notify) {
       ttsOptions = prefs.llm.default_tts
         ? includeUnknownModel(ttsPayload.data.models, prefs.llm.default_tts, 'tts')
         : ttsPayload.data.models;
-      embeddingOptions = embeddingPayload.data.models;
+      embeddingCatalogOptions = embeddingPayload.data.models;
+      embeddingLocalOptions = await listLocalCatalogModels('embedding');
+      localEmbedders = localEmbedderPayload.data.local ?? [];
       catalogAllProviders = providersPayload.data;
       await activeProvidersStore.load({ silent: true });
       resumeRerankerPolling();
+      resumeEmbedderPolling();
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load preferences.';
     } finally {
@@ -440,7 +519,8 @@ export function createPreferencesController(notify: Notify) {
       chatOptions = result.modelsByKind.chat ?? [];
       sttOptions = result.modelsByKind.stt ?? [];
       ttsOptions = result.modelsByKind.tts ?? [];
-      embeddingOptions = result.modelsByKind.embedding ?? [];
+      embeddingCatalogOptions = result.modelsByKind.embedding ?? [];
+      embeddingLocalOptions = await listLocalCatalogModels('embedding');
       rerankCatalogOptions = result.modelsByKind.rerank ?? [];
       rerankLocalOptions = await listLocalCatalogModels('rerank');
       catalogAllProviders = result.providers;
@@ -526,7 +606,17 @@ export function createPreferencesController(notify: Notify) {
       return ttsOptions;
     },
     get embeddingOptions() {
-      return embeddingOptions;
+      // Merged (catalog + local) — the embedding picker lists both, like rerankers.
+      return embeddingPickerOptions;
+    },
+    get localEmbedders() {
+      return localEmbedders;
+    },
+    get embedderDownloading() {
+      return embedderDownloading;
+    },
+    get embedderBusy() {
+      return embedderBusy;
     },
     get rerankCatalogOptions() {
       return rerankCatalogOptions;
@@ -559,6 +649,8 @@ export function createPreferencesController(notify: Notify) {
     setModelId,
     downloadReranker,
     cancelReranker,
+    downloadEmbedder,
+    cancelEmbedder,
     setDefaultTuningProfile,
     updateProfile,
     createProfile,

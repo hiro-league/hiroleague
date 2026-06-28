@@ -298,6 +298,55 @@ export function cancelKnowledgeReranker(
   );
 }
 
+// Local embedders: same download lifecycle/contract as rerankers (status + byte progress).
+export type LocalEmbedderRow = {
+  id: string;
+  display_name: string;
+  size_label: string;
+  dimension: number;
+  languages: string;
+  multilingual: boolean;
+  description: string;
+  downloaded: boolean;
+  status: RerankerDownloadStatus;
+  error: string | null;
+  percent: number | null;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
+};
+
+export function listKnowledgeEmbedders(): Promise<ApiResponse<{ local: LocalEmbedderRow[] }>> {
+  return apiRequest<{ local: LocalEmbedderRow[] }>('/knowledge/embedders', {
+    timeoutMs: 60000
+  });
+}
+
+export function downloadKnowledgeEmbedder(
+  modelId: string
+): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+  return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
+    '/knowledge/embedders/download',
+    {
+      method: 'POST',
+      body: { model_id: modelId },
+      timeoutMs: 60000
+    }
+  );
+}
+
+export function cancelKnowledgeEmbedder(
+  modelId: string
+): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+  return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
+    '/knowledge/embedders/cancel',
+    {
+      method: 'POST',
+      body: { model_id: modelId },
+      timeoutMs: 60000
+    }
+  );
+}
+
 export function createKnowledgeCategory(
   name: string,
   parentId: number | null = null

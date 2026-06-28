@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import type { PrefSelectOption } from '$lib/features/preferences/shared/preferences-field-options';
   import {
@@ -67,7 +67,7 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Graph search & indexing"
     description="The retrieval/ranking knobs the graph search uses, the observability tier, and the eval recalled-context format. These apply to both Agent Memory and Knowledge."
     collapsible
@@ -154,5 +154,5 @@
         />
       </PrefFieldGrid>
     </fieldset>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
+  import Badge from '$lib/components/ui/badge.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
@@ -8,6 +9,7 @@
     preferenceHint
   } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PrefEmbedderDownload from '$lib/features/preferences/widgets/PrefEmbedderDownload.svelte';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
@@ -20,46 +22,12 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Graph Extraction"
     description="Everything that builds the graph at ingest — the entity ontology, the heavy extraction model, the cheaper sub-step model, and the embedder. Changing any of these needs a re-ingest to rebuild the graph."
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.graphExtraction}
   >
-    <PrefFieldGrid>
-      <FormField
-        label="Extraction ontology"
-        hint={preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, 'graph.entity_ontology'))}
-        hintTooltip
-      >
-        <select
-          class={ADMIN_SELECT_LG}
-          bind:value={ctrl.draft.graph.entity_ontology}
-          onchange={ctrl.markDirty}
-        >
-          <option value="open">Open (no predefined types)</option>
-          <option value="typed">Typed (Person / Place / Organization / Event / Object)</option>
-        </select>
-      </FormField>
-    </PrefFieldGrid>
-
-    <FormField
-      label="Extraction instructions"
-      hint={preferenceHint(
-        preferenceFieldMeta(ctrl.fieldSchema, 'graph.custom_extraction_instructions')
-      )}
-      hintTooltip
-    >
-      <textarea
-        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        rows="4"
-        maxlength="2000"
-        placeholder="e.g. Capture first-person preferences, goals, habits, and activities as facts even when only the speaker is named; treat the activity, topic, or object as the second entity."
-        bind:value={ctrl.draft.graph.custom_extraction_instructions}
-        oninput={ctrl.markDirty}
-      ></textarea>
-    </FormField>
-
     <PrefFieldGrid>
       <div class="grid gap-3">
         <PrefModelPicker
@@ -97,15 +65,62 @@
         />
       </div>
 
-      <PrefModelPicker
-        {ctrl}
-        kind="embedding"
-        path="graph.embedder_model"
-        labelled
-        embedded
-        label="Embedder model"
-        selectedId={ctrl.draft.graph.embedder_model}
-      />
+      <!-- Embedder + ontology share one grid column (moved to the end) so the column beside
+           the tall instructions textarea stays filled instead of empty. -->
+      <div class="grid gap-3">
+        <div class="grid gap-2">
+          <h4
+            class="inline-flex items-center gap-1.5 font-sans text-base font-semibold leading-snug text-foreground"
+          >
+            Embedder model
+            {#if ctrl.draft.graph.embedder_model_locked}
+              <Badge variant="outline">Locked while indexed</Badge>
+            {/if}
+          </h4>
+          <PrefModelPicker
+            {ctrl}
+            kind="embedding"
+            path="graph.embedder_model"
+            embedded
+            label="Embedder model"
+            selectedId={ctrl.draft.graph.embedder_model}
+            emptyFallbackId={ctrl.draft.llm.default_embedder}
+            busy={ctrl.busy || Boolean(ctrl.draft.graph.embedder_model_locked)}
+          />
+          <PrefEmbedderDownload {ctrl} modelId={ctrl.draft.graph.embedder_model} />
+        </div>
+        <FormField
+          label="Extraction ontology"
+          hint={preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, 'graph.entity_ontology'))}
+          hintTooltip
+        >
+          <select
+            class={ADMIN_SELECT_LG}
+            bind:value={ctrl.draft.graph.entity_ontology}
+            onchange={ctrl.markDirty}
+          >
+            <option value="open">Open (no predefined types)</option>
+            <option value="typed">Typed (Person / Place / Organization / Event / Object)</option>
+          </select>
+        </FormField>
+      </div>
+
+      <FormField
+        label="Extraction instructions"
+        hint={preferenceHint(
+          preferenceFieldMeta(ctrl.fieldSchema, 'graph.custom_extraction_instructions')
+        )}
+        hintTooltip
+      >
+        <textarea
+          class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          rows="8"
+          maxlength="2000"
+          placeholder="e.g. Capture first-person preferences, goals, habits, and activities as facts even when only the speaker is named; treat the activity, topic, or object as the second entity."
+          bind:value={ctrl.draft.graph.custom_extraction_instructions}
+          oninput={ctrl.markDirty}
+        ></textarea>
+      </FormField>
     </PrefFieldGrid>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

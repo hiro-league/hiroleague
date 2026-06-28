@@ -27,7 +27,8 @@
     onChange,
     toolbar,
     embedded = false,
-    labelled = false
+    labelled = false,
+    emptyFallbackId = null
   }: {
     label: string;
     hint: string;
@@ -43,6 +44,12 @@
     onChange?: () => void;
     /** Optional row (e.g. catalog link + reload) shown under the section title. */
     toolbar?: Snippet;
+    /**
+     * When this picker is an OVERRIDE of a workspace default (e.g. the reranker overrides):
+     * the inherited default model id to show inside the empty box instead of
+     * "No workspace default set." `null` = no fallback (this picker IS the default).
+     */
+    emptyFallbackId?: string | null;
     /** When true, omit outer card chrome — host `<SectionCardMuted>` owns title/collapse. */
     embedded?: boolean;
     /**
@@ -176,7 +183,21 @@
     <div
       class="flex items-center justify-between gap-3 rounded-md border border-dashed border-input bg-background/40 p-3"
     >
-      <p class="text-sm text-muted-foreground">No workspace default set.</p>
+      {#if emptyFallbackId}
+        <!-- Override is empty → show the inherited default model in the box (not a generic
+             "no default" message), so the effective model is obvious without extra prose. -->
+        {@const fbRow = catalogModels.find((model) => model.id === emptyFallbackId)}
+        <span class="min-w-0 flex-1 grid gap-0.5">
+          <code class="break-all font-mono text-sm font-medium leading-snug text-muted-foreground">
+            {emptyFallbackId}
+          </code>
+          <span class="font-sans text-xs text-muted-foreground">
+            {fbRow ? `${fbRow.display_name} · ` : ''}inherited default (no override)
+          </span>
+        </span>
+      {:else}
+        <p class="text-sm text-muted-foreground">No workspace default set.</p>
+      {/if}
       <Button
         variant="outline"
         size="sm"

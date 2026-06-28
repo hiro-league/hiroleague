@@ -31,6 +31,8 @@ export const PREF_KEYS = {
   /** Primary tab on the Logs page: live log feed vs the Graph runs ledger. */
   logsPrimaryActiveTab: 'hiro.admin.logs.activeTab',
   preferencesActiveTab: 'hiro.admin.preferences.activeTab',
+  /** Settings page: show fields tagged `advanced` in the schema (default off ⇒ basic only). */
+  preferencesShowAdvanced: 'hiro.admin.preferences.showAdvanced',
   /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
   graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
   knowledgeLastFolderPrefix: 'hiro.admin.knowledge.lastFolder',

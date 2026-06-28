@@ -95,16 +95,32 @@ def test_create_knowledge_service_reads_default_embedding_preference(
         fake_resolve,
     )
 
+    # No forced default: empty knowledge override + empty workspace default → resolved id is None
+    # (the service builds an UnconfiguredEmbedder; here fake_resolve just records the id).
     prefs = WorkspacePreferences()
     prefs.knowledge.default_embedding_model = None
+    prefs.llm.default_embedder = None
     service = create_knowledge_service(tmp_path, prefs=prefs)
     try:
-        assert captured["model_id"] == DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
-        assert isinstance(service.embedder, FastEmbedBackend)
+        assert captured["model_id"] is None
     finally:
         import asyncio
 
         asyncio.run(service.close())
+
+    # The workspace default feeds the knowledge embedder when the override is empty.
+    captured.clear()
+    prefs2 = WorkspacePreferences()
+    prefs2.knowledge.default_embedding_model = None
+    prefs2.llm.default_embedder = DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
+    service2 = create_knowledge_service(tmp_path, prefs=prefs2)
+    try:
+        assert captured["model_id"] == DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
+        assert isinstance(service2.embedder, FastEmbedBackend)
+    finally:
+        import asyncio
+
+        asyncio.run(service2.close())
 
 
 def test_resolve_knowledge_embedder_uses_catalog_factory(

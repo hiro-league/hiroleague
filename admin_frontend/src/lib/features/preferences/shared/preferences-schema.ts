@@ -28,3 +28,8 @@ export function preferenceHint(meta: PreferenceFieldMeta | null | undefined): st
   const hint = meta?.description?.trim();
   return hint || undefined;
 }
+
+/** Display-only flag: advanced fields are hidden until the "show advanced" toggle is on. */
+export function preferenceIsAdvanced(meta: PreferenceFieldMeta | null | undefined): boolean {
+  return meta?.advanced === true;
+}

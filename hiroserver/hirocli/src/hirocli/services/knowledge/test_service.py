@@ -557,7 +557,10 @@ async def test_reingest_document_returns_running_job_without_blocking(tmp_path: 
             await asyncio.sleep(0.15)
             return await super()._ingest_one(raw_path, params, **kwargs)
 
-    service = SlowKnowledgeService(workspace)
+    # Explicit embedder: there is no implicit default embedder anymore (no forced model).
+    service = SlowKnowledgeService(
+        workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder()
+    )
     try:
         await service.ingest_and_wait([str(note)])
         document_id = (await service.list_documents()).documents[0].id

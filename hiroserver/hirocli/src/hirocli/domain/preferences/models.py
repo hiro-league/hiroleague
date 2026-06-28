@@ -305,6 +305,34 @@ class LLMPreferences(BaseModel):
     default_chat: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
     default_stt: str | None = Field(default=None, json_schema_extra={"model_kind": "stt"})
     default_tts: str | None = Field(default=None, json_schema_extra={"model_kind": "tts"})
+    # Workspace-wide default cross-encoder reranker. Both the knowledge retrieval reranker
+    # (knowledge.retrieval.reranker.model_id) and the graph fact-search reranker
+    # (graph.reranker.model_id) fall back to this when their own model is empty — one place
+    # to manage the reranker for both legs. Null = no default (each leg reranks only if it
+    # sets its own model).
+    default_reranker: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "rerank"},
+        description=(
+            "Default cross-encoder reranker. The knowledge and graph rerankers both fall "
+            "back to this when their own model is empty. Empty = no default. Cloud models "
+            "need a provider key; local models must be downloaded first."
+        ),
+    )
+    # Workspace-wide default embedder. The knowledge embedder (knowledge.default_embedding_model)
+    # and the graph embedder (graph.embedder_model) both fall back to this when their own model is
+    # empty. NOT forced to any model: null = no default, and indexing is blocked until an embedder
+    # is chosen (embedding is mandatory + dimension-bound, so there is no silent fallback). Never
+    # locked — it only seeds consumers that have not indexed yet.
+    default_embedder: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "embedding"},
+        description=(
+            "Default embedder. The knowledge and graph embedders both fall back to this when "
+            "their own model is empty. Empty = no default (indexing is blocked until one is "
+            "chosen). Cloud models need a provider key; local models must be downloaded first."
+        ),
+    )
     default_image_gen: str | None = Field(
         default=None,
         json_schema_extra={"model_kind": "chat", "preferencesSaveSkip": True},
@@ -447,6 +475,9 @@ class KnowledgeChunkingPreferences(BaseModel):
             "— including continuation pieces — carries its section context. Applies to new ingests; "
             "changing this requires re-ingesting existing documents."
         ),
+        # Demo seed for the admin "show advanced" toggle: a low-level ingest knob most users
+        # never touch. Remove/adjust `advanced` here (and on any other field) to taste.
+        json_schema_extra={"advanced": True},
     )
     markdown: KnowledgeChunkingMarkdownPreferences = Field(default_factory=KnowledgeChunkingMarkdownPreferences)
 
@@ -465,12 +496,20 @@ class KnowledgeRerankerPreferences(BaseModel):
     resolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` — the same way
     ``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a
     swap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local
-    torch lane only and are ignored by cloud models. ``model_id`` null = no reranker (retrieval
-    order used as-is) even when ``enabled`` is true.
+    torch lane only and are ignored by cloud models. ``model_id`` null = fall back to the
+    workspace default reranker (``llm.default_reranker``); if that is empty too, no reranker
+    (retrieval order used as-is) even when ``enabled`` is true.
     """
 
     enabled: bool = False
-    model_id: str | None = Field(default=None, json_schema_extra={"model_kind": "rerank"})
+    model_id: str | None = Field(
+        default=None,
+        json_schema_extra={"model_kind": "rerank"},
+        description=(
+            "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the "
+            "default reranker (General → Models). Local models must be downloaded first."
+        ),
+    )
     top_n: int = Field(default=8, ge=1, le=100, description="Final returned results if using rerank (top N).")
     device: str | None = None
     batch_size: int = Field(default=32, ge=1, le=512)
@@ -551,17 +590,17 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     SAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and
     local (FlashRank/FastEmbed/sentence-transformers) models are both available — and a
     local model that was never downloaded fails fast, degrading the fact search to RRF
-    (no silent fetch). ``model_id`` null = reuse the knowledge reranker model
-    (``knowledge.retrieval.reranker.model_id``) — one model to manage (the G8 play).
+    (no silent fetch). ``model_id`` null = fall back to the workspace default reranker
+    (``llm.default_reranker``) — one model to manage for both legs.
     """
 
-    # null → fall back to the shared knowledge reranker model id.
+    # null → fall back to the workspace default reranker model id (llm.default_reranker).
     model_id: str | None = Field(
         default=None,
         json_schema_extra={"model_kind": "rerank"},
         description=(
-            "Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge "
-            "Reranker model (one model to manage). Local models must be downloaded first."
+            "Cross-encoder used to rerank fact candidates. Empty = fall back to the default "
+            "reranker (General → Models). Local models must be downloaded first."
         ),
     )
     # Drop facts whose post-rerank relevance is below this (maps to Graphiti
@@ -1117,9 +1156,14 @@ class GraphPreferences(BaseModel):
 
 
 class KnowledgePreferences(BaseModel):
+    # Knowledge embedder OVERRIDE. Empty = inherit the workspace default (llm.default_embedder),
+    # resolved by ``resolve_knowledge_embedder_model``. Locked (UI badge + pre-save write-guard)
+    # once the knowledge collection has points — embedders are dimension-bound, so changing this
+    # after indexing would orphan the stored vectors. Field name kept (historical) to preserve the
+    # existing lock + value for already-indexed workspaces without a migration.
     default_embedding_model: str | None = Field(
         default=None,
-        description="Null uses the local multilingual FastEmbed default shown above.",
+        description="Knowledge embedder. Empty inherits the workspace default (General → Models).",
         json_schema_extra={"model_kind": "embedding"},
     )
     default_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
@@ -1127,10 +1171,6 @@ class KnowledgePreferences(BaseModel):
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
     answering: KnowledgeAnsweringPreferences = Field(default_factory=KnowledgeAnsweringPreferences)
     rewrite: KnowledgeRewritePreferences = Field(default_factory=KnowledgeRewritePreferences)
-
-    @property
-    def default_embedding_model_resolved(self) -> str:
-        return self.default_embedding_model or DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
 
 
 # General chat-answering instructions injected (in the current user turn) ahead of the question.

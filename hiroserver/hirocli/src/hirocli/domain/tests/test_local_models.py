@@ -25,14 +25,17 @@ def test_rerank_rows_shape_and_overlay(tmp_path: Path) -> None:
 
 def test_embedding_row_present(tmp_path: Path) -> None:
     rows = list_local_model_rows(tmp_path, model_kind="embedding")
-    assert len(rows) == 1
-    emb = rows[0]
+    # The curated FastEmbed registry yields several pickable local embedders (incl. MiniLM).
+    assert len(rows) >= 1
+    by_id = {r.id for r in rows}
+    assert "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2" in by_id
+    emb = next(r for r in rows if r.id == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     assert emb.model_kind == "embedding"
     assert emb.provider_id == "local"
     assert emb.backend == "fastembed"
     assert emb.hosting == "local"
     assert emb.free is True
-    assert "ingest" in emb.manage_hint.lower()  # auto-download hint, not the reranker hint
+    assert "download" in emb.manage_hint.lower()  # explicit download hint (no forced default)
     assert emb.downloaded is False  # fresh tmp cache (no marker)
 
 

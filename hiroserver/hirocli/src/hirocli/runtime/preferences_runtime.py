@@ -167,17 +167,49 @@ def _validate_knowledge_embedding_transition(
     updated: WorkspacePreferences,
     edits: dict[str, Any],
 ) -> None:
-    if "knowledge.default_embedding_model" not in edits:
-        return
-    old_value = previous.knowledge.default_embedding_model
-    new_value = updated.knowledge.default_embedding_model
-    if old_value == new_value:
-        return
+    """Block embedder PATCHes that would orphan stored (dimension-bound) vectors.
+
+    Per tool: knowledge override locks on knowledge points, graph override on the graph-indexed
+    marker. The workspace default (``llm.default_embedder``) is free except when an empty-override
+    consumer was indexed using it (so the default IS the stored vectors' model)."""
+
+    def _edited(path: str, old: Any, new: Any) -> bool:
+        return path in edits and old != new
+
+    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
     from hirocli.services.knowledge.live_registry import count_knowledge_points
 
-    point_count = count_knowledge_points(workspace_path)
-    if point_count > 0:
+    if _edited(
+        "knowledge.default_embedding_model",
+        previous.knowledge.default_embedding_model,
+        updated.knowledge.default_embedding_model,
+    ) and count_knowledge_points(workspace_path) > 0:
         raise PreferencePathError(
-            "knowledge.default_embedding_model cannot be changed while the knowledge collection has points. "
-            "Delete all knowledge documents first."
+            "knowledge.default_embedding_model cannot be changed while the knowledge collection "
+            "has points. Delete all knowledge documents first."
         )
+
+    if _edited(
+        "graph.embedder_model",
+        previous.graph.embedder_model,
+        updated.graph.embedder_model,
+    ) and is_graph_indexed(workspace_path):
+        raise PreferencePathError(
+            "graph.embedder_model cannot be changed while the graph has indexed data. "
+            "Reset the graph first."
+        )
+
+    if _edited("llm.default_embedder", previous.llm.default_embedder, updated.llm.default_embedder):
+        if not (updated.knowledge.default_embedding_model or "").strip() and (
+            count_knowledge_points(workspace_path) > 0
+        ):
+            raise PreferencePathError(
+                "llm.default_embedder cannot be changed: the knowledge collection was indexed "
+                "using it (no Knowledge embedder override). Set a Knowledge embedder override or "
+                "delete all knowledge documents first."
+            )
+        if not (updated.graph.embedder_model or "").strip() and is_graph_indexed(workspace_path):
+            raise PreferencePathError(
+                "llm.default_embedder cannot be changed: the graph was indexed using it (no "
+                "Graph embedder override). Set a Graph embedder override or reset the graph first."
+            )

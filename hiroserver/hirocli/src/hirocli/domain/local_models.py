@@ -121,33 +121,35 @@ def _reranker_rows(workspace_path: Path) -> list[LocalModelRow]:
 
 
 def _embedder_rows(workspace_path: Path) -> list[LocalModelRow]:
-    """The local default FastEmbed embedder (the non-catalog fallback). One curated row today.
+    """Local FastEmbed embedders (curated registry) with per-workspace download status.
 
-    Unlike rerankers it has no explicit download — it auto-downloads on first ingest — so its
-    manage hint reflects that. ``downloaded`` flips True once the embedder has loaded once.
+    These are pickable options (no forced default): the user chooses one as the workspace default
+    or a per-tool override, and downloads it like a reranker. ``downloaded`` is the shared marker.
     """
-    from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
-    from hirocli.services.knowledge.embedder import is_default_embedder_cached
+    from hirocli.services.knowledge.embedder_registry import (
+        embedder_cache_dir,
+        is_downloaded,
+        list_local_embedders,
+    )
 
+    cache = embedder_cache_dir(workspace_path)
     return [
         LocalModelRow(
-            id=DEFAULT_KNOWLEDGE_EMBEDDING_MODEL,
+            id=spec.id,
             provider_id=LOCAL_PROVIDER_ID,
-            display_name="Multilingual MiniLM-L12-v2 (FastEmbed)",
+            display_name=spec.display_name,
             model_kind="embedding",
             hosting="local",
             backend="fastembed",
-            size_label="~0.22 GB",
-            languages="multilingual (~50)",
-            description=(
-                "Default local embedder (FastEmbed ONNX, no torch). Used when no catalog "
-                "embedding model is selected; auto-downloads on first ingest."
-            ),
-            context_window=512,
+            size_label=spec.size_label,
+            languages=spec.languages,
+            description=spec.description,
+            context_window=None,
             modalities=["text"],
-            features=_features("fastembed", multilingual=True),
+            features=_features("fastembed", multilingual=spec.multilingual),
             free=True,
-            downloaded=is_default_embedder_cached(workspace_path),
-            manage_hint="Downloads automatically on first ingest (the default embedder)",
+            downloaded=is_downloaded(spec, cache),
+            manage_hint="Download in Preferences → General → Default models (or a Knowledge/Graph embedder)",
         )
+        for spec in list_local_embedders()
     ]

@@ -5,6 +5,14 @@ export type Version = number;
 export type DefaultChat = string | null;
 export type DefaultStt = string | null;
 export type DefaultTts = string | null;
+/**
+ * Default cross-encoder reranker. The knowledge and graph rerankers both fall back to this when their own model is empty. Empty = no default. Cloud models need a provider key; local models must be downloaded first.
+ */
+export type DefaultReranker = string | null;
+/**
+ * Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.
+ */
+export type DefaultEmbedder = string | null;
 export type DefaultImageGen = string | null;
 export type DefaultTuningProfile = string;
 export type DefaultImageProfile = string;
@@ -19,7 +27,7 @@ export type Enabled1 = boolean;
 export type TopK = number;
 export type Enabled2 = boolean;
 /**
- * Null uses the local multilingual FastEmbed default shown above.
+ * Knowledge embedder. Empty inherits the workspace default (General → Models).
  */
 export type DefaultEmbeddingModel = string | null;
 export type DefaultTuningProfile2 = string;
@@ -54,6 +62,9 @@ export type SparseModel = string;
  */
 export type PrefetchLimit = number;
 export type Enabled3 = boolean;
+/**
+ * Cross-encoder used to reorder retrieved candidates. Empty = fall back to the default reranker (General → Models). Local models must be downloaded first.
+ */
 export type ModelId = string | null;
 /**
  * Final returned results if using rerank (top N).
@@ -128,7 +139,7 @@ export type QueryTimeoutS = number;
  */
 export type Observability = "off" | "ledger" | "trace";
 /**
- * Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model (one model to manage). Local models must be downloaded first.
+ * Cross-encoder used to rerank fact candidates. Empty = fall back to the default reranker (General → Models). Local models must be downloaded first.
  */
 export type ModelId1 = string | null;
 /**
@@ -262,6 +273,8 @@ export interface LLMPreferences {
   default_chat: DefaultChat;
   default_stt: DefaultStt;
   default_tts: DefaultTts;
+  default_reranker: DefaultReranker;
+  default_embedder: DefaultEmbedder;
   default_image_gen: DefaultImageGen;
   default_tuning_profile: DefaultTuningProfile;
   default_image_profile: DefaultImageProfile;
@@ -337,8 +350,9 @@ export interface KnowledgeRetrievalPreferences {
  * resolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` — the same way
  * ``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a
  * swap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local
- * torch lane only and are ignored by cloud models. ``model_id`` null = no reranker (retrieval
- * order used as-is) even when ``enabled`` is true.
+ * torch lane only and are ignored by cloud models. ``model_id`` null = fall back to the
+ * workspace default reranker (``llm.default_reranker``); if that is empty too, no reranker
+ * (retrieval order used as-is) even when ``enabled`` is true.
  */
 export interface KnowledgeRerankerPreferences {
   enabled: Enabled3;
@@ -393,8 +407,8 @@ export interface GraphPreferences {
  * SAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and
  * local (FlashRank/FastEmbed/sentence-transformers) models are both available — and a
  * local model that was never downloaded fails fast, degrading the fact search to RRF
- * (no silent fetch). ``model_id`` null = reuse the knowledge reranker model
- * (``knowledge.retrieval.reranker.model_id``) — one model to manage (the G8 play).
+ * (no silent fetch). ``model_id`` null = fall back to the workspace default reranker
+ * (``llm.default_reranker``) — one model to manage for both legs.
  */
 export interface KnowledgeGraphRerankerPreferences {
   model_id: ModelId1;

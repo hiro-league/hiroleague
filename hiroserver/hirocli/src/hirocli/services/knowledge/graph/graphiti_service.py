@@ -40,6 +40,7 @@ from hirocli.domain.preferences import (
     ModelTuning,
     ResolvedModel,
     WorkspacePreferences,
+    resolve_graph_reranker_model,
     resolve_graphiti_embedder_model,
     resolve_graphiti_extraction_model,
     resolve_graphiti_small_model,
@@ -937,7 +938,14 @@ class GraphitiMemoryService:
         # module's import path.
         from hirocli.services.knowledge.embedder import resolve_knowledge_embedder
 
+        # No forced default: the graph needs a real embedder to build its vector index. Gate here
+        # rather than silently picking a model (would orphan vectors on a later change).
         embedder_model_id = resolve_graphiti_embedder_model(prefs)
+        if not embedder_model_id:
+            raise ValueError(
+                "No graph embedder configured. Set the Graph embedder, or a workspace default "
+                "embedder (Preferences → General → Default models), before building the graph."
+            )
         backend = resolve_knowledge_embedder(
             workspace_path, embedder_model_id, credential_store=credential_store
         )
@@ -973,9 +981,8 @@ class GraphitiMemoryService:
         cross_encoder: CrossEncoderClient | None = None
         reranker_min_score = 0.0
         if recipe == "cross_encoder":
-            reranker_model_id = (graph.reranker.model_id or "").strip() or (
-                prefs.knowledge.retrieval.reranker.model_id or ""
-            ).strip() or None
+            # Graph override, else the workspace default reranker (llm.default_reranker).
+            reranker_model_id = resolve_graph_reranker_model(prefs)
             if reranker_model_id:
                 try:
                     from hirocli.services.knowledge.reranker import resolve_reranker
@@ -1009,7 +1016,7 @@ class GraphitiMemoryService:
             else:
                 log.info(
                     "⬇️ graphiti — search_recipe=cross_encoder but no reranker model set "
-                    "(graph.reranker.model_id / knowledge.retrieval.reranker.model_id) · using RRF"
+                    "(graph.reranker.model_id / llm.default_reranker) · using RRF"
                 )
                 recipe = "rrf"
 

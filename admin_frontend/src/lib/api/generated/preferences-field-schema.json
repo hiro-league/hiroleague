@@ -27,6 +27,22 @@
     "default": null,
     "model_kind": "tts"
   },
+  "llm.default_reranker": {
+    "path": "llm.default_reranker",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "description": "Default cross-encoder reranker. The knowledge and graph rerankers both fall back to this when their own model is empty. Empty = no default. Cloud models need a provider key; local models must be downloaded first.",
+    "model_kind": "rerank"
+  },
+  "llm.default_embedder": {
+    "path": "llm.default_embedder",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "description": "Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.",
+    "model_kind": "embedding"
+  },
   "llm.default_image_gen": {
     "path": "llm.default_image_gen",
     "nullable": true,
@@ -139,7 +155,7 @@
     "nullable": true,
     "type": "string",
     "default": null,
-    "description": "Null uses the local multilingual FastEmbed default shown above.",
+    "description": "Knowledge embedder. Empty inherits the workspace default (General \u2192 Models).",
     "model_kind": "embedding"
   },
   "knowledge.default_tuning_profile": {
@@ -171,7 +187,8 @@
     "nullable": false,
     "type": "boolean",
     "default": true,
-    "description": "Prefix each chunk's embedded text with its document title and heading path so every chunk \u2014 including continuation pieces \u2014 carries its section context. Applies to new ingests; changing this requires re-ingesting existing documents."
+    "description": "Prefix each chunk's embedded text with its document title and heading path so every chunk \u2014 including continuation pieces \u2014 carries its section context. Applies to new ingests; changing this requires re-ingesting existing documents.",
+    "advanced": true
   },
   "knowledge.chunking.markdown.respect_headings": {
     "path": "knowledge.chunking.markdown.respect_headings",
@@ -231,6 +248,7 @@
     "nullable": true,
     "type": "string",
     "default": null,
+    "description": "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
     "model_kind": "rerank"
   },
   "knowledge.retrieval.reranker.top_n": {
@@ -446,7 +464,7 @@
     "nullable": true,
     "type": "string",
     "default": null,
-    "description": "Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model (one model to manage). Local models must be downloaded first.",
+    "description": "Cross-encoder used to rerank fact candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
     "model_kind": "rerank"
   },
   "graph.reranker.min_relevance": {
@@ -698,13 +716,13 @@
     "type": "object",
     "preferencesSaveSkip": true
   },
-  "knowledge.default_embedding_model_resolved": {
-    "path": "knowledge.default_embedding_model_resolved",
-    "type": "string",
-    "readOnly": true
-  },
   "knowledge.default_embedding_model_locked": {
     "path": "knowledge.default_embedding_model_locked",
+    "type": "boolean",
+    "readOnly": true
+  },
+  "graph.embedder_model_locked": {
+    "path": "graph.embedder_model_locked",
     "type": "boolean",
     "readOnly": true
   },

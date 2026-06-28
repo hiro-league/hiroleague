@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import {
     knowledgeHybridPrefetchActive,
@@ -29,7 +29,7 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Retrieval defaults"
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeRetrieval}
@@ -77,5 +77,5 @@
         />
       </div>
     </PrefFieldGrid>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

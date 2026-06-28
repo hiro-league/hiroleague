@@ -52,7 +52,6 @@ def _prefs_payload(
     payload = prefs.model_dump(mode="json")
     knowledge = payload.setdefault("knowledge", {})
     answering = knowledge.setdefault("answering", {})
-    knowledge["default_embedding_model_resolved"] = prefs.knowledge.default_embedding_model_resolved
     resolved = resolve_knowledge_answering_llm(
         prefs,
         runtime._workspace_path,
@@ -61,8 +60,14 @@ def _prefs_payload(
     answering["model_resolved"] = resolved.model_id if resolved is not None else None
     answering["model_resolved_source"] = knowledge_answering_model_source(prefs)
     from hirocli.services.knowledge import count_knowledge_points
+    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
 
     knowledge["default_embedding_model_locked"] = count_knowledge_points(runtime._workspace_path) > 0
+    # Graph embedder locks independently, on graph (not knowledge) indexing — read from the
+    # graph-indexed marker (the Kuzu DB can't be opened to count while the server holds it).
+    payload.setdefault("graph", {})["embedder_model_locked"] = is_graph_indexed(
+        runtime._workspace_path
+    )
     return payload
 
 
@@ -90,6 +95,11 @@ async def get_preferences(
 ) -> dict[str, Any]:
     try:
         runtime = _preferences_runtime(request, workspace_id)
+        # Reconcile the graph-embedder lock with LIVE graph data before reading it: backfills a
+        # graph that was populated before the marker existed, and clears it after a full wipe.
+        from hirocli.services.knowledge.graph.graph_index_marker import sync_graph_indexed_marker
+
+        await sync_graph_indexed_marker(runtime._workspace_path)
         return {
             "ok": True,
             "error": None,
@@ -115,6 +125,10 @@ async def patch_preferences(
     try:
         runtime = _preferences_runtime(request, workspace_id)
         updated = runtime.update_many(body.edits)
+        # Keep the graph-embedder lock in sync with live data for the returned payload.
+        from hirocli.services.knowledge.graph.graph_index_marker import sync_graph_indexed_marker
+
+        await sync_graph_indexed_marker(runtime._workspace_path)
         return {
             "ok": True,
             "error": None,

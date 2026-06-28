@@ -6,9 +6,11 @@
     normalizePrefSelectOptions,
     type PrefSelectOption
   } from '$lib/features/preferences/shared/preferences-field-options';
+  import { usePrefFieldVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
   import {
     preferenceFieldMeta,
     preferenceHint,
+    preferenceIsAdvanced,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
@@ -41,14 +43,17 @@
     assertPrefSelectOptionsMatchEnum(meta, normalized);
     return normalized;
   });
+  const vis = usePrefFieldVisibility(() => preferenceIsAdvanced(meta));
 </script>
 
-<FormField {label} {hint} hintTooltip class={className}>
-  <select class={ADMIN_SELECT_LG} bind:value onchange={ctrl.markDirty}>
-    {#each resolvedOptions as option (option.value)}
-      <option value={option.value} disabled={option.disabled} title={option.title}>
-        {option.label}
-      </option>
-    {/each}
-  </select>
-</FormField>
+{#if vis.visible}
+  <FormField {label} {hint} hintTooltip class={className}>
+    <select class={ADMIN_SELECT_LG} bind:value onchange={ctrl.markDirty}>
+      {#each resolvedOptions as option (option.value)}
+        <option value={option.value} disabled={option.disabled} title={option.title}>
+          {option.label}
+        </option>
+      {/each}
+    </select>
+  </FormField>
+{/if}

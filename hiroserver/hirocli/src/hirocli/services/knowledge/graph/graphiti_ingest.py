@@ -655,6 +655,12 @@ async def ingest_episodes(
                     stats=stats,
                     status="completed",
                 )
+            # Lock the graph embedder once data exists (dimension-bound; a later change would
+            # orphan vectors). Idempotent + best-effort; only when an episode actually landed.
+            if workspace_path is not None and stats.episodes_processed > 0:
+                from hirocli.services.knowledge.graph.graph_index_marker import mark_graph_indexed
+
+                mark_graph_indexed(workspace_path)
         return stats
 
 

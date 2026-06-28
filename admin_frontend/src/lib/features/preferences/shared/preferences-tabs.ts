@@ -32,7 +32,7 @@ export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
 export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
   { id: 'models', label: 'General' },
   { id: 'agent', label: 'Agent' },
-  { id: 'graph-engine', label: 'Graph Engine' },
+  { id: 'graph-engine', label: 'Memory' },
   { id: 'knowledge', label: 'Knowledge' },
   { id: 'eval', label: 'Eval' },
   { id: 'tuning-profiles', label: 'Model Profiles' }

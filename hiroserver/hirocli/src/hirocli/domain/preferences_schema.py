@@ -10,6 +10,10 @@ from hirocli.domain.preferences import WorkspacePreferences
 # ``minimum``/``maximum`` are intentionally absent: they are re-emitted as ``min``/``max``
 # by ``_leaf_meta`` (the single representation the frontend reads), so copying them too
 # would just duplicate the bounds in every numeric field.
+#
+# ``advanced`` is a display-only flag (``json_schema_extra={"advanced": True}`` on the field):
+# the admin UI hides advanced fields behind a "show advanced" toggle. Absent ⇒ basic. It never
+# affects PATCH writes — it's purely a presentation hint carried through the schema map.
 _META_KEYS = (
     "type",
     "default",
@@ -20,17 +24,18 @@ _META_KEYS = (
     "writeWhole",
     "preferencesSaveSkip",
     "model_kind",
+    "advanced",
 )
 
 # GET /preferences enrichments — not persisted; excluded from PATCH via schema readOnly.
 _PREFERENCES_PAYLOAD_READONLY_FIELDS: dict[str, dict[str, Any]] = {
-    "knowledge.default_embedding_model_resolved": {
-        "path": "knowledge.default_embedding_model_resolved",
-        "type": "string",
-        "readOnly": True,
-    },
     "knowledge.default_embedding_model_locked": {
         "path": "knowledge.default_embedding_model_locked",
+        "type": "boolean",
+        "readOnly": True,
+    },
+    "graph.embedder_model_locked": {
+        "path": "graph.embedder_model_locked",
         "type": "boolean",
         "readOnly": True,
     },

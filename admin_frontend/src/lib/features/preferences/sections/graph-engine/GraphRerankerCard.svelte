@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
@@ -15,7 +15,7 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Graphiti Reranker (Cross-encoder)"
     description="Reranks graph fact-search candidates with a real cross-encoder. Only active when the Search recipe above is set to Cross-encoder — otherwise these settings are disabled. Reuses the same reranker models as the flat path (cloud or local)."
     collapsible
@@ -38,6 +38,7 @@
         embedded
         label="Reranker model"
         selectedId={ctrl.draft.graph.reranker.model_id}
+        emptyFallbackId={ctrl.draft.llm.default_reranker}
       />
       <PrefFieldGrid>
         <PrefNumberField
@@ -55,5 +56,5 @@
         />
       </PrefFieldGrid>
     </fieldset>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

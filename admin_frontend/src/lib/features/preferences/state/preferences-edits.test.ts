@@ -32,6 +32,8 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
       default_chat: null,
       default_stt: null,
       default_tts: null,
+      default_reranker: null,
+      default_embedder: null,
       default_image_gen: null,
       default_tuning_profile: 'balanced_chat',
       default_image_profile: 'image_playground'
@@ -174,7 +176,7 @@ describe('editsForSave', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);
     draft.knowledge.answering.model_resolved = 'openai:gpt-4';
-    draft.knowledge.default_embedding_model_resolved = 'some-embedder';
+    draft.knowledge.default_embedding_model_locked = true;
     expect(diffEdits(baseline, draft)).toEqual({});
   });
 

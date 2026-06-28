@@ -92,8 +92,10 @@ log = Logger.get("SVC.KNOWLEDGE")
 
 
 @dataclass
-class _RerankerDownloadJob:
-    """A running local-reranker download (a killable subprocess + progress baseline)."""
+class _DownloadJob:
+    """A running local-model download (a killable subprocess + progress baseline).
+
+    Shared by the reranker and embedder download lanes (same subprocess mechanism)."""
 
     process: subprocess.Popen  # the download subprocess
     baseline_bytes: int  # cache size at start; progress = (current - baseline) / expected
@@ -134,8 +136,11 @@ class KnowledgeService:
         # In-flight local-reranker downloads (killable spawn processes), keyed by model_id, and
         # terminal error messages for the last failed download. The downloaded marker is the
         # source of truth for "ready". Surfaced via reranker_options() for the admin poll.
-        self._reranker_jobs: dict[str, _RerankerDownloadJob] = {}
+        self._reranker_jobs: dict[str, _DownloadJob] = {}
         self._reranker_errors: dict[str, str] = {}
+        # In-flight local-embedder downloads + last terminal errors (same mechanism as rerankers).
+        self._embedder_jobs: dict[str, _DownloadJob] = {}
+        self._embedder_errors: dict[str, str] = {}
         self.owner_token = current_owner_token()
         self.knowledge_path.mkdir(parents=True, exist_ok=True)
         self.qdrant_path.mkdir(parents=True, exist_ok=True)
@@ -149,12 +154,13 @@ class KnowledgeService:
         return load_preferences(self.workspace_path)
 
     def _default_embedder_for_workspace(self) -> EmbeddingBackend:
+        from hirocli.domain.preferences import resolve_knowledge_embedder_model
         from hirocli.services.knowledge.embedder import resolve_knowledge_embedder
 
         prefs = self.workspace_prefs()
         return resolve_knowledge_embedder(
             self.workspace_path,
-            prefs.knowledge.default_embedding_model_resolved,
+            resolve_knowledge_embedder_model(prefs),
         )
 
     def _default_sparse_embedder_for_workspace(self) -> SparseEmbeddingBackend:
@@ -189,9 +195,11 @@ class KnowledgeService:
                 task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
-        # Terminate any in-flight reranker download processes so they don't outlive the service.
+        # Terminate any in-flight download processes so they don't outlive the service.
         for model_id in list(self._reranker_jobs):
             self.cancel_reranker_download(model_id)
+        for model_id in list(self._embedder_jobs):
+            self.cancel_embedder_download(model_id)
         self.vector_store.close()
         unregister_live_service(self)
 
@@ -496,9 +504,16 @@ class KnowledgeService:
         # asyncio.to_thread cannot be killed). A subprocess (vs. multiprocessing) avoids
         # re-importing the server's __main__ on Windows spawn.
         proc = subprocess.Popen(
-            [sys.executable, "-m", "hirocli.services.knowledge.download_entry", model_id, str(cache)],
+            [
+                sys.executable,
+                "-m",
+                "hirocli.services.knowledge.download_entry",
+                "reranker",
+                model_id,
+                str(cache),
+            ],
         )
-        self._reranker_jobs[model_id] = _RerankerDownloadJob(
+        self._reranker_jobs[model_id] = _DownloadJob(
             process=proc,
             baseline_bytes=dir_size_bytes(cache),
             expected_bytes=parse_size_label(spec.size_label),
@@ -586,6 +601,155 @@ class KnowledgeService:
                     "display_name": spec.display_name,
                     "backend": spec.backend,
                     "size_label": spec.size_label,
+                    "languages": spec.languages,
+                    "multilingual": spec.multilingual,
+                    "description": spec.description,
+                    "downloaded": downloaded,
+                    "status": status,
+                    "error": error if status == "error" else None,
+                    "percent": percent,
+                    "downloaded_bytes": downloaded_bytes,
+                    "total_bytes": total_bytes,
+                }
+            )
+        return rows
+
+    # --- Local embedder downloads (same killable-subprocess mechanism as rerankers) -----------
+
+    async def download_embedder(self, model_id: str) -> dict[str, Any]:
+        """Download a local embedder's weights synchronously (blocking; for owned services)."""
+        from hirocli.services.knowledge.embedder_registry import (
+            download,
+            embedder_cache_dir,
+            get_local_embedder,
+        )
+
+        spec = get_local_embedder(model_id)
+        if spec is None:
+            raise KeyError(f"Unknown local embedder: {model_id}")
+        await asyncio.to_thread(download, spec, embedder_cache_dir(self.workspace_path))
+        return {"model_id": model_id, "status": "ready"}
+
+    def start_embedder_download(self, model_id: str) -> dict[str, Any]:
+        """Start a local-embedder download in a killable spawn process and return immediately."""
+        from hirocli.services.knowledge.download_markers import (
+            dir_size_bytes,
+            parse_size_label,
+        )
+        from hirocli.services.knowledge.embedder_registry import (
+            embedder_cache_dir,
+            get_local_embedder,
+            is_downloaded,
+        )
+
+        spec = get_local_embedder(model_id)
+        if spec is None:
+            raise KeyError(f"Unknown local embedder: {model_id}")
+        cache = embedder_cache_dir(self.workspace_path)
+        if is_downloaded(spec, cache):
+            return {"model_id": model_id, "status": "ready"}
+        existing = self._embedder_jobs.get(model_id)
+        if existing is not None and existing.process.poll() is None:
+            return {"model_id": model_id, "status": "downloading"}
+        self._embedder_errors.pop(model_id, None)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "hirocli.services.knowledge.download_entry",
+                "embedder",
+                model_id,
+                str(cache),
+            ],
+        )
+        self._embedder_jobs[model_id] = _DownloadJob(
+            process=proc,
+            baseline_bytes=dir_size_bytes(cache),
+            expected_bytes=parse_size_label(spec.size_label),
+        )
+        log.info("⬇️ Embedder download started — %s", model_id, size=spec.size_label)
+        return {"model_id": model_id, "status": "downloading"}
+
+    def cancel_embedder_download(self, model_id: str) -> dict[str, Any]:
+        """Terminate an in-flight local-embedder download (best-effort kill of the subprocess)."""
+        job = self._embedder_jobs.pop(model_id, None)
+        if job is None:
+            return {"model_id": model_id, "status": "available"}
+        job.cancelled = True
+        try:
+            if job.process.poll() is None:
+                job.process.terminate()
+                try:
+                    job.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    job.process.kill()
+        except Exception:
+            log.warning("⚠️ Embedder download cancel failed — %s", model_id, exc_info=True)
+        self._embedder_errors.pop(model_id, None)
+        log.info("🛑 Embedder download cancelled — %s", model_id)
+        return {"model_id": model_id, "status": "cancelled"}
+
+    def _poll_embedder_jobs(self) -> None:
+        """Reap finished embedder download subprocesses: success → marker (ready); else error."""
+        from hirocli.services.knowledge.embedder_registry import (
+            embedder_cache_dir,
+            get_local_embedder,
+            is_downloaded,
+        )
+
+        cache = embedder_cache_dir(self.workspace_path)
+        for model_id, job in list(self._embedder_jobs.items()):
+            if job.process.poll() is None:
+                continue
+            self._embedder_jobs.pop(model_id, None)
+            if job.cancelled:
+                continue
+            spec = get_local_embedder(model_id)
+            if spec is not None and is_downloaded(spec, cache):
+                continue  # success — marker present
+            self._embedder_errors[model_id] = f"download failed (exit {job.process.returncode})"
+            log.error("❌ Embedder download failed — %s · exit %s", model_id, job.process.returncode)
+
+    def embedder_options(self) -> list[dict[str, Any]]:
+        """Local embedder registry rows with per-model download status + byte progress."""
+        from hirocli.services.knowledge.download_markers import dir_size_bytes
+        from hirocli.services.knowledge.embedder_registry import (
+            embedder_cache_dir,
+            is_downloaded,
+            list_local_embedders,
+        )
+
+        self._poll_embedder_jobs()
+        cache = embedder_cache_dir(self.workspace_path)
+        current_bytes: int | None = None  # computed once, only if a download is active
+        rows: list[dict[str, Any]] = []
+        for spec in list_local_embedders():
+            downloaded = is_downloaded(spec, cache)
+            job = self._embedder_jobs.get(spec.id)
+            error = self._embedder_errors.get(spec.id)
+            percent: int | None = None
+            downloaded_bytes: int | None = None
+            total_bytes: int | None = None
+            if downloaded:
+                status = "ready"
+            elif job is not None and job.process.poll() is None:
+                status = "downloading"
+                if current_bytes is None:
+                    current_bytes = dir_size_bytes(cache)
+                downloaded_bytes = max(0, current_bytes - job.baseline_bytes)
+                total_bytes = job.expected_bytes or None
+                if job.expected_bytes > 0:
+                    percent = min(99, int(downloaded_bytes / job.expected_bytes * 100))
+            elif error:
+                status = "error"
+            else:
+                status = "available"
+            rows.append(
+                {
+                    "id": spec.id,
+                    "display_name": spec.display_name,
+                    "size_label": spec.size_label,
+                    "dimension": spec.dimension,
                     "languages": spec.languages,
                     "multilingual": spec.multilingual,
                     "description": spec.description,

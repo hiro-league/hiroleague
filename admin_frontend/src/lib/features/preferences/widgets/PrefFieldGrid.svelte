@@ -8,9 +8,10 @@
    * viewports). `cols={3}` is the explicit exception for dense numeric rows. `items-start` keeps
    * uneven-height neighbours top-aligned (a field with a long label/tooltip next to a short one).
    *
-   * Inherently-wide controls (model pickers, prompt editors, the extraction textarea) stay OUTSIDE
-   * this grid as full-width siblings in the card body — no in-grid full-span case exists yet; add a
-   * `md:col-span-full` opt-in on the field if one appears.
+   * Model pickers can sit in grid cells too (see the Default models card), so the 2-column layout
+   * holds for them like everything else. Genuinely full-bleed controls (prompt editors, the
+   * extraction textarea) still live OUTSIDE this grid as full-width siblings; add a
+   * `md:col-span-full` opt-in on a field if you need an in-grid full-span row.
    */
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';

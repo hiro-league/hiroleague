@@ -1,6 +1,6 @@
 <script lang="ts">
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { KNOWLEDGE_LANGUAGE_POLICY_LABELS } from '$lib/features/preferences/shared/preferences-enum-labels';
   import { knowledgeAnsweringModelHint } from '$lib/features/preferences/shared/preferences-helpers';
@@ -19,7 +19,7 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Knowledge answering (Ask Tab only)"
     description={knowledgeAnsweringModelHint(ctrl.draft)}
     collapsible
@@ -66,5 +66,5 @@
         bind:value={ctrl.draft.knowledge.answering.language_policy}
       />
     </PrefFieldGrid>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

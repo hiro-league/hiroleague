@@ -86,12 +86,17 @@ class KnowledgeManager:
         changed_workspace_path: Path,
         changes: dict[str, tuple[object, object]],
     ) -> None:
-        transition = changes.get("knowledge.default_embedding_model")
+        # React to the knowledge override OR the workspace default — either can change the
+        # effective knowledge embedder (resolve_knowledge_embedder_model accounts for which wins).
+        transition = changes.get("knowledge.default_embedding_model") or changes.get(
+            "llm.default_embedder"
+        )
         if transition is None or transition[0] == transition[1]:
             return
         if self._closed:
             return
         from hirocli.domain.credential_store import CredentialStore
+        from hirocli.domain.preferences import resolve_knowledge_embedder_model
         from hirocli.domain.workspace import workspace_id_for_path
         from hirocli.services.knowledge.embedder import resolve_knowledge_embedder
 
@@ -103,7 +108,7 @@ class KnowledgeManager:
         new_embedder = await asyncio.to_thread(
             resolve_knowledge_embedder,
             changed_workspace_path,
-            prefs.knowledge.default_embedding_model_resolved,
+            resolve_knowledge_embedder_model(prefs),
             credential_store=reload_cred_store,
         )
         await asyncio.to_thread(self.service.reload_embedder, new_embedder)

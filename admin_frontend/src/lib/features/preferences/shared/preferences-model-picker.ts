@@ -9,6 +9,8 @@ export type PrefModelIdPath =
   | 'llm.default_chat'
   | 'llm.default_stt'
   | 'llm.default_tts'
+  | 'llm.default_reranker'
+  | 'llm.default_embedder'
   | 'knowledge.default_embedding_model'
   | 'knowledge.answering.model'
   | 'knowledge.retrieval.reranker.model_id'
@@ -102,6 +104,12 @@ export function applyModelIdToDraft(
       return true;
     case 'llm.default_tts':
       draft.llm.default_tts = id;
+      return true;
+    case 'llm.default_reranker':
+      draft.llm.default_reranker = id;
+      return true;
+    case 'llm.default_embedder':
+      draft.llm.default_embedder = id;
       return true;
     case 'knowledge.default_embedding_model':
       if (draft.knowledge.default_embedding_model_locked) return false;

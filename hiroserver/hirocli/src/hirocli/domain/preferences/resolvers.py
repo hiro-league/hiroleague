@@ -483,15 +483,59 @@ def resolve_eval_retrieval_llm(
     )
 
 
-def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str:
-    """Graphiti pivot — the embedder model id for node/fact embeddings.
+def resolve_knowledge_embedder_model(prefs: WorkspacePreferences) -> str | None:
+    """Knowledge embedder id — the knowledge override (``knowledge.default_embedding_model``)
+    when set, else the workspace default (``llm.default_embedder``).
 
-    ``knowledge.graph.embedder_model`` when set, else the shared knowledge dense
-    embedder (decision G8). Pure preference read — no availability check (the
-    embedder is resolved by ``create_embedding_model`` at bootstrap)."""
+    ``None`` = no embedder configured anywhere. Embedding is mandatory and dimension-bound, so
+    there is no silent fallback: callers must gate ingest/query on ``None`` rather than forcing a
+    model. Pure preference read — availability/download is checked by ``resolve_knowledge_embedder``
+    at use time."""
+    return (
+        (prefs.knowledge.default_embedding_model or "").strip()
+        or (prefs.llm.default_embedder or "").strip()
+        or None
+    )
+
+
+def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str | None:
+    """Graphiti embedder id for node/fact embeddings — the graph override
+    (``graph.embedder_model``) when set, else the workspace default (``llm.default_embedder``).
+
+    ``None`` = no embedder configured; the graph build/ingest must gate on this rather than
+    forcing a model (decision: no silent default). Pure preference read."""
     return (
         prefs.graph.embedder_model_resolved
-        or prefs.knowledge.default_embedding_model_resolved
+        or (prefs.llm.default_embedder or "").strip()
+        or None
+    )
+
+
+def resolve_knowledge_reranker_model(prefs: WorkspacePreferences) -> str | None:
+    """Knowledge retrieval reranker model id.
+
+    The knowledge-specific override (``knowledge.retrieval.reranker.model_id``) when set,
+    else the workspace default reranker (``llm.default_reranker``). ``None`` = no reranker
+    (retrieval order kept). Pure preference read — availability/download is checked by
+    ``resolve_reranker`` at use time."""
+    return (
+        (prefs.knowledge.retrieval.reranker.model_id or "").strip()
+        or (prefs.llm.default_reranker or "").strip()
+        or None
+    )
+
+
+def resolve_graph_reranker_model(prefs: WorkspacePreferences) -> str | None:
+    """Graph fact-search reranker model id.
+
+    The graph-specific override (``graph.reranker.model_id``) when set, else the workspace
+    default reranker (``llm.default_reranker``). ``None`` = degrade the ``cross_encoder``
+    search recipe to RRF. Pure preference read — availability is checked by
+    ``resolve_reranker`` at use time."""
+    return (
+        (prefs.graph.reranker.model_id or "").strip()
+        or (prefs.llm.default_reranker or "").strip()
+        or None
     )
 
 

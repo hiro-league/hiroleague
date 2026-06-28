@@ -22,7 +22,7 @@ def create_knowledge_service(
     credential_store: CredentialStore | None = None,
 ) -> KnowledgeService:
     """Create the workspace-local knowledge service."""
-    from hirocli.domain.preferences import load_preferences
+    from hirocli.domain.preferences import load_preferences, resolve_knowledge_embedder_model
 
     from .embedder import resolve_knowledge_embedder
 
@@ -34,7 +34,7 @@ def create_knowledge_service(
     effective_prefs = provider() if provider is not None else load_preferences(workspace_path)
     embedder = resolve_knowledge_embedder(
         workspace_path,
-        effective_prefs.knowledge.default_embedding_model_resolved,
+        resolve_knowledge_embedder_model(effective_prefs),
         credential_store=credential_store,
     )
     return KnowledgeService(workspace_path, embedder=embedder, prefs_provider=provider)

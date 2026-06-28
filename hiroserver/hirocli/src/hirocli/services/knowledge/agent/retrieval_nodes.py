@@ -28,7 +28,11 @@ from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import StreamWriter
 
 from hirocli.domain.model_factory import create_chat_model, with_structured_output_compat
-from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_REWRITE_PROMPT
+from hirocli.domain.preferences import (
+    DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
+    resolve_knowledge_embedder_model,
+    resolve_knowledge_reranker_model,
+)
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
 from hirocli.runtime.agent_graph.graph_kit import (
     KNOWLEDGE_PREVIEW_MAX,
@@ -408,17 +412,21 @@ class KnowledgeRetrievalNodes(NodeGroup):
     @graph_logged(captures={"usage", "decision"}, on_error="mixed")
     async def embed_query_node(self, state: KnowledgeAgentState) -> dict[str, Any]:
         normalized = state["normalized_query"]
-        embedding_model = self._prefs.knowledge.default_embedding_model_resolved
+        # Effective knowledge embedder (override → workspace default); None when unconfigured —
+        # the embed below then fails fast (no silent model). For the ledger model column only.
+        embedding_model = resolve_knowledge_embedder_model(self._prefs)
         hybrid = self._prefs.knowledge.retrieval.hybrid
         sparse_model = self._prefs.knowledge.retrieval.sparse_model
         # Put the embedding model in the model column and an estimated input-token count so the
         # ledger prices it (gross list price; embedding pricing is input-only). Local/free
         # embedders aren't catalogued → cost stays blank.
-        provider = embedding_model.split(":", 1)[0] if ":" in embedding_model else ""
+        provider = (
+            embedding_model.split(":", 1)[0] if embedding_model and ":" in embedding_model else ""
+        )
         observe(
             usage={
                 "provider": provider,
-                "model": embedding_model,
+                "model": embedding_model or "",
                 "input_tokens": estimate_text_tokens(normalized.text),
             },
             input=(
@@ -512,10 +520,13 @@ class KnowledgeRetrievalNodes(NodeGroup):
         # Prefs-only, default off. Fails safe: any error logs and returns {} so the fused
         # retrieval order is kept — reranking never blocks an answer.
         reranker = self._prefs.knowledge.retrieval.reranker
+        # Resolve the effective model: the knowledge override, else the workspace default
+        # reranker (llm.default_reranker). None = nothing configured anywhere → skip.
+        model_id = resolve_knowledge_reranker_model(self._prefs)
         hits = state.get("hits") or []
         # Record WHY we skipped instead of writing a blank row — a node that ran should never be a
         # black box.
-        if not reranker.enabled or not reranker.model_id:
+        if not reranker.enabled or not model_id:
             reason = "disabled" if not reranker.enabled else "no_model"
             observe(
                 decision=("skipped", reason),
@@ -525,7 +536,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
         if not hits:
             observe(decision=("skipped", "no_candidates"), output="no candidates to rerank")
             return {}
-        provider = reranker.model_id.split(":", 1)[0] if ":" in reranker.model_id else ""
+        provider = model_id.split(":", 1)[0] if ":" in model_id else ""
         normalized = state["normalized_query"]
         # Estimate billed work (gross list price; free tiers ignored). Voyage-style processed
         # tokens = query_tokens × #candidates + sum(candidate doc tokens); Cohere prices per search
@@ -536,7 +547,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
         observe(
             usage={
                 "provider": provider,
-                "model": reranker.model_id,
+                "model": model_id,
                 "input_tokens": processed_tokens,
             },
             input=f"candidates: {len(hits)} · top_n: {reranker.top_n}",
@@ -545,7 +556,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
             reranked = await self._service.rerank_hits(
                 normalized.text,
                 hits,
-                model_id=reranker.model_id,
+                model_id=model_id,
                 top_n=reranker.top_n,
                 device=reranker.device,
                 workspace_id=self._workspace_id,
@@ -554,7 +565,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
             log.warning(
                 "⚠️ knowledge.rerank — failed, using retrieval order",
                 error=str(exc)[:200],
-                model=reranker.model_id,
+                model=model_id,
                 exc_info=True,
             )
             observe(fail={"code": "rerank_failed", "message": str(exc)})

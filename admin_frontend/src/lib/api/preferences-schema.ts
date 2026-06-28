@@ -14,6 +14,8 @@ export type PreferenceFieldMeta = {
   writeWhole?: boolean;
   preferencesSaveSkip?: boolean;
   model_kind?: string;
+  /** Display-only: when true the admin UI hides this field behind the "show advanced" toggle. */
+  advanced?: boolean;
 };
 
 export type PreferencesSchemaPayload = {

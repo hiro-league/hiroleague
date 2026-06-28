@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import { usePrefFieldVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
   import {
     preferenceFieldMeta,
     preferenceHint,
+    preferenceIsAdvanced,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
   import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
@@ -34,14 +36,17 @@
 
   const meta = $derived(preferenceFieldMeta(ctrl.fieldSchema, path));
   const hintText = $derived(hintOverride ?? preferenceHint(meta));
+  const vis = usePrefFieldVisibility(() => preferenceIsAdvanced(meta));
 </script>
 
-<SettingToggle
-  {label}
-  hint={hintText}
-  {details}
-  bind:checked
-  {disabled}
-  class={className}
-  onchange={ctrl.markDirty}
-/>
+{#if vis.visible}
+  <SettingToggle
+    {label}
+    hint={hintText}
+    {details}
+    bind:checked
+    {disabled}
+    class={className}
+    onchange={ctrl.markDirty}
+  />
+{/if}

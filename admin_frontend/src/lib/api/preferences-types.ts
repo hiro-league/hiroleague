@@ -5,7 +5,7 @@
 import type {
   AnswerPromptProfile,
   ChatPreferences,
-  GraphPreferences,
+  GraphPreferences as GeneratedGraphPreferences,
   ImageProfile,
   KnowledgePreferences as GeneratedKnowledgePreferences,
   KnowledgeAnsweringPreferences as GeneratedKnowledgeAnsweringPreferences,
@@ -20,7 +20,6 @@ import type {
 export type {
   AnswerPromptProfile,
   ChatPreferences,
-  GraphPreferences,
   ImageProfile,
   ImageProfile as ImageProfilePreference,
   KnowledgeRerankerPreferences,
@@ -39,12 +38,21 @@ export type KnowledgeAnsweringPreferences = GeneratedKnowledgeAnsweringPreferenc
 
 /** Persisted knowledge prefs plus admin GET payload enrichments. */
 export type KnowledgePreferences = Omit<GeneratedKnowledgePreferences, 'answering'> & {
-  default_embedding_model_resolved?: string | null;
+  // Lock flag (admin GET enrichment): true once the knowledge collection has points, so the
+  // knowledge embedder override can't change (dimension-bound). The resolved value is no longer
+  // sent — the empty box inherits llm.default_embedder directly.
   default_embedding_model_locked?: boolean;
   answering: KnowledgeAnsweringPreferences;
 };
 
+/** Persisted graph prefs plus admin GET payload enrichments. */
+export type GraphPreferences = GeneratedGraphPreferences & {
+  // True once the graph has been indexed — locks the graph embedder override (dimension-bound).
+  embedder_model_locked?: boolean;
+};
+
 /** Workspace preferences as returned by GET/PATCH (persisted shape + computed fields). */
-export type WorkspacePreferences = Omit<GeneratedWorkspacePreferences, 'knowledge'> & {
+export type WorkspacePreferences = Omit<GeneratedWorkspacePreferences, 'knowledge' | 'graph'> & {
   knowledge: KnowledgePreferences;
+  graph: GraphPreferences;
 };

@@ -16,8 +16,11 @@ from hirocli.domain.preferences import (
     GraphPreferences,
     WorkspacePreferences,
     default_tuning_profiles,
+    resolve_graph_reranker_model,
     resolve_graphiti_embedder_model,
     resolve_graphiti_extraction_model,
+    resolve_knowledge_embedder_model,
+    resolve_knowledge_reranker_model,
 )
 
 
@@ -93,13 +96,20 @@ def test_mmr_rejected_for_all_episodes_scopes() -> None:
     assert GraphPreferences(search_scope="edges_and_episodes", search_recipe="cross_encoder")
 
 
-def test_embedder_resolver_falls_back_to_knowledge_default() -> None:
+def test_embedder_resolvers_fall_back_to_workspace_default() -> None:
     prefs = WorkspacePreferences()
-    # Unset graph embedder → shares the knowledge dense embedder (G8).
-    assert resolve_graphiti_embedder_model(prefs) == prefs.knowledge.default_embedding_model_resolved
-    # Explicit graph embedder wins.
+    # No forced default: nothing set anywhere → None (indexing is gated, no silent model).
+    assert resolve_graphiti_embedder_model(prefs) is None
+    assert resolve_knowledge_embedder_model(prefs) is None
+    # The workspace default (llm.default_embedder) feeds BOTH legs when neither overrides.
+    prefs.llm.default_embedder = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    assert resolve_graphiti_embedder_model(prefs) == prefs.llm.default_embedder
+    assert resolve_knowledge_embedder_model(prefs) == prefs.llm.default_embedder
+    # Per-leg overrides win over the default.
     prefs.graph.embedder_model = "openai:text-embedding-3-small"
+    prefs.knowledge.default_embedding_model = "openai:text-embedding-3-large"
     assert resolve_graphiti_embedder_model(prefs) == "openai:text-embedding-3-small"
+    assert resolve_knowledge_embedder_model(prefs) == "openai:text-embedding-3-large"
 
 
 def test_extraction_resolver_none_when_no_model_configured(tmp_path) -> None:
@@ -110,10 +120,28 @@ def test_extraction_resolver_none_when_no_model_configured(tmp_path) -> None:
     assert resolve_graphiti_extraction_model(prefs, tmp_path, workspace_id="w") is None
 
 
+def test_reranker_resolvers_fall_back_to_default() -> None:
+    prefs = WorkspacePreferences()
+    # Nothing set anywhere → no reranker for either leg.
+    assert resolve_knowledge_reranker_model(prefs) is None
+    assert resolve_graph_reranker_model(prefs) is None
+
+    # The workspace default reranker feeds BOTH legs when neither sets its own model.
+    prefs.llm.default_reranker = "cohere:rerank-v3.5"
+    assert resolve_knowledge_reranker_model(prefs) == "cohere:rerank-v3.5"
+    assert resolve_graph_reranker_model(prefs) == "cohere:rerank-v3.5"
+
+    # Per-leg overrides win over the default.
+    prefs.knowledge.retrieval.reranker.model_id = "local:bge-reranker-v2-m3"
+    prefs.graph.reranker.model_id = "voyage:rerank-2"
+    assert resolve_knowledge_reranker_model(prefs) == "local:bge-reranker-v2-m3"
+    assert resolve_graph_reranker_model(prefs) == "voyage:rerank-2"
+
+
 def test_graph_reranker_defaults() -> None:
     # Cross-encoder reranker sub-prefs: off-by-default, no model, no gate.
     rr = WorkspacePreferences().graph.reranker
-    assert rr.model_id is None  # null → reuse the shared knowledge reranker
+    assert rr.model_id is None  # null → fall back to the workspace default reranker
     assert rr.min_relevance == 0.0  # keep all (gate disabled)
     assert rr.device is None
 

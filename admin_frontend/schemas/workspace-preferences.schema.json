@@ -598,6 +598,7 @@
           "type": "integer"
         },
         "embed_structural_context": {
+          "advanced": true,
           "default": true,
           "description": "Prefix each chunk's embedded text with its document title and heading path so every chunk \u2014 including continuation pieces \u2014 carries its section context. Applies to new ingests; changing this requires re-ingesting existing documents.",
           "title": "Embed Structural Context",
@@ -617,7 +618,7 @@
       ]
     },
     "KnowledgeGraphRerankerPreferences": {
-      "description": "Cross-encoder reranker for the graph fact-search leg.\n\nOnly takes effect when ``GraphPreferences.search_recipe == 'cross_encoder'``\n(the admin UI greys this whole group out otherwise). Every field is resolved by the\nSAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and\nlocal (FlashRank/FastEmbed/sentence-transformers) models are both available \u2014 and a\nlocal model that was never downloaded fails fast, degrading the fact search to RRF\n(no silent fetch). ``model_id`` null = reuse the knowledge reranker model\n(``knowledge.retrieval.reranker.model_id``) \u2014 one model to manage (the G8 play).",
+      "description": "Cross-encoder reranker for the graph fact-search leg.\n\nOnly takes effect when ``GraphPreferences.search_recipe == 'cross_encoder'``\n(the admin UI greys this whole group out otherwise). Every field is resolved by the\nSAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and\nlocal (FlashRank/FastEmbed/sentence-transformers) models are both available \u2014 and a\nlocal model that was never downloaded fails fast, degrading the fact search to RRF\n(no silent fetch). ``model_id`` null = fall back to the workspace default reranker\n(``llm.default_reranker``) \u2014 one model to manage for both legs.",
       "properties": {
         "model_id": {
           "anyOf": [
@@ -629,7 +630,7 @@
             }
           ],
           "default": null,
-          "description": "Cross-encoder used to rerank fact candidates. Empty = reuse the knowledge Reranker model (one model to manage). Local models must be downloaded first.",
+          "description": "Cross-encoder used to rerank fact candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
           "model_kind": "rerank",
           "title": "Model Id"
         },
@@ -676,7 +677,7 @@
             }
           ],
           "default": null,
-          "description": "Null uses the local multilingual FastEmbed default shown above.",
+          "description": "Knowledge embedder. Empty inherits the workspace default (General \u2192 Models).",
           "model_kind": "embedding",
           "title": "Default Embedding Model"
         },
@@ -710,7 +711,7 @@
       ]
     },
     "KnowledgeRerankerPreferences": {
-      "description": "Cross-encoder reranker over retrieved candidates (precision step).\n\nPrefs-only, default off. ``model_id`` is a catalog ``provider:model`` (cloud: Voyage /\nCohere) OR a local-registry id (FlashRank / FastEmbed / sentence-transformers). It is\nresolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` \u2014 the same way\n``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a\nswap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local\ntorch lane only and are ignored by cloud models. ``model_id`` null = no reranker (retrieval\norder used as-is) even when ``enabled`` is true.",
+      "description": "Cross-encoder reranker over retrieved candidates (precision step).\n\nPrefs-only, default off. ``model_id`` is a catalog ``provider:model`` (cloud: Voyage /\nCohere) OR a local-registry id (FlashRank / FastEmbed / sentence-transformers). It is\nresolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` \u2014 the same way\n``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a\nswap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local\ntorch lane only and are ignored by cloud models. ``model_id`` null = fall back to the\nworkspace default reranker (``llm.default_reranker``); if that is empty too, no reranker\n(retrieval order used as-is) even when ``enabled`` is true.",
       "properties": {
         "enabled": {
           "default": false,
@@ -727,6 +728,7 @@
             }
           ],
           "default": null,
+          "description": "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
           "model_kind": "rerank",
           "title": "Model Id"
         },
@@ -883,6 +885,34 @@
           "model_kind": "tts",
           "title": "Default Tts"
         },
+        "default_reranker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default cross-encoder reranker. The knowledge and graph rerankers both fall back to this when their own model is empty. Empty = no default. Cloud models need a provider key; local models must be downloaded first.",
+          "model_kind": "rerank",
+          "title": "Default Reranker"
+        },
+        "default_embedder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.",
+          "model_kind": "embedding",
+          "title": "Default Embedder"
+        },
         "default_image_gen": {
           "anyOf": [
             {
@@ -915,6 +945,8 @@
         "default_chat",
         "default_stt",
         "default_tts",
+        "default_reranker",
+        "default_embedder",
         "default_image_gen",
         "default_tuning_profile",
         "default_image_profile"

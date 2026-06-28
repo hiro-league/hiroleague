@@ -1,6 +1,6 @@
 <script lang="ts">
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
@@ -30,7 +30,7 @@
   {/if}
 
   {#if ctrl.draft}
-    <SectionCardMuted
+    <PrefSectionCard
       title="Chat Settings"
       description="Conversation window and knowledge citations for chat replies."
       collapsible
@@ -41,6 +41,7 @@
           {ctrl}
           path="memory.user_name"
           label="Your name"
+          hint="Anchors your remembered facts to a named person in the memory graph (instead of a generic “User”). Set this once, early. Changing it later won’t rename existing memories — it starts a separate identity and fragments recall. Leave blank to use “User”."
           maxlength={120}
           placeholder="e.g. Misho"
           disabled={ctrl.busy}
@@ -53,34 +54,43 @@
           bind:value={ctrl.draft.chat.max_messages}
         />
       </PrefFieldGrid>
-      <span class="text-xs text-muted-foreground">
-        Anchors your remembered facts to a named person in the memory graph (instead of a generic
-        “User”). <strong>Set this once, early.</strong> Changing it later won’t rename existing
-        memories — it starts a separate identity and fragments recall. Leave blank to use “User”.
-      </span>
 
+      <!-- Toggles stacked in the left column so chat instructions fills the right column —
+           one grid column wide each, both columns used. -->
       <PrefFieldGrid>
-        <PrefToggleField
+        <div class="grid gap-3">
+          <PrefToggleField
+            {ctrl}
+            path="chat.cite_sources"
+            label="Cite knowledge sources in chat replies"
+            disabled={ctrl.busy}
+            bind:checked={ctrl.draft.chat.cite_sources}
+          />
+          <PrefToggleField
+            {ctrl}
+            path="chat.tools_enabled"
+            label="Enable agent tools in chat"
+            disabled={ctrl.busy}
+            bind:checked={ctrl.draft.chat.tools_enabled}
+          />
+        </div>
+
+        <!-- Chat instructions moved in from its own section; old section description kept as the tooltip. -->
+        <PromptField
           {ctrl}
-          path="chat.cite_sources"
-          label="Cite knowledge sources in chat replies"
-          disabled={ctrl.busy}
-          bind:checked={ctrl.draft.chat.cite_sources}
-        />
-        <PrefToggleField
-          {ctrl}
-          path="chat.tools_enabled"
-          label="Enable agent tools in chat"
-          disabled={ctrl.busy}
-          bind:checked={ctrl.draft.chat.tools_enabled}
+          path="chat.instructions"
+          label="Chat instructions"
+          hint="General answering guidance injected into the current user turn (ahead of the question), alongside any retrieved knowledge and memories. Authored in Markdown; sent to the model as text."
+          ariaLabel="Chat answering instructions (markdown)"
+          editorLabel="Instructions markdown editor"
         />
       </PrefFieldGrid>
-    </SectionCardMuted>
+    </PrefSectionCard>
 
     <!-- Consolidated here from the removed "Agent Memory" tab — these toggles bound to the same
          memory.* fields that used to be duplicated on both tabs. Recall/remember + top_k are gated
          by the master "Enable agent memory" switch. -->
-    <SectionCardMuted
+    <PrefSectionCard
       title="Agent memory"
       description="Long-term conversation memory on the shared Graphiti graph engine — the agent remembers facts from the user's messages and recalls them on later turns. The models, embedder, and graph search it uses live in the Graph Engine tab."
       collapsible
@@ -119,21 +129,6 @@
           bind:value={ctrl.draft.memory.search.top_k}
         />
       </PrefFieldGrid>
-    </SectionCardMuted>
-
-    <SectionCardMuted
-      title="Chat instructions"
-      description="General answering guidance injected into the current user turn (ahead of the question), alongside any retrieved knowledge and memories. Authored in Markdown; sent to the model as text."
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.agentChatInstructions}
-    >
-      <PromptField
-        {ctrl}
-        path="chat.instructions"
-        label="Chat instructions"
-        ariaLabel="Chat answering instructions (markdown)"
-        editorLabel="Instructions markdown editor"
-      />
-    </SectionCardMuted>
+    </PrefSectionCard>
   {/if}
 </div>

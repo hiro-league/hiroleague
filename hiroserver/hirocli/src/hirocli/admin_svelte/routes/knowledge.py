@@ -173,6 +173,10 @@ class DownloadRerankerBody(BaseModel):
     model_id: str
 
 
+class DownloadEmbedderBody(BaseModel):
+    model_id: str
+
+
 class CreateCategoryBody(BaseModel):
     name: str
     parent_id: int | None = None
@@ -376,6 +380,78 @@ async def cancel_reranker_download(
     except Exception as exc:
         log.error(
             "knowledge reranker cancel failed",
+            model_id=body.model_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.get("/knowledge/embedders")
+async def list_embedders(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Local embedder registry rows with per-model download status.
+
+    Cloud embedders come from the catalog (``/catalog/models?model_kind=embedding``); the admin
+    picker merges the two sources.
+    """
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            return _success({"local": service.embedder_options()})
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error("knowledge list embedders failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/embedders/download")
+async def download_embedder(
+    body: DownloadEmbedderBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Download a local embedder's weights. Background on the live workspace (UI polls
+    ``GET /knowledge/embedders``); blocking for a short-lived (owned) service."""
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            if owned:
+                return _success(await service.download_embedder(body.model_id))
+            return _success(service.start_embedder_download(body.model_id))
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error(
+            "knowledge embedder download failed",
+            model_id=body.model_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        return envelope_failure(str(exc))
+
+
+@knowledge_router.post("/knowledge/embedders/cancel")
+async def cancel_embedder_download(
+    body: DownloadEmbedderBody,
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Cancel an in-flight local-embedder download (terminates the download process)."""
+    try:
+        service, owned = await _resolve_service(request, workspace_id)
+        try:
+            if owned:
+                return _success({"model_id": body.model_id, "status": "available"})
+            return _success(service.cancel_embedder_download(body.model_id))
+        finally:
+            await _close_if_owned(service, owned)
+    except Exception as exc:
+        log.error(
+            "knowledge embedder cancel failed",
             model_id=body.model_id,
             error=str(exc),
             exc_info=True,

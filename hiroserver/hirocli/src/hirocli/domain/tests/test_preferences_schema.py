@@ -34,6 +34,15 @@ def test_chunking_fields_expose_bounds_and_descriptions() -> None:
     assert respect_headings["description"]
 
 
+def test_advanced_flag_surfaces_and_defaults_absent() -> None:
+    """`json_schema_extra={"advanced": True}` reaches the flat field map; basic fields omit it."""
+    fields = workspace_preferences_field_map()
+    # Seeded demo advanced field (see KnowledgeChunkingPreferences.embed_structural_context).
+    assert fields["knowledge.chunking.embed_structural_context"]["advanced"] is True
+    # Untagged fields stay basic — the key is absent (default), not False.
+    assert "advanced" not in fields["knowledge.chunking.chunk_size"]
+
+
 def test_embedding_model_is_nullable_with_model_kind() -> None:
     fields = workspace_preferences_field_map()
     embed = fields["knowledge.default_embedding_model"]
@@ -65,7 +74,9 @@ def test_field_map_tags_for_save_policy() -> None:
     assert fields["llm.default_chat"]["nullable"] is True
     assert fields["graph.reranker.device"]["nullable"] is True
     assert fields["image_profiles"]["preferencesSaveSkip"] is True
-    assert fields["knowledge.default_embedding_model_resolved"]["readOnly"] is True
+    assert fields["knowledge.default_embedding_model_locked"]["readOnly"] is True
+    assert fields["graph.embedder_model_locked"]["readOnly"] is True
+    assert fields["llm.default_embedder"]["model_kind"] == "embedding"
 
 
 def test_json_schema_marks_nested_properties_required() -> None:

@@ -12,7 +12,6 @@ from hiro_commons.log import Logger
 
 from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
 from hirocli.services.knowledge.constants import (
-    DEFAULT_EMBEDDING_MODEL,
     DEFAULT_SPARSE_MODEL,
     KNOWLEDGE_DIR,
 )
@@ -87,16 +86,44 @@ class CatalogEmbeddingsBackend:
             raise
 
 
+class UnconfiguredEmbedder:
+    """Placeholder embedder for when no model is configured (default + override both empty).
+
+    Embedding is mandatory and there is NO forced default, so resolution returns this instead of
+    silently picking a model. It lets the service be constructed (browsing/listing still works) but
+    fails fast with a clear message the moment any embed/dimension is actually needed (ingest or
+    query) — i.e. indexing is blocked until the user chooses an embedder.
+    """
+
+    model_name = ""
+
+    @property
+    def dimension(self) -> int:
+        raise RuntimeError(
+            "No embedder configured. Choose one in Preferences → General → Default models "
+            "(or set a Knowledge/Graph embedder) before indexing or searching."
+        )
+
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        # Reuse the dimension guard's message — same root cause (nothing to embed with).
+        _ = self.dimension
+        return []
+
+
 def resolve_knowledge_embedder(
     workspace_path: Path,
-    model_id: str,
+    model_id: str | None,
     *,
     credential_store: CredentialStore | None = None,
 ) -> EmbeddingBackend:
-    """Build the active knowledge embedder from a resolved model id."""
-    resolved = (model_id or DEFAULT_KNOWLEDGE_EMBEDDING_MODEL).strip()
+    """Build the active knowledge embedder from a resolved model id.
+
+    No forced default: an empty ``model_id`` yields an ``UnconfiguredEmbedder`` (raises on use)
+    rather than silently falling back to a built-in model.
+    """
+    resolved = (model_id or "").strip()
     if not resolved:
-        resolved = DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
+        return UnconfiguredEmbedder()
 
     if _is_catalog_embedding_model(resolved):
         from hirocli.domain.model_factory import (
@@ -115,12 +142,16 @@ def resolve_knowledge_embedder(
             dimension=catalog_embedding_dimensions(resolved),
         )
 
-    fastembed_name = (
-        resolved if resolved.startswith("sentence-transformers/") else DEFAULT_EMBEDDING_MODEL
-    )
-    return FastEmbedBackend(
-        model_name=fastembed_name,
-        cache_dir=workspace_path / KNOWLEDGE_DIR / "fastembed_cache",
+    # Local FastEmbed lane: sentence-transformers/* ids (the local-embedder registry uses these).
+    if resolved.startswith("sentence-transformers/"):
+        return FastEmbedBackend(
+            model_name=resolved,
+            cache_dir=workspace_path / KNOWLEDGE_DIR / "fastembed_cache",
+        )
+
+    raise ValueError(
+        f"Unknown embedder model {resolved!r} — not a catalog embedding model nor a local "
+        f"sentence-transformers model."
     )
 
 

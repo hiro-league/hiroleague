@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
@@ -14,7 +14,7 @@
 </script>
 
 {#if ctrl.draft}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Evaluation Models"
     description="Models + profiles the eval harness uses — the answer step (memory track) and the judge (both tracks). Eval-only; the knowledge track answers with the production pipeline, not the answer model here."
     collapsible
@@ -57,5 +57,5 @@
         />
       </div>
     </PrefFieldGrid>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}

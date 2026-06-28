@@ -1,9 +1,11 @@
 <script lang="ts">
   import FormField from '$lib/components/ui/form-field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import { usePrefFieldVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
   import {
     preferenceFieldMeta,
     preferenceHint,
+    preferenceIsAdvanced,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
@@ -37,16 +39,19 @@
 
   const meta = $derived(preferenceFieldMeta(ctrl.fieldSchema, path));
   const hint = $derived(hintOverride ?? preferenceHint(meta));
+  const vis = usePrefFieldVisibility(() => preferenceIsAdvanced(meta));
 </script>
 
-<FormField {label} {hint} hintTooltip class={className}>
-  <input
-    type="text"
-    class={inputClass}
-    bind:value
-    {disabled}
-    {placeholder}
-    {maxlength}
-    oninput={ctrl.markDirty}
-  />
-</FormField>
+{#if vis.visible}
+  <FormField {label} {hint} hintTooltip class={className}>
+    <input
+      type="text"
+      class={inputClass}
+      bind:value
+      {disabled}
+      {placeholder}
+      {maxlength}
+      oninput={ctrl.markDirty}
+    />
+  </FormField>
+{/if}

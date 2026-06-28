@@ -1,6 +1,6 @@
 <script lang="ts">
   import Button from '$lib/components/ui/button.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
@@ -37,7 +37,7 @@
 </script>
 
 {#if ctrl.draft && limits}
-  <SectionCardMuted
+  <PrefSectionCard
     title="Retrieval Agent"
     description="Loop-bound caps for the agentic memory-retrieval path. One global value for eval and chat — tune without hand-editing preferences.json."
     collapsible
@@ -122,5 +122,5 @@
     <div class="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" onclick={restoreDefaults}>Restore defaults</Button>
     </div>
-  </SectionCardMuted>
+  </PrefSectionCard>
 {/if}
