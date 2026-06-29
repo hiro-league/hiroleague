@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import ResetDot from '$lib/components/ui/reset-dot.svelte';
 
   type Props = {
     label: string;
@@ -13,6 +14,11 @@
     // Rich help rendered below the label (markup the tooltip can't carry).
     details?: Snippet;
     onchange?: () => void;
+    // When true (and `onReset` given), render a "reset to default" dot after the label/help icon.
+    showReset?: boolean;
+    onReset?: () => void;
+    // Optional dotted preference path; tags the row so Settings search can scroll to + highlight it.
+    anchor?: string;
   };
 
   let {
@@ -22,13 +28,17 @@
     class: className = '',
     hint,
     details,
-    onchange
+    onchange,
+    showReset = false,
+    onReset,
+    anchor
   }: Props = $props();
 </script>
 
 <label
+  data-pref-path={anchor}
   class={cn(
-    'flex gap-3 rounded-md border border-border/50 bg-card/45 px-3',
+    'group flex gap-3 rounded-md border border-border/50 bg-card/45 px-3',
     details ? 'items-start py-2.5' : 'min-h-10 items-center',
     className
   )}
@@ -45,6 +55,13 @@
       {label}
       {#if hint?.trim()}
         <FieldHelp text={hint} />
+      {/if}
+      {#if showReset && onReset}
+        <!-- Hidden until the toggle row is hovered/focused (see FormField) to avoid icon clutter. -->
+        <ResetDot
+          {onReset}
+          class="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+        />
       {/if}
     </span>
   {/snippet}

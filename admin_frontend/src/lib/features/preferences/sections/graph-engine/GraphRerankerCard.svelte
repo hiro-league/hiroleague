@@ -36,7 +36,6 @@
         kind="rerank"
         path="graph.reranker.model_id"
         embedded
-        label="Reranker model"
         selectedId={ctrl.draft.graph.reranker.model_id}
         emptyFallbackId={ctrl.draft.llm.default_reranker}
       />
@@ -44,13 +43,11 @@
         <PrefNumberField
           {ctrl}
           path="graph.reranker.min_relevance"
-          label="Min relevance"
           bind:value={ctrl.draft.graph.reranker.min_relevance}
         />
         <PrefTextField
           {ctrl}
           path="graph.reranker.device"
-          label="Device (local only)"
           placeholder="auto"
           bind:value={ctrl.draft.graph.reranker.device}
         />

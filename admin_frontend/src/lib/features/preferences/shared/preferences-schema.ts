@@ -29,6 +29,14 @@ export function preferenceHint(meta: PreferenceFieldMeta | null | undefined): st
   return hint || undefined;
 }
 
+// Display label, sourced from the backend `Field(title=…)` (Pydantic auto-derives one from the
+// field name when unset). The `Pref*` field widgets render this when no explicit `label` prop is
+// passed — single source of truth for labels, also indexed by the Settings search.
+export function preferenceTitle(meta: PreferenceFieldMeta | null | undefined): string | undefined {
+  const title = meta?.title?.trim();
+  return title || undefined;
+}
+
 /** Display-only flag: advanced fields are hidden until the "show advanced" toggle is on. */
 export function preferenceIsAdvanced(meta: PreferenceFieldMeta | null | undefined): boolean {
   return meta?.advanced === true;

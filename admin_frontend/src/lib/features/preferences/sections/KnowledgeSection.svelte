@@ -2,10 +2,7 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import KnowledgeAnsweringCard from '$lib/features/preferences/sections/knowledge/KnowledgeAnsweringCard.svelte';
   import KnowledgeEmbeddingChunkingCard from '$lib/features/preferences/sections/knowledge/KnowledgeEmbeddingChunkingCard.svelte';
-  import KnowledgeGraphBackendCard from '$lib/features/preferences/sections/knowledge/KnowledgeGraphBackendCard.svelte';
-  import KnowledgeRerankerCard from '$lib/features/preferences/sections/knowledge/KnowledgeRerankerCard.svelte';
   import KnowledgeRetrievalCard from '$lib/features/preferences/sections/knowledge/KnowledgeRetrievalCard.svelte';
-  import KnowledgeRewriteCard from '$lib/features/preferences/sections/knowledge/KnowledgeRewriteCard.svelte';
   import {
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
@@ -39,9 +36,6 @@
   {#if ctrl.draft}
     <KnowledgeEmbeddingChunkingCard {ctrl} />
     <KnowledgeRetrievalCard {ctrl} />
-    <KnowledgeRerankerCard {ctrl} />
-    <KnowledgeRewriteCard {ctrl} />
     <KnowledgeAnsweringCard {ctrl} />
-    <KnowledgeGraphBackendCard {ctrl} />
   {/if}
 </div>

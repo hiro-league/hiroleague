@@ -23,7 +23,6 @@
       <PrefNumberField
         {ctrl}
         path="graph.view.large_type_threshold"
-        label="Large node-type warning threshold"
         bind:value={ctrl.draft.graph.view.large_type_threshold}
       />
     </PrefFieldGrid>

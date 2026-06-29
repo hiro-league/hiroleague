@@ -4,7 +4,8 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import {
     preferenceFieldMeta,
-    preferenceHint
+    preferenceHint,
+    preferenceTitle
   } from '$lib/features/preferences/shared/preferences-schema';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
@@ -43,12 +44,10 @@
           path="graph.eval.retrieval_model"
           labelled
           embedded
-          label="Retrieval agent model"
           selectedId={ctrl.draft.graph.eval.retrieval_model}
         />
         <TuningProfileSelect
           {ctrl}
-          label="Retrieval agent profile"
           path="graph.eval.retrieval_tuning_profile"
           bind:value={ctrl.draft.graph.eval.retrieval_tuning_profile}
         />
@@ -56,7 +55,10 @@
 
       <div class="grid gap-3">
         <FormField
-          label="Active prompt profile"
+          label={preferenceTitle(
+            preferenceFieldMeta(ctrl.fieldSchema, 'graph.eval.active_retrieval_agent_prompt_id')
+          ) ?? 'Active prompt profile'}
+          anchor="graph.eval.active_retrieval_agent_prompt_id"
           hint={preferenceHint(
             preferenceFieldMeta(ctrl.fieldSchema, 'graph.eval.active_retrieval_agent_prompt_id')
           )}
@@ -76,7 +78,6 @@
         <PromptLibraryField
           {ctrl}
           dictPath="graph.eval.retrieval_agent_prompts"
-          label="Retrieval Agent Prompt"
           hint={"Drives the memory eval's recall leg. Placeholders {MAX_AGENT_TURNS}, {MAX_PARALLEL_SEARCHES}, and {MAX_LIMIT} are filled from the Retrieval Agent caps card at runtime."}
           ariaLabel="Mem-eval retrieval agent prompt (markdown)"
           editorLabel="Retrieval agent prompt editor"

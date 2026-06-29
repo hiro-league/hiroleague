@@ -40,7 +40,6 @@
         <PrefTextField
           {ctrl}
           path="memory.user_name"
-          label="Your name"
           hint="Anchors your remembered facts to a named person in the memory graph (instead of a generic “User”). Set this once, early. Changing it later won’t rename existing memories — it starts a separate identity and fragments recall. Leave blank to use “User”."
           maxlength={120}
           placeholder="e.g. Misho"
@@ -50,7 +49,6 @@
         <PrefNumberField
           {ctrl}
           path="chat.max_messages"
-          label="Max retained messages"
           bind:value={ctrl.draft.chat.max_messages}
         />
       </PrefFieldGrid>
@@ -62,14 +60,12 @@
           <PrefToggleField
             {ctrl}
             path="chat.cite_sources"
-            label="Cite knowledge sources in chat replies"
             disabled={ctrl.busy}
             bind:checked={ctrl.draft.chat.cite_sources}
           />
           <PrefToggleField
             {ctrl}
             path="chat.tools_enabled"
-            label="Enable agent tools in chat"
             disabled={ctrl.busy}
             bind:checked={ctrl.draft.chat.tools_enabled}
           />
@@ -79,7 +75,6 @@
         <PromptField
           {ctrl}
           path="chat.instructions"
-          label="Chat instructions"
           hint="General answering guidance injected into the current user turn (ahead of the question), alongside any retrieved knowledge and memories. Authored in Markdown; sent to the model as text."
           ariaLabel="Chat answering instructions (markdown)"
           editorLabel="Instructions markdown editor"
@@ -99,7 +94,6 @@
       <PrefToggleField
         {ctrl}
         path="memory.enabled"
-        label="Enable agent memory"
         disabled={ctrl.busy}
         bind:checked={ctrl.draft.memory.enabled}
       />
@@ -108,7 +102,6 @@
         <PrefToggleField
           {ctrl}
           path="memory.extraction.enabled"
-          label="Remember new facts after each reply"
           disabled={ctrl.busy || !ctrl.draft.memory.enabled}
           class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
           bind:checked={ctrl.draft.memory.extraction.enabled}
@@ -116,7 +109,6 @@
         <PrefToggleField
           {ctrl}
           path="memory.search.enabled"
-          label="Recall memories before each reply"
           disabled={ctrl.busy || !ctrl.draft.memory.enabled}
           class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
           bind:checked={ctrl.draft.memory.search.enabled}
@@ -124,7 +116,6 @@
         <PrefNumberField
           {ctrl}
           path="memory.search.top_k"
-          label="Memories to recall (top K)"
           disabled={ctrl.busy || !ctrl.draft.memory.enabled}
           bind:value={ctrl.draft.memory.search.top_k}
         />

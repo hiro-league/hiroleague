@@ -28,12 +28,10 @@
           path="graph.eval.answer_model"
           labelled
           embedded
-          label="Eval answer model"
           selectedId={ctrl.draft.graph.eval.answer_model}
         />
         <TuningProfileSelect
           {ctrl}
-          label="Eval answer profile"
           path="graph.eval.answer_tuning_profile"
           bind:value={ctrl.draft.graph.eval.answer_tuning_profile}
         />
@@ -46,12 +44,10 @@
           path="graph.eval.judge_model"
           labelled
           embedded
-          label="Eval judge model"
           selectedId={ctrl.draft.graph.eval.judge_model}
         />
         <TuningProfileSelect
           {ctrl}
-          label="Eval judge profile"
           path="graph.eval.judge_tuning_profile"
           bind:value={ctrl.draft.graph.eval.judge_tuning_profile}
         />

@@ -5,11 +5,15 @@
   import type { Snippet } from 'svelte';
   import { cn } from '$lib/utils';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import ResetDot from '$lib/components/ui/reset-dot.svelte';
 
   let {
     label,
     hint,
     hintTooltip = false,
+    showReset = false,
+    onReset,
+    anchor,
     class: className = '',
     children
   }: {
@@ -18,22 +22,35 @@
     hint?: string;
     // When true, render `hint` as a help icon + tooltip next to the label instead of inline below.
     hintTooltip?: boolean;
+    // When true (and `onReset` given), render a "reset to default" dot after the label/help icon.
+    showReset?: boolean;
+    onReset?: () => void;
+    // Optional dotted preference path; tags the field so Settings search can scroll to + highlight it.
+    anchor?: string;
     class?: string;
     children: Snippet;
   } = $props();
 </script>
 
-<label class={cn('admin-ui-form-field grid gap-1.5 text-left', className)}>
+<label data-pref-path={anchor} class={cn('admin-ui-form-field group grid gap-1.5 text-left', className)}>
   {#if label?.trim()}
     <span
       class={cn(
         'font-sans text-sm font-semibold leading-snug text-muted-foreground',
-        hint?.trim() && hintTooltip && 'inline-flex items-center gap-1.5'
+        ((hint?.trim() && hintTooltip) || (showReset && onReset)) && 'inline-flex items-center gap-1.5'
       )}
     >
       {label}
       {#if hint?.trim() && hintTooltip}
         <FieldHelp text={hint} />
+      {/if}
+      {#if showReset && onReset}
+        <!-- Hidden until the field (or its title) is hovered/focused, so non-default fields don't
+             clutter the page with always-on reset icons. -->
+        <ResetDot
+          {onReset}
+          class="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+        />
       {/if}
     </span>
   {/if}

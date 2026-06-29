@@ -9,6 +9,12 @@ export type PreferenceFieldMeta = {
   step?: number;
   enum?: string[];
   nullable?: boolean;
+  /**
+   * Display label for the field, sourced from the backend `Field(title=…)` (Pydantic auto-derives
+   * one from the field name when unset). The `Pref*` field widgets render this when no explicit
+   * `label` prop is given, and the Settings search indexes it. Single source of truth for labels.
+   */
+  title?: string;
   description?: string;
   readOnly?: boolean;
   writeWhole?: boolean;

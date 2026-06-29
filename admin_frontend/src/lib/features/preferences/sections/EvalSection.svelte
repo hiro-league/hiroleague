@@ -59,7 +59,6 @@
           <PromptLibraryField
             {ctrl}
             dictPath="graph.eval.answer_prompts"
-            label="Mem Eval Answer Prompts"
             hint={'Drives the memory eval\'s recall leg. Each profile should keep declining with exactly "No information available." when no recalled element supports an answer — the abstain detector recognizes that phrase (and the legacy "I don\'t know"). The locked default carries the structured default (support gates, calibrator examples, absolute-date rules); duplicate it to customize.'}
             ariaLabel="Mem-eval answer prompt (markdown)"
             editorLabel="Answer prompt editor"
@@ -78,7 +77,6 @@
           <PromptField
             {ctrl}
             path="graph.eval.judge_prompt"
-            label="Eval judge prompt"
             hint={'Grades each answer against the ideal (both tracks). Blank uses the default: lenient on paraphrase/partial/dates, and recall_sufficient only holds when the judge quotes a real recalled line (verified server-side, so ungrounded "sufficient" claims are dropped). Verdict is always measured against the ideal. Keep the Output Fields section if you customize — on thinking-mode models the judge runs in JSON mode and that section is the only schema the model sees.'}
             ariaLabel="Eval judge prompt (markdown)"
             editorLabel="Eval judge prompt editor"

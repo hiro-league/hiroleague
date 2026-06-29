@@ -33,7 +33,7 @@
       "properties": {
         "instructions": {
           "default": "## Instructions\n- This is a conversation between you (the character) and the user.\n- Use the **Knowledge retrieved** (from the workspace knowledge base) and **Memories retrieved** below as optional background.\n- You choose what is relevant \u2014 you do not need to use all, or any, of it.\n- source rank and score suggest the search relevancy of the knowledge item to the user message/context\n- Answer **Last User Message** in your own style.",
-          "title": "Instructions",
+          "title": "Chat instructions",
           "type": "string"
         },
         "max_messages": {
@@ -41,17 +41,17 @@
           "description": "Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).",
           "maximum": 100,
           "minimum": 1,
-          "title": "Max Messages",
+          "title": "Max retained messages",
           "type": "integer"
         },
         "cite_sources": {
           "default": false,
-          "title": "Cite Sources",
+          "title": "Cite knowledge sources in chat replies",
           "type": "boolean"
         },
         "tools_enabled": {
           "default": true,
-          "title": "Tools Enabled",
+          "title": "Enable agent tools in chat",
           "type": "boolean"
         },
         "preferred_answering_language": {
@@ -77,13 +77,13 @@
           "additionalProperties": {
             "$ref": "#/$defs/AnswerPromptProfile"
           },
-          "title": "Answer Prompts",
+          "title": "Mem Eval Answer Prompts",
           "type": "object",
           "writeWhole": true
         },
         "judge_prompt": {
           "default": "## Objective\nGrade a model's Answer to a question about past conversations against the Ideal Answer, and\nreport the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as\nGUIDANCE on what a complete answer covers \u2014 not a checklist to fail on. Grade ONLY against the\nIdeal Answer and Rubric \u2014 never your own knowledge.\n\n## Verdicts\n- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording \u2014\n  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is\n  shown, an Answer that covers its MAIN elements passes \u2014 a missing minor element does NOT block\n  a pass.\n- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision\n  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but\n  misses a substantial part of what was asked.\n- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element\n  satisfied, the Answer misses the point, or it contradicts a rubric element.\n- abstain: the Answer declines \u2014 \"No information available.\" or any other refusal to answer.\n\n## Core Instructions\n- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.\n  Treat them as a GUIDE, not a pass/fail checklist \u2014 the Ideal Answer and the Rubric describe the\n  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states\n  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.\n- Dates: matching the Ideal's month and year passes; a correctly resolved relative date (\"next\n  month\" stated in an August conversation = September) passes; within ~2 weeks passes.\n- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the\n  right result, and a confident Answer is fail.\n- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict \u2014\n  use them only to fill evidence, recall_sufficient, and grounded.\n\n## Output Fields\nReply with one JSON object containing exactly these fields, in this order:\n- \"evidence\" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that\n  contain the information needed to answer; \"\" if no such line exists.\n- \"recall_sufficient\" (boolean): true only if evidence quotes a real line that supplies the\n  answer; false otherwise.\n- \"grounded\" (boolean): whether the Answer is supported by the Recalled Memory Elements.\n- \"reason\" (string): one short sentence justifying the verdict.\n- \"verdict\" (string): one of \"pass\", \"partial\", \"fail\", \"abstain\".\n\n## Validation\n- evidence is checked by exact substring match against the shown elements \u2014 an inexact or\n  invented quote counts as no evidence and forces recall_sufficient to false.\n- If no Recalled Memory Elements section was shown, set evidence \"\" and recall_sufficient true.\n- The verdict depends only on Answer vs Ideal (and Rubric, when shown).",
-          "title": "Judge Prompt",
+          "title": "Eval judge prompt",
           "type": "string"
         },
         "answer_model": {
@@ -98,12 +98,12 @@
           "default": null,
           "description": "Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)",
           "model_kind": "chat",
-          "title": "Answer Model"
+          "title": "Eval answer model"
         },
         "answer_tuning_profile": {
           "default": "knowledge_answering",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
-          "title": "Answer Tuning Profile",
+          "title": "Eval answer profile",
           "type": "string"
         },
         "judge_model": {
@@ -118,12 +118,12 @@
           "default": null,
           "description": "Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat.",
           "model_kind": "chat",
-          "title": "Judge Model"
+          "title": "Eval judge model"
         },
         "judge_tuning_profile": {
           "default": "knowledge_answering",
           "description": "Tuning profile for the judge model. Lower temperature = more repeatable grading.",
-          "title": "Judge Tuning Profile",
+          "title": "Eval judge profile",
           "type": "string"
         },
         "retrieval_model": {
@@ -138,59 +138,63 @@
           "default": null,
           "description": "Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model \u2192 default chat.",
           "model_kind": "chat",
-          "title": "Retrieval Model"
+          "title": "Retrieval agent model"
         },
         "retrieval_tuning_profile": {
           "default": "knowledge_answering",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
-          "title": "Retrieval Tuning Profile",
+          "title": "Retrieval agent profile",
           "type": "string"
         },
         "show_event_time": {
           "default": true,
-          "title": "Show Event Time",
+          "title": "Show event_time (valid date)",
           "type": "boolean"
         },
         "show_expired_at": {
           "default": false,
-          "title": "Show Expired At",
+          "title": "Show expired_at (invalid date)",
           "type": "boolean"
         },
         "show_superseded": {
           "default": false,
-          "title": "Show Superseded",
+          "title": "Show SUPERSEDED flag",
           "type": "boolean"
         },
         "max_elements_per_kind": {
+          "advanced": true,
           "default": 30,
           "description": "Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.",
           "maximum": 200,
           "minimum": 1,
-          "title": "Max Elements Per Kind",
+          "title": "Max elements / kind",
           "type": "integer"
         },
         "max_fact_chars": {
+          "advanced": true,
           "default": 240,
           "description": "Each recalled fact \u2192 one sanitized line capped here.",
           "maximum": 2000,
           "minimum": 40,
-          "title": "Max Fact Chars",
+          "title": "Max fact chars",
           "type": "integer"
         },
         "max_episode_chars": {
+          "advanced": true,
           "default": 300,
           "description": "Per-episode/message text cap (one sanitized line).",
           "maximum": 2000,
           "minimum": 40,
-          "title": "Max Episode Chars",
+          "title": "Max message chars",
           "type": "integer"
         },
         "max_summary_chars": {
+          "advanced": true,
           "default": 400,
           "description": "Per-entity summary cap (one sanitized line) \u2014 entity summaries are the longest/noisiest.",
           "maximum": 4000,
           "minimum": 40,
-          "title": "Max Summary Chars",
+          "title": "Max entity summary chars",
           "type": "integer"
         },
         "retrieval_agent": {
@@ -200,14 +204,14 @@
           "additionalProperties": {
             "$ref": "#/$defs/AnswerPromptProfile"
           },
-          "title": "Retrieval Agent Prompts",
+          "title": "Retrieval Agent Prompt",
           "type": "object",
           "writeWhole": true
         },
         "active_retrieval_agent_prompt_id": {
           "default": "default",
           "description": "Which retrieval-agent system prompt the loop uses.",
-          "title": "Active Retrieval Agent Prompt Id",
+          "title": "Active prompt profile",
           "type": "string"
         }
       },
@@ -244,7 +248,7 @@
             "off",
             "graphiti"
           ],
-          "title": "Backend",
+          "title": "Graph backend",
           "type": "string"
         },
         "extraction_model": {
@@ -259,12 +263,12 @@
           "default": null,
           "description": "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat.",
           "model_kind": "chat",
-          "title": "Extraction Model"
+          "title": "Extraction model"
         },
         "extraction_tuning_profile": {
           "default": "graphiti_extraction",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs.",
-          "title": "Extraction Tuning Profile",
+          "title": "Extraction profile",
           "type": "string"
         },
         "small_model": {
@@ -279,12 +283,12 @@
           "default": null,
           "description": "Cheaper model for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Null falls back to the extraction model.",
           "model_kind": "chat",
-          "title": "Small Model"
+          "title": "Smaller extraction model"
         },
         "small_tuning_profile": {
           "default": "graphiti_small",
           "description": "Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
-          "title": "Small Tuning Profile",
+          "title": "Smaller extraction profile",
           "type": "string"
         },
         "embedder_model": {
@@ -299,7 +303,7 @@
           "default": null,
           "description": "Embeds entity names + facts into the graph. Null shares the knowledge embedding model. Shared across memory + knowledge graph data \u2014 changing it re-indexes everything.",
           "model_kind": "embedding",
-          "title": "Embedder Model"
+          "title": "Embedder model"
         },
         "temporal_default": {
           "default": "current",
@@ -308,7 +312,7 @@
             "current",
             "all"
           ],
-          "title": "Temporal Default",
+          "title": "Temporal lens (default)",
           "type": "string"
         },
         "k_hop": {
@@ -316,7 +320,7 @@
           "description": "Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost.",
           "maximum": 3,
           "minimum": 1,
-          "title": "K Hop",
+          "title": "Expansion hops (k)",
           "type": "integer"
         },
         "search_recipe": {
@@ -327,7 +331,7 @@
             "mmr",
             "cross_encoder"
           ],
-          "title": "Search Recipe",
+          "title": "Search recipe",
           "type": "string"
         },
         "search_scope": {
@@ -339,24 +343,26 @@
             "edges_and_episodes",
             "edges_nodes_episodes"
           ],
-          "title": "Search Scope",
+          "title": "Search scope",
           "type": "string"
         },
         "entity_ontology": {
+          "advanced": true,
           "default": "open",
           "description": "Which entity types extraction may use. Open = no predefined types; the model extracts freely (everything becomes a generic Entity) \u2014 broadest recall, captures activities, interests, media, and preferences. Typed = pin the 5-type vocabulary (Person / Place / Organization / Event / Object) \u2014 more precise, but drops first-person facts that don't fit those types. Changing this rebuilds the graph at the next ingest, so a re-ingest is required to take effect.",
           "enum": [
             "open",
             "typed"
           ],
-          "title": "Entity Ontology",
+          "title": "Extraction ontology",
           "type": "string"
         },
         "custom_extraction_instructions": {
+          "advanced": true,
           "default": "Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity.",
           "description": "Optional domain-generic guidance injected verbatim into Graphiti's entity + fact extraction prompts. Use it to steer what gets captured \u2014 e.g. capture first-person preferences, goals, habits and activities as facts even when only the speaker is named, treating the activity / topic / object as the second entity. Keep it generic (no dataset-specific rules). Blank = none. Applied at ingest, so a re-ingest is required to take effect.",
           "maxLength": 2000,
-          "title": "Custom Extraction Instructions",
+          "title": "Extraction instructions",
           "type": "string"
         },
         "sim_min_score": {
@@ -365,15 +371,16 @@
           "maximum": 1.0,
           "minimum": 0.0,
           "step": 0.05,
-          "title": "Sim Min Score",
+          "title": "Candidate similarity floor",
           "type": "number"
         },
         "query_timeout_s": {
+          "advanced": true,
           "default": 60,
           "description": "Hard ceiling on any single graph (Kuzu) query \u2014 writes, index rebuilds, and Graph-tab reads. Protects the server from a stuck index-rebuild checkpoint that can otherwise freeze the whole admin UI for minutes; a bounded failure is retried and logged instead. Keep above your slowest legitimate operation (index rebuilds take seconds). 0 = unlimited.",
           "maximum": 600,
           "minimum": 0,
-          "title": "Query Timeout S",
+          "title": "Query timeout (seconds)",
           "type": "integer"
         },
         "observability": {
@@ -384,7 +391,7 @@
             "ledger",
             "trace"
           ],
-          "title": "Observability",
+          "title": "Graph observability",
           "type": "string"
         },
         "reranker": {
@@ -424,11 +431,12 @@
       "description": "Admin graph-VIZ display knobs for the shared Knowledge/Memories Graph tab.\n\nPure frontend-display settings: they tune how the force-graph view's per-node-type\nfilter dropdowns behave, NOT how facts are extracted, searched, or retrieved. The\ngraph engine ignores everything here.",
       "properties": {
         "large_type_threshold": {
+          "advanced": true,
           "default": 200,
           "description": "In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance \u2014 this only flags very large types. Display-only.",
           "maximum": 10000,
           "minimum": 10,
-          "title": "Large Type Threshold",
+          "title": "Large node-type warning threshold",
           "type": "integer"
         }
       },
@@ -532,16 +540,16 @@
           ],
           "default": null,
           "model_kind": "chat",
-          "title": "Model"
+          "title": "Knowledge answering model"
         },
         "prompt": {
           "default": "Use the provided knowledge context as your only source of facts; do not invent or assume anything that is not supported by it.\n\nAnswer every part of the question that the context supports. Partial answers are expected and welcome \u2014 never withhold a supported part just because another part is unsupported.\n\nIf a part of the question is not covered by the context, give the parts you can and briefly note what is missing. Do not reply with only 'I don't know' when any part of the question is supported by the context.",
-          "title": "Prompt",
+          "title": "Answering prompt",
           "type": "string"
         },
         "cite_sources": {
           "default": true,
-          "title": "Cite Sources",
+          "title": "Cite sources",
           "type": "boolean"
         },
         "language_policy": {
@@ -551,7 +559,7 @@
             "prefer_english",
             "prefer_arabic"
           ],
-          "title": "Language Policy",
+          "title": "Language policy",
           "type": "string"
         }
       },
@@ -569,7 +577,7 @@
         "respect_headings": {
           "default": true,
           "description": "Split chunks at markdown headings when ingesting documents.",
-          "title": "Respect Headings",
+          "title": "Respect markdown headings",
           "type": "boolean"
         }
       },
@@ -586,7 +594,7 @@
           "description": "Target size per chunk at document ingest (characters).",
           "maximum": 8000,
           "minimum": 200,
-          "title": "Chunk Size",
+          "title": "Chunk size",
           "type": "integer"
         },
         "chunk_overlap": {
@@ -594,14 +602,14 @@
           "description": "Overlap between consecutive chunks. Must stay smaller than chunk size.",
           "maximum": 2000,
           "minimum": 0,
-          "title": "Chunk Overlap",
+          "title": "Chunk overlap",
           "type": "integer"
         },
         "embed_structural_context": {
           "advanced": true,
           "default": true,
           "description": "Prefix each chunk's embedded text with its document title and heading path so every chunk \u2014 including continuation pieces \u2014 carries its section context. Applies to new ingests; changing this requires re-ingesting existing documents.",
-          "title": "Embed Structural Context",
+          "title": "Embed structural context",
           "type": "boolean"
         },
         "markdown": {
@@ -632,7 +640,7 @@
           "default": null,
           "description": "Cross-encoder used to rerank fact candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
           "model_kind": "rerank",
-          "title": "Model Id"
+          "title": "Reranker model"
         },
         "min_relevance": {
           "default": 0.0,
@@ -640,10 +648,11 @@
           "maximum": 1.0,
           "minimum": 0.0,
           "step": 0.05,
-          "title": "Min Relevance",
+          "title": "Min relevance",
           "type": "number"
         },
         "device": {
+          "advanced": true,
           "anyOf": [
             {
               "type": "string"
@@ -654,7 +663,7 @@
           ],
           "default": null,
           "description": "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models.",
-          "title": "Device"
+          "title": "Device (local only)"
         }
       },
       "title": "KnowledgeGraphRerankerPreferences",
@@ -679,11 +688,11 @@
           "default": null,
           "description": "Knowledge embedder. Empty inherits the workspace default (General \u2192 Models).",
           "model_kind": "embedding",
-          "title": "Default Embedding Model"
+          "title": "Knowledge embedder"
         },
         "default_tuning_profile": {
           "default": "knowledge_answering",
-          "title": "Default Tuning Profile",
+          "title": "Knowledge answering model profile",
           "type": "string"
         },
         "chunking": {
@@ -715,7 +724,7 @@
       "properties": {
         "enabled": {
           "default": false,
-          "title": "Enabled",
+          "title": "Enable reranking",
           "type": "boolean"
         },
         "model_id": {
@@ -730,14 +739,14 @@
           "default": null,
           "description": "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
           "model_kind": "rerank",
-          "title": "Model Id"
+          "title": "Reranker model"
         },
         "top_n": {
           "default": 8,
           "description": "Final returned results if using rerank (top N).",
           "maximum": 100,
           "minimum": 1,
-          "title": "Top N",
+          "title": "Rerank results (top N)",
           "type": "integer"
         },
         "device": {
@@ -777,7 +786,7 @@
           "description": "Fused results from hybrid search or direct results from dense only search (after applying minimum score).",
           "maximum": 100,
           "minimum": 1,
-          "title": "Top K",
+          "title": "Search/fused results (top K)",
           "type": "integer"
         },
         "min_score": {
@@ -786,12 +795,12 @@
           "maximum": 1.0,
           "minimum": 0.0,
           "step": 0.05,
-          "title": "Min Score",
+          "title": "Minimum score (Dense only)",
           "type": "number"
         },
         "hybrid": {
           "default": true,
-          "title": "Hybrid",
+          "title": "Hybrid retrieval (dense + BM25, RRF fusion)",
           "type": "boolean"
         },
         "sparse_model": {
@@ -805,7 +814,7 @@
           "description": "Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).",
           "maximum": 500,
           "minimum": 1,
-          "title": "Prefetch Limit",
+          "title": "Candidates per branch",
           "type": "integer"
         },
         "reranker": {
@@ -827,12 +836,12 @@
       "properties": {
         "prompt": {
           "default": "Rewrite the user's question into one clean, standalone search query.\n\nFix typos and normalize informal or dialectal phrasing into clear formal language, but do NOT change the meaning or add information that is not in the question.\n\nIf a conversation is provided, resolve references (pronouns, 'the second one', 'his brother') against it so the query stands alone without the conversation.\n\nCopy proper nouns, names, dates, and identifiers VERBATIM into `keywords` \u2014 never translate or 'correct' a name.\n\nSet `knowledge_needed` to false when the message is just a greeting, farewell, thanks, acknowledgement, or small talk and clearly does not ask for stored information; otherwise true. Do not invent facts or answer the question.\n\nRespond with a JSON object containing exactly these fields:\n- `standalone_query` (string): the rewritten standalone search query.\n- `keywords` (array of strings): proper nouns, names, dates, and identifiers copied verbatim.\n- `knowledge_needed` (boolean): false only for greetings/thanks/small talk, otherwise true.\n- `entities` (array of strings): named entities the question asks about (people, places, organizations) and qualified relational mentions like 'my sister' or 'mom'; empty when the question references no specific entity (e.g. 'what is photosynthesis?').",
-          "title": "Prompt",
+          "title": "Query Rewrite Prompt",
           "type": "string"
         },
         "default_on": {
           "default": false,
-          "title": "Default On",
+          "title": "Enable Query Rewrite on Ask Tab",
           "type": "boolean"
         }
       },
@@ -857,7 +866,7 @@
           ],
           "default": null,
           "model_kind": "chat",
-          "title": "Default Chat"
+          "title": "Default chat model"
         },
         "default_stt": {
           "anyOf": [
@@ -870,7 +879,7 @@
           ],
           "default": null,
           "model_kind": "stt",
-          "title": "Default Stt"
+          "title": "Default speech-to-text model"
         },
         "default_tts": {
           "anyOf": [
@@ -883,7 +892,7 @@
           ],
           "default": null,
           "model_kind": "tts",
-          "title": "Default Tts"
+          "title": "Default text-to-speech model"
         },
         "default_reranker": {
           "anyOf": [
@@ -897,7 +906,7 @@
           "default": null,
           "description": "Default cross-encoder reranker. The knowledge and graph rerankers both fall back to this when their own model is empty. Empty = no default. Cloud models need a provider key; local models must be downloaded first.",
           "model_kind": "rerank",
-          "title": "Default Reranker"
+          "title": "Default reranker model"
         },
         "default_embedder": {
           "anyOf": [
@@ -911,7 +920,7 @@
           "default": null,
           "description": "Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.",
           "model_kind": "embedding",
-          "title": "Default Embedder"
+          "title": "Default embedder model"
         },
         "default_image_gen": {
           "anyOf": [
@@ -929,7 +938,7 @@
         },
         "default_tuning_profile": {
           "default": "balanced_chat",
-          "title": "Default Tuning Profile",
+          "title": "Default chat model profile",
           "type": "string"
         },
         "default_image_profile": {
@@ -973,7 +982,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "title": "Enabled",
+          "title": "Remember new facts after each reply",
           "type": "boolean"
         }
       },
@@ -988,7 +997,7 @@
       "properties": {
         "enabled": {
           "default": false,
-          "title": "Enabled",
+          "title": "Enable agent memory",
           "type": "boolean"
         },
         "default_tuning_profile": {
@@ -999,7 +1008,7 @@
         "user_name": {
           "default": "",
           "maxLength": 120,
-          "title": "User Name",
+          "title": "Your name",
           "type": "string"
         },
         "search": {
@@ -1024,14 +1033,14 @@
       "properties": {
         "enabled": {
           "default": true,
-          "title": "Enabled",
+          "title": "Recall memories before each reply",
           "type": "boolean"
         },
         "top_k": {
           "default": 8,
           "maximum": 100,
           "minimum": 1,
-          "title": "Top K",
+          "title": "Memories to recall (top K)",
           "type": "integer"
         }
       },
@@ -1082,7 +1091,7 @@
           "description": "How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.",
           "maximum": 10,
           "minimum": 1,
-          "title": "Max Agent Turns",
+          "title": "Max agent turns",
           "type": "integer"
         },
         "max_parallel_searches": {
@@ -1090,7 +1099,7 @@
           "description": "Sub-queries per search_memory call \u2014 global for eval and chat.",
           "maximum": 5,
           "minimum": 1,
-          "title": "Max Parallel Searches",
+          "title": "Max parallel searches",
           "type": "integer"
         },
         "limit_default": {
@@ -1098,7 +1107,7 @@
           "description": "Starting num_results per search_memory call.",
           "maximum": 100,
           "minimum": 1,
-          "title": "Limit Default",
+          "title": "Limit default",
           "type": "integer"
         },
         "limit_min": {
@@ -1106,7 +1115,7 @@
           "description": "Soft floor when the tool clamps limit.",
           "maximum": 100,
           "minimum": 1,
-          "title": "Limit Min",
+          "title": "Limit min",
           "type": "integer"
         },
         "limit_max": {
@@ -1114,7 +1123,7 @@
           "description": "Soft ceiling when the tool clamps limit.",
           "maximum": 100,
           "minimum": 1,
-          "title": "Limit Max",
+          "title": "Limit max",
           "type": "integer"
         },
         "hops_max": {
@@ -1122,7 +1131,7 @@
           "description": "Upper bound the tool accepts per search (1\u20133).",
           "maximum": 3,
           "minimum": 1,
-          "title": "Hops Max",
+          "title": "Hops max",
           "type": "integer"
         }
       },

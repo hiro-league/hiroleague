@@ -109,7 +109,7 @@ export function providePrefFieldRegistry(registry: PrefFieldRegistry): void {
   setContext(FIELD_REGISTRY, registry);
 }
 
-function usePrefFieldRegistry(): PrefFieldRegistry | undefined {
+export function usePrefFieldRegistry(): PrefFieldRegistry | undefined {
   return getContext<PrefFieldRegistry>(FIELD_REGISTRY);
 }
 
@@ -128,6 +128,22 @@ export function usePrefFieldVisibility(isAdvanced: () => boolean): { readonly vi
 
   onMount(() => registry?.register(() => visible));
 
+  return {
+    get visible() {
+      return visible;
+    }
+  };
+}
+
+/**
+ * Advanced gate WITHOUT registering a card auto-hide probe. Use for an advanced field rendered as a
+ * raw control (not a `Pref*Field`) inside a card whose OTHER content doesn't register — registering
+ * here would make that field the card's only probe and wrongly collapse the whole card when advanced
+ * is off. Same visibility rule as `usePrefFieldVisibility`, just no registration.
+ */
+export function usePrefAdvancedVisibility(isAdvanced: () => boolean): { readonly visible: boolean } {
+  const visibility = useAdvancedVisibility();
+  const visible = $derived(!isAdvanced() || (visibility?.showAdvanced ?? true));
   return {
     get visible() {
       return visible;

@@ -14,11 +14,16 @@ from hirocli.domain.preferences import WorkspacePreferences
 # ``advanced`` is a display-only flag (``json_schema_extra={"advanced": True}`` on the field):
 # the admin UI hides advanced fields behind a "show advanced" toggle. Absent ⇒ basic. It never
 # affects PATCH writes — it's purely a presentation hint carried through the schema map.
+# ``title`` is the field's display label for the admin UI (a Pydantic ``Field(title=...)``).
+# Pydantic also auto-derives a title from the field name (``top_k`` → "Top K") when none is set,
+# so every leaf carries at least a fallback label — the admin field widgets render ``title`` when
+# no explicit ``label`` prop is passed, and the Settings search indexes it.
 _META_KEYS = (
     "type",
     "default",
     "step",
     "enum",
+    "title",
     "description",
     "readOnly",
     "writeWhole",

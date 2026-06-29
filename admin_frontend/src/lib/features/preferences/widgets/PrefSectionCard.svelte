@@ -19,6 +19,10 @@
   type Props = {
     title?: string;
     description?: string;
+    /** Preference cards show their description as a tooltip next to the title (like field hints). */
+    descriptionTooltip?: boolean;
+    /** Preference cards indent the body to align with the title text, not the collapse chevron. */
+    indentBody?: boolean;
     collapsible?: boolean;
     defaultExpanded?: boolean;
     bodyId?: string;
@@ -27,7 +31,14 @@
     children?: Snippet;
   };
 
-  let { class: className, headerActions, children, ...rest }: Props = $props();
+  let {
+    class: className,
+    headerActions,
+    children,
+    descriptionTooltip = true,
+    indentBody = true,
+    ...rest
+  }: Props = $props();
 
   const registry = createPrefFieldRegistry();
   providePrefFieldRegistry(registry);
@@ -37,6 +48,12 @@
   const hidden = $derived(registry.hasFields && !registry.anyVisible);
 </script>
 
-<SectionCardMuted {...rest} {headerActions} class={cn(className, hidden && 'hidden')}>
+<SectionCardMuted
+  {...rest}
+  {descriptionTooltip}
+  {indentBody}
+  {headerActions}
+  class={cn(className, hidden && 'hidden')}
+>
   {@render children?.()}
 </SectionCardMuted>

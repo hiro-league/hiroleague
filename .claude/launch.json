@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "admin_frontend", "run", "dev", "--", "--port", "5180", "--strictPort"],
       "port": 5180
+    },
+    {
+      "name": "admin-frontend-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "admin_frontend", "run", "dev", "--", "--port", "5191", "--strictPort"],
+      "port": 5191
     }
   ]
 }

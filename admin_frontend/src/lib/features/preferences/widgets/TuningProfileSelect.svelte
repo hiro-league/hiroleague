@@ -11,6 +11,7 @@
   import {
     preferenceFieldMeta,
     preferenceHint,
+    preferenceTitle,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
@@ -20,10 +21,11 @@
 
   type Props = {
     ctrl: PreferencesController;
-    label: string;
+    /** Optional label override; omit (with `path`) to use the field's backend `title`. */
+    label?: string;
     /** Overrides the schema description; omit (with `path`) to use the field's backend `description`. */
     hint?: string;
-    /** Schema path for the bound field — sources the hint when `hint` is not given. */
+    /** Schema path for the bound field — sources the label + hint when not given explicitly. */
     path?: PreferencePath;
     /** When set, writes via `ctrl.setDefaultTuningProfile` instead of `value`. */
     value?: string;
@@ -41,9 +43,9 @@
     class: className = ''
   }: Props = $props();
 
-  const hint = $derived(
-    hintOverride || (path ? preferenceHint(preferenceFieldMeta(ctrl.fieldSchema, path)) : '') || ''
-  );
+  const fieldMeta = $derived(path ? preferenceFieldMeta(ctrl.fieldSchema, path) : null);
+  const resolvedLabel = $derived(label ?? preferenceTitle(fieldMeta) ?? path ?? '');
+  const hint = $derived(hintOverride || preferenceHint(fieldMeta) || '');
 
   const THINKING_LABELS: Record<string, string> = {
     off: 'Off',
@@ -138,14 +140,14 @@
   }
 </script>
 
-<FormField {label} {hint} hintTooltip class={className}>
+<FormField label={resolvedLabel} {hint} hintTooltip anchor={path} class={className}>
   <div class="flex items-stretch gap-2">
     <Popover.Root bind:open>
       <Popover.Trigger
         class={cn(
           'flex flex-1 items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
         )}
-        aria-label={`${label} — choose tuning profile`}
+        aria-label={`${resolvedLabel} — choose tuning profile`}
       >
         {#if selectedProfile}
           <span class="grid min-w-0 gap-0.5">
@@ -163,7 +165,7 @@
       </Popover.Trigger>
 
       <Popover.Content align="start" class="w-80 max-w-[90vw] gap-0 p-1.5">
-        <div class="max-h-[20rem] overflow-y-auto" role="listbox" aria-label={`${label} profiles`}>
+        <div class="max-h-[20rem] overflow-y-auto" role="listbox" aria-label={`${resolvedLabel} profiles`}>
           {#each ctrl.profileEntries as [id, profile] (id)}
             <button
               type="button"
@@ -197,7 +199,7 @@
       size="icon"
       class="size-auto shrink-0 px-3"
       disabled={!selectedProfile || ctrl.busy}
-      aria-label={`Edit ${label}`}
+      aria-label={`Edit ${resolvedLabel}`}
       title="Edit this tuning profile"
       onclick={openEdit}
     >

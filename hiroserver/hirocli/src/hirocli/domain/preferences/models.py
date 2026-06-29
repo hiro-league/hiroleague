@@ -302,9 +302,15 @@ def default_image_profiles() -> dict[str, ImageProfile]:
 class LLMPreferences(BaseModel):
     """Which catalog models to use when the workspace has credentials for them."""
 
-    default_chat: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
-    default_stt: str | None = Field(default=None, json_schema_extra={"model_kind": "stt"})
-    default_tts: str | None = Field(default=None, json_schema_extra={"model_kind": "tts"})
+    default_chat: str | None = Field(
+        default=None, title="Default chat model", json_schema_extra={"model_kind": "chat"}
+    )
+    default_stt: str | None = Field(
+        default=None, title="Default speech-to-text model", json_schema_extra={"model_kind": "stt"}
+    )
+    default_tts: str | None = Field(
+        default=None, title="Default text-to-speech model", json_schema_extra={"model_kind": "tts"}
+    )
     # Workspace-wide default cross-encoder reranker. Both the knowledge retrieval reranker
     # (knowledge.retrieval.reranker.model_id) and the graph fact-search reranker
     # (graph.reranker.model_id) fall back to this when their own model is empty — one place
@@ -312,6 +318,7 @@ class LLMPreferences(BaseModel):
     # sets its own model).
     default_reranker: str | None = Field(
         default=None,
+        title="Default reranker model",
         json_schema_extra={"model_kind": "rerank"},
         description=(
             "Default cross-encoder reranker. The knowledge and graph rerankers both fall "
@@ -326,6 +333,7 @@ class LLMPreferences(BaseModel):
     # locked — it only seeds consumers that have not indexed yet.
     default_embedder: str | None = Field(
         default=None,
+        title="Default embedder model",
         json_schema_extra={"model_kind": "embedding"},
         description=(
             "Default embedder. The knowledge and graph embedders both fall back to this when "
@@ -337,7 +345,9 @@ class LLMPreferences(BaseModel):
         default=None,
         json_schema_extra={"model_kind": "chat", "preferencesSaveSkip": True},
     )
-    default_tuning_profile: str = DEFAULT_CHAT_TUNING_PROFILE_ID
+    default_tuning_profile: str = Field(
+        default=DEFAULT_CHAT_TUNING_PROFILE_ID, title="Default chat model profile"
+    )
     default_image_profile: str = Field(
         default=DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID,
         json_schema_extra={"preferencesSaveSkip": True},
@@ -350,10 +360,10 @@ class LLMPreferences(BaseModel):
 
 
 class ModalityFlags(BaseModel):
-    voice: bool = False
-    image: bool = False
-    video: bool = False
-    file: bool = False
+    voice: bool = Field(default=False, title="Voice")
+    image: bool = Field(default=False, title="Image")
+    video: bool = Field(default=False, title="Video")
+    file: bool = Field(default=False, title="File")
 
 
 def default_input_modalities() -> ModalityFlags:
@@ -386,8 +396,10 @@ class MemorySearchPreferences(BaseModel):
 
     # When false, ``memory_search`` is skipped — no long-term memory is injected before the reply
     # (independent of extraction). No-op unless ``memory.enabled``.
-    enabled: bool = True
-    top_k: int = Field(default=DEFAULT_MEMORY_SEARCH_TOP_K, ge=1, le=100)
+    enabled: bool = Field(default=True, title="Recall memories before each reply")
+    top_k: int = Field(
+        default=DEFAULT_MEMORY_SEARCH_TOP_K, ge=1, le=100, title="Memories to recall (top K)"
+    )
 
 
 class MemoryExtractionPreferences(BaseModel):
@@ -395,7 +407,7 @@ class MemoryExtractionPreferences(BaseModel):
 
     # When false, ``_store_turn_memory`` is skipped — memory becomes read-only (it stops growing)
     # while search may still inject existing memories. No-op unless ``memory.enabled``.
-    enabled: bool = True
+    enabled: bool = Field(default=True, title="Remember new facts after each reply")
 
 
 class MemoryPreferences(BaseModel):
@@ -406,7 +418,7 @@ class MemoryPreferences(BaseModel):
     when that engine can't be built. The mem0-legacy model / embedder / reranker fields are
     gone (mem0 → Graphiti, Phase 5)."""
 
-    enabled: bool = False
+    enabled: bool = Field(default=False, title="Enable agent memory")
     default_tuning_profile: str = DEFAULT_MEMORY_TUNING_PROFILE_ID
     # A1 fix: the human's name, used as the Graphiti *speaker label* when ingesting the user's
     # turns. Graphiti extracts the speaker (the token before the ":") as the anchor entity, so a
@@ -414,7 +426,7 @@ class MemoryPreferences(BaseModel):
     # fact the user states attaches to it. Empty ⇒ falls back to "User" (prior behavior).
     # IMPORTANT: keep this STABLE. Graphiti never auto-renames nodes, so changing it mid-history
     # forks a SECOND hub and fragments the user's memory — set it once, early.
-    user_name: str = Field(default="", max_length=120)
+    user_name: str = Field(default="", max_length=120, title="Your name")
     search: MemorySearchPreferences = Field(default_factory=MemorySearchPreferences)
     extraction: MemoryExtractionPreferences = Field(default_factory=MemoryExtractionPreferences)
 
@@ -451,6 +463,7 @@ DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = load_prompt("knowledge_answering")
 class KnowledgeChunkingMarkdownPreferences(BaseModel):
     respect_headings: bool = Field(
         default=True,
+        title="Respect markdown headings",
         description="Split chunks at markdown headings when ingesting documents.",
     )
 
@@ -460,16 +473,19 @@ class KnowledgeChunkingPreferences(BaseModel):
         default=1200,
         ge=200,
         le=8000,
+        title="Chunk size",
         description="Target size per chunk at document ingest (characters).",
     )
     chunk_overlap: int = Field(
         default=150,
         ge=0,
         le=2000,
+        title="Chunk overlap",
         description="Overlap between consecutive chunks. Must stay smaller than chunk size.",
     )
     embed_structural_context: bool = Field(
         default=True,
+        title="Embed structural context",
         description=(
             "Prefix each chunk's embedded text with its document title and heading path so every chunk "
             "— including continuation pieces — carries its section context. Applies to new ingests; "
@@ -501,49 +517,54 @@ class KnowledgeRerankerPreferences(BaseModel):
     (retrieval order used as-is) even when ``enabled`` is true.
     """
 
-    enabled: bool = False
+    enabled: bool = Field(default=False, title="Enable reranking")
     model_id: str | None = Field(
         default=None,
+        title="Reranker model",
         json_schema_extra={"model_kind": "rerank"},
         description=(
             "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the "
             "default reranker (General → Models). Local models must be downloaded first."
         ),
     )
-    top_n: int = Field(default=8, ge=1, le=100, description="Final returned results if using rerank (top N).")
+    top_n: int = Field(default=8, ge=1, le=100, title="Rerank results (top N)", description="Final returned results if using rerank (top N).")
     device: str | None = None
     batch_size: int = Field(default=32, ge=1, le=512)
 
 
 class KnowledgeRetrievalPreferences(BaseModel):
-    top_k: int = Field(default=20, ge=1, le=100, description="Fused results from hybrid search or direct results from dense only search (after applying minimum score).")
-    min_score: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05}, description="Applies only to dense (Vector search) branch.")
+    top_k: int = Field(default=20, ge=1, le=100, title="Search/fused results (top K)", description="Fused results from hybrid search or direct results from dense only search (after applying minimum score).")
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05}, title="Minimum score (Dense only)", description="Applies only to dense (Vector search) branch.")
     # Hybrid retrieval: fuse the dense vector with a BM25 sparse vector via Qdrant RRF.
     # Sparse vectors are always stored at ingest, so this is a pure query-time toggle
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
     # threshold on the dense branch; the BM25 branch is rank-fused (its scores are not 0-1).
-    hybrid: bool = True
+    hybrid: bool = Field(default=True, title="Hybrid retrieval (dense + BM25, RRF fusion)")
     sparse_model: str = Field(default=DEFAULT_KNOWLEDGE_SPARSE_MODEL, min_length=1)
     # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.
-    prefetch_limit: int = Field(default=40, ge=1, le=500, description="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).")
+    prefetch_limit: int = Field(default=40, ge=1, le=500, title="Candidates per branch", description="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).")
     reranker: KnowledgeRerankerPreferences = Field(default_factory=KnowledgeRerankerPreferences)
 
 
 class KnowledgeAnsweringPreferences(BaseModel):
-    model: str | None = Field(default=None, json_schema_extra={"model_kind": "chat"})
+    model: str | None = Field(
+        default=None, title="Knowledge answering model", json_schema_extra={"model_kind": "chat"}
+    )
     # Base answer-generation system prompt. Editable; blank falls back to the relaxed default
     # (partial answers allowed, no bare "I don't know" when any part is supported). The citation
     # and language clauses are appended at runtime from the fields below.
-    prompt: str = DEFAULT_KNOWLEDGE_ANSWERING_PROMPT
-    cite_sources: bool = True
-    language_policy: Literal["match_query", "prefer_english", "prefer_arabic"] = "match_query"
+    prompt: str = Field(default=DEFAULT_KNOWLEDGE_ANSWERING_PROMPT, title="Answering prompt")
+    cite_sources: bool = Field(default=True, title="Cite sources")
+    language_policy: Literal["match_query", "prefer_english", "prefer_arabic"] = Field(
+        default="match_query", title="Language policy"
+    )
 
 
 class KnowledgeRewritePreferences(BaseModel):
     # Optional LLM query rewrite for the Ask tab: normalize + extract literal keywords before
     # retrieval. Reuses the resolved answering model. ``default_on`` seeds the Ask-tab toggle.
-    prompt: str = DEFAULT_KNOWLEDGE_REWRITE_PROMPT
-    default_on: bool = False
+    prompt: str = Field(default=DEFAULT_KNOWLEDGE_REWRITE_PROMPT, title="Query Rewrite Prompt")
+    default_on: bool = Field(default=False, title="Enable Query Rewrite on Ask Tab")
 
 
 KnowledgeGraphBackend = Literal["off", "graphiti"]
@@ -597,6 +618,7 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     # null → fall back to the workspace default reranker model id (llm.default_reranker).
     model_id: str | None = Field(
         default=None,
+        title="Reranker model",
         json_schema_extra={"model_kind": "rerank"},
         description=(
             "Cross-encoder used to rerank fact candidates. Empty = fall back to the default "
@@ -611,11 +633,14 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
         ge=0.0,
         le=1.0,
         json_schema_extra={"step": 0.05},
+        title="Min relevance",
         description="Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.",
     )
     # Local torch lane only (sentence-transformers); ignored by cloud + ONNX models.
     device: str | None = Field(
         default=None,
+        json_schema_extra={"advanced": True},
+        title="Device (local only)",
         description=(
             "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). "
             "Blank = auto. Ignored by cloud + ONNX models."
@@ -763,14 +788,14 @@ class RetrievalAgentLimits(BaseModel):
     # (every invocation costs tokens). On the last allowed turn the model is invoked without tools
     # so it must answer. (P9 rename: was ``max_searches``; the counter advances per turn, not per
     # dispatched search call.)
-    max_agent_turns: int = Field(default=4, ge=1, le=10, description="How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.")
+    max_agent_turns: int = Field(default=4, ge=1, le=10, title="Max agent turns", description="How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.")
     # Sub-queries per single ``search_memory`` call (the decomposition fan-out). Enforced by the
     # tool against the configured value; one global value for eval and chat.
-    max_parallel_searches: int = Field(default=3, ge=1, le=5, description="Sub-queries per search_memory call — global for eval and chat.")
-    limit_default: int = Field(default=20, ge=1, le=100, description="Starting num_results per search_memory call.")
-    limit_min: int = Field(default=10, ge=1, le=100, description="Soft floor when the tool clamps limit.")
-    limit_max: int = Field(default=40, ge=1, le=100, description="Soft ceiling when the tool clamps limit.")
-    hops_max: int = Field(default=3, ge=1, le=3, description="Upper bound the tool accepts per search (1–3).")
+    max_parallel_searches: int = Field(default=3, ge=1, le=5, title="Max parallel searches", description="Sub-queries per search_memory call — global for eval and chat.")
+    limit_default: int = Field(default=20, ge=1, le=100, title="Limit default", description="Starting num_results per search_memory call.")
+    limit_min: int = Field(default=10, ge=1, le=100, title="Limit min", description="Soft floor when the tool clamps limit.")
+    limit_max: int = Field(default=40, ge=1, le=100, title="Limit max", description="Soft ceiling when the tool clamps limit.")
+    hops_max: int = Field(default=3, ge=1, le=3, title="Hops max", description="Upper bound the tool accepts per search (1–3).")
 
     @model_validator(mode="after")
     def _coherent_limits(self) -> "RetrievalAgentLimits":
@@ -790,7 +815,7 @@ class GraphViewPreferences(BaseModel):
     # A node TYPE whose instance count exceeds this shows a "many instances" perf
     # heads-up inside its per-type filter dropdown (the dropdown still lists + searches
     # every instance — this only flags very large types so the user reaches for search).
-    large_type_threshold: int = Field(default=200, ge=10, le=10000, description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
+    large_type_threshold: int = Field(default=200, ge=10, le=10000, json_schema_extra={"advanced": True}, title="Large node-type warning threshold", description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
 
 
 class GraphEvalPreferences(BaseModel):
@@ -815,9 +840,10 @@ class GraphEvalPreferences(BaseModel):
     # fallback. The ``default`` profile is locked and carries the built-in default text.
     answer_prompts: dict[str, AnswerPromptProfile] = Field(
         default_factory=default_answer_prompts,
+        title="Mem Eval Answer Prompts",
         json_schema_extra={"writeWhole": True},
     )
-    judge_prompt: str = DEFAULT_MEMORY_EVAL_JUDGE_PROMPT
+    judge_prompt: str = Field(default=DEFAULT_MEMORY_EVAL_JUDGE_PROMPT, title="Eval judge prompt")
     # Answer + judge each get their OWN model + tuning profile (split from the single shared
     # answering model the eval used before). ``*_model`` of ``None`` falls back through
     # ``knowledge.answering.model`` → ``llm.default_chat`` (the prior behavior), so an unset
@@ -826,6 +852,7 @@ class GraphEvalPreferences(BaseModel):
     # step uses ``answer_*``; the LLM judge (both tracks) uses ``judge_*``.
     answer_model: str | None = Field(
         default=None,
+        title="Eval answer model",
         json_schema_extra={"model_kind": "chat"},
         description=(
             "Model the memory-eval answer step uses to answer from recalled context. Null "
@@ -835,10 +862,12 @@ class GraphEvalPreferences(BaseModel):
     )
     answer_tuning_profile: str = Field(
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        title="Eval answer profile",
         description="Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
     )
     judge_model: str | None = Field(
         default=None,
+        title="Eval judge model",
         json_schema_extra={"model_kind": "chat"},
         description=(
             "Model the LLM judge uses to grade answers against the ideal (both tracks). Null "
@@ -847,6 +876,7 @@ class GraphEvalPreferences(BaseModel):
     )
     judge_tuning_profile: str = Field(
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        title="Eval judge profile",
         description="Tuning profile for the judge model. Lower temperature = more repeatable grading.",
     )
     # The agentic retrieval loop (memory track) gets its OWN model + tuning profile. ``None`` falls
@@ -856,6 +886,7 @@ class GraphEvalPreferences(BaseModel):
     # (e.g. a cheaper or higher-reasoning one) than the final answer step.
     retrieval_model: str | None = Field(
         default=None,
+        title="Retrieval agent model",
         json_schema_extra={"model_kind": "chat"},
         description=(
             "Model the agentic retrieval loop uses to plan searches and call the search_memory "
@@ -865,6 +896,7 @@ class GraphEvalPreferences(BaseModel):
     )
     retrieval_tuning_profile: str = Field(
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        title="Retrieval agent profile",
         description="Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
     )
     # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
@@ -873,27 +905,28 @@ class GraphEvalPreferences(BaseModel):
     # ``show_superseded`` annotate supersession. Defaults = a single timestamp per fact (Zep-style):
     # event_time on, the rest off. Applied identically to the answer, judge, and evidence-check
     # renders of a question (see eval_judge.RecallRenderOptions).
-    show_event_time: bool = True
-    show_expired_at: bool = False
-    show_superseded: bool = False
+    show_event_time: bool = Field(default=True, title="Show event_time (valid date)")
+    show_expired_at: bool = Field(default=False, title="Show expired_at (invalid date)")
+    show_superseded: bool = Field(default=False, title="Show SUPERSEDED flag")
     # Answer-context render caps (eval answerer + judge + evidence-check). The recall leg can surface
     # a large, noisy element set (100s of facts/entities/episodes) that buries the answer-relevant
     # ones; these bound what reaches the prompt. Each kind is score-ranked desc, the top
     # ``max_elements_per_kind`` kept, and every element sanitized to ONE line capped at the per-kind
     # char limit. One global set — applies identically to the answer, judge, and evidence renders.
-    max_elements_per_kind: int = Field(default=30, ge=1, le=200, description="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.")
-    max_fact_chars: int = Field(default=240, ge=40, le=2000, description="Each recalled fact → one sanitized line capped here.")
-    max_episode_chars: int = Field(default=300, ge=40, le=2000, description="Per-episode/message text cap (one sanitized line).")
-    max_summary_chars: int = Field(default=400, ge=40, le=4000, description="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.")
+    max_elements_per_kind: int = Field(default=30, ge=1, le=200, json_schema_extra={"advanced": True}, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.")
+    max_fact_chars: int = Field(default=240, ge=40, le=2000, json_schema_extra={"advanced": True}, title="Max fact chars", description="Each recalled fact → one sanitized line capped here.")
+    max_episode_chars: int = Field(default=300, ge=40, le=2000, json_schema_extra={"advanced": True}, title="Max message chars", description="Per-episode/message text cap (one sanitized line).")
+    max_summary_chars: int = Field(default=400, ge=40, le=4000, json_schema_extra={"advanced": True}, title="Max entity summary chars", description="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.")
     # Agentic retrieval loop caps/clamps (agentic-memory-retrieval-design §5.2). One global
     # value for eval and chat — do not split per surface.
     retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
     # Named library of retrieval-agent system prompts (mirrors answer_prompts).
     retrieval_agent_prompts: dict[str, AnswerPromptProfile] = Field(
         default_factory=default_retrieval_agent_prompts,
+        title="Retrieval Agent Prompt",
         json_schema_extra={"writeWhole": True},
     )
-    active_retrieval_agent_prompt_id: str = Field(default=DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, description="Which retrieval-agent system prompt the loop uses.")
+    active_retrieval_agent_prompt_id: str = Field(default=DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, title="Active prompt profile", description="Which retrieval-agent system prompt the loop uses.")
 
     @model_validator(mode="after")
     def _reseed_locked_prompt_profiles(self) -> "GraphEvalPreferences":
@@ -944,10 +977,11 @@ class GraphPreferences(BaseModel):
     hardcoded params. See docs/knowledge-graphiti-pivot-design.md §9–10.
     """
 
-    backend: KnowledgeGraphBackend = Field(default="off", description="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.")
+    backend: KnowledgeGraphBackend = Field(default="off", title="Graph backend", description="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.")
     # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
     extraction_model: str | None = Field(
         default=None,
+        title="Extraction model",
         json_schema_extra={"model_kind": "chat"},
         description=(
             "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. "
@@ -957,6 +991,7 @@ class GraphPreferences(BaseModel):
     )
     extraction_tuning_profile: str = Field(
         default=DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
+        title="Extraction profile",
         description=(
             "Tuning profile (temperature / max-tokens / thinking) for the extraction model. "
             "Ships deterministic so extraction stays repeatable across runs."
@@ -964,6 +999,7 @@ class GraphPreferences(BaseModel):
     )
     small_model: str | None = Field(
         default=None,
+        title="Smaller extraction model",
         json_schema_extra={"model_kind": "chat"},
         description=(
             "Cheaper model for Graphiti's sub-steps — node dedupe, entity summaries, timestamps. "
@@ -972,11 +1008,13 @@ class GraphPreferences(BaseModel):
     )
     small_tuning_profile: str = Field(
         default=DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
+        title="Smaller extraction profile",
         description="Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
     )
     # ``None`` → shares the knowledge dense embedder (decision G8).
     embedder_model: str | None = Field(
         default=None,
+        title="Embedder model",
         json_schema_extra={"model_kind": "embedding"},
         description=(
             "Embeds entity names + facts into the graph. Null shares the knowledge embedding "
@@ -987,6 +1025,7 @@ class GraphPreferences(BaseModel):
     # Default temporal lens at retrieval: current facts only vs include historical.
     temporal_default: KnowledgeGraphTemporalDefault = Field(
         default="current",
+        title="Temporal lens (default)",
         description=(
             "Default time lens at retrieval. Current = only facts valid now (superseded facts "
             "hidden). Include historical = also surface invalidated facts. Overridable per query."
@@ -997,6 +1036,7 @@ class GraphPreferences(BaseModel):
         default=1,
         ge=1,
         le=3,
+        title="Expansion hops (k)",
         description=(
             "Relationship hops out from matched entities when gathering related facts. 1 = "
             "direct neighbors only (precise); higher reaches further at more noise/cost."
@@ -1005,6 +1045,7 @@ class GraphPreferences(BaseModel):
     # Graphiti search rerank recipe for the fact-search leg.
     search_recipe: KnowledgeGraphSearchRecipe = Field(
         default="rrf",
+        title="Search recipe",
         description=(
             "How candidates are ranked/fused WITHIN each leg (orthogonal to Search scope below). "
             "RRF = fast reciprocal-rank fusion (default). MMR = favors diversity. Cross-encoder "
@@ -1020,6 +1061,7 @@ class GraphPreferences(BaseModel):
     # incompatibility (graphiti-core's ``EpisodeReranker`` has no MMR).
     search_scope: KnowledgeGraphSearchScope = Field(
         default="edges",
+        title="Search scope",
         description=(
             "Which graph elements memory recall and knowledge retrieval READ from (orthogonal "
             "to Search recipe above). Edges = facts between entities (relations). Nodes = "
@@ -1035,6 +1077,8 @@ class GraphPreferences(BaseModel):
     # drops facts that don't fit). Changing this needs a re-ingest to rebuild the graph.
     entity_ontology: KnowledgeGraphEntityOntology = Field(
         default="open",
+        json_schema_extra={"advanced": True},
+        title="Extraction ontology",
         description=(
             "Which entity types extraction may use. Open = no predefined types; the model "
             "extracts freely (everything becomes a generic Entity) — broadest recall, captures "
@@ -1057,6 +1101,8 @@ class GraphPreferences(BaseModel):
             "the second entity."
         ),
         max_length=2000,
+        json_schema_extra={"advanced": True},
+        title="Extraction instructions",
         description=(
             "Optional domain-generic guidance injected verbatim into Graphiti's entity + fact "
             "extraction prompts. Use it to steer what gets captured — e.g. capture first-person "
@@ -1079,6 +1125,7 @@ class GraphPreferences(BaseModel):
         ge=0.0,
         le=1.0,
         json_schema_extra={"step": 0.05},
+        title="Candidate similarity floor",
         description=(
             "Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep "
             "low (≈0.3) for recall — too high and paraphrased questions (e.g. asking 'wife' when "
@@ -1097,6 +1144,8 @@ class GraphPreferences(BaseModel):
         default=60,
         ge=0,
         le=600,
+        json_schema_extra={"advanced": True},
+        title="Query timeout (seconds)",
         description=(
             "Hard ceiling on any single graph (Kuzu) query — writes, index rebuilds, and "
             "Graph-tab reads. Protects the server from a stuck index-rebuild checkpoint that can "
@@ -1111,6 +1160,7 @@ class GraphPreferences(BaseModel):
     # (compact/rich) AND the HIRO_GRAPH_TRACE_RETRIEVAL/INGEST env vars (one dial now).
     observability: GraphObservability = Field(
         default="ledger",
+        title="Graph observability",
         description=(
             "How much the graph engine records to Graph Runs (ingest + retrieval). Off = nothing "
             "— no ledger rows, tracer, or usage sinks (spares CPU; graph cost is NOT tracked). "
@@ -1163,10 +1213,13 @@ class KnowledgePreferences(BaseModel):
     # existing lock + value for already-indexed workspaces without a migration.
     default_embedding_model: str | None = Field(
         default=None,
+        title="Knowledge embedder",
         description="Knowledge embedder. Empty inherits the workspace default (General → Models).",
         json_schema_extra={"model_kind": "embedding"},
     )
-    default_tuning_profile: str = DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
+    default_tuning_profile: str = Field(
+        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID, title="Knowledge answering model profile"
+    )
     chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
     answering: KnowledgeAnsweringPreferences = Field(default_factory=KnowledgeAnsweringPreferences)
@@ -1189,17 +1242,17 @@ class ChatPreferences(BaseModel):
 
     # General answering instructions (Markdown), injected into the current user turn. Editable in
     # the Admin → Preferences → Agent tab. Broader than knowledge — may carry any answering guidance.
-    instructions: str = DEFAULT_CHAT_INSTRUCTIONS
+    instructions: str = Field(default=DEFAULT_CHAT_INSTRUCTIONS, title="Chat instructions")
     # Conversation-history window kept per turn by trim_history (short-term context). Feeds the chat
     # answer + memory/knowledge retrieval — a chat-answering concern, not a long-term memory one.
-    max_messages: int = Field(default=DEFAULT_MAX_HISTORY_MESSAGES, ge=1, le=100, description="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).")
+    max_messages: int = Field(default=DEFAULT_MAX_HISTORY_MESSAGES, ge=1, le=100, title="Max retained messages", description="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).")
     # When on, chat instructs the model to cite knowledge inline as [n] AND surfaces the source list
     # to the client (citation bridge on graph.reply.completed). Moved here from knowledge.chat.
-    cite_sources: bool = False
+    cite_sources: bool = Field(default=False, title="Cite knowledge sources in chat replies")
     # Global tools kill-switch for the chat agent. When off, no tools are bound to the chat model on
     # any turn (the chat page's per-message "disable tools" toggle can additionally opt out a single
     # turn). Gated at runtime in call_model; default on.
-    tools_enabled: bool = True
+    tools_enabled: bool = Field(default=True, title="Enable agent tools in chat")
     # Placeholder until a real per-character/per-chat language setting exists; chat retrieval does
     # not constrain answer language today (the persona decides). Kept so it can be threaded later.
     preferred_answering_language: str = "en"

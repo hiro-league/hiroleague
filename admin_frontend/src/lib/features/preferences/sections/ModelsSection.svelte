@@ -1,10 +1,8 @@
 <script lang="ts">
   import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
+  import PrefPanel from '$lib/features/preferences/widgets/PrefPanel.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import {
-    modalityKeys,
-    modalityLabels
-  } from '$lib/features/preferences/shared/preferences-constants';
+  import { modalityKeys } from '$lib/features/preferences/shared/preferences-constants';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import {
     PREFERENCE_TAB_IDS,
@@ -51,7 +49,6 @@
           path="llm.default_chat"
           embedded
           labelled
-          label="Default chat model"
           selectedId={ctrl.draft.llm.default_chat}
         />
         <PrefModelPicker
@@ -60,12 +57,11 @@
           path="llm.default_stt"
           embedded
           labelled
-          label="Default speech-to-text model"
           selectedId={ctrl.draft.llm.default_stt}
         />
         <TuningProfileSelect
           {ctrl}
-          label="Default chat model profile"
+          path="llm.default_tuning_profile"
           value={ctrl.draft.llm.default_tuning_profile}
           scope="llm"
         />
@@ -75,7 +71,6 @@
           path="llm.default_tts"
           embedded
           labelled
-          label="Default text-to-speech model"
           selectedId={ctrl.draft.llm.default_tts}
         />
         <!-- Workspace default embedder. Never locked — the per-tool overrides (Knowledge / Graph)
@@ -87,7 +82,6 @@
             path="llm.default_embedder"
             embedded
             labelled
-            label="Default embedder model"
             selectedId={ctrl.draft.llm.default_embedder}
           />
           <PrefEmbedderDownload {ctrl} modelId={ctrl.draft.llm.default_embedder} />
@@ -102,7 +96,6 @@
             path="llm.default_reranker"
             embedded
             labelled
-            label="Default reranker model"
             selectedId={ctrl.draft.llm.default_reranker}
           />
           <PrefRerankerDownload {ctrl} modelId={ctrl.draft.llm.default_reranker} />
@@ -119,32 +112,28 @@
       bodyId={PREFERENCES_SECTION_BODY_IDS.mediaInput}
     >
       <div class="grid gap-4">
-        <div class="grid gap-2">
-          <p class="text-sm font-medium">Input Modalities</p>
+        <PrefPanel {ctrl} title="Input Modalities">
           <PrefFieldGrid>
             {#each modalityKeys as key (key)}
               <PrefToggleField
                 {ctrl}
                 path={`media.input.${key}`}
-                label={modalityLabels[key]}
                 bind:checked={ctrl.draft.media.input[key]}
               />
             {/each}
           </PrefFieldGrid>
-        </div>
-        <div class="grid gap-2">
-          <p class="text-sm font-medium">Output Modalities</p>
+        </PrefPanel>
+        <PrefPanel {ctrl} title="Output Modalities">
           <PrefFieldGrid>
             {#each modalityKeys as key (key)}
               <PrefToggleField
                 {ctrl}
                 path={`media.output.${key}`}
-                label={modalityLabels[key]}
                 bind:checked={ctrl.draft.media.output[key]}
               />
             {/each}
           </PrefFieldGrid>
-        </div>
+        </PrefPanel>
       </div>
     </PrefSectionCard>
   {/if}

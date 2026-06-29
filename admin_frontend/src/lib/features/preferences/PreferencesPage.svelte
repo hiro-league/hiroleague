@@ -2,7 +2,7 @@
   import { browser } from '$app/environment';
   import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
-  import { onMount, setContext } from 'svelte';
+  import { onMount, setContext, tick } from 'svelte';
   import { ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, RotateCcw, Save } from '@lucide/svelte';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
@@ -31,6 +31,9 @@
     provideAdvancedVisibility
   } from '$lib/features/preferences/shared/preferences-advanced.svelte';
   import { createPreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import { createPreferencesSearch } from '$lib/features/preferences/state/preferences-search.svelte';
+  import PrefSearchBox from '$lib/features/preferences/widgets/PrefSearchBox.svelte';
+  import type { PrefSearchEntry } from '$lib/features/preferences/shared/preferences-search-index';
   import { createPreferencesTabPreferences } from '$lib/preferences/preferences-tab-preferences.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
@@ -46,6 +49,9 @@
   const tabPrefs = createPreferencesTabPreferences();
   const sectionRegistry = createCollapsibleSectionRegistry();
   setContext(COLLAPSIBLE_SECTION_REGISTRY, sectionRegistry);
+  // Settings search — data-driven (schema titles + tab map), so per-tab counts cover every tab while
+  // only the active one is mounted. Clean-only: cleared + disabled while there are unsaved edits.
+  const search = createPreferencesSearch(() => ctrl.fieldSchema);
 
   if (browser) {
     tabPrefs.bootstrap();
@@ -56,13 +62,15 @@
     tabPrefs.initialize();
   });
 
-  const subtabDescriptors: readonly AdminSubtabDescriptor<PreferenceTabId>[] = PREFERENCE_TABS.map(
-    (tab) => ({
+  // Per-tab result counts appear in the tab strip while a search is active (e.g. "Memory (3)").
+  const subtabDescriptors = $derived<readonly AdminSubtabDescriptor<PreferenceTabId>[]>(
+    PREFERENCE_TABS.map((tab) => ({
       id: tab.id,
       label: tab.label,
       htmlId: PREFERENCE_TAB_IDS[tab.id],
-      ariaControls: PREFERENCE_TAB_PANEL_IDS[tab.id]
-    })
+      ariaControls: PREFERENCE_TAB_PANEL_IDS[tab.id],
+      count: search.active ? (search.countsByTab[tab.id] ?? 0) : undefined
+    }))
   );
 
   async function switchTab(tab: PreferenceTabId) {
@@ -88,6 +96,77 @@
     page.url.searchParams.get('tab');
     tabPrefs.syncActiveTabFromUrl();
   });
+
+  // Search is clean-only: drop the query the moment edits make the page dirty (the box also disables).
+  $effect(() => {
+    if (ctrl.dirty && search.query) search.clear();
+  });
+
+  // Jump to the active match whenever it changes (typing picks the first match; arrows step through).
+  // Reads `activeMatch` synchronously so the effect tracks it, then performs the DOM-side jump. The
+  // path guard avoids re-scrolling when narrowing the query keeps the same top match.
+  let lastNavPath: string | null = null;
+  $effect(() => {
+    const match = search.activeMatch;
+    if (!match) {
+      lastNavPath = null;
+      return;
+    }
+    if (match.path === lastNavPath) return;
+    lastNavPath = match.path;
+    void navigateToMatch(match);
+  });
+
+  // Persistent highlight on EVERY match in the mounted tab (a stronger marker on the active one),
+  // so all matching fields stay visibly marked while searching — not just a transient flash on the
+  // one you jumped to. Only the active tab is mounted, so only its matches are tagged here; the
+  // others are surfaced by the per-tab count badges and get tagged when you arrow into that tab.
+  // Re-runs after the DOM settles whenever the match set, active match, tab, or reveal state changes.
+  function markMatches() {
+    if (!browser) return;
+    const paths = new Set(search.matches.map((m) => m.path));
+    const active = search.activeMatch?.path ?? null;
+    for (const el of document.querySelectorAll<HTMLElement>('[data-pref-path]')) {
+      const path = el.getAttribute('data-pref-path');
+      el.classList.toggle('pref-search-match', !!path && paths.has(path));
+      el.classList.toggle('pref-search-active', path === active);
+    }
+  }
+
+  $effect(() => {
+    // Track the inputs that change which matches are visible/marked.
+    search.matches;
+    search.activeMatch;
+    tabPrefs.activeTab;
+    advancedVis.showAdvanced;
+    sectionRegistry.anyExpanded;
+    if (!browser) return;
+    void tick().then(markMatches);
+  });
+
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function navigateToMatch(match: PrefSearchEntry) {
+    if (!browser) return;
+    // Reveal anything that would hide the target: advanced fields + collapsed sections.
+    advancedVis.set(true);
+    if (tabPrefs.activeTab !== match.tabId) {
+      // Clean-only, so this never trips the unsaved-changes guard `switchTab` runs.
+      await tabPrefs.setActiveTab(match.tabId);
+    }
+    await tick(); // let the (possibly newly mounted) tab + its section cards render
+    sectionRegistry.expandAll();
+    await tick(); // let expanded sections + advanced fields paint before we look them up
+    const el = document.querySelector(`[data-pref-path="${match.path}"]`);
+    if (!el) return; // dict/table controls (e.g. tuning_profiles) have no single anchor — tab switch is enough
+    el.scrollIntoView({ block: 'center' });
+    document
+      .querySelectorAll('.pref-search-hit')
+      .forEach((node) => node.classList.remove('pref-search-hit'));
+    el.classList.add('pref-search-hit');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.remove('pref-search-hit'), 1800);
+  }
 </script>
 
 <svelte:head>
@@ -98,6 +177,7 @@
 
 <AdminPageHeader
   sticky
+  forceCompact={search.active}
   kicker="Workspace"
   title="Settings"
   subtitle="Runtime settings are held in memory and persisted to preferences.json when saved."
@@ -123,6 +203,16 @@
               </Button>
             {/if}
             {#if ctrl.draft && !ctrl.loading}
+              <PrefSearchBox
+                query={search.query}
+                disabled={ctrl.dirty}
+                position={search.position}
+                total={search.total}
+                onQuery={(next) => search.setQuery(next)}
+                onPrev={search.prev}
+                onNext={search.next}
+                onClear={search.clear}
+              />
               <Button
                 variant="ghost"
                 size="icon"
@@ -189,3 +279,31 @@
 </AdminPageHeader>
 
 <UnsavedPreferencesDialog unsaved={ctrl.unsaved} onDiscard={discardUnsavedChanges} />
+
+<style>
+  /* Search highlights. Targets live in child section components, so the rules must be :global.
+     `match` = persistent marker on every matching field; `active` = stronger marker on the current
+     one; `hit` = transient pulse applied on each jump. Ordered so `active` wins over `match`. */
+  :global([data-pref-path].pref-search-match) {
+    border-radius: 0.5rem;
+    background-color: color-mix(in oklab, var(--ring) 8%, transparent);
+    outline: 1px solid color-mix(in oklab, var(--ring) 35%, transparent);
+    outline-offset: 3px;
+  }
+  :global([data-pref-path].pref-search-active) {
+    background-color: color-mix(in oklab, var(--ring) 16%, transparent);
+    outline: 2px solid var(--ring);
+    outline-offset: 4px;
+  }
+  :global([data-pref-path].pref-search-hit) {
+    animation: pref-search-pulse 1.6s ease-out;
+  }
+  @keyframes pref-search-pulse {
+    0% {
+      background-color: color-mix(in oklab, var(--ring) 38%, transparent);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+</style>

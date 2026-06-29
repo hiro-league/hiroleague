@@ -1,13 +1,13 @@
 <script lang="ts">
   import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import {
-    knowledgeHybridPrefetchActive,
-    knowledgeRerankTopNActive
-  } from '$lib/features/preferences/shared/preferences-helpers';
+  import { knowledgeHybridPrefetchActive } from '$lib/features/preferences/shared/preferences-helpers';
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
+  import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
+  import PrefPanel from '$lib/features/preferences/widgets/PrefPanel.svelte';
+  import PrefRerankerDownload from '$lib/features/preferences/widgets/PrefRerankerDownload.svelte';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
   import { cn } from '$lib/utils';
 
@@ -18,14 +18,8 @@
   let { ctrl }: Props = $props();
 
   const hybridPrefetchActive = $derived(knowledgeHybridPrefetchActive(ctrl.draft));
-  const rerankTopNActive = $derived(
-    knowledgeRerankTopNActive(
-      ctrl.draft,
-      ctrl.localRerankers,
-      ctrl.activeProvidersStore.resolved,
-      ctrl.activeProvidersStore.rerankActiveProviderIds
-    )
-  );
+  // The Enable-reranking toggle is the single gate for both the reranker model and the rerank top-N.
+  const rerankerEnabled = $derived(Boolean(ctrl.draft?.knowledge.retrieval.reranker.enabled));
 </script>
 
 {#if ctrl.draft}
@@ -34,48 +28,77 @@
     collapsible
     bodyId={PREFERENCES_SECTION_BODY_IDS.knowledgeRetrieval}
   >
-    <PrefToggleField
-      {ctrl}
-      path="knowledge.retrieval.hybrid"
-      label="Hybrid retrieval (dense + BM25, RRF fusion)"
-      bind:checked={ctrl.draft.knowledge.retrieval.hybrid}
-    />
-    <p class="text-xs text-muted-foreground">
-      Runs BM25 keyword search alongside dense embeddings and fuses them with Reciprocal Rank
-      Fusion — recovers exact terms, proper nouns, and Arabic surface forms. Sparse model:
-      <code>{ctrl.draft.knowledge.retrieval.sparse_model}</code> (local, no extra setup).
-    </p>
     <PrefFieldGrid>
+      <PrefToggleField
+        {ctrl}
+        path="knowledge.retrieval.hybrid"
+        hint={`Runs BM25 keyword search alongside dense embeddings and fuses them with Reciprocal Rank Fusion — recovers exact terms, proper nouns, and Arabic surface forms. Sparse model: ${ctrl.draft.knowledge.retrieval.sparse_model} (local, no extra setup).`}
+        bind:checked={ctrl.draft.knowledge.retrieval.hybrid}
+      />
       <PrefNumberField
         {ctrl}
         path="knowledge.retrieval.min_score"
-        label="Minimum score (Dense only)"
         bind:value={ctrl.draft.knowledge.retrieval.min_score}
       />
-      <PrefNumberField
-        {ctrl}
-        path="knowledge.retrieval.top_k"
-        label="Search/fused results (top K)"
-        bind:value={ctrl.draft.knowledge.retrieval.top_k}
-      />
+    </PrefFieldGrid>
+    <PrefFieldGrid>
       <div class={cn(!hybridPrefetchActive && 'opacity-50')}>
         <PrefNumberField
           {ctrl}
           path="knowledge.retrieval.prefetch_limit"
-          label="Candidates per branch"
           disabled={ctrl.busy || !hybridPrefetchActive}
           bind:value={ctrl.draft.knowledge.retrieval.prefetch_limit}
         />
       </div>
-      <div class={cn(!rerankTopNActive && 'opacity-50')}>
-        <PrefNumberField
-          {ctrl}
-          path="knowledge.retrieval.reranker.top_n"
-          label="Rerank results (top N)"
-          disabled={ctrl.busy || !rerankTopNActive}
-          bind:value={ctrl.draft.knowledge.retrieval.reranker.top_n}
-        />
-      </div>
+      <PrefNumberField
+        {ctrl}
+        path="knowledge.retrieval.top_k"
+        bind:value={ctrl.draft.knowledge.retrieval.top_k}
+      />
     </PrefFieldGrid>
+
+    <!-- Reranker (moved in from its own card): cross-encoder that reorders candidates. The single
+         Enable toggle gates both the model picker and the rerank top-N. -->
+    <PrefPanel
+      {ctrl}
+      title="Reranker"
+      hint="Optional cross-encoder that reorders retrieved candidates by relevance before answering (precision step). Cloud models need a provider key; local models must be downloaded first. Switching is a hot swap — no re-ingest."
+    >
+      <PrefFieldGrid>
+        <PrefToggleField
+          {ctrl}
+          path="knowledge.retrieval.reranker.enabled"
+          hint="Cloud scores are calibrated [0,1]; local cross-encoder scores are sigmoid-normalized. A normalized relevance is emitted whether reranking is on (reranker score) or off (retrieval rank), so downstream ranking stays consistent."
+          bind:checked={ctrl.draft.knowledge.retrieval.reranker.enabled}
+        />
+        <div class={cn(!rerankerEnabled && 'opacity-50')}>
+          <div class="grid gap-2">
+            <PrefModelPicker
+              {ctrl}
+              kind="rerank"
+              path="knowledge.retrieval.reranker.model_id"
+              embedded
+              selectedId={ctrl.draft.knowledge.retrieval.reranker.model_id}
+              emptyFallbackId={ctrl.draft.llm.default_reranker}
+              busy={ctrl.busy || !rerankerEnabled}
+            />
+            {#if ctrl.draft.knowledge.retrieval.reranker.model_id}
+              <PrefRerankerDownload
+                {ctrl}
+                modelId={ctrl.draft.knowledge.retrieval.reranker.model_id}
+              />
+            {/if}
+          </div>
+        </div>
+        <div class={cn(!rerankerEnabled && 'opacity-50')}>
+          <PrefNumberField
+            {ctrl}
+            path="knowledge.retrieval.reranker.top_n"
+            disabled={ctrl.busy || !rerankerEnabled}
+            bind:value={ctrl.draft.knowledge.retrieval.reranker.top_n}
+          />
+        </div>
+      </PrefFieldGrid>
+    </PrefPanel>
   </PrefSectionCard>
 {/if}

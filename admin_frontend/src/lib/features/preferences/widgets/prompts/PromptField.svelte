@@ -10,6 +10,11 @@
   import { cn } from '$lib/utils';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import {
+    preferenceFieldMeta,
+    preferenceTitle,
+    type PreferencePath
+  } from '$lib/features/preferences/shared/preferences-schema';
   import PromptEditorDialog from './PromptEditorDialog.svelte';
   import type { PromptDialogModel, PromptSavePayload } from './prompt-editor';
 
@@ -17,8 +22,8 @@
     ctrl: PreferencesController;
     /** Dotted preference path, e.g. "knowledge.answering.prompt". */
     path: string;
-    /** Row title + default dialog title. */
-    label: string;
+    /** Optional row title override; omit to use the field's backend `title`. */
+    label?: string;
     /** Help text shown as a tooltip next to the label (no inline prose on the page). */
     hint?: string;
     ariaLabel: string;
@@ -30,6 +35,9 @@
 
   let open = $state(false);
 
+  const resolvedLabel = $derived(
+    label ?? preferenceTitle(preferenceFieldMeta(ctrl.fieldSchema, path as PreferencePath)) ?? path
+  );
   const value = $derived(String((getPreferenceByPath(ctrl.draft, path) as string) ?? ''));
   const defaultText = $derived(ctrl.promptDefaults[path] ?? '');
   const isDefault = $derived(value === defaultText);
@@ -46,10 +54,10 @@
   }
 </script>
 
-<div class="flex flex-wrap items-center justify-between gap-3">
+<div data-pref-path={path} class="flex flex-wrap items-center justify-between gap-3">
   <div class="flex items-center gap-2">
     <span class="inline-flex items-center gap-1.5 font-sans text-[0.9375rem] font-semibold text-foreground">
-      {label}
+      {resolvedLabel}
       {#if hint?.trim()}
         <FieldHelp text={hint} />
       {/if}
@@ -68,7 +76,7 @@
 
 <PromptEditorDialog
   {open}
-  title={dialogTitle ?? `Edit: ${label}`}
+  title={dialogTitle ?? `Edit: ${resolvedLabel}`}
   {ariaLabel}
   {editorLabel}
   {model}

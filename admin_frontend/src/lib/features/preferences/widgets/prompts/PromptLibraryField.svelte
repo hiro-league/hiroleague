@@ -10,6 +10,11 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import {
+    preferenceFieldMeta,
+    preferenceTitle,
+    type PreferencePath
+  } from '$lib/features/preferences/shared/preferences-schema';
   import type { AnswerPromptProfile } from '$lib/api/preferences';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import PromptEditorDialog from './PromptEditorDialog.svelte';
@@ -19,7 +24,8 @@
     ctrl: PreferencesController;
     /** Dotted path to the dict, e.g. "graph.eval.answer_prompts". */
     dictPath: string;
-    label: string;
+    /** Optional label override; omit to use the dict field's backend `title`. */
+    label?: string;
     /** Help text shown as a tooltip next to the field label (no inline prose on the page). */
     hint?: string;
     ariaLabel: string;
@@ -43,6 +49,9 @@
   }: Props = $props();
 
   let open = $state(false);
+  const resolvedLabel = $derived(
+    label ?? preferenceTitle(preferenceFieldMeta(ctrl.fieldSchema, dictPath as PreferencePath)) ?? dictPath
+  );
   // Seeded by the clamp effect below (to defaultId) once the dict is known — avoids capturing the
   // `defaultId` prop in the $state initializer (state_referenced_locally).
   let selectedId = $state('');
@@ -82,7 +91,7 @@
   }
 </script>
 
-<div class="flex flex-wrap items-end gap-3">
+<div data-pref-path={dictPath} class="flex flex-wrap items-end gap-3">
   <FormField label="Version to edit" class="min-w-[16rem] flex-1" {hint} hintTooltip>
     <select class={ADMIN_SELECT_LG} bind:value={selectedId}>
       {#each entries as [id, p] (id)}
@@ -97,7 +106,7 @@
 
 <PromptEditorDialog
   {open}
-  title={dialogTitle ?? `Edit: ${label}`}
+  title={dialogTitle ?? `Edit: ${resolvedLabel}`}
   {ariaLabel}
   {editorLabel}
   {model}

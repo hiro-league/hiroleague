@@ -29,6 +29,6 @@
   const colsClass = $derived(cols === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2');
 </script>
 
-<div class={cn('grid grid-cols-1 items-start gap-x-4 gap-y-3', colsClass, className)}>
+<div class={cn('grid grid-cols-1 items-start gap-x-8 gap-y-3', colsClass, className)}>
   {@render children()}
 </div>

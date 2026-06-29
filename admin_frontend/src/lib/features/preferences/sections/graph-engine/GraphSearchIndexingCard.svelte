@@ -77,46 +77,39 @@
       <PrefSelectField
         {ctrl}
         path="graph.temporal_default"
-        label="Temporal lens (default)"
         options={GRAPH_TEMPORAL_DEFAULT_LABELS}
         bind:value={ctrl.draft.graph.temporal_default}
       />
       <PrefNumberField
         {ctrl}
         path="graph.k_hop"
-        label="Expansion hops (k)"
         bind:value={ctrl.draft.graph.k_hop}
       />
       <PrefSelectField
         {ctrl}
         path="graph.search_recipe"
-        label="Search recipe"
         options={searchRecipeOptions}
         bind:value={ctrl.draft.graph.search_recipe}
       />
       <PrefSelectField
         {ctrl}
         path="graph.search_scope"
-        label="Search scope"
         options={searchScopeOptions}
         bind:value={ctrl.draft.graph.search_scope}
       />
       <PrefNumberField
         {ctrl}
         path="graph.sim_min_score"
-        label="Candidate similarity floor"
         bind:value={ctrl.draft.graph.sim_min_score}
       />
       <PrefNumberField
         {ctrl}
         path="graph.query_timeout_s"
-        label="Query timeout (seconds)"
         bind:value={ctrl.draft.graph.query_timeout_s}
       />
       <PrefSelectField
         {ctrl}
         path="graph.observability"
-        label="Graph observability"
         options={GRAPH_OBSERVABILITY_LABELS}
         bind:value={ctrl.draft.graph.observability}
       />
@@ -134,21 +127,18 @@
         <PrefToggleField
           {ctrl}
           path="graph.eval.show_event_time"
-          label="Show event_time (valid date)"
           hint="Adds 'event_time: <valid_at>' to each fact. Also governs the [date] prefix on recalled messages (episodes)."
           bind:checked={ctrl.draft.graph.eval.show_event_time}
         />
         <PrefToggleField
           {ctrl}
           path="graph.eval.show_expired_at"
-          label="Show expired_at (invalid date)"
           hint="Adds 'expired_at: <invalid_at>' when a fact has been invalidated — the upper bound of its validity window."
           bind:checked={ctrl.draft.graph.eval.show_expired_at}
         />
         <PrefToggleField
           {ctrl}
           path="graph.eval.show_superseded"
-          label="Show SUPERSEDED flag"
           hint="Tags facts that a newer fact has replaced. Only visible when the retrieval temporal lens is set to include historical facts."
           bind:checked={ctrl.draft.graph.eval.show_superseded}
         />

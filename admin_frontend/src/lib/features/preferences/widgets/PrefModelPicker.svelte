@@ -11,14 +11,16 @@
   import {
     preferenceFieldMeta,
     preferenceHint,
-    preferenceIsAdvanced
+    preferenceIsAdvanced,
+    preferenceTitle
   } from '$lib/features/preferences/shared/preferences-schema';
 
   type Props = {
     ctrl: PreferencesController;
     kind: PrefModelKind;
     path: PrefModelIdPath;
-    label: string;
+    /** Optional label override; omit to use the field's backend `title` (single source of truth). */
+    label?: string;
     /** Overrides the schema description; omit to use the field's backend `description`. */
     hint?: string;
     selectedId?: string | null;
@@ -46,15 +48,17 @@
   const empty = $derived(PREF_MODEL_EMPTY_LABELS[kind]);
   const pickerBusy = $derived(busy ?? ctrl.busy);
   const meta = $derived(preferenceFieldMeta(ctrl.fieldSchema, path));
+  const resolvedLabel = $derived(label ?? preferenceTitle(meta) ?? path);
   const hint = $derived(hintOverride ?? preferenceHint(meta) ?? '');
   const vis = usePrefFieldVisibility(() => preferenceIsAdvanced(meta));
 </script>
 
 {#if vis.visible}
+<div data-pref-path={path}>
 <SingleModelPicker
   {embedded}
   {labelled}
-  {label}
+  label={resolvedLabel}
   {hint}
   {selectedId}
   catalogModels={catalog.catalogModels}
@@ -67,4 +71,5 @@
   {emptyFallbackId}
   onSelect={(id) => ctrl.setModelId(path, id)}
 />
+</div>
 {/if}
