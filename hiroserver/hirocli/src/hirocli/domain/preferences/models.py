@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -47,9 +48,18 @@ def pref_field(
     save_skip: bool = False,
     write_whole: bool = False,
     read_only: bool = False,
+    tuning_profile_ref: bool = False,
     **field_kwargs: Any,
 ) -> Any:
-    """``Field(...)`` for a preference with the admin-UI ``json_schema_extra`` metadata named."""
+    """``Field(...)`` for a preference with the admin-UI ``json_schema_extra`` metadata named.
+
+    ``tuning_profile_ref=True`` marks a string field whose value is a ``tuning_profiles`` id. The
+    root validator finds these by the marker and checks the referenced profile exists (see
+    ``iter_tuning_profile_refs``), so a new profile-referencing field is validated automatically —
+    schema-driven, like the admin PATCH walk, with no hand-maintained list to update. The marker is
+    deliberately NOT copied into the flat admin field map (absent from
+    ``preferences_schema._META_KEYS``); it is backend validation metadata only.
+    """
     extra: dict[str, Any] = {}
     if model_kind is not None:
         extra["model_kind"] = model_kind
@@ -63,7 +73,24 @@ def pref_field(
         extra["writeWhole"] = True
     if read_only:
         extra["readOnly"] = True
+    if tuning_profile_ref:
+        extra["tuning_profile_ref"] = True
     return Field(json_schema_extra=extra, **field_kwargs)
+
+
+def iter_tuning_profile_refs(model: BaseModel, prefix: str = "") -> Iterator[tuple[str, str]]:
+    """Yield ``(dotted_path, profile_id)`` for every field flagged ``tuning_profile_ref`` via
+    ``pref_field``, recursing into nested preference models. Dict fields (``tuning_profiles`` /
+    ``image_profiles``) are not traversed — only the scalar reference fields carry the marker."""
+    for name, field in type(model).model_fields.items():
+        value = getattr(model, name)
+        path = f"{prefix}.{name}" if prefix else name
+        if isinstance(value, BaseModel):
+            yield from iter_tuning_profile_refs(value, path)
+            continue
+        extra = field.json_schema_extra
+        if isinstance(extra, dict) and extra.get("tuning_profile_ref"):
+            yield path, value
 
 
 class PreferenceSection(BaseModel):
@@ -386,8 +413,10 @@ class LLMPreferences(BaseModel):
         save_skip=True,
         default=None,
     )
-    default_tuning_profile: str = Field(
-        default=DEFAULT_CHAT_TUNING_PROFILE_ID, title="Default chat model profile"
+    default_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
+        default=DEFAULT_CHAT_TUNING_PROFILE_ID,
+        title="Default chat model profile",
     )
     default_image_profile: str = pref_field(
         save_skip=True,
@@ -460,7 +489,9 @@ class MemoryPreferences(BaseModel):
     gone (mem0 → Graphiti, Phase 5)."""
 
     enabled: bool = Field(default=False, title="Enable agent memory")
-    default_tuning_profile: str = DEFAULT_MEMORY_TUNING_PROFILE_ID
+    default_tuning_profile: str = pref_field(
+        tuning_profile_ref=True, default=DEFAULT_MEMORY_TUNING_PROFILE_ID
+    )
     # A1 fix: the human's name, used as the Graphiti *speaker label* when ingesting the user's
     # turns. Graphiti extracts the speaker (the token before the ":") as the anchor entity, so a
     # real name produces a clean `Misho` Person hub instead of a generic `User` node, and every
@@ -920,7 +951,8 @@ class GraphEvalPreferences(BaseModel):
             "answers always use the production answering pipeline, not this.)"
         ),
     )
-    answer_tuning_profile: str = Field(
+    answer_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
         title="Eval answer profile",
         description="Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
@@ -934,7 +966,8 @@ class GraphEvalPreferences(BaseModel):
             "falls back to the knowledge answering model, then default chat."
         ),
     )
-    judge_tuning_profile: str = Field(
+    judge_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
         title="Eval judge profile",
         description="Tuning profile for the judge model. Lower temperature = more repeatable grading.",
@@ -954,7 +987,8 @@ class GraphEvalPreferences(BaseModel):
             "answering model → default chat."
         ),
     )
-    retrieval_tuning_profile: str = Field(
+    retrieval_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
         title="Retrieval agent profile",
         description="Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
@@ -1059,7 +1093,8 @@ class GraphPreferences(BaseModel):
             "default chat."
         ),
     )
-    extraction_tuning_profile: str = Field(
+    extraction_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
         default=DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
         title="Extraction profile",
         description=(
@@ -1076,7 +1111,8 @@ class GraphPreferences(BaseModel):
             "Null falls back to the extraction model."
         ),
     )
-    small_tuning_profile: str = Field(
+    small_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
         default=DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
         title="Smaller extraction profile",
         description="Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
@@ -1287,8 +1323,10 @@ class KnowledgePreferences(BaseModel):
         title="Knowledge embedder",
         description="Knowledge embedder. Empty inherits the workspace default (General → Models).",
     )
-    default_tuning_profile: str = Field(
-        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID, title="Knowledge answering model profile"
+    default_tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
+        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        title="Knowledge answering model profile",
     )
     chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)
@@ -1358,29 +1396,12 @@ class WorkspacePreferences(BaseModel):
     @model_validator(mode="after")
     def _validate_tuning_profiles(self) -> "WorkspacePreferences":
         seed_default_profiles(self.tuning_profiles, default_tuning_profiles())
-        if self.llm.default_tuning_profile not in self.tuning_profiles:
-            raise ValueError(
-                f"Unknown llm.default_tuning_profile: {self.llm.default_tuning_profile}"
-            )
-        if self.memory.default_tuning_profile not in self.tuning_profiles:
-            raise ValueError(
-                f"Unknown memory.default_tuning_profile: {self.memory.default_tuning_profile}"
-            )
-        if self.knowledge.default_tuning_profile not in self.tuning_profiles:
-            raise ValueError(
-                f"Unknown knowledge.default_tuning_profile: {self.knowledge.default_tuning_profile}"
-            )
-        for graph_profile_id in (
-            self.graph.extraction_tuning_profile,
-            self.graph.small_tuning_profile,
-            self.graph.eval.answer_tuning_profile,
-            self.graph.eval.judge_tuning_profile,
-            self.graph.eval.retrieval_tuning_profile,
-        ):
-            if graph_profile_id not in self.tuning_profiles:
-                raise ValueError(
-                    f"Unknown graph tuning profile: {graph_profile_id}"
-                )
+        # Every field marked ``tuning_profile_ref`` (via ``pref_field``) must point at an existing
+        # profile. References are discovered by the marker (``iter_tuning_profile_refs``), so a new
+        # profile-referencing field is validated automatically — no hand-maintained list here.
+        for path, profile_id in iter_tuning_profile_refs(self):
+            if profile_id not in self.tuning_profiles:
+                raise ValueError(f"Unknown tuning profile at {path}: {profile_id!r}")
         return self
 
     @model_validator(mode="after")

@@ -110,6 +110,7 @@
           "default": "knowledge_answering",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
           "title": "Eval answer profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "judge_model": {
@@ -130,6 +131,7 @@
           "default": "knowledge_answering",
           "description": "Tuning profile for the judge model. Lower temperature = more repeatable grading.",
           "title": "Eval judge profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "retrieval_model": {
@@ -150,6 +152,7 @@
           "default": "knowledge_answering",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
           "title": "Retrieval agent profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "show_event_time": {
@@ -276,6 +279,7 @@
           "default": "graphiti_extraction",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs.",
           "title": "Extraction profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "small_model": {
@@ -296,6 +300,7 @@
           "default": "graphiti_small",
           "description": "Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
           "title": "Smaller extraction profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "embedder_model": {
@@ -700,6 +705,7 @@
         "default_tuning_profile": {
           "default": "knowledge_answering",
           "title": "Knowledge answering model profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "chunking": {
@@ -939,6 +945,7 @@
         "default_tuning_profile": {
           "default": "balanced_chat",
           "title": "Default chat model profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "default_image_profile": {
@@ -1003,6 +1010,7 @@
         "default_tuning_profile": {
           "default": "memory_extraction",
           "title": "Default Tuning Profile",
+          "tuning_profile_ref": true,
           "type": "string"
         },
         "user_name": {

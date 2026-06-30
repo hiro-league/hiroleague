@@ -1,8 +1,14 @@
-import { GRAPH_ENGINE_FIELD_ORDER } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
-import { EVAL_FIELD_ORDER } from '$lib/features/preferences/sections/eval/eval-manifest';
-import { AGENT_FIELD_ORDER } from '$lib/features/preferences/sections/agent-manifest';
-import { KNOWLEDGE_FIELD_ORDER } from '$lib/features/preferences/sections/knowledge/knowledge-manifest';
-import { MODELS_FIELD_ORDER } from '$lib/features/preferences/sections/models-manifest';
+import { GRAPH_ENGINE_MANIFEST } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
+import { EVAL_MANIFEST } from '$lib/features/preferences/sections/eval/eval-manifest';
+import { AGENT_MANIFEST } from '$lib/features/preferences/sections/agent-manifest';
+import { KNOWLEDGE_MANIFEST } from '$lib/features/preferences/sections/knowledge/knowledge-manifest';
+import { MODELS_MANIFEST } from '$lib/features/preferences/sections/models-manifest';
+import {
+  manifestCardSections,
+  manifestFieldPaths,
+  manifestSections,
+  type PrefTabManifest
+} from '$lib/features/preferences/widgets/manifest/manifest-types';
 
 /** Page-level preference tabs (`?tab=` on `/preferences`). */
 export type PreferenceTabId =
@@ -99,120 +105,69 @@ export function tabForPreferencePath(path: string): PreferenceTabId | null {
   return best?.tab ?? null;
 }
 
-// Path → section (card) title, for the search autocomplete's "Tab › Section" locator line. Same
-// longest-prefix-wins scheme as the tab map. These MUST mirror the `<PrefSectionCard title=…>` (and
-// a couple of `<PrefPanel>`) labels in the section components; if a card is renamed or a field moves
-// cards, update the matching rule here. Missing coverage degrades gracefully (the autocomplete just
-// omits the section), so this is best-effort polish, not correctness-critical.
-const PREFERENCE_SECTION_PATH_RULES: { prefix: string; section: string }[] = [
-  // General
-  { prefix: 'llm', section: 'Default models' },
-  { prefix: 'media', section: 'Modalities' },
-  // Agent
-  { prefix: 'memory.user_name', section: 'Chat Settings' },
-  { prefix: 'chat', section: 'Chat Settings' },
-  { prefix: 'memory', section: 'Agent memory' },
-  // Knowledge
-  { prefix: 'knowledge.retrieval', section: 'Retrieval defaults' },
-  { prefix: 'knowledge.answering', section: 'Knowledge Answering (Ask Tab)' },
-  { prefix: 'knowledge.rewrite', section: 'Knowledge Answering (Ask Tab)' },
-  { prefix: 'knowledge.default_tuning_profile', section: 'Knowledge Answering (Ask Tab)' },
-  { prefix: 'knowledge', section: 'Indexing Options' },
-  { prefix: 'graph.backend', section: 'Indexing Options' },
-  // Eval
-  { prefix: 'graph.eval.answer_model', section: 'Evaluation Models' },
-  { prefix: 'graph.eval.answer_tuning_profile', section: 'Evaluation Models' },
-  { prefix: 'graph.eval.judge_model', section: 'Evaluation Models' },
-  { prefix: 'graph.eval.judge_tuning_profile', section: 'Evaluation Models' },
-  { prefix: 'graph.eval.answer_prompts', section: 'Prompts' },
-  { prefix: 'graph.eval.active_answer_prompt_id', section: 'Prompts' },
-  { prefix: 'graph.eval.judge_prompt', section: 'Prompts' },
-  // Memory (shared graph engine)
-  { prefix: 'graph.eval.retrieval_model', section: 'Retrieval Agent Model & Prompt' },
-  { prefix: 'graph.eval.retrieval_tuning_profile', section: 'Retrieval Agent Model & Prompt' },
-  { prefix: 'graph.eval.active_retrieval_agent_prompt_id', section: 'Retrieval Agent Model & Prompt' },
-  { prefix: 'graph.eval.retrieval_agent_prompts', section: 'Retrieval Agent Model & Prompt' },
-  { prefix: 'graph.eval.retrieval_agent', section: 'Retrieval Agent' },
-  { prefix: 'graph.eval.max_elements_per_kind', section: 'Retrieval Agent' },
-  { prefix: 'graph.eval.max_fact_chars', section: 'Retrieval Agent' },
-  { prefix: 'graph.eval.max_episode_chars', section: 'Retrieval Agent' },
-  { prefix: 'graph.eval.max_summary_chars', section: 'Retrieval Agent' },
-  { prefix: 'graph.eval.show_event_time', section: 'Graph search & indexing' },
-  { prefix: 'graph.eval.show_expired_at', section: 'Graph search & indexing' },
-  { prefix: 'graph.eval.show_superseded', section: 'Graph search & indexing' },
-  { prefix: 'graph.reranker', section: 'Graphiti Reranker (Cross-encoder)' },
-  { prefix: 'graph.view', section: 'Graph view (display)' },
-  { prefix: 'graph.extraction_model', section: 'Graph Extraction' },
-  { prefix: 'graph.extraction_tuning_profile', section: 'Graph Extraction' },
-  { prefix: 'graph.small_model', section: 'Graph Extraction' },
-  { prefix: 'graph.small_tuning_profile', section: 'Graph Extraction' },
-  { prefix: 'graph.embedder_model', section: 'Graph Extraction' },
-  { prefix: 'graph.entity_ontology', section: 'Graph Extraction' },
-  { prefix: 'graph.custom_extraction_instructions', section: 'Graph Extraction' },
-  { prefix: 'graph', section: 'Graph search & indexing' },
-  // Model Profiles
-  { prefix: 'tuning_profiles', section: 'Model Profiles' }
-];
+// ---------------------------------------------------------------------------
+// Manifest-derived field order + section map (single source: the per-tab manifests)
+// ---------------------------------------------------------------------------
+//
+// Each manifest-driven tab owns its field ORDER, card/section titles, and path→section map. We
+// derive all of that straight from the manifests, so there is nothing to keep in sync with the
+// section components: adding/reordering a field or renaming a card in a manifest updates the search
+// index automatically. The hand-rolled `tuning-profiles` tab has no manifest, so it registers its
+// single field + section name explicitly. (`tabForPreferencePath` above stays a small prefix table —
+// the subtree-ownership map that lets the per-manifest tests catch a field someone forgot to add to
+// a manifest.)
+const PREFERENCE_TAB_MANIFESTS: Partial<Record<PreferenceTabId, PrefTabManifest>> = {
+  models: MODELS_MANIFEST,
+  agent: AGENT_MANIFEST,
+  'graph-engine': GRAPH_ENGINE_MANIFEST,
+  knowledge: KNOWLEDGE_MANIFEST,
+  eval: EVAL_MANIFEST
+};
 
-// Sections in the order they render on the page (tab order, then card order within each tab). Drives
-// search-result ordering so arrowing follows the visual top-to-bottom layout instead of the schema's
-// model-definition order. Keep in sync with the section components' card order.
-export const PREFERENCE_SECTION_ORDER: readonly string[] = [
-  // General
-  'Default models',
-  'Modalities',
-  // Agent
-  'Chat Settings',
-  'Agent memory',
-  // Memory (shared graph engine)
-  'Graph Extraction',
-  'Graph search & indexing',
-  'Graphiti Reranker (Cross-encoder)',
-  'Retrieval Agent Model & Prompt',
-  'Retrieval Agent',
-  'Graph view (display)',
-  // Knowledge
-  'Indexing Options',
-  'Retrieval defaults',
-  'Knowledge Answering (Ask Tab)',
-  // Eval
-  'Evaluation Models',
-  'Prompts',
-  // Model Profiles
-  'Model Profiles'
-];
+// Field paths + section titles a hand-rolled (non-manifest) tab contributes, in render order.
+const HANDROLLED_TAB_FIELDS: Partial<Record<PreferenceTabId, readonly string[]>> = {
+  'tuning-profiles': ['tuning_profiles']
+};
+const HANDROLLED_TAB_SECTIONS: Partial<Record<PreferenceTabId, readonly string[]>> = {
+  'tuning-profiles': ['Model Profiles']
+};
 
-// Field render order WITHIN each section, mirroring the markup order of the section components (the
-// 2-col grids fill left-to-right, top-to-bottom, so source order = visual order). Used to order
-// search results within a card so arrowing follows the page exactly, instead of the schema's
-// model-definition order. Paths not listed here fall back to schema order after the listed ones in
-// their section. Keep in sync with the cards; the `preferences-search-index` test guards that every
-// entry is a real, unique schema path.
-export const PREFERENCE_FIELD_ORDER: readonly string[] = [
-  // General (models) — DERIVED from MODELS_MANIFEST (see models-manifest.ts).
-  ...MODELS_FIELD_ORDER,
-  // Agent — DERIVED from AGENT_MANIFEST (see agent-manifest.ts).
-  ...AGENT_FIELD_ORDER,
-  // Memory (shared graph engine) — DERIVED from GRAPH_ENGINE_MANIFEST so render order and search
-  // order share one source and can't drift. Add/reorder Memory-tab fields in graph-engine-manifest.ts.
-  ...GRAPH_ENGINE_FIELD_ORDER,
-  // Knowledge — DERIVED from KNOWLEDGE_MANIFEST (see knowledge-manifest.ts).
-  ...KNOWLEDGE_FIELD_ORDER,
-  // Eval — DERIVED from EVAL_MANIFEST (single source for render + search order; see eval-manifest.ts).
-  ...EVAL_FIELD_ORDER,
-  // Model Profiles
-  'tuning_profiles'
-];
+function tabFieldPaths(tab: PreferenceTabId): readonly string[] {
+  const manifest = PREFERENCE_TAB_MANIFESTS[tab];
+  return manifest ? manifestFieldPaths(manifest) : (HANDROLLED_TAB_FIELDS[tab] ?? []);
+}
 
-/** Resolve a dotted preference path to its card/section title (longest matching prefix wins). */
+function tabSectionTitles(tab: PreferenceTabId): readonly string[] {
+  const manifest = PREFERENCE_TAB_MANIFESTS[tab];
+  return manifest ? manifestCardSections(manifest) : (HANDROLLED_TAB_SECTIONS[tab] ?? []);
+}
+
+// Field render order across the page: tab order, then each tab's manifest field order. Orders search
+// arrow-nav to follow the visual top-to-bottom layout. DERIVED — the manifests are the single source.
+export const PREFERENCE_FIELD_ORDER: readonly string[] = PREFERENCE_TABS.flatMap((tab) =>
+  tabFieldPaths(tab.id)
+);
+
+// Card/section titles in render order (tab order, then card order within each tab). Drives
+// search-result section grouping/ordering. DERIVED from the manifests' card order.
+export const PREFERENCE_SECTION_ORDER: readonly string[] = PREFERENCE_TABS.flatMap((tab) =>
+  tabSectionTitles(tab.id)
+);
+
+// path → section (card) title, merged across every manifest (+ the hand-rolled Model Profiles tab).
+// Each path lives in exactly one tab, so the merge can't collide.
+const PREFERENCE_SECTION_BY_PATH: Record<string, string> = { tuning_profiles: 'Model Profiles' };
+for (const manifest of Object.values(PREFERENCE_TAB_MANIFESTS)) {
+  if (manifest) Object.assign(PREFERENCE_SECTION_BY_PATH, manifestSections(manifest));
+}
+
+/**
+ * Resolve a dotted preference path to its card/section title. Returns `null` for a path no manifest
+ * surfaces (e.g. an editable field the UI intentionally doesn't render) — the search index treats a
+ * null section as "not navigable" and omits it.
+ */
 export function sectionForPreferencePath(path: string): string | null {
-  let best: { prefix: string; section: string } | null = null;
-  for (const rule of PREFERENCE_SECTION_PATH_RULES) {
-    if (prefixMatchesPath(path, rule.prefix) && (!best || rule.prefix.length > best.prefix.length)) {
-      best = rule;
-    }
-  }
-  return best?.section ?? null;
+  return PREFERENCE_SECTION_BY_PATH[path] ?? null;
 }
 
 /** Legacy `#preferences-*` scroll anchors from the pre-tab layout. */

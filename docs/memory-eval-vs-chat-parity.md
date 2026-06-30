@@ -163,14 +163,88 @@ chat uses. (Note: the "eval recalls 20 vs chat 8" intuition is **false** — bot
 `memory.search.top_k`, default 8: runtime at `services/memory/__init__.py:71`, eval at
 `services/memory/__init__.py:128`.)
 
-## 2. Inputs — real gaps
+## 2. Inputs — ingestion (corrected Jun 2026 after design review)
 
-| # | Aspect | Eval | Chat | Impact |
-|---|---|---|---|---|
-| **I1** | **Whose turns are written** | Every episode — **both speakers** | **User half only** (decision D2/F7, `graphiti_conversation.py:13`) | Facts stated by the *other party* enter eval memory but never chat memory. Eval corpus is a full dialogue; chat sees one side. **Biggest input asymmetry.** |
-| **I2** | **Timestamp fidelity** | Real `reference_time` (true event time) | Message **arrival** time; "now" if absent (`graphiti_conversation.py:160,168`) | Dated facts ("I started last March") get stamped *now* in chat → weaker `valid_at`, weaker supersession reasoning. |
-| **I3** | **Turn cleanliness** | Curated single-statement turns | Raw user text (greetings, multi-topic, noise) | Extraction quality more variable in chat. |
-| **I4** | **Query quality** | Standalone, well-formed question | Raw `user_text`, possibly anaphoric. **No memory query-rewrite** (knowledge has `knowledge.rewrite.*`; memory has none) | Chat recall is searched with a worse query than eval ever uses. |
+> **Framing correction.** Earlier notes treated eval as a *mirror* of chat ("eval reproduces
+> what the agent sees"). That is **not** the working relationship: **eval is a testbench** — a
+> harness to test ingestion/retrieval configurations *before* applying the winners to chat. Eval
+> and chat are *allowed* to diverge (the corpus is deliberately two-sided because the benchmarks
+> need both speakers as gold turns). The goal is not to make chat identical to eval — it is to
+> use eval to find the best chat ingestion, then ship it to chat.
+
+**The ingest engine is fully shared and identical** (confirmed in code): both surfaces build
+through `GraphitiMemoryService.from_preferences` and call the same `ingest_episodes`. Shared and
+identical across chat & eval:
+
+- Extraction model, embedder, `custom_extraction_instructions`, temporal default — all `graph.*`.
+- Observability tier (`graph.observability`: off/ledger/trace) + the per-episode / per-operation
+  ledger rows and the trace sidecar (chat folds these under the turn's `memory_out`; eval folds
+  them under a dedicated remember run — same machinery, different run topology).
+- No document chunking: **1 turn = 1 episode = 1 point_id**.
+
+The only intentional divergence today is the **drawer** (`group_override` → `eval_mem_{set}`). So
+every difference below is about **what episodes the caller feeds the engine**, not the engine.
+
+### I1 — the assistant side (the one real gap) → **decided: approach 4A**
+
+| | Eval | Chat (today) |
+|---|---|---|
+| What's written | Full dialogue: **both speakers**, each turn its own stored episode (corpus fixture) | **User turn only**; assistant reply never written (F7 write-gate / decision D2 anti-echo) |
+
+`F7` is the write-gate mechanism (`ALLOWED_SOURCE_ROLES` in `graphiti_ingest.py`); `D2` is the
+policy it enforces — *user-half only, never the assistant reply, so the graph can't become a
+stale echo of its own output* (mem0 #4573). Because only user turns are ever stored, graphiti's
+internally-injected extraction context is **user-only**, so an anaphoric user turn ("yes, the
+second one") has **no antecedent to resolve against**.
+
+**Decided approach — 4A "assistant-as-context, user-only extraction" (chat's default ingestion;
+no pref):**
+
+- When ingesting a user turn, **fold the preceding assistant message** (turn N−1 — the reply the
+  user is responding to, pulled from conversation history) into the episode body as *context*.
+- Set `custom_extraction_instructions` so facts are **extracted/attributed only from the user**;
+  the assistant context is disambiguation only.
+- The assistant turn is **never stored as its own episode** → no echo. This keeps D2's intent
+  while restoring the coreference signal eval gets for free from a two-sided corpus.
+
+Constraints / notes:
+
+- Graphiti's `previous_episodes` is **internally injected** — we control only the *count*, not
+  the content — so 4A must **body-fold** the assistant context; it can't go through that channel.
+- Fold the **prior assistant reply (N−1)**, *not* the current reply (which is the answer *to*
+  this turn and is model output → folding it reintroduces echo and leaks the future).
+- Body-fold changes the stored episode text (what BM25 indexes / shows as the episode body) —
+  acceptable, but noted.
+- **Eval stays two-sided** (unchanged): its benchmarks require the assistant turns as gold
+  episodes. Eval is the testbench; it does **not** adopt 4A.
+
+### I2 — timestamps → at parity (no action)
+
+Chat already passes the real turn time (`routing.timestamp`) as `reference_time`; in-turn dated
+facts get their own `valid_at` from extraction. The only eval-only trait is *backdating* a
+simulated months-long history, which live chat can't and shouldn't reproduce.
+
+### I3 — turn cleanliness → **not a gap** (handled by extraction prompts)
+
+Noisy / multi-topic / greeting turns are absorbed by graphiti's extraction prompt (+
+`custom_extraction_instructions`) → "no facts." Dropped from the gap list.
+
+### I4 — query quality → retrieval, not ingestion
+
+Memory query-rewrite is a *recall* concern, tracked with retrieval — not an ingestion input.
+
+### New — chunk guard for chat (oversized turns)
+
+Memory turns aren't chunked (the corpus loader keeps eval bodies under `CHUNK_MIN_TOKENS`), but a
+**very long chat user turn is unguarded** and could trip graphiti's internal `should_chunk`,
+breaking the pre-seeded `uuid == point_id` invariant (`graphiti_ingest.py:508`). **Action: guard
+chat turns against the threshold and expose `chunk_min_tokens` as a chat/memory preference** so it
+is tunable.
+
+### Rollout / params
+
+Keep ingestion params **shared today**; add **eval-specific overrides later** (factory seam or a
+`graph.eval.ingest.*` namespace) when we want eval to A/B configs independently of chat.
 
 ## 3. Outputs — the biggest controllable lever
 
@@ -198,11 +272,15 @@ those before the model ever sees them.
    part the facts support" discipline into the persona context so memory is actually used.
 3. **Add a memory query-rewrite** (I4) mirroring `knowledge.rewrite.*`, so chat searches memory
    with a standalone question instead of raw anaphoric `user_text`.
-4. **Reconsider one-sided ingestion** (I1) — decide whether chat should also remember salient
-   assistant-asserted facts (or extract facts spanning both turns), since the eval's quality bar
-   was measured on a two-sided transcript. Collides with the anti-echo D2/F7 decision → design
-   call, not a tweak.
-5. **Timestamp fidelity** (I2) — lower priority; only matters for explicitly dated statements.
+4. **Assistant-as-context ingestion (I1) — decided (4A).** Make chat fold the prior assistant
+   turn (N−1) into the user episode body as context, with `custom_extraction_instructions`
+   restricting extraction to the user. Chat's **default** behavior, no pref; the assistant turn
+   is never stored as its own episode (keeps D2's anti-echo intent). **Eval stays two-sided.**
+5. **Chunk guard for chat (new).** Guard chat turns against `CHUNK_MIN_TOKENS` and expose it as a
+   chat/memory pref, so an oversized turn can't trip graphiti's internal split and break
+   `uuid == point_id`.
+6. **Timestamp fidelity** (I2) — none; already at parity. Cleanliness (I3) — none; extraction
+   prompts handle it.
 
 ## TL;DR
 
@@ -212,9 +290,12 @@ those before the model ever sees them.
 - **Output (biggest lever):** chat's `memory_block` strips temporal/relationship/`SUPERSEDED`
   metadata, flattens kinds, truncates to 500 chars, and shows the wrong date — all of which
   eval's `format_recall_context` keeps. The data is already on the hits.
-- **Inputs:** chat writes only the user half, uses arrival time, and searches with raw
-  anaphoric `user_text` (no memory query-rewrite).
+- **Ingestion:** the engine, observability, tracking and params are shared/identical — the only
+  gap is the **assistant side** (chat writes user-only). **Decided fix: 4A** — fold the prior
+  assistant turn as context with user-only extraction, as chat's default; **eval stays two-sided**
+  (it is a testbench, *not* a mirror). Add a **chunk guard** for oversized chat turns. Timestamps
+  already at parity; cleanliness handled by extraction prompts; query-rewrite is a retrieval item.
 - **Answer discipline:** eval uses a grounding-only prompt at temp 0.2; chat folds memory into
   a persona prompt at temp 0.7 with no completeness instruction.
 - **Recommended order:** (1) `memory_block`↔`format_recall_context` parity, (2) grounding
-  instruction, (3) memory query-rewrite, (4) revisit one-sided ingestion.
+  instruction, (3) memory query-rewrite, (4) 4A assistant-as-context ingestion + chunk guard.

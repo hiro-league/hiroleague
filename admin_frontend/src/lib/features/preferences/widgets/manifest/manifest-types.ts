@@ -180,3 +180,8 @@ export function manifestSections(manifest: PrefTabManifest): Record<string, stri
   }
   return out;
 }
+
+/** Card/section titles across the manifest, in render order (a `customCard` contributes `section`). */
+export function manifestCardSections(manifest: PrefTabManifest): string[] {
+  return manifest.cards.map((card) => (card.kind === 'card' ? card.title : card.section));
+}

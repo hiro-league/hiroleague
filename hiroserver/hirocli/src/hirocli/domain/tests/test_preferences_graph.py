@@ -62,7 +62,11 @@ def test_default_prefs_validate() -> None:
 def test_unknown_graph_tuning_profile_rejected() -> None:
     prefs = WorkspacePreferences()
     prefs.graph.extraction_tuning_profile = "does_not_exist"
-    with pytest.raises(ValidationError, match="graph tuning profile"):
+    # The validator now reports the offending dotted path (discovered via the tuning_profile_ref
+    # marker) rather than a generic "graph tuning profile" message.
+    with pytest.raises(
+        ValidationError, match="Unknown tuning profile at graph.extraction_tuning_profile"
+    ):
         WorkspacePreferences.model_validate(prefs.model_dump())
 
 

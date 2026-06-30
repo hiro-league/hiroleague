@@ -1,10 +1,11 @@
 /**
  * Settings search index — pure, data-driven (no mounted components), so per-tab match counts and
  * cross-tab navigation work while only the active tab is rendered. An entry is built for every
- * EDITABLE preference path: its display `title` (the backend `Field(title=…)`, the same string the
- * field widget renders) and its `tabId` (from `tabForPreferencePath`). Read-only enrichment fields
- * and image-lab-only fields (`preferencesSaveSkip`) are excluded — they aren't surfaced on the
- * Settings tabs.
+ * editable preference path a manifest SURFACES: its display `title` (the backend `Field(title=…)`,
+ * the same string the field widget renders), its `tabId` (from `tabForPreferencePath`), and its
+ * `section` (from the manifest). Read-only enrichment fields, image-lab-only fields
+ * (`preferencesSaveSkip`), and editable knobs no manifest renders (no section → not navigable) are
+ * excluded — they aren't reachable on the Settings tabs.
  */
 import type { PreferenceTabId } from './preferences-tabs';
 import {
@@ -50,12 +51,17 @@ export function buildPrefSearchIndex(schema: PreferencesSchemaMap): PrefSearchEn
     if (meta.readOnly || meta.preferencesSaveSkip) continue;
     const tabId = tabForPreferencePath(meta.path);
     if (!tabId) continue;
+    // Only paths a manifest actually surfaces get a section. A null section means the UI doesn't
+    // render the field (an intentionally-unexposed editable knob), so there's nowhere to navigate —
+    // omit it from search rather than pointing a result at an invisible field.
+    const section = sectionForPreferencePath(meta.path);
+    if (!section) continue;
     out.push({
       path: meta.path,
       title: meta.title?.trim() || meta.path,
       tabId,
       tabLabel: TAB_LABEL.get(tabId) ?? tabId,
-      section: sectionForPreferencePath(meta.path)
+      section
     });
   }
   return out;
