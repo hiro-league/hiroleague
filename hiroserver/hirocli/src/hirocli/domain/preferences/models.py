@@ -26,6 +26,46 @@ from ..prompts import load_prompt
 logger = logging.getLogger(__name__)
 
 
+# Admin-UI preference field metadata.
+#
+# Every preference field can carry metadata in pydantic's ``json_schema_extra`` that the admin UI +
+# save layer read (see ``preferences_schema._META_KEYS``): which model kind a model-id field selects,
+# whether it's an "advanced" (hidden-by-default) knob, a UI slider ``step``, and the save-policy flags
+# (``preferencesSaveSkip`` / ``writeWhole`` / ``readOnly``). ``pref_field`` centralizes those so each
+# call site declares intent by NAME (``model_kind=…`` / ``advanced=True`` / ``step=…``) instead of
+# hand-writing the dict — a new model-id field can't silently forget its ``model_kind``. Any other
+# keyword (default, title, description, ge, le, max_length, default_factory, …) is forwarded straight
+# to ``Field``. Output is identical to the inline dict (schema gen copies keys in a fixed order).
+ModelKind = Literal["chat", "stt", "tts", "rerank", "embedding"]
+
+
+def pref_field(
+    *,
+    model_kind: ModelKind | None = None,
+    advanced: bool = False,
+    step: float | None = None,
+    save_skip: bool = False,
+    write_whole: bool = False,
+    read_only: bool = False,
+    **field_kwargs: Any,
+) -> Any:
+    """``Field(...)`` for a preference with the admin-UI ``json_schema_extra`` metadata named."""
+    extra: dict[str, Any] = {}
+    if model_kind is not None:
+        extra["model_kind"] = model_kind
+    if advanced:
+        extra["advanced"] = True
+    if step is not None:
+        extra["step"] = step
+    if save_skip:
+        extra["preferencesSaveSkip"] = True
+    if write_whole:
+        extra["writeWhole"] = True
+    if read_only:
+        extra["readOnly"] = True
+    return Field(json_schema_extra=extra, **field_kwargs)
+
+
 class PreferenceSection(BaseModel):
     """First-level preferences section metadata for admin presentation."""
 
@@ -145,7 +185,7 @@ class ModelTuning(BaseModel):
     """Provider-neutral runtime model tuning."""
 
     # step: float inputs in the admin UI read granularity from schema metadata (no hardcoded step).
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0, json_schema_extra={"step": 0.1})
+    temperature: float = pref_field(step=0.1, default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
     thinking: ThinkingLevel | None = None
     # Context-window size for local providers (Ollama `num_ctx`). Ollama silently defaults to 2048
@@ -302,24 +342,24 @@ def default_image_profiles() -> dict[str, ImageProfile]:
 class LLMPreferences(BaseModel):
     """Which catalog models to use when the workspace has credentials for them."""
 
-    default_chat: str | None = Field(
-        default=None, title="Default chat model", json_schema_extra={"model_kind": "chat"}
+    default_chat: str | None = pref_field(
+        model_kind="chat", default=None, title="Default chat model"
     )
-    default_stt: str | None = Field(
-        default=None, title="Default speech-to-text model", json_schema_extra={"model_kind": "stt"}
+    default_stt: str | None = pref_field(
+        model_kind="stt", default=None, title="Default speech-to-text model"
     )
-    default_tts: str | None = Field(
-        default=None, title="Default text-to-speech model", json_schema_extra={"model_kind": "tts"}
+    default_tts: str | None = pref_field(
+        model_kind="tts", default=None, title="Default text-to-speech model"
     )
     # Workspace-wide default cross-encoder reranker. Both the knowledge retrieval reranker
     # (knowledge.retrieval.reranker.model_id) and the graph fact-search reranker
     # (graph.reranker.model_id) fall back to this when their own model is empty — one place
     # to manage the reranker for both legs. Null = no default (each leg reranks only if it
     # sets its own model).
-    default_reranker: str | None = Field(
+    default_reranker: str | None = pref_field(
+        model_kind="rerank",
         default=None,
         title="Default reranker model",
-        json_schema_extra={"model_kind": "rerank"},
         description=(
             "Default cross-encoder reranker. The knowledge and graph rerankers both fall "
             "back to this when their own model is empty. Empty = no default. Cloud models "
@@ -331,26 +371,27 @@ class LLMPreferences(BaseModel):
     # empty. NOT forced to any model: null = no default, and indexing is blocked until an embedder
     # is chosen (embedding is mandatory + dimension-bound, so there is no silent fallback). Never
     # locked — it only seeds consumers that have not indexed yet.
-    default_embedder: str | None = Field(
+    default_embedder: str | None = pref_field(
+        model_kind="embedding",
         default=None,
         title="Default embedder model",
-        json_schema_extra={"model_kind": "embedding"},
         description=(
             "Default embedder. The knowledge and graph embedders both fall back to this when "
             "their own model is empty. Empty = no default (indexing is blocked until one is "
             "chosen). Cloud models need a provider key; local models must be downloaded first."
         ),
     )
-    default_image_gen: str | None = Field(
+    default_image_gen: str | None = pref_field(
+        model_kind="chat",
+        save_skip=True,
         default=None,
-        json_schema_extra={"model_kind": "chat", "preferencesSaveSkip": True},
     )
     default_tuning_profile: str = Field(
         default=DEFAULT_CHAT_TUNING_PROFILE_ID, title="Default chat model profile"
     )
-    default_image_profile: str = Field(
+    default_image_profile: str = pref_field(
+        save_skip=True,
         default=DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID,
-        json_schema_extra={"preferencesSaveSkip": True},
     )
 
 
@@ -480,7 +521,10 @@ class KnowledgeChunkingPreferences(BaseModel):
         title="Chunk overlap",
         description="Overlap between consecutive chunks. Must stay smaller than chunk size.",
     )
-    embed_structural_context: bool = Field(
+    embed_structural_context: bool = pref_field(
+        # Demo seed for the admin "show advanced" toggle: a low-level ingest knob most users
+        # never touch. Remove/adjust `advanced` here (and on any other field) to taste.
+        advanced=True,
         default=True,
         title="Embed structural context",
         description=(
@@ -488,9 +532,6 @@ class KnowledgeChunkingPreferences(BaseModel):
             "— including continuation pieces — carries its section context. Applies to new ingests; "
             "changing this requires re-ingesting existing documents."
         ),
-        # Demo seed for the admin "show advanced" toggle: a low-level ingest knob most users
-        # never touch. Remove/adjust `advanced` here (and on any other field) to taste.
-        json_schema_extra={"advanced": True},
     )
     markdown: KnowledgeChunkingMarkdownPreferences = Field(default_factory=KnowledgeChunkingMarkdownPreferences)
 
@@ -515,10 +556,10 @@ class KnowledgeRerankerPreferences(BaseModel):
     """
 
     enabled: bool = Field(default=False, title="Enable reranking")
-    model_id: str | None = Field(
+    model_id: str | None = pref_field(
+        model_kind="rerank",
         default=None,
         title="Reranker model",
-        json_schema_extra={"model_kind": "rerank"},
         description=(
             "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the "
             "default reranker (General → Models). Local models must be downloaded first."
@@ -531,7 +572,7 @@ class KnowledgeRerankerPreferences(BaseModel):
 
 class KnowledgeRetrievalPreferences(BaseModel):
     top_k: int = Field(default=20, ge=1, le=100, title="Search/fused results (top K)", description="Fused results from hybrid search or direct results from dense only search (after applying minimum score).")
-    min_score: float = Field(default=0.0, ge=0.0, le=1.0, json_schema_extra={"step": 0.05}, title="Minimum score (Dense only)", description="Applies only to dense (Vector search) branch.")
+    min_score: float = pref_field(step=0.05, default=0.0, ge=0.0, le=1.0, title="Minimum score (Dense only)", description="Applies only to dense (Vector search) branch.")
     # Hybrid retrieval: fuse the dense vector with a BM25 sparse vector via Qdrant RRF.
     # Sparse vectors are always stored at ingest, so this is a pure query-time toggle
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
@@ -546,8 +587,8 @@ class KnowledgeRetrievalPreferences(BaseModel):
 
 
 class KnowledgeAnsweringPreferences(BaseModel):
-    model: str | None = Field(
-        default=None, title="Knowledge answering model", json_schema_extra={"model_kind": "chat"}
+    model: str | None = pref_field(
+        model_kind="chat", default=None, title="Knowledge answering model"
     )
     # Base answer-generation system prompt. Editable; blank falls back to the relaxed default
     # (partial answers allowed, no bare "I don't know" when any part is supported). The citation
@@ -615,10 +656,10 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     """
 
     # null → fall back to the workspace default reranker model id (llm.default_reranker).
-    model_id: str | None = Field(
+    model_id: str | None = pref_field(
+        model_kind="rerank",
         default=None,
         title="Reranker model",
-        json_schema_extra={"model_kind": "rerank"},
         description=(
             "Cross-encoder used to rerank fact candidates. Empty = fall back to the default "
             "reranker (General → Models). Local models must be downloaded first."
@@ -627,18 +668,18 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     # Drop facts whose post-rerank relevance is below this (maps to Graphiti
     # ``SearchConfig.reranker_min_score``). 0.0 = keep all. Cross-encoder only —
     # RRF/MMR scores are rank-fusion artifacts, so this is ignored for those recipes.
-    min_relevance: float = Field(
+    min_relevance: float = pref_field(
+        step=0.05,
         default=0.0,
         ge=0.0,
         le=1.0,
-        json_schema_extra={"step": 0.05},
         title="Min relevance",
         description="Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.",
     )
     # Local torch lane only (sentence-transformers); ignored by cloud + ONNX models.
-    device: str | None = Field(
+    device: str | None = pref_field(
+        advanced=True,
         default=None,
-        json_schema_extra={"advanced": True},
         title="Device (local only)",
         description=(
             "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). "
@@ -780,6 +821,23 @@ def reseed_locked_profiles(
     return merged
 
 
+def seed_default_profiles(current: dict[str, _ProfileT], defaults: dict[str, _ProfileT]) -> None:
+    """Ensure every default profile is present and ``locked`` in ``current``, in-place.
+
+    A missing default is added outright; an existing one is re-marked locked (it's code-owned) and
+    gets the default label only when its own is blank — user-tuned values on a stored copy are left
+    intact. Shared by the tuning- and image-profile validators (the seeding step, before the
+    reference checks)."""
+    for profile_id, default_profile in defaults.items():
+        existing = current.get(profile_id)
+        if existing is None:
+            current[profile_id] = default_profile
+        else:
+            existing.locked = True
+            if not existing.label.strip():
+                existing.label = default_profile.label
+
+
 class RetrievalAgentLimits(BaseModel):
     """Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity)."""
 
@@ -814,7 +872,7 @@ class GraphViewPreferences(BaseModel):
     # A node TYPE whose instance count exceeds this shows a "many instances" perf
     # heads-up inside its per-type filter dropdown (the dropdown still lists + searches
     # every instance — this only flags very large types so the user reaches for search).
-    large_type_threshold: int = Field(default=200, ge=10, le=10000, json_schema_extra={"advanced": True}, title="Large node-type warning threshold", description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
+    large_type_threshold: int = pref_field(advanced=True, default=200, ge=10, le=10000, title="Large node-type warning threshold", description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
 
 
 class GraphEvalPreferences(BaseModel):
@@ -839,10 +897,10 @@ class GraphEvalPreferences(BaseModel):
     # ``active_answer_prompt_id`` profile (a persisted preference, mirroring the retrieval agent —
     # the former per-run eval-panel picker is gone); ``resolve_answer_prompt`` maps id → instruction
     # text with a default fallback. The ``default`` profile is locked and carries the built-in text.
-    answer_prompts: dict[str, AnswerPromptProfile] = Field(
+    answer_prompts: dict[str, AnswerPromptProfile] = pref_field(
+        write_whole=True,
         default_factory=default_answer_prompts,
         title="Mem Eval Answer Prompts",
-        json_schema_extra={"writeWhole": True},
     )
     active_answer_prompt_id: str = Field(default=DEFAULT_ANSWER_PROMPT_ID, title="Active prompt profile", description="Which mem-eval answer prompt the answer step uses.")
     judge_prompt: str = Field(default=DEFAULT_MEMORY_EVAL_JUDGE_PROMPT, title="Eval judge prompt")
@@ -852,10 +910,10 @@ class GraphEvalPreferences(BaseModel):
     # workspace is unchanged. The defaults reuse the ``knowledge_answering`` tuning profile —
     # set them apart to tune the answer step and the judge independently. The memory-eval answer
     # step uses ``answer_*``; the LLM judge (both tracks) uses ``judge_*``.
-    answer_model: str | None = Field(
+    answer_model: str | None = pref_field(
+        model_kind="chat",
         default=None,
         title="Eval answer model",
-        json_schema_extra={"model_kind": "chat"},
         description=(
             "Model the memory-eval answer step uses to answer from recalled context. Null "
             "falls back to the knowledge answering model, then default chat. (Knowledge-track "
@@ -867,10 +925,10 @@ class GraphEvalPreferences(BaseModel):
         title="Eval answer profile",
         description="Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
     )
-    judge_model: str | None = Field(
+    judge_model: str | None = pref_field(
+        model_kind="chat",
         default=None,
         title="Eval judge model",
-        json_schema_extra={"model_kind": "chat"},
         description=(
             "Model the LLM judge uses to grade answers against the ideal (both tracks). Null "
             "falls back to the knowledge answering model, then default chat."
@@ -886,10 +944,10 @@ class GraphEvalPreferences(BaseModel):
     # resolver chains retrieval_model → answer_model → knowledge.answering.model → llm.default_chat,
     # so an unset workspace is unchanged. Lets the retrieval/tool-calling step use a different model
     # (e.g. a cheaper or higher-reasoning one) than the final answer step.
-    retrieval_model: str | None = Field(
+    retrieval_model: str | None = pref_field(
+        model_kind="chat",
         default=None,
         title="Retrieval agent model",
-        json_schema_extra={"model_kind": "chat"},
         description=(
             "Model the agentic retrieval loop uses to plan searches and call the search_memory "
             "tool (memory track). Null falls back to the eval answer model, then the knowledge "
@@ -915,18 +973,18 @@ class GraphEvalPreferences(BaseModel):
     # ones; these bound what reaches the prompt. Each kind is score-ranked desc, the top
     # ``max_elements_per_kind`` kept, and every element sanitized to ONE line capped at the per-kind
     # char limit. One global set — applies identically to the answer, judge, and evidence renders.
-    max_elements_per_kind: int = Field(default=30, ge=1, le=200, json_schema_extra={"advanced": True}, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.")
-    max_fact_chars: int = Field(default=240, ge=40, le=2000, json_schema_extra={"advanced": True}, title="Max fact chars", description="Each recalled fact → one sanitized line capped here.")
-    max_episode_chars: int = Field(default=300, ge=40, le=2000, json_schema_extra={"advanced": True}, title="Max message chars", description="Per-episode/message text cap (one sanitized line).")
-    max_summary_chars: int = Field(default=400, ge=40, le=4000, json_schema_extra={"advanced": True}, title="Max entity summary chars", description="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.")
+    max_elements_per_kind: int = pref_field(advanced=True, default=30, ge=1, le=200, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.")
+    max_fact_chars: int = pref_field(advanced=True, default=240, ge=40, le=2000, title="Max fact chars", description="Each recalled fact → one sanitized line capped here.")
+    max_episode_chars: int = pref_field(advanced=True, default=300, ge=40, le=2000, title="Max message chars", description="Per-episode/message text cap (one sanitized line).")
+    max_summary_chars: int = pref_field(advanced=True, default=400, ge=40, le=4000, title="Max entity summary chars", description="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.")
     # Agentic retrieval loop caps/clamps (agentic-memory-retrieval-design §5.2). One global
     # value for eval and chat — do not split per surface.
     retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
     # Named library of retrieval-agent system prompts (mirrors answer_prompts).
-    retrieval_agent_prompts: dict[str, AnswerPromptProfile] = Field(
+    retrieval_agent_prompts: dict[str, AnswerPromptProfile] = pref_field(
+        write_whole=True,
         default_factory=default_retrieval_agent_prompts,
         title="Retrieval Agent Prompt",
-        json_schema_extra={"writeWhole": True},
     )
     active_retrieval_agent_prompt_id: str = Field(default=DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, title="Active prompt profile", description="Which retrieval-agent system prompt the loop uses.")
 
@@ -991,10 +1049,10 @@ class GraphPreferences(BaseModel):
 
     backend: KnowledgeGraphBackend = Field(default="off", title="Graph backend", description="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.")
     # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
-    extraction_model: str | None = Field(
+    extraction_model: str | None = pref_field(
+        model_kind="chat",
         default=None,
         title="Extraction model",
-        json_schema_extra={"model_kind": "chat"},
         description=(
             "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. "
             "Must be structured-output-capable. Null falls back to the answering model, then "
@@ -1009,10 +1067,10 @@ class GraphPreferences(BaseModel):
             "Ships deterministic so extraction stays repeatable across runs."
         ),
     )
-    small_model: str | None = Field(
+    small_model: str | None = pref_field(
+        model_kind="chat",
         default=None,
         title="Smaller extraction model",
-        json_schema_extra={"model_kind": "chat"},
         description=(
             "Cheaper model for Graphiti's sub-steps — node dedupe, entity summaries, timestamps. "
             "Null falls back to the extraction model."
@@ -1024,10 +1082,10 @@ class GraphPreferences(BaseModel):
         description="Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
     )
     # ``None`` → shares the knowledge dense embedder (decision G8).
-    embedder_model: str | None = Field(
+    embedder_model: str | None = pref_field(
+        model_kind="embedding",
         default=None,
         title="Embedder model",
-        json_schema_extra={"model_kind": "embedding"},
         description=(
             "Embeds entity names + facts into the graph. Null shares the knowledge embedding "
             "model. Shared across memory + knowledge graph data — changing it re-indexes "
@@ -1087,9 +1145,9 @@ class GraphPreferences(BaseModel):
     # Extraction ontology at ingest. "open" (default) extracts freely (broadest recall — captures
     # activities/interests/media/preferences); "typed" pins the 5-type vocabulary (precise, but
     # drops facts that don't fit). Changing this needs a re-ingest to rebuild the graph.
-    entity_ontology: KnowledgeGraphEntityOntology = Field(
+    entity_ontology: KnowledgeGraphEntityOntology = pref_field(
+        advanced=True,
         default="open",
-        json_schema_extra={"advanced": True},
         title="Extraction ontology",
         description=(
             "Which entity types extraction may use. Open = no predefined types; the model "
@@ -1106,14 +1164,14 @@ class GraphPreferences(BaseModel):
     # first-person preferences/goals/activities — phrased generically (true for any personal-memory
     # corpus, not LoCoMo-specific). Clear it to disable. Applied at ingest, so changing it needs a
     # re-ingest to take effect. Bounded so a runaway string can't blow the extraction token budget.
-    custom_extraction_instructions: str = Field(
+    custom_extraction_instructions: str = pref_field(
+        advanced=True,
         default=(
             "Capture first-person preferences, goals, habits and activities as facts "
             "even when only the speaker is named; treat the activity/topic/object as "
             "the second entity."
         ),
         max_length=2000,
-        json_schema_extra={"advanced": True},
         title="Extraction instructions",
         description=(
             "Optional domain-generic guidance injected verbatim into Graphiti's entity + fact "
@@ -1132,11 +1190,11 @@ class GraphPreferences(BaseModel):
     # comes back empty. Keep low for RECALL (the reranker.min_relevance below is where
     # precision belongs); raise toward 0.6 to tighten candidates. Applies to all recipes
     # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
-    sim_min_score: float = Field(
+    sim_min_score: float = pref_field(
+        step=0.05,
         default=0.3,
         ge=0.0,
         le=1.0,
-        json_schema_extra={"step": 0.05},
         title="Candidate similarity floor",
         description=(
             "Minimum cosine similarity (0–1) for a fact to even become a search candidate. Keep "
@@ -1152,11 +1210,11 @@ class GraphPreferences(BaseModel):
     # bound the stall dies in ~query_timeout_s and the non-fatal FTS retry absorbs the failure.
     # Sized above legit operations (per-episode writes are sub-second; a full FTS rebuild is
     # seconds at current scale) but far below Kuzu's internal wait. 0 = unlimited.
-    query_timeout_s: int = Field(
+    query_timeout_s: int = pref_field(
+        advanced=True,
         default=60,
         ge=0,
         le=600,
-        json_schema_extra={"advanced": True},
         title="Query timeout (seconds)",
         description=(
             "Hard ceiling on any single graph (Kuzu) query — writes, index rebuilds, and "
@@ -1223,11 +1281,11 @@ class KnowledgePreferences(BaseModel):
     # once the knowledge collection has points — embedders are dimension-bound, so changing this
     # after indexing would orphan the stored vectors. Field name kept (historical) to preserve the
     # existing lock + value for already-indexed workspaces without a migration.
-    default_embedding_model: str | None = Field(
+    default_embedding_model: str | None = pref_field(
+        model_kind="embedding",
         default=None,
         title="Knowledge embedder",
         description="Knowledge embedder. Empty inherits the workspace default (General → Models).",
-        json_schema_extra={"model_kind": "embedding"},
     )
     default_tuning_profile: str = Field(
         default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID, title="Knowledge answering model profile"
@@ -1278,7 +1336,7 @@ class ChatPreferences(BaseModel):
 class WorkspacePreferences(BaseModel):
     """Root preferences object persisted as preferences.json."""
 
-    version: int = Field(default=3, json_schema_extra={"readOnly": True})
+    version: int = pref_field(read_only=True, default=3)
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
@@ -1288,26 +1346,18 @@ class WorkspacePreferences(BaseModel):
     # reads as shared, not owned by knowledge. Qdrant knowledge prefs stay under ``knowledge``.
     graph: GraphPreferences = Field(default_factory=GraphPreferences)
     chat: ChatPreferences = Field(default_factory=ChatPreferences)
-    tuning_profiles: dict[str, TuningProfile] = Field(
+    tuning_profiles: dict[str, TuningProfile] = pref_field(
+        write_whole=True,
         default_factory=default_tuning_profiles,
-        json_schema_extra={"writeWhole": True},
     )
-    image_profiles: dict[str, ImageProfile] = Field(
+    image_profiles: dict[str, ImageProfile] = pref_field(
+        save_skip=True,
         default_factory=default_image_profiles,
-        json_schema_extra={"preferencesSaveSkip": True},
     )
 
     @model_validator(mode="after")
     def _validate_tuning_profiles(self) -> "WorkspacePreferences":
-        defaults = default_tuning_profiles()
-        for profile_id, default_profile in defaults.items():
-            current = self.tuning_profiles.get(profile_id)
-            if current is None:
-                self.tuning_profiles[profile_id] = default_profile
-            else:
-                current.locked = True
-                if not current.label.strip():
-                    current.label = default_profile.label
+        seed_default_profiles(self.tuning_profiles, default_tuning_profiles())
         if self.llm.default_tuning_profile not in self.tuning_profiles:
             raise ValueError(
                 f"Unknown llm.default_tuning_profile: {self.llm.default_tuning_profile}"
@@ -1335,16 +1385,7 @@ class WorkspacePreferences(BaseModel):
 
     @model_validator(mode="after")
     def _validate_image_profiles(self) -> "WorkspacePreferences":
-        # Mirror of _validate_tuning_profiles: seeded defaults are always present + locked.
-        defaults = default_image_profiles()
-        for profile_id, default_profile in defaults.items():
-            current = self.image_profiles.get(profile_id)
-            if current is None:
-                self.image_profiles[profile_id] = default_profile
-            else:
-                current.locked = True
-                if not current.label.strip():
-                    current.label = default_profile.label
+        seed_default_profiles(self.image_profiles, default_image_profiles())
         if self.llm.default_image_profile not in self.image_profiles:
             raise ValueError(
                 f"Unknown llm.default_image_profile: {self.llm.default_image_profile}"

@@ -196,6 +196,7 @@
   kicker="Workspace"
   title="Settings"
   subtitle="Runtime settings are held in memory and persisted to preferences.json when saved."
+  class="w-full"
 >
   {#if !ctrl.error}
     <AdminPageStickyToolbar>

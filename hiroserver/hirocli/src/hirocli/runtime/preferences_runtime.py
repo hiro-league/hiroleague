@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -23,6 +23,7 @@ from hirocli.domain.preferences import (
     load_preferences,
     save_preferences,
 )
+from hirocli.domain.preferences.io import check_embedder_transition
 
 
 class PreferencePathError(ValueError):
@@ -139,7 +140,7 @@ def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
             schema = _field_schema(field.annotation)
             continue
 
-        if schema is dict or getattr(schema, "__origin__", None) is dict:
+        if schema is dict or get_origin(schema) is dict:
             if not isinstance(node, dict):
                 raise PreferencePathError(f"Cannot update preference path: {path}")
             if is_last:
@@ -155,8 +156,9 @@ def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
 
 
 def _field_schema(annotation: Any) -> Any:
-    origin = getattr(annotation, "__origin__", None)
-    if origin is dict:
+    # `get_origin` handles `dict[str, T]`, `typing.Dict[...]`, etc. uniformly (vs. the raw
+    # `__origin__` attribute, which isn't present on every typing form).
+    if get_origin(annotation) is dict:
         return dict
     return annotation
 
@@ -167,49 +169,26 @@ def _validate_knowledge_embedding_transition(
     updated: WorkspacePreferences,
     edits: dict[str, Any],
 ) -> None:
-    """Block embedder PATCHes that would orphan stored (dimension-bound) vectors.
+    """PATCH-time embedder guard — delegates to the shared rule (``io.check_embedder_transition``),
+    raising ``PreferencePathError``. A thin wrapper so the runtime layer doesn't import the
+    knowledge/graph services itself; the "changed" signal is "edited AND value actually differs"."""
+    transitions: dict[str, tuple[Any, Any]] = {
+        "knowledge.default_embedding_model": (
+            previous.knowledge.default_embedding_model,
+            updated.knowledge.default_embedding_model,
+        ),
+        "graph.embedder_model": (previous.graph.embedder_model, updated.graph.embedder_model),
+        "llm.default_embedder": (previous.llm.default_embedder, updated.llm.default_embedder),
+    }
 
-    Per tool: knowledge override locks on knowledge points, graph override on the graph-indexed
-    marker. The workspace default (``llm.default_embedder``) is free except when an empty-override
-    consumer was indexed using it (so the default IS the stored vectors' model)."""
-
-    def _edited(path: str, old: Any, new: Any) -> bool:
+    def _changed(path: str) -> bool:
+        old, new = transitions[path]
         return path in edits and old != new
 
-    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
-    from hirocli.services.knowledge.live_registry import count_knowledge_points
-
-    if _edited(
-        "knowledge.default_embedding_model",
-        previous.knowledge.default_embedding_model,
-        updated.knowledge.default_embedding_model,
-    ) and count_knowledge_points(workspace_path) > 0:
-        raise PreferencePathError(
-            "knowledge.default_embedding_model cannot be changed while the knowledge collection "
-            "has points. Delete all knowledge documents first."
-        )
-
-    if _edited(
-        "graph.embedder_model",
-        previous.graph.embedder_model,
-        updated.graph.embedder_model,
-    ) and is_graph_indexed(workspace_path):
-        raise PreferencePathError(
-            "graph.embedder_model cannot be changed while the graph has indexed data. "
-            "Reset the graph first."
-        )
-
-    if _edited("llm.default_embedder", previous.llm.default_embedder, updated.llm.default_embedder):
-        if not (updated.knowledge.default_embedding_model or "").strip() and (
-            count_knowledge_points(workspace_path) > 0
-        ):
-            raise PreferencePathError(
-                "llm.default_embedder cannot be changed: the knowledge collection was indexed "
-                "using it (no Knowledge embedder override). Set a Knowledge embedder override or "
-                "delete all knowledge documents first."
-            )
-        if not (updated.graph.embedder_model or "").strip() and is_graph_indexed(workspace_path):
-            raise PreferencePathError(
-                "llm.default_embedder cannot be changed: the graph was indexed using it (no "
-                "Graph embedder override). Set a Graph embedder override or reset the graph first."
-            )
+    check_embedder_transition(
+        workspace_path,
+        changed=_changed,
+        knowledge_inherits_default=not (updated.knowledge.default_embedding_model or "").strip(),
+        graph_inherits_default=not (updated.graph.embedder_model or "").strip(),
+        error=PreferencePathError,
+    )

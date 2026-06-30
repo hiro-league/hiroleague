@@ -1,8 +1,7 @@
 <script lang="ts">
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import KnowledgeAnsweringCard from '$lib/features/preferences/sections/knowledge/KnowledgeAnsweringCard.svelte';
-  import KnowledgeEmbeddingChunkingCard from '$lib/features/preferences/sections/knowledge/KnowledgeEmbeddingChunkingCard.svelte';
-  import KnowledgeRetrievalCard from '$lib/features/preferences/sections/knowledge/KnowledgeRetrievalCard.svelte';
+  import { KNOWLEDGE_MANIFEST } from '$lib/features/preferences/sections/knowledge/knowledge-manifest';
+  import PrefManifestCard from '$lib/features/preferences/widgets/manifest/PrefManifestCard.svelte';
   import {
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
@@ -18,22 +17,25 @@
 
 <div
   id={PREFERENCE_TAB_PANEL_IDS.knowledge}
-  class="grid gap-4"
+  class="grid min-w-0 grid-cols-1 gap-4"
   role="tabpanel"
   aria-labelledby={PREFERENCE_TAB_IDS.knowledge}
 >
   <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     {#if ctrl.sectionDescription('knowledge')}
-      <p class="min-w-0 flex-1 text-sm text-muted-foreground">{ctrl.sectionDescription('knowledge')}</p>
+      <p class="min-w-0 flex-1 text-sm text-muted-foreground">
+        {ctrl.sectionDescription('knowledge')}
+      </p>
     {/if}
     <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
       <KnowledgeBrowseLink busy={ctrl.busy} />
     </div>
   </div>
 
+  <!-- Cards + fields are data-driven from KNOWLEDGE_MANIFEST (manifest rollout). -->
   {#if ctrl.draft}
-    <KnowledgeEmbeddingChunkingCard {ctrl} />
-    <KnowledgeRetrievalCard {ctrl} />
-    <KnowledgeAnsweringCard {ctrl} />
+    {#each KNOWLEDGE_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+      <PrefManifestCard {ctrl} {card} />
+    {/each}
   {/if}
 </div>

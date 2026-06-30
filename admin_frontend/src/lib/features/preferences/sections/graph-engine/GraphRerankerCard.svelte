@@ -36,20 +36,17 @@
         kind="rerank"
         path="graph.reranker.model_id"
         embedded
-        selectedId={ctrl.draft.graph.reranker.model_id}
         emptyFallbackId={ctrl.draft.llm.default_reranker}
       />
       <PrefFieldGrid>
         <PrefNumberField
           {ctrl}
           path="graph.reranker.min_relevance"
-          bind:value={ctrl.draft.graph.reranker.min_relevance}
         />
         <PrefTextField
           {ctrl}
           path="graph.reranker.device"
           placeholder="auto"
-          bind:value={ctrl.draft.graph.reranker.device}
         />
       </PrefFieldGrid>
     </fieldset>

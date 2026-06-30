@@ -13,9 +13,8 @@ from hirocli.admin_svelte.schemas import PreferencesPatchRequest
 from hirocli.domain.preferences import (
     PREFERENCE_SECTIONS,
     PROMPT_DEFAULTS,
-    knowledge_answering_model_source,
-    resolve_knowledge_answering_llm,
 )
+from hirocli.domain.preferences.computed_fields import COMPUTED_PREFERENCE_FIELDS
 from hirocli.domain.preferences_schema import workspace_preferences_schema_payload
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.preferences_runtime import (
@@ -43,6 +42,15 @@ def _preferences_runtime(request: Request, workspace_id: str | None) -> Workspac
     return WorkspacePreferencesRuntime(workspace_path)
 
 
+def _set_payload_path(payload: dict[str, Any], path: str, value: Any) -> None:
+    """Set a dotted path in the GET payload, creating intermediate dicts as needed."""
+    parts = path.split(".")
+    node = payload
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = value
+
+
 def _prefs_payload(
     runtime: WorkspacePreferencesRuntime,
     *,
@@ -50,24 +58,13 @@ def _prefs_payload(
 ) -> dict[str, Any]:
     prefs = runtime.current
     payload = prefs.model_dump(mode="json")
-    knowledge = payload.setdefault("knowledge", {})
-    answering = knowledge.setdefault("answering", {})
-    resolved = resolve_knowledge_answering_llm(
-        prefs,
-        runtime._workspace_path,
-        workspace_id=workspace_id,
-    )
-    answering["model_resolved"] = resolved.model_id if resolved is not None else None
-    answering["model_resolved_source"] = knowledge_answering_model_source(prefs)
-    from hirocli.services.knowledge import count_knowledge_points
-    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
-
-    knowledge["default_embedding_model_locked"] = count_knowledge_points(runtime._workspace_path) > 0
-    # Graph embedder locks independently, on graph (not knowledge) indexing — read from the
-    # graph-indexed marker (the Kuzu DB can't be opened to count while the server holds it).
-    payload.setdefault("graph", {})["embedder_model_locked"] = is_graph_indexed(
-        runtime._workspace_path
-    )
+    # Enrich with the computed read-only fields (single source — see preferences/computed_fields.py).
+    for field in COMPUTED_PREFERENCE_FIELDS:
+        if field.compute is None:
+            continue
+        _set_payload_path(
+            payload, field.path, field.compute(prefs, runtime._workspace_path, workspace_id)
+        )
     return payload
 
 

@@ -8,6 +8,7 @@
     type PrefModelKind
   } from '$lib/features/preferences/shared/preferences-model-picker';
   import { usePrefFieldVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
+  import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import {
     preferenceFieldMeta,
     preferenceHint,
@@ -23,7 +24,6 @@
     label?: string;
     /** Overrides the schema description; omit to use the field's backend `description`. */
     hint?: string;
-    selectedId?: string | null;
     busy?: boolean;
     embedded?: boolean;
     labelled?: boolean;
@@ -37,7 +37,6 @@
     path,
     label,
     hint: hintOverride,
-    selectedId = null,
     busy,
     embedded = false,
     labelled = false,
@@ -47,6 +46,9 @@
   const catalog = $derived(prefModelCatalog(ctrl, kind));
   const empty = $derived(PREF_MODEL_EMPTY_LABELS[kind]);
   const pickerBusy = $derived(busy ?? ctrl.busy);
+  // Selected id is owned by `path` (read from the draft), not passed in — removes the double-write
+  // where the call site repeated `selectedId={ctrl.draft.<path>}` alongside `path`.
+  const selectedId = $derived(getPreferenceByPath(ctrl.draft, path) as string | null);
   const meta = $derived(preferenceFieldMeta(ctrl.fieldSchema, path));
   const resolvedLabel = $derived(label ?? preferenceTitle(meta) ?? path);
   const hint = $derived(hintOverride ?? preferenceHint(meta) ?? '');

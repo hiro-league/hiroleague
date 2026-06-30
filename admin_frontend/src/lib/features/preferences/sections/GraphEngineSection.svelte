@@ -1,11 +1,7 @@
 <script lang="ts">
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import GraphRetrievalAgentCard from '$lib/features/preferences/sections/graph-engine/GraphRetrievalAgentCard.svelte';
-  import GraphRetrievalAgentModelCard from '$lib/features/preferences/sections/graph-engine/GraphRetrievalAgentModelCard.svelte';
-  import GraphExtractionCard from '$lib/features/preferences/sections/graph-engine/GraphExtractionCard.svelte';
-  import GraphRerankerCard from '$lib/features/preferences/sections/graph-engine/GraphRerankerCard.svelte';
-  import GraphSearchIndexingCard from '$lib/features/preferences/sections/graph-engine/GraphSearchIndexingCard.svelte';
-  import GraphViewCard from '$lib/features/preferences/sections/graph-engine/GraphViewCard.svelte';
+  import { GRAPH_ENGINE_MANIFEST } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
+  import PrefManifestCard from '$lib/features/preferences/widgets/manifest/PrefManifestCard.svelte';
   import {
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
@@ -20,7 +16,7 @@
 
 <div
   id={PREFERENCE_TAB_PANEL_IDS['graph-engine']}
-  class="grid gap-4"
+  class="grid min-w-0 grid-cols-1 gap-4"
   role="tabpanel"
   aria-labelledby={PREFERENCE_TAB_IDS['graph-engine']}
 >
@@ -31,12 +27,11 @@
     Knowledge tab.) Changing the graph embedder re-indexes all graph data.
   </p>
 
+  <!-- Cards + fields are data-driven from GRAPH_ENGINE_MANIFEST (Tier-2.1). Order, sections, and the
+       search index all derive from the same manifest — see graph-engine-manifest.ts. -->
   {#if ctrl.draft}
-    <GraphExtractionCard {ctrl} />
-    <GraphSearchIndexingCard {ctrl} />
-    <GraphRerankerCard {ctrl} />
-    <GraphRetrievalAgentModelCard {ctrl} />
-    <GraphRetrievalAgentCard {ctrl} />
-    <GraphViewCard {ctrl} />
+    {#each GRAPH_ENGINE_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+      <PrefManifestCard {ctrl} {card} />
+    {/each}
   {/if}
 </div>

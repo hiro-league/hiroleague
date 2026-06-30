@@ -1,16 +1,11 @@
 <script lang="ts">
-  import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
-  import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
+  import { AGENT_MANIFEST } from '$lib/features/preferences/sections/agent-manifest';
+  import PrefManifestCard from '$lib/features/preferences/widgets/manifest/PrefManifestCard.svelte';
   import {
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
-  import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
-  import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
-  import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
-  import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -21,7 +16,7 @@
 
 <div
   id={PREFERENCE_TAB_PANEL_IDS.agent}
-  class="grid gap-4"
+  class="grid min-w-0 grid-cols-1 gap-4"
   role="tabpanel"
   aria-labelledby={PREFERENCE_TAB_IDS.agent}
 >
@@ -29,97 +24,10 @@
     <p class="text-sm text-muted-foreground">{ctrl.sectionDescription('chat')}</p>
   {/if}
 
+  <!-- Cards + fields are data-driven from AGENT_MANIFEST (manifest rollout). -->
   {#if ctrl.draft}
-    <PrefSectionCard
-      title="Chat Settings"
-      description="Conversation window and knowledge citations for chat replies."
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.agentChatSettings}
-    >
-      <PrefFieldGrid>
-        <PrefTextField
-          {ctrl}
-          path="memory.user_name"
-          hint="Anchors your remembered facts to a named person in the memory graph (instead of a generic “User”). Set this once, early. Changing it later won’t rename existing memories — it starts a separate identity and fragments recall. Leave blank to use “User”."
-          maxlength={120}
-          placeholder="e.g. Misho"
-          disabled={ctrl.busy}
-          bind:value={ctrl.draft.memory.user_name}
-        />
-        <PrefNumberField
-          {ctrl}
-          path="chat.max_messages"
-          bind:value={ctrl.draft.chat.max_messages}
-        />
-      </PrefFieldGrid>
-
-      <!-- Toggles stacked in the left column so chat instructions fills the right column —
-           one grid column wide each, both columns used. -->
-      <PrefFieldGrid>
-        <div class="grid gap-3">
-          <PrefToggleField
-            {ctrl}
-            path="chat.cite_sources"
-            disabled={ctrl.busy}
-            bind:checked={ctrl.draft.chat.cite_sources}
-          />
-          <PrefToggleField
-            {ctrl}
-            path="chat.tools_enabled"
-            disabled={ctrl.busy}
-            bind:checked={ctrl.draft.chat.tools_enabled}
-          />
-        </div>
-
-        <!-- Chat instructions moved in from its own section; old section description kept as the tooltip. -->
-        <PromptField
-          {ctrl}
-          path="chat.instructions"
-          hint="General answering guidance injected into the current user turn (ahead of the question), alongside any retrieved knowledge and memories. Authored in Markdown; sent to the model as text."
-          ariaLabel="Chat answering instructions (markdown)"
-          editorLabel="Instructions markdown editor"
-        />
-      </PrefFieldGrid>
-    </PrefSectionCard>
-
-    <!-- Consolidated here from the removed "Agent Memory" tab — these toggles bound to the same
-         memory.* fields that used to be duplicated on both tabs. Recall/remember + top_k are gated
-         by the master "Enable agent memory" switch. -->
-    <PrefSectionCard
-      title="Agent memory"
-      description="Long-term conversation memory on the shared Graphiti graph engine — the agent remembers facts from the user's messages and recalls them on later turns. The models, embedder, and graph search it uses live in the Graph Engine tab."
-      collapsible
-      bodyId={PREFERENCES_SECTION_BODY_IDS.memoryRetrieval}
-    >
-      <PrefToggleField
-        {ctrl}
-        path="memory.enabled"
-        disabled={ctrl.busy}
-        bind:checked={ctrl.draft.memory.enabled}
-      />
-
-      <PrefFieldGrid>
-        <PrefToggleField
-          {ctrl}
-          path="memory.extraction.enabled"
-          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-          class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
-          bind:checked={ctrl.draft.memory.extraction.enabled}
-        />
-        <PrefToggleField
-          {ctrl}
-          path="memory.search.enabled"
-          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-          class={!ctrl.draft.memory.enabled ? 'opacity-50' : ''}
-          bind:checked={ctrl.draft.memory.search.enabled}
-        />
-        <PrefNumberField
-          {ctrl}
-          path="memory.search.top_k"
-          disabled={ctrl.busy || !ctrl.draft.memory.enabled}
-          bind:value={ctrl.draft.memory.search.top_k}
-        />
-      </PrefFieldGrid>
-    </PrefSectionCard>
+    {#each AGENT_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+      <PrefManifestCard {ctrl} {card} />
+    {/each}
   {/if}
 </div>

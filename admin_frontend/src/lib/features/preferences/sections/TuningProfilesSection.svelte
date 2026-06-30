@@ -217,7 +217,7 @@
 
 <div
   id={PREFERENCE_TAB_PANEL_IDS['tuning-profiles']}
-  class="grid gap-4"
+  class="grid min-w-0 grid-cols-1 gap-4"
   role="tabpanel"
   aria-labelledby={PREFERENCE_TAB_IDS['tuning-profiles']}
 >

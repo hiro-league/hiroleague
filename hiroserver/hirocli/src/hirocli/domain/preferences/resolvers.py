@@ -49,6 +49,78 @@ def _profile_tuning(prefs: WorkspacePreferences, profile_id: str) -> TuningProfi
     return profile
 
 
+def _resolved_from_tuning(model_id: str, tuning: TuningProfile) -> ResolvedModel:
+    """Build a ``ResolvedModel`` from a model id + tuning profile (the common tail of every resolver)."""
+    return ResolvedModel(
+        model_id=model_id,
+        temperature=tuning.temperature,
+        max_tokens=tuning.max_tokens,
+        thinking=tuning.thinking,
+        num_ctx=tuning.num_ctx,
+    )
+
+
+def _resolve_credential_store(
+    workspace_path: Path,
+    *,
+    workspace_id: str | None,
+    credential_store: CredentialStore | None,
+    log_label: str,
+) -> CredentialStore | None:
+    """Reuse the caller's store when given; else look up the workspace id and open one.
+
+    Returns ``None`` when the path isn't in the registry (no id) — callers treat that as
+    "availability can't be checked" (return None, or fall back)."""
+    if credential_store is not None:
+        return credential_store
+    from ..workspace import workspace_id_for_path
+
+    wid = workspace_id or workspace_id_for_path(workspace_path)
+    if wid is None:
+        logger.debug("%s: workspace path not in registry — %s", log_label, workspace_path)
+        return None
+    return CredentialStore(workspace_path, wid)
+
+
+def _resolve_available_model(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    model_id: str | None,
+    *,
+    expected_kind: str,
+    tuning_profile_id: str,
+    log_label: str,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Shared tail of the chat/stt/tts resolvers: catalog lookup + kind check + provider-credential
+    availability + tuning. The differing part — how ``model_id`` is chosen — stays in each caller."""
+    if not model_id:
+        return None
+    from ..available_models import AvailableModelsService
+    from ..model_catalog import get_model_catalog
+
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind(expected_kind):
+        return None
+
+    store = _resolve_credential_store(
+        workspace_path,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+        log_label=log_label,
+    )
+    if store is None:
+        return None
+
+    ams = AvailableModelsService(cat, store)
+    if not ams.is_model_available(model_id):
+        return None
+
+    return _resolved_from_tuning(model_id, _profile_tuning(prefs, tuning_profile_id))
+
+
 def resolve_llm(
     prefs: WorkspacePreferences,
     workspace_path: Path,
@@ -63,43 +135,16 @@ def resolve_llm(
     When ``credential_store`` is provided (e.g. AgentManager), it is reused to avoid
     repeated keyring/doc loads.
     """
-    from ..available_models import AvailableModelsService
-    from ..model_catalog import get_model_catalog
-    from ..workspace import workspace_id_for_path
-
-    attr = f"default_{purpose}"
-    model_id: str | None = getattr(prefs.llm, attr, None)
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None:
-        return None
-    expected_kind = {"chat": "chat", "stt": "stt", "tts": "tts"}[purpose]
-    if not spec.supports_kind(expected_kind):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_llm: workspace path not in registry — %s", workspace_path)
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, prefs.llm.default_tuning_profile)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
+    model_id: str | None = getattr(prefs.llm, f"default_{purpose}", None)
+    return _resolve_available_model(
+        prefs,
+        workspace_path,
+        model_id,
+        expected_kind=purpose,
+        tuning_profile_id=prefs.llm.default_tuning_profile,
+        log_label="resolve_llm",
+        workspace_id=workspace_id,
+        credential_store=credential_store,
     )
 
 
@@ -136,7 +181,6 @@ def resolve_image_gen(
     """
     from ..available_models import AvailableModelsService
     from ..model_catalog import get_model_catalog
-    from ..workspace import workspace_id_for_path
 
     pid = (profile_id or "").strip() or prefs.llm.default_image_profile
     profile = prefs.image_profiles.get(pid)
@@ -152,14 +196,14 @@ def resolve_image_gen(
     if spec is None or not spec.supports_kind("image_gen"):
         return None
 
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_image_gen: workspace path not in registry — %s", workspace_path)
-            return None
-        store = CredentialStore(workspace_path, wid)
+    store = _resolve_credential_store(
+        workspace_path,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+        log_label="resolve_image_gen",
+    )
+    if store is None:
+        return None
 
     ams = AvailableModelsService(cat, store)
     if not ams.is_model_available(model_id):
@@ -204,43 +248,17 @@ def _resolve_knowledge_llm(
     The model id is shared across knowledge LLM steps (explicit ``knowledge.answering.model``
     else ``llm.default_chat``); only the tuning profile differs (answering vs rewrite).
     """
-    from ..available_models import AvailableModelsService
-    from ..model_catalog import get_model_catalog
-    from ..workspace import workspace_id_for_path
-
     explicit = (prefs.knowledge.answering.model or "").strip() or None
     model_id = explicit or prefs.llm.default_chat
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind("chat"):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug(
-                "_resolve_knowledge_llm: workspace path not in registry — %s",
-                workspace_path,
-            )
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, tuning_profile_id)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
+    return _resolve_available_model(
+        prefs,
+        workspace_path,
+        model_id,
+        expected_kind="chat",
+        tuning_profile_id=tuning_profile_id,
+        log_label="_resolve_knowledge_llm",
+        workspace_id=workspace_id,
+        credential_store=credential_store,
     )
 
 
@@ -336,43 +354,18 @@ def _resolve_graphiti_model(
     :func:`_resolve_knowledge_llm` (catalog + provider credentials). The tuning
     profile is the per-tier graphiti profile.
     """
-    from ..available_models import AvailableModelsService
-    from ..model_catalog import get_model_catalog
-    from ..workspace import workspace_id_for_path
-
     explicit = (explicit_model or "").strip() or None
     answering = (prefs.knowledge.answering.model or "").strip() or None
     model_id = explicit or answering or prefs.llm.default_chat
-    if not model_id:
-        return None
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind("chat"):
-        return None
-
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug(
-                "_resolve_graphiti_model: workspace path not in registry — %s", workspace_path
-            )
-            return None
-        store = CredentialStore(workspace_path, wid)
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    tuning = _profile_tuning(prefs, tuning_profile_id)
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
+    return _resolve_available_model(
+        prefs,
+        workspace_path,
+        model_id,
+        expected_kind="chat",
+        tuning_profile_id=tuning_profile_id,
+        log_label="_resolve_graphiti_model",
+        workspace_id=workspace_id,
+        credential_store=credential_store,
     )
 
 
@@ -555,16 +548,15 @@ def resolve_character_llm(
     """
     from ..available_models import AvailableModelsService
     from ..model_catalog import get_model_catalog
-    from ..workspace import workspace_id_for_path
 
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            logger.debug("resolve_character_llm: workspace path not in registry — %s", workspace_path)
-            return resolve_llm(prefs, workspace_path, "chat", workspace_id=workspace_id)
-        store = CredentialStore(workspace_path, wid)
+    store = _resolve_credential_store(
+        workspace_path,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+        log_label="resolve_character_llm",
+    )
+    if store is None:
+        return resolve_llm(prefs, workspace_path, "chat", workspace_id=workspace_id)
 
     cat = get_model_catalog()
     ams = AvailableModelsService(cat, store)
@@ -592,14 +584,7 @@ def resolve_character_llm(
             continue
         if not ams.is_model_available(mid):
             continue
-        tuning = _profile_tuning(prefs, profile_id)
-        return ResolvedModel(
-            model_id=mid,
-            temperature=tuning.temperature,
-            max_tokens=tuning.max_tokens,
-            thinking=tuning.thinking,
-            num_ctx=tuning.num_ctx,
-        )
+        return _resolved_from_tuning(mid, _profile_tuning(prefs, profile_id))
     fallback = resolve_llm(
         prefs,
         workspace_path,
@@ -609,14 +594,7 @@ def resolve_character_llm(
     )
     if fallback is None:
         return None
-    tuning = _profile_tuning(prefs, profile_id)
-    return ResolvedModel(
-        model_id=fallback.model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
-    )
+    return _resolved_from_tuning(fallback.model_id, _profile_tuning(prefs, profile_id))
 
 
 def resolve_character_voice(
@@ -637,15 +615,15 @@ def resolve_character_voice(
     """
     from ..available_models import AvailableModelsService
     from ..model_catalog import get_model_catalog
-    from ..workspace import workspace_id_for_path
 
-    if credential_store is not None:
-        store = credential_store
-    else:
-        wid = workspace_id or workspace_id_for_path(workspace_path)
-        if wid is None:
-            return None
-        store = CredentialStore(workspace_path, wid)
+    store = _resolve_credential_store(
+        workspace_path,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+        log_label="resolve_character_voice",
+    )
+    if store is None:
+        return None
 
     cat = get_model_catalog()
     ams = AvailableModelsService(cat, store)

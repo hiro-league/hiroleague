@@ -76,7 +76,10 @@
   }
 </script>
 
-<div class={cn(ADMIN_SECTION_CARD_MUTED, 'grid gap-3', className)}>
+<!-- `grid-cols-1` (minmax(0,1fr)) bounds the single column to the card box, so content wraps within
+     the card and the header's description caption truncates as designed (a bare `grid` auto column
+     would size to content and overflow the box). -->
+<div class={cn(ADMIN_SECTION_CARD_MUTED, 'grid grid-cols-1 gap-3', className)}>
   {#if title}
     {#if collapsible}
       <!-- `group` makes the whole header LINE the hover target: the description reveals inline next
@@ -118,7 +121,7 @@
       </div>
       <div
         id={bodyId}
-        class={cn('grid gap-3', indentBody && 'pl-[26px]')}
+        class={cn('grid grid-cols-1 gap-3', indentBody && 'pl-[26px]')}
         hidden={!expanded}
       >
         {#if description && !descriptionTooltip}

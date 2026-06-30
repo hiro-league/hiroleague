@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
@@ -104,51 +104,67 @@ def save_preferences(
     )
 
 
+def check_embedder_transition(
+    workspace_path: Path,
+    *,
+    changed: Callable[[str], bool],
+    knowledge_inherits_default: bool,
+    graph_inherits_default: bool,
+    error: type[Exception] = ValueError,
+) -> None:
+    """Raise ``error`` if an embedder change would orphan stored (dimension-bound) vectors.
+
+    The single source for the embedder-lock rules: the knowledge override locks on knowledge points,
+    the graph override on the graph-indexed marker, and the workspace default (``llm.default_embedder``)
+    is blocked only when an empty-override consumer was indexed using it. The runtime PATCH guard and
+    the save-time guard both call this with their own "did this path change" predicate and exception
+    type — so the rule (and the messages) live in one place, and this module owns the service imports."""
+    from hirocli.services.knowledge import count_knowledge_points
+    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
+
+    if changed("knowledge.default_embedding_model") and count_knowledge_points(workspace_path) > 0:
+        raise error(
+            "knowledge.default_embedding_model cannot be changed while the knowledge collection "
+            "has points. Delete all knowledge documents first."
+        )
+
+    if changed("graph.embedder_model") and is_graph_indexed(workspace_path):
+        raise error(
+            "graph.embedder_model cannot be changed while the graph has indexed data. "
+            "Reset the graph first."
+        )
+
+    if changed("llm.default_embedder"):
+        if knowledge_inherits_default and count_knowledge_points(workspace_path) > 0:
+            raise error(
+                "llm.default_embedder cannot be changed: the knowledge collection was indexed "
+                "using it (no Knowledge embedder override). Set a Knowledge embedder override or "
+                "delete all knowledge documents first."
+            )
+        if graph_inherits_default and is_graph_indexed(workspace_path):
+            raise error(
+                "llm.default_embedder cannot be changed: the graph was indexed using it (no "
+                "Graph embedder override). Set a Graph embedder override or reset the graph first."
+            )
+
+
 def _validate_pre_save_transition(
     workspace_path: Path,
     effective_changes: dict[str, tuple[Any, Any]],
     prefs: WorkspacePreferences,
 ) -> None:
-    """Block embedder changes that would orphan stored (dimension-bound) vectors.
-
-    Per tool: the knowledge override locks on knowledge points, the graph override on the
-    graph-indexed marker. The workspace default (``llm.default_embedder``) is normally free, but
-    is blocked in the one unsafe case — when an empty-override consumer was indexed using it
-    (so the default IS the stored vectors' model)."""
+    """Save-time embedder guard — runs on every persist (see :func:`check_embedder_transition`)."""
 
     def _changed(path: str) -> bool:
         t = effective_changes.get(path)
         return t is not None and t[0] != t[1]
 
-    from hirocli.services.knowledge import count_knowledge_points
-    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
-
-    if _changed("knowledge.default_embedding_model") and count_knowledge_points(workspace_path) > 0:
-        raise ValueError(
-            "knowledge.default_embedding_model cannot be changed while the knowledge collection "
-            "has points. Delete all knowledge documents first."
-        )
-
-    if _changed("graph.embedder_model") and is_graph_indexed(workspace_path):
-        raise ValueError(
-            "graph.embedder_model cannot be changed while the graph has indexed data. "
-            "Reset the graph first."
-        )
-
-    if _changed("llm.default_embedder"):
-        knowledge_inherits = not (prefs.knowledge.default_embedding_model or "").strip()
-        graph_inherits = not (prefs.graph.embedder_model or "").strip()
-        if knowledge_inherits and count_knowledge_points(workspace_path) > 0:
-            raise ValueError(
-                "llm.default_embedder cannot be changed: the knowledge collection was indexed "
-                "using it (no Knowledge embedder override). Set a Knowledge embedder override or "
-                "delete all knowledge documents first."
-            )
-        if graph_inherits and is_graph_indexed(workspace_path):
-            raise ValueError(
-                "llm.default_embedder cannot be changed: the graph was indexed using it (no "
-                "Graph embedder override). Set a Graph embedder override or reset the graph first."
-            )
+    check_embedder_transition(
+        workspace_path,
+        changed=_changed,
+        knowledge_inherits_default=not (prefs.knowledge.default_embedding_model or "").strip(),
+        graph_inherits_default=not (prefs.graph.embedder_model or "").strip(),
+    )
 
 
 # ---------------------------------------------------------------------------

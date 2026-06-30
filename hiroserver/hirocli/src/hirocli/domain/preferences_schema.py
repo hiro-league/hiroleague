@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from hirocli.domain.preferences import WorkspacePreferences
+from hirocli.domain.preferences.computed_fields import computed_preference_schema_fields
 
 # Keys copied from a property node into the flat field map (plus derived flags).
 # ``minimum``/``maximum`` are intentionally absent: they are re-emitted as ``min``/``max``
@@ -31,39 +32,6 @@ _META_KEYS = (
     "model_kind",
     "advanced",
 )
-
-# GET /preferences enrichments — not persisted; excluded from PATCH via schema readOnly.
-_PREFERENCES_PAYLOAD_READONLY_FIELDS: dict[str, dict[str, Any]] = {
-    "knowledge.default_embedding_model_locked": {
-        "path": "knowledge.default_embedding_model_locked",
-        "type": "boolean",
-        "readOnly": True,
-    },
-    "graph.embedder_model_locked": {
-        "path": "graph.embedder_model_locked",
-        "type": "boolean",
-        "readOnly": True,
-    },
-    "knowledge.answering.model_resolved": {
-        "path": "knowledge.answering.model_resolved",
-        "type": "string",
-        "nullable": True,
-        "readOnly": True,
-    },
-    "knowledge.answering.model_resolved_source": {
-        "path": "knowledge.answering.model_resolved_source",
-        "type": "string",
-        "nullable": True,
-        "readOnly": True,
-    },
-    "graph.embedder_model_resolved": {
-        "path": "graph.embedder_model_resolved",
-        "type": "string",
-        "nullable": True,
-        "readOnly": True,
-    },
-}
-
 
 def _resolve_ref(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
     ref = node.get("$ref")
@@ -140,7 +108,8 @@ def workspace_preferences_field_map() -> dict[str, dict[str, Any]]:
     root_schema = workspace_preferences_json_schema()
     out: dict[str, dict[str, Any]] = {}
     _walk_node("", root_schema, root_schema, out)
-    out.update(_PREFERENCES_PAYLOAD_READONLY_FIELDS)
+    # Computed/enriched read-only fields (single source — see preferences/computed_fields.py).
+    out.update(computed_preference_schema_fields())
     return out
 
 

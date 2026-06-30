@@ -1,3 +1,9 @@
+import { GRAPH_ENGINE_FIELD_ORDER } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
+import { EVAL_FIELD_ORDER } from '$lib/features/preferences/sections/eval/eval-manifest';
+import { AGENT_FIELD_ORDER } from '$lib/features/preferences/sections/agent-manifest';
+import { KNOWLEDGE_FIELD_ORDER } from '$lib/features/preferences/sections/knowledge/knowledge-manifest';
+import { MODELS_FIELD_ORDER } from '$lib/features/preferences/sections/models-manifest';
+
 /** Page-level preference tabs (`?tab=` on `/preferences`). */
 export type PreferenceTabId =
   | 'models'
@@ -183,106 +189,17 @@ export const PREFERENCE_SECTION_ORDER: readonly string[] = [
 // their section. Keep in sync with the cards; the `preferences-search-index` test guards that every
 // entry is a real, unique schema path.
 export const PREFERENCE_FIELD_ORDER: readonly string[] = [
-  // General › Default models
-  'llm.default_chat',
-  'llm.default_stt',
-  'llm.default_tuning_profile',
-  'llm.default_tts',
-  'llm.default_embedder',
-  'llm.default_reranker',
-  // General › Modalities
-  'media.input.voice',
-  'media.input.image',
-  'media.input.video',
-  'media.input.file',
-  'media.output.voice',
-  'media.output.image',
-  'media.output.video',
-  'media.output.file',
-  // Agent › Chat Settings
-  'memory.user_name',
-  'chat.max_messages',
-  'chat.cite_sources',
-  'chat.tools_enabled',
-  'chat.instructions',
-  // Agent › Agent memory
-  'memory.enabled',
-  'memory.extraction.enabled',
-  'memory.search.enabled',
-  'memory.search.top_k',
-  // Memory › Graph Extraction
-  'graph.extraction_model',
-  'graph.extraction_tuning_profile',
-  'graph.small_model',
-  'graph.small_tuning_profile',
-  'graph.embedder_model',
-  'graph.entity_ontology',
-  'graph.custom_extraction_instructions',
-  // Memory › Graph search & indexing
-  'graph.temporal_default',
-  'graph.k_hop',
-  'graph.search_recipe',
-  'graph.search_scope',
-  'graph.sim_min_score',
-  'graph.query_timeout_s',
-  'graph.observability',
-  'graph.eval.show_event_time',
-  'graph.eval.show_expired_at',
-  'graph.eval.show_superseded',
-  // Memory › Graphiti Reranker
-  'graph.reranker.model_id',
-  'graph.reranker.min_relevance',
-  'graph.reranker.device',
-  // Memory › Retrieval Agent Model & Prompt
-  'graph.eval.retrieval_model',
-  'graph.eval.retrieval_tuning_profile',
-  'graph.eval.active_retrieval_agent_prompt_id',
-  'graph.eval.retrieval_agent_prompts',
-  // Memory › Retrieval Agent
-  'graph.eval.retrieval_agent.max_agent_turns',
-  'graph.eval.retrieval_agent.max_parallel_searches',
-  'graph.eval.retrieval_agent.hops_max',
-  'graph.eval.retrieval_agent.limit_default',
-  'graph.eval.retrieval_agent.limit_min',
-  'graph.eval.retrieval_agent.limit_max',
-  'graph.eval.max_elements_per_kind',
-  'graph.eval.max_fact_chars',
-  'graph.eval.max_episode_chars',
-  'graph.eval.max_summary_chars',
-  // Memory › Graph view
-  'graph.view.large_type_threshold',
-  // Knowledge › Indexing Options
-  'knowledge.default_embedding_model',
-  'knowledge.chunking.chunk_size',
-  'knowledge.chunking.chunk_overlap',
-  'knowledge.chunking.markdown.respect_headings',
-  'knowledge.chunking.embed_structural_context',
-  'graph.backend',
-  // Knowledge › Retrieval defaults
-  'knowledge.retrieval.hybrid',
-  'knowledge.retrieval.min_score',
-  'knowledge.retrieval.prefetch_limit',
-  'knowledge.retrieval.top_k',
-  'knowledge.retrieval.reranker.enabled',
-  'knowledge.retrieval.reranker.model_id',
-  'knowledge.retrieval.reranker.top_n',
-  // Knowledge › Knowledge Answering (Ask Tab)
-  'knowledge.rewrite.default_on',
-  'knowledge.rewrite.prompt',
-  'knowledge.answering.model',
-  'knowledge.default_tuning_profile',
-  'knowledge.answering.prompt',
-  'knowledge.answering.language_policy',
-  'knowledge.answering.cite_sources',
-  // Eval › Evaluation Models
-  'graph.eval.answer_model',
-  'graph.eval.answer_tuning_profile',
-  'graph.eval.judge_model',
-  'graph.eval.judge_tuning_profile',
-  // Eval › Prompts
-  'graph.eval.answer_prompts',
-  'graph.eval.active_answer_prompt_id',
-  'graph.eval.judge_prompt',
+  // General (models) — DERIVED from MODELS_MANIFEST (see models-manifest.ts).
+  ...MODELS_FIELD_ORDER,
+  // Agent — DERIVED from AGENT_MANIFEST (see agent-manifest.ts).
+  ...AGENT_FIELD_ORDER,
+  // Memory (shared graph engine) — DERIVED from GRAPH_ENGINE_MANIFEST so render order and search
+  // order share one source and can't drift. Add/reorder Memory-tab fields in graph-engine-manifest.ts.
+  ...GRAPH_ENGINE_FIELD_ORDER,
+  // Knowledge — DERIVED from KNOWLEDGE_MANIFEST (see knowledge-manifest.ts).
+  ...KNOWLEDGE_FIELD_ORDER,
+  // Eval — DERIVED from EVAL_MANIFEST (single source for render + search order; see eval-manifest.ts).
+  ...EVAL_FIELD_ORDER,
   // Model Profiles
   'tuning_profiles'
 ];

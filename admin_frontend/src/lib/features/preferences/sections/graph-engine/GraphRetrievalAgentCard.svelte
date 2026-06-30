@@ -36,32 +36,26 @@
         <PrefNumberField
           {ctrl}
           path="graph.eval.retrieval_agent.max_agent_turns"
-          bind:value={limits.max_agent_turns}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.retrieval_agent.max_parallel_searches"
-          bind:value={limits.max_parallel_searches}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.retrieval_agent.hops_max"
-          bind:value={limits.hops_max}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.retrieval_agent.limit_default"
-          bind:value={limits.limit_default}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.retrieval_agent.limit_min"
-          bind:value={limits.limit_min}
         />
         <PrefNumberField
           {ctrl}
           path="graph.eval.retrieval_agent.limit_max"
-          bind:value={limits.limit_max}
         />
       </PrefFieldGrid>
     </PrefPanel>
@@ -76,22 +70,18 @@
           <PrefNumberField
             {ctrl}
             path="graph.eval.max_elements_per_kind"
-            bind:value={evalPrefs.max_elements_per_kind}
           />
           <PrefNumberField
             {ctrl}
             path="graph.eval.max_fact_chars"
-            bind:value={evalPrefs.max_fact_chars}
           />
           <PrefNumberField
             {ctrl}
             path="graph.eval.max_episode_chars"
-            bind:value={evalPrefs.max_episode_chars}
           />
           <PrefNumberField
             {ctrl}
             path="graph.eval.max_summary_chars"
-            bind:value={evalPrefs.max_summary_chars}
           />
         </PrefFieldGrid>
       </PrefPanel>

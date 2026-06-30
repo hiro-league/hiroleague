@@ -14,6 +14,10 @@
     preferenceTitle,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
+  import {
+    getPreferenceByPath,
+    setPreferenceByPath
+  } from '$lib/features/preferences/state/preferences-edits';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import { cn } from '$lib/utils';
 
@@ -25,23 +29,19 @@
     label?: string;
     /** Overrides the schema description; omit (with `path`) to use the field's backend `description`. */
     hint?: string;
-    /** Schema path for the bound field — sources the label + hint when not given explicitly. */
+    /** Schema path for the bound field — sources the label + hint AND the selected profile id. */
     path?: PreferencePath;
-    /** When set, writes via `ctrl.setDefaultTuningProfile` instead of `value`. */
-    value?: string;
     scope?: TuningProfileScope;
     class?: string;
   };
 
-  let {
-    ctrl,
-    label,
-    hint: hintOverride = '',
-    path,
-    value = $bindable(''),
-    scope,
-    class: className = ''
-  }: Props = $props();
+  let { ctrl, label, hint: hintOverride = '', path, scope, class: className = '' }: Props = $props();
+
+  // Selected profile id is owned by `path` (read from the draft), not passed in — removes the
+  // double-write where the call site repeated `value={ctrl.draft.<path>}` alongside `path`.
+  const value = $derived(
+    path ? ((getPreferenceByPath(ctrl.draft, path) as string | null) ?? '') : ''
+  );
 
   const fieldMeta = $derived(path ? preferenceFieldMeta(ctrl.fieldSchema, path) : null);
   const resolvedLabel = $derived(label ?? preferenceTitle(fieldMeta) ?? path ?? '');
@@ -99,8 +99,11 @@
       ctrl.setDefaultTuningProfile(scope, id);
       return;
     }
-    value = id;
-    ctrl.markDirty();
+    // No scope: write the id straight to the bound path (mirrors the old `value = id` fallback).
+    if (path && ctrl.draft) {
+      setPreferenceByPath(ctrl.draft, path, id);
+      ctrl.markDirty();
+    }
   }
 
   // --- Inline edit dialog (persists immediately, applies to every model using the profile) ---

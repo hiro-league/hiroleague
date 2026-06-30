@@ -1,15 +1,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { usePrefFieldVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
-  import { usePrefPanelMembership } from '$lib/features/preferences/shared/preferences-panel.svelte';
-  import {
-    preferenceFieldMeta,
-    preferenceHint,
-    preferenceIsAdvanced,
-    preferenceTitle,
-    type PreferencePath
-  } from '$lib/features/preferences/shared/preferences-schema';
+  import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
+  import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
   import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
 
   type Props = {
@@ -17,7 +10,6 @@
     path: PreferencePath;
     /** Optional label override; omit to use the field's backend `title` (single source of truth). */
     label?: string;
-    checked?: boolean;
     disabled?: boolean;
     class?: string;
     /** Optional override of the schema description (rare card-local copy). */
@@ -30,45 +22,30 @@
     ctrl,
     path,
     label,
-    checked = $bindable(false),
     disabled = false,
     class: className = '',
     hint: hintOverride,
     details
   }: Props = $props();
 
-  const meta = $derived(preferenceFieldMeta(ctrl.fieldSchema, path));
-  const resolvedLabel = $derived(label ?? preferenceTitle(meta) ?? path);
-  const hintText = $derived(hintOverride ?? preferenceHint(meta));
-  const vis = usePrefFieldVisibility(() => preferenceIsAdvanced(meta));
-
-  // "Reset to default" affordance: only when the schema carries a boolean default and the current
-  // checked state differs. Resetting flips `checked` through the same binding + markDirty as a user
-  // toggle, so any reactive validation re-runs on its own.
-  const panel = usePrefPanelMembership(() => path);
-  const defaultChecked = $derived(meta?.default);
-  // Inside a panel the group reset owns it — hide the per-field dot.
-  const canReset = $derived(
-    !panel.inPanel && typeof defaultChecked === 'boolean' && checked !== defaultChecked
-  );
-  function resetToDefault() {
-    if (typeof defaultChecked !== 'boolean') return;
-    checked = defaultChecked;
-    ctrl.markDirty();
-  }
+  // Checked state owned by `path`; the rune's setter marks dirty on toggle. See
+  // preferences-field.svelte.ts.
+  const field = usePrefField<boolean>(() => ctrl, () => path, {
+    label: () => label,
+    hint: () => hintOverride
+  });
 </script>
 
-{#if vis.visible}
+{#if field.visible}
   <SettingToggle
-    label={resolvedLabel}
+    label={field.label}
     anchor={path}
-    hint={hintText}
+    hint={field.hint}
     {details}
-    bind:checked
+    bind:checked={field.value}
     {disabled}
     class={className}
-    onchange={ctrl.markDirty}
-    showReset={canReset}
-    onReset={resetToDefault}
+    showReset={field.canReset}
+    onReset={field.reset}
   />
 {/if}
