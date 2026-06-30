@@ -73,10 +73,6 @@ class EvalRunBody(BaseModel):
     # Optional LLM judge step: grade the model's answer against the ideal answer. When off, the
     # eval generates answers but assigns no marks (and no PROCEED/PIVOT gate).
     judge: bool = False
-    # Memory track — which named answer-prompt profile (graph.eval.answer_prompts) drives the
-    # recall leg's answer step. "" = the locked default profile. Ignored on the knowledge track
-    # (it answers with the production pipeline, not a mem-eval answer prompt).
-    answer_prompt_id: str = ""
     # Memory track — max questions running their recall→answer→judge legs at once (1 = serial).
     # Clamped server-side to [1, MAX_QUESTION_CONCURRENCY] rather than 422-ing an out-of-range
     # value. Ignored on the knowledge track (its leg loop is still serial — named follow-up).
@@ -215,7 +211,6 @@ async def eval_run(
                             episode_offset=body.episode_offset,
                             episode_limit=body.episode_limit,
                             judge=body.judge,
-                            answer_prompt_id=body.answer_prompt_id or None,
                             question_concurrency=concurrency,
                         )
                     finally:

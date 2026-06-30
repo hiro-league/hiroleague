@@ -7,7 +7,6 @@
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS
   } from '$lib/features/preferences/shared/preferences-tabs';
-  import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
   import KnowledgeBrowseLink from '$lib/features/preferences/widgets/KnowledgeBrowseLink.svelte';
 
   type Props = {
@@ -29,7 +28,6 @@
     {/if}
     <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
       <KnowledgeBrowseLink busy={ctrl.busy} />
-      <ActiveProvidersLink busy={ctrl.busy} />
     </div>
   </div>
 

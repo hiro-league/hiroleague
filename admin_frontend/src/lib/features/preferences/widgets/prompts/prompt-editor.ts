@@ -14,6 +14,12 @@ export type PromptDialogModel =
       defaultId: string;
       /** Version selected on the page when the dialog opened. */
       initialSelectedId: string;
+      /**
+       * Action to run immediately on open, so the page's New / Duplicate icons reuse the dialog's
+       * own logic: 'create' opens into a fresh blank profile, 'duplicate' into a copy of
+       * `initialSelectedId`. Omit to just open on the selected version (Edit).
+       */
+      initialAction?: 'create' | 'duplicate';
     };
 
 /** What the dialog hands back to the parent on Save (parent maps it to a PATCH payload). */

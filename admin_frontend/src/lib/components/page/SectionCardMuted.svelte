@@ -9,7 +9,6 @@
   import { getContext, hasContext, onMount, untrack } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
   import { cn } from '$lib/utils';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
   import { ADMIN_SECTION_CARD_MUTED } from '$lib/styling/admin-tokens';
   import {
     COLLAPSIBLE_SECTION_REGISTRY,
@@ -21,7 +20,9 @@
     title?: string;
     /** Intro copy shown inside the expanded body. */
     description?: string;
-    /** When true, render `description` as a help icon + tooltip next to the title (matches field hints) instead of as a paragraph. */
+    /** When true, reveal `description` inline next to the title on header-line hover — a muted,
+     * single-line caption truncated to the header's remaining width (no help icon). When false,
+     * `description` renders as a paragraph in the body instead. */
     descriptionTooltip?: boolean;
     /** When true (collapsible only), indent the body so it lines up with the title text, not the chevron. */
     indentBody?: boolean;
@@ -78,13 +79,15 @@
 <div class={cn(ADMIN_SECTION_CARD_MUTED, 'grid gap-3', className)}>
   {#if title}
     {#if collapsible}
-      <div class="flex items-start justify-between gap-2">
-        <!-- FieldHelp (a button) must sit OUTSIDE the toggle button, so the title/help live in a
-             flex-1 row and the toggle button shrinks to its content. -->
-        <div class="flex min-w-0 flex-1 items-start gap-1.5">
+      <!-- `group` makes the whole header LINE the hover target: the description reveals inline next
+           to the title (no help icon), truncated to the header's remaining width. The caption sits
+           OUTSIDE the toggle button so it isn't part of the click target; the button is shrink-0 so
+           the title keeps its width and the caption (flex-1) is what truncates. -->
+      <div class="group flex items-start justify-between gap-2">
+        <div class="flex min-w-0 flex-1 items-center gap-2">
           <button
             type="button"
-            class="flex min-w-0 items-start gap-2 rounded-md py-0.5 text-left outline-none transition hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
+            class="flex shrink-0 items-start gap-2 rounded-md py-0.5 text-left outline-none transition hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
             aria-expanded={expanded}
             aria-controls={bodyId}
             onclick={toggleExpanded}
@@ -100,7 +103,11 @@
             <span class="font-sans text-base font-semibold text-primary">{title}</span>
           </button>
           {#if description && descriptionTooltip}
-            <FieldHelp text={description} class="mt-1.5" />
+            <span
+              class="min-w-0 flex-1 truncate text-sm text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+            >
+              {description}
+            </span>
           {/if}
         </div>
         {#if headerActions}
@@ -120,16 +127,17 @@
         {@render children?.()}
       </div>
     {:else}
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0 grid gap-1">
-          <div class="flex items-center gap-1.5">
-            <h4 class="font-sans text-base font-semibold text-primary">{title}</h4>
-            {#if description && descriptionTooltip}
-              <FieldHelp text={description} />
-            {/if}
-          </div>
-          {#if description && !descriptionTooltip}
-            <p class="text-sm text-muted-foreground">{description}</p>
+      <!-- `group` makes the header LINE the hover target — the description reveals inline next to the
+           title (no help icon), truncated to the header's remaining width (h4 is shrink-0). -->
+      <div class="group flex items-start justify-between gap-2">
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <h4 class="shrink-0 font-sans text-base font-semibold text-primary">{title}</h4>
+          {#if description && descriptionTooltip}
+            <span
+              class="min-w-0 flex-1 truncate text-sm text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+            >
+              {description}
+            </span>
           {/if}
         </div>
         {#if headerActions}
@@ -138,6 +146,9 @@
           </div>
         {/if}
       </div>
+      {#if description && !descriptionTooltip}
+        <p class="text-sm text-muted-foreground">{description}</p>
+      {/if}
       {@render children?.()}
     {/if}
   {:else}

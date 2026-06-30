@@ -64,6 +64,7 @@ const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'graph.eval.answer_model', tab: 'eval' },
   { prefix: 'graph.eval.answer_tuning_profile', tab: 'eval' },
   { prefix: 'graph.eval.answer_prompts', tab: 'eval' },
+  { prefix: 'graph.eval.active_answer_prompt_id', tab: 'eval' },
   { prefix: 'graph.eval.judge_model', tab: 'eval' },
   { prefix: 'graph.eval.judge_tuning_profile', tab: 'eval' },
   { prefix: 'graph.eval.judge_prompt', tab: 'eval' },
@@ -90,6 +91,211 @@ export function tabForPreferencePath(path: string): PreferenceTabId | null {
     }
   }
   return best?.tab ?? null;
+}
+
+// Path → section (card) title, for the search autocomplete's "Tab › Section" locator line. Same
+// longest-prefix-wins scheme as the tab map. These MUST mirror the `<PrefSectionCard title=…>` (and
+// a couple of `<PrefPanel>`) labels in the section components; if a card is renamed or a field moves
+// cards, update the matching rule here. Missing coverage degrades gracefully (the autocomplete just
+// omits the section), so this is best-effort polish, not correctness-critical.
+const PREFERENCE_SECTION_PATH_RULES: { prefix: string; section: string }[] = [
+  // General
+  { prefix: 'llm', section: 'Default models' },
+  { prefix: 'media', section: 'Modalities' },
+  // Agent
+  { prefix: 'memory.user_name', section: 'Chat Settings' },
+  { prefix: 'chat', section: 'Chat Settings' },
+  { prefix: 'memory', section: 'Agent memory' },
+  // Knowledge
+  { prefix: 'knowledge.retrieval', section: 'Retrieval defaults' },
+  { prefix: 'knowledge.answering', section: 'Knowledge Answering (Ask Tab)' },
+  { prefix: 'knowledge.rewrite', section: 'Knowledge Answering (Ask Tab)' },
+  { prefix: 'knowledge.default_tuning_profile', section: 'Knowledge Answering (Ask Tab)' },
+  { prefix: 'knowledge', section: 'Indexing Options' },
+  { prefix: 'graph.backend', section: 'Indexing Options' },
+  // Eval
+  { prefix: 'graph.eval.answer_model', section: 'Evaluation Models' },
+  { prefix: 'graph.eval.answer_tuning_profile', section: 'Evaluation Models' },
+  { prefix: 'graph.eval.judge_model', section: 'Evaluation Models' },
+  { prefix: 'graph.eval.judge_tuning_profile', section: 'Evaluation Models' },
+  { prefix: 'graph.eval.answer_prompts', section: 'Prompts' },
+  { prefix: 'graph.eval.active_answer_prompt_id', section: 'Prompts' },
+  { prefix: 'graph.eval.judge_prompt', section: 'Prompts' },
+  // Memory (shared graph engine)
+  { prefix: 'graph.eval.retrieval_model', section: 'Retrieval Agent Model & Prompt' },
+  { prefix: 'graph.eval.retrieval_tuning_profile', section: 'Retrieval Agent Model & Prompt' },
+  { prefix: 'graph.eval.active_retrieval_agent_prompt_id', section: 'Retrieval Agent Model & Prompt' },
+  { prefix: 'graph.eval.retrieval_agent_prompts', section: 'Retrieval Agent Model & Prompt' },
+  { prefix: 'graph.eval.retrieval_agent', section: 'Retrieval Agent' },
+  { prefix: 'graph.eval.max_elements_per_kind', section: 'Retrieval Agent' },
+  { prefix: 'graph.eval.max_fact_chars', section: 'Retrieval Agent' },
+  { prefix: 'graph.eval.max_episode_chars', section: 'Retrieval Agent' },
+  { prefix: 'graph.eval.max_summary_chars', section: 'Retrieval Agent' },
+  { prefix: 'graph.eval.show_event_time', section: 'Graph search & indexing' },
+  { prefix: 'graph.eval.show_expired_at', section: 'Graph search & indexing' },
+  { prefix: 'graph.eval.show_superseded', section: 'Graph search & indexing' },
+  { prefix: 'graph.reranker', section: 'Graphiti Reranker (Cross-encoder)' },
+  { prefix: 'graph.view', section: 'Graph view (display)' },
+  { prefix: 'graph.extraction_model', section: 'Graph Extraction' },
+  { prefix: 'graph.extraction_tuning_profile', section: 'Graph Extraction' },
+  { prefix: 'graph.small_model', section: 'Graph Extraction' },
+  { prefix: 'graph.small_tuning_profile', section: 'Graph Extraction' },
+  { prefix: 'graph.embedder_model', section: 'Graph Extraction' },
+  { prefix: 'graph.entity_ontology', section: 'Graph Extraction' },
+  { prefix: 'graph.custom_extraction_instructions', section: 'Graph Extraction' },
+  { prefix: 'graph', section: 'Graph search & indexing' },
+  // Model Profiles
+  { prefix: 'tuning_profiles', section: 'Model Profiles' }
+];
+
+// Sections in the order they render on the page (tab order, then card order within each tab). Drives
+// search-result ordering so arrowing follows the visual top-to-bottom layout instead of the schema's
+// model-definition order. Keep in sync with the section components' card order.
+export const PREFERENCE_SECTION_ORDER: readonly string[] = [
+  // General
+  'Default models',
+  'Modalities',
+  // Agent
+  'Chat Settings',
+  'Agent memory',
+  // Memory (shared graph engine)
+  'Graph Extraction',
+  'Graph search & indexing',
+  'Graphiti Reranker (Cross-encoder)',
+  'Retrieval Agent Model & Prompt',
+  'Retrieval Agent',
+  'Graph view (display)',
+  // Knowledge
+  'Indexing Options',
+  'Retrieval defaults',
+  'Knowledge Answering (Ask Tab)',
+  // Eval
+  'Evaluation Models',
+  'Prompts',
+  // Model Profiles
+  'Model Profiles'
+];
+
+// Field render order WITHIN each section, mirroring the markup order of the section components (the
+// 2-col grids fill left-to-right, top-to-bottom, so source order = visual order). Used to order
+// search results within a card so arrowing follows the page exactly, instead of the schema's
+// model-definition order. Paths not listed here fall back to schema order after the listed ones in
+// their section. Keep in sync with the cards; the `preferences-search-index` test guards that every
+// entry is a real, unique schema path.
+export const PREFERENCE_FIELD_ORDER: readonly string[] = [
+  // General › Default models
+  'llm.default_chat',
+  'llm.default_stt',
+  'llm.default_tuning_profile',
+  'llm.default_tts',
+  'llm.default_embedder',
+  'llm.default_reranker',
+  // General › Modalities
+  'media.input.voice',
+  'media.input.image',
+  'media.input.video',
+  'media.input.file',
+  'media.output.voice',
+  'media.output.image',
+  'media.output.video',
+  'media.output.file',
+  // Agent › Chat Settings
+  'memory.user_name',
+  'chat.max_messages',
+  'chat.cite_sources',
+  'chat.tools_enabled',
+  'chat.instructions',
+  // Agent › Agent memory
+  'memory.enabled',
+  'memory.extraction.enabled',
+  'memory.search.enabled',
+  'memory.search.top_k',
+  // Memory › Graph Extraction
+  'graph.extraction_model',
+  'graph.extraction_tuning_profile',
+  'graph.small_model',
+  'graph.small_tuning_profile',
+  'graph.embedder_model',
+  'graph.entity_ontology',
+  'graph.custom_extraction_instructions',
+  // Memory › Graph search & indexing
+  'graph.temporal_default',
+  'graph.k_hop',
+  'graph.search_recipe',
+  'graph.search_scope',
+  'graph.sim_min_score',
+  'graph.query_timeout_s',
+  'graph.observability',
+  'graph.eval.show_event_time',
+  'graph.eval.show_expired_at',
+  'graph.eval.show_superseded',
+  // Memory › Graphiti Reranker
+  'graph.reranker.model_id',
+  'graph.reranker.min_relevance',
+  'graph.reranker.device',
+  // Memory › Retrieval Agent Model & Prompt
+  'graph.eval.retrieval_model',
+  'graph.eval.retrieval_tuning_profile',
+  'graph.eval.active_retrieval_agent_prompt_id',
+  'graph.eval.retrieval_agent_prompts',
+  // Memory › Retrieval Agent
+  'graph.eval.retrieval_agent.max_agent_turns',
+  'graph.eval.retrieval_agent.max_parallel_searches',
+  'graph.eval.retrieval_agent.hops_max',
+  'graph.eval.retrieval_agent.limit_default',
+  'graph.eval.retrieval_agent.limit_min',
+  'graph.eval.retrieval_agent.limit_max',
+  'graph.eval.max_elements_per_kind',
+  'graph.eval.max_fact_chars',
+  'graph.eval.max_episode_chars',
+  'graph.eval.max_summary_chars',
+  // Memory › Graph view
+  'graph.view.large_type_threshold',
+  // Knowledge › Indexing Options
+  'knowledge.default_embedding_model',
+  'knowledge.chunking.chunk_size',
+  'knowledge.chunking.chunk_overlap',
+  'knowledge.chunking.markdown.respect_headings',
+  'knowledge.chunking.embed_structural_context',
+  'graph.backend',
+  // Knowledge › Retrieval defaults
+  'knowledge.retrieval.hybrid',
+  'knowledge.retrieval.min_score',
+  'knowledge.retrieval.prefetch_limit',
+  'knowledge.retrieval.top_k',
+  'knowledge.retrieval.reranker.enabled',
+  'knowledge.retrieval.reranker.model_id',
+  'knowledge.retrieval.reranker.top_n',
+  // Knowledge › Knowledge Answering (Ask Tab)
+  'knowledge.rewrite.default_on',
+  'knowledge.rewrite.prompt',
+  'knowledge.answering.model',
+  'knowledge.default_tuning_profile',
+  'knowledge.answering.prompt',
+  'knowledge.answering.language_policy',
+  'knowledge.answering.cite_sources',
+  // Eval › Evaluation Models
+  'graph.eval.answer_model',
+  'graph.eval.answer_tuning_profile',
+  'graph.eval.judge_model',
+  'graph.eval.judge_tuning_profile',
+  // Eval › Prompts
+  'graph.eval.answer_prompts',
+  'graph.eval.active_answer_prompt_id',
+  'graph.eval.judge_prompt',
+  // Model Profiles
+  'tuning_profiles'
+];
+
+/** Resolve a dotted preference path to its card/section title (longest matching prefix wins). */
+export function sectionForPreferencePath(path: string): string | null {
+  let best: { prefix: string; section: string } | null = null;
+  for (const rule of PREFERENCE_SECTION_PATH_RULES) {
+    if (prefixMatchesPath(path, rule.prefix) && (!best || rule.prefix.length > best.prefix.length)) {
+      best = rule;
+    }
+  }
+  return best?.section ?? null;
 }
 
 /** Legacy `#preferences-*` scroll anchors from the pre-tab layout. */

@@ -11,12 +11,14 @@ below were verified against the installed stack, not assumed from model cards.
 - ✅ **Hybrid retrieval (dense + BM25 sparse, RRF fusion) — implemented.** The Qdrant
   collection stores named `dense` + `bm25` sparse vectors per chunk; queries fuse both
   branches server-side with Reciprocal Rank Fusion. Controlled by
-  `knowledge.retrieval.{hybrid, sparse_model, prefetch_limit}`. Sparse vectors are always
+  `knowledge.retrieval.{hybrid, prefetch_limit}`. Sparse vectors are always
   stored at ingest, so `hybrid` is a query-time toggle (no re-ingest to flip). `min_score`
   now applies as the cosine threshold on the **dense** branch; the BM25 branch is rank-fused
-  and the RRF output is not thresholded (precision left to a future reranker). Sparse model:
-  `Qdrant/bm25` — language-agnostic, ships Arabic stopwords, and lives in the already-present
-  `fastembed` (no new dependency).
+  and the RRF output is not thresholded (precision left to a future reranker). The sparse model
+  is a fixed constant (`services.knowledge.constants.DEFAULT_SPARSE_MODEL = Qdrant/bm25`), not a
+  preference — the collection is hardwired to BM25's IDF scoring and switching would need a full
+  re-ingest. `Qdrant/bm25` is language-agnostic, ships Arabic stopwords, and lives in the
+  already-present `fastembed` (no new dependency).
 - ✅ **Explain mode (opt-in) — implemented.** A per-query "Explain" toggle on the Ask screen
   (`explain=true`) returns per-result diagnostics for human evaluation: which branch matched
   (dense / sparse / both), per-branch **cosine** and **BM25** scores, the fused **RRF** score,

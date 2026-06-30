@@ -56,7 +56,6 @@ export type SearchFusedResultsTopK = number;
  */
 export type MinimumScoreDenseOnly = number;
 export type HybridRetrievalDenseBM25RRFFusion = boolean;
-export type SparseModel = string;
 /**
  * Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).
  */
@@ -153,6 +152,10 @@ export type DeviceLocalOnly = string | null;
 export type Label = string;
 export type Locked = boolean;
 export type Prompt = string;
+/**
+ * Which mem-eval answer prompt the answer step uses.
+ */
+export type ActivePromptProfile = string;
 export type EvalJudgePrompt = string;
 /**
  * Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)
@@ -224,7 +227,7 @@ export type HopsMax = number;
 /**
  * Which retrieval-agent system prompt the loop uses.
  */
-export type ActivePromptProfile = string;
+export type ActivePromptProfile1 = string;
 /**
  * In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.
  */
@@ -338,7 +341,6 @@ export interface KnowledgeRetrievalPreferences {
   top_k: SearchFusedResultsTopK;
   min_score: MinimumScoreDenseOnly;
   hybrid: HybridRetrievalDenseBM25RRFFusion;
-  sparse_model: SparseModel;
   prefetch_limit: CandidatesPerBranch;
   reranker: KnowledgeRerankerPreferences;
 }
@@ -419,9 +421,10 @@ export interface KnowledgeGraphRerankerPreferences {
  * Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
  *
  * ``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval
- * recall leg (``eval_judge.answer_from_context`` places the chosen one in the user message ahead
+ * recall leg (``eval_judge.answer_from_context`` places the active one in the user message ahead
  * of the question and the recalled elements; the system prompt there is a hardcoded two-line
- * role). A run selects one by id in the eval panel — see ``resolve_answer_prompt``.
+ * role). The active profile is the persisted ``active_answer_prompt_id`` (mirrors the retrieval
+ * agent's ``active_retrieval_agent_prompt_id``) — see ``resolve_active_answer_prompt``.
  * The knowledge-eval legs intentionally have no answer-prompt library:
  * they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
  * ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
@@ -432,6 +435,7 @@ export interface KnowledgeGraphRerankerPreferences {
  */
 export interface GraphEvalPreferences {
   answer_prompts: MemEvalAnswerPrompts;
+  active_answer_prompt_id: ActivePromptProfile;
   judge_prompt: EvalJudgePrompt;
   answer_model: EvalAnswerModel;
   answer_tuning_profile: EvalAnswerProfile;
@@ -448,7 +452,7 @@ export interface GraphEvalPreferences {
   max_summary_chars: MaxEntitySummaryChars;
   retrieval_agent: RetrievalAgentLimits;
   retrieval_agent_prompts: RetrievalAgentPrompt;
-  active_retrieval_agent_prompt_id: ActivePromptProfile;
+  active_retrieval_agent_prompt_id: ActivePromptProfile1;
 }
 export interface MemEvalAnswerPrompts {
   [k: string]: AnswerPromptProfile;

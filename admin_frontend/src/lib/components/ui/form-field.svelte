@@ -40,7 +40,8 @@
         ((hint?.trim() && hintTooltip) || (showReset && onReset)) && 'inline-flex items-center gap-1.5'
       )}
     >
-      {label}
+<!-- title shows the dotted preference path (e.g. graph.eval.retrieval_model) on hover. -->
+      <span class="pref-field-label" title={anchor}>{label}</span>
       {#if hint?.trim() && hintTooltip}
         <FieldHelp text={hint} />
       {/if}

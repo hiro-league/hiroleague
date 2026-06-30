@@ -13,7 +13,6 @@ const base = (over: Partial<BuildEvalRunRequestParams> = {}): BuildEvalRunReques
   episodeFrom: 1,
   episodeTo: 0,
   questionConcurrency: 1,
-  answerPromptId: '',
   ...over
 });
 
@@ -48,7 +47,6 @@ describe('buildEvalRunRequest — knowledge track', () => {
     expect(req.episode_offset).toBeUndefined();
     expect(req.episode_limit).toBeUndefined();
     expect(req.question_concurrency).toBeUndefined();
-    expect(req.answer_prompt_id).toBeUndefined();
   });
 });
 
@@ -75,9 +73,8 @@ describe('buildEvalRunRequest — memory track episode window', () => {
     expect(buildEvalRunRequest(base({ ingesting: false, clearBefore: true })).clear_before).toBe(false);
   });
 
-  it('passes through concurrency + answer-prompt profile', () => {
-    const req = buildEvalRunRequest(base({ questionConcurrency: 4, answerPromptId: 'terse' }));
+  it('passes through the question concurrency cap', () => {
+    const req = buildEvalRunRequest(base({ questionConcurrency: 4 }));
     expect(req.question_concurrency).toBe(4);
-    expect(req.answer_prompt_id).toBe('terse');
   });
 });

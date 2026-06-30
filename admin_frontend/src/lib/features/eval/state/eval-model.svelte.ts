@@ -71,7 +71,6 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
   const setup = createEvalSetup({
     getTrack: () => track,
     getSelectedCorpus: () => corpus.selectedCorpus,
-    getSelectedCorpusId: () => corpus.selectedCorpusId,
     getSetupEvents: () => run.setupEvents
   });
 
@@ -92,19 +91,17 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
     getTrack: () => track,
     setError: deps.setError,
     onCorpusResolved: () => {
-      setup.restoreAnswerPrompt(corpus.selectedCorpusId);
       setup.applyRebuildDefaultForCorpus();
     },
     reloadResults: () => void results.loadResults()
   });
 
-  /** Switch the eval track — reset the corpus picker, setup answer-prompt, run, and saved maps,
-   *  then rescan the new track's corpuses (which repopulates the bank + results). */
+  /** Switch the eval track — reset the corpus picker, run, and saved maps, then rescan the new
+   *  track's corpuses (which repopulates the bank + results). */
   function setTrack(v: EvalTrack) {
     if (track === v) return;
     track = v;
     corpus.resetForTrack();
-    setup.clearAnswerPrompt();
     run.resetRunState();
     results.resetSaved();
     void corpus.scanCorpuses();
@@ -125,7 +122,6 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
     // Clear in-view run; memory reloads persisted results via loadQuestions → reloadResults.
     run.resetRunState();
     corpus.setSelectedCorpusId(id);
-    setup.restoreAnswerPrompt(id);
     setup.applyRebuildDefaultForCorpus();
     void corpus.loadQuestions();
   }
@@ -200,8 +196,7 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
         clearBefore: setup.clearBefore,
         episodeFrom: setup.episodeFrom,
         episodeTo: setup.episodeTo,
-        questionConcurrency: setup.questionConcurrency,
-        answerPromptId: setup.answerPromptId
+        questionConcurrency: setup.questionConcurrency
       });
       const res = await runKnowledgeEval(req);
       run.setRunId(res.data.run_id);
@@ -268,12 +263,6 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
     },
     set judge(v: boolean) {
       setup.judge = v;
-    },
-    get answerPromptId() {
-      return setup.answerPromptId;
-    },
-    set answerPromptId(v: string) {
-      setup.answerPromptId = v;
     },
     get questionConcurrency() {
       return setup.questionConcurrency;

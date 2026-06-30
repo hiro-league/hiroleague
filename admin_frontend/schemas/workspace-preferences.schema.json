@@ -71,7 +71,7 @@
       ]
     },
     "GraphEvalPreferences": {
-      "description": "Eval-only answering knobs, surfaced under the shared Graphiti engine settings.\n\n``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval\nrecall leg (``eval_judge.answer_from_context`` places the chosen one in the user message ahead\nof the question and the recalled elements; the system prompt there is a hardcoded two-line\nrole). A run selects one by id in the eval panel \u2014 see ``resolve_answer_prompt``.\nThe knowledge-eval legs intentionally have no answer-prompt library:\nthey run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION\n``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real\nbehavior). The admin UI surfaces that production prompt alongside this one for convenience.\n\n``judge_prompt`` is the grading system prompt for the LLM judge (``eval_judge.judge_answer``),\nshared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.",
+      "description": "Eval-only answering knobs, surfaced under the shared Graphiti engine settings.\n\n``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval\nrecall leg (``eval_judge.answer_from_context`` places the active one in the user message ahead\nof the question and the recalled elements; the system prompt there is a hardcoded two-line\nrole). The active profile is the persisted ``active_answer_prompt_id`` (mirrors the retrieval\nagent's ``active_retrieval_agent_prompt_id``) \u2014 see ``resolve_active_answer_prompt``.\nThe knowledge-eval legs intentionally have no answer-prompt library:\nthey run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION\n``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real\nbehavior). The admin UI surfaces that production prompt alongside this one for convenience.\n\n``judge_prompt`` is the grading system prompt for the LLM judge (``eval_judge.judge_answer``),\nshared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.",
       "properties": {
         "answer_prompts": {
           "additionalProperties": {
@@ -80,6 +80,12 @@
           "title": "Mem Eval Answer Prompts",
           "type": "object",
           "writeWhole": true
+        },
+        "active_answer_prompt_id": {
+          "default": "default",
+          "description": "Which mem-eval answer prompt the answer step uses.",
+          "title": "Active prompt profile",
+          "type": "string"
         },
         "judge_prompt": {
           "default": "## Objective\nGrade a model's Answer to a question about past conversations against the Ideal Answer, and\nreport the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as\nGUIDANCE on what a complete answer covers \u2014 not a checklist to fail on. Grade ONLY against the\nIdeal Answer and Rubric \u2014 never your own knowledge.\n\n## Verdicts\n- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording \u2014\n  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is\n  shown, an Answer that covers its MAIN elements passes \u2014 a missing minor element does NOT block\n  a pass.\n- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision\n  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but\n  misses a substantial part of what was asked.\n- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element\n  satisfied, the Answer misses the point, or it contradicts a rubric element.\n- abstain: the Answer declines \u2014 \"No information available.\" or any other refusal to answer.\n\n## Core Instructions\n- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.\n  Treat them as a GUIDE, not a pass/fail checklist \u2014 the Ideal Answer and the Rubric describe the\n  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states\n  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.\n- Dates: matching the Ideal's month and year passes; a correctly resolved relative date (\"next\n  month\" stated in an August conversation = September) passes; within ~2 weeks passes.\n- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the\n  right result, and a confident Answer is fail.\n- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict \u2014\n  use them only to fill evidence, recall_sufficient, and grounded.\n\n## Output Fields\nReply with one JSON object containing exactly these fields, in this order:\n- \"evidence\" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that\n  contain the information needed to answer; \"\" if no such line exists.\n- \"recall_sufficient\" (boolean): true only if evidence quotes a real line that supplies the\n  answer; false otherwise.\n- \"grounded\" (boolean): whether the Answer is supported by the Recalled Memory Elements.\n- \"reason\" (string): one short sentence justifying the verdict.\n- \"verdict\" (string): one of \"pass\", \"partial\", \"fail\", \"abstain\".\n\n## Validation\n- evidence is checked by exact substring match against the shown elements \u2014 an inexact or\n  invented quote counts as no evidence and forces recall_sufficient to false.\n- If no Recalled Memory Elements section was shown, set evidence \"\" and recall_sufficient true.\n- The verdict depends only on Answer vs Ideal (and Rubric, when shown).",
@@ -219,6 +225,7 @@
       "type": "object",
       "required": [
         "answer_prompts",
+        "active_answer_prompt_id",
         "judge_prompt",
         "answer_model",
         "answer_tuning_profile",
@@ -803,12 +810,6 @@
           "title": "Hybrid retrieval (dense + BM25, RRF fusion)",
           "type": "boolean"
         },
-        "sparse_model": {
-          "default": "Qdrant/bm25",
-          "minLength": 1,
-          "title": "Sparse Model",
-          "type": "string"
-        },
         "prefetch_limit": {
           "default": 40,
           "description": "Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).",
@@ -827,7 +828,6 @@
         "top_k",
         "min_score",
         "hybrid",
-        "sparse_model",
         "prefetch_limit",
         "reranker"
       ]

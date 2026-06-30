@@ -58,6 +58,8 @@ export type AdminSubtabDescriptor<TId extends string = string> = {
   /** Optional free-text count after the label, in the same muted style, e.g. "5/20" → (5/20).
    *  Takes precedence over `count` when both are set. */
   countText?: string;
+  /** Override the count span's classes (e.g. an accent color); defaults to the muted style. */
+  countClass?: string;
   disabled?: boolean;
   ariaLabel?: string;
   htmlId?: string;

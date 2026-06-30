@@ -32,7 +32,7 @@
       <PrefToggleField
         {ctrl}
         path="knowledge.retrieval.hybrid"
-        hint={`Runs BM25 keyword search alongside dense embeddings and fuses them with Reciprocal Rank Fusion — recovers exact terms, proper nouns, and Arabic surface forms. Sparse model: ${ctrl.draft.knowledge.retrieval.sparse_model} (local, no extra setup).`}
+        hint="Runs BM25 keyword search alongside dense embeddings and fuses them with Reciprocal Rank Fusion — recovers exact terms, proper nouns, and Arabic surface forms. Sparse model: Qdrant/bm25 (local, no extra setup)."
         bind:checked={ctrl.draft.knowledge.retrieval.hybrid}
       />
       <PrefNumberField

@@ -19,8 +19,6 @@ import {
   readEvalInt,
   readCorpusPref,
   writeCorpusPref,
-  readAnswerPromptPref,
-  writeAnswerPromptPref,
   readCorpusMarkdownPref,
   writeCorpusMarkdownPref
 } from './eval-prefs';
@@ -59,26 +57,6 @@ describe('per-track corpus pref', () => {
   it('survives corrupt JSON by returning empty', () => {
     localStorage.setItem(PREF_KEYS.evalCorpus, '{not json');
     expect(readCorpusPref('memory')).toBe('');
-  });
-});
-
-describe('per-corpus answer-prompt pref', () => {
-  it('round-trips independently per corpus', () => {
-    writeAnswerPromptPref('c1', 'terse');
-    writeAnswerPromptPref('c2', 'verbose');
-    expect(readAnswerPromptPref('c1')).toBe('terse');
-    expect(readAnswerPromptPref('c2')).toBe('verbose');
-  });
-
-  it('ignores a blank corpus id', () => {
-    writeAnswerPromptPref('', 'terse');
-    expect(readAnswerPromptPref('')).toBe('');
-  });
-
-  it('an empty profile removes only that corpus', () => {
-    writeAnswerPromptPref('c1', 'terse');
-    writeAnswerPromptPref('c1', '');
-    expect(readAnswerPromptPref('c1')).toBe('');
   });
 });
 

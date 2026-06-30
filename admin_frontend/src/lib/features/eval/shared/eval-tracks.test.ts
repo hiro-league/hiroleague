@@ -32,8 +32,7 @@ describe('trackConfig', () => {
       'persistsResults',
       'canExportLocomo',
       'hasEpisodeWindow',
-      'hasQuestionConcurrency',
-      'hasAnswerPrompt'
+      'hasQuestionConcurrency'
     ] as const) {
       expect(m[flag], `memory.${flag}`).toBe(true);
       expect(k[flag], `knowledge.${flag}`).toBe(false);

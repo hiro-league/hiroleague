@@ -3,8 +3,6 @@ import type { WorkspacePreferences } from '$lib/api/preferences';
 import { trackConfig } from './eval-tracks';
 import {
   aiEngineLine,
-  answerPromptLabelFor,
-  answerPromptOptions,
   ingestKnobs,
   modelLines,
   recallKnobs,
@@ -51,7 +49,8 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
         answer_prompts: {
           default: { label: 'Default (grounded)', locked: true, prompt: '' },
           terse: { label: 'Terse', locked: false, prompt: 'be terse' }
-        }
+        },
+        active_answer_prompt_id: 'terse'
       }
     },
     knowledge: {
@@ -119,37 +118,30 @@ describe('ingestKnobs', () => {
 });
 
 describe('recallKnobs', () => {
-  it('memory shows the retrieval agent knobs before the answer-prompt provenance', () => {
-    const labels = recallKnobs(prefs(), MEMORY, 'Terse').map((p) => p.label);
+  it('memory shows the retrieval agent knobs before the active answer-prompt provenance', () => {
+    const knobs = recallKnobs(prefs(), MEMORY);
+    const labels = knobs.map((p) => p.label);
     expect(labels).toContain('Agent turns');
     expect(labels).toContain('Search limit');
     expect(labels).toContain('Retrieval prompt');
     expect(labels).toContain('Answer prompt');
+    // Answer-prompt provenance now resolves the persisted active_answer_prompt_id (= 'terse').
+    expect(knobs.find((p) => p.label === 'Answer prompt')?.value).toBe('Terse');
     // The agentic recall agent's knobs precede the answer-step knob; the dead `memory.search.top_k`
     // (Recall top-k) is gone.
     expect(labels).not.toContain('Recall top-k');
     expect(labels.indexOf('Search limit')).toBeLessThan(labels.indexOf('Answer prompt'));
   });
+  it('falls back to the locked default profile label when the active id is unknown', () => {
+    const p = prefs();
+    p.graph.eval.active_answer_prompt_id = 'missing';
+    const knobs = recallKnobs(p, MEMORY);
+    expect(knobs.find((k) => k.label === 'Answer prompt')?.value).toBe('Default (grounded)');
+  });
   it('knowledge shows flat retrieval knobs', () => {
-    const labels = recallKnobs(prefs(), KNOWLEDGE, '').map((p) => p.label);
+    const labels = recallKnobs(prefs(), KNOWLEDGE).map((p) => p.label);
     expect(labels).toContain('Retrieval top-k');
     expect(labels).toContain('Hybrid');
-  });
-});
-
-describe('answerPromptOptions / label', () => {
-  it('lists default first (value "") then the rest', () => {
-    const opts = answerPromptOptions(prefs());
-    expect(opts[0]).toEqual({ id: '', label: 'Default (grounded)' });
-    expect(opts.map((o) => o.id)).toEqual(['', 'terse']);
-  });
-  it('resolves a label by id, falling back to the first option', () => {
-    const opts = answerPromptOptions(prefs());
-    expect(answerPromptLabelFor(opts, 'terse')).toBe('Terse');
-    expect(answerPromptLabelFor(opts, 'missing')).toBe('Default (grounded)');
-  });
-  it('handles null prefs', () => {
-    expect(answerPromptOptions(null)).toEqual([{ id: '', label: 'Default' }]);
   });
 });
 

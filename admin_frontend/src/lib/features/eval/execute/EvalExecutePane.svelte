@@ -17,8 +17,6 @@
   import { legLabel } from '$lib/features/eval/shared/eval-display';
   import { preferenceTabHref } from '$lib/features/preferences/shared/preferences-tabs';
   import {
-    answerPromptLabelFor,
-    answerPromptOptions as answerPromptOptionsFn,
     ingestKnobs as ingestKnobsFn,
     modelLines as modelLinesFn,
     recallKnobs as recallKnobsFn,
@@ -29,7 +27,7 @@
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import type { WorkspacePreferences } from '$lib/api/preferences';
-  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   interface Props {
@@ -43,13 +41,11 @@
   let { eval_, cfg, prefs, traces }: Props = $props();
 
   // --- Engine params (read-only Settings columns) -------------------------------------------
-  const answerPromptOptions = $derived(answerPromptOptionsFn(prefs));
-  const answerPromptLabel = $derived(answerPromptLabelFor(answerPromptOptions, eval_.answerPromptId));
   const modelLines = $derived<ModelLine[]>(prefs ? modelLinesFn(prefs, cfg) : []);
   const ingestModels = $derived(modelLines.filter((m) => m.group === 'ingest'));
   const recallModels = $derived(modelLines.filter((m) => m.group === 'recall'));
   const ingestKnobs = $derived<Param[]>(prefs ? ingestKnobsFn(prefs, cfg) : []);
-  const recallKnobs = $derived<Param[]>(prefs ? recallKnobsFn(prefs, cfg, answerPromptLabel) : []);
+  const recallKnobs = $derived<Param[]>(prefs ? recallKnobsFn(prefs, cfg) : []);
 
   // --- Live activity feed -------------------------------------------------------------------
   const activityInput = $derived({
@@ -352,24 +348,6 @@
         oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
         disabled={isBusy || eval_.selectedCount === 0}
       />
-    </div>
-  {/if}
-  {#if cfg.hasAnswerPrompt}
-    <div
-      class="flex items-center gap-1.5 font-sans text-sm {isBusy ? 'opacity-50' : ''}"
-      title="Named answer-prompt profile driving the answer step (edit profiles in Preferences → Graph Engine). Remembered per corpus."
-    >
-      <span class="text-muted-foreground">Answer prompt</span>
-      <select
-        class={cn(ADMIN_SELECT, 'h-8')}
-        value={eval_.answerPromptId}
-        onchange={(e) => (eval_.answerPromptId = e.currentTarget.value)}
-        disabled={isBusy}
-      >
-        {#each answerPromptOptions as opt (opt.id)}
-          <option value={opt.id}>{opt.label}</option>
-        {/each}
-      </select>
     </div>
   {/if}
 {/snippet}

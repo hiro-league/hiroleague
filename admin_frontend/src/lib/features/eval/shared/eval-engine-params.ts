@@ -95,24 +95,9 @@ export function modelLines(prefs: WorkspacePreferences, cfg: EvalTrackConfig): M
   return out;
 }
 
-/** Answer-prompt picker options (memory track). The locked "default" profile is exposed as value
- *  '' so an unset run maps to it; the others by id. Authored in Preferences → Graph Engine. */
-export function answerPromptOptions(
-  prefs: WorkspacePreferences | null
-): { id: string; label: string }[] {
-  const lib = prefs?.graph.eval.answer_prompts ?? {};
-  const def = lib['default'];
-  const out = [{ id: '', label: def ? def.label : 'Default' }];
-  for (const [id, p] of Object.entries(lib)) {
-    if (id === 'default') continue;
-    out.push({ id, label: p.label });
-  }
-  return out;
-}
-
-/** The active retrieval-agent system prompt's label — provenance for the agentic recall leg (mirrors
- *  answerPromptLabelFor). Resolves `active_retrieval_agent_prompt_id` against the prompt library,
- *  falling back to the locked default profile, then 'Default'. */
+/** The active retrieval-agent system prompt's label — provenance for the agentic recall leg.
+ *  Resolves `active_retrieval_agent_prompt_id` against the prompt library, falling back to the
+ *  locked default profile, then 'Default'. */
 function retrievalAgentPromptLabel(prefs: WorkspacePreferences): string {
   const ev = prefs.graph.eval;
   const id = (ev.active_retrieval_agent_prompt_id || '').trim() || 'default';
@@ -120,12 +105,14 @@ function retrievalAgentPromptLabel(prefs: WorkspacePreferences): string {
   return lib[id]?.label ?? lib['default']?.label ?? 'Default';
 }
 
-/** The selected profile's label — the run's answer-prompt provenance, for the settings strip. */
-export function answerPromptLabelFor(
-  options: { id: string; label: string }[],
-  answerPromptId: string
-): string {
-  return options.find((o) => o.id === answerPromptId)?.label ?? options[0]?.label ?? 'Default';
+/** The active answer-prompt profile's label — the run's answer-prompt provenance, for the settings
+ *  strip. Resolves the persisted `active_answer_prompt_id` against the answer-prompt library
+ *  (mirrors retrievalAgentPromptLabel); falls back to the locked default profile, then 'Default'. */
+function answerPromptLabel(prefs: WorkspacePreferences): string {
+  const ev = prefs.graph.eval;
+  const id = (ev.active_answer_prompt_id || '').trim() || 'default';
+  const lib = ev.answer_prompts ?? {};
+  return lib[id]?.label ?? lib['default']?.label ?? 'Default';
 }
 
 /** Non-model ingestion knobs. Extraction ontology (open vs typed) governs what the graph build
@@ -148,11 +135,7 @@ export function ingestKnobs(prefs: WorkspacePreferences, cfg: EvalTrackConfig): 
 
 /** Retrieval + answering knobs at question time. Memory shows recall top-k + the answer-prompt
  *  provenance; knowledge shows the flat (Qdrant hybrid) retrieval knobs + flat reranker. */
-export function recallKnobs(
-  prefs: WorkspacePreferences,
-  cfg: EvalTrackConfig,
-  answerPromptLabel: string
-): Param[] {
+export function recallKnobs(prefs: WorkspacePreferences, cfg: EvalTrackConfig): Param[] {
   const g = prefs.graph;
   const out: Param[] = [
     { label: 'Temporal lens', value: TEMPORAL_LENS_LABEL[g.temporal_default] ?? g.temporal_default },
@@ -175,7 +158,7 @@ export function recallKnobs(
     out.push({ label: 'Parallel', value: String(ra.max_parallel_searches) });
     out.push({ label: 'Search limit', value: String(ra.limit_default) });
     out.push({ label: 'Retrieval prompt', value: retrievalAgentPromptLabel(prefs) });
-    out.push({ label: 'Answer prompt', value: answerPromptLabel });
+    out.push({ label: 'Answer prompt', value: answerPromptLabel(prefs) });
   } else {
     const r = prefs.knowledge.retrieval;
     out.push({ label: 'Retrieval top-k', value: String(r.top_k) });

@@ -41,6 +41,7 @@
         label={tab.label}
         count={tab.count}
         countText={tab.countText}
+        countClass={tab.countClass}
         active={tab.id === active}
         disabled={tab.disabled}
         ariaLabel={tab.ariaLabel}

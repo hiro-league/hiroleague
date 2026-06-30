@@ -42,35 +42,6 @@ export function writeCorpusPref(track: EvalTrack, id: string): void {
   writeLocalString(PREF_KEYS.evalCorpus, JSON.stringify(map));
 }
 
-/**
- * Per-corpus last-used answer-prompt profile (localStorage JSON map `{ corpusId: profileId }`).
- * Keyed by corpus id (not track) so each corpus remembers the prompt it was last evaluated with.
- */
-export function readAnswerPromptPref(corpusId: string): string {
-  if (!corpusId) return '';
-  try {
-    const raw = readLocalString(PREF_KEYS.evalAnswerPrompt);
-    if (!raw) return '';
-    return (JSON.parse(raw) as Record<string, string>)[corpusId] ?? '';
-  } catch {
-    return '';
-  }
-}
-
-export function writeAnswerPromptPref(corpusId: string, id: string): void {
-  if (!corpusId) return;
-  let map: Record<string, string> = {};
-  try {
-    const raw = readLocalString(PREF_KEYS.evalAnswerPrompt);
-    if (raw) map = JSON.parse(raw) as Record<string, string>;
-  } catch {
-    map = {};
-  }
-  if (id) map[corpusId] = id;
-  else delete map[corpusId];
-  writeLocalString(PREF_KEYS.evalAnswerPrompt, JSON.stringify(map));
-}
-
 /** Corpus tab: Markdown rendering mode for episode bodies (persisted across reloads). */
 export function readCorpusMarkdownPref(): boolean {
   return readLocalString(PREF_KEYS.evalCorpusMarkdown) === '1';

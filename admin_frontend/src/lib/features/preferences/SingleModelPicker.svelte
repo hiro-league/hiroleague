@@ -14,6 +14,7 @@
 
   let {
     label,
+    path,
     hint,
     selectedId = null,
     catalogModels,
@@ -31,6 +32,8 @@
     emptyFallbackId = null
   }: {
     label: string;
+    /** Dotted preference path; shown as a hover tooltip on the label. */
+    path?: string;
     hint: string;
     selectedId?: string | null;
     catalogModels: CatalogModelRow[];
@@ -220,7 +223,7 @@
       <h4
         class="inline-flex items-center gap-1.5 font-sans text-base font-semibold leading-snug text-foreground"
       >
-        {label}
+        <span class="pref-field-label" title={path}>{label}</span>
         {#if hint?.trim()}
           <FieldHelp text={hint} />
         {/if}
@@ -232,7 +235,7 @@
   <section class="grid gap-3 rounded-md border border-border/70 bg-background/45 p-4">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
       <div class="grid min-w-0 gap-1">
-        <h4 class="font-sans text-base font-semibold text-foreground">{label}</h4>
+        <h4 class="font-sans text-base font-semibold text-foreground"><span class="pref-field-label" title={path}>{label}</span></h4>
         <p class="text-sm text-muted-foreground">{hint}</p>
       </div>
       {#if toolbar}

@@ -10,6 +10,7 @@ import yaml
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
+    DEFAULT_ANSWER_PROMPT_ID,
     DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
     DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
@@ -207,6 +208,30 @@ def test_answer_prompt_library_roundtrips(tmp_path: Path) -> None:
     )
     _, default_text = reloaded.graph.eval.resolve_answer_prompt("nope")
     assert default_text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+
+
+def test_resolve_active_answer_prompt_uses_active_id() -> None:
+    # The answer step now reads the persisted active_answer_prompt_id (mirrors the retrieval agent),
+    # returning (id, label, text). A blank profile body falls back to the built-in default text.
+    prefs = WorkspacePreferences()
+    prefs.graph.eval.answer_prompts["variant"] = AnswerPromptProfile(
+        label="Variant", prompt="Answer tersely."
+    )
+    prefs.graph.eval.active_answer_prompt_id = "variant"
+    pid, label, text = prefs.graph.eval.resolve_active_answer_prompt()
+    assert (pid, label, text) == ("variant", "Variant", "Answer tersely.")
+
+    prefs.graph.eval.answer_prompts["blank"] = AnswerPromptProfile(label="Blank", prompt="")
+    prefs.graph.eval.active_answer_prompt_id = "blank"
+    pid, _label, text = prefs.graph.eval.resolve_active_answer_prompt()
+    assert pid == "blank"
+    assert text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
+
+
+def test_resolve_active_answer_prompt_defaults_to_locked_default() -> None:
+    pid, _label, text = WorkspacePreferences().graph.eval.resolve_active_answer_prompt()
+    assert pid == DEFAULT_ANSWER_PROMPT_ID
+    assert text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
 
 
 def test_retrieval_agent_defaults() -> None:

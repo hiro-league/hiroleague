@@ -8,7 +8,7 @@ import type { EvalLeg, EvalSetupProgressPayload } from '$lib/features/eval/share
 import type { EvalCorpus } from '$lib/api/eval';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import { readLocalBoolean, writeLocalBoolean, writeLocalString } from '$lib/preferences/storage';
-import { readAnswerPromptPref, readEvalInt, writeAnswerPromptPref } from '$lib/features/eval/shared/eval-prefs';
+import { readEvalInt } from '$lib/features/eval/shared/eval-prefs';
 import { EVAL_ALL_LEGS } from '$lib/features/eval/shared/eval-legs';
 import type { EvalTrack } from '$lib/features/eval/shared/eval-row';
 
@@ -16,7 +16,6 @@ import type { EvalTrack } from '$lib/features/eval/shared/eval-row';
 export type EvalSetupDeps = {
   getTrack: () => EvalTrack;
   getSelectedCorpus: () => EvalCorpus | null;
-  getSelectedCorpusId: () => string;
   /** The live run's setup activity trail — read by `advanceEpisodeWindow` after a batch ingests. */
   getSetupEvents: () => EvalSetupProgressPayload[];
 };
@@ -28,9 +27,6 @@ export function createEvalSetup(deps: EvalSetupDeps) {
   let buildGraph = $state<boolean>(readLocalBoolean(PREF_KEYS.evalBuildGraph, false));
   // Optional LLM judge step (grades the model's answer vs the ideal). Off = answers only.
   let judge = $state<boolean>(readLocalBoolean(PREF_KEYS.evalJudge, false));
-  // Memory track — which named answer-prompt profile (graph.eval.answer_prompts) this run uses.
-  // '' = the locked default profile. Sticky PER CORPUS (last-used), restored on corpus change.
-  let answerPromptId = $state<string>('');
   // Memory track — max questions evaluated concurrently (1 = serial). Mirrors the server's
   // MAX_QUESTION_CONCURRENCY ceiling; the server clamps anyway, this just keeps the control honest.
   const QUESTION_CONCURRENCY_MAX = 8;
@@ -107,18 +103,6 @@ export function createEvalSetup(deps: EvalSetupDeps) {
     }
   }
 
-  /** Restore the given corpus's last-used answer-prompt profile ('' ⇒ default). Called on every
-   *  corpus change (scan / select). In-memory only — no pref write (we're reading, not choosing). */
-  function restoreAnswerPrompt(corpusId: string) {
-    answerPromptId = readAnswerPromptPref(corpusId);
-  }
-
-  /** Reset the chosen answer-prompt to the default (used on track switch, before a rescan). Does
-   *  not persist — the per-corpus pref write only happens when the user picks a profile. */
-  function clearAnswerPrompt() {
-    answerPromptId = '';
-  }
-
   /** Disarm the per-run "Clear graph first" wipe (after an ingest run is accepted). */
   function disarmClearBefore() {
     clearBefore = false;
@@ -177,14 +161,6 @@ export function createEvalSetup(deps: EvalSetupDeps) {
       judge = v;
       writeLocalBoolean(PREF_KEYS.evalJudge, v);
     },
-    // Memory track — chosen answer-prompt profile id ('' ⇒ default). Sticky per corpus.
-    get answerPromptId() {
-      return answerPromptId;
-    },
-    set answerPromptId(v: string) {
-      answerPromptId = v;
-      writeAnswerPromptPref(deps.getSelectedCorpusId(), v);
-    },
     // Memory track — parallel-question cap (1 = serial). Clamped to the server ceiling here
     // too so a hand-typed value never round-trips just to be clamped server-side.
     get questionConcurrency() {
@@ -206,8 +182,6 @@ export function createEvalSetup(deps: EvalSetupDeps) {
     toggleMode,
     applyRebuildDefaultForCorpus,
     advanceEpisodeWindow,
-    restoreAnswerPrompt,
-    clearAnswerPrompt,
     disarmClearBefore
   };
 }

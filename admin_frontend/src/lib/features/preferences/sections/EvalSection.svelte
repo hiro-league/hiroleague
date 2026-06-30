@@ -10,8 +10,7 @@
   import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
-  import PromptLibraryField from '$lib/features/preferences/widgets/prompts/PromptLibraryField.svelte';
-  import ActiveProvidersLink from '$lib/features/preferences/widgets/ActiveProvidersLink.svelte';
+  import ActivePromptLibraryField from '$lib/features/preferences/widgets/prompts/ActivePromptLibraryField.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -26,14 +25,11 @@
   role="tabpanel"
   aria-labelledby={PREFERENCE_TAB_IDS.eval}
 >
-  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-    <p class="min-w-0 flex-1 text-sm text-muted-foreground">
-      Settings for the evaluation harness — the answer and judge models the eval runs use, and the
-      memory-eval answer/judge prompt libraries. Eval-only; these don't affect production chat,
-      knowledge, or memory.
-    </p>
-    <ActiveProvidersLink busy={ctrl.busy} />
-  </div>
+  <p class="text-sm text-muted-foreground">
+    Settings for the evaluation harness — the answer and judge models the eval runs use, and the
+    memory-eval answer/judge prompt libraries. Eval-only; these don't affect production chat,
+    knowledge, or memory.
+  </p>
 
   {#if ctrl.draft}
     <EvalModelsCard {ctrl} />
@@ -53,12 +49,13 @@
           >
             Mem Eval Answer Prompts
             <FieldHelp
-              text="A library of named instruction blocks the memory-eval answer step can use (the system prompt is a fixed role). A run picks one in the eval panel. Eval-only; memory track only."
+              text="A library of named instruction blocks the memory-eval answer step can use (the system prompt is a fixed role). The active profile drives every run. Eval-only; memory track only."
             />
           </h4>
-          <PromptLibraryField
+          <ActivePromptLibraryField
             {ctrl}
             dictPath="graph.eval.answer_prompts"
+            activeIdPath="graph.eval.active_answer_prompt_id"
             hint={'Drives the memory eval\'s recall leg. Each profile should keep declining with exactly "No information available." when no recalled element supports an answer — the abstain detector recognizes that phrase (and the legacy "I don\'t know"). The locked default carries the structured default (support gates, calibrator examples, absolute-date rules); duplicate it to customize.'}
             ariaLabel="Mem-eval answer prompt (markdown)"
             editorLabel="Answer prompt editor"

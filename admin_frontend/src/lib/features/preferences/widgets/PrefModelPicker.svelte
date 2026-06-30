@@ -59,6 +59,7 @@
   {embedded}
   {labelled}
   label={resolvedLabel}
+  {path}
   {hint}
   {selectedId}
   catalogModels={catalog.catalogModels}

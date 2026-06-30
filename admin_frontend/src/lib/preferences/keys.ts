@@ -67,8 +67,6 @@ export const PREF_KEYS = {
   evalCorpus: 'hiro.admin.eval.corpus',
   /** Eval: run the optional LLM judge (grade answers vs ideal). */
   evalJudge: 'hiro.admin.eval.judge',
-  /** Eval (memory track): last-used answer-prompt profile id, per corpus (JSON map { corpusId }). */
-  evalAnswerPrompt: 'hiro.admin.eval.answerPrompt',
   /** Eval (memory track): max questions evaluated concurrently (1 = serial). */
   evalQuestionConcurrency: 'hiro.admin.eval.questionConcurrency',
   /** Eval Corpus tab: render episode bodies as Markdown (default off). */

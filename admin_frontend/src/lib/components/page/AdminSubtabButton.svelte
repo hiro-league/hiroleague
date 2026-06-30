@@ -12,6 +12,8 @@
     count?: number;
     /** Optional free-text count (e.g. "5/20" → (5/20)); takes precedence over `count`. */
     countText?: string;
+    /** Override the count span classes (e.g. an accent color); defaults to the muted style. */
+    countClass?: string;
     active: boolean;
     disabled?: boolean;
     ariaControls?: string;
@@ -28,6 +30,7 @@
     label,
     count,
     countText,
+    countClass = 'ml-1 font-normal text-muted-foreground/70',
     active,
     disabled = false,
     ariaControls,
@@ -54,7 +57,7 @@
   {onclick}
 >
   {#if children}{@render children()}{:else}{label}{#if countText != null}<span
-        class="ml-1 font-normal text-muted-foreground/70">({countText})</span
-      >{:else if count != null}<span class="ml-1 font-normal text-muted-foreground/70">({count})</span
+        class={countClass}>({countText})</span
+      >{:else if count != null}<span class={countClass}>({count})</span
       >{/if}{/if}
 </button>

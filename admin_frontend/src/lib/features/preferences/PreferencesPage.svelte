@@ -34,6 +34,7 @@
   import { createPreferencesSearch } from '$lib/features/preferences/state/preferences-search.svelte';
   import PrefSearchBox from '$lib/features/preferences/widgets/PrefSearchBox.svelte';
   import type { PrefSearchEntry } from '$lib/features/preferences/shared/preferences-search-index';
+  import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import { createPreferencesTabPreferences } from '$lib/preferences/preferences-tab-preferences.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
@@ -53,6 +54,18 @@
   // only the active one is mounted. Clean-only: cleared + disabled while there are unsaved edits.
   const search = createPreferencesSearch(() => ctrl.fieldSchema);
 
+  // Current value of a matched field, formatted for the dropdown's second line. Unset / blank / a
+  // non-scalar (prompt libraries, profile dicts) → "--".
+  function searchValueFor(entry: PrefSearchEntry): string {
+    if (!ctrl.draft) return '--';
+    const value = getPreferenceByPath(ctrl.draft, entry.path);
+    if (value === null || value === undefined || value === '') return '--';
+    if (typeof value === 'boolean') return value ? 'On' : 'Off';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value;
+    return '--';
+  }
+
   if (browser) {
     tabPrefs.bootstrap();
   }
@@ -69,7 +82,9 @@
       label: tab.label,
       htmlId: PREFERENCE_TAB_IDS[tab.id],
       ariaControls: PREFERENCE_TAB_PANEL_IDS[tab.id],
-      count: search.active ? (search.countsByTab[tab.id] ?? 0) : undefined
+      // Only show a count for tabs that actually have matches (no "(0)"), in highlight yellow.
+      count: search.active ? search.countsByTab[tab.id] || undefined : undefined,
+      countClass: 'ml-1 font-semibold text-[#eab308]'
     }))
   );
 
@@ -208,9 +223,13 @@
                 disabled={ctrl.dirty}
                 position={search.position}
                 total={search.total}
+                matches={search.matches}
+                activePath={search.activeMatch?.path ?? null}
+                valueFor={searchValueFor}
                 onQuery={(next) => search.setQuery(next)}
                 onPrev={search.prev}
                 onNext={search.next}
+                onPick={(index) => search.select(index)}
                 onClear={search.clear}
               />
               <Button
@@ -281,29 +300,37 @@
 <UnsavedPreferencesDialog unsaved={ctrl.unsaved} onDiscard={discardUnsavedChanges} />
 
 <style>
-  /* Search highlights. Targets live in child section components, so the rules must be :global.
-     `match` = persistent marker on every matching field; `active` = stronger marker on the current
-     one; `hit` = transient pulse applied on each jump. Ordered so `active` wins over `match`. */
-  :global([data-pref-path].pref-search-match) {
-    border-radius: 0.5rem;
-    background-color: color-mix(in oklab, var(--ring) 8%, transparent);
-    outline: 1px solid color-mix(in oklab, var(--ring) 35%, transparent);
-    outline-offset: 3px;
+  /* Search highlights — a yellow "highlighter" look. Targets live in child section components, so
+     the rules must be :global. `match` = persistent marker on every matching field (clearly visible
+     border + tint); `active` = stronger marker on the current one; `hit` = transient glow pulse on
+     each jump. Ordered so `active` wins over `match`. Yellow (#facc15/#eab308) reads as a highlight
+     and works translucent over both light and dark themes. */
+  /* Persistent marker: highlight only the field NAME (a yellow marker behind the label text),
+     not the whole field area. `.pref-field-label` wraps the label text in each Pref* widget. */
+  :global([data-pref-path].pref-search-match .pref-field-label) {
+    border-radius: 0.25rem;
+    padding: 0.0625rem 0.3rem;
+    background-color: color-mix(in oklab, #facc15 65%, transparent);
+    color: #1a1500;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
+  /* Current result: just a simple border around the field — no background fill. */
   :global([data-pref-path].pref-search-active) {
-    background-color: color-mix(in oklab, var(--ring) 16%, transparent);
-    outline: 2px solid var(--ring);
+    border-radius: 0.5rem;
+    outline: 2px solid #eab308;
     outline-offset: 4px;
   }
-  :global([data-pref-path].pref-search-hit) {
-    animation: pref-search-pulse 1.6s ease-out;
+  /* Jump pulse: a brief glow on the name. */
+  :global([data-pref-path].pref-search-hit .pref-field-label) {
+    animation: pref-search-pulse 1.1s ease-out;
   }
   @keyframes pref-search-pulse {
     0% {
-      background-color: color-mix(in oklab, var(--ring) 38%, transparent);
+      box-shadow: 0 0 0 4px color-mix(in oklab, #facc15 70%, transparent);
     }
     100% {
-      background-color: transparent;
+      box-shadow: 0 0 0 4px transparent;
     }
   }
 </style>

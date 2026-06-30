@@ -40,8 +40,6 @@ export type EvalTrackConfig = {
   hasLegSelector: boolean;
   /** Memory only: the parallel-question concurrency cap. */
   hasQuestionConcurrency: boolean;
-  /** Memory only: the named answer-prompt profile picker. */
-  hasAnswerPrompt: boolean;
 
   // --- Ingestion / persistence / actions ----------------------------------------------------
   /** Memory only: per-episode ingest status (corpus-dropdown dot, cumulative ingest cost, pipeline). */
@@ -70,7 +68,6 @@ const MEMORY: EvalTrackConfig = {
   hasEpisodeWindow: true,
   hasLegSelector: false,
   hasQuestionConcurrency: true,
-  hasAnswerPrompt: true,
   tracksIngestion: true,
   persistsResults: true,
   canExportLocomo: true,
@@ -90,7 +87,6 @@ const KNOWLEDGE: EvalTrackConfig = {
   hasEpisodeWindow: false,
   hasLegSelector: true,
   hasQuestionConcurrency: false,
-  hasAnswerPrompt: false,
   tracksIngestion: false,
   persistsResults: false,
   canExportLocomo: false,

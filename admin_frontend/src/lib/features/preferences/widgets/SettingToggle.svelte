@@ -52,7 +52,8 @@
   />
   {#snippet labelRow()}
     <span class="inline-flex items-center gap-1.5 font-sans text-sm font-medium">
-      {label}
+<!-- title shows the dotted preference path on hover. -->
+      <span class="pref-field-label" title={anchor}>{label}</span>
       {#if hint?.trim()}
         <FieldHelp text={hint} />
       {/if}

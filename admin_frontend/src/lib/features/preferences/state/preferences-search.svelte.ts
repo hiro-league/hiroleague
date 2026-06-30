@@ -48,6 +48,10 @@ export function createPreferencesSearch(getSchema: () => PreferencesSchemaMap) {
     activeIndex = (base + delta + count) % count;
   }
 
+  function select(index: number) {
+    if (index >= 0 && index < matches.length) activeIndex = index;
+  }
+
   function clear() {
     query = '';
     activeIndex = -1;
@@ -80,6 +84,7 @@ export function createPreferencesSearch(getSchema: () => PreferencesSchemaMap) {
     setQuery,
     next: () => step(1),
     prev: () => step(-1),
+    select,
     clear
   };
 }

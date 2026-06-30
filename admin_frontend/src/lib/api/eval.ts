@@ -26,9 +26,6 @@ export type EvalRunRequest = {
   episode_offset?: number;
   episode_limit?: number | null;
   judge?: boolean; // run the optional LLM judge (grade answers vs the ideal)
-  // Memory track — named answer-prompt profile (graph.eval.answer_prompts) for the answer step.
-  // '' = the locked default profile. Ignored on the knowledge track.
-  answer_prompt_id?: string;
   // Memory track — max questions running recall→answer→judge at once (1 = serial).
   // Clamped server-side to [1, 8]; ignored on the knowledge track.
   question_concurrency?: number;

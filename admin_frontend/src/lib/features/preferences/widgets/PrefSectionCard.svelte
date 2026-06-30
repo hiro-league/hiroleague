@@ -19,7 +19,8 @@
   type Props = {
     title?: string;
     description?: string;
-    /** Preference cards show their description as a tooltip next to the title (like field hints). */
+    /** Preference cards reveal their description inline next to the title on header-line hover
+     * (truncated to the header width), instead of as a body paragraph. */
     descriptionTooltip?: boolean;
     /** Preference cards indent the body to align with the title text, not the collapse chevron. */
     indentBody?: boolean;

@@ -254,13 +254,6 @@
     "default": true,
     "title": "Hybrid retrieval (dense + BM25, RRF fusion)"
   },
-  "knowledge.retrieval.sparse_model": {
-    "path": "knowledge.retrieval.sparse_model",
-    "nullable": false,
-    "type": "string",
-    "default": "Qdrant/bm25",
-    "title": "Sparse Model"
-  },
   "knowledge.retrieval.prefetch_limit": {
     "path": "knowledge.retrieval.prefetch_limit",
     "nullable": false,
@@ -557,6 +550,14 @@
     "type": "object",
     "title": "Mem Eval Answer Prompts",
     "writeWhole": true
+  },
+  "graph.eval.active_answer_prompt_id": {
+    "path": "graph.eval.active_answer_prompt_id",
+    "nullable": false,
+    "type": "string",
+    "default": "default",
+    "title": "Active prompt profile",
+    "description": "Which mem-eval answer prompt the answer step uses."
   },
   "graph.eval.judge_prompt": {
     "path": "graph.eval.judge_prompt",

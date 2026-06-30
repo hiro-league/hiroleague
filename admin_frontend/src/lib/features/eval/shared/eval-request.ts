@@ -24,7 +24,6 @@ export type BuildEvalRunRequestParams = {
   episodeFrom: number;
   episodeTo: number;
   questionConcurrency: number;
-  answerPromptId: string;
 };
 
 export function buildEvalRunRequest(p: BuildEvalRunRequestParams): EvalRunRequest {
@@ -51,8 +50,6 @@ export function buildEvalRunRequest(p: BuildEvalRunRequestParams): EvalRunReques
     req.episode_offset = Math.max(0, p.episodeFrom - 1);
     req.episode_limit = p.episodeTo > 0 ? Math.max(0, p.episodeTo - p.episodeFrom + 1) : null;
     req.question_concurrency = p.questionConcurrency;
-    // Which named answer-prompt profile drives the answer step ('' ⇒ default profile).
-    req.answer_prompt_id = p.answerPromptId;
   }
   return req;
 }

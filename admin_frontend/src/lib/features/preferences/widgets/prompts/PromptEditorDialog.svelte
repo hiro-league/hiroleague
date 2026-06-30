@@ -62,7 +62,11 @@
     } else {
       workingDict = JSON.parse(JSON.stringify(model.initialDict));
       selectedId = model.initialSelectedId in workingDict ? model.initialSelectedId : model.defaultId;
+      // Snapshot BEFORE any initialAction so a New/Duplicate-on-open counts as a dirty change.
       originalSnapshot = JSON.stringify(workingDict);
+      // Reuse the dialog's own create/duplicate logic when the page's New/Duplicate icon opened us.
+      if (model.initialAction === 'create') createProfile();
+      else if (model.initialAction === 'duplicate') duplicateProfile();
     }
     confirmingClose = false;
   }
@@ -106,15 +110,18 @@
   }
 
   function duplicateProfile() {
-    if (!selected) return;
-    const label = `${selected.label} copy`;
+    // Read the working dict directly (not the `selected` derived) so this is reliable when called
+    // from seed() during initialAction, before the derived has recomputed for the new selectedId.
+    const src = workingDict[selectedId] ?? workingDict[defaultId];
+    if (!src) return;
+    const label = `${src.label} copy`;
     const id = uniquePromptId(slugifyPromptLabel(label), workingDict);
     // Duplicating the locked default seeds from its full default text so editing starts from the
     // real prompt (a non-default profile's own prompt otherwise).
     workingDict[id] = {
       label,
       locked: false,
-      prompt: selected.prompt || (selected.locked ? libraryDefaultText : '')
+      prompt: src.prompt || (src.locked ? libraryDefaultText : '')
     };
     selectedId = id;
   }

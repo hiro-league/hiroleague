@@ -43,6 +43,7 @@ from hirocli.runtime.agent_graph.graph_kit import (
 from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged, observe
 from hirocli.runtime.agent_graph.node_group import NodeGroup
 from hirocli.runtime.agent_graph.services import AgentServices
+from hirocli.services.knowledge.constants import DEFAULT_SPARSE_MODEL
 from hirocli.services.knowledge.graph.graphiti_session import graphiti_session
 
 from .config import KnowledgeGraphConfig
@@ -416,7 +417,8 @@ class KnowledgeRetrievalNodes(NodeGroup):
         # the embed below then fails fast (no silent model). For the ledger model column only.
         embedding_model = resolve_knowledge_embedder_model(self._prefs)
         hybrid = self._prefs.knowledge.retrieval.hybrid
-        sparse_model = self._prefs.knowledge.retrieval.sparse_model
+        # Sparse model is a fixed constant (no longer a preference) — for the ledger label only.
+        sparse_model = DEFAULT_SPARSE_MODEL
         # Put the embedding model in the model column and an estimated input-token count so the
         # ledger prices it (gross list price; embedding pricing is input-only). Local/free
         # embedders aren't catalogued → cost stays blank.

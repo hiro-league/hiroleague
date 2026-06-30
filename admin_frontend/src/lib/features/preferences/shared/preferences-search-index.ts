@@ -7,16 +7,41 @@
  * Settings tabs.
  */
 import type { PreferenceTabId } from './preferences-tabs';
-import { PREFERENCE_TABS, tabForPreferencePath } from './preferences-tabs';
+import {
+  PREFERENCE_FIELD_ORDER,
+  PREFERENCE_SECTION_ORDER,
+  PREFERENCE_TABS,
+  sectionForPreferencePath,
+  tabForPreferencePath
+} from './preferences-tabs';
 import type { PreferencesSchemaMap } from './preferences-schema';
 
 export type PrefSearchEntry = {
   path: string;
   title: string;
   tabId: PreferenceTabId;
+  /** Human tab name (e.g. "Memory") for the autocomplete locator line. */
+  tabLabel: string;
+  /** Card/section title (e.g. "Default models"), or null when unmapped. */
+  section: string | null;
 };
 
 const TAB_ORDER = new Map<PreferenceTabId, number>(PREFERENCE_TABS.map((tab, i) => [tab.id, i]));
+const TAB_LABEL = new Map<PreferenceTabId, string>(PREFERENCE_TABS.map((tab) => [tab.id, tab.label]));
+const SECTION_RANK = new Map<string, number>(PREFERENCE_SECTION_ORDER.map((s, i) => [s, i]));
+const FIELD_RANK = new Map<string, number>(PREFERENCE_FIELD_ORDER.map((p, i) => [p, i]));
+
+// Section rank (tab order + card order). Unmapped sections sort last, still grouped by tab.
+function sectionRank(entry: PrefSearchEntry): number {
+  const r = entry.section != null ? SECTION_RANK.get(entry.section) : undefined;
+  return r ?? 1000 + (TAB_ORDER.get(entry.tabId) ?? 0);
+}
+
+// Field rank within its card (markup order). Fields not in the list sort after the listed ones in
+// their section, in schema order (kept by the stable sort).
+function fieldRank(path: string): number {
+  return FIELD_RANK.get(path) ?? Number.MAX_SAFE_INTEGER;
+}
 
 /** Build the flat searchable entry list from the field schema map. */
 export function buildPrefSearchIndex(schema: PreferencesSchemaMap): PrefSearchEntry[] {
@@ -25,7 +50,13 @@ export function buildPrefSearchIndex(schema: PreferencesSchemaMap): PrefSearchEn
     if (meta.readOnly || meta.preferencesSaveSkip) continue;
     const tabId = tabForPreferencePath(meta.path);
     if (!tabId) continue;
-    out.push({ path: meta.path, title: meta.title?.trim() || meta.path, tabId });
+    out.push({
+      path: meta.path,
+      title: meta.title?.trim() || meta.path,
+      tabId,
+      tabLabel: TAB_LABEL.get(tabId) ?? tabId,
+      section: sectionForPreferencePath(meta.path)
+    });
   }
   return out;
 }
@@ -39,14 +70,15 @@ export function matchesPrefQuery(entry: PrefSearchEntry, query: string): boolean
 }
 
 /**
- * Filter the index by query, ordered for arrow navigation: by tab (the tab strip's left-to-right
- * order) then by schema order within a tab (Array.sort is stable, so the index order is preserved).
+ * Filter the index by query, ordered to follow the page's visual layout: tab → section (card) →
+ * field order within the card. This makes arrow navigation move top-to-bottom as rendered, not in
+ * the schema's model-definition order.
  */
 export function filterPrefSearch(index: PrefSearchEntry[], query: string): PrefSearchEntry[] {
   if (!query.trim()) return [];
   return index
     .filter((entry) => matchesPrefQuery(entry, query))
-    .sort((a, b) => (TAB_ORDER.get(a.tabId) ?? 0) - (TAB_ORDER.get(b.tabId) ?? 0));
+    .sort((a, b) => sectionRank(a) - sectionRank(b) || fieldRank(a.path) - fieldRank(b.path));
 }
 
 /** Count matches per tab, for the tab-strip count badges. */

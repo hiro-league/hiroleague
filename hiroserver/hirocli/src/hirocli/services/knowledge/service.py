@@ -166,11 +166,8 @@ class KnowledgeService:
     def _default_sparse_embedder_for_workspace(self) -> SparseEmbeddingBackend:
         from hirocli.services.knowledge.embedder import resolve_knowledge_sparse_embedder
 
-        prefs = self.workspace_prefs()
-        return resolve_knowledge_sparse_embedder(
-            self.workspace_path,
-            prefs.knowledge.retrieval.sparse_model,
-        )
+        # Sparse model is a fixed constant (no longer a preference) — resolver uses its default.
+        return resolve_knowledge_sparse_embedder(self.workspace_path)
 
     def reload_embedder(self, embedder: EmbeddingBackend) -> None:
         """Swap the active embedder after a preference change (empty collection only)."""

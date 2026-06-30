@@ -727,7 +727,6 @@ async def run_memory_eval(
     episode_offset: int = 0,
     episode_limit: int | None = None,
     judge: bool = False,
-    answer_prompt_id: str | None = None,
     question_concurrency: int = 1,
     eval_user_id: int = MEMORY_EVAL_USER_ID,
 ) -> dict[str, Any]:
@@ -782,11 +781,14 @@ async def run_memory_eval(
 
     _prefs = load_preferences(workspace_path)
     _eval_prefs = _prefs.graph.eval
-    # Resolve the run's chosen answer-prompt profile (eval-panel pick) → instruction text + a
-    # provenance label; unknown/blank id falls back to the locked default profile, then the
+    # Resolve the ACTIVE answer-prompt profile (persisted graph.eval.active_answer_prompt_id,
+    # mirroring the retrieval agent — the former per-run eval-panel pick is gone) → instruction text
+    # + a provenance label; unknown/blank id falls back to the locked default profile, then the
     # built-in constant. The id alone can later resolve to different text (profiles are editable),
     # so a content hash is recorded on the run for reproducible "which prompt produced this".
-    answer_prompt_label, memory_answer_prompt = _eval_prefs.resolve_answer_prompt(answer_prompt_id)
+    answer_prompt_id, answer_prompt_label, memory_answer_prompt = (
+        _eval_prefs.resolve_active_answer_prompt()
+    )
     answer_prompt_hash = hashlib.sha256(memory_answer_prompt.encode("utf-8")).hexdigest()[:8]
     judge_prompt = _eval_prefs.judge_prompt
     # Pre-resolve the retrieval-agent prefs ONCE per run and thread them into every question
@@ -821,10 +823,10 @@ async def run_memory_eval(
             "judged": judged,
             "filters": {"set": set_id},
             # Provenance: which answer-prompt profile drove this run's answers (label-tags the run
-            # so two runs of the same corpus under different prompts are distinguishable; the hash
-            # pins the exact text since profiles are editable). id="" ⇒ default profile used.
+            # so two runs of the same corpus under different active prompts are distinguishable; the
+            # hash pins the exact text since profiles are editable). id is the resolved active id.
             "answer_prompt": {
-                "id": (answer_prompt_id or "").strip(),
+                "id": answer_prompt_id,
                 "label": answer_prompt_label,
                 "hash": answer_prompt_hash,
             },

@@ -436,9 +436,6 @@ class MemoryPreferences(BaseModel):
 # ---------------------------------------------------------------------------
 
 DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-# Default sparse model for hybrid retrieval. Duplicated from services.knowledge.constants so
-# the domain layer does not import the services layer (same pattern as the embedding default).
-DEFAULT_KNOWLEDGE_SPARSE_MODEL = "Qdrant/bm25"
 
 # System prompt for the optional query-rewrite step. Editable in preferences; the rewrite node
 # falls back to this constant when the stored prompt is blank. Scope is normalization +
@@ -540,7 +537,9 @@ class KnowledgeRetrievalPreferences(BaseModel):
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
     # threshold on the dense branch; the BM25 branch is rank-fused (its scores are not 0-1).
     hybrid: bool = Field(default=True, title="Hybrid retrieval (dense + BM25, RRF fusion)")
-    sparse_model: str = Field(default=DEFAULT_KNOWLEDGE_SPARSE_MODEL, min_length=1)
+    # The BM25 sparse model is a fixed constant (services.knowledge.constants.DEFAULT_SPARSE_MODEL),
+    # not a preference: the Qdrant collection is hardwired to BM25's IDF scoring and switching would
+    # need a full re-ingest, so it was removed from the editable preference surface.
     # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.
     prefetch_limit: int = Field(default=40, ge=1, le=500, title="Candidates per branch", description="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).")
     reranker: KnowledgeRerankerPreferences = Field(default_factory=KnowledgeRerankerPreferences)
@@ -822,9 +821,10 @@ class GraphEvalPreferences(BaseModel):
     """Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
 
     ``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval
-    recall leg (``eval_judge.answer_from_context`` places the chosen one in the user message ahead
+    recall leg (``eval_judge.answer_from_context`` places the active one in the user message ahead
     of the question and the recalled elements; the system prompt there is a hardcoded two-line
-    role). A run selects one by id in the eval panel — see ``resolve_answer_prompt``.
+    role). The active profile is the persisted ``active_answer_prompt_id`` (mirrors the retrieval
+    agent's ``active_retrieval_agent_prompt_id``) — see ``resolve_active_answer_prompt``.
     The knowledge-eval legs intentionally have no answer-prompt library:
     they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
     ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
@@ -835,14 +835,16 @@ class GraphEvalPreferences(BaseModel):
     """
 
     # Named library of mem-eval answer-prompt recipes (replaces the former single
-    # ``memory_answer_prompt`` scalar — no-backward-compat, no migration). A run picks one by id
-    # in the eval panel; ``resolve_answer_prompt`` maps id → instruction text with a default
-    # fallback. The ``default`` profile is locked and carries the built-in default text.
+    # ``memory_answer_prompt`` scalar — no-backward-compat, no migration). The answer step uses the
+    # ``active_answer_prompt_id`` profile (a persisted preference, mirroring the retrieval agent —
+    # the former per-run eval-panel picker is gone); ``resolve_answer_prompt`` maps id → instruction
+    # text with a default fallback. The ``default`` profile is locked and carries the built-in text.
     answer_prompts: dict[str, AnswerPromptProfile] = Field(
         default_factory=default_answer_prompts,
         title="Mem Eval Answer Prompts",
         json_schema_extra={"writeWhole": True},
     )
+    active_answer_prompt_id: str = Field(default=DEFAULT_ANSWER_PROMPT_ID, title="Active prompt profile", description="Which mem-eval answer prompt the answer step uses.")
     judge_prompt: str = Field(default=DEFAULT_MEMORY_EVAL_JUDGE_PROMPT, title="Eval judge prompt")
     # Answer + judge each get their OWN model + tuning profile (split from the single shared
     # answering model the eval used before). ``*_model`` of ``None`` falls back through
@@ -945,14 +947,24 @@ class GraphEvalPreferences(BaseModel):
         """Resolve a mem-eval answer-prompt profile id → ``(label, instruction_text)``.
 
         Falls back to the locked ``default`` profile when the id is unknown/blank, then to the
-        built-in constant when even that is missing or its text is blank. The runner uses this to
-        turn the run's ``answer_prompt_id`` into the instruction block + a provenance label."""
+        built-in constant when even that is missing or its text is blank. The runner reaches this
+        via ``resolve_active_answer_prompt`` (the active id) for the instruction block + label."""
         pid = (profile_id or "").strip()
         profile = self.answer_prompts.get(pid) or self.answer_prompts.get(DEFAULT_ANSWER_PROMPT_ID)
         if profile is None:
             return (DEFAULT_ANSWER_PROMPT_ID, DEFAULT_MEMORY_EVAL_ANSWER_PROMPT)
         text = (profile.prompt or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
         return (profile.label or pid or DEFAULT_ANSWER_PROMPT_ID, text)
+
+    def resolve_active_answer_prompt(self) -> tuple[str, str, str]:
+        """Resolve the active mem-eval answer prompt → ``(id, label, instruction_text)``.
+
+        Mirrors ``resolve_retrieval_agent_prompt`` (the answer step now uses the persisted
+        ``active_answer_prompt_id`` instead of a per-run eval-panel pick). Blank/unknown id falls
+        back to the locked ``default`` profile, then to the built-in constant."""
+        active = (self.active_answer_prompt_id or "").strip() or DEFAULT_ANSWER_PROMPT_ID
+        label, text = self.resolve_answer_prompt(active)
+        return (active, label, text)
 
     def resolve_retrieval_agent_prompt(self) -> tuple[str, str]:
         """Resolve the active retrieval-agent prompt profile → ``(id, text)``.
