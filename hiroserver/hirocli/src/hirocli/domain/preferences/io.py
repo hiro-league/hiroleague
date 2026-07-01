@@ -9,14 +9,36 @@ from typing import Any, Callable
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
-from .models import (
-    PROMPT_DEFAULTS,
-    WorkspacePreferences,
-    _notify_preferences_saved,
-    compute_effective_changes,
-)
+from ..events import DomainEvent, DomainEventType, get_domain_event_bus
+from .defaults import PROMPT_DEFAULTS
+from .diff import compute_effective_changes
+from .models import WorkspacePreferences
 
 logger = logging.getLogger(__name__)
+
+
+def _notify_preferences_saved(
+    workspace_path: Path,
+    prefs: "WorkspacePreferences",
+    *,
+    effective_changes: dict[str, tuple[Any, Any]] | None = None,
+) -> None:
+    """Publish that ``preferences.json`` was written.
+
+    ``effective_changes`` maps leaf dot-paths to ``(old, new)`` tuples for values
+    that actually differed between the previous and new persisted state. Empty
+    dict ⇒ a no-op save (still published so subscribers can observe writes).
+    """
+    get_domain_event_bus().publish(
+        DomainEvent(
+            type=DomainEventType.PREFERENCES_SAVED,
+            workspace_path=workspace_path,
+            payload={
+                "prefs": prefs,
+                "effective_changes": dict(effective_changes or {}),
+            },
+        )
+    )
 
 
 def preferences_file(workspace_path: Path) -> Path:

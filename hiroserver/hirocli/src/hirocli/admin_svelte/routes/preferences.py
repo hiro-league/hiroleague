@@ -60,8 +60,6 @@ def _prefs_payload(
     payload = prefs.model_dump(mode="json")
     # Enrich with the computed read-only fields (single source — see preferences/computed_fields.py).
     for field in COMPUTED_PREFERENCE_FIELDS:
-        if field.compute is None:
-            continue
         _set_payload_path(
             payload, field.path, field.compute(prefs, runtime._workspace_path, workspace_id)
         )

@@ -30,7 +30,7 @@
   <!-- Cards + fields are data-driven from GRAPH_ENGINE_MANIFEST (Tier-2.1). Order, sections, and the
        search index all derive from the same manifest — see graph-engine-manifest.ts. -->
   {#if ctrl.draft}
-    {#each GRAPH_ENGINE_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+    {#each GRAPH_ENGINE_MANIFEST.cards as card (card.id)}
       <PrefManifestCard {ctrl} {card} />
     {/each}
   {/if}

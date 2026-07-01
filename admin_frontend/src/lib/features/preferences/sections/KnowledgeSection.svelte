@@ -34,7 +34,7 @@
 
   <!-- Cards + fields are data-driven from KNOWLEDGE_MANIFEST (manifest rollout). -->
   {#if ctrl.draft}
-    {#each KNOWLEDGE_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+    {#each KNOWLEDGE_MANIFEST.cards as card (card.id)}
       <PrefManifestCard {ctrl} {card} />
     {/each}
   {/if}

@@ -841,11 +841,5 @@
     "type": "string",
     "nullable": true,
     "readOnly": true
-  },
-  "graph.embedder_model_resolved": {
-    "path": "graph.embedder_model_resolved",
-    "type": "string",
-    "nullable": true,
-    "readOnly": true
   }
 }

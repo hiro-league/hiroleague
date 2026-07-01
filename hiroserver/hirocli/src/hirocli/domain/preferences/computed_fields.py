@@ -4,7 +4,8 @@ These are NOT persisted: they're derived at read time (resolved model ids, "lock
 flags) and surfaced read-only on ``GET/PATCH /preferences``. Each one used to be declared TWICE —
 its schema metadata in ``preferences_schema._PREFERENCES_PAYLOAD_READONLY_FIELDS`` and its value
 computed inline in the route's ``_prefs_payload`` — so adding one meant editing both, and the two
-could drift (``graph.embedder_model_resolved`` is declared but was never populated).
+could drift. This registry is the single place: every entry both declares its schema metadata AND
+computes its value.
 
 This registry is the one place: ``schema_meta`` feeds the field map (so the admin UI types + save
 policy see the read-only field), and ``compute`` (when set) feeds the payload. Compute functions defer
@@ -25,14 +26,14 @@ ComputeFn = Callable[[WorkspacePreferences, Path, str | None], Any]
 
 @dataclass(frozen=True)
 class ComputedPreferenceField:
-    """One read-only enrichment: its schema metadata + (optionally) how to compute its value."""
+    """One read-only enrichment: its schema metadata + how to compute its value."""
 
     path: str
     # Schema-map metadata for this field (``path`` is added automatically). Mirrors what a real
     # leaf carries: ``type`` (+ ``nullable``) and ``readOnly`` so it's excluded from PATCH writes.
     schema_meta: dict[str, Any]
-    # Value producer for the GET payload. ``None`` ⇒ declared in the schema but not populated.
-    compute: ComputeFn | None = None
+    # Value producer for the GET payload — every computed field is populated (no schema-only entries).
+    compute: ComputeFn
 
 
 def _knowledge_answering_model_resolved(
@@ -92,12 +93,6 @@ COMPUTED_PREFERENCE_FIELDS: tuple[ComputedPreferenceField, ...] = (
         "knowledge.answering.model_resolved_source",
         {"type": "string", "nullable": True, "readOnly": True},
         _knowledge_answering_model_resolved_source,
-    ),
-    # Declared read-only in the schema but not (yet) populated — kept for the admin UI type.
-    ComputedPreferenceField(
-        "graph.embedder_model_resolved",
-        {"type": "string", "nullable": True, "readOnly": True},
-        None,
     ),
 )
 

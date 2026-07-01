@@ -8,15 +8,15 @@ from pathlib import Path
 
 from ..credential_store import CredentialStore
 
-from .models import (
+from .defaults import (
     DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
     DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
     DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
     LLMPurpose,
     ThinkingLevel,
     TuningProfile,
-    WorkspacePreferences,
 )
+from .models import WorkspacePreferences
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +476,16 @@ def resolve_eval_retrieval_llm(
     )
 
 
+def _first_configured_id(*candidates: str | None) -> str | None:
+    """First non-blank id in the chain (each stripped), else ``None`` — the shared "override then
+    workspace default" fallback for the pure model-id preference reads below."""
+    for candidate in candidates:
+        stripped = (candidate or "").strip()
+        if stripped:
+            return stripped
+    return None
+
+
 def resolve_knowledge_embedder_model(prefs: WorkspacePreferences) -> str | None:
     """Knowledge embedder id — the knowledge override (``knowledge.default_embedding_model``)
     when set, else the workspace default (``llm.default_embedder``).
@@ -484,10 +494,8 @@ def resolve_knowledge_embedder_model(prefs: WorkspacePreferences) -> str | None:
     there is no silent fallback: callers must gate ingest/query on ``None`` rather than forcing a
     model. Pure preference read — availability/download is checked by ``resolve_knowledge_embedder``
     at use time."""
-    return (
-        (prefs.knowledge.default_embedding_model or "").strip()
-        or (prefs.llm.default_embedder or "").strip()
-        or None
+    return _first_configured_id(
+        prefs.knowledge.default_embedding_model, prefs.llm.default_embedder
     )
 
 
@@ -497,11 +505,7 @@ def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str | None:
 
     ``None`` = no embedder configured; the graph build/ingest must gate on this rather than
     forcing a model (decision: no silent default). Pure preference read."""
-    return (
-        prefs.graph.embedder_model_resolved
-        or (prefs.llm.default_embedder or "").strip()
-        or None
-    )
+    return _first_configured_id(prefs.graph.embedder_model, prefs.llm.default_embedder)
 
 
 def resolve_knowledge_reranker_model(prefs: WorkspacePreferences) -> str | None:
@@ -511,10 +515,8 @@ def resolve_knowledge_reranker_model(prefs: WorkspacePreferences) -> str | None:
     else the workspace default reranker (``llm.default_reranker``). ``None`` = no reranker
     (retrieval order kept). Pure preference read — availability/download is checked by
     ``resolve_reranker`` at use time."""
-    return (
-        (prefs.knowledge.retrieval.reranker.model_id or "").strip()
-        or (prefs.llm.default_reranker or "").strip()
-        or None
+    return _first_configured_id(
+        prefs.knowledge.retrieval.reranker.model_id, prefs.llm.default_reranker
     )
 
 
@@ -525,11 +527,7 @@ def resolve_graph_reranker_model(prefs: WorkspacePreferences) -> str | None:
     default reranker (``llm.default_reranker``). ``None`` = degrade the ``cross_encoder``
     search recipe to RRF. Pure preference read — availability is checked by
     ``resolve_reranker`` at use time."""
-    return (
-        (prefs.graph.reranker.model_id or "").strip()
-        or (prefs.llm.default_reranker or "").strip()
-        or None
-    )
+    return _first_configured_id(prefs.graph.reranker.model_id, prefs.llm.default_reranker)
 
 
 def resolve_character_llm(

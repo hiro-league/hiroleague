@@ -1,37 +1,45 @@
 <script lang="ts">
   /**
-   * Renders one `PrefCardSpec`: a data-driven `card` (a `PrefSectionCard` wrapping manifest fields)
-   * or a `customCard` (a bespoke card component resolved by the registry below — kept whole when its
-   * logic, e.g. cross-field validation or gating, is too card-specific to express as field specs).
+   * Renders one `PrefCardSpec` as a `PrefSectionCard` wrapping its manifest fields. An optional
+   * card-level `validate` (cross-field error registered via `ctrl.setSectionError`, so it gates Save)
+   * covers the one cross-field concern the field specs can't express — see the retrieval-agent card in
+   * graph-engine-manifest.ts. Whole-card gating uses a `gated` FIELD spec around the body (the reranker
+   * card), rendered by `PrefFieldRenderer` like any other field.
    */
-  import type { Component } from 'svelte';
+  import type { WorkspacePreferences } from '$lib/api/preferences';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import type { CustomCardKey, PrefCardSpec } from './manifest-types';
+  import type { PrefCardSpec } from './manifest-types';
   import PrefSectionCard from '$lib/features/preferences/widgets/PrefSectionCard.svelte';
   import PrefFieldRenderer from './PrefFieldRenderer.svelte';
-  import GraphRerankerCard from '$lib/features/preferences/sections/graph-engine/GraphRerankerCard.svelte';
-  import GraphRetrievalAgentCard from '$lib/features/preferences/sections/graph-engine/GraphRetrievalAgentCard.svelte';
 
   let { ctrl, card }: { ctrl: PreferencesController; card: PrefCardSpec } = $props();
 
-  const CUSTOM_CARDS: Record<CustomCardKey, Component<{ ctrl: PreferencesController }>> = {
-    graphReranker: GraphRerankerCard,
-    graphRetrievalAgent: GraphRetrievalAgentCard
-  };
+  // The card renders under a `{#if ctrl.draft}` guard at the section level, so draft is present here.
+  const draft = $derived(ctrl.draft as WorkspacePreferences);
+
+  const validationError = $derived(card.validate ? card.validate(draft) : null);
+
+  // Register the cross-field error (gating Save), and CLEAR it on unmount — otherwise a stale error
+  // sticks in `sectionErrors` after the user navigates away from an invalid card (tabs unmount their
+  // section), leaving Save disabled everywhere with no visible cause.
+  $effect(() => {
+    if (!card.validate) return;
+    ctrl.setSectionError(card.id, validationError);
+    return () => ctrl.setSectionError(card.id, null);
+  });
 </script>
 
-{#if card.kind === 'card'}
-  <PrefSectionCard
-    title={card.title}
-    description={card.descriptionOf ? card.descriptionOf(ctrl) : card.description}
-    collapsible={card.collapsible ?? false}
-    bodyId={card.bodyId}
-  >
-    {#each card.body as field, i (i)}
-      <PrefFieldRenderer {ctrl} spec={field} />
-    {/each}
-  </PrefSectionCard>
-{:else}
-  {@const CustomCard = CUSTOM_CARDS[card.component]}
-  <CustomCard {ctrl} />
-{/if}
+<PrefSectionCard
+  title={card.title}
+  description={card.descriptionOf ? card.descriptionOf(ctrl) : card.description}
+  collapsible={card.collapsible ?? false}
+  bodyId={card.bodyId}
+>
+  {#each card.body as field, i (i)}
+    <PrefFieldRenderer {ctrl} spec={field} />
+  {/each}
+
+  {#if validationError}
+    <p class="text-xs text-destructive">{validationError}</p>
+  {/if}
+</PrefSectionCard>

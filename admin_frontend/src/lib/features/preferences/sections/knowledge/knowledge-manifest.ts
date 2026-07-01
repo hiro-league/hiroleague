@@ -37,7 +37,14 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
       body: [
         {
           kind: 'grid',
-          fields: [{ kind: 'custom', component: 'knowledgeEmbedder', paths: ['knowledge.default_embedding_model'] }]
+          fields: [
+            {
+              kind: 'embedder',
+              path: 'knowledge.default_embedding_model',
+              lockedPath: 'knowledge.default_embedding_model_locked',
+              heading: 'Knowledge embedder'
+            }
+          ]
         },
         {
           kind: 'grid',

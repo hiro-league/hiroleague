@@ -5,6 +5,8 @@ Split into submodules for readability; this package re-exports the public API so
 defaults live in the sibling ``hirocli.domain.prompts`` package (loaded as markdown).
 """
 
+from .defaults import *  # noqa: F401,F403
+from .diff import *  # noqa: F401,F403
 from .models import *  # noqa: F401,F403
 from .io import *  # noqa: F401,F403
 from .resolvers import *  # noqa: F401,F403

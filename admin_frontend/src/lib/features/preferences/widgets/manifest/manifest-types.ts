@@ -6,14 +6,17 @@
  * manifest is the single source for the tab's field ORDER and section mapping (see
  * `manifestFieldPaths` / `manifestSections`), so the search index can't drift from what renders.
  *
- * Most fields are fully data-driven (number / text / toggle / textarea / select / model /
- * modelProfile + grid / column / panel / gated layout). Genuinely bespoke bits (an embedder with a
- * download affordance, a prompt-library editor, computed cross-field select options, a card with its
- * own cross-field validation) are escape hatches:
+ * Most fields are fully data-driven (number / text / toggle / textarea / select / model / embedder /
+ * modelProfile + grid / column / panel / gated layout). To gate a card's WHOLE body, wrap its fields
+ * in a single `gated` field spec (banner + disabled fieldset — e.g. the reranker card only applies
+ * when `search_recipe === 'cross_encoder'`); no separate card-level gating exists. A card CAN carry
+ * `validate` — the one card-level thing field specs can't express: a cross-field error registered via
+ * `ctrl.setSectionError` (e.g. `limit_min ≤ limit_default ≤ limit_max`) that gates Save. The remaining
+ * bespoke bits (a toggle-array block, computed cross-field select options) are escape hatches:
  *  - `select.options` may be a function of the draft (computed / cross-field-disabled options),
  *  - `gated.disabledWhen` is a draft predicate,
- *  - `custom` (field) / `customCard` reference a component by string KEY, resolved by the renderer's
- *    registry — so this data module never imports `.svelte` files.
+ *  - `custom` (field) references a component by string KEY, resolved by the renderer's registry — so
+ *    this data module never imports `.svelte` files.
  *
  * Pure data + pure functions only; no Svelte imports. The component keys are typed unions so a typo
  * is a compile error against the renderer registries.
@@ -34,10 +37,7 @@ export type PrefOptionsSource =
   | ((draft: WorkspacePreferences) => PrefSelectOption[]);
 
 /** Bespoke FIELD blocks rendered inside a data-driven card (resolved by the field-renderer registry). */
-export type CustomFieldKey = 'graphEmbedder' | 'graphEvalContextToggles' | 'knowledgeEmbedder';
-
-/** Bespoke whole CARDS (resolved by the card-renderer registry) — kept as-is for heavy custom logic. */
-export type CustomCardKey = 'graphReranker' | 'graphRetrievalAgent';
+export type CustomFieldKey = 'graphEvalContextToggles';
 
 export type PrefFieldSpec =
   | { kind: 'number'; path: PreferencePath; disabledWhen?: (d: WorkspacePreferences) => boolean }
@@ -69,6 +69,10 @@ export type PrefFieldSpec =
     }
   /** Standalone tuning-profile picker (not paired with a model — e.g. the default chat profile). */
   | { kind: 'tuningProfile'; path: PreferencePath; scope?: 'llm' | 'memory' | 'knowledge' }
+  /** Embedding model picker with a "locked while indexed" badge + inline download (embedders are
+   * dimension-bound). `lockedPath` is the backend-computed `*_locked` flag; the empty box inherits
+   * `llm.default_embedder`. Used by the graph + knowledge embedders. */
+  | { kind: 'embedder'; path: PrefModelIdPath; lockedPath: PreferencePath; heading: string }
   | {
       kind: 'modelProfile';
       modelPath: PrefModelIdPath;
@@ -109,20 +113,22 @@ export type PrefFieldSpec =
   /** Bespoke block; `paths` are its editable fields (in render order) for search/order derivation. */
   | { kind: 'custom'; component: CustomFieldKey; paths: PreferencePath[] };
 
-export type PrefCardSpec =
-  | {
-      kind: 'card';
-      id: string;
-      title: string;
-      description?: string;
-      /** Computed description (overrides `description`) for cards whose subtitle depends on live state. */
-      descriptionOf?: (ctrl: PreferencesController) => string;
-      bodyId: string;
-      collapsible?: boolean;
-      body: PrefFieldSpec[];
-    }
-  /** Bespoke card component; `paths` are its editable fields (in order) for search/order derivation. */
-  | { kind: 'customCard'; component: CustomCardKey; section: string; paths: PreferencePath[] };
+export type PrefCardSpec = {
+  kind: 'card';
+  id: string;
+  title: string;
+  description?: string;
+  /** Computed description (overrides `description`) for cards whose subtitle depends on live state. */
+  descriptionOf?: (ctrl: PreferencesController) => string;
+  bodyId: string;
+  collapsible?: boolean;
+  body: PrefFieldSpec[];
+  /** Card-level cross-field validation — the one card concern field specs can't express. The error
+   * (if any) is registered via `ctrl.setSectionError(id, error)` (gating Save) and rendered under the
+   * body; cleared when the card unmounts so it can't leave Save stuck. (To gate the whole body under a
+   * condition, wrap the body in a single `gated` field spec instead — no card-level `gated` exists.) */
+  validate?: (d: WorkspacePreferences) => string | null;
+};
 
 export type PrefTabManifest = {
   /** Intro paragraph rendered above the cards (optional). */
@@ -144,6 +150,7 @@ export function fieldSpecPaths(spec: PrefFieldSpec): string[] {
     case 'select':
     case 'model':
     case 'tuningProfile':
+    case 'embedder':
       return [spec.path];
     case 'modelProfile':
       return [spec.modelPath, spec.profilePath];
@@ -163,7 +170,7 @@ export function fieldSpecPaths(spec: PrefFieldSpec): string[] {
 
 /** All editable field paths in a card, in render order. */
 export function cardSpecPaths(card: PrefCardSpec): string[] {
-  return card.kind === 'card' ? card.body.flatMap(fieldSpecPaths) : [...card.paths];
+  return card.body.flatMap(fieldSpecPaths);
 }
 
 /** All editable field paths across the manifest, in render order (drives search arrow-nav order). */
@@ -175,13 +182,12 @@ export function manifestFieldPaths(manifest: PrefTabManifest): string[] {
 export function manifestSections(manifest: PrefTabManifest): Record<string, string> {
   const out: Record<string, string> = {};
   for (const card of manifest.cards) {
-    const section = card.kind === 'card' ? card.title : card.section;
-    for (const path of cardSpecPaths(card)) out[path] = section;
+    for (const path of cardSpecPaths(card)) out[path] = card.title;
   }
   return out;
 }
 
-/** Card/section titles across the manifest, in render order (a `customCard` contributes `section`). */
+/** Card/section titles across the manifest, in render order. */
 export function manifestCardSections(manifest: PrefTabManifest): string[] {
-  return manifest.cards.map((card) => (card.kind === 'card' ? card.title : card.section));
+  return manifest.cards.map((card) => card.title);
 }

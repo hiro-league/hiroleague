@@ -28,7 +28,7 @@
 
   <!-- Cards + fields are data-driven from EVAL_MANIFEST (manifest rollout). -->
   {#if ctrl.draft}
-    {#each EVAL_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+    {#each EVAL_MANIFEST.cards as card (card.id)}
       <PrefManifestCard {ctrl} {card} />
     {/each}
   {/if}

@@ -12,8 +12,8 @@
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
   import type { AnswerPromptProfile } from '$lib/api/preferences';
+  import PromptLibraryVersionBar from './PromptLibraryVersionBar.svelte';
   import {
     slugifyPromptLabel,
     uniquePromptId,
@@ -180,30 +180,14 @@
     </Dialog.Header>
 
     {#if model.kind === 'library' && selected}
-      <div class="flex flex-wrap items-end gap-3">
-        <FormField label="Version" class="min-w-[16rem] flex-1" hint="">
-          <select class={ADMIN_SELECT_LG} bind:value={selectedId}>
-            {#each entries as [id, p] (id)}
-              <option value={id}>{p.label}{p.locked ? ' 🔒' : ''}</option>
-            {/each}
-          </select>
-        </FormField>
-        <div class="flex flex-wrap gap-2 pb-1">
-          <Button variant="outline" size="sm" onclick={createProfile}>+ New</Button>
-          <Button variant="outline" size="sm" onclick={duplicateProfile}>Duplicate</Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selected.locked}
-            title={selected.locked
-              ? 'The built-in default cannot be deleted.'
-              : 'Delete this version.'}
-            onclick={deleteProfile}
-          >
-            Delete
-          </Button>
-        </div>
-      </div>
+      <PromptLibraryVersionBar
+        {entries}
+        {selected}
+        bind:selectedId
+        onCreate={createProfile}
+        onDuplicate={duplicateProfile}
+        onDelete={deleteProfile}
+      />
     {/if}
 
     <div class="min-h-0 flex-1 overflow-auto">

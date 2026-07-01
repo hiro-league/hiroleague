@@ -26,7 +26,7 @@
 
   <!-- Cards + fields are data-driven from MODELS_MANIFEST (manifest rollout). -->
   {#if ctrl.draft}
-    {#each MODELS_MANIFEST.cards as card (card.kind === 'card' ? card.id : card.component)}
+    {#each MODELS_MANIFEST.cards as card (card.id)}
       <PrefManifestCard {ctrl} {card} />
     {/each}
   {/if}

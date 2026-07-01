@@ -15,6 +15,7 @@
     preferenceHint
   } from '$lib/features/preferences/shared/preferences-schema';
   import type { CustomFieldKey, PrefFieldSpec } from './manifest-types';
+  import Badge from '$lib/components/ui/badge.svelte';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
@@ -24,24 +25,19 @@
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import ModelWithProfilePair from '$lib/features/preferences/widgets/ModelWithProfilePair.svelte';
   import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
-  import PrefEmbedderDownload from '$lib/features/preferences/widgets/PrefEmbedderDownload.svelte';
-  import PrefRerankerDownload from '$lib/features/preferences/widgets/PrefRerankerDownload.svelte';
+  import PrefModelDownload from '$lib/features/preferences/widgets/PrefModelDownload.svelte';
   import PrefPanel from '$lib/features/preferences/widgets/PrefPanel.svelte';
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
   import ActivePromptLibraryField from '$lib/features/preferences/widgets/prompts/ActivePromptLibraryField.svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import PrefFieldRenderer from './PrefFieldRenderer.svelte';
-  import GraphEmbedderField from '$lib/features/preferences/sections/graph-engine/GraphEmbedderField.svelte';
   import GraphEvalContextToggles from '$lib/features/preferences/sections/graph-engine/GraphEvalContextToggles.svelte';
-  import KnowledgeEmbedderField from '$lib/features/preferences/sections/knowledge/KnowledgeEmbedderField.svelte';
 
   let { ctrl, spec }: { ctrl: PreferencesController; spec: PrefFieldSpec } = $props();
 
   // String key → bespoke field component. The typed record makes a missing/typo key a compile error.
   const CUSTOM_FIELDS: Record<CustomFieldKey, Component<{ ctrl: PreferencesController }>> = {
-    graphEmbedder: GraphEmbedderField,
-    graphEvalContextToggles: GraphEvalContextToggles,
-    knowledgeEmbedder: KnowledgeEmbedderField
+    graphEvalContextToggles: GraphEvalContextToggles
   };
 
   const HEADING_CLASS =
@@ -95,11 +91,11 @@
           ? (getPreferenceByPath(draft, spec.emptyFallback) as string | null)
           : null}
       />
-      {#if spec.download === 'embedder'}
-        <PrefEmbedderDownload {ctrl} modelId={getPreferenceByPath(draft, spec.path) as string | null} />
-      {:else}
-        <PrefRerankerDownload {ctrl} modelId={getPreferenceByPath(draft, spec.path) as string | null} />
-      {/if}
+      <PrefModelDownload
+        {ctrl}
+        kind={spec.download}
+        modelId={getPreferenceByPath(draft, spec.path) as string | null}
+      />
     </div>
   {:else}
     <PrefModelPicker
@@ -113,6 +109,27 @@
         : null}
     />
   {/if}
+{:else if spec.kind === 'embedder'}
+  {@const locked = Boolean(getPreferenceByPath(draft, spec.lockedPath))}
+  <div class="grid gap-2">
+    <h4 class={HEADING_CLASS}>
+      {spec.heading}
+      {#if locked}<Badge variant="outline">Locked while indexed</Badge>{/if}
+    </h4>
+    <PrefModelPicker
+      {ctrl}
+      kind="embedding"
+      path={spec.path}
+      embedded
+      emptyFallbackId={draft.llm.default_embedder}
+      busy={ctrl.busy || locked}
+    />
+    <PrefModelDownload
+      {ctrl}
+      kind="embedder"
+      modelId={getPreferenceByPath(draft, spec.path) as string | null}
+    />
+  </div>
 {:else if spec.kind === 'tuningProfile'}
   <TuningProfileSelect {ctrl} path={spec.path} scope={spec.scope} />
 {:else if spec.kind === 'modelProfile'}

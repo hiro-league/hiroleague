@@ -12,7 +12,6 @@ export type PreferencePath =
   | 'graph.custom_extraction_instructions'
   | 'graph.embedder_model'
   | 'graph.embedder_model_locked'
-  | 'graph.embedder_model_resolved'
   | 'graph.entity_ontology'
   | 'graph.eval.active_answer_prompt_id'
   | 'graph.eval.active_retrieval_agent_prompt_id'

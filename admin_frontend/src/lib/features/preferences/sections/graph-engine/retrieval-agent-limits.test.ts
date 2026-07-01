@@ -67,7 +67,7 @@ describe('clampRetrievalAgentLimitField', () => {
   });
 });
 
-describe('GraphRetrievalAgentCard defaults', () => {
+describe('retrieval agent limits — built-in defaults', () => {
   it('renders_with_defaults', () => {
     const defaults = defaultRetrievalAgentLimits();
     expect(defaults.max_agent_turns).toBe(4);

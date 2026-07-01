@@ -180,14 +180,6 @@ describe('editsForSave', () => {
     expect(diffEdits(baseline, draft)).toEqual({});
   });
 
-  it('ignores the backend-computed graph.embedder_model_resolved mirror', () => {
-    const baseline = makePrefs();
-    const draft = cloneWorkspacePreferences(baseline);
-    // Not in the frontend type, but the backend mirrors this @property into the payload.
-    (draft.graph as unknown as Record<string, unknown>).embedder_model_resolved = 'openai:text-embed';
-    expect(diffEdits(baseline, draft)).toEqual({});
-  });
-
   it('ignores image profile and llm image defaults not edited in preferences UI', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);

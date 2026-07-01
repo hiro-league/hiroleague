@@ -2,9 +2,10 @@
  * Declarative manifest for the Memory (graph-engine) tab — the Tier-2.1 prototype.
  *
  * This DATA replaces the six hand-written `Graph*Card.svelte` components: `PrefManifestCard` /
- * `PrefFieldRenderer` turn it into the same widgets. Two cards stay as bespoke components
- * (`customCard`) because their logic is too card-specific for field specs: the reranker (cross-field
- * gating + banner) and the retrieval-agent caps (cross-field validation + panels).
+ * `PrefFieldRenderer` turn it into the same widgets, including the two cards that used to need bespoke
+ * components — the reranker (body wrapped in a `gated` field spec: banner + disabled fieldset while
+ * `search_recipe !== 'cross_encoder'`) and the retrieval-agent caps (card-level `validate`: the
+ * `limit_min ≤ limit_default ≤ limit_max` cross-field check, registered via `ctrl.setSectionError`).
  *
  * The tab's search/arrow-nav order is DERIVED from this manifest (`GRAPH_ENGINE_FIELD_ORDER`, spread
  * into `PREFERENCE_FIELD_ORDER`), so render order and search order can't drift — adding or reordering
@@ -20,6 +21,7 @@ import {
 } from '$lib/features/preferences/shared/preferences-enum-labels';
 import type { WorkspacePreferences } from '$lib/api/preferences';
 import type { PrefSelectOption } from '$lib/features/preferences/shared/preferences-field-options';
+import { validateRetrievalAgentLimits } from '$lib/features/preferences/sections/graph-engine/retrieval-agent-limits';
 import {
   manifestFieldPaths,
   type PrefTabManifest
@@ -109,12 +111,17 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
               modelPath: 'graph.small_model',
               profilePath: 'graph.small_tuning_profile'
             },
-            // Embedder (bespoke: lock badge + download) + ontology share one grid column so the
-            // column beside the tall instructions textarea stays filled.
+            // Embedder (lock badge + download) + ontology share one grid column so the column beside
+            // the tall instructions textarea stays filled.
             {
               kind: 'column',
               fields: [
-                { kind: 'custom', component: 'graphEmbedder', paths: ['graph.embedder_model'] },
+                {
+                  kind: 'embedder',
+                  path: 'graph.embedder_model',
+                  lockedPath: 'graph.embedder_model_locked',
+                  heading: 'Embedder model'
+                },
                 { kind: 'select', path: 'graph.entity_ontology', options: ONTOLOGY_OPTIONS }
               ]
             },
@@ -158,10 +165,37 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       ]
     },
     {
-      kind: 'customCard',
-      component: 'graphReranker',
-      section: 'Graphiti Reranker (Cross-encoder)',
-      paths: ['graph.reranker.model_id', 'graph.reranker.min_relevance', 'graph.reranker.device']
+      kind: 'card',
+      id: 'graphReranker',
+      title: 'Graphiti Reranker (Cross-encoder)',
+      description:
+        'Reranks graph fact-search candidates with a real cross-encoder. Only active when the Search recipe above is set to Cross-encoder — otherwise these settings are disabled. Reuses the same reranker models as the flat path (cloud or local).',
+      bodyId: PREFERENCES_SECTION_BODY_IDS.graphEngineReranker,
+      collapsible: true,
+      // Whole card gates on the search recipe via the field-level `gated` spec (banner + disabled
+      // fieldset) — no card-level gating needed.
+      body: [
+        {
+          kind: 'gated',
+          disabledWhen: (d) => d.graph.search_recipe !== 'cross_encoder',
+          banner: 'Set Search recipe → Cross-encoder above to enable these settings.',
+          fields: [
+            {
+              kind: 'model',
+              modelKind: 'rerank',
+              path: 'graph.reranker.model_id',
+              emptyFallback: 'llm.default_reranker'
+            },
+            {
+              kind: 'grid',
+              fields: [
+                { kind: 'number', path: 'graph.reranker.min_relevance' },
+                { kind: 'text', path: 'graph.reranker.device', placeholder: 'auto' }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       kind: 'card',
@@ -194,20 +228,48 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       ]
     },
     {
-      kind: 'customCard',
-      component: 'graphRetrievalAgent',
-      section: 'Retrieval Agent',
-      paths: [
-        'graph.eval.retrieval_agent.max_agent_turns',
-        'graph.eval.retrieval_agent.max_parallel_searches',
-        'graph.eval.retrieval_agent.hops_max',
-        'graph.eval.retrieval_agent.limit_default',
-        'graph.eval.retrieval_agent.limit_min',
-        'graph.eval.retrieval_agent.limit_max',
-        'graph.eval.max_elements_per_kind',
-        'graph.eval.max_fact_chars',
-        'graph.eval.max_episode_chars',
-        'graph.eval.max_summary_chars'
+      kind: 'card',
+      id: 'graphRetrievalAgent',
+      title: 'Retrieval Agent',
+      description:
+        'Loop-bound caps for the agentic memory-retrieval path. One global value for eval and chat — tune without hand-editing preferences.json.',
+      bodyId: PREFERENCES_SECTION_BODY_IDS.graphRetrievalAgent,
+      collapsible: true,
+      validate: (d) => validateRetrievalAgentLimits(d.graph.eval.retrieval_agent),
+      body: [
+        {
+          kind: 'panel',
+          title: 'Loop limits',
+          fields: [
+            {
+              kind: 'grid',
+              fields: [
+                { kind: 'number', path: 'graph.eval.retrieval_agent.max_agent_turns' },
+                { kind: 'number', path: 'graph.eval.retrieval_agent.max_parallel_searches' },
+                { kind: 'number', path: 'graph.eval.retrieval_agent.hops_max' },
+                { kind: 'number', path: 'graph.eval.retrieval_agent.limit_default' },
+                { kind: 'number', path: 'graph.eval.retrieval_agent.limit_min' },
+                { kind: 'number', path: 'graph.eval.retrieval_agent.limit_max' }
+              ]
+            }
+          ]
+        },
+        {
+          kind: 'panel',
+          title: 'Answer context',
+          hint: 'Caps the recalled set handed to the answerer + judge — score-ranked top-N per kind, each element sanitized to one capped line.',
+          fields: [
+            {
+              kind: 'grid',
+              fields: [
+                { kind: 'number', path: 'graph.eval.max_elements_per_kind' },
+                { kind: 'number', path: 'graph.eval.max_fact_chars' },
+                { kind: 'number', path: 'graph.eval.max_episode_chars' },
+                { kind: 'number', path: 'graph.eval.max_summary_chars' }
+              ]
+            }
+          ]
+        }
       ]
     },
     {
