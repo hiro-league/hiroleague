@@ -197,26 +197,18 @@ stale echo of its own output* (mem0 #4573). Because only user turns are ever sto
 internally-injected extraction context is **user-only**, so an anaphoric user turn ("yes, the
 second one") has **no antecedent to resolve against**.
 
-**Decided approach — 4A "assistant-as-context, user-only extraction" (chat's default ingestion;
-no pref):**
+**Decided approach — windowed batch ingestion (chat's default; no per-surface pref).** Chat stops
+writing one user turn per episode. Instead it **accumulates N exchanges** (both speakers) and
+ingests them **once** as a single timestamped, two-speaker episode — agent lines as *context*,
+**user-only extraction**. This restores the coreference signal eval gets from a two-sided corpus
+while keeping D2's anti-echo intent (agent facts are never recorded).
 
-- When ingesting a user turn, **fold the preceding assistant message** (turn N−1 — the reply the
-  user is responding to, pulled from conversation history) into the episode body as *context*.
-- Set `custom_extraction_instructions` so facts are **extracted/attributed only from the user**;
-  the assistant context is disambiguation only.
-- The assistant turn is **never stored as its own episode** → no echo. This keeps D2's intent
-  while restoring the coreference signal eval gets for free from a two-sided corpus.
+> A naïve "fold the prior assistant reply into every user turn" is **rejected** — it re-ingests
+> overlapping content every turn (duplicate episodes). The correct mechanism is a
+> **watermark-advanced, non-overlapping window**; see **[Ingestion — implementation design](#ingestion--implementation-design-windowed-batch)** below for the full algorithm, flush triggers, temporal model, prefs and touch points.
 
-Constraints / notes:
-
-- Graphiti's `previous_episodes` is **internally injected** — we control only the *count*, not
-  the content — so 4A must **body-fold** the assistant context; it can't go through that channel.
-- Fold the **prior assistant reply (N−1)**, *not* the current reply (which is the answer *to*
-  this turn and is model output → folding it reintroduces echo and leaks the future).
-- Body-fold changes the stored episode text (what BM25 indexes / shows as the episode body) —
-  acceptable, but noted.
-- **Eval stays two-sided** (unchanged): its benchmarks require the assistant turns as gold
-  episodes. Eval is the testbench; it does **not** adopt 4A.
+**Eval stays two-sided and per-line** (unchanged): its benchmarks require the assistant turns as
+gold episodes. Eval is the testbench; it does **not** adopt the chat windowing.
 
 ### I2 — timestamps → at parity (no action)
 
@@ -233,18 +225,183 @@ Noisy / multi-topic / greeting turns are absorbed by graphiti's extraction promp
 
 Memory query-rewrite is a *recall* concern, tracked with retrieval — not an ingestion input.
 
-### New — chunk guard for chat (oversized turns)
+### New — chunk guard for chat (oversized turns/windows)
 
 Memory turns aren't chunked (the corpus loader keeps eval bodies under `CHUNK_MIN_TOKENS`), but a
-**very long chat user turn is unguarded** and could trip graphiti's internal `should_chunk`,
-breaking the pre-seeded `uuid == point_id` invariant (`graphiti_ingest.py:508`). **Action: guard
-chat turns against the threshold and expose `chunk_min_tokens` as a chat/memory preference** so it
-is tunable.
+**large chat body is unguarded** and could trip graphiti's internal `should_chunk`, breaking the
+pre-seeded `uuid == point_id` invariant (`graphiti_ingest.py:508`). Windowing makes this sharper
+(a window is bigger than one turn). Folded into the design below: a **turn-granular guard** that
+*shrinks the window* rather than truncating text — see the [design section](#ingestion--implementation-design-windowed-batch).
 
 ### Rollout / params
 
 Keep ingestion params **shared today**; add **eval-specific overrides later** (factory seam or a
 `graph.eval.ingest.*` namespace) when we want eval to A/B configs independently of chat.
+
+---
+
+## Ingestion — implementation design (windowed batch)
+
+> **Status:** design agreed (this session), no code yet. This is the concrete plan for the I1
+> assistant-side gap + the chunk guard. Chat-only; **eval ingestion is untouched**.
+
+### Essence
+
+A conversation is a stream of **exchanges** — `U1 A1 U2 A2 U3 A3 …`. Chat ingestion changes from
+"one user turn → one episode" to: **accumulate N exchanges, then ingest that window once** as a
+single two-speaker, timestamped episode — non-overlapping, watermark-advanced, so **no exchange is
+ever ingested twice**. `memory_search` (recall) stays **per-turn**; only extraction/storage
+(`memory_out`) batches. The graph grows every N turns, not every turn.
+
+### Turn structure — chat vs eval (different units)
+
+| | Eval corpus turn | Chat turn (at `memory_out`) |
+|---|---|---|
+| Unit | one **utterance** (pre-segmented corpus line) | one **exchange** = user msg **+** this character's reply |
+| Fields | `{id, timestamp, speaker, body}` | `user_text`+`inbound_id`+`routing.timestamp`; `reply_text`+`reply_id`; `character_id`; `thread_id`; `channel_id` |
+| Speakers on hand | one per line | **both at once** (user + this character) |
+| Episode mapping | 1 line → 1 episode (**unchanged**) | **N exchanges → 1 windowed episode (2N speaker lines)** |
+
+### Identities (existing settings — no new naming knobs)
+
+- **User speaker label** = `memory.user_name` (`models.py:180`, the A1 anchor; falls back to `User`).
+- **Agent speaker label** = the **character's `name`** (`characters` table, `character.py:76`),
+  resolved by `state["character_id"]`. Each `(user, character)` memory group already isolates one
+  character, so its name is the agent label for that group.
+
+### Window body
+
+A timestamped two-speaker transcript (agent lines are **context**; extraction is **user-only**):
+
+```
+[2026-07-01 09:00] {user_name}: U1
+[2026-07-01 09:00] {Character.name}: A1
+[2026-07-01 09:12] {user_name}: U2
+[2026-07-01 09:12] {Character.name}: A2
+…                                        (up to N exchanges)
+```
+
+- Passed to the facade pre-assembled with `speaker=""`, so `_episode_body` emits it verbatim
+  (`graphiti_ingest.py` unchanged). The user's `{user_name}:` prefix preserves A1 anchoring.
+- `custom_extraction_instructions` (per-call override, see touch points) instructs the extractor
+  to record facts **only from the user** (incl. the user's confirmations), treating agent lines
+  as disambiguation context — never recording agent-only assertions (D2 intact).
+
+### The batching process — per-conversation watermark
+
+State is a single **N-independent** cursor per conversation; windows are reconstructed from
+**durable history** (not the `chat.max_messages`-trimmed `state["messages"]`):
+
+```
+on memory_out(turn):
+  gap = now − last_pending_turn_time
+  if pending and gap > session_gap:          # trigger 3 (session boundary) — flush BEFORE adding
+      flush(pending)                          # its own episode, real turn times
+  append current turn to pending
+  while len(pending) ≥ N:                     # trigger 1 (count) — loop-flush drains any backlog
+      flush(window ≤ N)                        # trigger 2 (size) applied inside flush
+```
+
+- **No duplication** — the watermark only moves forward over contiguous windows.
+- **Skipping is safe** — turns below the threshold aren't lost; they live in persisted history and
+  join the next window.
+- **Watermark key = the conversation** (`thread_id`/`chat_channel_id`); the episode still writes to
+  `mem_{user}_{character}`. Interleaving two threads into one episode would be nonsense, so batching
+  is per-conversation. Cursor row lives in `data.db` (`conversation_id → last_ingested_message_id,
+  last_activity_ts`).
+
+### Flush triggers (three)
+
+1. **Count** — pending reaches `window_turns` (N).
+2. **Size** — the turn-granular **chunk guard** (below).
+3. **Session-gap** — the next turn is further than `session_gap_minutes` from the last pending
+   turn → close the prior burst as a session, start fresh. Runs **before** the current turn is
+   appended (the new turn belongs to the new session).
+
+### Chunk guard (turn-granular — shrink, don't truncate)
+
+Assemble the window; if `estimate_tokens(body) ≥ chunk_min_tokens`:
+
+- **> 1 turn:** drop turns until it fits → ingest fewer turns; the rest stay pending (watermark
+  advances only by what was ingested). **N is a max, not a fixed count.**
+- **exactly 1 turn, still too big:** the only case where we **trim that turn's text + `⚠️` warn**
+  (unavoidable to preserve `uuid == point_id`).
+
+### Temporal model
+
+Two distinct signals, deliberately not conflated:
+
+- **`reference_time` (hard, graphiti's engine)** = the window's **last turn** time. Drives each
+  fact's default `valid_at` and cross-episode supersession ordering (a later window's facts can
+  invalidate an earlier window's; `invalid_at` ≈ the newer window's time). Cross-window ordering is
+  monotonic; **intra-window** ordering by `reference_time` is lost (all facts share one time).
+- **Per-line body timestamps (soft, for the extractor)** *recover* that intra-window resolution —
+  explicit ordered times the extraction LLM can attach as `valid_at` — plus time-of-day context.
+- **The session-gap lock tightens the window's time span**, so the single `reference_time` is
+  genuinely representative (fewer facts bunched at a misleading time). Gap-lock + body timestamps
+  are complementary temporal mitigations.
+- **Empirical check at impl time** (not a design branch): confirm graphiti promotes body
+  timestamps into `valid_at` and does **not** extract the `[…]` prefix as a spurious entity. If it
+  ignores them, windowing carries a real `valid_at`-resolution cost → weigh smaller N vs. coarser
+  temporal.
+
+### Idle flush (backstop)
+
+`memory_out` can't self-trigger on silence, so a session the user never returns to needs an
+**out-of-band** flush: a background **sweep** flushes conversations idle longer than
+`idle_flush_hours`, ingesting the partial window with **real turn timestamps** (not flush time) and
+advancing the watermark. The sweep **check interval is internal (hourly)** — not a pref — narrow
+enough that the 12h backstop actually means ~12h. Division of labor: `session_gap` (reactive) does
+the real grouping on the user's *return*; `idle_flush` only rescues *abandoned* sessions.
+
+### Changing N mid-conversation is safe
+
+The watermark stores a **position, never N**; N is read fresh each `memory_out`. Raising N just
+defers the next boundary; lowering N flushes a smaller window on the next turn; **loop-flush**
+drains any backlog (from an N-decrease, an idle-flush, or a chunk-shrink) into successive
+non-overlapping episodes. Nothing already committed shifts.
+
+### Preferences (all under `MemoryExtractionPreferences`, `models.py:154`)
+
+| Pref | Default | Role |
+|---|---|---|
+| `window_turns` (N) | TBD | count cap — exchanges per window (`1` = every turn) |
+| `chunk_min_tokens` | graphiti's `CHUNK_MIN_TOKENS` | size cap / guard threshold |
+| `session_gap_minutes` | ~120 | reactive session boundary (tunable — episode granularity vs coherence) |
+| `idle_flush_hours` | 12 | background backstop for abandoned sessions |
+
+Sweep check interval: **internal, hourly** (no pref). Full pref round-trip per CLAUDE.md (backend
+model → `gen:prefs-types` → Memory/extraction UI card → schema-driven save → `npm run check` +
+prefs tests → **server restart**). UI card placement to be confirmed with the user (don't guess).
+
+### Touch points
+
+| # | File | Change |
+|---|---|---|
+| 1 | `domain/preferences/models.py` (`MemoryExtractionPreferences`) | add `window_turns`, `chunk_min_tokens`, `session_gap_minutes`, `idle_flush_hours`. |
+| 2 | `data.db` layer | durable per-conversation ingest cursor: read / advance / query-stale (for the sweep). |
+| 3 | `runtime/agent_graph/nodes/memory.py` (`_store_turn_memory`) | batching controller: gap/count/size flush logic, reconstruct window from durable history, resolve `Character.name` + `memory.user_name`, build the timestamped transcript. |
+| 4 | background sweep (runtime) | hourly pass flushing conversations idle > `idle_flush_hours`. |
+| 5 | `services/memory/graphiti_conversation.py` (`add`/`__init__`) | accept a pre-assembled window body (`speaker=""`), apply the turn-granular chunk guard, pass the user-only `custom_extraction_instructions` override; anchor episode uuid = window's last user message id. |
+| 6 | `services/knowledge/graph/graphiti_service.py` (`ingest_chunks`) | new optional `custom_extraction_instructions` pass-through (append memory clause to shared nudge). |
+| 7 | `services/memory/__init__.py` (factories) | chat facade = windowed/user-only config; eval facade unchanged (per-line, two-sided). |
+
+`graphiti_ingest.py` / `ingest_episodes` stay **unchanged**.
+
+### Decided design choices (were open)
+
+- **Watermark store:** per-conversation cursor in `data.db` (episode still lands in the
+  `(user, character)` group).
+- **Episode uuid:** keep it (it *is* the point_id); anchor to the window's **last user message id**
+  — no synthetic window id (it would only coarsen citation to the closing turn for zero gain).
+- **`reference_time`:** window's **last turn** (monotonic cross-window supersession).
+- **Extraction scope:** user-only (agent = context); D2 preserved.
+- **Flush drain:** loop-flush is standard. **Sweep** (not per-conversation timers) for idle.
+
+### Not in scope
+
+Eval ingestion (per-line, two-sided); eval-specific ingest overrides (deferred — params shared
+today); all retrieval / `memory_block` / answer-prompt work (Section 3 + retrieval track).
 
 ## 3. Outputs — the biggest controllable lever
 

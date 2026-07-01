@@ -23,32 +23,100 @@ export const DEFAULT_PREFERENCE_TAB: PreferenceTabId = 'models';
 
 export const PREFERENCE_TABLIST_LABEL = 'Preference sections';
 
-export const PREFERENCE_TAB_IDS: Record<PreferenceTabId, string> = {
-  models: 'preferences-tab-models',
-  knowledge: 'preferences-tab-knowledge',
-  'graph-engine': 'preferences-tab-graph-engine',
-  eval: 'preferences-tab-eval',
-  agent: 'preferences-tab-agent',
-  'tuning-profiles': 'preferences-tab-tuning-profiles'
+/** Intro paragraph shown above a tab's cards — a live section description or a static string. */
+export type PrefTabIntro = { sectionKey: string } | { text: string };
+
+/**
+ * One page-level preference tab. This registry is the SINGLE source for a tab's identity: its strip
+ * label, its manifest (or hand-rolled marker), the intro paragraph, and any legacy `#hash` aliases.
+ * Every per-tab map below (`PREFERENCE_TABS`, the html/panel ids, the manifest + legacy maps) is
+ * DERIVED from it — adding a tab means adding one entry here, not editing six parallel objects. The
+ * `preferences-tab-map` test asserts `PREFERENCE_TAB_PATH_RULES` still routes every path to one tab.
+ */
+export type PrefTabDescriptor = {
+  id: PreferenceTabId;
+  label: string;
+  /** Manifest-driven tabs render via `PrefManifestTab`; hand-rolled tabs (Model Profiles) omit it. */
+  manifest?: PrefTabManifest;
+  /** Optional intro paragraph above the cards. */
+  intro?: PrefTabIntro;
+  /** Interactive header affordance rendered beside the intro (string key → widget in PrefManifestTab). */
+  headerAction?: 'knowledgeBrowse';
+  /** Extra legacy `#hash` aliases beyond the canonical `preferences-<id>` (from merged/removed tabs). */
+  legacyAliases?: readonly string[];
+  /** Field paths + section titles a hand-rolled (non-manifest) tab contributes, in render order. */
+  handRolled?: { fields: readonly string[]; sections: readonly string[] };
 };
 
-export const PREFERENCE_TAB_PANEL_IDS: Record<PreferenceTabId, string> = {
-  models: 'preferences-panel-models',
-  knowledge: 'preferences-panel-knowledge',
-  'graph-engine': 'preferences-panel-graph-engine',
-  eval: 'preferences-panel-eval',
-  agent: 'preferences-panel-agent',
-  'tuning-profiles': 'preferences-panel-tuning-profiles'
-};
-
-export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = [
-  { id: 'models', label: 'General' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'graph-engine', label: 'Memory' },
-  { id: 'knowledge', label: 'Knowledge' },
-  { id: 'eval', label: 'Eval' },
-  { id: 'tuning-profiles', label: 'Model Profiles' }
+// Registry order drives the tab strip order AND the page's field/section render order.
+export const PREFERENCE_TAB_REGISTRY: readonly PrefTabDescriptor[] = [
+  {
+    id: 'models',
+    label: 'General',
+    manifest: MODELS_MANIFEST,
+    intro: { sectionKey: 'llm' },
+    // Media settings were merged into the General tab; keep the legacy anchor working.
+    legacyAliases: ['preferences-media']
+  },
+  {
+    id: 'agent',
+    label: 'Agent',
+    manifest: AGENT_MANIFEST,
+    intro: { sectionKey: 'chat' },
+    // Agent Memory tab was merged into the Agent tab; keep the legacy anchor working.
+    legacyAliases: ['preferences-memory']
+  },
+  {
+    id: 'graph-engine',
+    label: 'Memory',
+    manifest: GRAPH_ENGINE_MANIFEST,
+    intro: {
+      text:
+        'One Graphiti temporal-graph engine, shared by Agent Memory and Knowledge — these models ' +
+        'and graph-search settings apply to both. (Whether Knowledge retrieval uses the graph is the ' +
+        '"Graph backend" toggle on the Knowledge tab.) Changing the graph embedder re-indexes all ' +
+        'graph data.'
+    }
+  },
+  {
+    id: 'knowledge',
+    label: 'Knowledge',
+    manifest: KNOWLEDGE_MANIFEST,
+    intro: { sectionKey: 'knowledge' },
+    headerAction: 'knowledgeBrowse'
+  },
+  {
+    id: 'eval',
+    label: 'Eval',
+    manifest: EVAL_MANIFEST,
+    intro: {
+      text:
+        'Settings for the evaluation harness — the answer and judge models the eval runs use, and ' +
+        "the memory-eval answer/judge prompt libraries. Eval-only; these don't affect production " +
+        'chat, knowledge, or memory.'
+    }
+  },
+  {
+    id: 'tuning-profiles',
+    label: 'Model Profiles',
+    // Hand-rolled table CRUD (no manifest) — registers its single field + section name explicitly.
+    handRolled: { fields: ['tuning_profiles'], sections: ['Model Profiles'] }
+  }
 ];
+
+// The html/panel ids follow a fixed convention (`preferences-tab-<id>` / `preferences-panel-<id>`),
+// so they're derived — no hand-maintained id maps to drift from the registry.
+export const PREFERENCE_TAB_IDS = Object.fromEntries(
+  PREFERENCE_TAB_REGISTRY.map((tab) => [tab.id, `preferences-tab-${tab.id}`])
+) as Record<PreferenceTabId, string>;
+
+export const PREFERENCE_TAB_PANEL_IDS = Object.fromEntries(
+  PREFERENCE_TAB_REGISTRY.map((tab) => [tab.id, `preferences-panel-${tab.id}`])
+) as Record<PreferenceTabId, string>;
+
+export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = PREFERENCE_TAB_REGISTRY.map(
+  (tab) => ({ id: tab.id, label: tab.label })
+);
 
 // ---------------------------------------------------------------------------
 // Path → tab assignment (Settings search / index)
@@ -116,49 +184,32 @@ export function tabForPreferencePath(path: string): PreferenceTabId | null {
 // single field + section name explicitly. (`tabForPreferencePath` above stays a small prefix table —
 // the subtree-ownership map that lets the per-manifest tests catch a field someone forgot to add to
 // a manifest.)
-const PREFERENCE_TAB_MANIFESTS: Partial<Record<PreferenceTabId, PrefTabManifest>> = {
-  models: MODELS_MANIFEST,
-  agent: AGENT_MANIFEST,
-  'graph-engine': GRAPH_ENGINE_MANIFEST,
-  knowledge: KNOWLEDGE_MANIFEST,
-  eval: EVAL_MANIFEST
-};
-
-// Field paths + section titles a hand-rolled (non-manifest) tab contributes, in render order.
-const HANDROLLED_TAB_FIELDS: Partial<Record<PreferenceTabId, readonly string[]>> = {
-  'tuning-profiles': ['tuning_profiles']
-};
-const HANDROLLED_TAB_SECTIONS: Partial<Record<PreferenceTabId, readonly string[]>> = {
-  'tuning-profiles': ['Model Profiles']
-};
-
-function tabFieldPaths(tab: PreferenceTabId): readonly string[] {
-  const manifest = PREFERENCE_TAB_MANIFESTS[tab];
-  return manifest ? manifestFieldPaths(manifest) : (HANDROLLED_TAB_FIELDS[tab] ?? []);
+function tabFieldPaths(tab: PrefTabDescriptor): readonly string[] {
+  return tab.manifest ? manifestFieldPaths(tab.manifest) : (tab.handRolled?.fields ?? []);
 }
 
-function tabSectionTitles(tab: PreferenceTabId): readonly string[] {
-  const manifest = PREFERENCE_TAB_MANIFESTS[tab];
-  return manifest ? manifestCardSections(manifest) : (HANDROLLED_TAB_SECTIONS[tab] ?? []);
+function tabSectionTitles(tab: PrefTabDescriptor): readonly string[] {
+  return tab.manifest ? manifestCardSections(tab.manifest) : (tab.handRolled?.sections ?? []);
 }
 
 // Field render order across the page: tab order, then each tab's manifest field order. Orders search
 // arrow-nav to follow the visual top-to-bottom layout. DERIVED — the manifests are the single source.
-export const PREFERENCE_FIELD_ORDER: readonly string[] = PREFERENCE_TABS.flatMap((tab) =>
-  tabFieldPaths(tab.id)
-);
+export const PREFERENCE_FIELD_ORDER: readonly string[] = PREFERENCE_TAB_REGISTRY.flatMap(tabFieldPaths);
 
 // Card/section titles in render order (tab order, then card order within each tab). Drives
 // search-result section grouping/ordering. DERIVED from the manifests' card order.
-export const PREFERENCE_SECTION_ORDER: readonly string[] = PREFERENCE_TABS.flatMap((tab) =>
-  tabSectionTitles(tab.id)
-);
+export const PREFERENCE_SECTION_ORDER: readonly string[] =
+  PREFERENCE_TAB_REGISTRY.flatMap(tabSectionTitles);
 
-// path → section (card) title, merged across every manifest (+ the hand-rolled Model Profiles tab).
+// path → section (card) title, merged across every manifest (+ each hand-rolled tab's section).
 // Each path lives in exactly one tab, so the merge can't collide.
-const PREFERENCE_SECTION_BY_PATH: Record<string, string> = { tuning_profiles: 'Model Profiles' };
-for (const manifest of Object.values(PREFERENCE_TAB_MANIFESTS)) {
-  if (manifest) Object.assign(PREFERENCE_SECTION_BY_PATH, manifestSections(manifest));
+const PREFERENCE_SECTION_BY_PATH: Record<string, string> = {};
+for (const tab of PREFERENCE_TAB_REGISTRY) {
+  if (tab.manifest) {
+    Object.assign(PREFERENCE_SECTION_BY_PATH, manifestSections(tab.manifest));
+  } else if (tab.handRolled) {
+    for (const path of tab.handRolled.fields) PREFERENCE_SECTION_BY_PATH[path] = tab.handRolled.sections[0];
+  }
 }
 
 /**
@@ -170,19 +221,14 @@ export function sectionForPreferencePath(path: string): string | null {
   return PREFERENCE_SECTION_BY_PATH[path] ?? null;
 }
 
-/** Legacy `#preferences-*` scroll anchors from the pre-tab layout. */
-export const LEGACY_PREFERENCE_HASH_TO_TAB: Record<string, PreferenceTabId> = {
-  'preferences-models': 'models',
-  // Media settings were merged into the General (models) tab; keep the legacy anchor working.
-  'preferences-media': 'models',
-  // Agent Memory tab was merged into the Agent tab; keep the legacy anchor working.
-  'preferences-memory': 'agent',
-  'preferences-knowledge': 'knowledge',
-  'preferences-graph-engine': 'graph-engine',
-  'preferences-eval': 'eval',
-  'preferences-agent': 'agent',
-  'preferences-tuning-profiles': 'tuning-profiles'
-};
+// Legacy `#preferences-*` scroll anchors from the pre-tab layout. DERIVED — each tab's canonical
+// `preferences-<id>` anchor plus any `legacyAliases` from merged/removed tabs.
+export const LEGACY_PREFERENCE_HASH_TO_TAB: Record<string, PreferenceTabId> = Object.fromEntries(
+  PREFERENCE_TAB_REGISTRY.flatMap((tab) => [
+    [`preferences-${tab.id}`, tab.id] as const,
+    ...(tab.legacyAliases ?? []).map((hash) => [hash, tab.id] as const)
+  ])
+);
 
 export function preferenceTabQuery(tab: PreferenceTabId): string {
   if (tab === DEFAULT_PREFERENCE_TAB) return '';

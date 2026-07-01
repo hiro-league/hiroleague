@@ -2,6 +2,7 @@ import type { CatalogModelRow } from '$lib/api/catalog';
 import type { WorkspacePreferences } from '$lib/api/preferences';
 import type { PreferencePath } from '$lib/api/generated/preferences-paths.generated';
 import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+import { setPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
 
 export type PrefModelKind = 'chat' | 'stt' | 'tts' | 'embedding' | 'rerank';
 
@@ -89,64 +90,28 @@ export function prefModelCatalog(
   }
 }
 
-/** Apply a catalog model id to the draft at `path`. Returns false when the write is blocked. */
+// Model paths whose write is blocked while a backend lock flag is set (dimension-bound embedders
+// that can't change once data is indexed). The picker is already disabled in the UI when locked;
+// this is the last-line guard so a stale enabled control can't sneak a write through. Any path not
+// listed here writes unconditionally.
+const MODEL_PATH_LOCK_GUARDS: Partial<
+  Record<PrefModelIdPath, (draft: WorkspacePreferences) => boolean>
+> = {
+  'knowledge.default_embedding_model': (draft) =>
+    Boolean(draft.knowledge.default_embedding_model_locked)
+};
+
+/**
+ * Apply a catalog model id to the draft at `path`. Returns false when a lock guard blocks the write.
+ * The write itself is the generic dotted-path setter (`setPreferenceByPath`) — `PrefModelIdPath`
+ * keeps the caller type-safe, so a new model field is picked up without editing this function.
+ */
 export function applyModelIdToDraft(
   draft: WorkspacePreferences,
   path: PrefModelIdPath,
   id: string | null
 ): boolean {
-  switch (path) {
-    case 'llm.default_chat':
-      draft.llm.default_chat = id;
-      return true;
-    case 'llm.default_stt':
-      draft.llm.default_stt = id;
-      return true;
-    case 'llm.default_tts':
-      draft.llm.default_tts = id;
-      return true;
-    case 'llm.default_reranker':
-      draft.llm.default_reranker = id;
-      return true;
-    case 'llm.default_embedder':
-      draft.llm.default_embedder = id;
-      return true;
-    case 'knowledge.default_embedding_model':
-      if (draft.knowledge.default_embedding_model_locked) return false;
-      draft.knowledge.default_embedding_model = id;
-      return true;
-    case 'knowledge.answering.model':
-      draft.knowledge.answering.model = id;
-      return true;
-    case 'knowledge.retrieval.reranker.model_id':
-      draft.knowledge.retrieval.reranker.model_id = id;
-      return true;
-    case 'graph.extraction_model':
-      draft.graph.extraction_model = id;
-      return true;
-    case 'graph.small_model':
-      draft.graph.small_model = id;
-      return true;
-    case 'graph.embedder_model':
-      draft.graph.embedder_model = id;
-      return true;
-    case 'graph.reranker.model_id':
-      draft.graph.reranker.model_id = id;
-      return true;
-    case 'graph.eval.answer_model':
-      draft.graph.eval.answer_model = id;
-      return true;
-    case 'graph.eval.judge_model':
-      draft.graph.eval.judge_model = id;
-      return true;
-    case 'graph.eval.retrieval_model':
-      draft.graph.eval.retrieval_model = id;
-      return true;
-    default: {
-      // Exhaustiveness guard: adding a PrefModelIdPath without a case here is a compile error,
-      // so a new model field can't silently no-op (skip markDirty) on select.
-      const _exhaustive: never = path;
-      return _exhaustive;
-    }
-  }
+  if (MODEL_PATH_LOCK_GUARDS[path]?.(draft)) return false;
+  setPreferenceByPath(draft, path, id);
+  return true;
 }

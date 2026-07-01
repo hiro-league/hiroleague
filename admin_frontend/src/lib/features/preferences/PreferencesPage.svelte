@@ -13,16 +13,13 @@
   } from '$lib/components/page/collapsible-section-registry.svelte';
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import Button from '$lib/components/ui/button.svelte';
-  import AgentSection from '$lib/features/preferences/sections/AgentSection.svelte';
-  import EvalSection from '$lib/features/preferences/sections/EvalSection.svelte';
-  import GraphEngineSection from '$lib/features/preferences/sections/GraphEngineSection.svelte';
-  import KnowledgeSection from '$lib/features/preferences/sections/KnowledgeSection.svelte';
-  import ModelsSection from '$lib/features/preferences/sections/ModelsSection.svelte';
   import TuningProfilesSection from '$lib/features/preferences/sections/TuningProfilesSection.svelte';
+  import PrefManifestTab from '$lib/features/preferences/widgets/manifest/PrefManifestTab.svelte';
   import {
     PREFERENCE_TAB_IDS,
     PREFERENCE_TAB_PANEL_IDS,
     PREFERENCE_TABLIST_LABEL,
+    PREFERENCE_TAB_REGISTRY,
     PREFERENCE_TABS,
     type PreferenceTabId
   } from '$lib/features/preferences/shared/preferences-tabs';
@@ -86,6 +83,13 @@
       count: search.active ? search.countsByTab[tab.id] || undefined : undefined,
       countClass: 'ml-1 font-semibold text-[#eab308]'
     }))
+  );
+
+  // The active tab's registry descriptor, when it's manifest-driven (rendered via PrefManifestTab).
+  // The hand-rolled Model Profiles tab has no manifest and is dispatched separately below. Only the
+  // active tab mounts, so this resolves to at most one descriptor.
+  const activeManifestTab = $derived(
+    PREFERENCE_TAB_REGISTRY.find((tab) => tab.id === tabPrefs.activeTab && tab.manifest)
   );
 
   async function switchTab(tab: PreferenceTabId) {
@@ -282,18 +286,10 @@
   {:else if ctrl.error}
     <InlineDestructiveAlert message={ctrl.error} class="p-4 text-sm" />
   {:else if ctrl.draft}
-    {#if tabPrefs.activeTab === 'models'}
-      <ModelsSection {ctrl} />
-    {:else if tabPrefs.activeTab === 'knowledge'}
-      <KnowledgeSection {ctrl} />
-    {:else if tabPrefs.activeTab === 'graph-engine'}
-      <GraphEngineSection {ctrl} />
-    {:else if tabPrefs.activeTab === 'eval'}
-      <EvalSection {ctrl} />
-    {:else if tabPrefs.activeTab === 'agent'}
-      <AgentSection {ctrl} />
-    {:else}
+    {#if tabPrefs.activeTab === 'tuning-profiles'}
       <TuningProfilesSection {ctrl} />
+    {:else if activeManifestTab}
+      <PrefManifestTab {ctrl} tab={activeManifestTab} />
     {/if}
   {/if}
 </AdminPageHeader>

@@ -131,8 +131,6 @@ export type PrefCardSpec = {
 };
 
 export type PrefTabManifest = {
-  /** Intro paragraph rendered above the cards (optional). */
-  intro?: string;
   cards: PrefCardSpec[];
 };
 
