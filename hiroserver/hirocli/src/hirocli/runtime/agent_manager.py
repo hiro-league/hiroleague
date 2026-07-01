@@ -495,7 +495,12 @@ class AgentManager:
         terminal_decision = "completed"
         terminal_detail = "text_reply"
         terminal_error = ""
-        ledger_sink = getattr(self._graph, "_ledger_sink", None)
+        # The per-turn ledger sink lives on the graph's AgentServices — ``ChatAgentGraph`` exposes no
+        # ``_ledger_sink`` attribute, so the old ``getattr(self._graph, "_ledger_sink", None)`` always
+        # resolved to None: no RunAccumulator was opened, so chat turns wrote NO ``@run`` aggregate
+        # row (→ they vanished from the Graph Runs list) and ``current_run`` was never set (→ a memory
+        # ingest couldn't nest under the turn). Read it from services, the same sink the nodes use.
+        ledger_sink = getattr(getattr(self._graph, "services", None), "ledger_sink", None)
         accumulator = (
             RunAccumulator(
                 sink=ledger_sink,

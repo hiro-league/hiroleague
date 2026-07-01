@@ -367,3 +367,18 @@ async def test_store_turn_memory_skipped_without_channel(tmp_path, monkeypatch) 
     )
 
     assert calls == []  # no channel → no windowed ingest
+
+
+def test_chat_graph_exposes_ledger_sink_for_run_accumulator(tmp_path) -> None:
+    """Regression: agent_manager opens the per-turn RunAccumulator (which writes the chat ``@run``
+    aggregate row + sets ``current_run``) from ``graph.services.ledger_sink``. ``ChatAgentGraph``
+    exposes no ``_ledger_sink`` attribute, so if this path breaks, chat turns write NO ``@run`` row
+    and vanish from the Graph Runs list (and memory ingests can't nest under the turn)."""
+    from hirocli.runtime.agent_graph.chat import ChatAgentGraph
+
+    services = make_agent_services(tmp_path)
+    graph = ChatAgentGraph(services)
+    # The EXACT resolution agent_manager.handle uses — must yield the same sink the nodes write to.
+    sink = getattr(getattr(graph, "services", None), "ledger_sink", None)
+    assert sink is not None
+    assert sink is services.ledger_sink
