@@ -50,10 +50,15 @@
     return Number.isFinite(step) && traceStepIds.has(step);
   }
 
-  /** Ingest-trace marker on the PARENT episode row (``knowledge_graph_ingest/episode``). A
-   *  run is either an ingest run or a retrieval run, so the two markers never collide. */
+  /** Ingest-trace marker on the episode row (``knowledge_graph_ingest/episode``). Keyed on the
+   *  NODE NAME, not ``isParentStep``: a knowledge-document ingest episode is a top-level step, but a
+   *  conversation-memory ingest nests UNDER ``memory_out`` so its episode is a SUB-step (e.g.
+   *  ``8.1``) — it must still get the marker. A run is either an ingest or a retrieval run, so the
+   *  markers never collide. */
   function rowHasIngestTrace(row: GraphLedgerRow): boolean {
-    if (!onOpenIngestTrace || !isParentStep(row)) return false;
+    if (!onOpenIngestTrace || String(row.node ?? '') !== 'knowledge_graph_ingest/episode') {
+      return false;
+    }
     const step = stepOf(row);
     return Number.isFinite(step) && ingestTraceStepIds.has(step);
   }

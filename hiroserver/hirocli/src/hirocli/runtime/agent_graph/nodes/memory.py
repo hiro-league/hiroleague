@@ -252,10 +252,13 @@ class MemoryNodes(NodeGroup):
         memory_run_id = str(state.get("chat_channel_id") or state.get("thread_id") or "")
         character_id = state.get("character_id", "")
         ext = memory_prefs.extraction
-        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_out`` step
-        # (current_substep) — the ingest ledger auto-attaches to the chat run via ``current_run``;
-        # passing ``self._ledger_sink`` (inside the controller) is what turns those rows on. Token
-        # cost is priced on those sub-rows, so this node's own row carries no usage.
+        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_out`` step:
+        # ``substep_scope`` sets ``current_substep``, and the graph-ingest ledger borrows THIS node's
+        # run id from ``current_entry`` (a chat turn has no ``current_run`` accumulator) so its rows
+        # land as sub-rows of ``memory_out`` in the chat run — instead of spawning a standalone
+        # ``knowledge_graph_ingest`` run the Graph Runs page can't render. ``self._ledger_sink``
+        # (passed inside the controller) turns those rows on. Token cost prices on those sub-rows, so
+        # this node's own row carries no usage.
         with substep_scope():
             try:
                 result = await ingest_pending_windows(

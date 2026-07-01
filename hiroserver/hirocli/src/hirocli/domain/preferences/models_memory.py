@@ -8,25 +8,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .defaults import DEFAULT_MEMORY_TUNING_PROFILE_ID, pref_field
+# DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS lives in ``defaults`` alongside PROMPT_DEFAULTS (mirroring
+# chat.instructions), so the admin prompt-editor "Restore default" restores it — a memory-scoped
+# extraction clause with {user}/{character} placeholders filled at ingest with the real speaker
+# names. NOT the shared ``graph.custom_extraction_instructions`` (knowledge + eval) nor
+# ``chat.instructions`` (answer-time persona guidance, a different pipeline stage).
+from .defaults import (
+    DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
+    DEFAULT_MEMORY_TUNING_PROFILE_ID,
+    pref_field,
+)
 
 DEFAULT_MEMORY_SEARCH_TOP_K = 8
-
-# Default extraction clause the CHAT facade appends when ingesting windowed two-speaker episodes:
-# attribute facts to the human user only; the assistant/character lines are context (D2 anti-echo).
-# The ``{user}`` / ``{character}`` placeholders are filled at ingest with the ACTUAL speaker names
-# (the body uses bare names for A1 anchoring, so the role→name mapping must be stated explicitly or
-# the extractor has to guess which speaker is the human). Editable per workspace via
-# ``memory.extraction.instructions``. Memory-scoped on purpose — it must NOT ride
-# ``graph.custom_extraction_instructions`` (shared with knowledge + eval) nor ``chat.instructions``
-# (answer-time persona guidance, a different pipeline stage).
-DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS = (
-    'This text is a chat transcript. In it, "{user}" is the human user and "{character}" is the AI '
-    "assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY "
-    "about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines "
-    "purely as context for resolving what {user} refers to — never record a fact asserted by "
-    "{character} that {user} did not state or confirm."
-)
 
 
 class MemorySearchPreferences(BaseModel):

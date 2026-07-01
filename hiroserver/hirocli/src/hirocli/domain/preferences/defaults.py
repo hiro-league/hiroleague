@@ -384,6 +384,21 @@ DEFAULT_CHAT_INSTRUCTIONS = load_prompt("chat_instructions")
 PROMPT_DEFAULTS["chat.instructions"] = DEFAULT_CHAT_INSTRUCTIONS
 
 
+# Chat conversation-memory extraction guidance (``memory.extraction.instructions``). The
+# ``{user}`` / ``{character}`` placeholders are filled with the real speaker names at ingest so the
+# extractor knows which labelled speaker is the human vs the assistant. Registered in
+# PROMPT_DEFAULTS so the admin prompt-editor "Restore default" restores THIS text (not blank) and a
+# value equal to the default prunes from preferences.json like the other prompt defaults.
+DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS = (
+    'This text is a chat transcript. In it, "{user}" is the human user and "{character}" is the AI '
+    "assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY "
+    "about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines "
+    "purely as context for resolving what {user} refers to — never record a fact asserted by "
+    "{character} that {user} did not state or confirm."
+)
+PROMPT_DEFAULTS["memory.extraction.instructions"] = DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS
+
+
 class AnswerPromptProfile(BaseModel):
     """A named mem-eval answer-prompt recipe — the answer analog of ``ImageProfile`` / tuning
     profiles. A run picks which profile's instruction block the memory-eval recall leg uses

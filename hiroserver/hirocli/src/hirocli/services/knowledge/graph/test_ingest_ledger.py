@@ -177,3 +177,46 @@ async def test_no_ledger_sink_is_silent(tmp_path: Path) -> None:
     stats = await ingest_episodes(g, eps, source_role="user_document", group_id="kb_main")
     assert stats.episodes_processed == 1
     assert not (tmp_path / "logs" / "graph.log").exists()
+
+
+@pytest.mark.asyncio
+async def test_ingest_ledger_nests_under_active_chat_node(tmp_path) -> None:
+    """A memory ingest during a chat turn (active ``current_entry`` = ``memory_out``, no
+    ``current_run``) must NEST under the chat run — borrow the node's run id and set it as
+    ``current_run`` so per-episode entries resolve the chat run id — instead of spawning a rogue
+    standalone ``knowledge_graph_ingest`` run the Graph Runs page can't render."""
+    from hirocli.runtime.agent_graph.ledger import current_entry, current_run, current_substep
+    from hirocli.services.knowledge.graph.ingest_ledger import (
+        GRAPH_INGEST_RUN_ID_PREFIX,
+        knowledge_graph_ingest_ledger,
+    )
+
+    sink = LedgerSink(tmp_path)
+    entry = sink.open_entry("memory_out", {"inbound_id": "abc"})
+    assert entry.run_id == "chat-abc"
+    tok_e = current_entry.set(entry)
+    tok_s = current_substep.set(entry.step_index)
+    try:
+        async with knowledge_graph_ingest_ledger(sink=sink) as run:
+            assert run.nested is True
+            assert run.run_id == "chat-abc"
+            assert not run.run_id.startswith(GRAPH_INGEST_RUN_ID_PREFIX)  # no rogue standalone run
+            acc = current_run.get()
+            assert acc is not None and acc.run_id == "chat-abc"  # episodes resolve the chat run id
+    finally:
+        current_substep.reset(tok_s)
+        current_entry.reset(tok_e)
+
+
+@pytest.mark.asyncio
+async def test_ingest_ledger_standalone_without_active_node(tmp_path) -> None:
+    """Knowledge-doc ingest / CLI (no active node entry) keeps its own top-level run."""
+    from hirocli.services.knowledge.graph.ingest_ledger import (
+        GRAPH_INGEST_RUN_ID_PREFIX,
+        knowledge_graph_ingest_ledger,
+    )
+
+    sink = LedgerSink(tmp_path)
+    async with knowledge_graph_ingest_ledger(sink=sink, document_id="doc-1") as run:
+        assert run.nested is False
+        assert run.run_id.startswith(GRAPH_INGEST_RUN_ID_PREFIX)

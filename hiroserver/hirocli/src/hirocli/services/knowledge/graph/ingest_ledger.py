@@ -244,6 +244,28 @@ async def knowledge_graph_ingest_ledger(
         )
         return
 
+    # Chat-turn ingest (conversation memory ``memory_out``): a chat turn ledgers per-node ENTRIES,
+    # not a ``current_run`` accumulator, so without this a memory ingest would fall through to the
+    # standalone branch and spawn a rogue top-level ``knowledge_graph_ingest`` run (mem_ group +
+    # ``conv:`` doc) that the Graph Runs page can't render. Instead, nest under the active node's run
+    # by borrowing its run_id: set a same-run accumulator so the per-episode entries resolve the
+    # CHAT run_id (via ``resolve_ledger_identity`` → ``current_run``) and land as sub-rows of
+    # ``memory_out`` (``current_substep``). No aggregate ``@run`` row (nested) — the node row is the
+    # parent. Knowledge-doc ingest / CLI have no active entry → they still take the standalone path.
+    entry = current_entry.get()
+    if entry is not None and getattr(entry, "run_id", ""):
+        accumulator = RunAccumulator(
+            sink=sink, run_id=entry.run_id, inbound_id=getattr(entry, "inbound_id", "") or entry.run_id
+        )
+        token = current_run.set(accumulator)
+        try:
+            yield GraphIngestLedgerRun(
+                run_id=entry.run_id, nested=True, accumulator=None, sink=sink
+            )
+        finally:
+            current_run.reset(token)
+        return
+
     run_id = f"{GRAPH_INGEST_RUN_ID_PREFIX}{uuid.uuid4()}"
     accumulator = RunAccumulator(sink=sink, run_id=run_id, inbound_id=document_id or run_id)
     token = current_run.set(accumulator)

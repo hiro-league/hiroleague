@@ -85,23 +85,26 @@ async def ingest_pending_windows(
     retries the rest, never re-ingesting."""
     cursor = get_cursor(workspace_path, channel_id)
 
-    # start-from-now: pin to the latest durable message, ingest nothing historical.
+    # First-ever watermark for this conversation. Decision A is "don't back-fill an EXISTING
+    # conversation's old history" — NOT "skip the current turn". So pin the watermark to the message
+    # BEFORE the current turn's user message (``rows[-1]`` is the just-arrived user message; its
+    # reply isn't durable yet), then fall through and window the current turn normally. A fresh /
+    # wiped conversation (only the current turn exists) gets an empty watermark, so turn 1 is
+    # counted — not consumed as an un-ingested anchor (the earlier start-from-now bug).
     if cursor is None:
         rows = await list_messages(workspace_path, channel_id, limit=None)
-        if rows:
-            last = rows[-1]
-            advance_cursor(
-                workspace_path,
-                channel_id,
-                last_ingested_id=str(last.get("external_id") or ""),
-                last_ingested_at=str(last.get("created_at") or ""),
-            )
-            log.info(
-                "🧭 memory windowing — start-from-now · channel=%s · pinned=%s",
-                channel_id,
-                last.get("external_id"),
-            )
-        return WindowIngestResult()
+        if not rows:
+            return WindowIngestResult()
+        prior = rows[-2] if len(rows) >= 2 else None
+        wm_id = str(prior.get("external_id") or "") if prior else ""
+        wm_at = str(prior.get("created_at") or "") if prior else ""
+        advance_cursor(workspace_path, channel_id, last_ingested_id=wm_id, last_ingested_at=wm_at)
+        cursor = {"last_ingested_id": wm_id, "last_ingested_at": wm_at}
+        log.info(
+            "🧭 memory windowing — first watermark · channel=%s · skip_prior_before=%s",
+            channel_id,
+            wm_id or "(none — fresh conversation)",
+        )
 
     rows = await list_messages(
         workspace_path,
