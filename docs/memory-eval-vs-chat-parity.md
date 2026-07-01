@@ -221,6 +221,83 @@ prompt, so persona voice is preserved.
   Run (reuse eval's usage attribution), so cost stays visible.
 - **Knowledge retrieve** untouched (toggled off during memory tests).
 
+### Detailed design (per phase)
+
+> Grounded in today's code. Expands each phase into concrete seams (files / functions / shapes).
+> Still design-level — signatures are the intended shape, not final.
+
+**Data flow (target):**
+`memory_search_node` → `MemoryRetriever.retrieve(query, history, …)` → `run_retrieval` →
+`RetrievalResult{accumulator, answer_text}` → state `{retrieved_memories: rich rows, memory_draft}`
+→ `memory_block` (via `format_recall_context`) + `search_conclusion_block(draft)` →
+`compose_context_node` → `inject_turn_context` (onto last human turn) → `call_model` (persona).
+
+**Phase 0 — `MemoryRetriever` seam + `run_retrieval` flags.** Today `run_retrieval` is called only
+from `runner_memory._recall_via_agent` and bakes in two eval-isms: it seeds
+`messages = [SystemMessage(prompt), HumanMessage(question)]` (no history) and runs an
+**unconditional verbatim fallback** on an empty accumulator (`retrieval_agent.py:359-370`).
+
+- **New** `MemoryRetriever` (`services/memory/agent/retriever.py`) — surface-neutral callable:
+  `retrieve(query, *, memory, limits, prompt_text, model, model_id, user_id, character_id, history=None, allow_abstain=False) -> RetrievalResult`. Just forwards to `run_retrieval`.
+- **Extend** `run_retrieval(...)` with `history: list[AnyMessage] | None = None` (seeded into
+  `messages` before the `HumanMessage(question)`) and `allow_abstain: bool = False` (gates the
+  fallback: `if acc.size()==0 and not allow_abstain: …`; abstain → `RetrievalResult(∅, "")`).
+- Eval's `_recall_via_agent` calls the seam with defaults ⇒ **byte-identical** behavior.
+- *Validate:* eval track regression (unchanged).
+
+**Phase 1 — chat config + prompt.** The caps type `RetrievalAgentLimits` (`models_graph.py:110`,
+"eval + chat parity") and the prompt machinery (`retrieval_agent_prompts` locked defaults +
+`resolve_retrieval_agent_prompt`, `models_graph.py:256-304`) are already generic.
+
+- **New chat retrieval prompt** — add a locked-default profile to `retrieval_agent_prompts`
+  (abstain-allowed + history-aware wording) selected by a chat-scoped active id; the eval prompt
+  stays (multi-prompt hosts both).
+- **Caps/model shared for now:** chat builds a **tight** `RetrievalAgentLimits` (`max_agent_turns=1`)
+  and reuses the eval retrieval-model builder. The formal `memory.retrieval.*` namespace (own
+  caps/model/active-prompt-id in admin UI) is the **deferred split** (post-task).
+- *Validate:* prefs tests, `npm run check`. UI card placement — **ask, don't guess**.
+
+**Phase 2 — wire the loop into `memory_search_node`** (`runtime/agent_graph/nodes/memory.py:87`).
+
+- Gather `history = state["messages"]`, `query = user_text`; resolve chat limits/prompt/model; call
+  `MemoryRetriever.retrieve(query, memory=self.services.memory, history=history, allow_abstain=True, …)`.
+- Stash into state: `retrieved_memories =` rich rows
+  (`present_accumulator` → `accumulated_item_to_recall_row`), and **new** `memory_draft: str | None`
+  (`GraphState`) `= result.answer_text`.
+- **Ledger:** the node already runs under `@graph_logged(captures={"usage","decision"})`; the loop's
+  `_write_recall_usage` → `observe(usage=…)` lands on that entry ⇒ cost shows as the recall node.
+- **Keep the flat `memory_block`** this phase (rows adapted) to isolate loop-wiring risk from render.
+- *Validate:* latency (one added LLM call), abstain skips chit-chat (empty rows, no reply
+  regression), ledger nesting, error paths.
+
+**Phase 3 — rich render via `format_recall_context`** (`services/eval/judge.py:206`).
+
+- `memory_block` (`context_assembly.py:159`) body ⇒ `format_recall_context(memories, render)` with a
+  chat `RecallRenderOptions` (`show_event_time=True`, `show_superseded=True`, large `max_*` = no
+  meaningful truncation). Pure formatting on rows already in state.
+- **Layering:** `format_recall_context` lives under `services/eval` — importing eval into runtime is
+  a smell; **move it to a shared render module** (e.g. `services/memory/agent/presentation.py`) as
+  part of this phase (common-utility rule); eval imports from the new home.
+- *Validate:* temporal / relationship / `SUPERSEDED` present, kinds grouped, no bad truncation.
+
+**Phase 4 — draft + persona answer.**
+
+- **Draft block:** new `search_conclusion_block(draft)` `ContextBlock` (heading e.g.
+  "## Memory search conclusion") assembled in `compose_context_node` (`nodes/context.py:85`) — it
+  rides in **turn_context** (`inject_turn_context`, `llm.py:143`), *not* the persona system prompt,
+  so character voice stays clean.
+- **Light grounding nudge:** one short line in turn_context ("use the recalled facts + the search
+  conclusion where relevant; prefer the current fact when validity is shown; if memory doesn't cover
+  it, say so") — again in turn_context, not `config.system_prompt`.
+- **Retune** chat retrieval + answer settings (temp etc.).
+- *Validate:* persona uses memory and can override the draft; voice preserved.
+
+**Phase 5 — tune & measure.** Loosen caps, tune the chat retrieval + grounding prompts, A/B vs the
+eval bar; optional cheap **pre-gate** heuristic before the loop if per-turn cost matters.
+
+**New state / shapes:** `GraphState.memory_draft: str | None`; `retrieved_memories` becomes the rich
+recall rows (same shape eval passes to `format_recall_context`), not raw `hits`.
+
 ---
 
 ## 1. Configuration — essentially at parity ✅
