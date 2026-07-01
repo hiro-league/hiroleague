@@ -1,5 +1,5 @@
 import {
-  clearWorkspaceMemories,
+  clearWorkspaceGroup,
   deleteWorkspaceMemories,
   listWorkspaceMemories
 } from '$lib/api/memory';
@@ -27,11 +27,14 @@ export async function loadMemoriesList(groupId?: string): Promise<{
   }
 }
 
-export async function clearAllMemories(): Promise<void> {
-  await clearWorkspaceMemories();
+/** Wipe one whole partition (facts + entities + episodes + communities) — "Clear group". */
+export async function clearGroup(groupId: string): Promise<void> {
+  const gid = groupId.trim();
+  if (!gid) return;
+  await clearWorkspaceGroup(gid);
 }
 
-/** Delete several memories at once (the filtered "Clear shown" set). No-op on empty input. */
+/** Delete several memories at once (the filtered "Clear memories" set). No-op on empty input. */
 export async function deleteMemories(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   await deleteWorkspaceMemories(ids);

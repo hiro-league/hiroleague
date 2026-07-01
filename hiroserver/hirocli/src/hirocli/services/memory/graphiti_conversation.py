@@ -388,6 +388,23 @@ class GraphitiConversationMemory:
             await self._graph.clear_group(group)
         return len(existing)
 
+    async def clear_groups(self, group_ids: list[str]) -> int:
+        """Wipe whole partitions — backs the admin "Clear group" action (memories redesign).
+
+        Unlike :meth:`delete_many` (which forgets specific fact edges), this drops each
+        group's ENTIRE contents via :meth:`GraphitiMemoryService.clear_group` — facts +
+        entities + episodes + communities — so a cleared group is truly empty (and drops
+        out of the group selector, since it's derived from the Episodic table). Callers
+        (the route) validate the ids against the group grammar first; blank ids are dropped
+        and empty input is a no-op. Returns the total episodes removed."""
+        groups = [str(g).strip() for g in (group_ids or []) if str(g).strip()]
+        if not groups:
+            return 0
+        total = 0
+        for group in groups:
+            total += await self._graph.clear_group(group)
+        return total
+
     async def delete(self, memory_id: str) -> None:
         """Forget one fact (memory) by its edge id (facts-as-memory, decision D3)."""
         mid = str(memory_id or "").strip()

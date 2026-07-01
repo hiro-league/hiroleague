@@ -16,10 +16,12 @@
     groupsForMemoryFilterDropdown = [],
     characterOptions,
     sourcesForMemoryFilterDropdown,
-    visibleMemoriesCount,
+    canClearMemories,
+    clearableMemoryCount,
     memoryActionBusy,
     memoriesLoading,
-    onRequestClearAll,
+    onRequestClearMemories,
+    onRequestClearGroup,
     onRefreshMemories
   }: {
     filters: Record<MemoryFilterKey, string>;
@@ -27,10 +29,14 @@
     groupsForMemoryFilterDropdown?: { value: string; label: string }[];
     characterOptions: { value: string; label: string }[];
     sourcesForMemoryFilterDropdown: { value: string; label: string }[];
-    visibleMemoriesCount: number;
+    /** Offer "Clear memories" (row filter active + relation facts in view). */
+    canClearMemories: boolean;
+    /** Relation-fact count "Clear memories" would delete (button label). */
+    clearableMemoryCount: number;
     memoryActionBusy: boolean;
     memoriesLoading: boolean;
-    onRequestClearAll: () => void;
+    onRequestClearMemories: () => void;
+    onRequestClearGroup: () => void;
     onRefreshMemories: () => void;
   } = $props();
 </script>
@@ -39,11 +45,12 @@
   <div class="memories-controls">
     <AdminFilterBar class="min-w-0 flex-1 items-end">
       {#if groupsForMemoryFilterDropdown.length > 0}
+        <!-- A single group is always selected — no "All" scope (it only ever meant conversation
+             memory, never knowledge/eval, which was confusing). No placeholder option. -->
         <AdminFilterBarSelect
           label="Group"
           value={filters.mem_group}
           onValueChange={(v) => setFilter('mem_group', v)}
-          placeholder="All memory"
           class="min-w-[12rem]"
           options={groupsForMemoryFilterDropdown}
         />
@@ -89,18 +96,34 @@
       />
     </AdminFilterBar>
     <div class="memories-actions">
-      {#if visibleMemoriesCount > 0}
+      {#if canClearMemories}
+        <!-- Deletes only the filtered relation facts in view (entities are excluded — use
+             Clear group for those). Hidden when no row filter narrows the list. -->
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={memoryActionBusy || memoriesLoading}
+          onclick={onRequestClearMemories}
+          title="Delete the filtered facts currently shown"
+        >
+          <Trash2 size={14} aria-hidden="true" />
+          Clear {clearableMemoryCount}
+          {clearableMemoryCount === 1 ? 'memory' : 'memories'}
+        </Button>
+      {/if}
+      {#if groupsForMemoryFilterDropdown.length > 0}
+        <!-- Wipes the whole selected partition: facts + entities + episodes + communities. -->
         <Button
           type="button"
           variant="destructive"
           size="sm"
           disabled={memoryActionBusy || memoriesLoading}
-          onclick={onRequestClearAll}
-          title="Delete the memories matching the current filters"
+          onclick={onRequestClearGroup}
+          title="Delete the entire selected group (facts, entities, episodes)"
         >
           <Trash2 size={14} aria-hidden="true" />
-          Clear {visibleMemoriesCount}
-          {visibleMemoriesCount === 1 ? 'memory' : 'memories'}
+          Clear group
         </Button>
       {/if}
       <Button

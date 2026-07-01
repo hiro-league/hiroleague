@@ -95,6 +95,14 @@ class MemoryService(Protocol):
         character_id: str | None = None,
     ) -> int: ...
 
+    async def clear_groups(
+        self,
+        group_ids: list[str],
+    ) -> int:
+        """Wipe whole graph partitions (facts + entities + episodes + communities) — backs
+        the admin "Clear group" action over the selected partition."""
+        ...
+
     async def delete(
         self,
         memory_id: str,

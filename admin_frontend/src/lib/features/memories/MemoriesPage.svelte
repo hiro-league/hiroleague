@@ -98,7 +98,10 @@
       channelById={ctl.channelById}
       groupLabelById={ctl.memoryGroupLabelById}
       memoryActionBusy={ctl.memoryActionBusy}
-      onRequestClearAll={ctl.requestClearMemoriesConfirm}
+      canClearMemories={ctl.canClearMemories}
+      clearableMemoryCount={ctl.clearableMemoryCount}
+      onRequestClearMemories={ctl.requestClearMemoriesConfirm}
+      onRequestClearGroup={ctl.requestClearGroupConfirm}
       onRefreshMemories={() => void ctl.refreshMemories()}
       onViewJson={ctl.showMemoryJsonRow}
       onViewProvenance={ctl.showMemoryProvenance}
@@ -113,9 +116,14 @@
   memoryProvenanceLoading={ctl.memoryProvenanceLoading}
   memoryProvenanceError={ctl.memoryProvenanceError}
   clearMemoriesConfirmOpen={ctl.clearMemoriesConfirmOpen}
+  clearGroupConfirmOpen={ctl.clearGroupConfirmOpen}
+  clearableMemoryCount={ctl.clearableMemoryCount}
+  selectedGroupLabel={ctl.selectedGroupLabel}
   memoryActionBusy={ctl.memoryActionBusy}
   onCloseMemoryJson={ctl.closeMemoryJsonDialog}
   onCloseProvenance={ctl.closeMemoryProvenance}
   onCloseClearMemories={ctl.closeClearMemoriesDialog}
   onConfirmClearMemories={() => void ctl.confirmClearMemories()}
+  onCloseClearGroup={ctl.closeClearGroupDialog}
+  onConfirmClearGroup={() => void ctl.confirmClearGroup()}
 />

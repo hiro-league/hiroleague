@@ -271,8 +271,8 @@ def _edge_to_memory(edge: Any) -> dict[str, Any]:
     }
 
 
-def _node_to_memory(node: Any) -> dict[str, Any] | None:
-    """One Graphiti entity node's summary → a plain memory dict (attribute-style memory).
+def _node_to_memory(node: Any) -> dict[str, Any]:
+    """One Graphiti entity node → a plain memory dict (attribute-style memory / entity).
 
     Graphiti stores two complementary memory shapes: relational facts on ``EntityEdge``
     (already surfaced by :func:`_edge_to_memory`) and per-entity attribute summaries on
@@ -281,19 +281,21 @@ def _node_to_memory(node: Any) -> dict[str, Any] | None:
     on the Graph panel yet not in the Memories tab. We now emit them as ``kind="summary"``
     rows alongside relation rows so the tab honestly reflects what's remembered.
 
-    Returns ``None`` for nodes with an empty summary (Graphiti only writes one once
-    ``summarize_entities`` runs) — they have nothing useful to show.
+    reason (memories admin redesign): entities WITHOUT a summary are no longer dropped —
+    they're emitted as ``kind="entity"`` rows (empty ``memory``, identified by name/type)
+    so the Memories list shows every entity, including the endpoint entities that
+    otherwise appeared only as names in a relation's Entities column. A ``summarize_entities``
+    pass fills the summary later, flipping the row to ``kind="summary"``.
 
-    ``chunk_ids`` are NOT carried for summary rows: a node summary is the *accumulated*
+    ``chunk_ids`` are NOT carried for entity rows: a node summary is the *accumulated*
     state across every episode that mentioned the entity (so its provenance isn't a
     single chunk like a relation has — the chunk-detail panel correctly hides for these).
     """
     summary = (getattr(node, "summary", "") or "").strip()
-    if not summary:
-        return None
     created_at = getattr(node, "created_at", None)
     return {
-        "kind": "summary",
+        # A summarized entity is an attribute memory; a bare one is just the entity.
+        "kind": "summary" if summary else "entity",
         "memory": summary,
         # The entity this summary is *about* + its ontology type — lets the admin table show
         # "Misho (Person)" beside the prose so a summary reads as a graph node, not a sentence.
@@ -812,10 +814,10 @@ class GraphitiMemoryService:
             row["source_name"] = name_by_uuid.get(row["source_id"], "")
             row["target_name"] = name_by_uuid.get(row["target_id"], "")
             rows.append(row)
+        # Every entity node becomes a row now (summarized → kind="summary", bare →
+        # kind="entity"); _node_to_memory no longer returns None.
         for node in nodes or []:
-            row = _node_to_memory(node)
-            if row is not None:
-                rows.append(row)
+            rows.append(_node_to_memory(node))
         return rows
 
     async def list_group_ids(self, prefix: str) -> list[str]:

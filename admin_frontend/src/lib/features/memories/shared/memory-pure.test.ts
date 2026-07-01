@@ -56,6 +56,15 @@ describe('memoryPrimaryText', () => {
     expect(memoryPrimaryText({ memory: { a: 1 } })).toBe('{"a":1}');
     expect(memoryPrimaryText({})).toBe('');
   });
+
+  it('falls back to the entity name for a bare entity with no summary', () => {
+    // kind="entity" rows carry an empty memory — show the entity name instead of a blank cell.
+    expect(memoryPrimaryText({ kind: 'entity', memory: '', entity_name: 'Ada' })).toBe('Ada');
+    // A summarized row keeps its summary text.
+    expect(memoryPrimaryText({ kind: 'summary', memory: 'turned 50', entity_name: 'Ada' })).toBe(
+      'turned 50'
+    );
+  });
 });
 
 describe('memoryStableKey', () => {
@@ -160,9 +169,11 @@ describe('memoryKind', () => {
   it('only accepts relation/summary', () => {
     expect(memoryKind({ kind: 'Relation' })).toBe('relation');
     expect(memoryKind({ kind: 'SUMMARY' })).toBe('summary');
+    expect(memoryKind({ kind: 'entity' })).toBe('entity');
     expect(memoryKind({ kind: 'other' })).toBe('');
     expect(memoryKindLabel({ kind: 'relation' })).toBe('Relation');
     expect(memoryKindLabel({ kind: 'summary' })).toBe('Summary');
+    expect(memoryKindLabel({ kind: 'entity' })).toBe('Entity');
     expect(memoryKindLabel({})).toBe('—');
   });
 });

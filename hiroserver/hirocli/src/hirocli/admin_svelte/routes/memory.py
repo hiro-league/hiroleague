@@ -164,6 +164,43 @@ async def clear_workspace_memories(
         return envelope_failure(str(exc))
 
 
+@memory_router.post("/memory/clear-group")
+async def clear_workspace_group(
+    workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Wipe ONE graph partition — backs the admin "Clear group" action. Unlike
+    ``/memory/delete`` (forgets specific fact edges), this drops the whole group: facts +
+    entities + episodes + communities. The client-supplied ``group_id`` is re-validated at
+    this API boundary against the closed group grammar (firm group policy,
+    docs/graph-group-policy-design.md §6) so a crafted/empty id can't wipe an unintended
+    partition. Returns the episode count removed."""
+    try:
+        body = await request.json()
+        raw_gid = body.get("group_id") if isinstance(body, dict) else None
+        gid = str(raw_gid or "").strip()
+        if not gid:
+            return envelope_failure("'group_id' is required.")
+        # Re-mint the untrusted client scope against the closed grammar before any write.
+        from hirocli.services.knowledge.graph.group_scope import (
+            GroupPolicyError,
+            validate_group_id,
+        )
+
+        try:
+            gid = validate_group_id(gid)
+        except GroupPolicyError as exc:
+            return envelope_failure(f"Invalid memory group: {exc}")
+        service, _ = await _resolve_memory_service(request, workspace_id)
+        if service is None:
+            return _service_unavailable()
+        deleted = await service.clear_groups([gid])
+        return _success({"deleted_count": deleted})
+    except Exception as exc:
+        log.error("clear group - admin failed", error=str(exc), exc_info=True)
+        return envelope_failure(str(exc))
+
+
 @memory_router.post("/memory/delete")
 async def delete_workspace_memories(
     workspace_id: SelectedWorkspaceIdDep,

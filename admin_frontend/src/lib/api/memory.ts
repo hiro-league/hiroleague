@@ -21,11 +21,19 @@ export async function listWorkspaceMemories(groupId?: string): Promise<ApiRespon
   return apiRequest<MemoryListData>(path);
 }
 
-export async function clearWorkspaceMemories(): Promise<ApiResponse<MemoryClearData>> {
-  return apiRequest<MemoryClearData>('/memory/clear', { method: 'POST' });
+/**
+ * Wipe ONE graph partition — backs the "Clear group" action. Unlike the fact-edge delete,
+ * this drops the whole group: facts + entities + episodes + communities. The backend
+ * re-validates `groupId` against the group grammar.
+ */
+export async function clearWorkspaceGroup(groupId: string): Promise<ApiResponse<MemoryClearData>> {
+  return apiRequest<MemoryClearData>('/memory/clear-group', {
+    method: 'POST',
+    body: { group_id: groupId }
+  });
 }
 
-/** Delete several memories (Graphiti fact edges) by id — backs the "Clear shown" action. */
+/** Delete several memories (Graphiti fact edges) by id — backs the "Clear memories" action. */
 export async function deleteWorkspaceMemories(ids: string[]): Promise<ApiResponse<MemoryClearData>> {
   return apiRequest<MemoryClearData>('/memory/delete', { method: 'POST', body: { ids } });
 }

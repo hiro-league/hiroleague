@@ -48,7 +48,10 @@
     channelById,
     groupLabelById,
     memoryActionBusy,
-    onRequestClearAll,
+    canClearMemories,
+    clearableMemoryCount,
+    onRequestClearMemories,
+    onRequestClearGroup,
     onRefreshMemories,
     onViewJson,
     onViewProvenance
@@ -72,7 +75,12 @@
     /** group_id → logical label (Knowledge / Memory · char / Eval · …) for the Group column. */
     groupLabelById: Map<string, string>;
     memoryActionBusy: boolean;
-    onRequestClearAll: () => void;
+    /** Offer "Clear memories" (row filter active + relation facts in view to delete). */
+    canClearMemories: boolean;
+    /** How many relation facts "Clear memories" would delete (for the button label). */
+    clearableMemoryCount: number;
+    onRequestClearMemories: () => void;
+    onRequestClearGroup: () => void;
     onRefreshMemories: () => void;
     onViewJson: (row: Record<string, unknown>) => void;
     onViewProvenance: (row: Record<string, unknown>) => void;
@@ -111,10 +119,12 @@
           {groupsForMemoryFilterDropdown}
           {characterOptions}
           {sourcesForMemoryFilterDropdown}
-          visibleMemoriesCount={visibleMemoriesRows.length}
+          {canClearMemories}
+          {clearableMemoryCount}
           {memoryActionBusy}
           {memoriesLoading}
-          {onRequestClearAll}
+          {onRequestClearMemories}
+          {onRequestClearGroup}
           {onRefreshMemories}
         />
       {/if}

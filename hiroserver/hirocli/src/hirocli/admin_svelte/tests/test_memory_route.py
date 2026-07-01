@@ -48,6 +48,10 @@ class FakeMemoryService:
         self._rows = []
         return count
 
+    async def clear_groups(self, group_ids: list[str]) -> int:
+        self.calls.append({"clear_group_ids": group_ids})
+        return 3
+
     async def delete(self, memory_id: str) -> None:
         self.deleted_ids.append(memory_id)
 
@@ -202,6 +206,64 @@ async def test_memory_clear_uses_live_workspace_service(
     assert result["ok"] is True
     assert result["data"] == {"deleted_count": 2}
     assert service.calls == [{"clear_user_id": user_id, "character_id": None}]
+
+
+def _request_with_body(tmp_path, service: FakeMemoryService, body: Any) -> SimpleNamespace:
+    """A fake FastAPI Request whose ``.json()`` yields ``body`` (routes that read a POST body)."""
+
+    async def _json() -> Any:
+        return body
+
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                ctx=SimpleNamespace(workspace_path=tmp_path, memory_service=service)
+            )
+        ),
+        json=_json,
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_clear_group_wipes_validated_partition(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # "Clear group" wipes ONE partition (facts + entities + episodes) via clear_groups after
+    # re-validating the client group_id at the API boundary.
+    service = FakeMemoryService()
+    request = _request_with_body(tmp_path, service, {"group_id": "kb_main"})
+    monkeypatch.setattr(
+        memory_route,
+        "resolve_workspace",
+        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
+    )
+
+    result = await memory_route.clear_workspace_group("ws-1", request)
+
+    assert result["ok"] is True
+    assert result["data"] == {"deleted_count": 3}
+    assert service.calls == [{"clear_group_ids": ["kb_main"]}]
+
+
+@pytest.mark.asyncio
+async def test_memory_clear_group_requires_group_id(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A missing/blank group_id is rejected before any wipe (never falls through to clear_groups).
+    service = FakeMemoryService()
+    request = _request_with_body(tmp_path, service, {"group_id": "  "})
+    monkeypatch.setattr(
+        memory_route,
+        "resolve_workspace",
+        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
+    )
+
+    result = await memory_route.clear_workspace_group("ws-1", request)
+
+    assert result["ok"] is False
+    assert service.calls == []
 
 
 @pytest.mark.asyncio

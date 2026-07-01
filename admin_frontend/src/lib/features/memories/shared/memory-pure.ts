@@ -17,7 +17,14 @@ import { rowMatches } from '$lib/search/match';
 
 export function memoryPrimaryText(m: Record<string, unknown>): string {
   const raw = m.memory ?? m.text ?? m.content ?? m['data'];
-  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'string') {
+    // A bare entity (kind="entity") has no summarized memory yet — fall back to its name so
+    // the Memory cell identifies the entity instead of rendering blank.
+    if (raw.trim() === '' && memoryKind(m) === 'entity') {
+      return String(memoryField(m, 'entity_name') ?? '').trim();
+    }
+    return raw;
+  }
   if (raw !== null && typeof raw === 'object') return JSON.stringify(raw);
   return raw === null || raw === undefined ? '' : String(raw);
 }
@@ -139,18 +146,20 @@ export function memorySourceLabel(row: Record<string, unknown>): string {
 // partition it lives in, and its provenance chunk_ids. All read fields the backend now
 // enriches onto each row (see graphiti_service._edge_to_memory/_node_to_memory).
 
-export type MemoryKind = 'relation' | 'summary' | '';
+export type MemoryKind = 'relation' | 'summary' | 'entity' | '';
 
-/** 'relation' = a fact edge between two entities; 'summary' = an entity attribute summary. */
+/** 'relation' = a fact edge between two entities; 'summary' = an entity attribute summary;
+ *  'entity' = an entity with no summary yet (shown so the list covers every entity). */
 export function memoryKind(row: Record<string, unknown>): MemoryKind {
   const k = String(row.kind ?? '').trim().toLowerCase();
-  return k === 'relation' || k === 'summary' ? k : '';
+  return k === 'relation' || k === 'summary' || k === 'entity' ? k : '';
 }
 
 export function memoryKindLabel(row: Record<string, unknown>): string {
   const k = memoryKind(row);
   if (k === 'relation') return 'Relation';
   if (k === 'summary') return 'Summary';
+  if (k === 'entity') return 'Entity';
   return '—';
 }
 
@@ -190,7 +199,7 @@ export function memoryEntities(row: Record<string, unknown>): MemoryEntities {
     if (!source && !target && !relation) return null;
     return { kind: 'relation', source, relation, target };
   }
-  if (k === 'summary') {
+  if (k === 'summary' || k === 'entity') {
     const entity = String(memoryField(row, 'entity_name') ?? '').trim();
     const type = String(memoryField(row, 'entity_type') ?? '').trim();
     if (!entity && !type) return null;

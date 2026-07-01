@@ -12,11 +12,16 @@
     memoryProvenanceLoading,
     memoryProvenanceError,
     clearMemoriesConfirmOpen,
+    clearGroupConfirmOpen,
+    clearableMemoryCount,
+    selectedGroupLabel,
     memoryActionBusy,
     onCloseMemoryJson,
     onCloseProvenance,
     onCloseClearMemories,
-    onConfirmClearMemories
+    onConfirmClearMemories,
+    onCloseClearGroup,
+    onConfirmClearGroup
   }: {
     memoryJsonRow: Record<string, unknown> | null;
     memoryProvenanceRow: Record<string, unknown> | null;
@@ -24,11 +29,16 @@
     memoryProvenanceLoading: boolean;
     memoryProvenanceError: string;
     clearMemoriesConfirmOpen: boolean;
+    clearGroupConfirmOpen: boolean;
+    clearableMemoryCount: number;
+    selectedGroupLabel: string;
     memoryActionBusy: boolean;
     onCloseMemoryJson: () => void;
     onCloseProvenance: () => void;
     onCloseClearMemories: () => void;
     onConfirmClearMemories: () => void;
+    onCloseClearGroup: () => void;
+    onConfirmClearGroup: () => void;
   } = $props();
 </script>
 
@@ -87,16 +97,37 @@
 <Dialog.Root open={clearMemoriesConfirmOpen} onOpenChange={(next) => { if (!next) onCloseClearMemories(); }}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Delete these memories?</Dialog.Title>
+      <Dialog.Title>
+        Delete {clearableMemoryCount} {clearableMemoryCount === 1 ? 'memory' : 'memories'}?
+      </Dialog.Title>
     </Dialog.Header>
     <p class="font-sans text-sm text-muted-foreground">
-      This permanently deletes the long-term memories currently shown (matching your filters)
-      for the default user. With no filters active, this clears all of them. This can't be undone.
+      This permanently deletes the filtered facts currently shown. Entities and episodes are
+      kept (use “Clear group” to wipe those). This can't be undone.
     </p>
     <Dialog.Footer>
       <Button variant="outline" disabled={memoryActionBusy} onclick={onCloseClearMemories}>Cancel</Button>
       <Button variant="destructive" disabled={memoryActionBusy} onclick={onConfirmClearMemories}>
         Delete
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={clearGroupConfirmOpen} onOpenChange={(next) => { if (!next) onCloseClearGroup(); }}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Clear the entire “{selectedGroupLabel}” group?</Dialog.Title>
+    </Dialog.Header>
+    <p class="font-sans text-sm text-muted-foreground">
+      This permanently wipes the whole partition — <strong>all facts, entities, episodes, and
+      communities</strong> in this group, not just what's shown. The group itself will disappear
+      from the selector. This can't be undone.
+    </p>
+    <Dialog.Footer>
+      <Button variant="outline" disabled={memoryActionBusy} onclick={onCloseClearGroup}>Cancel</Button>
+      <Button variant="destructive" disabled={memoryActionBusy} onclick={onConfirmClearGroup}>
+        Clear group
       </Button>
     </Dialog.Footer>
   </Dialog.Content>
