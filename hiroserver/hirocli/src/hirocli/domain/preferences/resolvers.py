@@ -235,33 +235,6 @@ def knowledge_answering_model_source(prefs: WorkspacePreferences) -> str | None:
     return None
 
 
-def _resolve_knowledge_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    tuning_profile_id: str,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the knowledge chat model (catalog + credentials) with a given tuning profile.
-
-    The model id is shared across knowledge LLM steps (explicit ``knowledge.answering.model``
-    else ``llm.default_chat``); only the tuning profile differs (answering vs rewrite).
-    """
-    explicit = (prefs.knowledge.answering.model or "").strip() or None
-    model_id = explicit or prefs.llm.default_chat
-    return _resolve_available_model(
-        prefs,
-        workspace_path,
-        model_id,
-        expected_kind="chat",
-        tuning_profile_id=tuning_profile_id,
-        log_label="_resolve_knowledge_llm",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
 def resolve_knowledge_answering_llm(
     prefs: WorkspacePreferences,
     workspace_path: Path,
@@ -270,9 +243,10 @@ def resolve_knowledge_answering_llm(
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
     """Resolve the knowledge answering chat model with catalog, credentials, and tuning."""
-    return _resolve_knowledge_llm(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
+        explicit_model=None,
         tuning_profile_id=prefs.knowledge.default_tuning_profile,
         workspace_id=workspace_id,
         credential_store=credential_store,
@@ -287,9 +261,10 @@ def resolve_knowledge_rewrite_llm(
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
     """Resolve the model for the query-rewrite step: same model, ``knowledge_rewrite`` tuning."""
-    return _resolve_knowledge_llm(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
+        explicit_model=None,
         tuning_profile_id=DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
         workspace_id=workspace_id,
         credential_store=credential_store,
@@ -308,9 +283,10 @@ def resolve_knowledge_graph_extraction_llm(
     Same answering-model resolution path; only the tuning profile differs
     (``knowledge_graph_extraction`` — temp=0, generous max_tokens, no reasoning).
     """
-    return _resolve_knowledge_llm(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
+        explicit_model=None,
         tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
         workspace_id=workspace_id,
         credential_store=credential_store,
@@ -329,16 +305,17 @@ def resolve_knowledge_graph_disambiguation_llm(
     Called only when the deterministic ladder (exact → fuzzy) cannot decide
     confidently. Tiny output budget — see the tuning profile.
     """
-    return _resolve_knowledge_llm(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
+        explicit_model=None,
         tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
         workspace_id=workspace_id,
         credential_store=credential_store,
     )
 
 
-def _resolve_graphiti_model(
+def _resolve_chat_llm(
     prefs: WorkspacePreferences,
     workspace_path: Path,
     *,
@@ -347,12 +324,13 @@ def _resolve_graphiti_model(
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
-    """Resolve a Graphiti model tier.
+    """Resolve a chat model tier (catalog + provider credentials + tuning) with the shared fallback.
 
-    Model id chain: explicit graph override (``knowledge.graph.*_model``) →
-    ``knowledge.answering.model`` → ``llm.default_chat``. Availability checks mirror
-    :func:`_resolve_knowledge_llm` (catalog + provider credentials). The tuning
-    profile is the per-tier graphiti profile.
+    Single fallback chain for every chat resolver: explicit override (``explicit_model`` — a graph
+    ``graph.*_model`` or eval override) → ``knowledge.answering.model`` → ``llm.default_chat``. The
+    knowledge answering/rewrite/graph tiers pass ``explicit_model=None`` (they have no per-tier
+    override, so they resolve from ``knowledge.answering.model`` down); the graphiti + eval tiers pass
+    their own override. Only the tuning profile differs per caller.
     """
     explicit = (explicit_model or "").strip() or None
     answering = (prefs.knowledge.answering.model or "").strip() or None
@@ -363,7 +341,7 @@ def _resolve_graphiti_model(
         model_id,
         expected_kind="chat",
         tuning_profile_id=tuning_profile_id,
-        log_label="_resolve_graphiti_model",
+        log_label="_resolve_chat_llm",
         workspace_id=workspace_id,
         credential_store=credential_store,
     )
@@ -377,7 +355,7 @@ def resolve_graphiti_extraction_model(
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
     """Graphiti pivot — the main extraction + edge tier (``ModelSize.medium``)."""
-    return _resolve_graphiti_model(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
         explicit_model=prefs.graph.extraction_model,
@@ -400,7 +378,7 @@ def resolve_graphiti_small_model(
     configured model still drives both tiers (with their separate tuning profiles).
     """
     explicit = prefs.graph.small_model or prefs.graph.extraction_model
-    return _resolve_graphiti_model(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
         explicit_model=explicit,
@@ -425,7 +403,7 @@ def resolve_eval_answer_llm(
     """Resolve the memory-eval ANSWER model — its own model override + tuning profile, separate
     from the judge. Model chain: ``graph.eval.answer_model`` → ``knowledge.answering.model`` →
     ``llm.default_chat`` (mirrors the graphiti tiers)."""
-    return _resolve_graphiti_model(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
         explicit_model=prefs.graph.eval.answer_model,
@@ -444,7 +422,7 @@ def resolve_eval_judge_llm(
 ) -> ResolvedModel | None:
     """Resolve the eval JUDGE model (both tracks) — its own model override + tuning profile,
     separate from the answer. Same fallback chain as :func:`resolve_eval_answer_llm`."""
-    return _resolve_graphiti_model(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
         explicit_model=prefs.graph.eval.judge_model,
@@ -466,7 +444,7 @@ def resolve_eval_retrieval_llm(
     ``knowledge.answering.model`` → ``llm.default_chat``. The answer-model tier preserves prior
     behavior (the retrieval loop borrowed the answer model before it had a dedicated preference),
     so an unset ``retrieval_model`` resolves to exactly the same model as the answer step."""
-    return _resolve_graphiti_model(
+    return _resolve_chat_llm(
         prefs,
         workspace_path,
         explicit_model=prefs.graph.eval.retrieval_model or prefs.graph.eval.answer_model,

@@ -228,3 +228,16 @@ async def test_memory_delete_uses_mem0_memory_id(
     assert result["ok"] is True
     assert result["data"] == {"memory_id": "mem-1"}
     assert service.deleted_ids == ["mem-1"]
+
+
+def test_sort_memories_tolerates_out_of_range_dates() -> None:
+    """A Graphiti fact can carry an out-of-range valid_at/created_at (pre-1970, year-0001,
+    far-future). datetime.timestamp() raises OSError on Windows / OverflowError elsewhere for
+    those — the sort must NOT 500 the whole Memories list; such rows sort as epoch-0 (oldest)."""
+    rows = [
+        {"id": "recent", "created_at": "2026-07-01T09:00:00+00:00"},
+        {"id": "ancient", "created_at": "0001-01-01T00:00:00+00:00"},
+    ]
+    # year-0001 → datetime.timestamp() raises (OSError on Windows) → treated as epoch-0, sorts last.
+    ordered = [r["id"] for r in memory_route._sort_memories(rows)]
+    assert ordered == ["recent", "ancient"]

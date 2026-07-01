@@ -86,7 +86,27 @@ export const AGENT_MANIFEST: PrefTabManifest = {
             gatedMemoryField({ kind: 'toggle', path: 'memory.search.enabled' }),
             gatedMemoryField({ kind: 'number', path: 'memory.search.top_k' })
           ]
-        }
+        },
+        // Windowed batch ingestion knobs (memory.extraction.*) — gated by the memory master switch.
+        // How many turns batch into one memory episode and when a batch is closed/flushed.
+        {
+          kind: 'grid',
+          fields: [
+            gatedMemoryField({ kind: 'number', path: 'memory.extraction.window_turns' }),
+            gatedMemoryField({ kind: 'number', path: 'memory.extraction.session_gap_minutes' }),
+            gatedMemoryField({ kind: 'number', path: 'memory.extraction.idle_flush_hours' }),
+            gatedMemoryField({ kind: 'number', path: 'memory.extraction.chunk_min_tokens' })
+          ]
+        },
+        // Extraction-time guidance for chat memory (which facts enter the graph from a two-speaker
+        // window) — NOT the answer-time chat instructions, and applied to memory only.
+        gatedMemoryField({
+          kind: 'prompt',
+          path: 'memory.extraction.instructions',
+          hint: 'Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window of user + assistant turns). By default it tells the extractor to record facts about the user only, using the assistant’s turns as context. This shapes WHICH facts are stored — it is separate from the answer-time chat instructions, and applies to conversation memory only (not knowledge documents).',
+          ariaLabel: 'Memory extraction instructions',
+          editorLabel: 'Memory extraction instructions editor'
+        })
       ]
     }
   ]

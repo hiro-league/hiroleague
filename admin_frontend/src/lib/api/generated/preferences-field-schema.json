@@ -173,6 +173,54 @@
     "default": true,
     "title": "Remember new facts after each reply"
   },
+  "memory.extraction.window_turns": {
+    "path": "memory.extraction.window_turns",
+    "nullable": false,
+    "type": "integer",
+    "default": 4,
+    "title": "Turns per memory batch",
+    "description": "Conversation turns (user+agent exchanges) accumulated into one memory episode before extraction. 1 = ingest every turn; higher batches more turns into a richer episode.",
+    "min": 1,
+    "max": 50
+  },
+  "memory.extraction.chunk_min_tokens": {
+    "path": "memory.extraction.chunk_min_tokens",
+    "nullable": false,
+    "type": "integer",
+    "default": 1000,
+    "title": "Max tokens per memory episode",
+    "description": "Token budget for a batched memory episode. A window over this sheds turns to fit (a lone oversized turn is trimmed). Keep at/below Graphiti's chunk threshold so an episode is never re-split.",
+    "min": 100,
+    "max": 8000
+  },
+  "memory.extraction.session_gap_minutes": {
+    "path": "memory.extraction.session_gap_minutes",
+    "nullable": false,
+    "type": "integer",
+    "default": 120,
+    "title": "New-session gap (minutes)",
+    "description": "If the next message arrives more than this many minutes after the previous one, the pending turns are ingested as a finished session and a new batch starts.",
+    "min": 1,
+    "max": 10080
+  },
+  "memory.extraction.idle_flush_hours": {
+    "path": "memory.extraction.idle_flush_hours",
+    "nullable": false,
+    "type": "integer",
+    "default": 12,
+    "title": "Idle flush (hours)",
+    "description": "A background sweep ingests a conversation's pending turns after this many hours of inactivity, so an abandoned conversation's memories still land.",
+    "min": 1,
+    "max": 168
+  },
+  "memory.extraction.instructions": {
+    "path": "memory.extraction.instructions",
+    "nullable": false,
+    "type": "string",
+    "default": "This text is a chat transcript. In it, \"{user}\" is the human user and \"{character}\" is the AI assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines purely as context for resolving what {user} refers to \u2014 never record a fact asserted by {character} that {user} did not state or confirm.",
+    "title": "Memory extraction instructions",
+    "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge or eval."
+  },
   "knowledge.default_embedding_model": {
     "path": "knowledge.default_embedding_model",
     "nullable": true,

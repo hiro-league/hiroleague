@@ -44,6 +44,7 @@ class _FakeGraph:
                 "source_role": source_role,
                 "group_id": group_id,
                 "ledger_sink": kwargs.get("ledger_sink"),
+                "extra_extraction_instructions": kwargs.get("extra_extraction_instructions"),
             }
         )
         return SimpleNamespace(
@@ -142,6 +143,41 @@ async def test_add_ingests_user_turn_as_message_episode() -> None:
     # facts learned == stored_count (facts-as-memory, D3)
     assert result.stored_count == 3
     assert result.usage is None  # fake graph fires no LLM calls → no usage captured
+
+
+@pytest.mark.asyncio
+async def test_windowed_add_binds_speaker_names_in_extraction_clause() -> None:
+    # The {user}/{character} placeholders are filled with the metadata speaker names, so the
+    # extractor knows which labelled speaker is the human vs the assistant (roles explicit).
+    g = _FakeGraph()
+    mem = GraphitiConversationMemory(
+        g,
+        extraction_instructions='"{user}" is the human; "{character}" is the AI. Extract {user} only.',
+    )
+    await mem.add(
+        "[09:00] Misho: pizza\n[09:00] Aria: nice",
+        user_id=1,
+        run_id="c",
+        character_id="aria",
+        metadata={
+            "message_id": "w1",
+            "prerendered": True,
+            "user_name": "Misho",
+            "character_name": "Aria",
+        },
+    )
+    instr = g.ingest_calls[0]["extra_extraction_instructions"]
+    assert instr == '"Misho" is the human; "Aria" is the AI. Extract Misho only.'
+    assert "{user}" not in instr and "{character}" not in instr
+    assert g.ingest_calls[0]["episodes"][0].speaker == ""  # prerendered → not re-prefixed
+
+    # Empty names fall back to the same labels the window body uses ("User" / "Assistant").
+    await mem.add(
+        "body", user_id=1, run_id="c", character_id="aria",
+        metadata={"message_id": "w2", "prerendered": True},
+    )
+    instr2 = g.ingest_calls[1]["extra_extraction_instructions"]
+    assert '"User" is the human; "Assistant" is the AI' in instr2
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ from hirocli.runtime.preferences_runtime import (
 )
 
 preferences_router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _preferences_runtime(request: Request, workspace_id: str | None) -> WorkspacePreferencesRuntime:
@@ -117,27 +120,43 @@ async def patch_preferences(
     request: Request,
     workspace_id: SelectedWorkspaceIdDep,
 ) -> dict[str, Any]:
+    # Human-first breadcrumb: prefs edits change runtime behavior, so log who changed which paths on
+    # every PATCH. Computed before the try so the failure branches can report the attempted paths too.
+    changed = sorted(str(path).strip() for path in body.edits)
     try:
         runtime = _preferences_runtime(request, workspace_id)
-        updated = runtime.update_many(body.edits)
+        runtime.update_many(body.edits)
         # Keep the graph-embedder lock in sync with live data for the returned payload.
         from hirocli.services.knowledge.graph.graph_index_marker import sync_graph_indexed_marker
 
         await sync_graph_indexed_marker(runtime._workspace_path)
+        logger.info(
+            "✅ Preferences updated — %s · %s",
+            workspace_id or "?",
+            ", ".join(changed) if changed else "(none)",
+            extra={"changed": changed, "workspace_id": workspace_id},
+        )
         return {
             "ok": True,
             "error": None,
             "data": {
-                "changed": sorted(str(path).strip() for path in body.edits),
+                "changed": changed,
                 "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
                 # Same map as GET — the controller refreshes its state from the PATCH response.
                 "prompt_defaults": dict(PROMPT_DEFAULTS),
             },
         }
-    except PreferencePathError as exc:
-        return {"ok": False, "error": str(exc), "data": None}
-    except ValidationError as exc:
+    except (PreferencePathError, ValidationError) as exc:
+        # Expected user-facing rejections (unknown path / failed bounds) — WARNING, not a stack trace.
+        logger.warning(
+            "⚠️ Preferences update rejected — %s · %s",
+            workspace_id or "?",
+            ", ".join(changed) if changed else "(none)",
+            extra={"error": str(exc), "changed": changed, "workspace_id": workspace_id},
+        )
         return {"ok": False, "error": str(exc), "data": None}
     except Exception as exc:
+        # Unexpected failure — log with traceback instead of swallowing it silently.
+        logger.exception("❌ Preferences update failed — %s", workspace_id or "?")
         return {"ok": False, "error": str(exc), "data": None}

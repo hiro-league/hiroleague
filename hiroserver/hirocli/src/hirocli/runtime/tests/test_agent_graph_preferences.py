@@ -189,14 +189,33 @@ async def test_memory_search_records_search_and_result_previews(tmp_path) -> Non
     assert row.get("output_preview") == "results: 1 · User prefers concise replies"
 
 
+def _patch_ingest(monkeypatch, *, returns: int, sink: list[dict]):
+    """Replace the windowed-ingest controller with an async recorder — the node's job is to gather
+    state/prefs and delegate; the controller's data.db/windowing behavior is covered by
+    ``services/memory/test_windowed_ingest.py`` + ``test_windowing.py``."""
+    import hirocli.services.memory.windowed_ingest as wi
+    from hirocli.services.memory.windowed_ingest import WindowIngestResult
+
+    async def _fake(_memory, **kwargs):
+        sink.append(kwargs)
+        return WindowIngestResult(facts=returns, triggers=("count",) if returns else ())
+
+    monkeypatch.setattr(wi, "ingest_pending_windows", _fake)
+
+
 @pytest.mark.asyncio
-async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
+async def test_memory_out_delegates_to_windowed_ingest(tmp_path, monkeypatch) -> None:
+    """memory_out gathers the turn + windowing prefs and delegates to the windowed controller,
+    splicing the CURRENT reply so its exchange can complete with no lag."""
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
     graph = MemoryNodes(services)
-    events = []
+
+    calls: list[dict] = []
+    _patch_ingest(monkeypatch, returns=1, sink=calls)
+    events: list[dict] = []
 
     result = await graph.memory_out_node(
         {
@@ -212,32 +231,36 @@ async def test_memory_out_stores_turn_after_reply_event(tmp_path) -> None:
 
     assert result["reply_text"] == "Noted."
     assert events[-1]["event"] == GRAPH_MEMORY_STORED
-    # User turn ONLY — the assistant reply is intentionally not ingested (decision D2).
-    assert memory.added[0]["content"] == "remember that I like tea"
-    assert memory.added[0]["user_id"] == get_default_user_id(tmp_path)
-    assert memory.added[0]["run_id"] == "12"
-    assert memory.added[0]["character_id"] == "hiro"
-    assert memory.added[0]["metadata"] == {
-        "message_id": "in-1",  # episode uuid → provenance back to the turn (decision D5)
-        "thread_id": "thread-1",
-        "channel_id": 12,
-        "source": "conversation",
-        "speaker": "",  # no user_name configured → graphiti_conversation falls back to "User"
-        "timestamp": None,  # no inbound_envelope here → ingest stamps 'now'
-    }
+    assert len(calls) == 1
+    kw = calls[0]
+    assert kw["channel_id"] == 12
+    assert kw["character_id"] == "hiro"
+    assert kw["run_id"] == "12"
+    assert kw["user_id"] == get_default_user_id(tmp_path)
+    # The current reply is spliced (external_id == the turn's reply_id) so no lag.
+    assert kw["current_reply_text"] == "Noted."
+    assert kw["current_reply_id"] == result["reply_id"]
+    # Windowing knobs threaded from memory.extraction.* (defaults).
+    assert kw["window_turns"] == 4
+    assert kw["session_gap_minutes"] == 120
+    assert kw["chunk_min_tokens"] == 1000
 
 
 @pytest.mark.asyncio
-async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(tmp_path) -> None:
-    """``memory_out`` forwards the turn's ledger_sink to the memory write (so Graphiti's
-    ingest steps nest under this node in Graph Runs) and records decision + preview — but
-    NOT usage: the extraction cost is priced on those nested sub-rows, so folding it onto the
-    parent row too would double-count it in the turn total."""
+async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
+    tmp_path, monkeypatch
+) -> None:
+    """``memory_out`` forwards the turn's ledger_sink to the windowed write (so Graphiti's ingest
+    steps nest under this node in Graph Runs) and records decision + preview — but NOT usage: the
+    extraction cost is priced on the nested sub-rows, so folding it here too would double-count."""
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
     graph = MemoryNodes(services)
+
+    calls: list[dict] = []
+    _patch_ingest(monkeypatch, returns=1, sink=calls)
 
     sink = LedgerSink(tmp_path)
     entry = LedgerEntry(
@@ -259,16 +282,18 @@ async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
             },
             lambda _event: None,
             "Noted.",
+            "reply-xyz",
         )
     finally:
         current_entry.reset(token)
 
     # The write is ledgered through the chat turn's own sink.
-    assert memory.added[0]["ledger_sink"] is graph._ledger_sink
+    assert calls[0]["ledger_sink"] is graph._ledger_sink
     # Parent row: decision + preview, but no usage folded on (cost is on the nested sub-rows).
     assert entry.decision_kind == "stored"
     assert entry.decision_detail == "ok"
-    assert entry.output_preview == "stored: 1 · stored memory 1"
+    # Preview now carries the flush-trigger note for tuning.
+    assert entry.output_preview == "stored: 1 · 1 window(s): count"
     assert entry.provider == ""
     assert entry.model == ""
     assert entry.input_tokens == ""
@@ -276,15 +301,17 @@ async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
 
 
 @pytest.mark.asyncio
-async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None:
-    """A turn whose extraction ran but yielded no facts (``stored_count == 0``) is a NORMAL
-    ``no_new_facts`` store, not a failure — Graphiti has no mem0-style silent-drop failure
-    mode."""
-    memory = _MemoryService(stored_count=0)
+async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path, monkeypatch) -> None:
+    """A turn that flushed no window / no facts (controller returns 0) is a NORMAL
+    ``no_new_facts`` store, not a failure — the window may just still be accumulating."""
+    memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
     graph = MemoryNodes(services)
+
+    calls: list[dict] = []
+    _patch_ingest(monkeypatch, returns=0, sink=calls)
 
     sink = LedgerSink(tmp_path)
     entry = LedgerEntry(
@@ -307,6 +334,7 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None
             },
             events.append,
             "Got it.",
+            "reply-abc",
         )
     finally:
         current_entry.reset(token)
@@ -319,53 +347,23 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path) -> None
 
 
 @pytest.mark.asyncio
-async def test_store_turn_memory_threads_message_timestamp(tmp_path) -> None:
-    """The episode is anchored to the REAL turn time: ``routing.timestamp`` from the inbound
-    envelope is threaded into ``metadata['timestamp']`` (→ episode reference_time), so temporal
-    ordering/supersession stays honest even if ingest is later detached from the turn (D4)."""
+async def test_store_turn_memory_skipped_without_channel(tmp_path, monkeypatch) -> None:
+    """Windowing needs a durable channel to read pending turns from — a turn with no
+    ``chat_channel_id`` skips ingestion cleanly (never calls the controller)."""
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
     graph = MemoryNodes(services)
 
-    await graph._store_turn_memory(
-        {
-            "user_text": "remember that I moved to Tokyo",
-            "inbound_id": "in-1",
-            "chat_channel_id": 12,
-            "character_id": "hiro",
-            "thread_id": "thread-1",
-            # Serialized UnifiedMessage shape (model_dump(mode="json")) → ISO timestamp.
-            "inbound_envelope": {"routing": {"timestamp": "2026-06-07T10:30:00+00:00"}},
-        },
-        lambda _event: None,
-        "Noted.",
-    )
-
-    assert memory.added[0]["metadata"]["timestamp"] == "2026-06-07T10:30:00+00:00"
-
-
-@pytest.mark.asyncio
-async def test_store_turn_memory_missing_envelope_timestamp_is_none(tmp_path) -> None:
-    """No envelope (or no routing timestamp) ⇒ ``metadata['timestamp']`` is None, so ingest
-    falls back to stamping 'now' — never an error."""
-    memory = _MemoryService()
-    runtime = WorkspacePreferencesRuntime(tmp_path)
-    _enable_memory(runtime)
-    services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
-    graph = MemoryNodes(services)
+    calls: list[dict] = []
+    _patch_ingest(monkeypatch, returns=1, sink=calls)
 
     await graph._store_turn_memory(
-        {
-            "user_text": "remember my name",
-            "inbound_id": "in-1",
-            "chat_channel_id": 12,
-            "character_id": "hiro",
-            "thread_id": "thread-1",
-        },
+        {"user_text": "hi", "inbound_id": "in-1", "character_id": "hiro", "thread_id": "thread-1"},
         lambda _event: None,
         "Noted.",
+        "reply-1",
     )
 
-    assert memory.added[0]["metadata"]["timestamp"] is None
+    assert calls == []  # no channel → no windowed ingest

@@ -269,7 +269,7 @@ def test_clear_all_truncates_workspace_gateway_and_stderr_logs(tmp_path) -> None
         log_dir / "server.log",
         log_dir / "cli.log",
         log_dir / "channel-alpha.log",
-        workspace / "stderr.log",
+        log_dir / "stderr.log",
         gateway_log_dir / "gateway.log",
         gateway / "stderr.log",
     ]

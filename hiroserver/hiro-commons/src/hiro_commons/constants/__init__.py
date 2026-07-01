@@ -42,6 +42,7 @@ from .storage import (
     PREFERENCES_FILENAME,
     PROVIDERS_FILENAME,
     REGISTRY_FILENAME,
+    RUN_DIR,
     WORKSPACE_DB_FILENAME,
 )
 from .timing import (
@@ -81,6 +82,7 @@ __all__ = [
     "PREFERENCES_FILENAME",
     "PROVIDERS_FILENAME",
     "REGISTRY_FILENAME",
+    "RUN_DIR",
     "WORKSPACE_DB_FILENAME",
     # timing
     "DEFAULT_AUTH_TIMEOUT_SECONDS",

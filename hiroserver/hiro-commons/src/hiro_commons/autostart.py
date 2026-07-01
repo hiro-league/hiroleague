@@ -16,6 +16,12 @@ else:
 REG_RUN_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AutostartMethod = Literal["schtasks", "registry", "none"]
 
+# TEMP DEV TOGGLE: OS-startup registration disabled for the upcoming release.
+# When False, register_autostart* become no-ops (report "none"/False) so hiro and
+# hirogate are not registered to launch at OS login. Teardown/unregister stays live
+# so already-registered entries can still be cleaned up. Flip back to True to resume.
+AUTOSTART_ENABLED = False
+
 
 def _task_name(entry_name_prefix: str, target_name: str) -> str:
     return f"{entry_name_prefix}-{target_name}"
@@ -131,6 +137,8 @@ def register_autostart(
     executable_name: str,
     launch_args: list[str],
 ) -> AutostartMethod:
+    if not AUTOSTART_ENABLED:  # temp dev toggle — skip OS-startup registration
+        return "none"
     exe = _resolve_executable(executable_name)
     task_name = _task_name(entry_name_prefix, target_name)
     reg_key = _reg_run_key(entry_name_prefix, target_name)
@@ -149,6 +157,8 @@ def register_autostart_elevated(
     executable_name: str,
     launch_args: list[str],
 ) -> bool:
+    if not AUTOSTART_ENABLED:  # temp dev toggle — skip OS-startup registration
+        return False
     if sys.platform != "win32":
         raise RuntimeError("Elevated auto-start is only supported on Windows.")
     exe = _resolve_executable(executable_name)

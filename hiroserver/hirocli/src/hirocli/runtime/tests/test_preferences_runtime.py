@@ -52,6 +52,28 @@ def test_runtime_update_allows_top_level_tuning_profiles(tmp_path) -> None:
     assert load_preferences(tmp_path).tuning_profiles["balanced_chat"].max_tokens == 1234
 
 
+def test_runtime_rejects_subfield_write_into_write_whole_dict(tmp_path) -> None:
+    """`tuning_profiles` is a whole-write dict: the schema walk descends by dict key but not into the
+    profile MODEL, so a per-leaf write (`...balanced_chat.temperature`) is rejected rather than
+    silently applied. This is the backend half of the `writeWhole` contract the admin save honors."""
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+
+    with pytest.raises(PreferencePathError):
+        runtime.update("tuning_profiles.balanced_chat.temperature", 0.5)
+
+    assert runtime.current.tuning_profiles["balanced_chat"].temperature != 0.5
+
+
+def test_runtime_rejects_readonly_computed_path(tmp_path) -> None:
+    """Computed read-only enrichments (e.g. `knowledge.answering.model_resolved`) aren't persisted
+    model fields, so a PATCH that targets one is rejected as an unknown path — the `readOnly` flag on
+    those fields can never be written through, matching the admin save policy."""
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+
+    with pytest.raises(PreferencePathError):
+        runtime.update("knowledge.answering.model_resolved", "openai:gpt-4")
+
+
 def test_runtime_update_rejects_unknown_path(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
 

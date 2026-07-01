@@ -27,6 +27,26 @@ export type RecallMemoriesBeforeEachReply = boolean;
 export type MemoriesToRecallTopK = number;
 export type RememberNewFactsAfterEachReply = boolean;
 /**
+ * Conversation turns (user+agent exchanges) accumulated into one memory episode before extraction. 1 = ingest every turn; higher batches more turns into a richer episode.
+ */
+export type TurnsPerMemoryBatch = number;
+/**
+ * Token budget for a batched memory episode. A window over this sheds turns to fit (a lone oversized turn is trimmed). Keep at/below Graphiti's chunk threshold so an episode is never re-split.
+ */
+export type MaxTokensPerMemoryEpisode = number;
+/**
+ * If the next message arrives more than this many minutes after the previous one, the pending turns are ingested as a finished session and a new batch starts.
+ */
+export type NewSessionGapMinutes = number;
+/**
+ * A background sweep ingests a conversation's pending turns after this many hours of inactivity, so an abandoned conversation's memories still land.
+ */
+export type IdleFlushHours = number;
+/**
+ * Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders — they are filled with the actual speaker names at ingest. Applies to conversation memory only — not knowledge or eval.
+ */
+export type MemoryExtractionInstructions = string;
+/**
  * Knowledge embedder. Empty inherits the workspace default (General → Models).
  */
 export type KnowledgeEmbedder = string | null;
@@ -315,10 +335,15 @@ export interface MemorySearchPreferences {
   top_k: MemoriesToRecallTopK;
 }
 /**
- * Whether the agent stores new long-term memories after a reply (memory_out).
+ * Whether — and how — the agent stores new long-term memories after a reply (memory_out).
  */
 export interface MemoryExtractionPreferences {
   enabled: RememberNewFactsAfterEachReply;
+  window_turns: TurnsPerMemoryBatch;
+  chunk_min_tokens: MaxTokensPerMemoryEpisode;
+  session_gap_minutes: NewSessionGapMinutes;
+  idle_flush_hours: IdleFlushHours;
+  instructions: MemoryExtractionInstructions;
 }
 export interface KnowledgePreferences {
   default_embedding_model: KnowledgeEmbedder;

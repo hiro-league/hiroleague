@@ -354,6 +354,26 @@ def character_index_row_exists(workspace_path: Path, character_id: str) -> bool:
         return row is not None
 
 
+def get_character_name(workspace_path: Path, character_id: str) -> str:
+    """Cheap DB-only lookup of a character's display name — the agent speaker label used when
+    ingesting windowed conversation memory (docs/memory-eval-vs-chat-parity.md → "Ingestion —
+    implementation design"). Reads just the ``name`` column (no disk load, no seeding) so it's safe
+    on the per-turn chat hot path. Falls back to the id when the character is unknown or on a DB
+    error, so a lookup hiccup never breaks memory ingestion."""
+    cid = (character_id or "").strip()
+    if not cid:
+        return ""
+    try:
+        with sqlite3.connect(str(db_path(workspace_path))) as conn:
+            row = conn.execute(
+                "SELECT name FROM characters WHERE id = ?", (cid,)
+            ).fetchone()
+    except sqlite3.Error:
+        logger.warning("get_character_name failed for %s", cid, exc_info=True)
+        return cid
+    return str(row[0]) if row is not None and row[0] else cid
+
+
 def get_character_detail(workspace_path: Path, character_id: str) -> dict[str, Any]:
     """Merge DB index row with on-disk content for tools and APIs."""
     seed_default_characters(workspace_path)

@@ -200,7 +200,7 @@ class MemoryNodes(NodeGroup):
                 event_identity_keys=IDENTITY_PEER_KEYS,
             ),
         )
-        await self._store_turn_memory(state, writer, reply_text)
+        await self._store_turn_memory(state, writer, reply_text, reply_id)
         return {"reply_text": reply_text, "reply_id": reply_id}
 
     def _reply_knowledge_sources(self, state: GraphState) -> list[dict[str, Any]]:
@@ -214,6 +214,7 @@ class MemoryNodes(NodeGroup):
         state: GraphState,
         writer: StreamWriter,
         reply_text: str,
+        reply_id: str,
     ) -> None:
         memory_prefs = self.prefs.memory()
         if self.services.memory is None or not bool(getattr(memory_prefs, "enabled", False)):
@@ -227,53 +228,54 @@ class MemoryNodes(NodeGroup):
             )
             return
 
+        # Windowed batch ingestion (docs/memory-eval-vs-chat-parity.md → "Ingestion — implementation
+        # design"): rather than write this one user turn, accumulate N exchanges per conversation and
+        # ingest them as ONE two-speaker episode (agent turns as context, user-only extraction). The
+        # controller reads the pending turns from the durable message store and splices the current
+        # reply, so it needs a real channel to window over.
+        channel_id = int(state.get("chat_channel_id") or 0)
+        if channel_id <= 0:
+            observe(decision=("skipped", "no_channel"), output="stored: 0; no channel")
+            return
+
+        # Lazy imports keep the windowing/data.db paths off this module's base import path.
+        from hiro_commons.timestamps import utc_iso, utc_now
+
+        from ....domain.character import get_character_name
+        from ....services.memory.windowed_ingest import ingest_pending_windows
+
         t0 = time.perf_counter()
         memory_user_id = resolve_memory_user_id(
             data_user_id=state.get("data_user_id"),
             workspace_path=self.services.workspace_path,
         )
         memory_run_id = str(state.get("chat_channel_id") or state.get("thread_id") or "")
-        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_out``
-        # step (e.g. ``8.1``, ``8.2`` …) instead of letting them restart their own counter —
-        # the same ``current_substep`` trick ``knowledge_retrieve_node`` uses. The ingest
-        # ledger auto-attaches to the chat run via ``current_run``; passing ``self._ledger_sink``
-        # is what turns those rows on. Token cost is priced on those sub-rows (graphiti's
-        # default usage sink), so this node's own row carries NO usage — folding it here too
-        # would double-count the extraction tokens in the turn total.
-        # Anchor the episode to the REAL turn time (routing.timestamp, carried in the
-        # inbound envelope), not the ingest wall-clock. Inline ingest makes _now() ≈
-        # turn time today, but D4 background ingest would drift; passing the message
-        # timestamp keeps temporal ordering/supersession honest regardless of when
-        # extraction runs. Serialized as ISO → _parse_reference_time consumes it.
-        envelope = state.get("inbound_envelope") or {}
-        routing = envelope.get("routing") if isinstance(envelope, dict) else {}
-        inbound_ts = routing.get("timestamp") if isinstance(routing, dict) else None
+        character_id = state.get("character_id", "")
+        ext = memory_prefs.extraction
+        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_out`` step
+        # (current_substep) — the ingest ledger auto-attaches to the chat run via ``current_run``;
+        # passing ``self._ledger_sink`` (inside the controller) is what turns those rows on. Token
+        # cost is priced on those sub-rows, so this node's own row carries no usage.
         with substep_scope():
             try:
-                result = await self.services.memory.add(
-                    # User turn ONLY — the assistant reply (``reply_text``) is intentionally
-                    # never ingested (decision D2 / F7 ``conversation`` gate), so the memory
-                    # graph can't become a stale echo of its own output.
-                    state.get("user_text") or "",
+                result = await ingest_pending_windows(
+                    self.services.memory,
+                    workspace_path=self.services.workspace_path,
+                    channel_id=channel_id,
                     user_id=memory_user_id,
                     run_id=memory_run_id,
-                    character_id=state.get("character_id", ""),
-                    metadata={
-                        # Episode uuid == the inbound message id → provenance back to the exact
-                        # turn the fact was learned from (decision D5).
-                        "message_id": state.get("inbound_id", ""),
-                        "thread_id": state.get("thread_id", ""),
-                        "channel_id": state.get("chat_channel_id", 0),
-                        "source": "conversation",
-                        # Real turn time → episode reference_time (see above). Empty ⇒
-                        # graphiti_conversation falls back to None ⇒ ingest stamps now.
-                        "timestamp": inbound_ts,
-                        # A1 fix: anchor the user's facts to their real name. Graphiti extracts the
-                        # speaker (token before ":") as the anchor entity, so this turns the generic
-                        # "User" hub into a clean named Person. Empty ⇒ graphiti_conversation falls
-                        # back to "User" (prior behavior). Configured via memory.user_name.
-                        "speaker": (getattr(memory_prefs, "user_name", "") or "").strip(),
-                    },
+                    character_id=character_id,
+                    # Speaker labels: the user_name pref (A1 anchor) + the character's display name.
+                    user_name=(getattr(memory_prefs, "user_name", "") or "").strip(),
+                    character_name=get_character_name(self.services.workspace_path, character_id),
+                    window_turns=int(getattr(ext, "window_turns", 4)),
+                    session_gap_minutes=int(getattr(ext, "session_gap_minutes", 120)),
+                    chunk_min_tokens=int(getattr(ext, "chunk_min_tokens", 1000)),
+                    # Splice the current reply so the current exchange completes with no lag — its
+                    # external_id becomes ``reply_id`` when persisted downstream (reply.completed).
+                    current_reply_id=reply_id,
+                    current_reply_text=reply_text,
+                    current_reply_at=utc_iso(utc_now()),
                     ledger_sink=self._ledger_sink,
                 )
             except Exception as exc:
@@ -291,27 +293,37 @@ class MemoryNodes(NodeGroup):
                 return
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        stored_count = result.stored_count
-        # ``stored_count == 0`` is a NORMAL outcome — the turn simply had no extractable facts
-        # (e.g. "ok thanks") — not a failure. Graphiti raises on real errors, which the
-        # try/except above records as ``memory_store_failed``. The extraction token cost shows
-        # on the nested Graphiti ingest sub-rows (see above), not on this parent row.
+        stored_count = result.facts
+        # ``stored_count == 0`` is a NORMAL outcome — the window may still be accumulating (fewer
+        # than N exchanges pending), or the flushed turns had no extractable facts. Not a failure
+        # (Graphiti raises on real errors, caught above). Extraction token cost shows on the nested
+        # Graphiti ingest sub-rows, not this parent row.
+        # Trigger note (tuning): which flush trigger(s) fired this turn, e.g. "· 1 window: count".
+        window_note = (
+            f" · {result.windows} window(s): {', '.join(result.triggers)}" if result.triggers else ""
+        )
         log.info(
-            "✅ memory_out — stored · %s · %dms",
+            "✅ memory_out — windowed ingest · %s · %dms",
             state.get("inbound_id", "?"),
             elapsed_ms,
             stored=stored_count,
+            windows=result.windows,
         )
         emit_outcome(
             writer,
             state,
             NodeOutcome(
                 decision=("stored", "ok" if stored_count else "no_new_facts"),
-                output=_memory_results_preview(
-                    "stored",
-                    list(getattr(result, "stored_items", ()) or []),
-                    stored_count,
+                output=f"stored: {stored_count}{window_note}",
+                event=(
+                    GRAPH_MEMORY_STORED,
+                    {
+                        "count": stored_count,
+                        "elapsed_ms": elapsed_ms,
+                        # Flush-trigger telemetry for the Graph tab / tuning.
+                        "windows": result.windows,
+                        "triggers": list(result.triggers),
+                    },
                 ),
-                event=(GRAPH_MEMORY_STORED, {"count": stored_count, "elapsed_ms": elapsed_ms}),
             ),
         )

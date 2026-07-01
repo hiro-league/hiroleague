@@ -3,26 +3,44 @@
 > **Status:** Research note (no code changes). Goal: bring the live **chat** conversation-memory
 > experience up to the quality the **memory-eval** track already reaches.
 >
-> **⚠️ Jun 2026 update:** the eval recall leg was rebuilt around an **agentic retrieval loop**
-> (`services/memory/agent/`); chat was **not** changed. The *"Current reality"* section below
-> reflects today's code (which **takes precedence over docs**). The original *"Key insight"*
-> analysis further down **predates the loop and is now stale** — kept only for the
-> output-formatting gaps it catalogs, which still apply.
+> **Eval vs chat today:** the eval recall leg runs an **agentic retrieval loop**
+> (`services/memory/agent/`, `run_retrieval`); chat still does a single `memory.search()` + a flat
+> `memory_block`. Code **takes precedence over docs**. Retrieval **config/engine is already shared**
+> across both (§1 Configuration) — the gaps are in **ingestion inputs** (§2 + the Ingestion design)
+> and **chat retrieval flow + output formatting** (the *Chat retrieval* section), not configuration.
 >
 > Related: [`memory-graphiti-replacement-design.md`](memory-graphiti-replacement-design.md),
 > [`eval-corpus-tracks-design.md`](eval-corpus-tracks-design.md),
 > [`agentic-memory-retrieval-implementation.md`](agentic-memory-retrieval-implementation.md).
 
-## Current reality (Jun 2026) — supersedes the analysis below
+## Chat retrieval — new design (spec)
 
-**Eval** runs a full agentic retrieval loop (`run_retrieval`): the LLM decomposes the question
-into parallel sub-queries, searches across several turns, accumulates a deduped/time-sorted fact
-set, then drafts an answer that the answerer + judge consume. **Chat** still does **one**
-`memory.search()` call and folds the raw hits into the persona prompt via a flat `memory_block`.
+> **Status:** spec, Jul 2026 — *what changes* + the before/after shape; the detailed code design is
+> a later turn. This section is **self-contained** (the whole chat-retrieval story). **Ingestion**
+> has its own [implementation design](#ingestion--implementation-design-windowed-batch) (being
+> built) and is untouched here. **Knowledge retrieval is out of scope** and unchanged — it is
+> toggled off during memory tests so it doesn't pollute results.
 
-The loop engine is **already surface-neutral** — the only eval-bound parts are the *preferences
-namespace* (`graph.eval.*`), the *call site* (`runner_memory.py`), and *what's consumed from the
-result*. So adopting it in chat is **lift-and-share, not a rewrite**.
+### Today → target
+
+**Chat today** does **one** `memory.search()` and folds the raw hits into the persona prompt via a
+flat `memory_block` (drops temporal / relationship / `SUPERSEDED`, truncates to 500 chars). **Eval**
+runs the agentic loop `run_retrieval`: the LLM decomposes the question into parallel sub-queries,
+searches across several turns, accumulates a deduped / time-sorted set, and produces **two** outputs
+— a **draft answer** (`answer_text`, from the natural-stop turn (Exit A) or a final compose turn
+(Exit B)) **and** the **accumulated recalled rows** — which eval's grounding answerer + judge
+consume.
+
+The loop is **already surface-neutral** (`services/memory/agent/`); the only eval-bound parts are
+the prefs namespace (`graph.eval.*`), the call site (`runner_memory.py`), the eval-only verbatim
+fallback, and *who answers*. So adopting it in chat is **lift-and-share, not a rewrite**.
+
+**The target in a nutshell:** chat replaces single-shot `memory_search` with the loop as a
+**pre-pass** (chosen for control), fed **recent history** so the loop's first turn does **rewrite +
+recall-gate + decomposition** in one LLM call. It hands the persona **both** the **draft** (as a
+`search_conclusion` block) and the **rich recalled rows** (rendered by eval's `format_recall_context`).
+The **persona owns the reply** and may use or override the draft. Retrieval config is **shared with
+eval today**, retuned / split for chat later (§1).
 
 ### Today: both flows, with reuse highlighted
 
@@ -59,93 +77,151 @@ flowchart TB
     end
 
     %% ============ reuse / insertion mapping ============
-    SMT -. "REUSE the loop here<br/>(gather-only mode)" .-> MS2
-    PRES -. "REUSE present + rich rows" .-> MB
+    SMT -. "adopt the loop here<br/>(history-in; draft + rows)" .-> MS2
+    PRES -. "render via format_recall_context" .-> MB
 
     classDef reuse fill:#d6f5d6,stroke:#2e7d32,stroke-width:2px,color:#000;
     classDef insert fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000;
     classDef unchanged fill:#eceff1,stroke:#607d8b,color:#000;
-    class LP,TURN,SMT,MS1,ACC,PRES,RR reuse;
+    class LP,TURN,SMT,MS1,ACC,PRES,RR,DRAFT reuse;
     class MS2,MB insert;
-    class CU,MSN,HITS,RM,CC,PERSONA,EQ,ERA,DRAFT,AFC,JUDGE unchanged;
+    class CU,MSN,HITS,RM,CC,PERSONA,EQ,ERA,AFC,JUDGE unchanged;
 ```
 
-**Legend** — 🟩 green = **reuse from eval** (the loop engine, untouched) · 🟧 orange = **chat
-insertion points** (the two places that change) · ⬜ grey = unchanged.
-The two dashed arrows are the whole job: swap chat's single `memory.search()` for the **loop**
-(gather-only), and upgrade `memory_block` to render the **rich rows** `present_*` already produces.
+**Legend** — 🟩 green = **reused from eval** (loop engine + `DRAFT` + rich rows, untouched) · 🟧
+orange = **chat change points** · ⬜ grey = unchanged. Chat swaps its single `memory.search()` for
+the **loop** (fed history, producing **both** draft + rows) and renders memory via
+`format_recall_context` instead of the flat `memory_block`. (Eval's answerer/judge stay eval-only —
+the **persona** answers in chat.)
 
 ### Target chat flow (after adoption)
 
 ```mermaid
-flowchart LR
-    CU["user_text"] --> MSN["memory_search_node"]
-    MSN --> ENTRY["shared retrieval entrypoint<br/>gather-only mode"]
-    subgraph NEW["reused engine + CHAT-specific config"]
+flowchart TB
+    IN["user_text + recent history"] --> RECALL["memory_recall node<br/>(replaces single-shot memory_search)"]
+    RECALL --> LOOP
+    subgraph LOOP["run_retrieval · CHAT prompt / caps / model — NEW chat-scoped config"]
         direction TB
-        ENTRY --> LOOP2["run_retrieval<br/>CHAT prompt · CHAT caps · CHAT model"]
-        LOOP2 --> ACC2["Accumulator"]
-        ACC2 --> PRES2["present + rich rows"]
+        T1{"turn 1 = rewrite + GATE + decompose<br/>one LLM call · history-aware"}
+        T1 -->|"no recall needed → abstain<br/>(verbatim fallback OFF for chat)"| EMPTY["∅ no search"]
+        T1 -->|"queries[] resolved + decomposed"| SMT["SearchMemoryTool → memory.search"]
+        SMT --> ACC["Accumulator · dedup · time-sort"]
+        ACC -->|"adaptive: go deeper ≤ cap"| T1
+        ACC --> OUT["OUTPUTS: draft_answer + recalled_rows"]
+        EMPTY --> OUT
     end
-    PRES2 --> MB2["memory_block (upgraded)<br/>kind sections · temporal · no truncation"]
-    MB2 --> PERSONA2["call_model (persona) → reply"]
+    OUT --> REND["format_recall_context (REUSED)<br/>Facts / Entities / Episodes · valid_at→invalid_at · SUPERSEDED"]
+    OUT --> DR["draft → search_conclusion block"]
+    REND --> CM["call_model persona — UPDATED prompt<br/>consumes search_conclusion + rich facts · light grounding · retuned"]
+    DR --> CM
+    CM --> REPLY["reply — persona owns it, may use or override draft"]
 
     classDef reuse fill:#d6f5d6,stroke:#2e7d32,stroke-width:2px,color:#000;
     classDef newcfg fill:#bbdefb,stroke:#1565c0,stroke-width:2px,color:#000;
     classDef insert fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000;
-    class LOOP2,ACC2,PRES2,ENTRY reuse;
-    class MB2 insert;
+    class SMT,ACC,REND reuse;
+    class T1,DR newcfg;
+    class RECALL,CM insert;
 ```
 
-**Reading the target:** the green blocks are the **same eval engine**; only the **config is
-chat-specific** (its own prompt, caps, model — blue intent). Chat consumes the **accumulator**
-(not the loop's draft answer) and lets the **persona** write the reply → "gather-only" skips the
-loop's final synthesis turn. With caps at `turns=1, parallel=1`, this collapses back to today's
-single-shot — so it ships safe and tunes up.
+**Legend** — 🟩 green = **reused eval engine** (`SearchMemoryTool`, `Accumulator`,
+`format_recall_context`) · 🟦 blue = **chat-scoped config/behavior** (prompt, caps, model, abstain)
+· 🟧 orange = **chat change points** (the node replacement, the updated persona prompt).
+
+**Reading the target:** the loop is the **same eval engine** under **chat-scoped config**. Its
+**first turn** collapses **rewrite + recall-gate + decomposition** into one history-aware LLM call —
+the **gate** is simply the model choosing *not* to search (which requires eval's **verbatim
+fallback disabled** for chat, else abstain is overridden and a search is forced). **Adaptive depth**
+is the loop's own stop decision (Exit A), bounded by the caps; `turns=1` collapses toward today's
+single-shot, so it ships safe and tunes up. Chat consumes **both outputs** — the `draft` as a
+`search_conclusion` block and the rich rows via `format_recall_context` — and the **persona**
+(updated, retuned prompt) writes the final reply.
 
 ### What gets reused vs added
 
 | Eval component | File | In chat? |
 |---|---|---|
-| `run_retrieval` loop | `services/memory/agent/retrieval_agent.py` | **Reuse** (add gather-only mode) |
+| `run_retrieval` loop | `services/memory/agent/retrieval_agent.py` | **Reuse** — add chat flags: feed **history** + **disable verbatim fallback** (enable abstain) |
 | `SearchMemoryTool` | `services/memory/agent/search_tool.py` | **Reuse** as-is |
 | `Accumulator` | `services/memory/agent/accumulator.py` | **Reuse** as-is |
 | `present_accumulator` / `accumulated_item_to_recall_row` | `services/memory/agent/presentation.py` | **Reuse** as-is |
-| Retrieval prompt | `graph.eval.retrieval_agent_prompts` | **New** chat-scoped prompt (tuned for user/characters) |
-| Caps / model | `graph.eval.retrieval_agent`, `graph.eval.retrieval_model` | **New** chat-scoped instances |
-| Shared entrypoint | _does not exist yet_ | **New** small `MemoryRetriever` seam |
-| `memory_block` | `runtime/agent_graph/context_assembly.py` | **Upgrade** to rich rows |
+| `format_recall_context` (rich render) | `services/eval/judge.py` | **Reuse** — chat renders memory with it (**replaces** the flat `memory_block`) |
+| Draft `answer_text` | `run_retrieval` output | **Consume** — inject as a `search_conclusion` block in the persona prompt |
+| History → loop input | knowledge does it; memory doesn't | **New** — feed recent messages so turn 1 does the rewrite (**subsumes I4**) |
+| Retrieval prompt | `graph.eval.retrieval_agent_prompts` | **New** chat prompt (abstain-allowed, history-aware) via the multi-prompt locked-defaults |
+| Caps / model | `graph.eval.retrieval_agent`, `graph.eval.retrieval_model` | **New** chat-scoped `memory.retrieval.*` |
+| Shared entrypoint | _does not exist yet_ | **New** small `MemoryRetriever` seam (eval + chat both call) |
+| Persona / answering prompt | `call_model` (`compose_context`) | **Update** to consume `search_conclusion` + rich facts (light grounding; retuned) |
 | Answerer / judge | `services/eval/judge.py` | **Not used** — persona answers in chat |
 
+### Output rendering — why the rich rows matter (O1–O5)
+
+The loop hands over rich rows, but they only help if chat *renders* them. Reusing
+`format_recall_context` (vs today's flat `memory_block`) is what makes the recalled facts usable:
+
+| # | Eval `format_recall_context` (`eval_judge.py:110-137`) | Chat `memory_block` today (`context_assembly.py:157-176`) |
+|---|---|---|
+| **O1** | Keeps **relationship**, **temporal validity** (`valid X → present`), **`SUPERSEDED`** per fact | **Drops all of it** — only `- {date} · score · {text[:500]}` |
+| **O2** | **Facts / Entities / Episodes** sections | **Flattens** all kinds into one bullet list |
+| **O3** | **No truncation** | Truncates each memory to **500 chars** |
+| **O4** | Shows the fact's **`valid_at`** window | Reads **`created_at`** (ingest time) → date often **blank** |
+| **O5** | Strict grounding-only answer prompt at temp **0.2** | Memory is one advisory block in the **persona** prompt (temp **0.7**), **no grounding instruction** |
+
+**O1 is the headline:** the model can pick the *current* fact only because it *sees*
+`valid → present` / `SUPERSEDED` — chat strips those today. **O5 in chat becomes a *light* grounding
+nudge on the persona** (plus the draft `search_conclusion`), retuned for chat — not eval's strict
+prompt, so persona voice is preserved.
+
+### Components — build / reuse / change
+
+| Kind | Component | Note |
+|---|---|---|
+| **Reuse as-is** | `SearchMemoryTool`, `Accumulator`, `present_accumulator`, `format_recall_context` | no changes |
+| **Extend** | `run_retrieval` | add **history input** + a flag to **disable the verbatim fallback** (enable abstain); defaults keep eval behavior |
+| **New (seam)** | `MemoryRetriever` | surface-neutral entrypoint; eval + chat both call it |
+| **New (config)** | `memory.retrieval.*` prefs + chat retrieval prompt | caps / model / enable; prompt via the multi-prompt locked defaults |
+| **Change (node)** | `memory_search_node` (`runtime/agent_graph/nodes/memory.py`) | single-shot → pre-pass loop; stash `draft` + `recalled_rows`; ledger under a `memory_recall` node |
+| **Change (render)** | chat `memory_block` (`context_assembly.py`) | → `format_recall_context` |
+| **Change (answer)** | persona prompt (`compose_context` / `call_model`) | consume `search_conclusion` + rich facts; light grounding; retune |
+| **Untouched** | knowledge retrieve, eval answerer / judge | off-scope |
+
+### Implementation phases
+
+> High-level ordering only — a **detailed design is a later run**. Each phase leaves chat working;
+> caps default tight (`turns=1`) so early phases collapse toward today's single-shot.
+
+**Bucket A — Foundations (no user-visible change)**
+
+| # | Phase | Goal | Ships safe because | Validate |
+|---|---|---|---|---|
+| **0** | Shared seam + loop flags | lift `run_retrieval` into `MemoryRetriever`; add `history` + abstain flag; eval calls the seam | flags default to eval's current behavior | **eval track unchanged** (regression) |
+| **1** | Chat config + prompt | `memory.retrieval.*` prefs + chat retrieval prompt (abstain-allowed, history-aware); tight caps default | nothing wired yet | prefs tests, `npm run check` |
+
+**Bucket B — Quality package (2–4 land together for the real win)**
+
+| # | Phase | Goal | Ships safe because | Validate |
+|---|---|---|---|---|
+| **2** | Wire the pre-pass loop | `memory_search_node` → `MemoryRetriever` (chat cfg), fed history; abstain on; ledger under `memory_recall`; **keep flat render** to isolate risk | tight caps ≈ single-shot | **latency/cost inflection** (loop = ≥1 extra LLM call/turn); abstain skips chit-chat; ledger nests |
+| **3** | Rich rendering | flat `memory_block` → `format_recall_context` (O1–O4) | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation |
+| **4** | Draft + persona answer | inject `<search_conclusion>`; persona prompt consumes conclusion + facts, light grounding, retune temp (O5) | persona still owns voice | memory actually used; voice preserved; draft overridable |
+
+**Bucket C — Tune**
+
+| # | Phase | Goal | Validate |
+|---|---|---|---|
+| **5** | Tune & measure | loosen caps, tune chat retrieval + persona prompts, A/B vs the eval bar; optional cheap pre-gate for cost | quality up; latency / cost acceptable |
+
+**Cross-cutting**
+
+- **Latency/cost inflection is Phase 2** — the loop adds ≥1 LLM call before the persona replies;
+  tight caps + the abstain gate mitigate; a heuristic pre-gate is the Phase-5 lever if needed.
+- **Config shared with eval now, split later** (post-task) — retune-for-chat happens on the shared
+  knobs first.
+- **Ledger** — the loop's LLM usage attributes to a `memory_recall` node in the chat turn's Graph
+  Run (reuse eval's usage attribution), so cost stays visible.
+- **Knowledge retrieve** untouched (toggled off during memory tests).
+
 ---
-
-## Key insight
-
-> **⚠️ Stale (pre-agentic-loop).** The claim below that "both paths run the exact same recall
-> engine" is **no longer true** — see *Current reality* above. The output-formatting gaps it
-> documents (sections 3 / O1–O5) still hold and feed the `memory_block` upgrade.
-
-Both paths run the **exact same recall engine**. `create_memory_service` (chat) and
-`create_eval_memory_service` (eval) both build the same `GraphitiConversationMemory` over
-`GraphitiMemoryService.from_preferences`, reading the same `graph.*` and `memory.search.*`
-preferences. The eval was deliberately written to *reproduce* the runtime
-(`services/memory/__init__.py:129-130` — *"Eval mirrors the runtime… so the Memory eval
-reproduces what the agent will actually see at recall time"*).
-
-So the quality gap is **not** in retrieval configuration. It is in two places: **the inputs
-written to memory**, and **how recalled facts are formatted into the answer prompt**.
-
-```
-          INGEST                    RETRIEVE (identical)            ANSWER
-EVAL   both speakers,            ┌────────────────────┐    format_recall_context →
-       real reference_time   →   │ GraphitiMemory     │ →  Facts/Entities/Episodes
-       clean turns               │ .search()          │    w/ temporal+rel+SUPERSEDED
-                                 │ top_k=8, temporal, │    → grounding-only prompt
-CHAT   user half only,           │ recipe, scope,     │    memory_block →
-       arrival timestamp,    →   │ sim_min_score —    │ →  flat "- date·score·text[:500]"
-       raw user_text query       │ SAME for both      │    → persona chat prompt
-                                 └────────────────────┘
-```
 
 ## 1. Configuration — essentially at parity ✅
 
@@ -401,58 +477,41 @@ prefs tests → **server restart**). UI card placement to be confirmed with the 
 ### Not in scope
 
 Eval ingestion (per-line, two-sided); eval-specific ingest overrides (deferred — params shared
-today); all retrieval / `memory_block` / answer-prompt work (Section 3 + retrieval track).
+today); all retrieval / `memory_block` / answer-prompt work (see the *Chat retrieval* section).
 
-## 3. Outputs — the biggest controllable lever
+## How to close the gap — two workstreams
 
-The same `hits` (same metadata keys) flow to both renderers, but they render very differently:
+Each has its own self-contained section above:
 
-| # | Eval `format_recall_context` (`eval_judge.py:110-137`) | Chat `memory_block` (`context_assembly.py:157-176`) |
-|---|---|---|
-| **O1** | Keeps **relationship**, **temporal validity** (`valid X → present`), and **`SUPERSEDED`** markers per fact | **Drops all of it.** Renders only `- {date} · score {s} · {text[:500]}` |
-| **O2** | Groups into **Facts / Entities / Episodes** sections with headings | **Flattens** all kinds into one bullet list — a raw episode body looks identical to an extracted fact |
-| **O3** | **No truncation** | Truncates each memory to **500 chars** |
-| **O4** | Shows the fact's **`valid_at`** validity window | Reads **`created_at`** (ingest time), which fact rows generally don't carry → date often **blank/missing** |
-| **O5** | System prompt = strict grounding-only `DEFAULT_MEMORY_EVAL_ANSWER_PROMPT` ("use ONLY the facts… answer every part the facts support"); answer model = knowledge-answering tuning (temp **0.2**) | Memory is one advisory block inside the **persona** prompt + `chat.instructions`; chat model is `balanced_chat` (temp **0.7**) with a tool loop. The grounding/completeness discipline is **never instructed**. |
+1. **Chat retrieval (spec)** — one package: adopt `run_retrieval` as a pre-pass (history + abstain +
+   draft), render via `format_recall_context`, and update the persona prompt. See
+   [Chat retrieval — new design](#chat-retrieval--new-design-spec).
+2. **Ingestion (being built)** — windowed batch (+ turn-granular chunk guard). See
+   [Ingestion — implementation design](#ingestion--implementation-design-windowed-batch).
 
-**O1 is the headline:** the eval answer model reaches its quality partly because it *sees*
-`valid → present` and `SUPERSEDED` annotations and can choose the current fact. Chat strips
-those before the model ever sees them.
-
-## How to close the gap (proposed, by leverage-to-effort)
-
-1. **Bring `memory_block` to parity with `format_recall_context`** (O1–O4). The metadata is
-   already on the `hits` — chat just discards it. Render kind sections, keep relationship +
-   `valid_at → invalid_at` + `SUPERSEDED`, use `valid_at` for the date, don't truncate facts.
-   *Highest leverage, lowest risk — pure formatting on data already in hand.*
-2. **Instruct grounding/completeness in the chat answer** (O5). Adapt the eval's "answer every
-   part the facts support" discipline into the persona context so memory is actually used.
-3. **Add a memory query-rewrite** (I4) mirroring `knowledge.rewrite.*`, so chat searches memory
-   with a standalone question instead of raw anaphoric `user_text`.
-4. **Assistant-as-context ingestion (I1) — decided (4A).** Make chat fold the prior assistant
-   turn (N−1) into the user episode body as context, with `custom_extraction_instructions`
-   restricting extraction to the user. Chat's **default** behavior, no pref; the assistant turn
-   is never stored as its own episode (keeps D2's anti-echo intent). **Eval stays two-sided.**
-5. **Chunk guard for chat (new).** Guard chat turns against `CHUNK_MIN_TOKENS` and expose it as a
-   chat/memory pref, so an oversized turn can't trip graphiti's internal split and break
-   `uuid == point_id`.
-6. **Timestamp fidelity** (I2) — none; already at parity. Cleanliness (I3) — none; extraction
-   prompts handle it.
+I2 (timestamps) / I3 (cleanliness) need no work; **I4 (query-rewrite) is subsumed** by the retrieval
+loop's decomposition.
 
 ## TL;DR
 
 - **No config gap.** Eval and chat share one recall engine and the same knobs
   (`top_k=8`, temporal, recipe, scope, `sim_min_score`, models).
-- **The gap is in inputs and output-formatting, not retrieval.**
-- **Output (biggest lever):** chat's `memory_block` strips temporal/relationship/`SUPERSEDED`
-  metadata, flattens kinds, truncates to 500 chars, and shows the wrong date — all of which
-  eval's `format_recall_context` keeps. The data is already on the hits.
+- **The gap is in ingestion inputs and retrieval flow + output-formatting, not config.**
 - **Ingestion:** the engine, observability, tracking and params are shared/identical — the only
-  gap is the **assistant side** (chat writes user-only). **Decided fix: 4A** — fold the prior
-  assistant turn as context with user-only extraction, as chat's default; **eval stays two-sided**
-  (it is a testbench, *not* a mirror). Add a **chunk guard** for oversized chat turns. Timestamps
-  already at parity; cleanliness handled by extraction prompts; query-rewrite is a retrieval item.
-- **Answer discipline:** eval uses a grounding-only prompt at temp 0.2; chat folds memory into
-  a persona prompt at temp 0.7 with no completeness instruction.
-- **Recommended order:** (1) `memory_block`↔`format_recall_context` parity, (2) grounding
-  instruction, (3) memory query-rewrite, (4) 4A assistant-as-context ingestion + chunk guard.
+  gap is the **assistant side** (chat writes user-only). **Decided fix: windowed batch ingestion**
+  — accumulate **N exchanges**, ingest once as a two-speaker timestamped episode (agent-as-context,
+  user-only extraction), watermark-advanced so nothing re-ingests; three flush triggers (count /
+  size / session-gap), turn-granular chunk guard, last-turn `reference_time` + body timestamps,
+  idle-sweep backstop. **Eval stays two-sided** (a testbench, *not* a mirror). Full plan in the
+  **[Ingestion — implementation design](#ingestion--implementation-design-windowed-batch)** section.
+- **Retrieval (chat):** adopt eval's `run_retrieval` as a **pre-pass** fed **history** → turn-1
+  **rewrite + recall-gate + decomposition**; **abstain** by disabling eval's verbatim fallback; hand
+  the persona **both** the **draft** (`search_conclusion`) and the **rich rows** rendered by
+  `format_recall_context`; the **persona owns the reply**. New `memory.retrieval.*` config + chat
+  prompt (multi-prompt locked defaults). **I4 subsumed.** Knowledge retrieval untouched. *Spec —
+  detailed design later.*
+- **Answer discipline:** eval uses a strict grounding-only prompt at temp 0.2; chat gets a **light**
+  grounding nudge + the draft, retuned for chat (voice preserved).
+- **Recommended order:** (1) retrieval package — adopt loop (history + abstain + draft) **+** render
+  via `format_recall_context` **+** update persona prompt (one unit); (2) windowed batch ingestion
+  (+ turn-granular chunk guard, in progress).

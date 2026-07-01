@@ -8,15 +8,17 @@ Workspace layout:
     config.json              ← boot config (this module)
     preferences.json         ← single source of truth for LLM, voice, and
                                audio settings (domain/preferences.py)
-    state.json               ← runtime state (this module)
     master_key.pem           ← ECDSA private key (domain/crypto.py)
     workspace.db             ← SQLite: characters, devices, channel_plugins (domain/db.py)
     data/
       data.db                ← SQLite: users, channels, messages (domain/data_store.py)
       media/<channel_id>/    ← binary content files (domain/media_store.py)
     logs/
-    pairing_session.json     ← short-lived pairing session (domain/pairing.py)
-    hiro.pid
+    run/                     ← ephemeral runtime/process state (this module, domain/pairing.py,
+      state.json                 hiro_commons/process.py)
+      pairing_session.json
+      server.pid
+      channel-<name>.pid
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from hiro_commons.constants.network import (
     PORT_OFFSET_PLUGIN,
     PORT_RANGE_START,
 )
-from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME
+from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME, RUN_DIR
 
 from ..environment import default_workspace_log_level
 
@@ -84,8 +86,14 @@ def workspace_config_file(workspace_path: Path) -> Path:
     return workspace_path / CONFIG_FILENAME
 
 
+def workspace_run_dir(workspace_path: Path) -> Path:
+    """Directory for ephemeral runtime/process state (pids, session, connection state)."""
+    return workspace_path / RUN_DIR
+
+
 def workspace_state_file(workspace_path: Path) -> Path:
-    return workspace_path / "state.json"
+    # state.json now lives under <workspace>/run/ with the other ephemeral runtime state.
+    return workspace_run_dir(workspace_path) / "state.json"
 
 
 def workspace_log_dir(workspace_path: Path) -> Path:
@@ -139,7 +147,7 @@ def load_state(workspace_path: Path) -> State:
 
 
 def save_state(workspace_path: Path, state: State) -> None:
-    workspace_path.mkdir(parents=True, exist_ok=True)
+    workspace_run_dir(workspace_path).mkdir(parents=True, exist_ok=True)
     workspace_state_file(workspace_path).write_text(
         state.model_dump_json(indent=2), encoding="utf-8"
     )

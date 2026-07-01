@@ -95,6 +95,7 @@ class GraphitiConversationMemory:
         temporal_default: "KnowledgeGraphTemporalDefault" = "current",
         event_sink: "GraphEventSink | None" = None,
         group_override: str | None = None,
+        extraction_instructions: str = "",
     ) -> None:
         self._graph = graph_service
         self._default_top_k = int(default_top_k)
@@ -114,6 +115,10 @@ class GraphitiConversationMemory:
         # unscoped instance (override=None) unchanged, so this is additive — a single binding that
         # redirects the memory eval's data without touching the hot path.
         self._group_override = group_override
+        # Optional per-call extraction clause appended to the shared graph nudge for THIS facade's
+        # writes (conversation-memory windowing: "attribute facts to the user only" on a two-speaker
+        # window). "" ⇒ no clause (current behavior). The chat factory sets it; eval leaves it blank.
+        self._extraction_instructions = extraction_instructions
 
     def _group_for(self, user_id: int, character_id: str) -> str:
         """The drawer this call writes/reads: the eval override when scoped, else the per-
@@ -156,7 +161,13 @@ class GraphitiConversationMemory:
         # D5). Fall back to inbound_id; empty ⇒ ingest mints no provenance link (still
         # works, just unciteable).
         message_id = str(meta.get("message_id") or meta.get("inbound_id") or "").strip()
-        speaker = str(meta.get("speaker") or "User").strip() or "User"
+        # Windowed ingestion (P2) passes a PRE-RENDERED two-speaker transcript whose lines already
+        # carry "[ts] Speaker:" prefixes — so speaker="" tells the ingest layer NOT to re-prefix it.
+        # Single-turn callers omit the flag and get the usual user_name anchor (default "User").
+        if meta.get("prerendered"):
+            speaker = ""
+        else:
+            speaker = str(meta.get("speaker") or "User").strip() or "User"
         reference_time = _parse_reference_time(meta.get("timestamp"))
         # Lazy import keeps graphiti episode types off this module's import path until used.
         from hirocli.services.knowledge.graph.graphiti_ingest import GraphitiEpisodeInput
@@ -169,6 +180,17 @@ class GraphitiConversationMemory:
             source="message",  # speaker-aware episode (A3)
             speaker=speaker,
         )
+        # Bind role→name in the extraction clause: the body labels speakers with bare names (for A1
+        # anchoring), so ``{user}``/``{character}`` must be filled with those SAME names or the
+        # extractor has to guess which speaker is the human. Fallbacks match the window body's
+        # labels ("User"/"Assistant"). "" ⇒ None ⇒ no clause (eval / non-windowed).
+        instructions = self._extraction_instructions or ""
+        if instructions:
+            instructions = instructions.replace(
+                "{user}", str(meta.get("user_name") or "").strip() or "User"
+            ).replace(
+                "{character}", str(meta.get("character_name") or "").strip() or "Assistant"
+            )
         stats = await self._graph.ingest_chunks(
             [episode],
             source_role="conversation",
@@ -176,6 +198,9 @@ class GraphitiConversationMemory:
             ledger_sink=ledger_sink,
             event_sink=self._event_sink,  # live viz: stream new facts to the Graph tab
             trace_label=trace_label,  # e.g. graph_ingest_3 for a numbered memory-eval remember turn
+            # Windowing (P2): user-only extraction clause for the two-speaker episode, with speaker
+            # names bound above; "" ⇒ None ⇒ no change. Blank on the eval facade (corpus stays two-sided).
+            extra_extraction_instructions=instructions or None,
             rebuild_fts=rebuild_fts,  # bulk remember defers this → one rebuild at batch end
         )
         stored = int(getattr(stats, "edges_total", 0) or 0)

@@ -26,7 +26,7 @@ from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
 
 from hirocli.constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
-from hirocli.domain.config import load_config, mark_disconnected
+from hirocli.domain.config import load_config, mark_disconnected, workspace_log_dir
 from hirocli.domain.crypto import load_or_create_master_key
 from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
@@ -324,7 +324,11 @@ def _spawn_server(workspace_path: Path, admin: bool = False) -> None:
 
     remove_pid(workspace_path, PID_FILENAME)
 
-    stderr_log = workspace_path / "stderr.log"
+    # Keep the detached-process stderr log inside <workspace>/logs/ rather than the
+    # workspace root, so all diagnostic files live together under the logs folder.
+    log_dir = workspace_log_dir(workspace_path)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stderr_log = log_dir / "stderr.log"
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
     log.info("New server process spawning (child will write its own PID)")
 

@@ -511,6 +511,7 @@ class GraphitiMemoryService:
         event_sink: GraphEventSink | None = None,
         ledger_sink: "LedgerSink | None" = None,
         trace_label: str | None = None,
+        extra_extraction_instructions: str | None = None,
         rebuild_fts: bool = True,
     ) -> GraphitiIngestStats:
         """Ingest document chunks as Graphiti episodes (F7 write-gated, sequential).
@@ -538,6 +539,13 @@ class GraphitiMemoryService:
         target_group = validate_group_id(group_id or self._group_id)
         # ``off`` → no episode ledger rows regardless of what the caller handed in.
         effective_sink = ledger_sink if self._observability != "off" else None
+        # Per-call extraction clause (conversation-memory windowing) APPENDED after the shared
+        # workspace nudge — lets a caller add scope guidance (e.g. "attribute facts to the user
+        # only" for a two-speaker window) without mutating the workspace-wide
+        # ``graph.custom_extraction_instructions``. None/"" ⇒ just the shared nudge (no change).
+        extra = (extra_extraction_instructions or "").strip()
+        base = self._custom_extraction_instructions
+        effective_instructions = f"{base}\n\n{extra}".strip() if extra else base
         return await ingest_episodes(
             self._graphiti,
             episodes,
@@ -545,8 +553,8 @@ class GraphitiMemoryService:
             group_id=target_group,
             # "open" → no ontology (Graphiti extracts freely); "typed" → pinned 5-type vocabulary.
             entity_types=(GRAPHITI_ENTITY_TYPES if self._entity_ontology == "typed" else None),
-            # Domain-generic extraction nudge (graph.custom_extraction_instructions pref); "" ⇒ no-op.
-            custom_extraction_instructions=self._custom_extraction_instructions,
+            # Shared workspace nudge + optional per-call clause (computed above); "" ⇒ no-op.
+            custom_extraction_instructions=effective_instructions,
             event_sink=event_sink,
             ledger_sink=effective_sink,
             observability=self._observability,

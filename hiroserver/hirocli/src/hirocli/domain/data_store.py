@@ -81,6 +81,19 @@ _DDL = [
         UNIQUE(message_pk, slot_index)
     )
     """,
+    # Windowed memory ingestion (docs/memory-eval-vs-chat-parity.md → "Ingestion — implementation
+    # design"): one cursor per conversation channel marking the last message folded into long-term
+    # memory. Chat batches N exchanges into one memory episode, so the watermark advances only past
+    # what was ingested — the store IS the source of truth for pending turns (read via
+    # message_store.list_messages(after_id=...)). Keyed by channel; cascades when the channel is gone.
+    """
+    CREATE TABLE IF NOT EXISTS memory_ingest_cursors (
+        channel_id       INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+        last_ingested_id TEXT NOT NULL DEFAULT '',
+        last_ingested_at TEXT NOT NULL DEFAULT '',
+        updated_at       TEXT NOT NULL DEFAULT ''
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel_id, created_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_ext_id ON messages(external_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_user_name ON channels(user_id, name)",
@@ -124,6 +137,10 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("message_attachments", "duration_ms",  "INTEGER"),
     ("message_attachments", "metadata",     "TEXT NOT NULL DEFAULT '{}'"),
     ("message_attachments", "created_at",   "TEXT NOT NULL DEFAULT ''"),
+    # memory_ingest_cursors
+    ("memory_ingest_cursors", "last_ingested_id", "TEXT NOT NULL DEFAULT ''"),
+    ("memory_ingest_cursors", "last_ingested_at", "TEXT NOT NULL DEFAULT ''"),
+    ("memory_ingest_cursors", "updated_at",       "TEXT NOT NULL DEFAULT ''"),
 ]
 
 # ---------------------------------------------------------------------------

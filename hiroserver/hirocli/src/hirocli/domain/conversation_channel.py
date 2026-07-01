@@ -379,6 +379,10 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
             raise RuntimeError(
                 f"Bulk clear updated unexpected row count for channels id={channel_id}"
             )
+        # Clearing the conversation resets its windowed-memory ingest watermark so the next turn
+        # starts fresh (start-from-now) instead of reading past a now-deleted message. Graphiti FACTS
+        # still persist across the clear (see note below) — only the ingestion cursor is dropped.
+        conn.execute("DELETE FROM memory_ingest_cursors WHERE channel_id = ?", (channel_id,))
         lr = conn.execute(
             "SELECT last_deleted FROM channels WHERE id = ?",
             (channel_id,),
@@ -438,6 +442,10 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
             (channel_id,),
         )
         conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
+        # Drop the windowed-memory ingest watermark for this channel. The FK ON DELETE CASCADE on
+        # memory_ingest_cursors is NOT enforced here (foreign_keys pragma is off, and we delete rows
+        # manually above), so remove it explicitly — otherwise an orphan cursor lingers.
+        conn.execute("DELETE FROM memory_ingest_cursors WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
         conn.commit()
     # Drop the agent's LangGraph thread so a recreated channel reusing this id

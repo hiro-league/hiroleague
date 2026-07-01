@@ -68,7 +68,11 @@ def _timestamp_seconds(value: Any) -> float:
         try:
             parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
             return parsed.timestamp()
-        except ValueError:
+        except (ValueError, OverflowError, OSError):
+            # datetime.timestamp() raises OSError [Errno 22] on Windows (and OverflowError elsewhere)
+            # for out-of-range dates — pre-1970, year-0001, or far-future — which a Graphiti fact can
+            # carry as a weird extracted valid_at/created_at (e.g. a BEAM eval fact). Sort those as
+            # epoch-0 instead of 500ing the entire Memories list for that group.
             return 0.0
     return 0.0
 

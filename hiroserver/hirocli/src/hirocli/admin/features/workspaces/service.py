@@ -8,6 +8,7 @@ from typing import Any
 from hiro_commons.process import is_running, read_pid
 
 from hirocli.constants import PID_FILENAME
+from hirocli.domain.config import workspace_log_dir
 from hirocli.domain.workspace import WorkspaceError
 from hirocli.tools.server import RestartTool, SetupTool, StartTool, StatusTool, StopTool
 from hirocli.tools.workspace import (
@@ -67,7 +68,8 @@ class WorkspaceService:
                     "ws_connected": bool(getattr(status, "ws_connected", False)),
                     "last_connected": getattr(status, "last_connected", None),
                     "is_current": ws["id"] == hosting_workspace_id,
-                    **stderr_log_info(ws_path),
+                    # stderr.log now lives under <workspace>/logs/, not the workspace root.
+                    **stderr_log_info(workspace_log_dir(ws_path)),
                 }
             )
         return Result.success(rows)

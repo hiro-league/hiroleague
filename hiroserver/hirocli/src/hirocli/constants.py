@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from hiro_commons.constants.storage import RUN_DIR
+
 APP_NAME: str = "hiro"
-PID_FILENAME: str = "hiro.pid"
+# Server pid lives under <workspace>/run/ alongside the other ephemeral process state.
+# The subdir is baked into the filename so every read_pid/write_pid/remove_pid call site
+# (which passes the workspace root as base_path) resolves to the same run/ location.
+PID_FILENAME: str = f"{RUN_DIR}/server.pid"
 # Renamed from HIRO_WORKSPACE
 ENV_WORKSPACE: str = "HIRO_WORKSPACE"
 # Renamed from HIRO_WORKSPACE_PATH

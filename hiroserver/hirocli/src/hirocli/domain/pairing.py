@@ -2,8 +2,9 @@
 
 All functions are workspace-scoped — they accept workspace_path: Path.
 
-Pairing sessions are short-lived and read at boot; they stay as a JSON file:
-  <workspace>/pairing_session.json
+Pairing sessions are short-lived and read at boot; they stay as a JSON file
+under the ephemeral runtime dir:
+  <workspace>/run/pairing_session.json
 
 Approved devices are durable structured records; they are stored in the
 devices table of workspace.db.
@@ -24,6 +25,7 @@ from hiro_commons.constants.domain import DEFAULT_PAIRING_CODE_LENGTH, DEFAULT_P
 from hiro_commons.constants.storage import PAIRING_SESSION_FILENAME
 from hiro_commons.timestamps import utc_iso
 
+from .config import workspace_run_dir
 from .db import db_path, ensure_db
 
 logger = logging.getLogger(__name__)
@@ -66,7 +68,8 @@ class ApprovedDevice(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _pairing_session_file(workspace_path: Path) -> Path:
-    return workspace_path / PAIRING_SESSION_FILENAME
+    # Lives under <workspace>/run/ with the other ephemeral runtime state.
+    return workspace_run_dir(workspace_path) / PAIRING_SESSION_FILENAME
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +97,6 @@ def create_pairing_session(code_length: int = DEFAULT_PAIRING_CODE_LENGTH, ttl_s
 # ---------------------------------------------------------------------------
 
 def load_pairing_session(workspace_path: Path) -> PairingSession | None:
-    workspace_path.mkdir(parents=True, exist_ok=True)
     path = _pairing_session_file(workspace_path)
     if not path.exists():
         return None
@@ -109,7 +111,7 @@ def load_pairing_session(workspace_path: Path) -> PairingSession | None:
 
 
 def save_pairing_session(workspace_path: Path, session: PairingSession) -> None:
-    workspace_path.mkdir(parents=True, exist_ok=True)
+    workspace_run_dir(workspace_path).mkdir(parents=True, exist_ok=True)
     _pairing_session_file(workspace_path).write_text(
         session.model_dump_json(indent=2), encoding="utf-8"
     )

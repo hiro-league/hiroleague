@@ -33,7 +33,7 @@ from ..autostart import (
 )
 from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from ..domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
-from ..domain.config import Config, load_config, master_key_path
+from ..domain.config import Config, load_config, master_key_path, workspace_log_dir
 from ..domain.crypto import load_or_create_master_key
 from ..domain.workspace import WorkspaceError, WorkspaceRegistry, create_workspace, resolve_workspace
 
@@ -93,7 +93,11 @@ def start_server(
     if metrics:
         env[ENV_METRICS] = "1"
 
-    stderr_log = workspace_path / "stderr.log"
+    # Detached-process stderr belongs under <workspace>/logs/, not the workspace root,
+    # so all diagnostic files live together under the logs folder.
+    log_dir = workspace_log_dir(workspace_path)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stderr_log = log_dir / "stderr.log"
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
 
     return wait_for_pid(workspace_path, PID_FILENAME, stderr_log=stderr_log)

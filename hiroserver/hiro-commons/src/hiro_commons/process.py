@@ -20,6 +20,8 @@ import sys
 import time
 from pathlib import Path
 
+from hiro_commons.constants.storage import RUN_DIR
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -155,10 +157,10 @@ def pid_file(base_path: Path, pid_filename: str) -> Path:
     return base_path / pid_filename
 
 
-def channel_pid_file(
-    base_path: Path, channel_name: str, channels_dir: str = "channels"
-) -> Path:
-    return base_path / channels_dir / f"{channel_name}.pid"
+def channel_pid_file(base_path: Path, channel_name: str) -> Path:
+    # Channel pids live beside the server pid under <workspace>/run/, named
+    # ``channel-<name>.pid`` to mirror the ``logs/channel-<name>.log`` convention.
+    return base_path / RUN_DIR / f"channel-{channel_name}.pid"
 
 
 def _proc_create_time(pid: int) -> float | None:
@@ -177,7 +179,10 @@ def write_pid(base_path: Path, pid_filename: str, pid: int | None = None) -> Non
     pid = pid or os.getpid()
     create_time = _proc_create_time(pid)
     payload = str(pid) if create_time is None else f"{pid}\n{create_time}"
-    pid_file(base_path, pid_filename).write_text(payload, encoding="utf-8")
+    target = pid_file(base_path, pid_filename)
+    # pid_filename may point into a subdir (e.g. run/server.pid); ensure it exists.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(payload, encoding="utf-8")
 
 
 def read_pid(base_path: Path, pid_filename: str) -> int | None:
@@ -285,18 +290,14 @@ def kill_process(pid: int) -> bool:
         return False
 
 
-def write_channel_pid(
-    base_path: Path, channel_name: str, pid: int, channels_dir: str = "channels"
-) -> None:
-    target = channel_pid_file(base_path, channel_name, channels_dir=channels_dir)
+def write_channel_pid(base_path: Path, channel_name: str, pid: int) -> None:
+    target = channel_pid_file(base_path, channel_name)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(str(pid), encoding="utf-8")
 
 
-def read_channel_pid(
-    base_path: Path, channel_name: str, channels_dir: str = "channels"
-) -> int | None:
-    target = channel_pid_file(base_path, channel_name, channels_dir=channels_dir)
+def read_channel_pid(base_path: Path, channel_name: str) -> int | None:
+    target = channel_pid_file(base_path, channel_name)
     if not target.exists():
         return None
     try:
@@ -305,13 +306,9 @@ def read_channel_pid(
         return None
 
 
-def remove_channel_pid(
-    base_path: Path, channel_name: str, channels_dir: str = "channels"
-) -> None:
+def remove_channel_pid(base_path: Path, channel_name: str) -> None:
     try:
-        channel_pid_file(base_path, channel_name, channels_dir=channels_dir).unlink(
-            missing_ok=True
-        )
+        channel_pid_file(base_path, channel_name).unlink(missing_ok=True)
     except OSError:
         pass
 

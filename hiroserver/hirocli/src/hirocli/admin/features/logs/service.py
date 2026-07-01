@@ -11,6 +11,7 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from hirocli.admin.shared.result import Result
+from hirocli.domain.config import workspace_log_dir
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.runtime.request_methods import REGISTERED_REQUEST_METHOD_NAMES
 from hirocli.tools.logs import (
@@ -303,7 +304,8 @@ class LogsService:
             paths: set[Path] = set()
             if log_dir.exists():
                 paths.update(p for p in log_dir.glob("*.log") if p.is_file())
-            paths.add(workspace_path / "stderr.log")
+            # stderr.log now lives under <workspace>/logs/, not the workspace root.
+            paths.add(workspace_log_dir(workspace_path) / "stderr.log")
             if gateway_log_dir is not None and gateway_log_dir.exists():
                 paths.update(p for p in gateway_log_dir.glob("*.log") if p.is_file())
             if gateway_instance_path is not None:

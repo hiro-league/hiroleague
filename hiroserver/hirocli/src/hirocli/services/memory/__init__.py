@@ -86,6 +86,12 @@ def create_memory_service(
         default_top_k=top_k,
         temporal_default=temporal_default,
         event_sink=event_sink,
+        # Chat ingests windowed two-speaker episodes → append the memory extraction clause
+        # (memory.extraction.instructions; default = attribute facts to the user only, agent lines as
+        # context). Eval leaves this blank (its corpus stays two-sided, extracting every speaker).
+        extraction_instructions=str(
+            getattr(getattr(memory_prefs, "extraction", None), "instructions", "") or ""
+        ),
     )
 
 

@@ -37,7 +37,12 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
       "top_k": 8
     },
     "extraction": {
-      "enabled": true
+      "enabled": true,
+      "window_turns": 4,
+      "chunk_min_tokens": 1000,
+      "session_gap_minutes": 120,
+      "idle_flush_hours": 12,
+      "instructions": "This text is a chat transcript. In it, \"{user}\" is the human user and \"{character}\" is the AI assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines purely as context for resolving what {user} refers to \u2014 never record a fact asserted by {character} that {user} did not state or confirm."
     }
   },
   "knowledge": {

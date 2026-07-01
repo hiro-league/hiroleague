@@ -63,6 +63,11 @@ if TYPE_CHECKING:
 
 log = Logger.get("AGENT")
 
+# Idle memory-flush sweep cadence — how often the backstop runs (NOT how idle a conversation must
+# be; that is the ``memory.extraction.idle_flush_hours`` pref). Internal on purpose: hourly is cheap
+# (one indexed query for stale cursors) and keeps the ~12h idle threshold meaningfully timely.
+_IDLE_SWEEP_INTERVAL_S = 3600.0
+
 # Keep the public helpers the old test surface imports.
 __all__ = [
     "AgentManager",
@@ -264,9 +269,16 @@ class AgentManager:
                 "✅ AgentManager started — workspace · graph runner ready",
                 db=db,
             )
+            # Backstop for windowed memory ingestion: an hourly sweep flushes conversations idle
+            # beyond memory.extraction.idle_flush_hours (a user who never returns to trigger a normal
+            # flush). Lives for the server's lifetime alongside the stop-event wait.
+            sweep_task = asyncio.create_task(self._idle_sweep_loop())
             try:
                 await self._ctx.stop_event.wait()
             finally:
+                sweep_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await sweep_task
                 bus.unsubscribe(DomainEventType.PROVIDERS_CHANGED, self._handle_providers_changed)
                 self._compiled_cache.clear()
                 self._graph = None
@@ -274,6 +286,45 @@ class AgentManager:
                 await _close_memory_service(self._memory)
                 self._memory = None
                 self._ctx.memory_service = None
+
+    async def _idle_sweep_loop(self) -> None:
+        """Hourly idle-flush backstop for windowed memory ingestion. Each tick, flush pending turns
+        for conversations idle beyond ``memory.extraction.idle_flush_hours``. No-op while memory or
+        extraction is off. Sleeps on the stop-event so shutdown is immediate (never a full hour)."""
+        from ..services.memory.windowed_ingest import sweep_idle_conversations
+
+        while not self._ctx.stop_event.is_set():
+            try:
+                # Sleep up to one interval, but wake instantly on shutdown.
+                await asyncio.wait_for(
+                    self._ctx.stop_event.wait(), timeout=_IDLE_SWEEP_INTERVAL_S
+                )
+                return  # stop_event fired → exit the loop
+            except asyncio.TimeoutError:
+                pass  # interval elapsed → run a sweep
+
+            memory = self._memory
+            prefs = self._current_preferences()
+            mem_prefs = getattr(prefs, "memory", None)
+            ext = getattr(mem_prefs, "extraction", None)
+            if (
+                memory is None
+                or not getattr(mem_prefs, "enabled", False)
+                or not getattr(ext, "enabled", True)
+            ):
+                continue
+            try:
+                await sweep_idle_conversations(
+                    memory,
+                    workspace_path=self._ctx.workspace_path,
+                    idle_flush_hours=int(getattr(ext, "idle_flush_hours", 12)),
+                    window_turns=int(getattr(ext, "window_turns", 4)),
+                    session_gap_minutes=int(getattr(ext, "session_gap_minutes", 120)),
+                    chunk_min_tokens=int(getattr(ext, "chunk_min_tokens", 1000)),
+                    user_name=(getattr(mem_prefs, "user_name", "") or "").strip(),
+                )
+            except Exception:
+                log.warning("⚠️ memory idle sweep — tick failed (skipped)", exc_info=True)
 
     # ------------------------------------------------------------------
     # Per-message entry point

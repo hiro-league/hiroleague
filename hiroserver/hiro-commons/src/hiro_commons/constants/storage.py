@@ -5,6 +5,9 @@ from __future__ import annotations
 REGISTRY_FILENAME: str = "registry.json"
 CONFIG_FILENAME: str = "config.json"
 LOGS_DIR: str = "logs"
+# Ephemeral runtime/process state (pids, session, connection state) lives together
+# under <workspace>/run/ rather than scattered across the workspace root.
+RUN_DIR: str = "run"
 PAIRING_SESSION_FILENAME: str = "pairing_session.json"
 MASTER_KEY_FILENAME: str = "master_key.pem"
 WORKSPACE_DB_FILENAME: str = "workspace.db"
