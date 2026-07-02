@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from pydantic import PrivateAttr
 
 from hirocli.domain.preferences import RetrievalAgentLimits
 from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, ai_final, ai_text
@@ -93,7 +94,7 @@ def _search_call(*queries: dict, call_id: str = "c1"):
     return ai_tool_call("search_memory", {"queries": list(queries)}, call_id=call_id)
 
 
-async def _run(*, model, memory, limits=None, question="Q?") -> object:
+async def _run(*, model, memory, limits=None, question="Q?", allow_abstain=False, history=None) -> object:
     return await run_retrieval(
         question=question,
         memory=memory,
@@ -102,6 +103,8 @@ async def _run(*, model, memory, limits=None, question="Q?") -> object:
         model=model,
         user_id=1,
         character_id="aria",
+        allow_abstain=allow_abstain,
+        history=history,
     )
 
 
@@ -350,3 +353,61 @@ async def test_one_failing_sub_query_does_not_abort() -> None:
     errored = [row for row in sub_results if row.get("error")]
     assert len(errored) == 1
     assert "simulated search failure" in errored[0]["error"]
+
+
+# --- Phase 0 surface flags (history + allow_abstain) ------------------------------------------
+
+
+class _RecordingChatModel(ScriptedChatModel):
+    """``ScriptedChatModel`` that snapshots each turn's messages so history seeding is observable."""
+
+    _seen: list = PrivateAttr(default_factory=list)
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[override]
+        self._seen.append(list(messages))
+        return super()._generate(messages, stop, run_manager, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_allow_abstain_skips_fallback_when_model_never_searches() -> None:
+    """Phase 0 chat flag: with allow_abstain=True a loop that recalled NOTHING returns an empty
+    draft — no verbatim fallback, no forced answer turn (persona answers without memory). Contrast
+    the default (allow_abstain=False) path in test_verbatim_fallback_when_model_never_searches."""
+    graph = _SlowFakeGraph()  # no hits
+    # A no-tool stop turn (acc stays empty). The 2nd response is scripted to prove a forced final
+    # turn does NOT run under abstain — if it did, answer_text would become "should not run".
+    model = ScriptedChatModel(responses=[ai_text("no recall needed"), ai_final("should not run")])
+    result = await _run(model=model, memory=_memory(graph=graph), allow_abstain=True, question="hi")
+    assert result.answer_text == ""
+    assert result.accumulator.size() == 0
+    assert graph.search_calls == []  # verbatim fallback did NOT run
+
+
+@pytest.mark.asyncio
+async def test_allow_abstain_after_fruitless_search_returns_empty() -> None:
+    """Abstain also covers the realistic chat case: the model DID search but the graph returned
+    nothing — still no verbatim fallback, still an empty draft."""
+    graph = _SlowFakeGraph()  # search runs but yields no hits
+    model = ScriptedChatModel(responses=[_search_call(_q("anything")), ai_text("nothing found")])
+    result = await _run(model=model, memory=_memory(graph=graph), allow_abstain=True)
+    assert result.answer_text == ""
+    assert result.accumulator.size() == 0
+    assert len(graph.search_calls) == 1  # only the model's own search — no extra verbatim fallback
+
+
+@pytest.mark.asyncio
+async def test_history_seeded_between_system_prompt_and_question() -> None:
+    """Phase 0: history is inserted AFTER the system prompt and BEFORE the question, so turn 1 sees
+    recent context (default history=None keeps the plain system+question pair — covered elsewhere)."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
+    model = _RecordingChatModel(responses=[_search_call(_q("q1")), ai_final("done")])
+    history = [HumanMessage(content="my dog is Rex"), AIMessage(content="nice")]
+    await _run(model=model, memory=_memory(graph=graph), history=history)
+
+    first_call = model._seen[0]
+    contents = [getattr(m, "content", None) for m in first_call]
+    assert isinstance(first_call[0], SystemMessage)  # system prompt still leads
+    assert first_call[-1].content == "Q?"  # question is last
+    assert contents.index("my dog is Rex") < contents.index("nice") < contents.index("Q?")

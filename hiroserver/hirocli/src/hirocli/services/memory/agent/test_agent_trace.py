@@ -113,7 +113,7 @@ def test_write_agent_retrieval_trace_creates_jsonl_sidecar(tmp_path: Path) -> No
     write_agent_retrieval_trace(
         tmp_path,
         run_id="memeval-abc",
-        question_id="q_work",
+        slot="q_work",
         events=events,
     )
     path = agent_trace_dir(tmp_path) / "memeval-abc__q_work.jsonl"
@@ -123,7 +123,7 @@ def test_write_agent_retrieval_trace_creates_jsonl_sidecar(tmp_path: Path) -> No
 
 
 def test_write_agent_retrieval_trace_overwrites_on_rerun(tmp_path: Path) -> None:
-    """A second write with the same (run_id, question_id) replaces the snapshot — does NOT append."""
+    """A second write with the same (run_id, slot) replaces the snapshot — does NOT append."""
     first = [
         {"ts_ms": 10, "event": "tool_call", "turn": 1, "sub_queries": 1},
         {"ts_ms": 50, "event": "final", "reduce_op": "none", "cumulative_agent_turns": 2},
@@ -133,8 +133,8 @@ def test_write_agent_retrieval_trace_overwrites_on_rerun(tmp_path: Path) -> None
         {"ts_ms": 30, "event": "sub_result", "turn": 1, "sid": 1, "returned": 4, "new": 4},
         {"ts_ms": 60, "event": "final", "reduce_op": "latest", "cumulative_agent_turns": 2},
     ]
-    write_agent_retrieval_trace(tmp_path, run_id="r", question_id="q", events=first)
-    write_agent_retrieval_trace(tmp_path, run_id="r", question_id="q", events=second)
+    write_agent_retrieval_trace(tmp_path, run_id="r", slot="q", events=first)
+    write_agent_retrieval_trace(tmp_path, run_id="r", slot="q", events=second)
     path = agent_trace_dir(tmp_path) / "r__q.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 3

@@ -217,7 +217,7 @@ async def _recall_via_agent(
         accumulated_item_to_recall_row,
         present_accumulator,
     )
-    from hirocli.services.memory.agent.retrieval_agent import run_retrieval
+    from hirocli.services.memory.agent.retriever import MemoryRetriever
 
     limits = retrieval_limits
     prompt_text = retrieval_prompt_text
@@ -246,8 +246,10 @@ async def _recall_via_agent(
         )
         return [], [], None
 
-    result = await run_retrieval(
-        question=question,
+    # Phase 0: eval calls the shared MemoryRetriever seam (defaults ⇒ byte-identical to the old
+    # direct run_retrieval call — no history, verbatim-fallback floor on).
+    result = await MemoryRetriever.retrieve(
+        question,
         memory=memory,
         limits=limits,
         prompt_text=prompt_text,
@@ -288,7 +290,7 @@ def _persist_retrieval_trace(
     write_agent_retrieval_trace(
         workspace_path,
         run_id=run_id,
-        question_id=question_id,
+        slot=question_id,  # Phase 0 G3: eval's slot is the question id; chat passes step_index.
         events=transcript,
     )
 

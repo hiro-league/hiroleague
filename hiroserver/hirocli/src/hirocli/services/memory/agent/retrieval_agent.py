@@ -262,6 +262,8 @@ async def run_retrieval(
     user_id: int,
     character_id: str,
     model_id: str = "",
+    history: list[AnyMessage] | None = None,
+    allow_abstain: bool = False,
 ) -> RetrievalResult:
     """Drive the bounded retrieval loop; returns the populated accumulator + declared reduce/answer.
 
@@ -271,6 +273,12 @@ async def run_retrieval(
     The search loop gets ``max_agent_turns - 1`` tool-bound turns (the last turn is reserved for the
     dedicated structured final call, so total LLM invocations stay within ``max_agent_turns`` — the
     pref's documented meaning). The model stops searching early by emitting a turn with no tool call.
+
+    Surface flags (Phase 0 seam — both default to the eval behavior so the eval track stays
+    byte-identical): ``history`` seeds recent conversation turns *before* the question so turn 1 can
+    resolve anaphora + decompose against real context (chat); ``allow_abstain`` lets a loop that
+    recalled NOTHING return an empty result instead of running eval's verbatim-fallback floor (chat
+    may legitimately need no memory).
     """
     started_ms = int(time.perf_counter() * 1000)
     acc = Accumulator()
@@ -289,10 +297,13 @@ async def run_retrieval(
         MAX_LIMIT=limits.limit_max,
     )
 
-    messages: list[AnyMessage] = [
-        SystemMessage(content=formatted_prompt),
-        HumanMessage(content=question),
-    ]
+    # Phase 0: chat seeds recent turns between the system prompt and the question so the first turn
+    # resolves anaphora + decomposes against real context; eval passes history=None → the plain
+    # system+question pair is unchanged (byte-identical).
+    messages: list[AnyMessage] = [SystemMessage(content=formatted_prompt)]
+    if history:
+        messages.extend(history)
+    messages.append(HumanMessage(content=question))
     transcript: list[dict[str, Any]] = []
     # Accumulates the loop's own LLM token usage across every turn; written once to the
     # memory_recall ledger entry at the end (the refactor dropped this, so the node showed $0).
@@ -350,7 +361,13 @@ async def run_retrieval(
     # return content as a LIST of blocks ([{"type":"text","text":...}]), so a str-only check left
     # stop_text empty and forced the exit-B answer turn on EVERY question (duplicate answer call).
     stop_text = normalize_reply_content(last_stop.content).strip() if last_stop is not None else ""
-    if stop_text and acc.size() > 0:
+    if acc.size() == 0 and allow_abstain:
+        # Phase 0 abstain: the loop recalled nothing and this surface (chat) permits skipping — do
+        # NOT run eval's verbatim fallback or a forced answer turn; return an empty draft so the
+        # persona answers without memory. Eval keeps allow_abstain=False, so its floor below is
+        # untouched.
+        answer_text = ""
+    elif stop_text and acc.size() > 0:
         answer_text = stop_text
     else:
         # Exit B (budget exhausted) or an empty/groundless stop. Degenerate floor first (design §10):

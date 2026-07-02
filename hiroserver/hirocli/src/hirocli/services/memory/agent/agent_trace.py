@@ -141,21 +141,22 @@ def write_agent_retrieval_trace(
     workspace_path: Path,
     *,
     run_id: str,
-    question_id: str,
+    slot: str,
     events: list[dict[str, Any]],
 ) -> None:
     """Write one JSONL line per agent step (best-effort — never raises).
 
-    The events list is the full transcript for one question, so the sidecar is opened
-    in write mode (a re-run with the same ``run_id``/``question_id`` overwrites the
-    previous snapshot instead of appending duplicate rows).
+    ``slot`` is the surface-neutral sub-key of the run (Phase 0 G3): eval passes the question id,
+    chat passes the recall node's ``step_index``. The events list is the full transcript for one
+    ``slot``, so the sidecar is opened in write mode (a re-run with the same ``run_id``/``slot``
+    overwrites the previous snapshot instead of appending duplicate rows).
     """
     if not events:
         return
     try:
         directory = agent_trace_dir(workspace_path)
         directory.mkdir(parents=True, exist_ok=True)
-        stem = f"{_safe_segment(run_id)}__{_safe_segment(question_id)}"
+        stem = f"{_safe_segment(run_id)}__{_safe_segment(slot)}"
         path = directory / f"{stem}.jsonl"
         lines = [json.dumps(row, ensure_ascii=False, default=str) for row in events]
         with _write_lock:
@@ -164,9 +165,9 @@ def write_agent_retrieval_trace(
                     fh.write(line + "\n")
     except Exception:
         log.warning(
-            "⚠️ agent retrieval trace — sidecar write failed · run_id=%s · q=%s",
+            "⚠️ agent retrieval trace — sidecar write failed · run_id=%s · slot=%s",
             run_id,
-            question_id,
+            slot,
             exc_info=True,
         )
 
