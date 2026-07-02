@@ -80,6 +80,9 @@ export type PrefFieldSpec =
       modelKind: PrefModelKind;
       scope?: 'llm' | 'memory' | 'knowledge';
       heading?: string;
+      /** Path whose value is shown as the inherited fallback in the empty model box (e.g. an unset
+       *  override falling back to `llm.default_chat`). */
+      emptyFallback?: PreferencePath;
     }
   /** Responsive field grid (the 2-col default; `cols: 3` for dense numeric rows). */
   | { kind: 'grid'; cols?: 2 | 3; fields: PrefFieldSpec[] }
@@ -99,11 +102,27 @@ export type PrefFieldSpec =
       ariaLabel: string;
       editorLabel: string;
     }
-  /** A named prompt library (active-profile select + New/Edit/Duplicate), optional heading + help. */
+  /** A named prompt library (active-profile select + New/Edit/Duplicate), optional heading + help.
+   *  OWNS both its dict and active-id paths (the canonical home of the library). */
   | {
       kind: 'promptLibrary';
       dictPath: PreferencePath;
       activeIdPath: PreferencePath;
+      defaultId?: string;
+      heading?: string;
+      headingHelp?: string;
+      hint: string;
+      ariaLabel: string;
+      editorLabel: string;
+    }
+  /** Active-profile SELECT over a library OWNED ELSEWHERE (a different tab/card). Renders the same
+   *  dropdown + New/Edit/Duplicate against the shared ``dictPath`` but owns ONLY ``activeIdPath`` —
+   *  so the dict isn't double-claimed across tabs (e.g. chat selecting from the eval-owned library). */
+  | {
+      kind: 'promptLibrarySelect';
+      dictPath: PreferencePath;
+      activeIdPath: PreferencePath;
+      defaultId?: string;
       heading?: string;
       headingHelp?: string;
       hint: string;
@@ -156,6 +175,9 @@ export function fieldSpecPaths(spec: PrefFieldSpec): string[] {
       return [spec.path];
     case 'promptLibrary':
       return [spec.activeIdPath, spec.dictPath];
+    case 'promptLibrarySelect':
+      // Owns ONLY the active-id pointer — the dict is owned by its canonical card on another tab.
+      return [spec.activeIdPath];
     case 'grid':
     case 'column':
     case 'panel':

@@ -29,29 +29,14 @@ from ..events import (
 from ..graph_kit import (
     IDENTITY_PEER_KEYS,
     emit,
-    emit_for,
-    memory_text,
     normalize_reply_content,
 )
-from ..ledger import graph_logged, observe, substep_scope
+from ..ledger import current_entry, graph_logged, observe, substep_scope
 from ..node_group import NodeGroup
 from ..outcomes import NodeOutcome, emit_outcome
 from ..state import GraphState
 
 log = Logger.get("AGENT.GRAPH")
-
-
-def _memory_results_preview(
-    label: str,
-    memories: list[dict[str, Any]],
-    count: int | None = None,
-) -> str:
-    total = len(memories) if count is None else count
-    snippets = [memory_text(item) for item in memories[:3]]
-    snippets = [item for item in snippets if item]
-    if snippets:
-        return f"{label}: {total} · " + " | ".join(snippets)
-    return f"{label}: {total}"
 
 
 def _serialize_knowledge_sources(sources: list[Any]) -> list[dict[str, Any]]:
@@ -85,15 +70,23 @@ class MemoryNodes(NodeGroup):
 
     @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def memory_search_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
-        """Bring recent conversation memory (Graphiti) into the turn. Runs after ``trim_history``."""
+        """Agentic memory recall (the Graphiti retrieval loop) before context assembly.
+
+        Phase 2 (memory-eval-vs-chat-parity): replaces the pre-P2 single-shot ``memory.search()``
+        with the shared, history-aware, abstain-allowed loop (``MemoryRetriever`` over
+        ``memory.retrieval.*`` config). Produces the recalled rows AND a draft grounding note
+        (``memory_draft``) for the persona (consumed in Phase 4). Runs after ``trim_history`` so the
+        history it sees is already bounded to ``chat.max_messages``. (Node keeps the ``memory_search``
+        label for now; the ``memory_recall`` rename ships with the admin detail view in a later phase.)
+        """
         text = state.get("user_text") or ""
         observe(input=f"q: {text[:160]}" if text.strip() else "q: <empty>")
-        if not text.strip() or self.services.memory is None:
+
+        memory = self.services.memory
+        if not text.strip() or memory is None:
             observe(
-                decision=("empty", "disabled" if self.services.memory is None else "no_query"),
-                output=(
-                    "results: 0; disabled" if self.services.memory is None else "results: 0; no_query"
-                ),
+                decision=("empty", "disabled" if memory is None else "no_query"),
+                output="results: 0; disabled" if memory is None else "results: 0; no_query",
             )
             return {}
 
@@ -106,45 +99,136 @@ class MemoryNodes(NodeGroup):
             observe(decision=("empty", "search_disabled"), output="results: 0; search disabled")
             return {}
 
-        # Graphiti memory recall uses only top_k — the shared graph engine owns the rest
-        # (sim_min_score / reranker) and bears the query-embedding + search cost.
-        search_prefs = memory_prefs.search
-        observe(input=f"q: {text[:120]} · top_k={search_prefs.top_k}")
+        prefs = self.prefs.current
+        if prefs is None:
+            observe(decision=("empty", "no_prefs"), output="results: 0; prefs unavailable")
+            return {}
 
-        t0 = time.perf_counter()
+        # Lazy imports keep the retrieval-loop deps off this module's base import path.
+        from ....domain.preferences import resolve_chat_retrieval_agent_prompt
+        from ....services.memory.agent import (
+            MemoryRetriever,
+            accumulated_item_to_recall_row,
+            present_accumulator,
+        )
+        from ....services.memory.agent.agent_trace import (
+            format_memory_recall_output_preview,
+            summarize_agent_transcript,
+            write_agent_retrieval_trace,
+        )
+        from ....services.memory.models import build_memory_retrieval_model
+
+        # Chat retrieval config (memory.retrieval.*, Phase 1): caps + prompt + model.
+        limits = prefs.memory.retrieval.limits
+        _prompt_id, prompt_text = resolve_chat_retrieval_agent_prompt(prefs)
+        model, model_id = build_memory_retrieval_model(
+            prefs, self.services.workspace_path, credential_store=self.services.credentials
+        )
+        if model is None:
+            observe(decision=("empty", "no_model"), output="results: 0; no retrieval model")
+            return {}
+
         memory_user_id = resolve_memory_user_id(
             data_user_id=state.get("data_user_id"),
             workspace_path=self.services.workspace_path,
         )
+        # Identities → the loop phrases queries with the real names (memory anchors facts to the
+        # speaker's real name, so "{user}'s wife" hits far better than "the user's wife"). Same
+        # resolution ingest uses (memory.user_name A1 anchor + the character display name); the
+        # assistant is marked as the AI in the prompt to avoid same-name collisions.
+        from ....domain.character import get_character_name
+
+        user_name = (getattr(memory_prefs, "user_name", "") or "").strip()
+        agent_name = get_character_name(self.services.workspace_path, state.get("character_id", ""))
+        # History = the trimmed prior turns (bounded by chat.max_messages in trim_history). The
+        # current user turn isn't in ``messages`` yet (it's ``user_text``, appended later by
+        # context_build) — so this is exactly the anaphora context the loop's turn 1 resolves against.
+        history = list(state.get("messages") or [])
+
+        t0 = time.perf_counter()
         try:
-            hits = await self.services.memory.search(
+            result = await MemoryRetriever.retrieve(
                 text,
+                memory=memory,
+                limits=limits,
+                prompt_text=prompt_text,
+                model=model,
+                model_id=model_id,
                 user_id=memory_user_id,
                 character_id=state.get("character_id", ""),
+                history=history,
+                allow_abstain=True,
+                user_name=user_name,
+                agent_name=agent_name,
             )
         except Exception as exc:
             observe(
-                fail={"code": "memory_search_failed", "message": str(exc), "decision": "failed"}
+                fail={"code": "memory_recall_failed", "message": str(exc), "decision": "failed"}
             )
             log.warning(
-                "memory_search failed - %s",
+                "❌ memory_recall — loop failed · %s",
                 state.get("inbound_id", "?"),
                 error=str(exc),
+                exc_info=True,
             )
             return {}
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        log.info("memory_search retrieved - n=%d", len(hits), elapsed_ms=elapsed_ms)
+        rows = [
+            accumulated_item_to_recall_row(item) for item in present_accumulator(result.accumulator)
+        ]
+        draft = (result.answer_text or "").strip() or None
+        n = len(rows)
+
+        # G3: persist the loop transcript sidecar (turns/sub-queries) — trace tier only, best-effort.
+        if getattr(prefs.graph, "observability", "ledger") == "trace" and result.transcript:
+            entry = current_entry.get()
+            if entry is not None:
+                write_agent_retrieval_trace(
+                    self.services.workspace_path,
+                    run_id=str(entry.run_id),
+                    slot=str(entry.step_index),
+                    events=result.transcript,
+                )
+
+        # G2: decision distinguishes recalled / abstained (the loop chose NOT to search) / errored /
+        # empty — so "why no memory this turn" is answerable in Graph Runs (observability by design).
+        summary = summarize_agent_transcript(result.transcript)
+        if n:
+            decision = ("retrieved", str(n))
+        elif summary.searches == 0:
+            decision = ("abstained", "no_recall_needed")
+        elif getattr(result, "error_count", 0):
+            decision = ("empty", f"{result.error_count} search error(s)")
+        else:
+            decision = ("empty", "0")
+
+        facts_preview = " | ".join(
+            str(r.get("memory") or "").strip()
+            for r in rows[:3]
+            if str(r.get("memory") or "").strip()
+        )
+        preview = format_memory_recall_output_preview(
+            result.transcript, facts_preview=facts_preview or "(nothing recalled)"
+        )
+        log.info(
+            "✅ memory_recall — %s · rows=%d · searches=%d · draft=%s",
+            state.get("inbound_id", "?"),
+            n,
+            summary.searches,
+            "yes" if draft else "no",
+            elapsed_ms=elapsed_ms,
+        )
         emit_outcome(
             writer,
             state,
             NodeOutcome(
-                decision=("retrieved" if hits else "empty", str(len(hits))),
-                output=_memory_results_preview("results", hits),
-                event=(GRAPH_MEMORY_RETRIEVED, {"count": len(hits), "elapsed_ms": elapsed_ms}),
+                decision=decision,
+                output=preview,
+                event=(GRAPH_MEMORY_RETRIEVED, {"count": n, "elapsed_ms": elapsed_ms}),
             ),
         )
-        return {"retrieved_memories": hits}
+        return {"retrieved_memories": rows, "memory_draft": draft}
 
     @graph_logged(captures={"usage", "decision"}, on_error="raise")
     async def memory_out_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:

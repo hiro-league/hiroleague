@@ -60,6 +60,8 @@ from .models_memory import (
     DEFAULT_MEMORY_SEARCH_TOP_K,
     MemoryExtractionPreferences,
     MemoryPreferences,
+    MemoryRetrievalPreferences,
+    MemoryRetrievalRenderPreferences,
     MemorySearchPreferences,
 )
 
@@ -75,6 +77,8 @@ __all__ = [
     "DEFAULT_MEMORY_SEARCH_TOP_K",
     "MemorySearchPreferences",
     "MemoryExtractionPreferences",
+    "MemoryRetrievalPreferences",
+    "MemoryRetrievalRenderPreferences",
     "MemoryPreferences",
     # Knowledge
     "DEFAULT_KNOWLEDGE_EMBEDDING_MODEL",

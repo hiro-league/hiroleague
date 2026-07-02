@@ -34,6 +34,8 @@ class MemoryRetriever:
         model_id: str = "",
         history: list[AnyMessage] | None = None,
         allow_abstain: bool = False,
+        user_name: str = "",
+        agent_name: str = "",
     ) -> RetrievalResult:
         """Run the bounded retrieval loop for ``query``; forwards to :func:`run_retrieval`.
 
@@ -53,6 +55,8 @@ class MemoryRetriever:
             model_id=model_id,
             history=history,
             allow_abstain=allow_abstain,
+            user_name=user_name,
+            agent_name=agent_name,
         )
 
 

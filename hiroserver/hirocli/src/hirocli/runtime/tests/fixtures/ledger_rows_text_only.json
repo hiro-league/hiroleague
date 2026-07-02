@@ -28,12 +28,12 @@
     "tts_audio_seconds": "",
     "cost_usd": "",
     "pricing_version": "",
-    "decision_kind": "retrieved",
-    "decision_detail": "1",
+    "decision_kind": "empty",
+    "decision_detail": "no_model",
     "error_code": "",
     "row_kind": "node",
-    "input_preview": "q: hello there \u00b7 top_k=8",
-    "output_preview": "results: 1 \u00b7 User prefers concise replies"
+    "input_preview": "q: hello there",
+    "output_preview": "results: 0; no retrieval model"
   },
   {
     "ts": "",
@@ -68,8 +68,8 @@
     "decision_detail": "instructionsknowledgememory",
     "error_code": "",
     "row_kind": "node",
-    "input_preview": "knowledge: 0 \u00b7 memories: 1",
-    "output_preview": "blocks: instructions,knowledge,memory \u00b7 chars=539"
+    "input_preview": "knowledge: 0 · memories: 0",
+    "output_preview": "blocks: instructions,knowledge,memory · chars=532"
   },
   {
     "ts": "",
@@ -137,11 +137,11 @@
     "cost_usd": "",
     "pricing_version": "",
     "decision_kind": "stored",
-    "decision_detail": "ok",
+    "decision_detail": "no_new_facts",
     "error_code": "",
     "row_kind": "node",
-    "input_preview": "user: hello there \u00b7 assistant: final reply",
-    "output_preview": "stored: 1 \u00b7 stored 1"
+    "input_preview": "user: hello there · assistant: final reply",
+    "output_preview": "stored: 0"
   },
   {
     "ts": "",
@@ -176,7 +176,7 @@
     "decision_detail": "ok",
     "error_code": "",
     "row_kind": "node",
-    "input_preview": "reply_id: reply-<uuid> \u00b7 reply: final reply",
+    "input_preview": "reply_id: reply-<uuid> · reply: final reply",
     "output_preview": "run: completed"
   }
 ]

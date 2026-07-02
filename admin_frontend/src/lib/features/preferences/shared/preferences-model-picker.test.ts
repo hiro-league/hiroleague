@@ -31,6 +31,28 @@ function makeDraft(): WorkspacePreferences {
         session_gap_minutes: 120,
         idle_flush_hours: 12,
         instructions: ''
+      },
+      retrieval: {
+        active_prompt_id: 'chat',
+        limits: {
+          max_agent_turns: 4,
+          max_parallel_searches: 3,
+          limit_default: 20,
+          limit_min: 10,
+          limit_max: 40,
+          hops_max: 3
+        },
+        model: null,
+        tuning_profile: 'knowledge_answering',
+        render: {
+          show_event_time: true,
+          show_expired_at: false,
+          show_superseded: false,
+          max_elements_per_kind: 30,
+          max_fact_chars: 240,
+          max_episode_chars: 300,
+          max_summary_chars: 400
+        }
       }
     },
     knowledge: {

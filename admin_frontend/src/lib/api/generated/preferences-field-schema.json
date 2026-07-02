@@ -221,6 +221,156 @@
     "title": "Memory extraction instructions",
     "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge or eval."
   },
+  "memory.retrieval.active_prompt_id": {
+    "path": "memory.retrieval.active_prompt_id",
+    "nullable": false,
+    "type": "string",
+    "default": "chat",
+    "title": "Active prompt profile",
+    "description": "Which shared retrieval-agent prompt profile the CHAT recall loop uses."
+  },
+  "memory.retrieval.limits.max_agent_turns": {
+    "path": "memory.retrieval.limits.max_agent_turns",
+    "nullable": false,
+    "type": "integer",
+    "default": 4,
+    "title": "Max agent turns",
+    "description": "How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.",
+    "min": 1,
+    "max": 10
+  },
+  "memory.retrieval.limits.max_parallel_searches": {
+    "path": "memory.retrieval.limits.max_parallel_searches",
+    "nullable": false,
+    "type": "integer",
+    "default": 3,
+    "title": "Max parallel searches",
+    "description": "Sub-queries per search_memory call \u2014 global for eval and chat.",
+    "min": 1,
+    "max": 5
+  },
+  "memory.retrieval.limits.limit_default": {
+    "path": "memory.retrieval.limits.limit_default",
+    "nullable": false,
+    "type": "integer",
+    "default": 20,
+    "title": "Limit default",
+    "description": "Starting num_results per search_memory call.",
+    "min": 1,
+    "max": 100
+  },
+  "memory.retrieval.limits.limit_min": {
+    "path": "memory.retrieval.limits.limit_min",
+    "nullable": false,
+    "type": "integer",
+    "default": 10,
+    "title": "Limit min",
+    "description": "Soft floor when the tool clamps limit.",
+    "min": 1,
+    "max": 100
+  },
+  "memory.retrieval.limits.limit_max": {
+    "path": "memory.retrieval.limits.limit_max",
+    "nullable": false,
+    "type": "integer",
+    "default": 40,
+    "title": "Limit max",
+    "description": "Soft ceiling when the tool clamps limit.",
+    "min": 1,
+    "max": 100
+  },
+  "memory.retrieval.limits.hops_max": {
+    "path": "memory.retrieval.limits.hops_max",
+    "nullable": false,
+    "type": "integer",
+    "default": 3,
+    "title": "Hops max",
+    "description": "Upper bound the tool accepts per search (1\u20133).",
+    "min": 1,
+    "max": 3
+  },
+  "memory.retrieval.model": {
+    "path": "memory.retrieval.model",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "title": "Retrieval agent model",
+    "description": "Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory tool. Null falls back to the default chat model.",
+    "model_kind": "chat"
+  },
+  "memory.retrieval.tuning_profile": {
+    "path": "memory.retrieval.tuning_profile",
+    "nullable": false,
+    "type": "string",
+    "default": "knowledge_answering",
+    "title": "Retrieval agent profile",
+    "description": "Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model."
+  },
+  "memory.retrieval.render.show_event_time": {
+    "path": "memory.retrieval.render.show_event_time",
+    "nullable": false,
+    "type": "boolean",
+    "default": true,
+    "title": "Show event_time (valid date)"
+  },
+  "memory.retrieval.render.show_expired_at": {
+    "path": "memory.retrieval.render.show_expired_at",
+    "nullable": false,
+    "type": "boolean",
+    "default": false,
+    "title": "Show expired_at (invalid date)"
+  },
+  "memory.retrieval.render.show_superseded": {
+    "path": "memory.retrieval.render.show_superseded",
+    "nullable": false,
+    "type": "boolean",
+    "default": false,
+    "title": "Show SUPERSEDED flag"
+  },
+  "memory.retrieval.render.max_elements_per_kind": {
+    "path": "memory.retrieval.render.max_elements_per_kind",
+    "nullable": false,
+    "type": "integer",
+    "default": 30,
+    "title": "Max elements / kind",
+    "description": "Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.",
+    "advanced": true,
+    "min": 1,
+    "max": 200
+  },
+  "memory.retrieval.render.max_fact_chars": {
+    "path": "memory.retrieval.render.max_fact_chars",
+    "nullable": false,
+    "type": "integer",
+    "default": 240,
+    "title": "Max fact chars",
+    "description": "Each recalled fact \u2192 one sanitized line capped here.",
+    "advanced": true,
+    "min": 40,
+    "max": 2000
+  },
+  "memory.retrieval.render.max_episode_chars": {
+    "path": "memory.retrieval.render.max_episode_chars",
+    "nullable": false,
+    "type": "integer",
+    "default": 300,
+    "title": "Max message chars",
+    "description": "Per-episode/message text cap (one sanitized line).",
+    "advanced": true,
+    "min": 40,
+    "max": 2000
+  },
+  "memory.retrieval.render.max_summary_chars": {
+    "path": "memory.retrieval.render.max_summary_chars",
+    "nullable": false,
+    "type": "integer",
+    "default": 400,
+    "title": "Max entity summary chars",
+    "description": "Per-entity summary cap (one sanitized line).",
+    "advanced": true,
+    "min": 40,
+    "max": 4000
+  },
   "knowledge.default_embedding_model": {
     "path": "knowledge.default_embedding_model",
     "nullable": true,

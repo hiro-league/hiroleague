@@ -39,6 +39,9 @@ def test_constants_are_backed_by_bundled_files() -> None:
     assert p.DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT == load_prompt(
         "memory_eval_retrieval_agent"
     )
+    assert p.DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT == load_prompt(
+        "memory_chat_retrieval_agent"
+    )
     assert p.DEFAULT_CHAT_INSTRUCTIONS == load_prompt("chat_instructions")
 
 

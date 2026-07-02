@@ -55,8 +55,8 @@ def test_count_trigger_and_anchors() -> None:
     assert w.episode_uuid == "u2" and w.watermark_id == "u2"
     assert w.reference_time == "2026-07-01T09:01:00+00:00"  # last (agent) turn
     assert w.watermark_at == "2026-07-01T09:01:00+00:00"  # last user turn
-    # Body carries both speakers, labelled + timestamped.
-    assert "Misho:" in w.body and "Aria:" in w.body and "[2026-07-01 09:00]" in w.body
+    # Body carries both speakers, labelled + timestamped; the assistant carries the "(AI)" marker.
+    assert "Misho:" in w.body and "Aria (AI):" in w.body and "[2026-07-01 09:00]" in w.body
 
 
 def test_under_n_stays_pending() -> None:

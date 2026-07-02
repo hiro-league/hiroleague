@@ -9,9 +9,11 @@ from pathlib import Path
 from ..credential_store import CredentialStore
 
 from .defaults import (
+    DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
     DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
     DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
     DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
+    DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
     LLMPurpose,
     ThinkingLevel,
     TuningProfile,
@@ -389,8 +391,18 @@ def resolve_graphiti_small_model(
 
 
 def resolve_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
-    """Return ``(profile_id, prompt_text)`` for the agentic retrieval loop."""
+    """Return ``(profile_id, prompt_text)`` for the agentic retrieval loop (eval active profile)."""
     return prefs.graph.eval.resolve_retrieval_agent_prompt()
+
+
+def resolve_chat_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
+    """Return ``(profile_id, prompt_text)`` for the CHAT retrieval loop.
+
+    Cross-namespace: the profile LIBRARY is shared (``graph.eval.retrieval_agent_prompts``) but chat's
+    selection lives under ``memory.retrieval.active_prompt_id`` (its own dropdown). Blank falls back to
+    the locked ``chat`` profile, then the built-in chat prompt constant."""
+    active = (prefs.memory.retrieval.active_prompt_id or "").strip() or DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+    return prefs.graph.eval.resolve_prompt_from_library(active, DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT)
 
 
 def resolve_eval_answer_llm(
@@ -449,6 +461,31 @@ def resolve_eval_retrieval_llm(
         workspace_path,
         explicit_model=prefs.graph.eval.retrieval_model or prefs.graph.eval.answer_model,
         tuning_profile_id=prefs.graph.eval.retrieval_tuning_profile,
+        workspace_id=workspace_id,
+        credential_store=credential_store,
+    )
+
+
+def resolve_memory_retrieval_llm(
+    prefs: WorkspacePreferences,
+    workspace_path: Path,
+    *,
+    workspace_id: str | None = None,
+    credential_store: CredentialStore | None = None,
+) -> ResolvedModel | None:
+    """Resolve the CHAT agentic memory-retrieval model (Phase 2).
+
+    Chain: ``memory.retrieval.model`` → ``llm.default_chat``. Chat memory deliberately does NOT
+    borrow the knowledge-answering tier (unlike the eval retrieval resolver) — a simple, predictable
+    fallback the Agent-memory model picker surfaces via its empty-box hint."""
+    model_id = (prefs.memory.retrieval.model or "").strip() or prefs.llm.default_chat
+    return _resolve_available_model(
+        prefs,
+        workspace_path,
+        model_id,
+        expected_kind="chat",
+        tuning_profile_id=prefs.memory.retrieval.tuning_profile,
+        log_label="memory.retrieval",
         workspace_id=workspace_id,
         credential_store=credential_store,
     )

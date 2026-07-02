@@ -119,7 +119,12 @@ def _group_exchanges(turns: list[WinTurn]) -> list[_Exchange]:
 
 def _render_body(exchanges: list[_Exchange], *, user_name: str, character_name: str) -> str:
     user_label = (user_name or "User").strip() or "User"
-    agent_label = (character_name or "Assistant").strip() or "Assistant"
+    # Disambiguate the assistant's speaker label with an "(AI)" marker so its name can't be confused
+    # with a person the user knows by the same name in episode-text (BM25) search. Keep this form
+    # aligned with how the retrieval agent refers to the assistant in queries
+    # (domain/prompts/memory_chat_retrieval_agent.md → ## Identities).
+    agent_name = (character_name or "").strip()
+    agent_label = f"{agent_name} (AI)" if agent_name else "AI assistant"
     lines: list[str] = []
     for ex in exchanges:
         for t in ex.turns:

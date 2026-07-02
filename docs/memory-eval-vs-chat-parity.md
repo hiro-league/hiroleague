@@ -148,8 +148,8 @@ single-shot, so it ships safe and tunes up. Chat consumes **both outputs** — t
 | `format_recall_context` (rich render) | `services/eval/judge.py` | **Reuse** — chat renders memory with it (**replaces** the flat `memory_block`) |
 | Draft `answer_text` | `run_retrieval` output | **Consume** — inject as a `search_conclusion` block in the persona prompt |
 | History → loop input | knowledge does it; memory doesn't | **New** — feed recent messages so turn 1 does the rewrite (**subsumes I4**) |
-| Retrieval prompt | `graph.eval.retrieval_agent_prompts` | **New** chat prompt (abstain-allowed, history-aware) via the multi-prompt locked-defaults |
-| Caps / model | `graph.eval.retrieval_agent`, `graph.eval.retrieval_model` | **New** chat-scoped `memory.retrieval.*` |
+| Retrieval prompt | `graph.eval.retrieval_agent_prompts` | **Done (P1)** — locked `chat` profile in the **shared** library; chat selects via its own `memory.retrieval.active_prompt_id` (new `promptLibrarySelect` widget) |
+| Caps / model | `graph.eval.retrieval_agent`, `graph.eval.retrieval_model` | **Done (P1)** — chat got its **own** `memory.retrieval.{limits,model,tuning_profile}` (turns=4 default); the `memory.retrieval.*` split is no longer deferred |
 | Shared entrypoint | _does not exist yet_ | **New** small `MemoryRetriever` seam (eval + chat both call) |
 | Persona / answering prompt | `call_model` (`compose_context`) | **Update** to consume `search_conclusion` + rich facts (light grounding; retuned) |
 | Loop transcript + trajectory + preview | `services/memory/agent/agent_trace.py` (P6/P8/P9) | **Reuse** — pure over `RetrievalResult.transcript`; chat calls `write_agent_retrieval_trace` (**generalize** the `question_id` key → G3) + `format_memory_recall_output_preview` (G2) |
@@ -228,22 +228,26 @@ folded into Phase 2; G4 (admin chat-safe detail) is its own phase.**
 
 ### Implementation phases
 
-> High-level ordering only — a **detailed design is a later run**. Each phase leaves chat working;
-> caps default tight (`turns=1`) so early phases collapse toward today's single-shot.
+> High-level ordering only — a **detailed design is a later run**. Each phase leaves chat working.
+> **Caps decision (2026-07-02):** chat **reuses eval's validated `graph.eval.retrieval_agent`
+> (default `max_agent_turns=4`)** — eval parity, not a tight `turns=1` override. (`turns=1` gives
+> *zero* search turns → with chat's abstain flag on, *no recall*; it does **not** "collapse toward
+> single-shot" as an earlier draft claimed.) Safety in early phases comes from the **abstain gate +
+> flat render + observability gating**, and Phase 6 can tune *down* if latency/cost demands.
 
 **Bucket A — Foundations (no user-visible change)**
 
 | # | Phase | Goal | Ships safe because | Validate |
 |---|---|---|---|---|
 | **0** ✅ | Shared seam + loop flags **(done 2026-07-02)** | lift `run_retrieval` into `MemoryRetriever`; add `history` + abstain flag; eval calls the seam. **Also generalize** `write_agent_retrieval_trace`'s `question_id` → a neutral `slot` key (G3) so chat can key by `step_index` | flags default to eval's current behavior; `RetrievalResult` already carries `transcript`/`error_count` (no shape change) | **eval track unchanged** (regression) — 41 tests green |
-| **1** | Chat config + prompt | `memory.retrieval.*` prefs + chat retrieval prompt (abstain-allowed, history-aware); tight caps default | nothing wired yet | prefs tests, `npm run check` |
+| **1** ✅ | Chat config + prompt — **`memory.retrieval.*` split (done 2026-07-02)** | own `memory.retrieval.{active_prompt_id, limits, model, tuning_profile}` on the Agent-memory card; **shared** prompt library via new `promptLibrarySelect` widget; caps default `turns=4` (eval parity) | nothing wired to the loop yet; config + UI only | 231 backend + 69 frontend prefs tests, `svelte-check` 0 errors |
 
 **Bucket B — Quality package (2–4 land together for the real win)**
 
 | # | Phase | Goal | Ships safe because | Validate |
 |---|---|---|---|---|
-| **2** | Wire the pre-pass loop **+ graph-run wiring (G1–G3, G5)** | `memory_search_node` → `MemoryRetriever` (chat cfg), fed history; abstain on; **rename node → `memory_recall`** w/ `captures={"usage","decision"}` (G1); set decision from `error_count`/abstain/size + `output_preview` via `format_memory_recall_output_preview` (G2); write the transcript sidecar keyed by chat `run/step` (G3); **keep flat render** to isolate risk | tight caps ≈ single-shot; usage/preview land on the existing wrapper entry (no new ledger plumbing) | **latency/cost inflection** (loop = ≥1 extra LLM call/turn); abstain skips chit-chat; recall node shows model/tokens/cost + decision; **G5**: per-search traces nest under the recall `step_index` w/ distinct `sid` (observability=`trace`) |
-| **3** | Rich rendering | flat `memory_block` → `format_recall_context` (O1–O4) | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation |
+| **2** ✅ | Wire the pre-pass loop **+ graph-run wiring (G1–G3, G5)** — **done 2026-07-02** | `memory_search_node` runs `MemoryRetriever.retrieve` (chat cfg, fed history, **abstain on**); stashes rich rows + **`memory_draft`**; decision distinguishes recalled/**abstained**/errored/empty (G2) + `format_memory_recall_output_preview` (G2); transcript sidecar under `trace` (G3); usage lands via `_write_recall_usage` (G1); **flat render kept** (P3). **Node NOT renamed** — kept `memory_search` (rename → `memory_recall` deferred to P5/G4 to avoid 8-fixture churn; usage/decision land name-independently). New `build_memory_retrieval_model` (`memory.retrieval.model → llm.default_chat`). | reuses eval caps (turns=4); usage/preview land on the wrapper entry (no new ledger plumbing) | **latency/cost inflection** (loop = ≥1 extra LLM call/turn); abstain skips chit-chat; recall node shows model/tokens/cost + decision. Tests: 283 runtime (incl. rewritten node tests + regenerated snapshot fixtures) + 270 domain/memory/eval + `svelte-check`. **G5** per-search trace nesting: deferred verify (needs a live `trace` run) |
+| **3** ✅ | Rich rendering **+ chat render caps** — **done 2026-07-02** | flat `memory_block` → shared `format_recall_context` (moved out of `services/eval` into `services/memory/agent/presentation.py`; eval re-exports); **new `memory.retrieval.render.*` prefs** (chat copy of eval's "Answer context" caps + temporal toggles) on the Memory tab, built into a chat `RecallRenderOptions` | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation; render caps editable + honored — 640 backend + 69 frontend prefs, `svelte-check` clean |
 | **4** | Draft + persona answer | inject `<search_conclusion>`; persona prompt consumes conclusion + facts, light grounding, retune temp (O5) | persona still owns voice | memory actually used; voice preserved; draft overridable |
 | **5** | Graph-run detail parity (G4, admin) | chat-safe detail path for a `memory_recall` row: backend read of the transcript sidecar → `build_retrieval_loop_payload`; a **degraded dialog branch** showing **trajectory + recalled rows** (no gold/judge) so the ⓘ marker doesn't dead-end on the eval-DB bridge | pure read/render; independent of the reply path | on the Vite dev site (`:5173`), a live chat turn's `memory_recall` row opens the loop trajectory (turns/sub-queries) + recalled facts — **no "no saved eval row" toast** |
 
@@ -255,8 +259,9 @@ folded into Phase 2; G4 (admin chat-safe detail) is its own phase.**
 
 **Cross-cutting**
 
-- **Latency/cost inflection is Phase 2** — the loop adds ≥1 LLM call before the persona replies;
-  tight caps + the abstain gate mitigate; a heuristic pre-gate is the Phase-6 lever if needed.
+- **Latency/cost inflection is Phase 2** — at eval-parity caps (turns=4) the loop adds up to a few
+  LLM calls before the persona replies; the **abstain gate** (skip search when no memory is needed)
+  is the main mitigation, with a heuristic pre-gate and/or tuning caps *down* as the Phase-6 levers.
 - **Config shared with eval now, split later** (post-task) — retune-for-chat happens on the shared
   knobs first.
 - **Graph-run representation** — the loop's LLM usage, decision, preview, transcript, and per-search
@@ -302,21 +307,49 @@ from `runner_memory._recall_via_agent` and bakes in two eval-isms: it seeds
   `question_id → slot` (eval passes the question id). Eval's `_recall_via_agent` now calls the seam.
   Tests: `test_retrieval_agent` (+abstain/history), `test_agent_trace`, `test_memory` — 41 green.
 
-**Phase 1 — chat config + prompt.** The caps type `RetrievalAgentLimits` (`models_graph.py:110`,
-"eval + chat parity") and the prompt machinery (`retrieval_agent_prompts` locked defaults +
-`resolve_retrieval_agent_prompt`, `models_graph.py:256-304`) are already generic.
+**Phase 1 — chat config + prompt (the `memory.retrieval.*` split, brought forward).** After review
+the deferred split was **pulled into P1**: chat gets its **own** `memory.retrieval.*` config on the
+**Agent ▸ Agent memory** card, so nothing chat-related lives in the eval card. Decisions (via
+`AskUserQuestion`): **shared prompt library** (one dict, two independent dropdowns) + **full split**
+(own prompt selection + caps + model).
 
-- **New chat retrieval prompt** — add a locked-default profile to `retrieval_agent_prompts`
-  (abstain-allowed + history-aware wording) selected by a chat-scoped active id; the eval prompt
-  stays (multi-prompt hosts both).
-- **Caps/model shared for now:** chat builds a **tight** `RetrievalAgentLimits` (`max_agent_turns=1`)
-  and reuses the eval retrieval-model builder. The formal `memory.retrieval.*` namespace (own
-  caps/model/active-prompt-id in admin UI) is the **deferred split** (post-task).
-- *Validate:* prefs tests, `npm run check`. UI card placement — **ask, don't guess**.
+- **Shared library, own selector.** The prompt *library* stays the single
+  `graph.eval.retrieval_agent_prompts` (holds the locked `default` (eval) + `chat` profiles); chat
+  selects via its **own** `memory.retrieval.active_prompt_id` (default → `chat`), eval via
+  `graph.eval.active_retrieval_agent_prompt_id`. The manifest owns each library **dict** per-tab and
+  the `promptLibrary` widget owns its `dictPath`, so a naive shared reference would double-claim the
+  eval dict on the agent tab → **new `promptLibrarySelect` widget** that renders the same
+  dropdown/editor over a shared `dictPath` but owns **only** its `activeIdPath`.
+- **Own caps + model (turns=4).** `memory.retrieval.limits` (own `RetrievalAgentLimits`, default
+  `max_agent_turns=4` — eval parity, **not** `turns=1`) + `memory.retrieval.model` /
+  `tuning_profile`. Chat tunes independently of eval; the eval caps card is relabeled eval-only.
+- *Built 2026-07-02:* prompt file `memory_chat_retrieval_agent.md` + constants; locked `chat` profile
+  in the shared library; new `MemoryRetrievalPreferences` (`models_memory.py`) on `MemoryPreferences`;
+  `resolve_prompt_from_library` (shared helper) + cross-namespace `resolve_chat_retrieval_agent_prompt`
+  (reads `memory.retrieval.active_prompt_id`); new `promptLibrarySelect` manifest widget
+  (owns only `activeIdPath`); Agent-memory card gains model + prompt-select + caps (card `validate`
+  mirrors eval); `PrefModelIdPath` += `memory.retrieval.model`. Tests: 231 backend + 69 frontend
+  prefs; `svelte-check` 0 errors. **Needs a server restart** (schema-driven UI serves the new fields
+  only after restart).
+- *UI reorg 2026-07-02:* the **eval** retrieval-agent cards ("Retrieval Agent Model & Prompt" +
+  "Retrieval Agent" caps, incl. the answerer/judge "Answer context" render caps) **moved from the
+  "Memory" (graph-engine) tab to the Eval tab** (routing rules in `preferences-tabs.ts` + cards moved
+  `graph-engine-manifest.ts` → `eval-manifest.ts`), so eval settings no longer live on the shared
+  engine tab. Still on the graph-engine tab: the eval temporal render toggles (`graph.eval.show_*`) —
+  a possible follow-up. Frontend-only (no schema change).
+- *UI reorg 2026-07-02 (chat side):* the **chat** `memory.retrieval.*` config **moved from the Agent
+  tab to the Memory (graph-engine) tab** and reorganized eval-style — two cards, **"Chat Retrieval
+  Agent Model & Prompt"** (model + shared-library prompt select) + **"Chat Retrieval Agent"** (a
+  "Loop limits" panel with the 6 caps). Rationale: these are memory-engine-specific, not general chat
+  settings. Routing: `{ prefix: 'memory.retrieval', tab: 'graph-engine' }` overrides `memory → agent`.
+  Distinct card titles from eval's (avoids a search-index title-rank collision). Frontend-only.
 
 **Phase 2 — wire the loop into `memory_search_node`** (`runtime/agent_graph/nodes/memory.py:87`).
 
-- Gather `history = state["messages"]`, `query = user_text`; resolve chat limits/prompt/model; call
+- Gather `history = state["messages"]`, `query = user_text`; resolve chat config from
+  `memory.retrieval.*` (P1): `limits = memory.retrieval.limits`, prompt via
+  `resolve_chat_retrieval_agent_prompt(prefs)`, model from `memory.retrieval.model` (add a
+  `build_memory_retrieval_model` mirroring `build_eval_retrieval_model`); call
   `MemoryRetriever.retrieve(query, memory=self.services.memory, history=history, allow_abstain=True, …)`.
 - Stash into state: `retrieved_memories =` rich rows
   (`present_accumulator` → `accumulated_item_to_recall_row`), and **new** `memory_draft: str | None`
@@ -339,16 +372,59 @@ from `runner_memory._recall_via_agent` and bakes in two eval-isms: it seeds
 - **Keep the flat `memory_block`** this phase (rows adapted) to isolate loop-wiring risk from render.
 - *Validate:* latency (one added LLM call), abstain skips chit-chat (empty rows, no reply
   regression), recall node shows tokens/cost + decision, sidecar written under `trace`, error paths.
+- **Built 2026-07-02:** `memory_search_node` rewritten to run `MemoryRetriever.retrieve` (history +
+  `allow_abstain=True`); stashes rich rows + `GraphState.memory_draft`; decision =
+  recalled/abstained/errored/empty (via `summarize_agent_transcript` + `error_count`) + preview via
+  `format_memory_recall_output_preview`; G3 sidecar written under `trace` (keyed `run_id`/`step_index`
+  via `current_entry`); new `services/memory/models.build_memory_retrieval_model` +
+  `resolve_memory_retrieval_llm` (`memory.retrieval.model → llm.default_chat`, shown in the picker's
+  empty box via a new `modelProfile` `emptyFallback`). **Deviations from the plan above:** (1) node
+  **kept `memory_search`** — the `→ memory_recall` rename (G1 label + admin marker) is **deferred to
+  Phase 5/G4**, since usage/decision land name-independently and the rename would churn 8 snapshot
+  fixtures for no P2 value; (2) with **no chat model configured** the loop can't run → the node
+  degrades to `("empty","no_model")` (model-less snapshot fixtures regenerated to this contract; live
+  recall is covered by `test_retrieval_agent` + `test_agent_graph_preferences`). Tests: 283 runtime +
+  270 domain/memory/eval; `svelte-check` 0 errors. **Needs a server restart** (schema + new node
+  behavior). *Deferred:* live-`trace` G5 sid-nesting check; per-turn model-build caching (Phase 6).
+- **Identity threading (done 2026-07-02):** the loop now phrases queries with the **real names** —
+  memory anchors facts to the speaker's real name, so "Misho's wife" hits the entity hub + BM25 far
+  better than "the user's wife". `run_retrieval`/`MemoryRetriever.retrieve` gained `user_name` /
+  `agent_name` (formatted into a new **## Identities** block in `memory_chat_retrieval_agent.md` via
+  `{USER_NAME}` / `{AGENT_NAME}`; blank → generic wording, so no regression); `memory_search_node`
+  resolves them exactly as ingest does (`memory.user_name` + `get_character_name`). The assistant is
+  marked as **"AI"** on both sides for same-name collision safety: its episode speaker label is now
+  `{name} (AI)` (`windowing._render_body`) and the prompt refers to it as "AI assistant {name}" — the
+  two forms kept **aligned** so hybrid terms match. Eval unchanged (its prompt lacks the placeholders,
+  so the extra `.format` kwargs are ignored) — eval-prompt parity is an optional follow-up.
 
 **Phase 3 — rich render via `format_recall_context`** (`services/eval/judge.py:206`).
 
 - `memory_block` (`context_assembly.py:159`) body ⇒ `format_recall_context(memories, render)` with a
-  chat `RecallRenderOptions` (`show_event_time=True`, `show_superseded=True`, large `max_*` = no
-  meaningful truncation). Pure formatting on rows already in state.
+  chat `RecallRenderOptions` built from the chat render prefs (below). Pure formatting on rows in state.
+- **Chat render caps (new prefs — the replication deferred from P1).** Eval's `RecallRenderOptions`
+  is driven by the "Answer context" caps `graph.eval.{max_elements_per_kind, max_fact_chars,
+  max_episode_chars, max_summary_chars}` + the temporal toggles `graph.eval.{show_event_time,
+  show_expired_at, show_superseded}` (Eval tab). Chat needs its **own** copy — add
+  `memory.retrieval.render.*` (mirror the eval fields + bounds), surface them on the **Memory tab**
+  next to the "Chat Retrieval Agent" cards, and build the chat `RecallRenderOptions` from them
+  instead of hardcoding `show_event_time=True` / large `max_*`. Full pref round-trip
+  (backend model → `gen:prefs-types` → Memory-tab UI → schema-driven save → `npm run check` +
+  prefs tests → **server restart**). *(These are NOT the retrieval-loop caps — they bound how the
+  recalled set is rendered into the prompt, the answer/rendering stage.)*
 - **Layering:** `format_recall_context` lives under `services/eval` — importing eval into runtime is
   a smell; **move it to a shared render module** (e.g. `services/memory/agent/presentation.py`) as
   part of this phase (common-utility rule); eval imports from the new home.
-- *Validate:* temporal / relationship / `SUPERSEDED` present, kinds grouped, no bad truncation.
+- *Validate:* temporal / relationship / `SUPERSEDED` present, kinds grouped, no bad truncation;
+  chat render caps editable on the Memory tab and honored by the renderer.
+- **Built 2026-07-02:** `RecallRenderOptions` + `format_recall_context` (+ `_format_recall_item` etc.)
+  **moved** `services/eval/judge.py` → `services/memory/agent/presentation.py`; `judge.py` re-exports
+  them (eval callers/tests unchanged, but runtime no longer imports eval). `context_assembly.memory_block`
+  now takes a `render` and calls `format_recall_context` (flat one-bullet list gone; dead
+  `_format_memory_date`/`memory_text` removed). New `MemoryRetrievalRenderPreferences`
+  (`memory.retrieval.render.*` — 3 toggles + 4 caps, mirroring eval) + a **"Recall rendering"** panel
+  on the "Chat Retrieval Agent" card (Memory tab); `PreferencesView.memory_recall_render()` builds
+  the options, `compose_context_node` passes them. Also fixed a P2 flake: event-payload snapshots now
+  blank `elapsed_ms` (`normalize_event_stream`), fixtures regenerated. **Needs a server restart.**
 
 **Phase 4 — draft + persona answer.**
 

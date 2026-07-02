@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from hirocli.domain.data_store import ensure_data_db, get_default_user_id
+from hirocli.domain.data_store import get_default_user_id
 from hirocli.runtime.agent_graph.nodes.context import ContextNodes
 from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
 from hirocli.runtime.tests.graph_fakes import RecordingLedgerSink, make_agent_services
@@ -11,6 +11,36 @@ from hirocli.runtime.agent_graph.events import GRAPH_MEMORY_RETRIEVED, GRAPH_MEM
 from hirocli.runtime.agent_graph.ledger import LedgerEntry, LedgerSink, current_entry
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 from hirocli.domain.memory import MemoryAddResult, MemoryUsage
+from hirocli.services.memory.agent import MemoryRetriever
+from hirocli.services.memory.agent.accumulator import Accumulator
+from hirocli.services.memory.agent.retrieval_agent import RetrievalResult
+
+
+def _canned_recall(
+    monkeypatch,
+    *,
+    text: str = "User prefers concise replies",
+    draft: str = "They prefer concise replies.",
+) -> None:
+    """Phase 2: stub the retrieval model builder + the loop so a NODE test exercises the node's own
+    behavior (rows / draft / decision / preview), not the loop internals (see test_retrieval_agent)."""
+    acc = Accumulator()
+    acc.merge([{"kind": "fact", "uuid": "e1", "memory": text, "fact": text}], search_id=1, goal="")
+    transcript = [
+        {"event": "tool_call", "turn": 1, "sub_queries": 1, "cumulative_agent_turns": 1},
+        {"event": "sub_result", "turn": 1, "sid": 1, "returned": 1, "new": 1, "accumulated_total": 1},
+        {"event": "final", "turn": 2, "cumulative_agent_turns": 2, "answer_len_chars": len(draft)},
+    ]
+    result = RetrievalResult(accumulator=acc, answer_text=draft, transcript=transcript)
+
+    async def _fake_retrieve(query, **_kw):
+        return result
+
+    monkeypatch.setattr(
+        "hirocli.services.memory.models.build_memory_retrieval_model",
+        lambda *a, **k: (object(), "fake:model"),
+    )
+    monkeypatch.setattr(MemoryRetriever, "retrieve", staticmethod(_fake_retrieve))
 
 
 class _MemoryService:
@@ -135,10 +165,11 @@ def test_llm_usage_payload_uses_langchain_usage_metadata_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_search_and_compose_context_injects_memory(tmp_path) -> None:
+async def test_memory_search_and_compose_context_injects_memory(tmp_path, monkeypatch) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
+    _canned_recall(monkeypatch)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime)
     memory_group = MemoryNodes(services)
     context_group = ContextNodes(services)
@@ -158,20 +189,23 @@ async def test_memory_search_and_compose_context_injects_memory(tmp_path) -> Non
     )
 
     assert events[0]["event"] == GRAPH_MEMORY_RETRIEVED
-    assert result["retrieved_memories"] == [{"memory": "User prefers concise replies"}]
+    # P2: the loop yields rich recall rows (kind/search_id/goal) + a draft grounding note.
+    assert result["retrieved_memories"][0]["memory"] == "User prefers concise replies"
+    assert result["memory_draft"] == "They prefer concise replies."
     assert message_result["messages"][0].content == "what should you remember?"
     turn_context = ctx_result["turn_context"]
-    # Persona is NOT in the context block (it stays a stable system message). Instructions lead,
-    # then the Memories section renders the hit as a bullet.
+    # Persona is NOT in the context block (it stays a stable system message). Instructions lead, then
+    # the Memories section renders richly (P3): kind-grouped "### Relevant Facts" with the fact line.
     assert turn_context.startswith("## Instructions")
-    assert "## Memories retrieved\n- User prefers concise replies" in turn_context
+    assert "## Memories retrieved\n### Relevant Facts\n- User prefers concise replies" in turn_context
 
 
 @pytest.mark.asyncio
-async def test_memory_search_records_search_and_result_previews(tmp_path) -> None:
+async def test_memory_search_records_search_and_result_previews(tmp_path, monkeypatch) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
+    _canned_recall(monkeypatch)
     sink = RecordingLedgerSink(tmp_path)
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime, ledger_sink=sink)
     graph = MemoryNodes(services)
@@ -182,11 +216,11 @@ async def test_memory_search_records_search_and_result_previews(tmp_path) -> Non
     )
 
     row = sink.row("memory_search") or {}
-    # Input carries the query + top_k (the only knob Graphiti recall uses; F4 dropped
-    # threshold/rerank from the preview); output uses the ` · ` separator.
+    # Input carries the query; output is the loop summary (searches/turns) + a facts preview.
     assert str(row.get("input_preview") or "").startswith("q: tea preference?")
-    assert "top_k=" in str(row.get("input_preview") or "")
-    assert row.get("output_preview") == "results: 1 · User prefers concise replies"
+    assert row.get("output_preview") == "searches=1 · turns=2 · User prefers concise replies"
+    assert row.get("decision_kind") == "retrieved"
+    assert str(row.get("decision_detail")) == "1"
 
 
 def _patch_ingest(monkeypatch, *, returns: int, sink: list[dict]):

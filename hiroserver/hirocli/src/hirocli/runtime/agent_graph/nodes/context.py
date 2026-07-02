@@ -92,7 +92,9 @@ class ContextNodes(NodeGroup):
             for block in (
                 instructions_block(self.prefs.chat_instructions()),
                 knowledge_block(sources),
-                memory_block(state.get("retrieved_memories") or []),
+                memory_block(
+                    state.get("retrieved_memories") or [], self.prefs.memory_recall_render()
+                ),
                 citation_block(
                     has_sources=bool(sources),
                     cite_enabled=self.prefs.cite_sources(),

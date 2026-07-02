@@ -411,3 +411,35 @@ async def test_history_seeded_between_system_prompt_and_question() -> None:
     assert isinstance(first_call[0], SystemMessage)  # system prompt still leads
     assert first_call[-1].content == "Q?"  # question is last
     assert contents.index("my dog is Rex") < contents.index("nice") < contents.index("Q?")
+
+
+@pytest.mark.asyncio
+async def test_identities_substitute_into_prompt() -> None:
+    """Identity threading: USER_NAME / AGENT_NAME fill the prompt so the loop phrases queries with the
+    real names; blank falls back to generic wording (today's behavior)."""
+    graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
+    model = _RecordingChatModel(responses=[_search_call(_q("q1")), ai_final("done")])
+    await run_retrieval(
+        question="Q?",
+        memory=_memory(graph=graph),
+        limits=RetrievalAgentLimits(),
+        prompt_text="user={USER_NAME} · agent={AGENT_NAME}",
+        model=model,
+        user_id=1,
+        character_id="aria",
+        user_name="Misho",
+        agent_name="Aria",
+    )
+    assert model._seen[0][0].content == "user=Misho · agent=Aria"
+
+    blank = _RecordingChatModel(responses=[_search_call(_q("q1")), ai_final("done")])
+    await run_retrieval(
+        question="Q?",
+        memory=_memory(graph=graph),
+        limits=RetrievalAgentLimits(),
+        prompt_text="user={USER_NAME} · agent={AGENT_NAME}",
+        model=blank,
+        user_id=1,
+        character_id="aria",
+    )
+    assert blank._seen[0][0].content == "user=the user · agent=the assistant"

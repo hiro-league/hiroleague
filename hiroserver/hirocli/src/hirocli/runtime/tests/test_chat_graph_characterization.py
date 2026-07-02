@@ -20,7 +20,6 @@ from hirocli.runtime.agent_graph.events import (
     GRAPH_ERROR,
     GRAPH_INGEST_COMPLETED,
     GRAPH_LLM_USAGE,
-    GRAPH_MEMORY_RETRIEVED,
     GRAPH_MEMORY_STORED,
     GRAPH_REPLY_COMPLETED,
     GRAPH_RUN_COMPLETED,
@@ -113,10 +112,12 @@ async def test_text_only_turn_contract(tmp_path: Path) -> None:
     env = make_inbound_envelope(text="hello there")
     result = await run_graph(compiled, _state(tmp_path, env))
 
-    # Events — exact ordered sequence for this linear flow.
+    # Events — exact ordered sequence for this linear flow. No GRAPH_MEMORY_RETRIEVED: the P2
+    # recall node runs the agentic loop, which needs a chat model; this harness configures none, so
+    # recall bails ("no_model") and emits no retrieval event. (Recall behavior: test_retrieval_agent
+    # + test_agent_graph_preferences.)
     assert result.event_names() == [
         GRAPH_INGEST_COMPLETED,
-        GRAPH_MEMORY_RETRIEVED,
         GRAPH_LLM_USAGE,
         GRAPH_REPLY_COMPLETED,
         GRAPH_MEMORY_STORED,

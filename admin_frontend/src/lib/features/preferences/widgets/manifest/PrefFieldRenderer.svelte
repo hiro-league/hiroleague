@@ -140,6 +140,9 @@
     profilePath={spec.profilePath}
     scope={spec.scope}
     heading={spec.heading}
+    emptyFallbackId={spec.emptyFallback
+      ? (getPreferenceByPath(draft, spec.emptyFallback) as string | null)
+      : null}
   />
 {:else if spec.kind === 'grid'}
   <PrefFieldGrid cols={spec.cols}>
@@ -189,7 +192,7 @@
       editorLabel={spec.editorLabel}
     />
   </div>
-{:else if spec.kind === 'promptLibrary'}
+{:else if spec.kind === 'promptLibrary' || spec.kind === 'promptLibrarySelect'}
   <div class="grid gap-2">
     {#if spec.heading}
       <h4 class={HEADING_CLASS}>
@@ -201,6 +204,7 @@
       {ctrl}
       dictPath={spec.dictPath}
       activeIdPath={spec.activeIdPath}
+      defaultId={spec.defaultId}
       hint={spec.hint}
       ariaLabel={spec.ariaLabel}
       editorLabel={spec.editorLabel}

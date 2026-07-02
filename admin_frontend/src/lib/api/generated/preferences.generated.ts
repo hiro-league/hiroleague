@@ -47,6 +47,61 @@ export type IdleFlushHours = number;
  */
 export type MemoryExtractionInstructions = string;
 /**
+ * Which shared retrieval-agent prompt profile the CHAT recall loop uses.
+ */
+export type ActivePromptProfile = string;
+/**
+ * How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.
+ */
+export type MaxAgentTurns = number;
+/**
+ * Sub-queries per search_memory call — global for eval and chat.
+ */
+export type MaxParallelSearches = number;
+/**
+ * Starting num_results per search_memory call.
+ */
+export type LimitDefault = number;
+/**
+ * Soft floor when the tool clamps limit.
+ */
+export type LimitMin = number;
+/**
+ * Soft ceiling when the tool clamps limit.
+ */
+export type LimitMax = number;
+/**
+ * Upper bound the tool accepts per search (1–3).
+ */
+export type HopsMax = number;
+/**
+ * Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory tool. Null falls back to the default chat model.
+ */
+export type RetrievalAgentModel = string | null;
+/**
+ * Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.
+ */
+export type RetrievalAgentProfile = string;
+export type ShowEventTimeValidDate = boolean;
+export type ShowExpiredAtInvalidDate = boolean;
+export type ShowSUPERSEDEDFlag = boolean;
+/**
+ * Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.
+ */
+export type MaxElementsKind = number;
+/**
+ * Each recalled fact → one sanitized line capped here.
+ */
+export type MaxFactChars = number;
+/**
+ * Per-episode/message text cap (one sanitized line).
+ */
+export type MaxMessageChars = number;
+/**
+ * Per-entity summary cap (one sanitized line).
+ */
+export type MaxEntitySummaryChars = number;
+/**
  * Knowledge embedder. Empty inherits the workspace default (General → Models).
  */
 export type KnowledgeEmbedder = string | null;
@@ -175,7 +230,7 @@ export type Prompt = string;
 /**
  * Which mem-eval answer prompt the answer step uses.
  */
-export type ActivePromptProfile = string;
+export type ActivePromptProfile1 = string;
 export type EvalJudgePrompt = string;
 /**
  * Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)
@@ -196,58 +251,34 @@ export type EvalJudgeProfile = string;
 /**
  * Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model → default chat.
  */
-export type RetrievalAgentModel = string | null;
+export type RetrievalAgentModel1 = string | null;
 /**
  * Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.
  */
-export type RetrievalAgentProfile = string;
-export type ShowEventTimeValidDate = boolean;
-export type ShowExpiredAtInvalidDate = boolean;
-export type ShowSUPERSEDEDFlag = boolean;
+export type RetrievalAgentProfile1 = string;
+export type ShowEventTimeValidDate1 = boolean;
+export type ShowExpiredAtInvalidDate1 = boolean;
+export type ShowSUPERSEDEDFlag1 = boolean;
 /**
  * Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.
  */
-export type MaxElementsKind = number;
+export type MaxElementsKind1 = number;
 /**
  * Each recalled fact → one sanitized line capped here.
  */
-export type MaxFactChars = number;
+export type MaxFactChars1 = number;
 /**
  * Per-episode/message text cap (one sanitized line).
  */
-export type MaxMessageChars = number;
+export type MaxMessageChars1 = number;
 /**
  * Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.
  */
-export type MaxEntitySummaryChars = number;
-/**
- * How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.
- */
-export type MaxAgentTurns = number;
-/**
- * Sub-queries per search_memory call — global for eval and chat.
- */
-export type MaxParallelSearches = number;
-/**
- * Starting num_results per search_memory call.
- */
-export type LimitDefault = number;
-/**
- * Soft floor when the tool clamps limit.
- */
-export type LimitMin = number;
-/**
- * Soft ceiling when the tool clamps limit.
- */
-export type LimitMax = number;
-/**
- * Upper bound the tool accepts per search (1–3).
- */
-export type HopsMax = number;
+export type MaxEntitySummaryChars1 = number;
 /**
  * Which retrieval-agent system prompt the loop uses.
  */
-export type ActivePromptProfile1 = string;
+export type ActivePromptProfile2 = string;
 /**
  * In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.
  */
@@ -326,6 +357,7 @@ export interface MemoryPreferences {
   user_name: YourName;
   search: MemorySearchPreferences;
   extraction: MemoryExtractionPreferences;
+  retrieval: MemoryRetrievalPreferences;
 }
 /**
  * Retrieval-time tuning for ``MemoryService.search``.
@@ -344,6 +376,48 @@ export interface MemoryExtractionPreferences {
   session_gap_minutes: NewSessionGapMinutes;
   idle_flush_hours: IdleFlushHours;
   instructions: MemoryExtractionInstructions;
+}
+/**
+ * Chat-side agentic memory-retrieval loop config (memory-eval-vs-chat-parity, Phase 1).
+ *
+ * The prompt LIBRARY is shared with eval (``graph.eval.retrieval_agent_prompts``); this section
+ * holds chat's own SELECTION (``active_prompt_id``), caps, and model, so chat tunes independently of
+ * eval (the deferred ``memory.retrieval.*`` split, brought forward). Consumed when the loop is wired
+ * into the recall node (Phase 2) — fields only today.
+ */
+export interface MemoryRetrievalPreferences {
+  active_prompt_id: ActivePromptProfile;
+  limits: RetrievalAgentLimits;
+  model: RetrievalAgentModel;
+  tuning_profile: RetrievalAgentProfile;
+  render: MemoryRetrievalRenderPreferences;
+}
+/**
+ * Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity).
+ */
+export interface RetrievalAgentLimits {
+  max_agent_turns: MaxAgentTurns;
+  max_parallel_searches: MaxParallelSearches;
+  limit_default: LimitDefault;
+  limit_min: LimitMin;
+  limit_max: LimitMax;
+  hops_max: HopsMax;
+}
+/**
+ * How recalled memory is rendered into the CHAT persona prompt (memory-eval-vs-chat-parity,
+ * Phase 3). Chat's own copy of eval's ``RecallRenderOptions`` — which temporal annotations show +
+ * per-kind caps — so chat drops the flat ``memory_block`` for the rich `format_recall_context`
+ * layout. Mirrors the eval "Answer context" caps (``graph.eval.max_*``) + temporal toggles
+ * (``graph.eval.show_*``); the runtime builds a ``RecallRenderOptions`` from these.
+ */
+export interface MemoryRetrievalRenderPreferences {
+  show_event_time: ShowEventTimeValidDate;
+  show_expired_at: ShowExpiredAtInvalidDate;
+  show_superseded: ShowSUPERSEDEDFlag;
+  max_elements_per_kind: MaxElementsKind;
+  max_fact_chars: MaxFactChars;
+  max_episode_chars: MaxMessageChars;
+  max_summary_chars: MaxEntitySummaryChars;
 }
 export interface KnowledgePreferences {
   default_embedding_model: KnowledgeEmbedder;
@@ -460,24 +534,24 @@ export interface KnowledgeGraphRerankerPreferences {
  */
 export interface GraphEvalPreferences {
   answer_prompts: MemEvalAnswerPrompts;
-  active_answer_prompt_id: ActivePromptProfile;
+  active_answer_prompt_id: ActivePromptProfile1;
   judge_prompt: EvalJudgePrompt;
   answer_model: EvalAnswerModel;
   answer_tuning_profile: EvalAnswerProfile;
   judge_model: EvalJudgeModel;
   judge_tuning_profile: EvalJudgeProfile;
-  retrieval_model: RetrievalAgentModel;
-  retrieval_tuning_profile: RetrievalAgentProfile;
-  show_event_time: ShowEventTimeValidDate;
-  show_expired_at: ShowExpiredAtInvalidDate;
-  show_superseded: ShowSUPERSEDEDFlag;
-  max_elements_per_kind: MaxElementsKind;
-  max_fact_chars: MaxFactChars;
-  max_episode_chars: MaxMessageChars;
-  max_summary_chars: MaxEntitySummaryChars;
+  retrieval_model: RetrievalAgentModel1;
+  retrieval_tuning_profile: RetrievalAgentProfile1;
+  show_event_time: ShowEventTimeValidDate1;
+  show_expired_at: ShowExpiredAtInvalidDate1;
+  show_superseded: ShowSUPERSEDEDFlag1;
+  max_elements_per_kind: MaxElementsKind1;
+  max_fact_chars: MaxFactChars1;
+  max_episode_chars: MaxMessageChars1;
+  max_summary_chars: MaxEntitySummaryChars1;
   retrieval_agent: RetrievalAgentLimits;
   retrieval_agent_prompts: RetrievalAgentPrompt;
-  active_retrieval_agent_prompt_id: ActivePromptProfile1;
+  active_retrieval_agent_prompt_id: ActivePromptProfile2;
 }
 export interface MemEvalAnswerPrompts {
   [k: string]: AnswerPromptProfile;
@@ -499,17 +573,6 @@ export interface AnswerPromptProfile {
   label: Label;
   locked: Locked;
   prompt: Prompt;
-}
-/**
- * Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity).
- */
-export interface RetrievalAgentLimits {
-  max_agent_turns: MaxAgentTurns;
-  max_parallel_searches: MaxParallelSearches;
-  limit_default: LimitDefault;
-  limit_min: LimitMin;
-  limit_max: LimitMax;
-  hops_max: HopsMax;
 }
 export interface RetrievalAgentPrompt {
   [k: string]: AnswerPromptProfile;

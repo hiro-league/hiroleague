@@ -12,16 +12,6 @@
     }
   },
   {
-    "event": "graph.memory.retrieved",
-    "payload": {
-      "inbound_id": "in-1",
-      "chat_channel_id": 1,
-      "character_id": "hiro",
-      "count": 1,
-      "elapsed_ms": 0
-    }
-  },
-  {
     "event": "graph.llm.usage",
     "payload": {
       "inbound_id": "in-1",
@@ -77,8 +67,10 @@
       "inbound_id": "in-1",
       "chat_channel_id": 1,
       "character_id": "hiro",
-      "count": 1,
-      "elapsed_ms": 0
+      "count": 0,
+      "elapsed_ms": 0,
+      "windows": 0,
+      "triggers": []
     }
   },
   {

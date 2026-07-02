@@ -296,18 +296,29 @@ class GraphEvalPreferences(BaseModel):
         label, text = self.resolve_answer_prompt(active)
         return (active, label, text)
 
-    def resolve_retrieval_agent_prompt(self) -> tuple[str, str]:
-        """Resolve the active retrieval-agent prompt profile → ``(id, text)``.
+    def resolve_prompt_from_library(self, requested_id: str, fallback_text: str) -> tuple[str, str]:
+        """Resolve one retrieval-agent profile id → ``(id, text)`` from the shared library.
 
-        Blank profile text falls back to ``DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT``."""
-        active = (self.active_retrieval_agent_prompt_id or "").strip() or DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+        Shared by the eval and chat resolvers (the library lives here; chat's active id lives under
+        ``memory.retrieval`` and is passed in by the free ``resolve_chat_retrieval_agent_prompt``):
+        a blank/unknown id falls back to the locked ``default`` profile, and blank profile text falls
+        back to ``fallback_text``."""
+        active = (requested_id or "").strip() or DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
         profile = self.retrieval_agent_prompts.get(active) or self.retrieval_agent_prompts.get(
             DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
         )
         if profile is None:
-            return (DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT)
-        text = (profile.prompt or "").strip() or DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+            return (DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, fallback_text)
+        text = (profile.prompt or "").strip() or fallback_text
         return (active, text)
+
+    def resolve_retrieval_agent_prompt(self) -> tuple[str, str]:
+        """Resolve the active (eval) retrieval-agent prompt profile → ``(id, text)``.
+
+        Blank profile text falls back to ``DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT``."""
+        return self.resolve_prompt_from_library(
+            self.active_retrieval_agent_prompt_id, DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+        )
 
 
 class GraphPreferences(BaseModel):

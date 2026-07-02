@@ -11,7 +11,9 @@ from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     DEFAULT_ANSWER_PROMPT_ID,
+    DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
     DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+    DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
     DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
     DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
     DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
@@ -28,6 +30,7 @@ from hirocli.domain.preferences import (
     knowledge_answering_model_source,
     load_preferences,
     preferences_file,
+    resolve_chat_retrieval_agent_prompt,
     resolve_knowledge_answering_llm,
     resolve_llm,
     resolve_retrieval_agent_prompt,
@@ -284,6 +287,42 @@ def test_retrieval_agent_prompt_default_in_builtin_defaults() -> None:
     pid, text = resolve_retrieval_agent_prompt(WorkspacePreferences())
     assert pid == DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
     assert text == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
+
+
+def test_chat_retrieval_agent_prompt_is_locked_default_and_resolves() -> None:
+    """Phase 1: the SHARED library hosts a locked ``chat`` profile; the chat resolver selects it via
+    ``memory.retrieval.active_prompt_id`` (chat's own pointer), independent of the eval active id."""
+    chat_profile = WorkspacePreferences().graph.eval.retrieval_agent_prompts[
+        DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+    ]
+    assert chat_profile.locked is True
+    assert chat_profile.prompt == DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
+
+    # Default memory pointer → the chat profile.
+    pid, text = resolve_chat_retrieval_agent_prompt(WorkspacePreferences())
+    assert pid == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+    assert text == DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
+
+    # The two surfaces read INDEPENDENT pointers against the one shared library: pointing chat at the
+    # eval default resolves eval text, while eval's own pointer is untouched.
+    prefs = WorkspacePreferences()
+    prefs.memory.retrieval.active_prompt_id = DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+    assert resolve_chat_retrieval_agent_prompt(prefs) == (
+        DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
+        DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
+    )
+    # Eval active id does NOT affect chat.
+    prefs.graph.eval.active_retrieval_agent_prompt_id = DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+    assert resolve_chat_retrieval_agent_prompt(prefs)[0] == DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
+    assert resolve_retrieval_agent_prompt(prefs)[0] == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+
+
+def test_memory_retrieval_defaults_parity_with_eval_caps() -> None:
+    """The chat retrieval caps default to eval parity (max_agent_turns=4), NOT a tight turns=1."""
+    retrieval = WorkspacePreferences().memory.retrieval
+    assert retrieval.limits.max_agent_turns == 4
+    assert retrieval.active_prompt_id == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+    assert retrieval.model is None
 
 
 def test_locked_default_prompts_reseed_from_code_on_load(tmp_path: Path) -> None:

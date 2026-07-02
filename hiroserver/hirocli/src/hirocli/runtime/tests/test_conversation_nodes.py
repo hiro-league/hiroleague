@@ -154,16 +154,43 @@ async def test_compose_context_writes_turn_context_not_messages(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_memory_search_with_fake_memory(tmp_path: Path) -> None:
+async def test_memory_search_with_fake_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Phase 2: the node runs the agentic loop. Stub the model builder + the loop with a canned
+    # result so the node test stays focused (the loop itself is covered by test_retrieval_agent).
+    from hirocli.services.memory.agent import MemoryRetriever
+    from hirocli.services.memory.agent.accumulator import Accumulator
+    from hirocli.services.memory.agent.retrieval_agent import RetrievalResult
+
     ensure_data_db(tmp_path)
     runtime = WorkspacePreferencesRuntime(tmp_path)
     runtime.update_many({"memory.enabled": True})
+    acc = Accumulator()
+    acc.merge(
+        [{"kind": "fact", "uuid": "e1", "memory": "recalled fact", "fact": "recalled fact"}],
+        search_id=1,
+        goal="",
+    )
+
+    async def _fake_retrieve(query, **_kw):
+        return RetrievalResult(
+            accumulator=acc,
+            answer_text="draft",
+            transcript=[{"event": "final", "cumulative_agent_turns": 1}],
+        )
+
+    monkeypatch.setattr(
+        "hirocli.services.memory.models.build_memory_retrieval_model",
+        lambda *a, **k: (object(), "fake:model"),
+    )
+    monkeypatch.setattr(MemoryRetriever, "retrieve", staticmethod(_fake_retrieve))
+
     memory = _memory(tmp_path, memory=FakeMemory(), prefs=runtime)
     result = await memory.memory_search_node(
         {"user_text": "hello", "character_id": "hiro"},
         lambda _e: None,
     )
     assert len(result.get("retrieved_memories") or []) >= 1
+    assert result.get("memory_draft") == "draft"
 
 
 @pytest.mark.asyncio

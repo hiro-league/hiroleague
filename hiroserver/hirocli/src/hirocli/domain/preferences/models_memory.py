@@ -14,10 +14,13 @@ from pydantic import BaseModel, Field
 # names. NOT the shared ``graph.custom_extraction_instructions`` (knowledge + eval) nor
 # ``chat.instructions`` (answer-time persona guidance, a different pipeline stage).
 from .defaults import (
+    DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
+    DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
     DEFAULT_MEMORY_TUNING_PROFILE_ID,
     pref_field,
 )
+from .models_graph import RetrievalAgentLimits
 
 DEFAULT_MEMORY_SEARCH_TOP_K = 8
 
@@ -111,6 +114,65 @@ class MemoryExtractionPreferences(BaseModel):
     )
 
 
+class MemoryRetrievalRenderPreferences(BaseModel):
+    """How recalled memory is rendered into the CHAT persona prompt (memory-eval-vs-chat-parity,
+    Phase 3). Chat's own copy of eval's ``RecallRenderOptions`` — which temporal annotations show +
+    per-kind caps — so chat drops the flat ``memory_block`` for the rich `format_recall_context`
+    layout. Mirrors the eval "Answer context" caps (``graph.eval.max_*``) + temporal toggles
+    (``graph.eval.show_*``); the runtime builds a ``RecallRenderOptions`` from these."""
+
+    # Temporal annotations per recalled FACT line. Defaults = a single timestamp per fact (event_time
+    # on, the rest off), matching eval.
+    show_event_time: bool = Field(default=True, title="Show event_time (valid date)")
+    show_expired_at: bool = Field(default=False, title="Show expired_at (invalid date)")
+    show_superseded: bool = Field(default=False, title="Show SUPERSEDED flag")
+    # Render caps: each kind is score-ranked desc, top-N kept, every element sanitized to one capped
+    # line — so a large recalled set doesn't bury the answer-relevant elements or blow the prompt.
+    max_elements_per_kind: int = pref_field(advanced=True, default=30, ge=1, le=200, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.")
+    max_fact_chars: int = pref_field(advanced=True, default=240, ge=40, le=2000, title="Max fact chars", description="Each recalled fact → one sanitized line capped here.")
+    max_episode_chars: int = pref_field(advanced=True, default=300, ge=40, le=2000, title="Max message chars", description="Per-episode/message text cap (one sanitized line).")
+    max_summary_chars: int = pref_field(advanced=True, default=400, ge=40, le=4000, title="Max entity summary chars", description="Per-entity summary cap (one sanitized line).")
+
+
+class MemoryRetrievalPreferences(BaseModel):
+    """Chat-side agentic memory-retrieval loop config (memory-eval-vs-chat-parity, Phase 1).
+
+    The prompt LIBRARY is shared with eval (``graph.eval.retrieval_agent_prompts``); this section
+    holds chat's own SELECTION (``active_prompt_id``), caps, and model, so chat tunes independently of
+    eval (the deferred ``memory.retrieval.*`` split, brought forward). Consumed when the loop is wired
+    into the recall node (Phase 2) — fields only today."""
+
+    # Selects a profile from the SHARED library (graph.eval.retrieval_agent_prompts); defaults to the
+    # locked ``chat`` profile. The library dict is owned by the Graph-Engine card; the Agent-memory
+    # card only owns this pointer (via the active-id-only dropdown widget).
+    active_prompt_id: str = Field(
+        default=DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
+        title="Active prompt profile",
+        description="Which shared retrieval-agent prompt profile the CHAT recall loop uses.",
+    )
+    # Chat's OWN loop caps (default max_agent_turns=4 — eval parity, per the accepted recommendation;
+    # NOT a tight turns=1). Split from eval so chat can be tuned independently later.
+    limits: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
+    model: str | None = pref_field(
+        model_kind="chat",
+        default=None,
+        title="Retrieval agent model",
+        description=(
+            "Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory "
+            "tool. Null falls back to the default chat model."
+        ),
+    )
+    tuning_profile: str = pref_field(
+        tuning_profile_ref=True,
+        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        title="Retrieval agent profile",
+        description="Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.",
+    )
+    render: MemoryRetrievalRenderPreferences = Field(
+        default_factory=MemoryRetrievalRenderPreferences
+    )
+
+
 class MemoryPreferences(BaseModel):
     """Agent memory settings — a thin feature layer over the shared Graphiti graph engine.
 
@@ -132,3 +194,4 @@ class MemoryPreferences(BaseModel):
     user_name: str = Field(default="", max_length=120, title="Your name")
     search: MemorySearchPreferences = Field(default_factory=MemorySearchPreferences)
     extraction: MemoryExtractionPreferences = Field(default_factory=MemoryExtractionPreferences)
+    retrieval: MemoryRetrievalPreferences = Field(default_factory=MemoryRetrievalPreferences)

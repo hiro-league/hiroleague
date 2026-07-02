@@ -1068,6 +1068,9 @@
         },
         "extraction": {
           "$ref": "#/$defs/MemoryExtractionPreferences"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/MemoryRetrievalPreferences"
         }
       },
       "title": "MemoryPreferences",
@@ -1077,7 +1080,122 @@
         "default_tuning_profile",
         "user_name",
         "search",
-        "extraction"
+        "extraction",
+        "retrieval"
+      ]
+    },
+    "MemoryRetrievalPreferences": {
+      "description": "Chat-side agentic memory-retrieval loop config (memory-eval-vs-chat-parity, Phase 1).\n\nThe prompt LIBRARY is shared with eval (``graph.eval.retrieval_agent_prompts``); this section\nholds chat's own SELECTION (``active_prompt_id``), caps, and model, so chat tunes independently of\neval (the deferred ``memory.retrieval.*`` split, brought forward). Consumed when the loop is wired\ninto the recall node (Phase 2) \u2014 fields only today.",
+      "properties": {
+        "active_prompt_id": {
+          "default": "chat",
+          "description": "Which shared retrieval-agent prompt profile the CHAT recall loop uses.",
+          "title": "Active prompt profile",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/RetrievalAgentLimits"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory tool. Null falls back to the default chat model.",
+          "model_kind": "chat",
+          "title": "Retrieval agent model"
+        },
+        "tuning_profile": {
+          "default": "knowledge_answering",
+          "description": "Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.",
+          "title": "Retrieval agent profile",
+          "tuning_profile_ref": true,
+          "type": "string"
+        },
+        "render": {
+          "$ref": "#/$defs/MemoryRetrievalRenderPreferences"
+        }
+      },
+      "title": "MemoryRetrievalPreferences",
+      "type": "object",
+      "required": [
+        "active_prompt_id",
+        "limits",
+        "model",
+        "tuning_profile",
+        "render"
+      ]
+    },
+    "MemoryRetrievalRenderPreferences": {
+      "description": "How recalled memory is rendered into the CHAT persona prompt (memory-eval-vs-chat-parity,\nPhase 3). Chat's own copy of eval's ``RecallRenderOptions`` \u2014 which temporal annotations show +\nper-kind caps \u2014 so chat drops the flat ``memory_block`` for the rich `format_recall_context`\nlayout. Mirrors the eval \"Answer context\" caps (``graph.eval.max_*``) + temporal toggles\n(``graph.eval.show_*``); the runtime builds a ``RecallRenderOptions`` from these.",
+      "properties": {
+        "show_event_time": {
+          "default": true,
+          "title": "Show event_time (valid date)",
+          "type": "boolean"
+        },
+        "show_expired_at": {
+          "default": false,
+          "title": "Show expired_at (invalid date)",
+          "type": "boolean"
+        },
+        "show_superseded": {
+          "default": false,
+          "title": "Show SUPERSEDED flag",
+          "type": "boolean"
+        },
+        "max_elements_per_kind": {
+          "advanced": true,
+          "default": 30,
+          "description": "Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.",
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Max elements / kind",
+          "type": "integer"
+        },
+        "max_fact_chars": {
+          "advanced": true,
+          "default": 240,
+          "description": "Each recalled fact \u2192 one sanitized line capped here.",
+          "maximum": 2000,
+          "minimum": 40,
+          "title": "Max fact chars",
+          "type": "integer"
+        },
+        "max_episode_chars": {
+          "advanced": true,
+          "default": 300,
+          "description": "Per-episode/message text cap (one sanitized line).",
+          "maximum": 2000,
+          "minimum": 40,
+          "title": "Max message chars",
+          "type": "integer"
+        },
+        "max_summary_chars": {
+          "advanced": true,
+          "default": 400,
+          "description": "Per-entity summary cap (one sanitized line).",
+          "maximum": 4000,
+          "minimum": 40,
+          "title": "Max entity summary chars",
+          "type": "integer"
+        }
+      },
+      "title": "MemoryRetrievalRenderPreferences",
+      "type": "object",
+      "required": [
+        "show_event_time",
+        "show_expired_at",
+        "show_superseded",
+        "max_elements_per_kind",
+        "max_fact_chars",
+        "max_episode_chars",
+        "max_summary_chars"
       ]
     },
     "MemorySearchPreferences": {

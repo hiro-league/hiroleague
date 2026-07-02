@@ -199,11 +199,11 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
     },
     {
       kind: 'card',
-      id: 'graphEvalModels',
-      title: 'Retrieval Agent Model & Prompt',
+      id: 'memoryRetrievalModels',
+      title: 'Chat Retrieval Agent Model & Prompt',
       description:
-        'Model, profile, and system prompt for the agentic memory-retrieval loop (the Retrieval Agent caps below feed its placeholders).',
-      bodyId: PREFERENCES_SECTION_BODY_IDS.graphEvalModels,
+        'Model, profile, and system prompt for the CHAT agentic memory-retrieval loop (the Chat Retrieval Agent caps below feed its placeholders). Chat-only; the eval copy lives on the Eval tab.',
+      bodyId: PREFERENCES_SECTION_BODY_IDS.memoryRetrievalModels,
       collapsible: true,
       body: [
         {
@@ -212,15 +212,17 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
             {
               kind: 'modelProfile',
               modelKind: 'chat',
-              modelPath: 'graph.eval.retrieval_model',
-              profilePath: 'graph.eval.retrieval_tuning_profile'
+              modelPath: 'memory.retrieval.model',
+              profilePath: 'memory.retrieval.tuning_profile',
+              emptyFallback: 'llm.default_chat'
             },
             {
-              kind: 'promptLibrary',
+              kind: 'promptLibrarySelect',
               dictPath: 'graph.eval.retrieval_agent_prompts',
-              activeIdPath: 'graph.eval.active_retrieval_agent_prompt_id',
-              hint: "Drives the memory eval's recall leg. Placeholders {MAX_AGENT_TURNS}, {MAX_PARALLEL_SEARCHES}, and {MAX_LIMIT} are filled from the Retrieval Agent caps card at runtime.",
-              ariaLabel: 'Mem-eval retrieval agent prompt (markdown)',
+              activeIdPath: 'memory.retrieval.active_prompt_id',
+              defaultId: 'chat',
+              hint: 'The retrieval-agent prompt the chat recall loop uses. Chosen from the shared prompt library (also edited on the Eval tab’s Retrieval Agent card); the “Chat” profile is history-aware and may abstain when a message needs no memory. Placeholders {MAX_AGENT_TURNS}, {MAX_PARALLEL_SEARCHES}, {MAX_LIMIT} are filled from the Retrieval Agent caps card at runtime.',
+              ariaLabel: 'Chat retrieval agent prompt (markdown)',
               editorLabel: 'Retrieval agent prompt editor'
             }
           ]
@@ -229,13 +231,13 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
     },
     {
       kind: 'card',
-      id: 'graphRetrievalAgent',
-      title: 'Retrieval Agent',
+      id: 'memoryRetrievalCaps',
+      title: 'Chat Retrieval Agent',
       description:
-        'Loop-bound caps for the agentic memory-retrieval path. One global value for eval and chat — tune without hand-editing preferences.json.',
-      bodyId: PREFERENCES_SECTION_BODY_IDS.graphRetrievalAgent,
+        'Loop-bound caps for the CHAT agentic memory-retrieval path (its own copy — the eval path has a separate one on the Eval tab, so each tunes independently).',
+      bodyId: PREFERENCES_SECTION_BODY_IDS.memoryRetrievalCaps,
       collapsible: true,
-      validate: (d) => validateRetrievalAgentLimits(d.graph.eval.retrieval_agent),
+      validate: (d) => validateRetrievalAgentLimits(d.memory.retrieval.limits),
       body: [
         {
           kind: 'panel',
@@ -244,28 +246,36 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
             {
               kind: 'grid',
               fields: [
-                { kind: 'number', path: 'graph.eval.retrieval_agent.max_agent_turns' },
-                { kind: 'number', path: 'graph.eval.retrieval_agent.max_parallel_searches' },
-                { kind: 'number', path: 'graph.eval.retrieval_agent.hops_max' },
-                { kind: 'number', path: 'graph.eval.retrieval_agent.limit_default' },
-                { kind: 'number', path: 'graph.eval.retrieval_agent.limit_min' },
-                { kind: 'number', path: 'graph.eval.retrieval_agent.limit_max' }
+                { kind: 'number', path: 'memory.retrieval.limits.max_agent_turns' },
+                { kind: 'number', path: 'memory.retrieval.limits.max_parallel_searches' },
+                { kind: 'number', path: 'memory.retrieval.limits.hops_max' },
+                { kind: 'number', path: 'memory.retrieval.limits.limit_default' },
+                { kind: 'number', path: 'memory.retrieval.limits.limit_min' },
+                { kind: 'number', path: 'memory.retrieval.limits.limit_max' }
               ]
             }
           ]
         },
         {
           kind: 'panel',
-          title: 'Answer context',
-          hint: 'Caps the recalled set handed to the answerer + judge — score-ranked top-N per kind, each element sanitized to one capped line.',
+          title: 'Recall rendering',
+          hint: 'How recalled memory is written into the reply prompt: which temporal annotations show per fact, and per-kind caps on how much is included (score-ranked). Separate from the loop caps above.',
           fields: [
             {
               kind: 'grid',
               fields: [
-                { kind: 'number', path: 'graph.eval.max_elements_per_kind' },
-                { kind: 'number', path: 'graph.eval.max_fact_chars' },
-                { kind: 'number', path: 'graph.eval.max_episode_chars' },
-                { kind: 'number', path: 'graph.eval.max_summary_chars' }
+                { kind: 'toggle', path: 'memory.retrieval.render.show_event_time' },
+                { kind: 'toggle', path: 'memory.retrieval.render.show_expired_at' },
+                { kind: 'toggle', path: 'memory.retrieval.render.show_superseded' }
+              ]
+            },
+            {
+              kind: 'grid',
+              fields: [
+                { kind: 'number', path: 'memory.retrieval.render.max_elements_per_kind' },
+                { kind: 'number', path: 'memory.retrieval.render.max_fact_chars' },
+                { kind: 'number', path: 'memory.retrieval.render.max_episode_chars' },
+                { kind: 'number', path: 'memory.retrieval.render.max_summary_chars' }
               ]
             }
           ]

@@ -21,14 +21,22 @@ describe('tabForPreferencePath (preferences tab map)', () => {
     expect(tabForPreferencePath('llm.default_chat')).toBe('models');
     expect(tabForPreferencePath('media.input.voice')).toBe('models');
     expect(tabForPreferencePath('memory.search.top_k')).toBe('agent');
+    // `memory.retrieval.*` is a longer-prefix override → the shared Memory (graph-engine) tab.
+    expect(tabForPreferencePath('memory.retrieval.active_prompt_id')).toBe('graph-engine');
+    expect(tabForPreferencePath('memory.retrieval.limits.max_agent_turns')).toBe('graph-engine');
     expect(tabForPreferencePath('chat.instructions')).toBe('agent');
     expect(tabForPreferencePath('knowledge.retrieval.top_k')).toBe('knowledge');
     // `graph.backend` is a longer-prefix override that beats the broad `graph` rule.
     expect(tabForPreferencePath('graph.backend')).toBe('knowledge');
-    // `graph.eval.*` split: answer/judge → Eval; the retrieval loop + render knobs → graph engine.
+    // `graph.eval.*` split: answer/judge + the retrieval-agent section + answerer/judge render caps
+    // → Eval; only the temporal render toggles + shared-engine knobs stay on the graph-engine tab.
     expect(tabForPreferencePath('graph.eval.answer_model')).toBe('eval');
     expect(tabForPreferencePath('graph.eval.judge_prompt')).toBe('eval');
-    expect(tabForPreferencePath('graph.eval.retrieval_model')).toBe('graph-engine');
+    expect(tabForPreferencePath('graph.eval.retrieval_model')).toBe('eval');
+    expect(tabForPreferencePath('graph.eval.retrieval_agent.max_agent_turns')).toBe('eval');
+    expect(tabForPreferencePath('graph.eval.retrieval_agent_prompts')).toBe('eval');
+    expect(tabForPreferencePath('graph.eval.active_retrieval_agent_prompt_id')).toBe('eval');
+    expect(tabForPreferencePath('graph.eval.max_fact_chars')).toBe('eval');
     expect(tabForPreferencePath('graph.eval.show_event_time')).toBe('graph-engine');
     expect(tabForPreferencePath('graph.reranker.model_id')).toBe('graph-engine');
     expect(tabForPreferencePath('tuning_profiles')).toBe('tuning-profiles');

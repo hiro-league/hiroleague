@@ -25,6 +25,9 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   graphView: 'preferences-section-graph-view',
   graphRetrievalAgent: 'preferences-section-graph-retrieval-agent',
   graphEvalRetrievalAgentPrompt: 'preferences-section-graph-eval-retrieval-agent-prompt',
+  // Chat memory retrieval-agent cards (memory.retrieval.*) on the Memory (graph-engine) tab.
+  memoryRetrievalModels: 'preferences-section-memory-retrieval-models',
+  memoryRetrievalCaps: 'preferences-section-memory-retrieval-caps',
   // Eval tab: answer/judge models + the mem-eval answer/judge prompts.
   evalModels: 'preferences-section-eval-models',
   evalMemAnswerPrompt: 'preferences-section-eval-mem-answer-prompt',

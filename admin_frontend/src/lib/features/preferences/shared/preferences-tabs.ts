@@ -134,6 +134,9 @@ const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'llm', tab: 'models' },
   { prefix: 'media', tab: 'models' },
   { prefix: 'memory', tab: 'agent' },
+  // The chat retrieval-agent config is memory-engine-specific (not general chat), so it renders on
+  // the shared Memory (graph-engine) tab, not the Agent tab — a longer-prefix override of `memory`.
+  { prefix: 'memory.retrieval', tab: 'graph-engine' },
   { prefix: 'chat', tab: 'agent' },
   { prefix: 'knowledge', tab: 'knowledge' },
   // Graph master switch is surfaced on the Knowledge tab, not the shared graph-engine tab.
@@ -148,6 +151,17 @@ const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'graph.eval.judge_model', tab: 'eval' },
   { prefix: 'graph.eval.judge_tuning_profile', tab: 'eval' },
   { prefix: 'graph.eval.judge_prompt', tab: 'eval' },
+  // The retrieval-agent section (model/profile, prompt library, loop caps) and the answerer/judge
+  // render caps are eval-only — moved to the Eval tab (were on the shared graph-engine tab).
+  { prefix: 'graph.eval.retrieval_model', tab: 'eval' },
+  { prefix: 'graph.eval.retrieval_tuning_profile', tab: 'eval' },
+  { prefix: 'graph.eval.retrieval_agent', tab: 'eval' },
+  { prefix: 'graph.eval.retrieval_agent_prompts', tab: 'eval' },
+  { prefix: 'graph.eval.active_retrieval_agent_prompt_id', tab: 'eval' },
+  { prefix: 'graph.eval.max_elements_per_kind', tab: 'eval' },
+  { prefix: 'graph.eval.max_fact_chars', tab: 'eval' },
+  { prefix: 'graph.eval.max_episode_chars', tab: 'eval' },
+  { prefix: 'graph.eval.max_summary_chars', tab: 'eval' },
   { prefix: 'graph', tab: 'graph-engine' },
   { prefix: 'tuning_profiles', tab: 'tuning-profiles' }
 ];

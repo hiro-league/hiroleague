@@ -264,6 +264,8 @@ async def run_retrieval(
     model_id: str = "",
     history: list[AnyMessage] | None = None,
     allow_abstain: bool = False,
+    user_name: str = "",
+    agent_name: str = "",
 ) -> RetrievalResult:
     """Drive the bounded retrieval loop; returns the populated accumulator + declared reduce/answer.
 
@@ -291,10 +293,16 @@ async def run_retrieval(
     )
     lc_tool = build_search_memory_langchain_tool(search_tool)
 
+    # USER_NAME / AGENT_NAME let the prompt phrase queries with the real names — memory anchors facts
+    # to the speaker's real name, so "Misho's wife" hits the entity hub + BM25 far better than "the
+    # user's wife". Blank falls back to generic wording (today's behavior). Prompts without these
+    # placeholders (the eval prompt) simply ignore the extra kwargs.
     formatted_prompt = prompt_text.format(
         MAX_AGENT_TURNS=limits.max_agent_turns,
         MAX_PARALLEL_SEARCHES=limits.max_parallel_searches,
         MAX_LIMIT=limits.limit_max,
+        USER_NAME=(user_name or "").strip() or "the user",
+        AGENT_NAME=(agent_name or "").strip() or "the assistant",
     )
 
     # Phase 0: chat seeds recent turns between the system prompt and the question so the first turn

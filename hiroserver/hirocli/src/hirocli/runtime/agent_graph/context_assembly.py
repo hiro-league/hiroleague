@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from .graph_kit import memory_text
+from ...services.memory.agent.presentation import RecallRenderOptions, format_recall_context
 
 # Section order (lower first). Instructions → knowledge → memory, matching the prompt design;
 # the citation instruction trails last (it refers back to the knowledge it annotates).
@@ -156,23 +155,15 @@ def knowledge_block(sources: list[Any]) -> ContextBlock:
     )
 
 
-def memory_block(memories: list[dict[str, Any]]) -> ContextBlock:
-    """Render long-term memory hits as ``- {date} · score {s} · {text}`` (placeholder when empty)."""
-    lines: list[str] = []
-    for item in (memories or [])[:8]:
-        text = memory_text(item)
-        if not text:
-            continue
-        parts: list[str] = []
-        date = _format_memory_date(_get(item, "created_at"))
-        if date:
-            parts.append(date)
-        score = _get(item, "score")
-        if isinstance(score, (int, float)):
-            parts.append(f"score {score:.2f}")
-        parts.append(text[:500])
-        lines.append("- " + " · ".join(parts))
-    body = "\n".join(lines) if lines else _EMPTY_SECTION
+def memory_block(
+    memories: list[dict[str, Any]], render: RecallRenderOptions | None = None
+) -> ContextBlock:
+    """Render recalled memory richly — **Relevant Facts / Entities / Messages** with temporal
+    validity (``as of`` / ``until`` / ``SUPERSEDED``), grouped by kind, no truncation beyond the
+    per-kind caps — via the shared ``format_recall_context`` (P3; replaces the old flat one-bullet
+    list that dropped temporal/relationship info). ``render`` comes from ``memory.retrieval.render``
+    (toggles + caps); placeholder when empty."""
+    body = format_recall_context(memories or [], render) or _EMPTY_SECTION
     return ContextBlock(
         source="memory", heading=_MEMORY_HEADING, body=body, priority=_PRIORITY_MEMORY
     )
@@ -194,16 +185,6 @@ def _get(item: Any, key: str) -> Any:
     if isinstance(item, dict):
         return item.get(key)
     return getattr(item, key, None)
-
-
-def _format_memory_date(value: Any) -> str:
-    if not value:
-        return ""
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return ""
-    return parsed.strftime("%Y-%m-%d %H:%M")
 
 
 def _xml_attr(value: Any) -> str:

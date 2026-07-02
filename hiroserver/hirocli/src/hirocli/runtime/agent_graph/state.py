@@ -129,6 +129,10 @@ class GraphState(TypedDict, total=False):
     # --- Retrieval scratch (parallel) ---
     user_text: str | None
     retrieved_memories: list[dict[str, Any]]
+    # Draft grounding note from the agentic recall loop (Phase 2). Produced by memory_search/recall;
+    # consumed by the persona prompt in Phase 4 (a `search_conclusion` block). None when the loop
+    # abstained or found nothing.
+    memory_draft: str | None
     knowledge_enabled: bool
     knowledge_context: str | None
     knowledge_sources: list[KnowledgeSource]

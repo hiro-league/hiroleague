@@ -354,6 +354,14 @@ DEFAULT_MEMORY_EVAL_JUDGE_PROMPT = load_prompt("memory_eval_judge")
 DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT = load_prompt("memory_eval_retrieval_agent")
 
 
+# Chat sibling of the retrieval-agent prompt (memory-eval-vs-chat-parity, Phase 1). Same loop, but
+# history-aware (recent turns are fed in) and abstain-allowed (may skip searching when the message
+# needs no memory), and its final turn is a GROUNDING NOTE for the persona — not a user-facing reply.
+# Hosted in the SAME ``graph.eval.retrieval_agent_prompts`` library (multi-prompt hosts both); the
+# formal ``memory.retrieval.*`` split with its own admin-selectable active id is deferred.
+DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT = load_prompt("memory_chat_retrieval_agent")
+
+
 # Dotted preference path → built-in default text for every editable system prompt. Exposed in the
 # admin /preferences payload so the UI can offer "Restore default" on prompt editors: once a prompt
 # is saved as "" the pydantic default never re-applies (defaults only fill ABSENT JSON keys), so the
@@ -434,14 +442,22 @@ def default_answer_prompts() -> dict[str, AnswerPromptProfile]:
 
 
 DEFAULT_RETRIEVAL_AGENT_PROMPT_ID = "default"
+# Locked chat-retrieval profile id in the SAME library — chat resolves this fixed id (Phase 1);
+# an admin-selectable chat active id is part of the deferred ``memory.retrieval.*`` split.
+DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID = "chat"
 
 
 def default_retrieval_agent_prompts() -> dict[str, AnswerPromptProfile]:
     return {
         DEFAULT_RETRIEVAL_AGENT_PROMPT_ID: AnswerPromptProfile(
-            label="Default",
+            label="Default (eval)",
             locked=True,
             prompt=DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
+        ),
+        DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID: AnswerPromptProfile(
+            label="Chat (history-aware, abstain-allowed)",
+            locked=True,
+            prompt=DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
         ),
     }
 

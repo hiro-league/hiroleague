@@ -51,3 +51,22 @@ class PreferencesView:
     def memory(self):
         """The memory prefs sub-object (or None) — replaces getattr(...current..., 'memory')."""
         return getattr(self.current, "memory", None)
+
+    def memory_recall_render(self):
+        """Build the chat ``RecallRenderOptions`` from ``memory.retrieval.render`` (P3) — the temporal
+        toggles + per-kind caps the memory block renders with. Defaults when prefs are unavailable."""
+        from ...services.memory.agent.presentation import RecallRenderOptions
+
+        retrieval = getattr(getattr(self.current, "memory", None), "retrieval", None)
+        r = getattr(retrieval, "render", None)
+        if r is None:
+            return RecallRenderOptions()
+        return RecallRenderOptions(
+            show_event_time=bool(r.show_event_time),
+            show_expired_at=bool(r.show_expired_at),
+            show_superseded=bool(r.show_superseded),
+            max_elements_per_kind=int(r.max_elements_per_kind),
+            max_fact_chars=int(r.max_fact_chars),
+            max_episode_chars=int(r.max_episode_chars),
+            max_summary_chars=int(r.max_summary_chars),
+        )

@@ -26,6 +26,10 @@ def normalize_event_stream(events: list[dict[str, Any]]) -> list[dict[str, Any]]
         for key, value in list(payload.items()):
             if key == "audio_b64" and value:
                 payload[key] = "<b64>"
+            elif key == "elapsed_ms":
+                # Volatile wall-clock timing — blank it so snapshots stay stable run-to-run (mirrors
+                # the ledger snapshot's _VOLATILE_COLUMNS).
+                payload[key] = 0
             elif isinstance(value, str):
                 payload[key] = _REPLY_ID_PATTERN.sub("reply-<uuid>", value)
         normalized.append({"event": event.get("event"), "payload": payload})
