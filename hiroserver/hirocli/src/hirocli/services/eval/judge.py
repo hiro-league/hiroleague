@@ -142,7 +142,7 @@ async def _ledger_llm_node(
     provider = _provider_prefix(model_id)
     # captures={"usage","decision"} is REQUIRED: without it to_row() blanks the entire usage +
     # decision block, so the row showed no model/tokens (and then priced off a now-blank model ⇒ no
-    # cost). Mirrors how call_model / memory_search_node / the ingest nodes declare their captures.
+    # cost). Mirrors how call_model / memory_recall_node / the ingest nodes declare their captures.
     entry = sink.open_entry(node, {}, None, captures=frozenset({"usage", "decision"}))
     token = current_entry.set(entry)
     status, error_code = "ok", ""

@@ -76,7 +76,7 @@
     "run_id": "chat-in-1",
     "step_index": "5",
     "sub_step": "",
-    "node": "memory_search",
+    "node": "memory_recall",
     "node_attempt": "1",
     "branch_index": "",
     "status": "ok",

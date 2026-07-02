@@ -154,7 +154,7 @@ async def test_compose_context_writes_turn_context_not_messages(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_memory_search_with_fake_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_memory_recall_with_fake_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Phase 2: the node runs the agentic loop. Stub the model builder + the loop with a canned
     # result so the node test stays focused (the loop itself is covered by test_retrieval_agent).
     from hirocli.services.memory.agent import MemoryRetriever
@@ -185,7 +185,7 @@ async def test_memory_search_with_fake_memory(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(MemoryRetriever, "retrieve", staticmethod(_fake_retrieve))
 
     memory = _memory(tmp_path, memory=FakeMemory(), prefs=runtime)
-    result = await memory.memory_search_node(
+    result = await memory.memory_recall_node(
         {"user_text": "hello", "character_id": "hiro"},
         lambda _e: None,
     )

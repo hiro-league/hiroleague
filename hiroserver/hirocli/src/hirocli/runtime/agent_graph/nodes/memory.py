@@ -2,11 +2,11 @@
 
 Split out of the old monolithic ``ConversationNodes`` (review §1.5).
 
-- ``memory_search`` — Graphiti recall before context assembly
+- ``memory_recall`` — Graphiti recall before context assembly
 - ``memory_out`` — emit ``reply.completed`` and ingest the user turn
 
 Both nodes are external-call boundaries (Graphiti API), so both carry retry policies
-(see ``_RETRY_POLICIES`` below). ``memory_search`` runs in parallel with the knowledge
+(see ``_RETRY_POLICIES`` below). ``memory_recall`` runs in parallel with the knowledge
 fan-out off ``trim_history``; ``memory_out`` runs after ``call_model``/tools.
 """
 
@@ -64,20 +64,19 @@ class MemoryNodes(NodeGroup):
     """Memory recall + ingest — constructed from ``AgentServices`` only."""
 
     _RETRY_POLICIES = {
-        "memory_search": RetryPolicy(max_attempts=2),
+        "memory_recall": RetryPolicy(max_attempts=2),
         "memory_out": RetryPolicy(max_attempts=2),
     }
 
     @graph_logged(captures={"usage", "decision"}, on_error="degrade")
-    async def memory_search_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
+    async def memory_recall_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Agentic memory recall (the Graphiti retrieval loop) before context assembly.
 
         Phase 2 (memory-eval-vs-chat-parity): replaces the pre-P2 single-shot ``memory.search()``
         with the shared, history-aware, abstain-allowed loop (``MemoryRetriever`` over
         ``memory.retrieval.*`` config). Produces the recalled rows AND a draft grounding note
         (``memory_draft``) for the persona (consumed in Phase 4). Runs after ``trim_history`` so the
-        history it sees is already bounded to ``chat.max_messages``. (Node keeps the ``memory_search``
-        label for now; the ``memory_recall`` rename ships with the admin detail view in a later phase.)
+        history it sees is already bounded to ``chat.max_messages``.
         """
         text = state.get("user_text") or ""
         observe(input=f"q: {text[:160]}" if text.strip() else "q: <empty>")

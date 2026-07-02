@@ -2,7 +2,7 @@
 
 Split out of the old monolithic ``ConversationNodes`` (review §1.5).
 
-- ``knowledge_fanout`` (router) — fan trim_history out to memory_search ∥ knowledge_retrieve
+- ``knowledge_fanout`` (router) — fan trim_history out to memory_recall ∥ knowledge_retrieve
 - ``knowledge_retrieve`` — invoke the wired knowledge subgraph, map context/sources
 
 The knowledge subgraph itself lives at ``services.knowledge.agent.graph`` and is compiled
@@ -57,7 +57,7 @@ class KnowledgeFanoutNodes(NodeGroup):
 
         Returning False here drops the node from ``registered_nodes()`` *and* from the
         builder's conditional path-map — chat then wires ``trim_history`` straight to
-        ``memory_search`` with no fan-out.
+        ``memory_recall`` with no fan-out.
         """
         if label == "knowledge_retrieve":
             return self.services.knowledge_subgraph is not None
@@ -67,12 +67,12 @@ class KnowledgeFanoutNodes(NodeGroup):
     def knowledge_fanout(state: GraphState) -> list[str]:
         """Fan out from ``trim_history`` to the parallel context branches.
 
-        ``memory_search`` always runs; ``knowledge_retrieve`` is added only when the
+        ``memory_recall`` always runs; ``knowledge_retrieve`` is added only when the
         per-message toggle is on (default on). The compile-time check that the knowledge
         subgraph is wired lives on ``is_active`` — this conditional edge isn't even
         registered when the subgraph is absent (``ChatAgentGraph.build``).
         """
-        targets = ["memory_search"]
+        targets = ["memory_recall"]
         if state.get("knowledge_enabled", True):
             targets.append("knowledge_retrieve")
         return targets

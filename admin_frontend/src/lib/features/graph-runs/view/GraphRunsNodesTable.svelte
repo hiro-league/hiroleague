@@ -63,11 +63,21 @@
     return Number.isFinite(step) && ingestTraceStepIds.has(step);
   }
 
-  /** The `memory_recall` parent row gets the rich eval-detail marker instead of the bare
+  /** An EVAL `memory_recall` parent row gets the rich eval-detail marker instead of the bare
    *  retrieval-trace one — its run_id resolves to the full eval row (overview / gold + our answer /
-   *  trajectory / counted facts-entities-episodes), with sub-query traces reachable from within. */
+   *  trajectory / counted facts-entities-episodes), with sub-query traces reachable from within.
+   *
+   *  Gated to eval runs (run_id `memory_eval*`): a CHAT recall run (P2+) also flushes a `memory_recall`
+   *  node, but it isn't in `eval_results.db`, so the eval bridge would dead-end on "no saved eval row".
+   *  Chat rows therefore fall through to the bare retrieval-trace marker (their per-search pipeline is
+   *  written under observability=`trace`). */
   function rowHasEvalDetail(row: GraphLedgerRow): boolean {
-    return !!onOpenEvalRow && isParentStep(row) && String(row.node ?? '') === 'memory_recall';
+    return (
+      !!onOpenEvalRow &&
+      isParentStep(row) &&
+      String(row.node ?? '') === 'memory_recall' &&
+      String(row.run_id ?? '').startsWith('memory_eval')
+    );
   }
 </script>
 

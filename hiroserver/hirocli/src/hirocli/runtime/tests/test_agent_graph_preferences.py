@@ -165,7 +165,7 @@ def test_llm_usage_payload_uses_langchain_usage_metadata_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_search_and_compose_context_injects_memory(tmp_path, monkeypatch) -> None:
+async def test_memory_recall_and_compose_context_injects_memory(tmp_path, monkeypatch) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
@@ -175,7 +175,7 @@ async def test_memory_search_and_compose_context_injects_memory(tmp_path, monkey
     context_group = ContextNodes(services)
     events = []
 
-    result = await memory_group.memory_search_node(
+    result = await memory_group.memory_recall_node(
         {"user_text": "what should you remember?", "character_id": "hiro"},
         events.append,
     )
@@ -198,10 +198,14 @@ async def test_memory_search_and_compose_context_injects_memory(tmp_path, monkey
     # the Memories section renders richly (P3): kind-grouped "### Relevant Facts" with the fact line.
     assert turn_context.startswith("## Instructions")
     assert "## Memories retrieved\n### Relevant Facts\n- User prefers concise replies" in turn_context
+    # P4: the loop's draft rides as a "search conclusion" block + a light grounding nudge, both in
+    # turn_context (not the persona system prompt).
+    assert "## Memory search conclusion\nThey prefer concise replies." in turn_context
+    assert "Use the recalled memory" in turn_context
 
 
 @pytest.mark.asyncio
-async def test_memory_search_records_search_and_result_previews(tmp_path, monkeypatch) -> None:
+async def test_memory_recall_records_search_and_result_previews(tmp_path, monkeypatch) -> None:
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
@@ -210,12 +214,12 @@ async def test_memory_search_records_search_and_result_previews(tmp_path, monkey
     services = make_agent_services(tmp_path, memory=memory, preferences=runtime, ledger_sink=sink)
     graph = MemoryNodes(services)
 
-    await graph.memory_search_node(
+    await graph.memory_recall_node(
         {"user_text": "tea preference?", "character_id": "hiro"},
         lambda _event: None,
     )
 
-    row = sink.row("memory_search") or {}
+    row = sink.row("memory_recall") or {}
     # Input carries the query; output is the loop summary (searches/turns) + a facts preview.
     assert str(row.get("input_preview") or "").startswith("q: tea preference?")
     assert row.get("output_preview") == "searches=1 · turns=2 · User prefers concise replies"

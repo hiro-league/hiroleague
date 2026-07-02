@@ -130,7 +130,7 @@ async def test_text_only_turn_contract(tmp_path: Path) -> None:
     assert "## Instructions" not in history and "Memories retrieved" not in history
     # Ledger — the @graph_logged nodes flushed with the expected decisions.
     nodes = set(sink.nodes())
-    assert {"memory_search", "compose_context", "call_model", "memory_out", "finalize"} <= nodes
+    assert {"memory_recall", "compose_context", "call_model", "memory_out", "finalize"} <= nodes
     decisions = sink.decisions()
     assert decisions["call_model"][0] == "text_reply"
     assert decisions["memory_out"][0] == "stored"
@@ -235,7 +235,7 @@ async def test_knowledge_branch_on_attaches_sources(tmp_path: Path) -> None:
     result = await run_graph(compiled, _state(tmp_path, env))
 
     assert result.final["reply_text"] == "answer with knowledge"
-    # knowledge_retrieve ran in parallel with memory_search and retrieved a source.
+    # knowledge_retrieve ran in parallel with memory_recall and retrieved a source.
     assert "knowledge_retrieve" in sink.nodes()
     assert sink.decisions()["knowledge_retrieve"][0] == "retrieved"
     reply_payload = result.event_payload(GRAPH_REPLY_COMPLETED)
@@ -261,4 +261,4 @@ async def test_knowledge_toggle_off_skips_branch(tmp_path: Path) -> None:
 
     assert result.final["reply_text"] == "answer without knowledge"
     assert "knowledge_retrieve" not in sink.nodes()
-    assert "memory_search" in sink.nodes()
+    assert "memory_recall" in sink.nodes()

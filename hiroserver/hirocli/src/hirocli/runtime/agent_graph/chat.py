@@ -4,7 +4,7 @@ The flow is:
 
     ingest → dispatch_media (Send fan-out) → stt | vision | (none)
            → gather → input_gate
-                       ├── trim_history → {memory_search ∥ knowledge_retrieve?}
+                       ├── trim_history → {memory_recall ∥ knowledge_retrieve?}
                        │      → context_build → compose_context → call_model
                        │      → tools (loop) → memory_out → tts? → finalize → END
                        └── media_failed → tts? → finalize → END
@@ -13,7 +13,7 @@ Groups (review §1.5):
 
 - ``MediaNodes`` — ingest, stt, vision, gather, media_failed (audio/image intake)
 - ``ContextNodes`` — trim_history, context_build, compose_context
-- ``MemoryNodes`` — memory_search, memory_out
+- ``MemoryNodes`` — memory_recall, memory_out
 - ``KnowledgeFanoutNodes`` — knowledge_retrieve + knowledge_fanout router
 - ``LLMNodes`` — call_model, tools + should_continue router
 - ``TTSNodes`` — tts, finalize + tts_gate router
@@ -86,12 +86,12 @@ class ChatAgentGraph:
             b.add_conditional_edges(
                 "trim_history",
                 knowledge.knowledge_fanout,
-                ["memory_search", "knowledge_retrieve"],
+                ["memory_recall", "knowledge_retrieve"],
             )
             b.add_edge("knowledge_retrieve", "context_build")
         else:
-            b.add_edge("trim_history", "memory_search")
-        b.add_edge("memory_search", "context_build")
+            b.add_edge("trim_history", "memory_recall")
+        b.add_edge("memory_recall", "context_build")
         b.add_edge("context_build", "compose_context")
         b.add_edge("compose_context", "call_model")
 

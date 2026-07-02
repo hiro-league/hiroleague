@@ -8,7 +8,7 @@
     "trim_history",
     "context_build",
     "compose_context",
-    "memory_search",
+    "memory_recall",
     "memory_out",
     "call_model",
     "tts",
@@ -21,7 +21,7 @@
     "vision": {
       "max_attempts": 2
     },
-    "memory_search": {
+    "memory_recall": {
       "max_attempts": 2
     },
     "memory_out": {
@@ -103,7 +103,7 @@
       "conditional": true
     },
     {
-      "source": "memory_search",
+      "source": "memory_recall",
       "target": "context_build",
       "conditional": false
     },
@@ -114,7 +114,7 @@
     },
     {
       "source": "trim_history",
-      "target": "memory_search",
+      "target": "memory_recall",
       "conditional": false
     },
     {

@@ -155,7 +155,7 @@ async def test_open_entry_numbers_subgraph_rows_as_substeps(tmp_path: Path) -> N
     assert (second.step_index, second.sub_step) == (1, 2)
 
     # Top-level numbering resumes after the substep scope closes (parallel branch, next chat node).
-    after = sink.open_entry("memory_search", _state("in-sub"))
+    after = sink.open_entry("memory_recall", _state("in-sub"))
     assert after.step_index == 2
     assert after.sub_step == ""
 
@@ -299,7 +299,7 @@ def test_tts_audio_seconds_are_persisted(tmp_path: Path) -> None:
 def test_node_previews_are_persisted_and_capped(tmp_path: Path) -> None:
     graph = _graph(tmp_path)
     entry = graph._ledger_sink.open_entry(
-        "memory_search",
+        "memory_recall",
         _state("in-preview"),
         captures=frozenset({"decision"}),
     )

@@ -28,7 +28,7 @@ DEFAULT_MEMORY_SEARCH_TOP_K = 8
 class MemorySearchPreferences(BaseModel):
     """Retrieval-time tuning for ``MemoryService.search``."""
 
-    # When false, ``memory_search`` is skipped — no long-term memory is injected before the reply
+    # When false, ``memory_recall`` is skipped — no long-term memory is injected before the reply
     # (independent of extraction). No-op unless ``memory.enabled``.
     enabled: bool = Field(default=True, title="Recall memories before each reply")
     top_k: int = Field(

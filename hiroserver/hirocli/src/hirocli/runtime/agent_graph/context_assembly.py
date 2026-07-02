@@ -28,10 +28,23 @@ from ...services.memory.agent.presentation import RecallRenderOptions, format_re
 _PRIORITY_INSTRUCTIONS = 10
 _PRIORITY_KNOWLEDGE = 20
 _PRIORITY_MEMORY = 30
+# P4: the recall loop's draft conclusion + a light grounding nudge sit just after the memory facts,
+# before the citation instruction — so the persona reads facts → conclusion → how-to-use.
+_PRIORITY_SEARCH_CONCLUSION = 35
+_PRIORITY_MEMORY_GROUNDING = 40
 _PRIORITY_CITATION = 90
 
 _KNOWLEDGE_HEADING = "## Knowledge retrieved"
 _MEMORY_HEADING = "## Memories retrieved"
+_SEARCH_CONCLUSION_HEADING = "## Memory search conclusion"
+# LIGHT grounding (P4 / O5) — NOT eval's strict grounding-only prompt: the persona still blends
+# memory with its own voice/knowledge, so this is a nudge, not a mandate. Only shown when memory was
+# actually recalled (else it references nothing).
+_MEMORY_GROUNDING_INSTRUCTION = (
+    "Use the recalled memory and any search conclusion above where relevant — prefer the fact marked "
+    "current when a validity window is shown, and if memory doesn't cover the question, say so plainly "
+    "instead of guessing. The conclusion is a hint; keep your own voice."
+)
 _EMPTY_SECTION = "(none for this message)"
 _CITATION_INSTRUCTION = (
     "When you use the knowledge above, cite the sources inline as [n], matching their rank."
@@ -166,6 +179,34 @@ def memory_block(
     body = format_recall_context(memories or [], render) or _EMPTY_SECTION
     return ContextBlock(
         source="memory", heading=_MEMORY_HEADING, body=body, priority=_PRIORITY_MEMORY
+    )
+
+
+def search_conclusion_block(draft: str | None) -> ContextBlock | None:
+    """The retrieval loop's draft grounding note (P4) — a hint the persona may use OR override. Rides
+    in turn_context (never the persona system prompt), so character voice stays clean. None when the
+    loop abstained / produced no draft."""
+    text = (draft or "").strip()
+    if not text:
+        return None
+    return ContextBlock(
+        source="search_conclusion",
+        heading=_SEARCH_CONCLUSION_HEADING,
+        body=text,
+        priority=_PRIORITY_SEARCH_CONCLUSION,
+    )
+
+
+def memory_grounding_block(*, has_memory: bool) -> ContextBlock | None:
+    """A LIGHT grounding nudge (P4 / O5) — only when memory was recalled (facts and/or a draft).
+    A no-heading instruction line, like the citation instruction."""
+    if not has_memory:
+        return None
+    return ContextBlock(
+        source="memory_grounding",
+        heading="",
+        body=_MEMORY_GROUNDING_INSTRUCTION,
+        priority=_PRIORITY_MEMORY_GROUNDING,
     )
 
 

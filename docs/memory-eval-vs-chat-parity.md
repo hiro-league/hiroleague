@@ -248,8 +248,8 @@ folded into Phase 2; G4 (admin chat-safe detail) is its own phase.**
 |---|---|---|---|---|
 | **2** ✅ | Wire the pre-pass loop **+ graph-run wiring (G1–G3, G5)** — **done 2026-07-02** | `memory_search_node` runs `MemoryRetriever.retrieve` (chat cfg, fed history, **abstain on**); stashes rich rows + **`memory_draft`**; decision distinguishes recalled/**abstained**/errored/empty (G2) + `format_memory_recall_output_preview` (G2); transcript sidecar under `trace` (G3); usage lands via `_write_recall_usage` (G1); **flat render kept** (P3). **Node NOT renamed** — kept `memory_search` (rename → `memory_recall` deferred to P5/G4 to avoid 8-fixture churn; usage/decision land name-independently). New `build_memory_retrieval_model` (`memory.retrieval.model → llm.default_chat`). | reuses eval caps (turns=4); usage/preview land on the wrapper entry (no new ledger plumbing) | **latency/cost inflection** (loop = ≥1 extra LLM call/turn); abstain skips chit-chat; recall node shows model/tokens/cost + decision. Tests: 283 runtime (incl. rewritten node tests + regenerated snapshot fixtures) + 270 domain/memory/eval + `svelte-check`. **G5** per-search trace nesting: deferred verify (needs a live `trace` run) |
 | **3** ✅ | Rich rendering **+ chat render caps** — **done 2026-07-02** | flat `memory_block` → shared `format_recall_context` (moved out of `services/eval` into `services/memory/agent/presentation.py`; eval re-exports); **new `memory.retrieval.render.*` prefs** (chat copy of eval's "Answer context" caps + temporal toggles) on the Memory tab, built into a chat `RecallRenderOptions` | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation; render caps editable + honored — 640 backend + 69 frontend prefs, `svelte-check` clean |
-| **4** | Draft + persona answer | inject `<search_conclusion>`; persona prompt consumes conclusion + facts, light grounding, retune temp (O5) | persona still owns voice | memory actually used; voice preserved; draft overridable |
-| **5** | Graph-run detail parity (G4, admin) | chat-safe detail path for a `memory_recall` row: backend read of the transcript sidecar → `build_retrieval_loop_payload`; a **degraded dialog branch** showing **trajectory + recalled rows** (no gold/judge) so the ⓘ marker doesn't dead-end on the eval-DB bridge | pure read/render; independent of the reply path | on the Vite dev site (`:5173`), a live chat turn's `memory_recall` row opens the loop trajectory (turns/sub-queries) + recalled facts — **no "no saved eval row" toast** |
+| **4** ✅ | Draft + persona answer — **done 2026-07-02** | inject the loop's draft as a `## Memory search conclusion` block + a **light** grounding nudge, both in **turn_context** (not the system prompt); persona consumes conclusion + rich facts | persona still owns voice (turn_context only; blocks conditional on recall) | memory actually used; voice preserved; draft overridable — 283 runtime tests. *Temp retune → Phase 6.* |
+| **5** 🟡 | Graph-run detail parity (G4, admin) — **rename + dead-end fix done 2026-07-02** | **Done:** the deferred node rename `memory_search → memory_recall` (40 files, fixtures/tests consistent); the eval-detail (ⓘ) marker is **gated to eval runs** (`run_id` `memory_eval*`) so a chat `memory_recall` row **no longer dead-ends** on the eval-DB bridge — it falls through to the bare **retrieval-trace** (⌗) marker (its per-search pipeline, written under `trace`). **Deferred:** the dedicated agent-transcript **trajectory** dialog (turns/sub-queries) — a new backend endpoint + degraded dialog. | pure UI marker gating + a mechanical rename | chat `memory_recall` row shows no toast; opens the per-search retrieval-trace under `trace` — 283 runtime + 81 graph-runs + `svelte-check` |
 
 **Bucket C — Tune**
 
@@ -437,6 +437,15 @@ the deferred split was **pulled into P1**: chat gets its **own** `memory.retriev
   it, say so") — again in turn_context, not `config.system_prompt`.
 - **Retune** chat retrieval + answer settings (temp etc.).
 - *Validate:* persona uses memory and can override the draft; voice preserved.
+- **Built 2026-07-02:** `search_conclusion_block(draft)` + `memory_grounding_block(has_memory=…)`
+  (`context_assembly.py`) added to `compose_context_node` between the memory facts and the citation
+  instruction (priorities 35/40) — both ride in `turn_context`, never `config.system_prompt`. The
+  conclusion shows only when the loop produced a draft (`state["memory_draft"]`); the light grounding
+  line shows whenever facts and/or a draft exist (abstained turns get neither, so a no-memory turn is
+  unchanged). Pure runtime (no prefs/schema/frontend); **temp retune deferred to Phase 6** — chat
+  keeps its persona temp (0.7), which is the point (light grounding preserves voice). Tests: the
+  memory-inject test asserts the conclusion + grounding in `turn_context`; 283 runtime green; the
+  model-less snapshot/characterization harness (no draft/facts) is unaffected. **Needs a restart.**
 
 **Phase 5 — graph-run detail parity (G4).** Today the `memory_recall` ⓘ marker calls
 `onOpenEvalRow` → `getEvalRowByRunId` → `store.find_row_by_run_id`, which queries
@@ -456,6 +465,16 @@ Give chat a **chat-safe path**, not the eval bridge:
 - *Validate:* on the Vite dev site (`:5173`, per CLAUDE.md), a live chat turn's `memory_recall` row
   opens the loop trajectory (turns / sub-queries) + recalled facts with **no eval-row toast**;
   eval rows still open the full dialog.
+- **Built 2026-07-02 (part 1 — rename + dead-end fix):** the deferred node rename
+  `memory_search → memory_recall` shipped (scoped sed across 40 files: node method, `chat.py` edges,
+  `knowledge.py` fanout, topology + ledger fixtures, tests — all consistent, 283 runtime green). The
+  eval-detail (ⓘ) marker `rowHasEvalDetail` (`GraphRunsNodesTable.svelte`) is now **gated to eval
+  runs** (`run_id.startsWith('memory_eval')`), so a **chat** `memory_recall` row no longer opens the
+  eval bridge (no "no saved eval row" toast) — it falls through to the bare **retrieval-trace** (⌗)
+  marker, opening the per-search pipeline dialog (written under observability=`trace`). 81 graph-runs
+  tests + `svelte-check` green. **Deferred (part 2 — trajectory dialog):** the `GET
+  /graph-runs/{run_id}/retrieval-loop` endpoint + the degraded trajectory dialog (turns/sub-queries
+  from the agent transcript) — chat recall is inspectable via the retrieval-trace view for now.
 
 **Phase 6 — tune & measure.** Loosen caps, tune the chat retrieval + grounding prompts, A/B vs the
 eval bar; optional cheap **pre-gate** heuristic before the loop if per-turn cost matters.

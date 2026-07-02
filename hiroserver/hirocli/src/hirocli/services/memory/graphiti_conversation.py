@@ -245,7 +245,7 @@ class GraphitiConversationMemory:
             return []
         group = self._group_for(user_id, character_id)
         top_k = self._default_top_k if limit is None else int(limit)
-        # Ledger Graphiti's fact search as a sub-step of the active ``memory_search`` node:
+        # Ledger Graphiti's fact search as a sub-step of the active ``memory_recall`` node:
         # ONE priced ``rerank`` roll-up child (cloud cross-encoder cost), mirroring knowledge's
         # ``graph_expand``. The deep per-stage breakdown lives only in the ``trace`` sidecar.
         # All of this no-ops outside a ledgered chat turn (CLI / admin / tools / tests).

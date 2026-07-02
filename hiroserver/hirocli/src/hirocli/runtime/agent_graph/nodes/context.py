@@ -27,6 +27,8 @@ from ..context_assembly import (
     instructions_block,
     knowledge_block,
     memory_block,
+    memory_grounding_block,
+    search_conclusion_block,
 )
 from ..ledger import graph_logged, observe
 from ..node_group import NodeGroup
@@ -84,17 +86,21 @@ class ContextNodes(NodeGroup):
     @graph_logged(captures={"decision"}, on_error="raise")
     async def compose_context_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         sources = state.get("knowledge_sources") or []
-        # Instructions, Knowledge, and Memories are always present (sections render a
-        # placeholder when empty); the citation instruction is conditional. Knowledge renders
-        # from the structured sources (tagged, neutralized), not the pre-joined string.
+        memories = state.get("retrieved_memories") or []
+        draft = state.get("memory_draft")
+        # Instructions, Knowledge, and Memories are always present (sections render a placeholder when
+        # empty); the citation instruction, the recall-loop conclusion (P4), and the memory-grounding
+        # nudge (P4) are conditional. Knowledge renders from the structured sources (tagged,
+        # neutralized), not the pre-joined string. The conclusion + grounding ride in turn_context
+        # (never the persona system prompt), so character voice stays clean.
         blocks = [
             block
             for block in (
                 instructions_block(self.prefs.chat_instructions()),
                 knowledge_block(sources),
-                memory_block(
-                    state.get("retrieved_memories") or [], self.prefs.memory_recall_render()
-                ),
+                memory_block(memories, self.prefs.memory_recall_render()),
+                search_conclusion_block(draft),
+                memory_grounding_block(has_memory=bool(memories) or bool(draft)),
                 citation_block(
                     has_sources=bool(sources),
                     cite_enabled=self.prefs.cite_sources(),
