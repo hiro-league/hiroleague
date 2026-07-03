@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 
@@ -472,4 +473,35 @@ def test_create_embedding_model_delegates_to_init_embeddings(
 
     assert calls["model"] == "openai:text-embedding-3-small"
     assert calls["provider"] is None
-    assert calls["kwargs"] == {"api_key": "sk-test"}
+    kwargs = calls["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["api_key"] == "sk-test"
+    # A warm-keepalive http_client is injected so human-paced chat turns don't re-handshake on
+    # every query embed (see _embedding_provider_kwargs); assert it's wired with our keepalive.
+    http_client = kwargs["http_client"]
+    assert isinstance(http_client, httpx.Client)
+    assert http_client.timeout.read == 30.0
+    assert set(kwargs) == {"api_key", "http_client"}
+
+
+def test_openai_chat_model_gets_warm_keepalive_http_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chat models are also wired through the centralized keepalive policy (both sync + async
+    clients), so the first call of each human-paced turn doesn't re-handshake."""
+    from hirocli.domain.model_http import KEEPALIVE_EXPIRY_S
+
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("openai", "sk-test")
+
+    model = create_chat_model(
+        "openai:gpt-5.4", workspace_path=tmp_path, credential_store=store,
+    )
+
+    assert isinstance(model.http_client, httpx.Client)
+    assert isinstance(model.http_async_client, httpx.AsyncClient)
+    # The async client is the chat hot path (langchain streams over it); assert the pool keepalive.
+    pool = model.http_async_client._transport._pool
+    assert pool._keepalive_expiry == KEEPALIVE_EXPIRY_S

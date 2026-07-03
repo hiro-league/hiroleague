@@ -24,6 +24,7 @@ import pulls in no engine.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -273,6 +274,14 @@ async def _episode_stated_dates(graphiti: Any, episode_uuids: list[str]) -> dict
     return out
 
 
+async def _empty_lane() -> tuple[list[Any], dict[str, float | None]]:
+    """Placeholder lane result (no candidates, no scores).
+
+    Substituted for the node/episode coroutine when the scope didn't mount that lane's config, so
+    the ``asyncio.gather`` below stays a fixed 3-tuple without scheduling an un-awaited coroutine."""
+    return [], {}
+
+
 async def _traced_search(
     graphiti: Any,
     query: str,
@@ -342,9 +351,19 @@ async def _traced_search(
         )
     )
 
-    # Edge (fact) lane — always present. ``edge_scores`` (uuid→rerank score) is threaded back so
-    # recall fact rows can show the same score the trace does (graphiti leaves edge.score unset).
-    edges, edge_scores = await search_facts_traced(
+    # Perf fix (serial-rerank latency): the lanes are INDEPENDENT — each only reads the already
+    # computed shared ``query_vector`` — so run edge/node/episode CONCURRENTLY (asyncio.gather)
+    # instead of awaiting them in series. The old serial form forced their three remote reranker
+    # calls back-to-back (~0.65s of avoidable latency per recall); this restores graphiti's stock
+    # ``search_()`` behavior, which already gathers the lanes. Concurrency is safe under the shared
+    # ``trace``: ``add_stage`` is a plain append on the single event-loop thread, each StageRecord
+    # self-times and is tagged by ``lane``, and the trace dialog groups by lane — so overlapping the
+    # lanes changes only wall-clock, not per-stage timing or attribution. ``edge_scores`` /
+    # ``node_scores`` / ``episode_scores`` (uuid→rerank score) are threaded back so the recall rows
+    # can show the same score the trace does (graphiti leaves the object's ``score`` unset). The
+    # node/episode lanes only run when the scope mounted their config; ``_empty_lane`` keeps the
+    # gather a fixed 3-tuple without an un-awaited coroutine.
+    edge_coro = search_facts_traced(
         clients,
         query,
         query_vector,
@@ -356,13 +375,8 @@ async def _traced_search(
         capture=capture,
         trace=trace,
     )
-
-    # Node (entity) lane — only when the scope mounted a node_config. ``node_scores`` (uuid→rerank
-    # score) is threaded back so recall entity rows can show the same score the trace does.
-    nodes: list[Any] = []
-    node_scores: dict[str, float | None] = {}
-    if getattr(config, "node_config", None) is not None:
-        nodes, node_scores = await search_nodes_traced(
+    node_coro = (
+        search_nodes_traced(
             clients,
             query,
             query_vector,
@@ -373,13 +387,11 @@ async def _traced_search(
             reranker_min_score=config.reranker_min_score,
             trace=trace,
         )
-
-    # Episode lane — only when the scope mounted an episode_config. ``episode_scores`` threaded
-    # back for the same reason as the node lane.
-    episodes: list[Any] = []
-    episode_scores: dict[str, float | None] = {}
-    if getattr(config, "episode_config", None) is not None:
-        episodes, episode_scores = await search_episodes_traced(
+        if getattr(config, "node_config", None) is not None
+        else _empty_lane()
+    )
+    episode_coro = (
+        search_episodes_traced(
             clients,
             query,
             group_ids=[group_id],
@@ -389,6 +401,20 @@ async def _traced_search(
             reranker_min_score=config.reranker_min_score,
             trace=trace,
         )
+        if getattr(config, "episode_config", None) is not None
+        else _empty_lane()
+    )
+    (
+        (edges, edge_scores),
+        (nodes, node_scores),
+        (episodes, episode_scores),
+    ) = await asyncio.gather(edge_coro, node_coro, episode_coro)
+
+    # Gather appends stages in completion order (lanes overlap); regroup into the stable
+    # query→edge→node→episode order the sidecar/dialog previously relied on. Python's sort is
+    # stable, so each lane's internal stage sequence (candidate→hop→rank→temporal) is preserved.
+    _lane_order = {"query": 0, "edge": 1, "node": 2, "episode": 3}
+    trace.stages.sort(key=lambda s: _lane_order.get(s.lane, 9))
 
     capture.trace = trace
     return edges, nodes, episodes, edge_scores, node_scores, episode_scores

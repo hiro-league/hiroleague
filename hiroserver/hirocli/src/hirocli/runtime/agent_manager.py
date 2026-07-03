@@ -196,6 +196,7 @@ class AgentManager:
         db = str(db_path(self._ctx.workspace_path))
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
             self._checkpointer = checkpointer
+            from ..services.memory.models import MemoryRetrievalModelCache
             from .agent_graph.ledger import LedgerSink
 
             services = AgentServices(
@@ -209,6 +210,8 @@ class AgentManager:
                 checkpointer=checkpointer,
                 preferences=self._ctx.preferences,
                 knowledge_subgraph=self._build_knowledge_subgraph(),
+                # C2: cache the recall model across turns (rebuilt only when its spec changes).
+                memory_retrieval_models=MemoryRetrievalModelCache(),
             )
             self._graph = ChatAgentGraph(services)
             # Hot-reload STT/TTS when workspace model defaults change. Nodes read
@@ -893,6 +896,12 @@ class AgentManager:
         self._ctx.memory_service = new_memory
         if self._graph is not None:
             self._graph.services.memory = new_memory
+            # C2: drop the cached recall model too — a credential/provider change can leave the
+            # model_id unchanged (so the spec key wouldn't self-invalidate) while its client holds
+            # stale credentials. This choke point fires on both memory-pref and providers changes.
+            cache = self._graph.services.memory_retrieval_models
+            if cache is not None:
+                cache.clear()
         log.fineinfo(
             "Memory rebound - HiroServer",
             context=context,

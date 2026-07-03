@@ -85,6 +85,7 @@ export type PreferencePath =
   | 'llm.default_stt'
   | 'llm.default_tts'
   | 'llm.default_tuning_profile'
+  | 'llm.http_keepalive_s'
   | 'media.input.file'
   | 'media.input.image'
   | 'media.input.video'

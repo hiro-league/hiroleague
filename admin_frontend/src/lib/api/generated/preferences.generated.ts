@@ -13,6 +13,10 @@ export type DefaultRerankerModel = string | null;
  * Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.
  */
 export type DefaultEmbedderModel = string | null;
+/**
+ * How long idle HTTPS connections to model providers (OpenAI, Google, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.
+ */
+export type ProviderConnectionKeepaliveSeconds = number;
 export type DefaultImageGen = string | null;
 export type DefaultChatModelProfile = string;
 export type DefaultImageProfile = string;
@@ -328,6 +332,7 @@ export interface LLMPreferences {
   default_tts: DefaultTextToSpeechModel;
   default_reranker: DefaultRerankerModel;
   default_embedder: DefaultEmbedderModel;
+  http_keepalive_s: ProviderConnectionKeepaliveSeconds;
   default_image_gen: DefaultImageGen;
   default_tuning_profile: DefaultChatModelProfile;
   default_image_profile: DefaultImageProfile;

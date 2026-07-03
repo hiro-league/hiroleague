@@ -340,3 +340,83 @@ async def test_search_chunk_ids_show_expiry_only_on_edges() -> None:
     assert "invalid_at" not in exp.node_rows[0]
     assert "superseded" not in exp.episode_rows[0]
     assert "invalid_at" not in exp.episode_rows[0]
+
+
+# ── Traced path: lanes run concurrently and stages stay lane-ordered ─────────────────────────
+@pytest.mark.asyncio
+async def test_traced_search_gathers_lanes_concurrently_and_orders_stages(monkeypatch) -> None:
+    """The trace re-host runs edge/node/episode lanes via asyncio.gather (not serially), so their
+    remote reranker calls overlap; the collected stages are then regrouped into the stable
+    query→edge→node→episode order the sidecar/dialog rely on. Guards the perf fix in
+    ``_traced_search`` (previously the three lanes — and their reranks — awaited one at a time)."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from hirocli.services.knowledge.graph import graphiti_compat, graphiti_fact_search
+    from hirocli.services.knowledge.graph import graphiti_search as gs
+    from hirocli.services.knowledge.graph.retrieval_trace import (
+        RetrievalCapture,
+        StageRecord,
+        current_capture,
+    )
+
+    monkeypatch.setattr(graphiti_compat, "assert_graphiti_compatible", lambda: None)
+
+    # Shared concurrency gauge: each lane bumps the active count and sleeps; if the lanes were
+    # awaited serially the peak would be 1, so peak==3 proves they overlapped (gather).
+    state = {"active": 0, "peak": 0}
+
+    async def _run_lane(lane: str, trace, ret):
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        await asyncio.sleep(0.02)
+        trace.add_stage(StageRecord(kind="rank", label=lane, lane=lane))
+        state["active"] -= 1
+        return ret
+
+    async def fake_facts(*_a, **kw):
+        return await _run_lane("edge", kw["trace"], ([SimpleNamespace(
+            uuid="e1", fact="fx", name="REL", source_node_uuid="s", target_node_uuid="t",
+            episodes=["chunk-e1"], valid_at=_past(), invalid_at=None, expired_at=None,
+        )], {"e1": 0.9}))
+
+    async def fake_nodes(*_a, **kw):
+        return await _run_lane("node", kw["trace"], ([SimpleNamespace(
+            uuid="n1", name="Adam", labels=["Person"], summary="likes sci-fi",
+        )], {"n1": 0.8}))
+
+    async def fake_episodes(*_a, **kw):
+        return await _run_lane("episode", kw["trace"], ([SimpleNamespace(
+            uuid="ep1", content="a turn", valid_at=_past(),
+        )], {"ep1": 0.7}))
+
+    monkeypatch.setattr(graphiti_fact_search, "search_facts_traced", fake_facts)
+    monkeypatch.setattr(graphiti_fact_search, "search_nodes_traced", fake_nodes)
+    monkeypatch.setattr(graphiti_fact_search, "search_episodes_traced", fake_episodes)
+
+    async def fake_create(*, input_data):
+        return [0.1, 0.2, 0.3, 0.4]
+
+    graphiti = SimpleNamespace(
+        clients=SimpleNamespace(embedder=SimpleNamespace(create=fake_create),
+                                driver=object(), cross_encoder=object())
+    )
+
+    token = current_capture.set(RetrievalCapture())
+    try:
+        exp = await gs.search_chunk_ids(
+            graphiti, "where does adam work", group_id="mem_1_aria",
+            scope="edges_nodes_episodes", recipe="rrf", temporal="all",
+        )
+        capture = current_capture.get()
+    finally:
+        current_capture.reset(token)
+
+    # All three lanes flowed through to the expansion (gather unpacked the 3-tuple correctly).
+    assert exp.facts and exp.node_memories and exp.episode_memories
+    # Lanes overlapped rather than serializing (the whole point of the perf fix).
+    assert state["peak"] == 3
+    # Stage order regrouped to query (embed) → edge → node → episode despite completion-order append.
+    lanes = [s.lane for s in capture.trace.stages]
+    assert lanes[0] == "query"
+    assert lanes == sorted(lanes, key={"query": 0, "edge": 1, "node": 2, "episode": 3}.get)

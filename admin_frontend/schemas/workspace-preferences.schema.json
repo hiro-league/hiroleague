@@ -928,6 +928,15 @@
           "model_kind": "embedding",
           "title": "Default embedder model"
         },
+        "http_keepalive_s": {
+          "default": 300,
+          "description": "How long idle HTTPS connections to model providers (OpenAI, Google, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.",
+          "maximum": 1800,
+          "minimum": 5,
+          "step": 5,
+          "title": "Provider connection keepalive (seconds)",
+          "type": "integer"
+        },
         "default_image_gen": {
           "anyOf": [
             {
@@ -963,6 +972,7 @@
         "default_tts",
         "default_reranker",
         "default_embedder",
+        "http_keepalive_s",
         "default_image_gen",
         "default_tuning_profile",
         "default_image_profile"

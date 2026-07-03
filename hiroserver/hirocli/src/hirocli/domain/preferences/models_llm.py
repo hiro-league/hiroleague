@@ -53,6 +53,26 @@ class LLMPreferences(BaseModel):
             "chosen). Cloud models need a provider key; local models must be downloaded first."
         ),
     )
+    # Warm-keepalive window (seconds) for outbound HTTPS connections to model providers (OpenAI,
+    # Google, DeepSeek). Human-paced chat turns are usually >5s apart — the SDK default — so the
+    # first provider call each turn re-does a TLS handshake (~1s+); a larger window keeps the
+    # connection warm. Applied centrally in ``model_http`` via ``model_factory`` (rerankers and
+    # local endpoints are excluded — no client hook / localhost). Capped in practice by each
+    # provider's server-side idle timeout (~60-240s), so very large values buy nothing past that.
+    # Read at model-build time → takes effect on server restart.
+    http_keepalive_s: int = pref_field(
+        default=300,
+        ge=5,
+        le=1800,
+        step=5,
+        title="Provider connection keepalive (seconds)",
+        description=(
+            "How long idle HTTPS connections to model providers (OpenAI, Google, DeepSeek) are "
+            "kept warm before closing. Larger avoids a TLS handshake on the first call of each "
+            "chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). "
+            "Takes effect on server restart."
+        ),
+    )
     default_image_gen: str | None = pref_field(
         model_kind="chat",
         save_skip=True,

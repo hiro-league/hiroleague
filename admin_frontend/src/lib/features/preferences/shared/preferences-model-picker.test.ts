@@ -11,6 +11,7 @@ function makeDraft(): WorkspacePreferences {
       default_tts: null,
       default_reranker: null,
       default_embedder: null,
+      http_keepalive_s: 300,
       default_image_gen: null,
       default_tuning_profile: 'balanced_chat',
       default_image_profile: 'image_playground'

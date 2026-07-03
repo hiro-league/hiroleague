@@ -43,7 +43,11 @@ export const MODELS_MANIFEST: PrefTabManifest = {
               download: 'reranker'
             }
           ]
-        }
+        },
+        // Workspace-wide provider connection keepalive (seconds). Its own row below the model
+        // pickers — it's a shared HTTP-connection setting, not a per-model choice. Bounds/step come
+        // from the schema (5–1800, step 5); takes effect on server restart.
+        { kind: 'grid', fields: [{ kind: 'number', path: 'llm.http_keepalive_s' }] }
       ]
     },
     {

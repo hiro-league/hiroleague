@@ -37,8 +37,8 @@ def _canned_recall(
         return result
 
     monkeypatch.setattr(
-        "hirocli.services.memory.models.build_memory_retrieval_model",
-        lambda *a, **k: (object(), "fake:model"),
+        "hirocli.services.memory.models.MemoryRetrievalModelCache.get",
+        lambda self, *a, **k: (object(), "fake:model"),
     )
     monkeypatch.setattr(MemoryRetriever, "retrieve", staticmethod(_fake_retrieve))
 

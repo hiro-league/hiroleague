@@ -12,6 +12,7 @@ from langchain_ollama import ChatOllama
 
 from .credential_store import CredentialStore
 from .model_catalog import ModelCatalog, ModelSpec, get_model_catalog
+from .model_http import google_http_kwargs, openai_http_kwargs
 from .preferences import ModelTuning, ThinkingLevel
 from .workspace import workspace_id_for_path
 
@@ -21,6 +22,26 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
+
+
+def _http_keepalive_s(workspace_path: Path) -> float | None:
+    """Workspace-configured provider keepalive window (``llm.http_keepalive_s``) for model_http.
+
+    Read here (model_factory already receives ``workspace_path``) so the keepalive pref reaches the
+    HTTP-client build without threading a param through every caller. Best-effort: a prefs read /
+    validation hiccup falls back to the model_http default rather than blocking model construction —
+    keepalive is perf tuning, not correctness. Returns ``None`` on any failure (helper applies the
+    default)."""
+    try:
+        from .preferences.io import load_preferences
+
+        return float(load_preferences(workspace_path).llm.http_keepalive_s)
+    except Exception:
+        logger.warning(
+            "⚠️ model factory — could not read llm.http_keepalive_s; using default keepalive",
+            exc_info=True,
+        )
+        return None
 
 
 def _api_model_id(canonical_id: str) -> str:
@@ -97,6 +118,8 @@ def build_chat_model_from_tuning(
     pid = spec.provider_id
     effective = tuning or ModelTuning()
     cb = callbacks or []
+    # Workspace keepalive window for the warm-connection HTTP clients wired below (cloud providers).
+    keepalive_s = _http_keepalive_s(workspace_path)
 
     if pid == "openai":
         key = store.get_api_key("openai")
@@ -119,6 +142,9 @@ def build_chat_model_from_tuning(
         else:
             kwargs["temperature"] = effective.temperature
             kwargs["max_tokens"] = effective.max_tokens
+        # Warm-keepalive HTTP clients (centralized in model_http) so a human-paced turn doesn't
+        # re-handshake on its first call. streaming=True → wires both sync + async clients.
+        kwargs.update(openai_http_kwargs(streaming=True, keepalive_s=keepalive_s))
         return init_chat_model(
             api_model,
             **kwargs,
@@ -155,6 +181,8 @@ def build_chat_model_from_tuning(
             "callbacks": cb,
         }
         kwargs.update(_google_thinking_kwargs(effective.thinking, api_model, spec))
+        # Warm-keepalive HTTP client via google-genai's client_args (see model_http).
+        kwargs.update(google_http_kwargs(streaming=True, keepalive_s=keepalive_s))
         return init_chat_model(
             api_model,
             **kwargs,
@@ -193,6 +221,9 @@ def build_chat_model_from_tuning(
         else:
             ds_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
             ds_kwargs["reasoning_effort"] = effort
+        # DeepSeek is the langchain_openai family (ChatDeepSeek exposes http_client) — same
+        # warm-keepalive policy as OpenAI chat.
+        ds_kwargs.update(openai_http_kwargs(streaming=True, keepalive_s=keepalive_s))
         return ChatDeepSeek(**ds_kwargs)
 
     if pid == "lm_studio":
@@ -382,18 +413,23 @@ def _embedding_provider_kwargs(
     *,
     store: CredentialStore,
     cat: ModelCatalog,
+    keepalive_s: float | None = None,
 ) -> dict[str, Any]:
     if catalog_provider_id == "openai":
         key = store.get_api_key("openai")
         if not key:
             raise ValueError("OpenAI API key missing (keyring or OPENAI_API_KEY).")
-        return {"api_key": key}
+        # Warm-keepalive http_client (centralized in model_http) so a human-paced chat turn doesn't
+        # re-handshake on every query embed (~1.7s cold-connect was observed for a 63-char query —
+        # record count is irrelevant). streaming=False → sync client only (embed_documents is sync).
+        return {"api_key": key, **openai_http_kwargs(streaming=False, keepalive_s=keepalive_s)}
 
     if catalog_provider_id == "google":
         key = store.get_api_key("google")
         if not key:
             raise ValueError("Google API key missing (keyring or GOOGLE_API_KEY).")
-        return {"google_api_key": key}
+        # Same warm-keepalive policy, via google-genai's client_args (see model_http).
+        return {"google_api_key": key, **google_http_kwargs(streaming=False, keepalive_s=keepalive_s)}
 
     if catalog_provider_id == "ollama":
         cred = store.get("ollama")
@@ -452,7 +488,9 @@ def create_embedding_model(
 
     api_model = _api_model_id(model_id)
     pid = spec.provider_id
-    provider_kwargs = _embedding_provider_kwargs(pid, store=store, cat=cat)
+    provider_kwargs = _embedding_provider_kwargs(
+        pid, store=store, cat=cat, keepalive_s=_http_keepalive_s(workspace_path)
+    )
 
     # LM Studio is OpenAI-compatible but not a built-in init_embeddings provider key.
     if pid == "lm_studio":
@@ -505,6 +543,10 @@ def create_reranker(
 
     api_model = _api_model_id(model_id)
     pid = spec.provider_id
+    # NOTE: the rerank wrappers (CohereRerank / VoyageAIRerank) expose only a pre-built ``client``
+    # object, not an httpx ``http_client`` / ``client_args`` hook, so the centralized warm-keepalive
+    # policy (model_http) can't be injected here without hand-constructing each vendor client. Left
+    # on SDK defaults for now (rerank calls are short; the cold-connect cost is smaller than embed).
     if pid == "cohere":
         key = store.get_api_key("cohere")
         if not key:

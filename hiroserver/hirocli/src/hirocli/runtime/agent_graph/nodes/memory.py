@@ -68,6 +68,20 @@ class MemoryNodes(NodeGroup):
         "memory_out": RetryPolicy(max_attempts=2),
     }
 
+    def _recall_model_cache(self):
+        """The shared, cross-turn recall-model cache (C2), lazily created on ``AgentServices``.
+
+        Lives on ``services`` (a long-lived singleton) so it survives across turns and is shared by
+        every compiled chat graph — the recall model is independent of the chat model/character.
+        """
+        from ....services.memory.models import MemoryRetrievalModelCache
+
+        cache = self.services.memory_retrieval_models
+        if cache is None:
+            cache = MemoryRetrievalModelCache()
+            self.services.memory_retrieval_models = cache
+        return cache
+
     @graph_logged(captures={"usage", "decision"}, on_error="degrade")
     async def memory_recall_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Agentic memory recall (the Graphiti retrieval loop) before context assembly.
@@ -116,12 +130,13 @@ class MemoryNodes(NodeGroup):
             write_agent_recall_result,
             write_agent_retrieval_trace,
         )
-        from ....services.memory.models import build_memory_retrieval_model
 
         # Chat retrieval config (memory.retrieval.*, Phase 1): caps + prompt + model.
         limits = prefs.memory.retrieval.limits
         _prompt_id, prompt_text = resolve_chat_retrieval_agent_prompt(prefs)
-        model, model_id = build_memory_retrieval_model(
+        # C2: the recall model is cached across turns (rebuilt only when its spec changes) instead of
+        # reconstructing the provider client every message — see MemoryRetrievalModelCache.
+        model, model_id = self._recall_model_cache().get(
             prefs, self.services.workspace_path, credential_store=self.services.credentials
         )
         if model is None:
