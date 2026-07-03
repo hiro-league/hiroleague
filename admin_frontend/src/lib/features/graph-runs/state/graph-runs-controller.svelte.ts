@@ -19,10 +19,12 @@ import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct
 import {
   getGraphRun,
   getGraphRunLangsmithUrl,
+  getGraphRunRetrievalLoop,
   GRAPH_RUN_HEADER_FIELDS,
   GRAPH_RUN_HEADER_TAB_FIELDS,
   GRAPH_RUN_NODE_TABLE_FIELDS,
-  type GraphLedgerRow
+  type GraphLedgerRow,
+  type GraphRunRetrievalLoopResponse
 } from '$lib/api/graph-runs';
 import { createPoller } from '$lib/state/create-poller.svelte';
 import {
@@ -47,6 +49,7 @@ import { createGraphRunTraceModel } from './graph-runs-trace-model.svelte';
 import { createRetrievalTraceDialogController } from './retrieval-trace-dialog.svelte';
 import { getEvalRowByRunId } from '$lib/api/eval';
 import { rowFromPayload, type EvalRow } from '$lib/features/eval/shared/eval-row';
+import type { EvalQuestionLeg } from '$lib/features/eval/shared/eval-events';
 import type { ToastKind } from '$lib/ui/toast-types';
 
 const NOOP_NOTIFY = (_kind: ToastKind, _message: string): void => {};
@@ -98,6 +101,80 @@ export function createGraphRunsPageController(
   function closeEvalRow() {
     activeEvalRow = null;
     rowTraces.closeTrace();
+  }
+
+  // --- Chat retrieval-loop bridge (P5 part 2): the chat-safe analog of the eval-detail bridge -------
+  // A CHAT `memory_recall` node isn't in eval_results.db, so it can't resolve a saved eval row. We read
+  // its agent-transcript sidecar live and wrap the loop as a MINIMAL `EvalRow` (a single `recall` leg
+  // carrying `retrieval_loop` + the node's run_id), then open the SAME full `EvalRowDetailDialog` the
+  // eval bridge uses — so chat gets the real Trajectory tab with per-sub-query pipeline traces reachable
+  // from within (via `rowTraces.openTraceForSubQuery`), not a stripped-down one-off dialog. Chat has no
+  // gold/judge/recalled-set, so those tabs simply don't render (tabsForLeg gates on presence).
+  let retrievalLoopLoadingRunId = $state<string | null>(null);
+
+  function chatEvalRowFromLoop(
+    runId: string,
+    data: GraphRunRetrievalLoopResponse,
+    row: GraphLedgerRow
+  ): EvalRow {
+    const query = String(row.input_preview ?? '')
+      .replace(/^q:\s*/i, '')
+      .trim();
+    const answer = data.answer ?? '';
+    const leg: EvalQuestionLeg = {
+      mode: 'recall',
+      mark: '',
+      answer_preview: answer.slice(0, 200),
+      answer,
+      recalled: data.recalled ?? [],
+      retrieval_loop: data.loop ?? undefined,
+      render: data.render ?? undefined,
+      run_id: runId,
+      elapsed_ms: Number(row.elapsed_ms) || 0,
+      cost_usd: Number(row.cost_usd) || 0
+    };
+    return {
+      index: 0,
+      total: 0,
+      id: runId,
+      category: 'chat recall',
+      subcategory: '',
+      difficulty: '',
+      question: query || '(chat memory recall)',
+      requires_graph: false,
+      track: 'memory',
+      legs: { recall: leg },
+      delta: '0',
+      gold: '',
+      cost_usd: leg.cost_usd ?? 0,
+      is_negative_control: false,
+      answered_at: '',
+      evidence_recall: null,
+      rubric: []
+    };
+  }
+
+  async function openRetrievalLoopForNode(row: GraphLedgerRow) {
+    const runId = String(row.run_id ?? '').trim();
+    if (!runId) return;
+    retrievalLoopLoadingRunId = runId;
+    try {
+      const res = await getGraphRunRetrievalLoop(runId);
+      const data = res.data;
+      if (res.ok && data && (data.loop || (data.recalled?.length ?? 0) > 0 || data.answer)) {
+        // Reuse the eval detail dialog in place (same activeEvalRow + rowTraces seam).
+        activeEvalRow = chatEvalRowFromLoop(runId, data, row);
+      } else {
+        notify(
+          'info',
+          'No retrieval trajectory recorded for this recall node (set Graph observability = trace).'
+        );
+      }
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Failed to load the retrieval trajectory.');
+    } finally {
+      retrievalLoopLoadingRunId = null;
+    }
   }
 
   let timelineByRun = $state<Record<string, GraphLedgerRow[]>>({});
@@ -676,6 +753,12 @@ export function createGraphRunsPageController(
     },
     openEvalRowForNode,
     closeEvalRow,
+    /** Chat retrieval-loop bridge (P5 part 2) — opens the same eval detail dialog (via `activeEvalRow`)
+     * from a CHAT `memory_recall` node's live agent-transcript sidecar; close via `closeEvalRow`. */
+    get retrievalLoopLoadingRunId() {
+      return retrievalLoopLoadingRunId;
+    },
+    openRetrievalLoopForNode,
     RUNS_TAB,
     mount,
     showRunsOnly,

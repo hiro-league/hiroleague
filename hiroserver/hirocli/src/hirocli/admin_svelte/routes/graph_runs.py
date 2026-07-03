@@ -91,6 +91,30 @@ async def get_graph_run_retrieval_trace(
     }
 
 
+@graph_runs_router.get("/graph-runs/{run_id}/retrieval-loop")
+async def get_graph_run_retrieval_loop(
+    run_id: str,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> dict[str, Any]:
+    """Full retrieval-recall detail for a chat recall run, read live from the agent sidecars: the loop
+    trajectory (``loop``) plus the recalled facts/entities/episodes (``recalled``), draft ``answer``,
+    and ``render`` caps — the same shape the eval detail dialog renders. All null/empty when tracing
+    wasn't enabled for the run."""
+    result = await run_in_threadpool(
+        GraphLedgerService().retrieval_loop,
+        workspace_id,
+        run_id,
+    )
+    if not result.ok:
+        return _api_from_result(result)
+    return {
+        "ok": True,
+        "error": None,
+        "data": result.data
+        or {"loop": None, "recalled": [], "answer": "", "render": None},
+    }
+
+
 @graph_runs_router.get("/graph-runs/{run_id}/ingest-trace")
 async def get_graph_run_ingest_trace(
     run_id: str,

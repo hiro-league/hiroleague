@@ -249,7 +249,7 @@ folded into Phase 2; G4 (admin chat-safe detail) is its own phase.**
 | **2** ✅ | Wire the pre-pass loop **+ graph-run wiring (G1–G3, G5)** — **done 2026-07-02** | `memory_search_node` runs `MemoryRetriever.retrieve` (chat cfg, fed history, **abstain on**); stashes rich rows + **`memory_draft`**; decision distinguishes recalled/**abstained**/errored/empty (G2) + `format_memory_recall_output_preview` (G2); transcript sidecar under `trace` (G3); usage lands via `_write_recall_usage` (G1); **flat render kept** (P3). **Node NOT renamed** — kept `memory_search` (rename → `memory_recall` deferred to P5/G4 to avoid 8-fixture churn; usage/decision land name-independently). New `build_memory_retrieval_model` (`memory.retrieval.model → llm.default_chat`). | reuses eval caps (turns=4); usage/preview land on the wrapper entry (no new ledger plumbing) | **latency/cost inflection** (loop = ≥1 extra LLM call/turn); abstain skips chit-chat; recall node shows model/tokens/cost + decision. Tests: 283 runtime (incl. rewritten node tests + regenerated snapshot fixtures) + 270 domain/memory/eval + `svelte-check`. **G5** per-search trace nesting: deferred verify (needs a live `trace` run) |
 | **3** ✅ | Rich rendering **+ chat render caps** — **done 2026-07-02** | flat `memory_block` → shared `format_recall_context` (moved out of `services/eval` into `services/memory/agent/presentation.py`; eval re-exports); **new `memory.retrieval.render.*` prefs** (chat copy of eval's "Answer context" caps + temporal toggles) on the Memory tab, built into a chat `RecallRenderOptions` | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation; render caps editable + honored — 640 backend + 69 frontend prefs, `svelte-check` clean |
 | **4** ✅ | Draft + persona answer — **done 2026-07-02** | inject the loop's draft as a `## Memory search conclusion` block + a **light** grounding nudge, both in **turn_context** (not the system prompt); persona consumes conclusion + rich facts | persona still owns voice (turn_context only; blocks conditional on recall) | memory actually used; voice preserved; draft overridable — 283 runtime tests. *Temp retune → Phase 6.* |
-| **5** 🟡 | Graph-run detail parity (G4, admin) — **rename + dead-end fix done 2026-07-02** | **Done:** the deferred node rename `memory_search → memory_recall` (40 files, fixtures/tests consistent); the eval-detail (ⓘ) marker is **gated to eval runs** (`run_id` `memory_eval*`) so a chat `memory_recall` row **no longer dead-ends** on the eval-DB bridge — it falls through to the bare **retrieval-trace** (⌗) marker (its per-search pipeline, written under `trace`). **Deferred:** the dedicated agent-transcript **trajectory** dialog (turns/sub-queries) — a new backend endpoint + degraded dialog. | pure UI marker gating + a mechanical rename | chat `memory_recall` row shows no toast; opens the per-search retrieval-trace under `trace` — 283 runtime + 81 graph-runs + `svelte-check` |
+| **5** ✅ | Graph-run detail parity (G4, admin) — **done 2026-07-02** | node rename `memory_search → memory_recall` (40 files, consistent); eval-detail (ⓘ) marker **gated to eval runs** so chat recall no longer dead-ends; **new trajectory (📊) marker** on a chat `memory_recall` row → `GET /graph-runs/{run_id}/retrieval-loop` (reads the agent-transcript sidecar) → a dialog reusing the eval **`EvalRetrievalTrajectory`** renderer (turns/sub-queries); the per-search pipeline stays on the ⌗ marker alongside | pure read/render + a mechanical rename; endpoint returns null off-`trace` | chat `memory_recall` row (under `trace`) opens the loop trajectory, no toast — 283 runtime + 81 graph-runs + 7 agent-trace + `svelte-check` |
 
 **Bucket C — Tune**
 
@@ -468,13 +468,30 @@ Give chat a **chat-safe path**, not the eval bridge:
 - **Built 2026-07-02 (part 1 — rename + dead-end fix):** the deferred node rename
   `memory_search → memory_recall` shipped (scoped sed across 40 files: node method, `chat.py` edges,
   `knowledge.py` fanout, topology + ledger fixtures, tests — all consistent, 283 runtime green). The
-  eval-detail (ⓘ) marker `rowHasEvalDetail` (`GraphRunsNodesTable.svelte`) is now **gated to eval
-  runs** (`run_id.startsWith('memory_eval')`), so a **chat** `memory_recall` row no longer opens the
-  eval bridge (no "no saved eval row" toast) — it falls through to the bare **retrieval-trace** (⌗)
-  marker, opening the per-search pipeline dialog (written under observability=`trace`). 81 graph-runs
-  tests + `svelte-check` green. **Deferred (part 2 — trajectory dialog):** the `GET
-  /graph-runs/{run_id}/retrieval-loop` endpoint + the degraded trajectory dialog (turns/sub-queries
-  from the agent transcript) — chat recall is inspectable via the retrieval-trace view for now.
+  eval-detail (ⓘ) marker `rowHasEvalDetail` (`GraphRunsNodesTable.svelte`) is **gated to eval runs**
+  (`run_id.startsWith('memory_eval')`), so a **chat** `memory_recall` row no longer opens the eval
+  bridge (no toast).
+- **Built 2026-07-02 (part 2 — full recall detail dialog):** a chat `memory_recall` row now opens the
+  **exact same `EvalRowDetailDialog`** an eval row does — one ⓘ marker, one dialog, **Overview +
+  Facts + Entities + Episodes (with counts) + Trajectory**, per-search pipeline reachable from the
+  Trajectory tab. Achieved by persisting what eval keeps in `row_json`:
+  - **Node** (`memory_recall_node`) — under `observability=trace` it now writes, beside the transcript,
+    a **recalled-rows + draft companion** (`write_agent_recall_result` → `{run}__{slot}.result.json`,
+    `{recalled, answer}`). The rows are the SAME `accumulated_item_to_recall_row(present_accumulator(
+    result.accumulator))` eval builds; `answer` is the loop's draft. No extra compute — the node
+    already had `rows`/`draft`.
+  - **Backend** — `GraphLedgerService.retrieval_loop` reads both sidecars and returns
+    `{loop, recalled, answer, render}` (render = `memory.retrieval.render.*` caps); `GET
+    /graph-runs/{run_id}/retrieval-loop` returns that shape (all null/empty off-`trace`).
+  - **Frontend** — `openRetrievalLoopForNode` wraps the response as an `EvalRow`
+    (`chatEvalRowFromLoop`: one `recall` leg carrying `recalled` + `answer` + `retrieval_loop` +
+    `render` + the node's `run_id`) and sets the SAME `activeEvalRow`; closed by `closeEvalRow`. The
+    single ⓘ marker replaces the earlier 📊+⌗ pair; the stripped-down
+    `GraphRunsRetrievalLoopDialog.svelte` was **deleted**. Chat has no gold/judge, so those Overview
+    rows show "—" (tabs gate on presence).
+  Tests: `read_agent_recall_result` round-trip (+ confirms the `.jsonl` transcript reader ignores the
+  `.result.json` companion); 8 agent-trace + 29 runtime node/memory + 81 graph-runs + `svelte-check`
+  0 errors. **Needs a server restart** (new endpoint + node rename), and set `observability = trace`.
 
 **Phase 6 — tune & measure.** Loosen caps, tune the chat retrieval + grounding prompts, A/B vs the
 eval bar; optional cheap **pre-gate** heuristic before the loop if per-turn cost matters.

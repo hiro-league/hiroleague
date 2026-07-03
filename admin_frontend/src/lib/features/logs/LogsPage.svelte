@@ -185,6 +185,7 @@
       evalRowTraces={runsCtrl.evalRowTraces}
       onOpenEvalRow={(row) => void runsCtrl.openEvalRowForNode(row)}
       onCloseEvalRow={runsCtrl.closeEvalRow}
+      onOpenRetrievalLoop={(row) => void runsCtrl.openRetrievalLoopForNode(row)}
     />
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />

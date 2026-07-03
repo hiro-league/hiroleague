@@ -1,4 +1,6 @@
 import { apiRequest, type ApiResponse } from './client';
+import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
+import type { RecalledFact, EvalRecallRender } from '$lib/features/eval/shared/eval-events';
 
 export type GraphLedgerRow = {
   id: string;
@@ -247,6 +249,28 @@ export async function getGraphRunRetrievalTrace(
 ): Promise<ApiResponse<GraphRunRetrievalTraceResponse>> {
   return apiRequest<GraphRunRetrievalTraceResponse>(
     `/graph-runs/${encodeURIComponent(runId)}/retrieval-trace`
+  );
+}
+
+export type GraphRunRetrievalLoopResponse = {
+  /** Loop trajectory (turns / sub-queries); null when no transcript sidecar. */
+  loop: RetrievalLoop | null;
+  /** Recalled facts/entities/episodes (eval `RecalledFact` shape) — the detail dialog's tables. */
+  recalled: RecalledFact[];
+  /** The retrieval agent's draft answer (Overview tab). */
+  answer: string;
+  /** Render caps the recall used (chat `memory.retrieval.render.*`); null falls back to defaults. */
+  render: EvalRecallRender | null;
+};
+
+/** Full retrieval-recall detail for a chat recall run — the loop trajectory PLUS recalled
+ *  facts/entities/episodes, the draft answer, and render caps (the same shape the eval detail dialog
+ *  renders). All null/empty when tracing wasn't enabled. Sourced live from the agent sidecars. */
+export async function getGraphRunRetrievalLoop(
+  runId: string
+): Promise<ApiResponse<GraphRunRetrievalLoopResponse>> {
+  return apiRequest<GraphRunRetrievalLoopResponse>(
+    `/graph-runs/${encodeURIComponent(runId)}/retrieval-loop`
   );
 }
 

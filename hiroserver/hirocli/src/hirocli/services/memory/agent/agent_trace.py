@@ -172,11 +172,94 @@ def write_agent_retrieval_trace(
         )
 
 
+def write_agent_recall_result(
+    workspace_path: Path,
+    *,
+    run_id: str,
+    slot: str,
+    recalled: list[dict[str, Any]],
+    answer: str,
+) -> None:
+    """Persist the recalled rows + draft answer beside the transcript (best-effort — never raises).
+
+    A CHAT ``memory_recall`` node has no ``eval_results.db`` row, so the Graph-Runs detail dialog has
+    nowhere to read the recalled facts/entities/episodes or the draft answer from. This companion
+    (``{run}__{slot}.result.json``) mirrors what eval stores in ``row_json`` so that dialog can render
+    the SAME Overview + Facts/Entities/Episodes tables (with counts) a memory-eval row shows.
+    """
+    try:
+        directory = agent_trace_dir(workspace_path)
+        directory.mkdir(parents=True, exist_ok=True)
+        stem = f"{_safe_segment(run_id)}__{_safe_segment(slot)}"
+        path = directory / f"{stem}.result.json"
+        payload = {"recalled": recalled, "answer": answer or ""}
+        with _write_lock:
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8"
+            )
+    except Exception:
+        log.warning(
+            "⚠️ agent recall result — sidecar write failed · run_id=%s · slot=%s",
+            run_id,
+            slot,
+            exc_info=True,
+        )
+
+
+def read_agent_recall_result(workspace_path: Path, run_id: str) -> dict[str, Any]:
+    """Read the recalled-rows + draft-answer companion for ``run_id`` ({} on miss/error).
+
+    Globs ``{run}__*.result.json`` and returns the first slot's ``{recalled, answer}``. Companion to
+    :func:`read_agent_retrieval_trace` (the transcript is ``.jsonl``, this is ``.result.json``)."""
+    try:
+        directory = agent_trace_dir(workspace_path)
+        matches = sorted(directory.glob(f"{_safe_segment(run_id)}__*.result.json"))
+        if not matches:
+            return {}
+        data = json.loads(matches[0].read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        log.warning(
+            "⚠️ agent recall result — read failed · run_id=%s", run_id, exc_info=True
+        )
+        return {}
+
+
+def read_agent_retrieval_trace(workspace_path: Path, run_id: str) -> list[dict[str, Any]]:
+    """Read the agent-loop transcript sidecar for ``run_id`` (best-effort — [] on miss/error).
+
+    Globs ``{run}__*.jsonl`` and returns the first slot's events. A chat turn has one recall slot
+    (keyed by ``step_index``); eval keys by question id. Backs the Graph-Runs trajectory dialog."""
+    try:
+        directory = agent_trace_dir(workspace_path)
+        matches = sorted(directory.glob(f"{_safe_segment(run_id)}__*.jsonl"))
+        if not matches:
+            return []
+        events: list[dict[str, Any]] = []
+        for raw in matches[0].read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return events
+    except Exception:
+        log.warning(
+            "⚠️ agent retrieval trace — read failed · run_id=%s", run_id, exc_info=True
+        )
+        return []
+
+
 __all__ = [
     "AgentTranscriptSummary",
     "agent_trace_dir",
     "build_retrieval_loop_payload",
     "format_memory_recall_output_preview",
+    "read_agent_recall_result",
+    "read_agent_retrieval_trace",
     "summarize_agent_transcript",
+    "write_agent_recall_result",
     "write_agent_retrieval_trace",
 ]

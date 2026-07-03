@@ -13,7 +13,8 @@
     onOpenNodeDetails,
     onOpenRetrievalTrace,
     onOpenIngestTrace,
-    onOpenEvalRow
+    onOpenEvalRow,
+    onOpenRetrievalLoop
   }: {
     timeline: GraphLedgerRow[];
     nodeFieldList: readonly (keyof GraphLedgerRow)[];
@@ -29,6 +30,10 @@
     /** Open the rich eval-detail dialog for a `memory_recall` node (resolves its run_id → eval
      *  row). Takes precedence over the bare retrieval-trace marker for that node. */
     onOpenEvalRow?: (row: GraphLedgerRow) => void;
+    /** Open the FULL eval detail dialog for a CHAT `memory_recall` node — reads the agent-transcript
+     *  sidecar live and wraps the loop as a minimal `EvalRow` (Trajectory tab + per-search traces).
+     *  Chat's answer to the eval-only detail marker. */
+    onOpenRetrievalLoop?: (row: GraphLedgerRow) => void;
   } = $props();
 
   /** True when ``row`` is a top-level step (not a nested sub-step). Sub-steps share the
@@ -79,6 +84,21 @@
       String(row.run_id ?? '').startsWith('memory_eval')
     );
   }
+
+  /** A CHAT `memory_recall` row (non-eval run) gets the SAME single ⓘ detail marker eval rows get —
+   *  it opens the full detail dialog (overview · facts/entities/episodes · trajectory), with the
+   *  per-search pipeline reachable from inside the Trajectory tab. Gated on a recorded retrieval trace
+   *  (a proxy for observability=`trace` — the recalled-rows companion is written together), so the
+   *  dialog always has data. */
+  function rowHasRetrievalLoop(row: GraphLedgerRow): boolean {
+    return (
+      !!onOpenRetrievalLoop &&
+      isParentStep(row) &&
+      String(row.node ?? '') === 'memory_recall' &&
+      !String(row.run_id ?? '').startsWith('memory_eval') &&
+      rowHasTrace(row)
+    );
+  }
 </script>
 
 <div class="nodes-table-panel min-w-0">
@@ -119,6 +139,22 @@
                     onclick={(ev) => {
                       ev.stopPropagation();
                       onOpenEvalRow?.(row);
+                    }}
+                  >
+                    {'ⓘ'}
+                  </button>
+                </span>
+              {:else if field === 'node' && rowHasRetrievalLoop(row)}
+                <span class="node-cell">
+                  <span>{formatLedgerField(field, row)}</span>
+                  <button
+                    type="button"
+                    class="trace-marker"
+                    title="Open recall detail (overview · facts/entities/episodes · trajectory, with per-search traces)"
+                    aria-label="Open recall detail dialog"
+                    onclick={(ev) => {
+                      ev.stopPropagation();
+                      onOpenRetrievalLoop?.(row);
                     }}
                   >
                     {'ⓘ'}

@@ -61,7 +61,8 @@
     evalRowLegColumns,
     evalRowTraces,
     onOpenEvalRow,
-    onCloseEvalRow
+    onCloseEvalRow,
+    onOpenRetrievalLoop
   }: {
     activePane: ActivePane;
     runDetailCardsExpanded: boolean;
@@ -104,6 +105,9 @@
     evalRowTraces: RetrievalTraceDialogController;
     onOpenEvalRow: (row: GraphLedgerRow) => void;
     onCloseEvalRow: () => void;
+    /** Chat retrieval-loop bridge (P5 part 2) — opens the SAME eval detail dialog (`activeEvalRow`)
+     *  from a CHAT `memory_recall` node's trajectory marker; it closes via `onCloseEvalRow`. */
+    onOpenRetrievalLoop: (row: GraphLedgerRow) => void;
   } = $props();
 
   const detailHidden = $derived(!isRunDetailPane(activePane));
@@ -169,6 +173,7 @@
         {onOpenRetrievalTrace}
         {onOpenIngestTrace}
         {onOpenEvalRow}
+        {onOpenRetrievalLoop}
       />
 
       {#if nodeDetailRow}

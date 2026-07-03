@@ -113,6 +113,7 @@ class MemoryNodes(NodeGroup):
         from ....services.memory.agent.agent_trace import (
             format_memory_recall_output_preview,
             summarize_agent_transcript,
+            write_agent_recall_result,
             write_agent_retrieval_trace,
         )
         from ....services.memory.models import build_memory_retrieval_model
@@ -179,15 +180,26 @@ class MemoryNodes(NodeGroup):
         draft = (result.answer_text or "").strip() or None
         n = len(rows)
 
-        # G3: persist the loop transcript sidecar (turns/sub-queries) — trace tier only, best-effort.
-        if getattr(prefs.graph, "observability", "ledger") == "trace" and result.transcript:
+        # G3: persist the loop transcript sidecar (turns/sub-queries) AND the recalled rows + draft
+        # answer companion — trace tier only, best-effort. The companion mirrors what eval stores in
+        # row_json so the Graph-Runs detail dialog renders the SAME Overview + Facts/Entities/Episodes
+        # tables (with counts) a memory-eval row shows (a chat recall has no eval_results.db row).
+        if getattr(prefs.graph, "observability", "ledger") == "trace":
             entry = current_entry.get()
             if entry is not None:
-                write_agent_retrieval_trace(
+                if result.transcript:
+                    write_agent_retrieval_trace(
+                        self.services.workspace_path,
+                        run_id=str(entry.run_id),
+                        slot=str(entry.step_index),
+                        events=result.transcript,
+                    )
+                write_agent_recall_result(
                     self.services.workspace_path,
                     run_id=str(entry.run_id),
                     slot=str(entry.step_index),
-                    events=result.transcript,
+                    recalled=rows,
+                    answer=draft or "",
                 )
 
         # G2: decision distinguishes recalled / abstained (the loop chose NOT to search) / errored /

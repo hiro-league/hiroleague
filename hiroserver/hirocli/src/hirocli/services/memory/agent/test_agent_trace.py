@@ -9,9 +9,47 @@ from hirocli.services.memory.agent.agent_trace import (
     agent_trace_dir,
     build_retrieval_loop_payload,
     format_memory_recall_output_preview,
+    read_agent_recall_result,
+    read_agent_retrieval_trace,
     summarize_agent_transcript,
+    write_agent_recall_result,
     write_agent_retrieval_trace,
 )
+
+
+def test_read_agent_retrieval_trace_round_trips_and_builds_payload(tmp_path) -> None:
+    events = [
+        {"event": "tool_call", "turn": 1, "sub_queries": 1, "cumulative_agent_turns": 1},
+        {"event": "sub_result", "turn": 1, "sid": 1, "goal": "g", "query": "q", "returned": 2, "new": 2, "accumulated_total": 2},
+        {"event": "final", "turn": 2, "cumulative_agent_turns": 2},
+    ]
+    write_agent_retrieval_trace(tmp_path, run_id="chat-1", slot="6", events=events)
+    read = read_agent_retrieval_trace(tmp_path, "chat-1")
+    assert [r["event"] for r in read] == ["tool_call", "sub_result", "final"]
+    payload = build_retrieval_loop_payload(read, max_agent_turns=4)
+    assert payload["turns"][0]["sub_queries"][0]["sid"] == 1
+    assert read_agent_retrieval_trace(tmp_path, "missing-run") == []
+
+
+def test_recall_result_companion_round_trips(tmp_path: Path) -> None:
+    """The recalled-rows + draft-answer companion (feeds the chat detail dialog's Facts/Overview
+    tabs) writes as ``{run}__{slot}.result.json`` and reads back by run_id — separate from the
+    ``.jsonl`` transcript, so the transcript reader never picks it up."""
+    recalled = [
+        {"memory": "Budget is $50", "kind": "fact", "score": 0.9},
+        {"memory": "Rex", "kind": "entity", "score": 0.7},
+    ]
+    write_agent_recall_result(
+        tmp_path, run_id="chat-9", slot="6", recalled=recalled, answer="You said $50."
+    )
+    path = agent_trace_dir(tmp_path) / "chat-9__6.result.json"
+    assert path.exists()
+    data = read_agent_recall_result(tmp_path, "chat-9")
+    assert data["answer"] == "You said $50."
+    assert [r["kind"] for r in data["recalled"]] == ["fact", "entity"]
+    # The transcript reader globs *.jsonl and must NOT surface the .result.json companion.
+    assert read_agent_retrieval_trace(tmp_path, "chat-9") == []
+    assert read_agent_recall_result(tmp_path, "missing-run") == {}
 
 
 def test_build_retrieval_loop_payload_groups_turns_and_sub_queries() -> None:

@@ -143,6 +143,61 @@ class GraphLedgerService:
         except Exception as exc:
             return Result.failure(str(exc))
 
+    def retrieval_loop(
+        self,
+        workspace: str | None,
+        run_id: str,
+    ) -> Result[dict[str, Any] | None]:
+        """Return the FULL retrieval-recall detail for a CHAT recall run — the same shape the eval
+        detail dialog renders: the loop trajectory (turns / sub-queries) PLUS the recalled
+        facts/entities/episodes, the draft answer, and the render caps.
+
+        Reads the two agent sidecars the recall node writes under observability=``trace``: the
+        transcript (→ ``build_retrieval_loop_payload``) and the recalled-rows/draft companion (→
+        ``read_agent_recall_result``, mirroring eval's ``row_json``). ``None`` when neither exists
+        (tracing is opt-in). The per-sub-query pipeline detail stays reachable via the
+        retrieval-trace endpoint (keyed by ``sid``)."""
+        rid = (run_id or "").strip()
+        if not rid:
+            return Result.failure("run_id is required.")
+        try:
+            from hirocli.domain.preferences import load_preferences
+            from hirocli.services.memory.agent.agent_trace import (
+                build_retrieval_loop_payload,
+                read_agent_recall_result,
+                read_agent_retrieval_trace,
+            )
+
+            entry, _ = resolve_workspace(workspace)
+            ws = Path(entry.path)
+            events = read_agent_retrieval_trace(ws, rid)
+            recall = read_agent_recall_result(ws, rid)
+            if not events and not recall:
+                return Result.success(None)
+            prefs = load_preferences(ws)
+            max_turns = int(prefs.memory.retrieval.limits.max_agent_turns)
+            loop = (
+                build_retrieval_loop_payload(events, max_agent_turns=max_turns) if events else None
+            )
+            render = prefs.memory.retrieval.render
+            return Result.success(
+                {
+                    "loop": loop,
+                    "recalled": recall.get("recalled") or [],
+                    "answer": str(recall.get("answer") or ""),
+                    "render": {
+                        "max_elements_per_kind": int(
+                            getattr(render, "max_elements_per_kind", 0) or 0
+                        ),
+                        "max_fact_chars": int(getattr(render, "max_fact_chars", 0) or 0),
+                        "max_episode_chars": int(getattr(render, "max_episode_chars", 0) or 0),
+                        "max_summary_chars": int(getattr(render, "max_summary_chars", 0) or 0),
+                    },
+                }
+            )
+        except Exception as exc:
+            return Result.failure(str(exc))
+
     def ingest_trace(
         self,
         workspace: str | None,
