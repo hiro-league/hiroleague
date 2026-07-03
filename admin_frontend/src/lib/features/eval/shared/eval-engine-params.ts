@@ -150,9 +150,9 @@ export function recallKnobs(prefs: WorkspacePreferences, cfg: EvalTrackConfig): 
   }
   if (cfg.track === 'memory') {
     // Memory recall is fully agentic: show the retrieval AGENT's loop caps + active system prompt
-    // BEFORE the answer-step knob. The old `memory.search.top_k` is dead on this path — the agent's
-    // search tool draws its per-query limit from `retrieval_agent.limit_default` (search_tool._run_one),
-    // so it's replaced by the agent's Search limit here.
+    // BEFORE the answer-step knob. (The old `memory.search.top_k` recall-depth pref was removed — the
+    // agent's search tool draws its per-query result count from `retrieval_agent.limit_default`
+    // (search_tool._run_one), surfaced as the Search limit below.)
     const ra = g.eval.retrieval_agent;
     out.push({ label: 'Agent turns', value: String(ra.max_agent_turns) });
     out.push({ label: 'Parallel', value: String(ra.max_parallel_searches) });

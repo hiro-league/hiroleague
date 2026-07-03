@@ -77,7 +77,7 @@ class _FailOnQueryGraph(_SlowFakeGraph):
 
 
 def _memory(*, graph: _SlowFakeGraph) -> GraphitiConversationMemory:
-    return GraphitiConversationMemory(graph, default_top_k=8, temporal_default="current")
+    return GraphitiConversationMemory(graph, temporal_default="current")
 
 
 def _hit(uuid: str, text: str) -> dict:
@@ -110,16 +110,16 @@ async def _run(*, model, memory, limits=None, question="Q?", allow_abstain=False
 
 @pytest.mark.asyncio
 async def test_loop_llm_usage_attributed_to_ledger_entry(tmp_path) -> None:
-    """The loop's own search + final-answer LLM token usage must land on the active memory_recall
-    entry. Exercised via exit B (3 search turns + the forced answer turn) so both the search-turn
-    and final-turn usage folding are covered.
+    """The loop's own search + answer LLM token usage must land on the active memory_recall entry.
+    Exercised across 4 LLM calls (3 search turns + the answer turn) so both search-turn and
+    answer-turn usage folding are covered.
 
     Regression guard for the agentic-cost fix: before it, run_retrieval drove its own LLM calls but
     never read usage_metadata, so the memory_recall node showed no model/tokens/cost ($0)."""
     from hirocli.runtime.agent_graph.ledger import LedgerSink, current_entry
 
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
-    # 3 search turns (in 8 / out 3 each) + the exit-B answer turn (in 8 / out 4)
+    # 3 search turns (in 8 / out 3 each) + the answer turn (in 8 / out 4)
     # → totals in 32 / out 13, summed across all four LLM calls.
     model = ScriptedChatModel(
         responses=[
@@ -173,20 +173,23 @@ async def test_verbatim_fallback_when_model_never_searches() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verbatim_fallback_covers_max_agent_turns_one() -> None:
-    """H3 config trap: max_agent_turns=1 leaves zero search turns — without the floor EVERY question
-    would recall nothing. The verbatim fallback must still run, then the answer turn answers."""
-    graph = _SlowFakeGraph(hits=[_hit("e1", "fact")])
-    model = ScriptedChatModel(responses=[ai_final("answer")])
+async def test_max_agent_turns_one_grants_one_real_search_turn() -> None:
+    """Regression for the turns=1 starvation (M3 fix, 2026-07-03): ``max_agent_turns`` now == the
+    search-turn budget, so max_agent_turns=1 grants ONE real search turn (previously ZERO — every
+    turns=1 recall could only fall back / abstain). The model searches on its one turn, then the
+    exit-B compose turn answers over what it found — no verbatim fallback, because the loop recalled."""
+    graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
+    model = ScriptedChatModel(responses=[_search_call(_q("budget")), ai_final("The budget is $50.")])
     result = await _run(
         model=model,
         memory=_memory(graph=graph),
         limits=RetrievalAgentLimits(max_agent_turns=1),
-        question="anything",
+        question="What's the budget?",
     )
+    assert len(graph.search_calls) == 1  # the MODEL's own search turn, not a fallback
+    assert graph.search_calls[0]["query"] == "budget"  # its query, not the raw question
     assert result.accumulator.size() == 1
-    assert len(graph.search_calls) == 1
-    assert result.answer_text == "answer"
+    assert result.answer_text == "The budget is $50."
 
 
 @pytest.mark.asyncio
@@ -271,24 +274,26 @@ async def test_decomposition_sub_queries_gathered_concurrently() -> None:
 
 @pytest.mark.asyncio
 async def test_exit_b_caps_search_turns_then_forces_answer_turn() -> None:
-    """Exit B: max_agent_turns=4 → 3 tool-bound search turns (model never stops), then ONE forced
-    tool-free answer turn composes the answer (turn 4)."""
+    """Exit B: max_agent_turns=4 → the model searches all 4 tool-bound turns (never stops), then ONE
+    forced tool-free answer turn composes the answer. The compose turn is NOT counted as a search
+    turn, so the counter tops out at exactly 4 (not 5)."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
     model = ScriptedChatModel(
         responses=[
             _search_call(_q("q1"), call_id="c1"),
             _search_call(_q("q2"), call_id="c2"),
             _search_call(_q("q3"), call_id="c3"),
+            _search_call(_q("q4"), call_id="c4"),
             ai_final("forced final"),
         ]
     )
     result = await _run(
         model=model, memory=_memory(graph=graph), limits=RetrievalAgentLimits(max_agent_turns=4)
     )
-    assert len(graph.search_calls) == 3
+    assert len(graph.search_calls) == 4
     assert result.answer_text == "forced final"
     final = next(row for row in result.transcript if row["event"] == "final")
-    assert final["cumulative_agent_turns"] == 4  # 3 search turns + the forced answer turn
+    assert final["cumulative_agent_turns"] == 4  # 4 search turns; the forced compose turn isn't counted
 
 
 @pytest.mark.asyncio
@@ -303,15 +308,17 @@ async def test_exit_a_counter_counts_search_and_stop_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_zero_search_turns_goes_straight_to_answer_turn() -> None:
-    """max_agent_turns=1 → no model search budget; the verbatim fallback floor (H3) still runs one
-    search so recall isn't empty, then the forced tool-free answer turn answers."""
+async def test_turns_one_floor_when_model_skips_its_search_turn() -> None:
+    """max_agent_turns=1 grants one search turn, but if the model spends it answering WITHOUT
+    searching, the accumulator is empty → the verbatim-fallback floor (H3) still runs one search
+    (raw question) and the forced tool-free answer turn composes. The compose turn isn't counted, so
+    the counter stays at 1 (the single search-or-stop turn)."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
-    model = ScriptedChatModel(responses=[ai_final("only final")])
+    model = ScriptedChatModel(responses=[ai_text("answering directly"), ai_final("only final")])
     result = await _run(
         model=model, memory=_memory(graph=graph), limits=RetrievalAgentLimits(max_agent_turns=1)
     )
-    assert len(graph.search_calls) == 1  # the verbatim fallback (no model-driven search turn ran)
+    assert len(graph.search_calls) == 1  # the verbatim fallback (the model didn't search)
     assert graph.search_calls[0]["query"] == "Q?"
     assert result.accumulator.size() == 1
     assert result.answer_text == "only final"

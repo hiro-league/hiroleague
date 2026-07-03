@@ -10,8 +10,8 @@ import {
 } from './preferences-search-index';
 
 const SAMPLE: PrefSearchEntry = {
-  path: 'memory.search.top_k',
-  title: 'Memories to recall (top K)',
+  path: 'memory.search.enabled',
+  title: 'Recall memories before each reply',
   tabId: 'agent',
   tabLabel: 'Agent',
   section: 'Agent memory'
@@ -22,7 +22,7 @@ describe('preferences search index', () => {
     const index = buildPrefSearchIndex(PREFERENCES_FIELD_SCHEMA);
     const paths = new Set(index.map((e) => e.path));
     expect(paths.has('llm.default_chat')).toBe(true);
-    expect(paths.has('memory.search.top_k')).toBe(true);
+    expect(paths.has('memory.search.enabled')).toBe(true);
     // read-only enrichment + image-lab-only fields are not searchable
     expect(paths.has('knowledge.answering.model_resolved')).toBe(false);
     expect(paths.has('image_profiles')).toBe(false);
@@ -40,9 +40,9 @@ describe('preferences search index', () => {
 
   it('matches case-insensitively by title or path, token-AND', () => {
     expect(matchesPrefQuery(SAMPLE, 'memories')).toBe(true);
-    expect(matchesPrefQuery(SAMPLE, 'TOP k')).toBe(true); // both tokens present
+    expect(matchesPrefQuery(SAMPLE, 'RECALL reply')).toBe(true); // both tokens present
     expect(matchesPrefQuery(SAMPLE, 'memory.search')).toBe(true); // path match
-    expect(matchesPrefQuery(SAMPLE, 'top zzz')).toBe(false); // one token missing
+    expect(matchesPrefQuery(SAMPLE, 'recall zzz')).toBe(false); // one token missing
     expect(matchesPrefQuery(SAMPLE, '')).toBe(false);
   });
 

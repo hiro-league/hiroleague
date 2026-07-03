@@ -23,7 +23,7 @@ function makeDraft(): WorkspacePreferences {
       enabled: true,
       default_tuning_profile: 'memory_extraction',
       user_name: '',
-      search: { enabled: true, top_k: 8 },
+      search: { enabled: true },
       extraction: {
         enabled: true,
         window_turns: 4,

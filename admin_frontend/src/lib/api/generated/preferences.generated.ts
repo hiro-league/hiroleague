@@ -24,7 +24,6 @@ export type EnableAgentMemory = boolean;
 export type DefaultTuningProfile = string;
 export type YourName = string;
 export type RecallMemoriesBeforeEachReply = boolean;
-export type MemoriesToRecallTopK = number;
 export type RememberNewFactsAfterEachReply = boolean;
 /**
  * Conversation turns (user+agent exchanges) accumulated into one memory episode before extraction. 1 = ingest every turn; higher batches more turns into a richer episode.
@@ -51,7 +50,7 @@ export type MemoryExtractionInstructions = string;
  */
 export type ActivePromptProfile = string;
 /**
- * How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.
+ * Tool-bound turns the agent gets to search (one search_memory call per turn, each up to max-parallel-searches sub-queries). The optional final compose turn isn't counted, so total LLM calls are at most this + 1.
  */
 export type MaxAgentTurns = number;
 /**
@@ -59,19 +58,19 @@ export type MaxAgentTurns = number;
  */
 export type MaxParallelSearches = number;
 /**
- * Starting num_results per search_memory call.
+ * Memories one search fetches when the agent doesn't request a specific number — its starting point.
  */
-export type LimitDefault = number;
+export type NumResultsDefault = number;
 /**
- * Soft floor when the tool clamps limit.
+ * Lower bound of the range the search tool clamps the agent's requested result count into.
  */
-export type LimitMin = number;
+export type NumResultsMin = number;
 /**
- * Soft ceiling when the tool clamps limit.
+ * Upper bound of the range the search tool clamps the requested result count into — also the ceiling the loop tells the agent it may raise up to.
  */
-export type LimitMax = number;
+export type NumResultsMax = number;
 /**
- * Upper bound the tool accepts per search (1–3).
+ * Upper bound on graph expansion hops the tool accepts per search (1–3).
  */
 export type HopsMax = number;
 /**
@@ -364,7 +363,6 @@ export interface MemoryPreferences {
  */
 export interface MemorySearchPreferences {
   enabled: RecallMemoriesBeforeEachReply;
-  top_k: MemoriesToRecallTopK;
 }
 /**
  * Whether — and how — the agent stores new long-term memories after a reply (memory_out).
@@ -398,9 +396,9 @@ export interface MemoryRetrievalPreferences {
 export interface RetrievalAgentLimits {
   max_agent_turns: MaxAgentTurns;
   max_parallel_searches: MaxParallelSearches;
-  limit_default: LimitDefault;
-  limit_min: LimitMin;
-  limit_max: LimitMax;
+  limit_default: NumResultsDefault;
+  limit_min: NumResultsMin;
+  limit_max: NumResultsMax;
   hops_max: HopsMax;
 }
 /**

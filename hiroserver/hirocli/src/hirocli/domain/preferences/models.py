@@ -57,7 +57,6 @@ from .models_media import (
     default_output_modalities,
 )
 from .models_memory import (
-    DEFAULT_MEMORY_SEARCH_TOP_K,
     MemoryExtractionPreferences,
     MemoryPreferences,
     MemoryRetrievalPreferences,
@@ -74,7 +73,6 @@ __all__ = [
     "default_input_modalities",
     "default_output_modalities",
     # Memory
-    "DEFAULT_MEMORY_SEARCH_TOP_K",
     "MemorySearchPreferences",
     "MemoryExtractionPreferences",
     "MemoryRetrievalPreferences",

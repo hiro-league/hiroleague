@@ -65,7 +65,7 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
         reranker: { enabled: false, model_id: null, top_n: 5 }
       }
     },
-    memory: { search: { top_k: 6 } },
+    memory: { search: { enabled: true } },
     tuning_profiles: {
       tp_answer: { label: 'Answer', locked: false, temperature: 0.2, max_tokens: 1600, thinking: 'low' },
       tp_extract: { label: 'Extract', locked: false, temperature: 0, max_tokens: 800 }

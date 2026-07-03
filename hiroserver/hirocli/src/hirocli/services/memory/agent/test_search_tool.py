@@ -62,7 +62,7 @@ class _FakeGraph:
 
 def _tool(*, hits: list[dict] | None = None, limits: RetrievalAgentLimits | None = None) -> SearchMemoryTool:
     graph = _FakeGraph(hits)
-    memory = GraphitiConversationMemory(graph, default_top_k=8, temporal_default="current")
+    memory = GraphitiConversationMemory(graph, temporal_default="current")
     return SearchMemoryTool(
         memory=memory,
         accumulator=Accumulator(),
@@ -202,7 +202,7 @@ async def test_error_in_one_sub_query_captured_not_raised() -> None:
             return await super().search_chunk_ids(query, **kwargs)
 
     graph = _BoomOnBad([{"kind": "fact", "uuid": "e1", "memory": "ok", "fact": "ok"}])
-    memory = GraphitiConversationMemory(graph, default_top_k=8)
+    memory = GraphitiConversationMemory(graph)
     tool = SearchMemoryTool(
         memory=memory,
         accumulator=Accumulator(),

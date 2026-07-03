@@ -68,7 +68,6 @@ def create_memory_service(
 
     from .graphiti_conversation import GraphitiConversationMemory
 
-    top_k = int(getattr(getattr(memory_prefs, "search", None), "top_k", 8))
     # Snapshot the temporal lens at construction (replaces the former D8 hardcoded "current"):
     # memory recall now follows ``graph.temporal_default`` like every other leg. The
     # agent_manager reactor rebuilds this service on any ``graph.*`` change, so flipping
@@ -83,7 +82,6 @@ def create_memory_service(
     )
     return GraphitiConversationMemory(
         graph_service,
-        default_top_k=top_k,
         temporal_default=temporal_default,
         event_sink=event_sink,
         # Chat ingests windowed two-speaker episodes → append the memory extraction clause
@@ -131,7 +129,6 @@ def create_eval_memory_service(
     from hirocli.services.knowledge.graph.graph_events import graph_event_bus_sink
 
     group = eval_memory_group_id(set_id)
-    top_k = int(getattr(getattr(getattr(prefs, "memory", None), "search", None), "top_k", 8))
     # Eval mirrors the runtime: read the admin temporal lens from prefs (replaces D8 hardcode)
     # so the Memory eval reproduces what the agent will actually see at recall time.
     temporal_default = prefs.graph.temporal_default
@@ -142,7 +139,6 @@ def create_eval_memory_service(
     )
     return GraphitiConversationMemory(
         graph_service,
-        default_top_k=top_k,
         temporal_default=temporal_default,
         event_sink=graph_event_bus_sink(workspace_path),
         group_override=group,

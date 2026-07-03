@@ -118,7 +118,6 @@ export type PreferencePath =
   | 'memory.retrieval.render.show_superseded'
   | 'memory.retrieval.tuning_profile'
   | 'memory.search.enabled'
-  | 'memory.search.top_k'
   | 'memory.user_name'
   | 'tuning_profiles'
   | 'version';

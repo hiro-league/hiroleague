@@ -20,7 +20,7 @@ describe('tabForPreferencePath (preferences tab map)', () => {
   it('routes subtree, override, and split paths to the right tab', () => {
     expect(tabForPreferencePath('llm.default_chat')).toBe('models');
     expect(tabForPreferencePath('media.input.voice')).toBe('models');
-    expect(tabForPreferencePath('memory.search.top_k')).toBe('agent');
+    expect(tabForPreferencePath('memory.search.enabled')).toBe('agent');
     // `memory.retrieval.*` is a longer-prefix override → the shared Memory (graph-engine) tab.
     expect(tabForPreferencePath('memory.retrieval.active_prompt_id')).toBe('graph-engine');
     expect(tabForPreferencePath('memory.retrieval.limits.max_agent_turns')).toBe('graph-engine');

@@ -230,10 +230,20 @@ folded into Phase 2; G4 (admin chat-safe detail) is its own phase.**
 
 > High-level ordering only — a **detailed design is a later run**. Each phase leaves chat working.
 > **Caps decision (2026-07-02):** chat **reuses eval's validated `graph.eval.retrieval_agent`
-> (default `max_agent_turns=4`)** — eval parity, not a tight `turns=1` override. (`turns=1` gives
-> *zero* search turns → with chat's abstain flag on, *no recall*; it does **not** "collapse toward
-> single-shot" as an earlier draft claimed.) Safety in early phases comes from the **abstain gate +
-> flat render + observability gating**, and Phase 6 can tune *down* if latency/cost demands.
+> (default `max_agent_turns=4`)** — eval parity, not a tight `turns=1` override. Safety in early
+> phases comes from the **abstain gate + flat render + observability gating**, and Phase 6 can tune
+> *down* if latency/cost demands.
+>
+> **Turn-semantics fix (2026-07-03):** `max_agent_turns` now means the **search-turn budget** — the
+> model gets exactly that many tool-bound search turns, and the *optional* exit-B compose turn (only
+> when the loop never stops on its own) is **not** counted (total LLM calls ≤ `max_agent_turns + 1`).
+> Previously the loop reserved one turn for the answer (`max_agent_turns − 1` search turns), so
+> `turns=1` gave **zero** search turns and every `turns=1` recall could only fall back / abstain —
+> which also made a starved recall read as a deliberate *abstain* in Graph Runs (the M3 review
+> finding). Now `turns=1` grants one real search turn, so `searches == 0` is an honest
+> abstain. **Effect:** at the default `4`, chat and eval each get **one more** effective search turn
+> than before (was 3) — this breaks the P0 "eval byte-identical" property, so **re-run the memory
+> eval** to confirm the bar holds; drop the pref to `3` to reproduce the old effective depth.
 
 **Bucket A — Foundations (no user-visible change)**
 

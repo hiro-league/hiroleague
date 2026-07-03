@@ -44,6 +44,12 @@ if TYPE_CHECKING:
 
 log = Logger.get("SVC.MEMORY.GRAPHITI")
 
+# Safety fallback result count for a ``search()`` call that omits ``limit``. Live recall is the
+# agentic loop, which ALWAYS passes an explicit per-sub-query limit (RetrievalAgentLimits.limit_default
+# → search_tool), so this only covers direct/admin/test callers that don't specify one. (Replaces the
+# former ``memory.search.top_k`` pref → ``default_top_k`` ctor arg, which was dead on the recall path.)
+_DEFAULT_RECALL_LIMIT = 8
+
 
 # Extraction-cost visibility (mem0 → Graphiti): the memory write now ledgers Graphiti's own
 # per-episode / per-operation rows (extract / resolve_facts / persist …) NESTED under the
@@ -91,14 +97,12 @@ class GraphitiConversationMemory:
         self,
         graph_service: "GraphitiMemoryService",
         *,
-        default_top_k: int = 8,
         temporal_default: "KnowledgeGraphTemporalDefault" = "current",
         event_sink: "GraphEventSink | None" = None,
         group_override: str | None = None,
         extraction_instructions: str = "",
     ) -> None:
         self._graph = graph_service
-        self._default_top_k = int(default_top_k)
         # Default temporal lens for recall — follows the admin pref ``graph.temporal_default``
         # (single source of truth across knowledge AND memory legs). The factories in
         # ``services/memory/__init__.py`` snapshot the pref at construction; the agent_manager
@@ -244,7 +248,7 @@ class GraphitiConversationMemory:
         if not q:
             return []
         group = self._group_for(user_id, character_id)
-        top_k = self._default_top_k if limit is None else int(limit)
+        top_k = int(limit) if limit is not None else _DEFAULT_RECALL_LIMIT
         # Ledger Graphiti's fact search as a sub-step of the active ``memory_recall`` node:
         # ONE priced ``rerank`` roll-up child (cloud cross-encoder cost), mirroring knowledge's
         # ``graph_expand``. The deep per-stage breakdown lives only in the ``trace`` sidecar.

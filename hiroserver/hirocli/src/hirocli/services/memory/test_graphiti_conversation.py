@@ -235,7 +235,7 @@ async def test_add_ledger_sink_defaults_to_none() -> None:
 @pytest.mark.asyncio
 async def test_search_returns_facts_as_memory() -> None:
     g = _FakeGraph(facts=("Adam lives in Tokyo (as of 2024-05-01)", "Adam works at Cedar"))
-    mem = GraphitiConversationMemory(g, default_top_k=5)
+    mem = GraphitiConversationMemory(g)
     hits = await mem.search("where does adam live", user_id=42, character_id="aria")
     assert hits == [
         {"memory": "Adam lives in Tokyo (as of 2024-05-01)", "kind": "fact"},
@@ -247,7 +247,9 @@ async def test_search_returns_facts_as_memory() -> None:
     # factory snapshots from ``graph.temporal_default``); the constructor default is
     # ``"current"`` so an unscoped instance recalls only currently-valid facts.
     assert call["temporal"] == "current"
-    assert call["num_results"] == 5
+    # No explicit limit → the module fallback (_DEFAULT_RECALL_LIMIT); live recall passes an
+    # explicit per-sub-query limit, so this fallback only covers limit-less callers.
+    assert call["num_results"] == 8
 
 
 @pytest.mark.asyncio
@@ -272,7 +274,7 @@ async def test_search_empty_query_is_noop() -> None:
 @pytest.mark.asyncio
 async def test_search_limit_overrides_default() -> None:
     g = _FakeGraph()
-    mem = GraphitiConversationMemory(g, default_top_k=8)
+    mem = GraphitiConversationMemory(g)
     await mem.search("q", user_id=1, character_id="a", limit=3)
     assert g.search_calls[0]["num_results"] == 3
 
@@ -396,13 +398,9 @@ def test_create_memory_service_none_when_engine_unavailable(tmp_path) -> None:
 
 def test_create_memory_service_builds_graphiti_conversation(tmp_path, monkeypatch) -> None:
     """When enabled and the engine builds, the factory wraps the GraphitiMemoryService in a
-    GraphitiConversationMemory, threading ``memory.search.top_k`` as the recall default and
-    building even when graph RETRIEVAL is off (``require_backend=False``)."""
-    from hirocli.domain.preferences import (
-        MemoryPreferences,
-        MemorySearchPreferences,
-        WorkspacePreferences,
-    )
+    GraphitiConversationMemory, building even when graph RETRIEVAL is off
+    (``require_backend=False``)."""
+    from hirocli.domain.preferences import MemoryPreferences, WorkspacePreferences
     from hirocli.services.knowledge.graph import graphiti_service as gsvc_mod
     from hirocli.services.memory import create_memory_service
 
@@ -417,13 +415,10 @@ def test_create_memory_service_builds_graphiti_conversation(tmp_path, monkeypatc
         gsvc_mod.GraphitiMemoryService, "from_preferences", staticmethod(_fake_from_prefs)
     )
 
-    prefs = WorkspacePreferences(
-        memory=MemoryPreferences(enabled=True, search=MemorySearchPreferences(top_k=5))
-    )
+    prefs = WorkspacePreferences(memory=MemoryPreferences(enabled=True))
     service = create_memory_service(tmp_path, prefs)
 
     assert isinstance(service, GraphitiConversationMemory)
-    assert service._default_top_k == 5  # memory.search.top_k threaded as the recall default
     assert captured["require_backend"] is False  # builds even when graph retrieval is off
     # No on_usage override passed: the client falls back to graphiti's default
     # ``record_episode_llm_usage`` sink, which prices the write on the nested Graph-Runs

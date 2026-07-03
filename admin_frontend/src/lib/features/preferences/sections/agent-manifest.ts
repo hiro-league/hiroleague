@@ -83,8 +83,7 @@ export const AGENT_MANIFEST: PrefTabManifest = {
           kind: 'grid',
           fields: [
             gatedMemoryField({ kind: 'toggle', path: 'memory.extraction.enabled' }),
-            gatedMemoryField({ kind: 'toggle', path: 'memory.search.enabled' }),
-            gatedMemoryField({ kind: 'number', path: 'memory.search.top_k' })
+            gatedMemoryField({ kind: 'toggle', path: 'memory.search.enabled' })
           ]
         },
         // Windowed batch ingestion knobs (memory.extraction.*) — gated by the memory master switch.

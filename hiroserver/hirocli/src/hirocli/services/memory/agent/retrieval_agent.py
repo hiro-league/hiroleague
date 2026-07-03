@@ -272,9 +272,10 @@ async def run_retrieval(
     ``model_id`` is the prefixed ``provider:model`` id of ``model`` — threaded through so the loop's
     own LLM token usage can be priced and attributed to the ``memory_recall`` ledger node.
 
-    The search loop gets ``max_agent_turns - 1`` tool-bound turns (the last turn is reserved for the
-    dedicated structured final call, so total LLM invocations stay within ``max_agent_turns`` — the
-    pref's documented meaning). The model stops searching early by emitting a turn with no tool call.
+    ``max_agent_turns`` is the SEARCH-turn budget: the model gets that many tool-bound turns. The
+    optional exit-B compose turn (a tool-free final answer, run only when the loop never stops on its
+    own) is NOT counted against it, so total LLM invocations are at most ``max_agent_turns + 1``. The
+    model stops searching early by emitting a turn with no tool call.
 
     Surface flags (Phase 0 seam — both default to the eval behavior so the eval track stays
     byte-identical): ``history`` seeds recent conversation turns *before* the question so turn 1 can
@@ -317,9 +318,12 @@ async def run_retrieval(
     # memory_recall ledger entry at the end (the refactor dropped this, so the node showed $0).
     usage_totals: dict[str, int] = {}
     cumulative_agent_turns = 0
-    # One turn is reserved for the possible exit-B answer turn, so total invocations stay within
-    # max_agent_turns even when the loop never stops on its own.
-    max_search_turns = max(0, limits.max_agent_turns - 1)
+    # ``max_agent_turns`` == the SEARCH-turn budget (changed 2026-07-03): the model gets this many
+    # tool-bound turns. The optional exit-B compose turn below is NOT a search turn, so it's not
+    # counted here (total LLM calls are at most max_agent_turns + 1). Previously this was
+    # ``max_agent_turns - 1`` (one turn "reserved" for the answer), which starved max_agent_turns=1
+    # of ALL search turns — so a turns=1 recall could never search and always read as an abstain.
+    max_search_turns = limits.max_agent_turns
     search_model = model.bind_tools([lc_tool])
     last_stop: AIMessage | None = None  # exit A: the no-tool stop turn whose content is the answer
 
@@ -393,7 +397,9 @@ async def run_retrieval(
                 turn=cumulative_agent_turns + 1,
                 transcript=transcript,
             )
-        cumulative_agent_turns += 1
+        # The exit-B compose call is NOT a search turn, so it does NOT advance the turn counter
+        # (changed 2026-07-03) — the loop's search budget stays == max_agent_turns and the trajectory
+        # reads e.g. "4 / 4" instead of "5 / 4".
         answer_text, final_raw = await _final_answer_turn(model=model, messages=messages)
         _accumulate_message_usage(usage_totals, final_raw)
     # Attribute the loop's total LLM cost to the active memory_recall ledger node (no-op off-ledger).

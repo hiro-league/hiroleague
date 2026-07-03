@@ -22,8 +22,6 @@ from .defaults import (
 )
 from .models_graph import RetrievalAgentLimits
 
-DEFAULT_MEMORY_SEARCH_TOP_K = 8
-
 
 class MemorySearchPreferences(BaseModel):
     """Retrieval-time tuning for ``MemoryService.search``."""
@@ -31,9 +29,9 @@ class MemorySearchPreferences(BaseModel):
     # When false, ``memory_recall`` is skipped — no long-term memory is injected before the reply
     # (independent of extraction). No-op unless ``memory.enabled``.
     enabled: bool = Field(default=True, title="Recall memories before each reply")
-    top_k: int = Field(
-        default=DEFAULT_MEMORY_SEARCH_TOP_K, ge=1, le=100, title="Memories to recall (top K)"
-    )
+    # NOTE: the former ``top_k`` recall-depth knob was removed — chat recall is now the agentic loop,
+    # which draws its per-search result count from ``memory.retrieval.limits`` (Num results
+    # default/min/max), not a single top-k. ``memory.search.enabled`` is the only search-side knob.
 
 
 class MemoryExtractionPreferences(BaseModel):

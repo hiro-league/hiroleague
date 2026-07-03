@@ -1205,20 +1205,12 @@
           "default": true,
           "title": "Recall memories before each reply",
           "type": "boolean"
-        },
-        "top_k": {
-          "default": 8,
-          "maximum": 100,
-          "minimum": 1,
-          "title": "Memories to recall (top K)",
-          "type": "integer"
         }
       },
       "title": "MemorySearchPreferences",
       "type": "object",
       "required": [
-        "enabled",
-        "top_k"
+        "enabled"
       ]
     },
     "ModalityFlags": {
@@ -1258,7 +1250,7 @@
       "properties": {
         "max_agent_turns": {
           "default": 4,
-          "description": "How many LLM turns the agent gets across the whole loop (includes the final-answer turn). Each search turn may emit up to max parallel searches sub-queries in one tool call.",
+          "description": "Tool-bound turns the agent gets to search (one search_memory call per turn, each up to max-parallel-searches sub-queries). The optional final compose turn isn't counted, so total LLM calls are at most this + 1.",
           "maximum": 10,
           "minimum": 1,
           "title": "Max agent turns",
@@ -1274,31 +1266,31 @@
         },
         "limit_default": {
           "default": 20,
-          "description": "Starting num_results per search_memory call.",
+          "description": "Memories one search fetches when the agent doesn't request a specific number \u2014 its starting point.",
           "maximum": 100,
           "minimum": 1,
-          "title": "Limit default",
+          "title": "Num results default",
           "type": "integer"
         },
         "limit_min": {
           "default": 10,
-          "description": "Soft floor when the tool clamps limit.",
+          "description": "Lower bound of the range the search tool clamps the agent's requested result count into.",
           "maximum": 100,
           "minimum": 1,
-          "title": "Limit min",
+          "title": "Num results min",
           "type": "integer"
         },
         "limit_max": {
           "default": 40,
-          "description": "Soft ceiling when the tool clamps limit.",
+          "description": "Upper bound of the range the search tool clamps the requested result count into \u2014 also the ceiling the loop tells the agent it may raise up to.",
           "maximum": 100,
           "minimum": 1,
-          "title": "Limit max",
+          "title": "Num results max",
           "type": "integer"
         },
         "hops_max": {
           "default": 3,
-          "description": "Upper bound the tool accepts per search (1\u20133).",
+          "description": "Upper bound on graph expansion hops the tool accepts per search (1\u20133).",
           "maximum": 3,
           "minimum": 1,
           "title": "Hops max",
