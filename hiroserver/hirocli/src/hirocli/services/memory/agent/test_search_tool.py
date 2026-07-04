@@ -222,6 +222,81 @@ async def test_error_in_one_sub_query_captured_not_raised() -> None:
     exc_log.assert_called_once()
 
 
+class _RerankingGraph(_FakeGraph):
+    """Records a cross-encoder rerank call during search (folds into ``current_rerank_usage``)."""
+
+    async def search_chunk_ids(self, query, **kwargs):
+        from hirocli.services.knowledge.graph.ledger_tracer import record_rerank_usage
+
+        record_rerank_usage("cohere:rerank-v3.5", 512, 40.0)
+        return await super().search_chunk_ids(query, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_defer_rerank_captures_block_and_skips_live_flush(tmp_path) -> None:
+    """defer_rerank_ledger=True: the sub-query captures its own cross-encoder usage into the
+    ``rerank`` block (for the ordered ``memory_recall/rerank`` sub-row) and the search does NOT flush
+    a live rerank ledger child — the loop owns emission (no double-count)."""
+    from hirocli.runtime.agent_graph.ledger import LedgerSink, current_entry
+
+    graph = _RerankingGraph(
+        [{"kind": "fact", "uuid": "e1", "memory": "Dana is the wife", "fact": "Dana is the wife", "score": 0.9}]
+    )
+    memory = GraphitiConversationMemory(graph, temporal_default="current")
+    tool = SearchMemoryTool(
+        memory=memory,
+        accumulator=Accumulator(),
+        limits=RetrievalAgentLimits(),
+        user_id=1,
+        character_id="aria",
+        defer_rerank_ledger=True,
+    )
+    entry = LedgerSink(tmp_path).open_entry("memory_recall", {}, None)
+    token = current_entry.set(entry)
+    with patch(
+        "hirocli.services.knowledge.graph.retrieval_ledger.flush_graph_expand"
+    ) as flush:
+        try:
+            result = await tool.call(_args(SearchMemoryQuery(query="wife", goal="wife")))
+        finally:
+            current_entry.reset(token)
+    flush.assert_not_called()  # deferred → no live rerank child
+    rr = result.sub_results[0].rerank
+    assert rr is not None
+    assert rr["model"] == "cohere:rerank-v3.5"
+    assert rr["tokens"] == 512 and rr["calls"] == 1
+    assert rr["top"][0]["t"] == "Dana is the wife"
+
+
+@pytest.mark.asyncio
+async def test_no_defer_flushes_live_rerank_and_leaves_block_none(tmp_path) -> None:
+    """Default (eval/knowledge): the live rerank flush runs and no ``rerank`` block is attached."""
+    from hirocli.runtime.agent_graph.ledger import LedgerSink, current_entry
+
+    graph = _RerankingGraph(
+        [{"kind": "fact", "uuid": "e1", "memory": "x", "fact": "x", "score": 0.9}]
+    )
+    memory = GraphitiConversationMemory(graph, temporal_default="current")
+    tool = SearchMemoryTool(
+        memory=memory,
+        accumulator=Accumulator(),
+        limits=RetrievalAgentLimits(),
+        user_id=1,
+        character_id="aria",
+    )  # defer_rerank_ledger defaults False
+    entry = LedgerSink(tmp_path).open_entry("memory_recall", {}, None)
+    token = current_entry.set(entry)
+    with patch(
+        "hirocli.services.knowledge.graph.retrieval_ledger.flush_graph_expand"
+    ) as flush:
+        try:
+            result = await tool.call(_args(SearchMemoryQuery(query="wife")))
+        finally:
+            current_entry.reset(token)
+    flush.assert_called_once()  # live flush, as before
+    assert result.sub_results[0].rerank is None
+
+
 @pytest.mark.asyncio
 async def test_hops_above_pref_max_clamped() -> None:
     tool = _tool(hits=[], limits=RetrievalAgentLimits(hops_max=2))

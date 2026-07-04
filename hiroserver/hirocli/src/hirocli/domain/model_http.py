@@ -17,12 +17,14 @@ just spans normal turn spacing.
 
 Injection differs by SDK (verified against the installed client classes):
   - OpenAI / DeepSeek (langchain_openai family) take explicit ``http_client`` /
-    ``http_async_client`` objects.
-  - Google GenAI takes raw httpx kwargs via ``client_args`` (google-genai forwards them to its
-    httpx.Client, so ``limits`` + ``timeout`` apply).
-Providers with no client hook (Anthropic, Cohere, Voyage — they expose only a pre-built client
-object) and local endpoints (Ollama, LM Studio, where keepalive to localhost is pointless) are
-intentionally left on their SDK defaults.
+    ``http_async_client`` objects — both httpx, so this is clean.
+Providers left on their SDK defaults (no safe hook):
+  - Google GenAI — its ASYNC path uses aiohttp (not httpx) with a hardcoded connector, and it
+    forwards ``client_args`` straight into ``aiohttp.ClientSession.request(**args)`` alongside its
+    own ``timeout=`` — so any httpx-shaped kwarg (``limits`` / ``timeout``) collides there
+    ("got multiple values for keyword argument 'timeout'"). No cross-transport keepalive hook.
+  - Anthropic, Cohere, Voyage — expose only a pre-built client object, no httpx hook.
+  - Ollama, LM Studio — local endpoints, keepalive to localhost is pointless.
 
 A fresh client is built per model construction; models are cached / long-lived (the agent compile
 cache, the recall-model cache, the memory-service embedder), so this is a one-time cost per model,
@@ -75,20 +77,8 @@ def openai_http_kwargs(*, streaming: bool, keepalive_s: float | None = None) -> 
     return kwargs
 
 
-def google_http_kwargs(*, streaming: bool, keepalive_s: float | None = None) -> dict[str, Any]:
-    """Warm-keepalive client kwargs for Google GenAI (chat + embeddings).
-
-    google-genai forwards ``client_args`` to its httpx.Client, so the pool ``limits`` and
-    ``timeout`` take effect (verified: the values reach the client's connection pool).
-    ``keepalive_s`` overrides the module-default keepalive window."""
-    return {
-        "client_args": {"limits": _limits(keepalive_s), "timeout": _timeout(streaming=streaming)}
-    }
-
-
 __all__ = [
     "KEEPALIVE_EXPIRY_S",
     "MAX_KEEPALIVE_CONNECTIONS",
-    "google_http_kwargs",
     "openai_http_kwargs",
 ]

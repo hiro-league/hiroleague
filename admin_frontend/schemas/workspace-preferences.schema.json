@@ -930,7 +930,7 @@
         },
         "http_keepalive_s": {
           "default": 300,
-          "description": "How long idle HTTPS connections to model providers (OpenAI, Google, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.",
+          "description": "How long idle HTTPS connections to model providers (OpenAI, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.",
           "maximum": 1800,
           "minimum": 5,
           "step": 5,

@@ -45,6 +45,9 @@ export type EvalRow = {
   // Grading rubric (BEAM corpora) — required-element criteria shown beside the gold answer in the
   // detail dialog's judge pane; empty for non-BEAM corpora.
   rubric: string[];
+  // True when this row wraps a live CHAT memory-recall loop (not a saved eval question). Chat has
+  // no gold/judge, so the detail dialog's Overview collapses to just the question + draft answer.
+  is_chat?: boolean;
 };
 
 export function rowFromPayload(p: EvalQuestionPayload): EvalRow {
@@ -65,6 +68,7 @@ export function rowFromPayload(p: EvalQuestionPayload): EvalRow {
     is_negative_control: p.is_negative_control ?? false,
     answered_at: p.answered_at ?? '',
     evidence_recall: p.evidence_recall ?? null,
-    rubric: p.rubric ?? []
+    rubric: p.rubric ?? [],
+    is_chat: false
   };
 }

@@ -7,8 +7,10 @@ from pathlib import Path
 
 from hirocli.services.memory.agent.agent_trace import (
     agent_trace_dir,
+    build_recall_ledger_substeps,
     build_retrieval_loop_payload,
     format_memory_recall_output_preview,
+    format_recall_items_preview,
     read_agent_recall_result,
     read_agent_retrieval_trace,
     summarize_agent_transcript,
@@ -127,6 +129,153 @@ def test_summarize_agent_transcript_counts_searches_and_decomposition() -> None:
     assert summary.searches == 3
     assert summary.agent_turns == 3
     assert summary.decomposition_turns == 1
+
+
+def test_build_recall_ledger_substeps_orders_turn_search_rerank_answer() -> None:
+    """Transcript → per-step ledger sub-rows, all under the unified ``memory_recall/`` stem and in
+    execution order: a search turn (LLM, priced) → its sub-query search (graph, no model) → that
+    sub-query's DEFERRED rerank row (priced) → a failed sub-query as an errored search row → the
+    exit-B answer turn (LLM). Real numbered previews in output; stats in decision detail."""
+    events = [
+        {
+            "event": "turn",
+            "turn": 1,
+            "kind": "search",
+            "sub_queries": 2,
+            "ts_ms": 100,
+            "dur_ms": 90,
+            "input_tokens": 800,
+            "output_tokens": 40,
+        },
+        {"event": "tool_call", "turn": 1, "sub_queries": 2},
+        {
+            "event": "sub_result",
+            "turn": 1,
+            "sid": 1,
+            "goal": "wife",
+            "query": "wife name",
+            "temporal": "current",
+            "limit": 20,
+            "hops": 1,
+            "returned": 6,
+            "new": 6,
+            "accumulated_total": 6,
+            "ts_ms": 260,
+            "dur_ms": 160,
+            "new_items": [
+                {"t": "Dana is Misho's wife", "s": 0.89},
+                {"t": "Wife works at Cairo Uni", "s": 0.72},
+            ],
+            "rerank": {
+                "model": "cohere:rerank-v3.5",
+                "calls": 1,
+                "tokens": 512,
+                "elapsed_ms": 40,
+                "top": [{"t": "Dana is Misho's wife", "s": 0.94}],
+            },
+        },
+        {
+            "event": "sub_result",
+            "turn": 1,
+            "sid": 2,
+            "goal": "married",
+            "query": "married to",
+            "returned": 0,
+            "new": 0,
+            "accumulated_total": 6,
+            "error": "graph timeout",
+            "ts_ms": 300,
+            "dur_ms": 200,
+        },
+        {
+            "event": "answer",
+            "turn": 1,
+            "ts_ms": 500,
+            "dur_ms": 210,
+            "answer_len_chars": 21,
+            "answer_preview": "Your wife is Dana.",
+            "input_tokens": 1600,
+            "output_tokens": 12,
+        },
+        {"event": "final", "turn": 1, "cumulative_agent_turns": 1},
+    ]
+    specs = build_recall_ledger_substeps(events, model_id="openai:gpt-5.4")
+    # Order + NUMBERED names: turn1 → search1 → rerank1 → search2 (errored) → answer.
+    assert [s["node"] for s in specs] == [
+        "memory_recall/turn1",
+        "memory_recall/search1",
+        "memory_recall/rerank1",
+        "memory_recall/search2",
+        "memory_recall/answer",
+    ]
+    # The LLM turn carries model + tokens, is display-only (no_fold), and its elapsed spans the WHOLE
+    # turn: LLM dur (90) + its searches' wall-clock (max sub ts 300 − turn ts 100 = 200) = 290.
+    turn = specs[0]
+    assert turn["usage"]["model"] == "openai:gpt-5.4"
+    assert turn["decision"] == ("search", "2q")
+    assert turn["no_fold"] is True
+    assert turn["elapsed_ms"] == 290
+    # A graph search has NO usage; output is the REAL numbered facts (w/ scores), stats in detail,
+    # and its elapsed is its OWN real duration (not an inter-event delta).
+    ok_search = specs[1]
+    assert "usage" not in ok_search
+    assert ok_search["decision"] == ("recalled", "ret6/new6/acc6")
+    assert ok_search["output"] == "1. Dana is Misho's wife [0.89] · 2. Wife works at Cairo Uni [0.72]"
+    assert ok_search["elapsed_ms"] == 160
+    assert "no_fold" not in ok_search  # searches carry no cost; folding is irrelevant
+    # The deferred rerank row is priced (its own model/tokens), folds, and shows the top fact.
+    rerank = specs[2]
+    assert rerank["usage"]["model"] == "cohere:rerank-v3.5"
+    assert rerank["usage"]["input_tokens"] == 512
+    assert rerank["decision"] == ("rerank", "1call/512tok")
+    assert rerank["output"] == "1. Dana is Misho's wife [0.94]"
+    assert rerank["elapsed_ms"] == 40
+    assert "no_fold" not in rerank  # rerank cost DOES fold (separate from the LLM aggregate)
+    # The failed sub-query becomes an errored row (its real duration preserved).
+    assert specs[3]["fail"]["message"] == "graph timeout"
+    assert specs[3]["elapsed_ms"] == 200
+    # The exit-B answer row shows the real draft text, its real duration, and is display-only.
+    answer = specs[4]
+    assert answer["usage"]["input_tokens"] == 1600
+    assert answer["output"] == "Your wife is Dana."
+    assert answer["elapsed_ms"] == 210
+    assert answer["no_fold"] is True
+
+
+def test_build_recall_ledger_substeps_stop_turn_shows_answer() -> None:
+    """An exit-A stop turn yields a single numbered stop turn row (real LLM duration, display-only)."""
+    events = [
+        {
+            "event": "turn",
+            "turn": 1,
+            "kind": "stop",
+            "sub_queries": 0,
+            "ts_ms": 90,
+            "dur_ms": 85,
+            "input_tokens": 500,
+            "content_preview": "Your wife's name is Dana.",
+        },
+        {"event": "final", "turn": 1, "cumulative_agent_turns": 1},
+    ]
+    specs = build_recall_ledger_substeps(events, model_id="openai:gpt-5.4")
+    assert len(specs) == 1
+    assert specs[0]["node"] == "memory_recall/turn1"
+    assert specs[0]["decision"] == ("stop", "exitA")
+    assert specs[0]["output"] == "Your wife's name is Dana."
+    assert specs[0]["elapsed_ms"] == 85  # stop turn = its own LLM duration
+    assert specs[0]["no_fold"] is True
+
+
+def test_format_recall_items_preview_numbers_and_scores() -> None:
+    """Numbered, score-annotated, skips empty text, honors max_items — accepts compact or full rows."""
+    items = [
+        {"memory": "Dana is Misho's wife", "score": 0.89},
+        {"t": "", "s": 0.5},  # empty text → skipped, numbering stays gap-free
+        {"t": "Married in Cairo", "s": 0.81},
+        {"t": "no score item"},
+    ]
+    out = format_recall_items_preview(items, max_items=3)
+    assert out == "1. Dana is Misho's wife [0.89] · 2. Married in Cairo [0.81] · 3. no score item"
 
 
 def test_format_memory_recall_output_preview_includes_summary_and_facts() -> None:

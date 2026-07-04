@@ -220,11 +220,12 @@ async def test_memory_recall_records_search_and_result_previews(tmp_path, monkey
     )
 
     row = sink.row("memory_recall") or {}
-    # Input carries the query; output is the loop summary (searches/turns) + a facts preview.
+    # Input carries the query; output_preview is now the REAL recalled facts (numbered, scored when
+    # available), and the stats (facts/turns/searches) moved to decision_detail.
     assert str(row.get("input_preview") or "").startswith("q: tea preference?")
-    assert row.get("output_preview") == "searches=1 · turns=2 · User prefers concise replies"
+    assert str(row.get("output_preview") or "").startswith("1. User prefers concise replies")
     assert row.get("decision_kind") == "retrieved"
-    assert str(row.get("decision_detail")) == "1"
+    assert str(row.get("decision_detail")) == "1facts/2turns/1searches"
 
 
 def _patch_ingest(monkeypatch, *, returns: int, sink: list[dict]):

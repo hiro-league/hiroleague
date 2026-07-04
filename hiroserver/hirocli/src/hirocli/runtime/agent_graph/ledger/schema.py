@@ -131,6 +131,10 @@ class RunAccumulator:
     def fold_row(self, row: dict[str, Any]) -> None:
         if row_kind(row) != "node" or row.get("run_id") != self.run_id:
             return
+        # Display-only rows (e.g. memory_recall per-turn sub-rows, whose cost also sits on the parent
+        # aggregate) are priced + written but excluded from the run total to avoid double counting.
+        if row.get("_no_fold"):
+            return
 
         if str(row.get("node") or "") == "call_model" and row.get("model") and not self.model:
             self.provider = str(row.get("provider") or "")
@@ -187,6 +191,10 @@ class LedgerEntry:
     output_preview: str = ""
     error_code: str = ""
     captures: frozenset[str] = field(default_factory=frozenset)
+    # Display-only cost: the row is written + priced normally, but the RunAccumulator SKIPS it when
+    # summing the run total (so a per-step breakdown whose cost also lives on its parent aggregate —
+    # e.g. the memory_recall per-turn sub-rows — isn't double-counted). See RunAccumulator.fold_row.
+    no_fold: bool = False
     elapsed_ms: int = 0
     status: str = "ok"
     _started: float = field(default_factory=time.perf_counter)
@@ -270,6 +278,7 @@ class LedgerEntry:
         elapsed_ms: int | None = None,
         branch_index: int | None = None,
         captures: Iterable[str] | None = None,
+        no_fold: bool = False,
     ) -> "LedgerEntry":
         child = LedgerEntry(
             sink=self.sink,
@@ -285,6 +294,7 @@ class LedgerEntry:
             user_id=self.user_id,
             character_id=self.character_id,
             captures=frozenset(captures or {"decision"}),
+            no_fold=no_fold,
             status=status,
         )
         if elapsed_ms is not None:
@@ -343,6 +353,8 @@ class LedgerEntry:
             "input_preview": self.input_preview,
             "output_preview": self.output_preview,
             "error_code": self.error_code,
+            # Not a CSV column (write_rows trims to GRAPH_LEDGER_COLUMNS); read by fold_row only.
+            "_no_fold": self.no_fold,
         }
         if "usage" not in self.captures:
             for key in (

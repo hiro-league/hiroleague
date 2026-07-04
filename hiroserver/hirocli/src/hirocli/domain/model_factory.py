@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 
 from .credential_store import CredentialStore
 from .model_catalog import ModelCatalog, ModelSpec, get_model_catalog
-from .model_http import google_http_kwargs, openai_http_kwargs
+from .model_http import openai_http_kwargs
 from .preferences import ModelTuning, ThinkingLevel
 from .workspace import workspace_id_for_path
 
@@ -181,8 +181,10 @@ def build_chat_model_from_tuning(
             "callbacks": cb,
         }
         kwargs.update(_google_thinking_kwargs(effective.thinking, api_model, spec))
-        # Warm-keepalive HTTP client via google-genai's client_args (see model_http).
-        kwargs.update(google_http_kwargs(streaming=True, keepalive_s=keepalive_s))
+        # NOTE: no warm-keepalive client here. google-genai's ASYNC path uses aiohttp and forwards
+        # client_args into ``ClientSession.request(**args)`` alongside its own ``timeout=``, so any
+        # httpx-shaped kwarg collides ("multiple values for keyword argument 'timeout'"). Left on
+        # SDK defaults — see model_http for the full provider-coverage rationale.
         return init_chat_model(
             api_model,
             **kwargs,
@@ -428,8 +430,9 @@ def _embedding_provider_kwargs(
         key = store.get_api_key("google")
         if not key:
             raise ValueError("Google API key missing (keyring or GOOGLE_API_KEY).")
-        # Same warm-keepalive policy, via google-genai's client_args (see model_http).
-        return {"google_api_key": key, **google_http_kwargs(streaming=False, keepalive_s=keepalive_s)}
+        # No warm-keepalive client: google-genai's aiohttp async path rejects httpx-shaped
+        # client_args (see the chat branch / model_http). Left on SDK defaults.
+        return {"google_api_key": key}
 
     if catalog_provider_id == "ollama":
         cred = store.get("ollama")

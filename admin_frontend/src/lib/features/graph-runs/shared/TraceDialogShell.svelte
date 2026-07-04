@@ -21,7 +21,7 @@
     contentClass?: string;
     /** Everything after Dialog.Title in the header row (nav, search, bulk actions, …). */
     headActions?: Snippet;
-    /** Optional block below the title row — Dialog.Description, TraceAnswers, config line, … */
+    /** Optional block below the title row — Dialog.Description, config line, … */
     headerDetail?: Snippet;
     children?: Snippet;
   } = $props();

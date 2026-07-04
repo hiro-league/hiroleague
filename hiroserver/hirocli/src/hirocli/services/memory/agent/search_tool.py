@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Any, Literal
 
 from hiro_commons.log import Logger
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from hirocli.domain.preferences import RetrievalAgentLimits
+from hirocli.services.knowledge.graph.ledger_tracer import RerankUsage
 from hirocli.services.memory.agent.accumulator import AccumulatedItem, Accumulator
+from hirocli.services.memory.agent.agent_trace import compact_recall_item
 from hirocli.services.memory.graphiti_conversation import GraphitiConversationMemory
 
 log = Logger.get("SVC.MEMORY.AGENT.SEARCH")
@@ -75,6 +78,16 @@ class SearchMemorySubResult(BaseModel):
     new: int
     items: list[dict[str, Any]]
     error: str | None = None
+    # Real wall-clock of this sub-query's search (graph recall + its cross-encoder rerank). Drives the
+    # ``memory_recall/search`` sub-row's elapsed — concurrent sub-queries each get their OWN time (the
+    # prior transcript-ts-delta approach gave a bogus ~0ms to every sub-query after the first).
+    elapsed_ms: int = 0
+    # Deferred cross-encoder roll-up for this sub-query (only when the agentic loop asks the search
+    # to defer its rerank ledger row — ``SearchMemoryTool.defer_rerank_ledger``). Shape:
+    # ``{model, calls, tokens, elapsed_ms, top: [{t, s}, …]}``. None when no priced rerank ran / the
+    # tool isn't deferring. Feeds the transcript's ``memory_recall/rerank`` sub-node (ordered after
+    # its search row). NOT surfaced to the model (``render_search_result_text`` ignores it).
+    rerank: dict[str, Any] | None = None
 
 
 class SearchMemoryResult(BaseModel):
@@ -257,6 +270,25 @@ def render_search_result_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _rerank_block(
+    usage: RerankUsage | None, hits: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Compact cross-encoder roll-up for one sub-query's deferred ``memory_recall/rerank`` sub-row.
+
+    None unless a catalogued cross-encoder actually ran (model id + ≥1 call) — RRF/MMR / local
+    rerankers price nothing, so they get no row (mirrors ``retrieval_ledger._rerank_priced``). ``top``
+    is the top few reranked hits (the search returns them score-ordered) for the row's real preview."""
+    if usage is None or not usage.model_id or usage.calls <= 0:
+        return None
+    return {
+        "model": usage.model_id,
+        "calls": usage.calls,
+        "tokens": usage.processed_tokens,
+        "elapsed_ms": int(usage.elapsed_ms),
+        "top": [compact_recall_item(hit) for hit in hits[:3]],
+    }
+
+
 class SearchMemoryTool:
     """Thin clamp + concurrent dispatcher over :class:`GraphitiConversationMemory`.
 
@@ -276,6 +308,7 @@ class SearchMemoryTool:
         limits: RetrievalAgentLimits,
         user_id: int,
         character_id: str,
+        defer_rerank_ledger: bool = False,
     ) -> None:
         self._memory = memory
         self._accumulator = accumulator
@@ -283,6 +316,11 @@ class SearchMemoryTool:
         self._user_id = user_id
         self._character_id = character_id
         self._next_search_id = 1
+        # When set (chat under per-step tracing), each sub-query captures its own cross-encoder
+        # rerank usage and the search does NOT flush a live ``rerank`` ledger child — the retrieval
+        # loop emits it as an ordered ``memory_recall/rerank`` sub-row instead. Default False keeps
+        # eval / knowledge on the live-flush path (unchanged).
+        self._defer_rerank_ledger = defer_rerank_ledger
 
     async def _run_one(self, *, sid: int, q: SearchMemoryQuery) -> SearchMemorySubResult:
         """Run one sub-query. Never raises — a failure becomes an ``error`` sub-result so a
@@ -317,6 +355,10 @@ class SearchMemoryTool:
         if not q.query:
             return SearchMemorySubResult(returned=0, new=0, items=[], **base)
 
+        # Deferred rerank: pass a private sink so the search captures this sub-query's cross-encoder
+        # usage HERE (skipping its live ledger flush); the loop emits the ordered rerank sub-row.
+        rerank_sink = RerankUsage() if self._defer_rerank_ledger else None
+        t0 = time.perf_counter()
         try:
             hits = await self._memory.search(
                 q.query,
@@ -329,16 +371,26 @@ class SearchMemoryTool:
                 # Tag this sub-query's pipeline trace with its sid so the trajectory UI can
                 # open the exact retrieval trace for S{sid}.
                 sid=sid,
+                rerank_sink=rerank_sink,
             )
         except Exception as exc:
             log.exception("❌ search_memory sub-query failed · sid=%d", sid)
-            return SearchMemorySubResult(returned=0, new=0, items=[], error=str(exc), **base)
+            return SearchMemorySubResult(
+                returned=0,
+                new=0,
+                items=[],
+                error=str(exc),
+                elapsed_ms=int((time.perf_counter() - t0) * 1000),
+                **base,
+            )
 
         added = self._accumulator.merge(hits, search_id=sid, goal=q.goal)
         return SearchMemorySubResult(
             returned=len(hits),
             new=len(added),
             items=[_serialize_item(item) for item in added],
+            rerank=_rerank_block(rerank_sink, hits),
+            elapsed_ms=int((time.perf_counter() - t0) * 1000),
             **base,
         )
 

@@ -102,7 +102,9 @@
   ): TraceTab[] {
     const cap = render.max_elements_per_kind;
     const out: TraceTab[] = [];
+    // Order: Overview, then Trajectory (the retrieval story), then the recalled-set tabs.
     if (gold || leg.answer || leg.mark || leg.reason) out.push({ key: 'judge', label: 'Overview' });
+    if (trajectory) out.push({ key: 'trajectory', label: 'Trajectory', count: trajectory });
     if (mode === 'recall' && evidence && evidence.total > 0)
       out.push({ key: 'evidence', label: 'Evidence recall', count: `${evidence.matched}/${evidence.total}` });
     if (recalled.facts.length > 0)
@@ -111,7 +113,6 @@
       out.push({ key: 'entities', label: 'Entities', count: recalledTabCount(recalled.entities, cap, term) });
     if (recalled.episodes.length > 0)
       out.push({ key: 'episodes', label: 'Episodes', count: recalledTabCount(recalled.episodes, cap, term) });
-    if (trajectory) out.push({ key: 'trajectory', label: 'Trajectory', count: trajectory });
     return out;
   }
 
@@ -155,32 +156,33 @@
   <Dialog.Content class="flex h-[90vh] flex-col sm:max-w-[min(96vw,1100px)]">
     {#if row}
       {@const r = row}
-      <Dialog.Header>
-        <Dialog.Title class="line-clamp-2 pr-8">{r.question}</Dialog.Title>
+      <!-- Header row: question · search (filters + highlights the tables) · trimmed/full toggle —
+           all on one line (title no longer sits on its own row above the toolbar). -->
+      <Dialog.Header class="border-b border-border pb-3">
+        <div class="flex items-center gap-3 pr-8">
+          <Dialog.Title class="line-clamp-2 min-w-0 flex-1">{r.question}</Dialog.Title>
+          <SearchInput
+            variant="inline"
+            class="w-56 shrink-0 border-input bg-muted/30 shadow-none"
+            inputClass="text-xs text-foreground"
+            bind:value={q}
+            placeholder="Search facts, entities, episodes…"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            aria-pressed={trimmed}
+            title={trimmed
+              ? 'Showing trimmed item text (as sent to eval). Click to show full text.'
+              : 'Showing full item text. Click to trim it to the eval caps (as sent to eval).'}
+            onclick={() => (trimmed = !trimmed)}
+          >
+            <Scissors size={14} aria-hidden="true" />
+            <span class="text-xs">{trimmed ? 'Trimmed' : 'Full text'}</span>
+          </Button>
+        </div>
       </Dialog.Header>
-
-      <!-- Dialog toolbar: search (filters + highlights the tables) · trimmed/full text toggle. -->
-      <div class="flex items-center gap-2 border-b border-border pb-3">
-        <SearchInput
-          variant="inline"
-          class="min-w-0 flex-1 border-input bg-muted/30 shadow-none"
-          inputClass="text-xs text-foreground"
-          bind:value={q}
-          placeholder="Search facts, entities, episodes…"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          aria-pressed={trimmed}
-          title={trimmed
-            ? 'Showing trimmed item text (as sent to eval). Click to show full text.'
-            : 'Showing full item text. Click to trim it to the eval caps (as sent to eval).'}
-          onclick={() => (trimmed = !trimmed)}
-        >
-          <Scissors size={14} aria-hidden="true" />
-          <span class="text-xs">{trimmed ? 'Trimmed' : 'Full text'}</span>
-        </Button>
-      </div>
 
       <div class="grid flex-1 content-start gap-4 overflow-y-auto pr-1 {legColumns.length > 1 ? 'md:grid-cols-2' : ''}">
         {#each legColumns as mode, legIdx (mode)}
@@ -254,6 +256,24 @@
 {#snippet judgePane(mode: string, leg: EvalRow['legs'][string])}
   {#if row}
     {@const r = row}
+    {#if r.is_chat}
+      <!-- Chat runs have no gold/judge — the Overview is just the question + the recall agent's
+           draft answer (verdict/recall/grounded/gold/rubric are eval-only). -->
+      <div class="grid gap-2 text-xs leading-5">
+        <div class="flex flex-wrap gap-2">
+          <span class="min-w-[64px] text-muted-foreground">Question</span>
+          <span class="flex-1 whitespace-pre-wrap text-foreground"><Highlight text={r.question} query={overviewTerm} /></span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="min-w-[64px] text-muted-foreground">Draft answer</span>
+          {#if leg.answer}
+            <span class="flex-1 whitespace-pre-wrap text-foreground"><Highlight text={leg.answer} query={overviewTerm} /></span>
+          {:else}
+            <span class="flex-1 italic text-muted-foreground">— (no answer)</span>
+          {/if}
+        </div>
+      </div>
+    {:else}
     <div class="grid gap-2 text-xs leading-5">
       <!-- Verdict · recall sufficiency · grounded — moved to the top so the outcome reads first. -->
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -331,6 +351,7 @@
         {/if}
       </div>
     </div>
+    {/if}
   {/if}
 {/snippet}
 

@@ -29,6 +29,7 @@ from langchain_core.tools import StructuredTool
 from hirocli.domain.preferences import RetrievalAgentLimits
 from hirocli.runtime.agent_graph.graph_kit import normalize_reply_content
 from hirocli.services.memory.agent.accumulator import Accumulator
+from hirocli.services.memory.agent.agent_trace import compact_recall_item
 from hirocli.services.memory.agent.search_tool import (
     SearchMemoryArgs,
     SearchMemoryQuery,
@@ -88,6 +89,17 @@ def _accumulate_message_usage(totals: dict[str, int], message: Any) -> None:
         value = usage.get(key)
         if value is not None:
             totals[key] = totals.get(key, 0) + value
+
+
+def _message_usage(message: Any) -> dict[str, int]:
+    """One reply's usage as a standalone dict (per-turn, not accumulated).
+
+    Used to stamp each transcript ``turn`` / ``answer`` event with its OWN token cost so the
+    ``memory_recall`` node can flush a priced per-turn sub-row (Graph-Runs loop visibility) — the
+    per-step counterpart to ``_accumulate_message_usage``'s running total."""
+    totals: dict[str, int] = {}
+    _accumulate_message_usage(totals, message)
+    return totals
 
 
 def _write_recall_usage(*, model_id: str, totals: dict[str, int]) -> None:
@@ -171,6 +183,13 @@ def _record_search_turn(
     if payload is not None:
         accumulated_total = payload.get("accumulated_total")
         for sub in payload.get("sub_results") or []:
+            # Compact preview of the NEW facts this sub-query added (top few, text+score) so the
+            # ``memory_recall/search`` sub-row's output_preview shows the real recalled content, not
+            # just counts. ``rerank`` (present only when the loop deferred it) rides along so the
+            # ordered ``memory_recall/rerank`` sub-row can be built from the same transcript row.
+            new_items = [
+                compact_recall_item(item) for item in (sub.get("items") or [])[:3]
+            ]
             transcript.append(
                 {
                     "ts_ms": int(time.perf_counter() * 1000) - started_ms,
@@ -187,6 +206,9 @@ def _record_search_turn(
                     "new": sub.get("new"),
                     "accumulated_total": accumulated_total,
                     "error": sub.get("error"),
+                    "new_items": new_items,
+                    "rerank": sub.get("rerank"),
+                    "dur_ms": sub.get("elapsed_ms"),
                 }
             )
     elif content and content.startswith("Error:"):
@@ -266,6 +288,7 @@ async def run_retrieval(
     allow_abstain: bool = False,
     user_name: str = "",
     agent_name: str = "",
+    per_step_usage: bool = False,
 ) -> RetrievalResult:
     """Drive the bounded retrieval loop; returns the populated accumulator + declared reduce/answer.
 
@@ -282,6 +305,12 @@ async def run_retrieval(
     resolve anaphora + decompose against real context (chat); ``allow_abstain`` lets a loop that
     recalled NOTHING return an empty result instead of running eval's verbatim-fallback floor (chat
     may legitimately need no memory).
+
+    ``per_step_usage`` (chat, under ``observability=trace``) signals that the caller will flush a
+    per-step sub-row breakdown, so the loop **defers** each sub-query's rerank ledger row (captured
+    into the transcript for ordered emission) instead of flushing it live. The parent still gets the
+    aggregate LLM cost either way (the per-turn sub-rows are flushed ``no_fold`` so nothing is
+    double-counted). Eval keeps the default (``False``) — live rerank flush, no per-turn sub-rows.
     """
     started_ms = int(time.perf_counter() * 1000)
     acc = Accumulator()
@@ -291,6 +320,9 @@ async def run_retrieval(
         limits=limits,
         user_id=user_id,
         character_id=character_id,
+        # Under per-step usage (chat/trace) each search defers its rerank ledger row so the loop can
+        # emit it in order (search → its rerank) as a ``memory_recall/rerank`` sub-node.
+        defer_rerank_ledger=per_step_usage,
     )
     lc_tool = build_search_memory_langchain_tool(search_tool)
 
@@ -329,14 +361,44 @@ async def run_retrieval(
 
     for turn in range(1, max_search_turns + 1):
         cumulative_agent_turns += 1
+        t_turn = time.perf_counter()
         response = await search_model.ainvoke(messages)
+        turn_dur_ms = int((time.perf_counter() - t_turn) * 1000)
         # Fold this search turn's tokens in before any coercion (usage rides on the raw reply).
         _accumulate_message_usage(usage_totals, response)
+        turn_usage = _message_usage(response)
         if not isinstance(response, AIMessage):
             response = AIMessage(content=normalize_reply_content(response))
 
         tool_calls = list(getattr(response, "tool_calls", None) or [])
         messages.append(response)
+        # Per-turn transcript row (feeds the Graph-Runs per-turn sub-node): how many sub-queries the
+        # model emitted this turn (0 = it stopped, exit A) + this turn's own token usage. Placed
+        # BEFORE the search rows so the transcript reads turn → its searches, in loop order.
+        n_sub_this_turn = sum(
+            len(_tool_call_args(c).get("queries") or [])
+            for c in tool_calls
+            if _tool_call_name(c) == SearchMemoryTool.name
+        )
+        transcript.append(
+            {
+                "ts_ms": int(time.perf_counter() * 1000) - started_ms,
+                "event": "turn",
+                "turn": turn,
+                "cumulative_agent_turns": cumulative_agent_turns,
+                "kind": "search" if tool_calls else "stop",
+                "sub_queries": n_sub_this_turn,
+                # Real wall-clock of THIS turn's own LLM decision call (the builder widens a search
+                # turn's displayed elapsed to also cover the searches it launched — see the builder).
+                "dur_ms": turn_dur_ms,
+                # A stop turn's content IS the answer (exit A) — stamp a preview so the
+                # ``memory_recall/turn`` sub-row shows the real answer, not just "stopped".
+                "content_preview": normalize_reply_content(response.content)[:160]
+                if not tool_calls
+                else "",
+                **turn_usage,
+            }
+        )
         if not tool_calls:
             # Exit A — model stopped searching; this turn's content is its final answer.
             last_stop = response
@@ -400,9 +462,27 @@ async def run_retrieval(
         # The exit-B compose call is NOT a search turn, so it does NOT advance the turn counter
         # (changed 2026-07-03) — the loop's search budget stays == max_agent_turns and the trajectory
         # reads e.g. "4 / 4" instead of "5 / 4".
+        t_ans = time.perf_counter()
         answer_text, final_raw = await _final_answer_turn(model=model, messages=messages)
+        ans_dur_ms = int((time.perf_counter() - t_ans) * 1000)
         _accumulate_message_usage(usage_totals, final_raw)
-    # Attribute the loop's total LLM cost to the active memory_recall ledger node (no-op off-ledger).
+        # Exit-B compose call = its own priced sub-node (memory/recall_answer) under per_step_usage.
+        transcript.append(
+            {
+                "ts_ms": int(time.perf_counter() * 1000) - started_ms,
+                "event": "answer",
+                "turn": cumulative_agent_turns,
+                "cumulative_agent_turns": cumulative_agent_turns,
+                "answer_len_chars": len(answer_text),
+                "answer_preview": answer_text[:160],
+                "dur_ms": ans_dur_ms,
+                **_message_usage(final_raw),
+            }
+        )
+    # Attribute the loop's total LLM cost to the parent memory_recall ledger node (like eval), so the
+    # top recall row always reflects the recall's LLM cost. Under per_step_usage the per-turn/answer
+    # sub-rows ALSO show their slice, but they're flushed ``no_fold`` (display-only) so the same
+    # tokens aren't double-counted into the run total.
     _write_recall_usage(model_id=model_id, totals=usage_totals)
     log.info(
         "✅ retrieval — agent · %d/%d turns · searches=%d · answer_chars=%d",

@@ -66,7 +66,10 @@ export const ADMIN_HEADER_BREADCRUMB_SEP = 'shrink-0 font-sans text-sm font-norm
  * Frosted chrome (`ADMIN_PAGE_STICKY_HEADER_PINNED`) is added only once pinned.
  */
 export const ADMIN_PAGE_STICKY_HEADER_POSITION = cn(
-  'sticky top-16 z-10 mt-0 border-b border-transparent bg-transparent transition-[margin,padding,box-shadow,background-color,border-color,backdrop-filter] duration-200 ease-out',
+  // `min-w-0`: as a grid item this defaults to `min-width:auto` and would grow to its content's
+  // min-width, letting a nowrap/scrollable subtab strip push page-level horizontal overflow instead
+  // of scrolling within itself. Pinning min-width to 0 keeps the header inside its column.
+  'sticky top-16 z-10 mt-0 min-w-0 border-b border-transparent bg-transparent transition-[margin,padding,box-shadow,background-color,border-color,backdrop-filter] duration-200 ease-out',
   ADMIN_SHELL_STICKY_BLEED
 );
 

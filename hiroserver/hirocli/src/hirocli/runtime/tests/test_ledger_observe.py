@@ -151,6 +151,33 @@ def test_record_child_spawns_child_row(sink: RecordingLedgerSink) -> None:
         current_entry.reset(token)
 
 
+def test_record_child_usage_needs_usage_capture(sink: RecordingLedgerSink) -> None:
+    """A usage-bearing child (memory/recall_turn) must pass captures={"usage","decision"}, else
+    ``to_row`` blanks the model/token columns even after ``add_usage`` — the default child capture is
+    decision-only."""
+    entry = sink.open_entry("memory_recall", {}, None)
+    token = current_entry.set(entry)
+    try:
+        record_child(
+            node="memory/recall_turn",
+            captures=("usage", "decision"),
+            decision=("search", "2"),
+            usage={"provider": "openai", "model": "openai:gpt-5.4", "input_tokens": 800},
+        )
+        # A search child WITHOUT the usage capture: even if usage is passed, the columns blank out.
+        record_child(
+            node="memory/search",
+            decision=("recalled", "6"),
+        )
+        turn_row, search_row = entry.rows(include_parent=False)
+        assert turn_row["model"] == "openai:gpt-5.4"
+        assert turn_row["input_tokens"] == 800
+        assert search_row["model"] == ""  # decision-only capture → no usage columns
+        assert search_row["decision_kind"] == "recalled"
+    finally:
+        current_entry.reset(token)
+
+
 def test_record_child_noop_without_entry() -> None:
     assert current_entry.get() is None
     record_child(node="tools/nope")  # must not raise

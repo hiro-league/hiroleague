@@ -406,6 +406,19 @@ async def test_run_accumulator_writes_aggregate_and_evicts_run(tmp_path: Path) -
     assert not graph._ledger_sink._attempt_indexes
 
 
+def test_run_accumulator_skips_no_fold_rows() -> None:
+    """A ``_no_fold`` node row is priced + written for display but EXCLUDED from the run total, so a
+    per-step breakdown whose cost also sits on its parent aggregate (memory_recall per-turn sub-rows)
+    isn't double-counted into the @run line."""
+    acc = RunAccumulator(sink=None, run_id="r")  # sink unused by fold_row
+    acc.fold_row({"row_kind": "node", "run_id": "r", "cost_usd": "0.010", "input_tokens": "100"})
+    acc.fold_row(
+        {"row_kind": "node", "run_id": "r", "cost_usd": "0.005", "input_tokens": "50", "_no_fold": True}
+    )
+    assert abs(acc.cost_usd - 0.010) < 1e-9  # the no_fold row's 0.005 is NOT added
+    assert acc.input_tokens == 100  # nor its tokens
+
+
 @pytest.mark.parametrize(
     ("status", "error_code"),
     [("failed", "provider_error"), ("cancelled", "cancelled")],

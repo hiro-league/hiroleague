@@ -31,7 +31,7 @@ from ..graph_kit import (
     emit,
     normalize_reply_content,
 )
-from ..ledger import current_entry, graph_logged, observe, substep_scope
+from ..ledger import current_entry, graph_logged, observe, record_child, substep_scope
 from ..node_group import NodeGroup
 from ..outcomes import NodeOutcome, emit_outcome
 from ..state import GraphState
@@ -125,11 +125,17 @@ class MemoryNodes(NodeGroup):
             present_accumulator,
         )
         from ....services.memory.agent.agent_trace import (
-            format_memory_recall_output_preview,
+            build_recall_ledger_substeps,
+            format_recall_items_preview,
             summarize_agent_transcript,
             write_agent_recall_result,
             write_agent_retrieval_trace,
         )
+
+        # Under `trace`, attribute the loop's LLM cost PER TURN (priced sub-rows) instead of one
+        # aggregate on this node, and persist the loop sidecars. `per_step_usage` follows this flag so
+        # the parent node doesn't ALSO carry the tokens (double-count) — see run_retrieval.
+        trace_on = getattr(prefs.graph, "observability", "ledger") == "trace"
 
         # Chat retrieval config (memory.retrieval.*, Phase 1): caps + prompt + model.
         limits = prefs.memory.retrieval.limits
@@ -175,6 +181,7 @@ class MemoryNodes(NodeGroup):
                 allow_abstain=True,
                 user_name=user_name,
                 agent_name=agent_name,
+                per_step_usage=trace_on,
             )
         except Exception as exc:
             observe(
@@ -199,7 +206,7 @@ class MemoryNodes(NodeGroup):
         # answer companion — trace tier only, best-effort. The companion mirrors what eval stores in
         # row_json so the Graph-Runs detail dialog renders the SAME Overview + Facts/Entities/Episodes
         # tables (with counts) a memory-eval row shows (a chat recall has no eval_results.db row).
-        if getattr(prefs.graph, "observability", "ledger") == "trace":
+        if trace_on:
             entry = current_entry.get()
             if entry is not None:
                 if result.transcript:
@@ -216,27 +223,31 @@ class MemoryNodes(NodeGroup):
                     recalled=rows,
                     answer=draft or "",
                 )
+                # Per-turn / per-search sub-nodes (4.1, 4.2 …) under this memory_recall step: one
+                # priced memory/recall_turn per LLM turn + one memory/search per sub-query, so the
+                # loop's internals are inspectable in the Graph-Runs node table (not only the
+                # trajectory dialog). Pure over the transcript; children carry the per-turn cost
+                # (parent carries none — per_step_usage above).
+                for spec in build_recall_ledger_substeps(result.transcript, model_id=model_id):
+                    record_child(**spec)
 
         # G2: decision distinguishes recalled / abstained (the loop chose NOT to search) / errored /
         # empty — so "why no memory this turn" is answerable in Graph Runs (observability by design).
+        # decision_detail carries the STATS (facts/turns/searches); output_preview carries the REAL
+        # recalled facts (numbered, scored) — the useful content, not counts.
         summary = summarize_agent_transcript(result.transcript)
         if n:
-            decision = ("retrieved", str(n))
+            decision = ("retrieved", f"{n}facts/{summary.agent_turns}turns/{summary.searches}searches")
+            preview = format_recall_items_preview(rows, max_items=5)
         elif summary.searches == 0:
             decision = ("abstained", "no_recall_needed")
+            preview = "abstained — no memory needed this turn"
         elif getattr(result, "error_count", 0):
-            decision = ("empty", f"{result.error_count} search error(s)")
+            decision = ("empty", f"{result.error_count}errors")
+            preview = f"recall emptied by {result.error_count} search error(s)"
         else:
             decision = ("empty", "0")
-
-        facts_preview = " | ".join(
-            str(r.get("memory") or "").strip()
-            for r in rows[:3]
-            if str(r.get("memory") or "").strip()
-        )
-        preview = format_memory_recall_output_preview(
-            result.transcript, facts_preview=facts_preview or "(nothing recalled)"
-        )
+            preview = "nothing recalled"
         log.info(
             "✅ memory_recall — %s · rows=%d · searches=%d · draft=%s",
             state.get("inbound_id", "?"),

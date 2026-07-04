@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from hirocli.domain.model_http import (
-    KEEPALIVE_EXPIRY_S,
-    MAX_KEEPALIVE_CONNECTIONS,
-    google_http_kwargs,
-    openai_http_kwargs,
-)
+from hirocli.domain.model_http import KEEPALIVE_EXPIRY_S, openai_http_kwargs
 
 
 def _pool_keepalive(client: httpx.Client | httpx.AsyncClient) -> float:
@@ -38,24 +33,9 @@ def test_openai_non_streaming_is_sync_only() -> None:
     assert kwargs["http_client"].timeout.read == 30.0
 
 
-def test_google_kwargs_carry_limits_and_timeout() -> None:
-    # google-genai takes raw httpx kwargs via client_args (it forwards them to its httpx.Client).
-    for streaming, read in ((True, 600.0), (False, 30.0)):
-        kwargs = google_http_kwargs(streaming=streaming)
-        assert set(kwargs) == {"client_args"}
-        client_args = kwargs["client_args"]
-        assert set(client_args) == {"limits", "timeout"}
-        assert client_args["limits"].keepalive_expiry == KEEPALIVE_EXPIRY_S
-        assert client_args["limits"].max_keepalive_connections == MAX_KEEPALIVE_CONNECTIONS
-        assert client_args["timeout"].read == read
-
-
 def test_keepalive_override_and_fallback() -> None:
     # The workspace pref (llm.http_keepalive_s) overrides the module default...
     assert _pool_keepalive(openai_http_kwargs(streaming=False, keepalive_s=45.0)["http_client"]) == 45.0
-    assert google_http_kwargs(streaming=True, keepalive_s=45.0)["client_args"][
-        "limits"
-    ].keepalive_expiry == 45.0
     # ...but a missing / non-positive value falls back to the default (never breaks client build).
     for bad in (None, 0, -1):
         assert (

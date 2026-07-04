@@ -14,7 +14,7 @@ export type DefaultRerankerModel = string | null;
  */
 export type DefaultEmbedderModel = string | null;
 /**
- * How long idle HTTPS connections to model providers (OpenAI, Google, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.
+ * How long idle HTTPS connections to model providers (OpenAI, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.
  */
 export type ProviderConnectionKeepaliveSeconds = number;
 export type DefaultImageGen = string | null;

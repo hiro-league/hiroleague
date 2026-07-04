@@ -36,10 +36,11 @@ class MemoryRetriever:
         allow_abstain: bool = False,
         user_name: str = "",
         agent_name: str = "",
+        per_step_usage: bool = False,
     ) -> RetrievalResult:
         """Run the bounded retrieval loop for ``query``; forwards to :func:`run_retrieval`.
 
-        ``history`` / ``allow_abstain`` default to eval behavior (see
+        ``history`` / ``allow_abstain`` / ``per_step_usage`` default to eval behavior (see
         :func:`retrieval_agent.run_retrieval`), so an eval call with defaults is byte-identical to
         calling ``run_retrieval`` directly. Dispatched through the module (not a bound import) so a
         test monkeypatching ``retrieval_agent.run_retrieval`` is honored.
@@ -57,6 +58,7 @@ class MemoryRetriever:
             allow_abstain=allow_abstain,
             user_name=user_name,
             agent_name=agent_name,
+            per_step_usage=per_step_usage,
         )
 
 

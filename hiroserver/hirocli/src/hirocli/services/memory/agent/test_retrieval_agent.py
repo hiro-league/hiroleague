@@ -339,14 +339,69 @@ async def test_no_search_direct_answer_empty_graph() -> None:
 
 @pytest.mark.asyncio
 async def test_trace_event_shapes() -> None:
-    """A search turn yields tool_call + one sub_result per sub-query, then a final row."""
+    """A search turn yields a ``turn`` row (per-turn usage) + tool_call + one sub_result per
+    sub-query; the exit-A stop turn adds its own ``turn`` row; then a final row."""
     graph = _SlowFakeGraph(hits=[_hit("e1", "Budget is $50")])
     model = ScriptedChatModel(
         responses=[_search_call(_q("monthly budget")), ai_final("The budget is $50.")]
     )
     result = await _run(model=model, memory=_memory(graph=graph))
     events = [row["event"] for row in result.transcript]
-    assert events == ["tool_call", "sub_result", "final"]
+    # turn(search) → its tool_call+sub_result → turn(stop, exit A) → final.
+    assert events == ["turn", "tool_call", "sub_result", "turn", "final"]
+    turns = [row for row in result.transcript if row["event"] == "turn"]
+    assert [t["kind"] for t in turns] == ["search", "stop"]
+    assert turns[0]["sub_queries"] == 1
+    assert turns[1]["sub_queries"] == 0
+    # Each turn row carries its OWN token usage (drives the priced per-turn sub-node).
+    assert turns[0]["input_tokens"] > 0 and turns[0]["output_tokens"] > 0
+
+
+@pytest.mark.asyncio
+async def test_per_step_usage_aggregates_on_parent_and_stamps_transcript(tmp_path) -> None:
+    """per_step_usage=True (chat/trace): the parent memory_recall entry STILL gets the aggregate LLM
+    cost (so the top recall row reflects the recall cost, like eval), AND each turn/answer transcript
+    row is stamped with its own tokens + real duration (dur_ms) so the caller can flush per-turn
+    sub-rows (as ``no_fold`` display rows). Exit-B path: 4 search turns + a forced answer row."""
+    from hirocli.runtime.agent_graph.ledger import LedgerSink, current_entry
+
+    graph = _SlowFakeGraph(hits=[_hit("e1", "x")])
+    model = ScriptedChatModel(
+        responses=[
+            _search_call(_q("q1"), call_id="c1"),
+            _search_call(_q("q2"), call_id="c2"),
+            _search_call(_q("q3"), call_id="c3"),
+            _search_call(_q("q4"), call_id="c4"),
+            ai_final("forced final"),
+        ]
+    )
+    sink = LedgerSink(tmp_path)
+    entry = sink.open_entry("memory_recall", {}, None, captures=frozenset({"usage", "decision"}))
+    token = current_entry.set(entry)
+    try:
+        result = await run_retrieval(
+            question="Q?",
+            memory=_memory(graph=graph),
+            limits=RetrievalAgentLimits(max_agent_turns=4),
+            prompt_text=_PROMPT,
+            model=model,
+            user_id=1,
+            character_id="aria",
+            model_id="openai:gpt-5.4",
+            per_step_usage=True,
+        )
+    finally:
+        current_entry.reset(token)
+
+    # Parent carries the aggregate LLM cost (top recall row shows it) — no longer blank.
+    assert entry.model == "openai:gpt-5.4"
+    assert entry.input_tokens > 0 and entry.output_tokens > 0
+    turn_rows = [r for r in result.transcript if r["event"] == "turn"]
+    answer_rows = [r for r in result.transcript if r["event"] == "answer"]
+    assert len(turn_rows) == 4  # 4 search turns
+    assert all(r.get("input_tokens", 0) > 0 and "dur_ms" in r for r in turn_rows)
+    assert len(answer_rows) == 1  # the exit-B compose turn
+    assert answer_rows[0]["input_tokens"] > 0 and "dur_ms" in answer_rows[0]
 
 
 @pytest.mark.asyncio

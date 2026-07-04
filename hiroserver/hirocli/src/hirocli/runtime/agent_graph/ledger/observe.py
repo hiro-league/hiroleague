@@ -63,13 +63,20 @@ def record_child(
     status: str = "ok",
     elapsed_ms: int = 0,
     branch_index: int | None = None,
+    captures: Any = None,
+    no_fold: bool = False,
     input: str | None = None,
     output: str | None = None,
     decision: str | tuple[str, str] | None = None,
     usage: dict | None = None,
     fail: dict | None = None,
 ) -> None:
-    """Spawn + fill one child ledger row under the current entry. No-op without entry."""
+    """Spawn + fill one child ledger row under the current entry. No-op without entry.
+
+    ``captures`` controls which columns survive ``to_row`` (defaults to ``{"decision"}``); pass
+    ``{"usage", "decision"}`` for a child that carries model/tokens/cost — otherwise the usage
+    columns are blanked even after ``add_usage`` (see ``LedgerEntry.to_row``). ``no_fold`` writes the
+    row for display but excludes its cost from the run total (see ``RunAccumulator.fold_row``)."""
     parent = current_entry.get()
     if parent is None:
         return
@@ -78,6 +85,8 @@ def record_child(
         status=status,
         elapsed_ms=elapsed_ms,
         branch_index=branch_index,
+        captures=captures,
+        no_fold=no_fold,
     )
     if input is not None:
         child.set_input_preview(input)

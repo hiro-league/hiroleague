@@ -4,9 +4,9 @@
    * Primary pill tabs live in `<AdminPageHeader tabs>`.
    */
   import { ChevronDown, ChevronUp, RefreshCw, X } from '@lucide/svelte';
-  import AdminSubtabButton from '$lib/components/page/AdminSubtabButton.svelte';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import { cn } from '$lib/utils';
   import {
     graphRunTabId,
     GRAPH_RUNS_PANEL_IDS,
@@ -55,28 +55,39 @@
   ariaLabel={GRAPH_RUNS_SUBTAB_TABLIST_LABEL}
   tabs={browseTab}
   active={activePane}
+  scrollable
   onSelect={(id) => {
     if (id === RUNS_TAB) onShowRunsOnly();
   }}
 >
   {#snippet extraTabs()}
     {#each openRunIds as rid (rid)}
+      <!-- One compact tab (label + inline close) styled as a single underline unit so the X reads
+           as part of the tab rather than a detached button. -->
       <span
-        class="flex min-w-0 max-w-[min(26rem,calc(100vw-8rem))] shrink-0 items-end gap-0"
+        class={cn(
+          '-mb-px flex shrink-0 items-center gap-1 border-b-2 py-2 pl-3 pr-1.5 text-sm transition-colors',
+          activePane === rid
+            ? 'border-primary font-semibold text-foreground'
+            : 'border-transparent text-muted-foreground hover:text-foreground'
+        )}
         role="presentation"
       >
-        <AdminSubtabButton
-          label={runTabDisplayLabel(rid)}
-          title={runTabTooltip(rid)}
-          class="max-w-[min(22rem,calc(100vw-10rem))]"
-          active={activePane === rid}
-          htmlId={graphRunTabId(rid)}
-          ariaControls={GRAPH_RUNS_PANEL_IDS.detail}
-          onclick={() => onOpenRunTab(rid)}
-        />
         <button
           type="button"
-          class="-mb-px flex size-9 shrink-0 items-center justify-center rounded-t-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+          id={graphRunTabId(rid)}
+          class="min-w-0 max-w-[15ch] truncate bg-transparent text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          role="tab"
+          aria-selected={activePane === rid}
+          aria-controls={GRAPH_RUNS_PANEL_IDS.detail}
+          title={runTabTooltip(rid)}
+          onclick={() => onOpenRunTab(rid)}
+        >
+          {runTabDisplayLabel(rid)}
+        </button>
+        <button
+          type="button"
+          class="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           aria-label="Close run inspector"
           title="Close (Esc)"
           onclick={(e) => {
@@ -84,7 +95,7 @@
             onCloseRunTab(rid);
           }}
         >
-          <X size={16} aria-hidden="true" />
+          <X size={14} aria-hidden="true" />
         </button>
       </span>
     {/each}

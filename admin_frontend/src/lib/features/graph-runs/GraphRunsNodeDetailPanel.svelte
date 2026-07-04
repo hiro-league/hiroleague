@@ -23,6 +23,7 @@
     ['model'],
     ['input_preview'],
     ['output_preview'],
+    ['decision_detail'],
     ['user_id', 'character_id'],
     ['tts_chars', 'tts_text_tokens'],
     ['tts_audio_tokens', 'tts_audio_seconds'],
@@ -32,7 +33,6 @@
     ['input_tokens', 'output_tokens'],
     ['cached_input_tokens', 'reasoning_tokens'],
     ['pricing_version', 'decision_kind'],
-    ['decision_detail'],
     ['error_code'],
     ['row_kind'],
     ['id'],
@@ -81,7 +81,7 @@
 
 <DetailPanelShell
   ariaLabel="Graph run node details"
-  class="bg-card/80"
+  class="node-detail-panel bg-card/90"
   closeLabel="Close node details"
   {onClose}
 >

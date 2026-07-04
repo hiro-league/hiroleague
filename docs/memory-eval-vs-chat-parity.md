@@ -226,6 +226,74 @@ trajectory view. So a normal chat turn is always cost-visible; the deep loop int
 tracing is on — the same contract eval uses. **This means G1/G2/G3/G5 are backend/ledger wiring
 folded into Phase 2; G4 (admin chat-safe detail) is its own phase.**
 
+**G6 — per-turn / per-search sub-nodes (built 2026-07-03).** The loop's internal steps are now
+also **first-class node rows** in the Graph-Runs node table (not only the G4 trajectory dialog):
+under `memory_recall` (step *N*), each LLM decision turn flushes a priced **`memory/recall_turn`**
+row (*N.1* …, model + per-turn tokens/cost, decision `search/N` or `stop`), each sub-query flushes a
+**`memory/search`** row (query · returned/new, **no** model/cost — a graph search; a failed sub-query
+or whole-tool error becomes an errored row), and the optional exit-B compose call flushes a
+**`memory/recall_answer`** row. Mechanism: `run_retrieval` gained `per_step_usage` — when set (chat
+under `trace`) it stamps each `turn`/`answer` transcript event with its **own** token usage and
+**skips** the aggregate `_write_recall_usage` write, so the per-turn sub-rows carry the cost and the
+parent isn't double-counted into the run total; the node builds the sub-rows purely from the
+transcript via `build_recall_ledger_substeps` → `record_child` (loop stays ledger-free — same pattern
+as the trajectory payload). `record_child` gained a `captures` arg so usage-bearing children keep
+their token columns. Frontend: `isGraphNodeSubstep` now also matches `memory/` (sub-step indent).
+**Gated to `trace`** (agreed): under plain `ledger` the parent keeps the single aggregate cost row
+(no per-turn fan-out), so prod node tables stay lean. Tests: `build_recall_ledger_substeps` +
+`per_step_usage` gating + `record_child` captures; 39 memory-agent/ledger-observe + 33 node/ledger +
+94 memory + 106 eval green; frontend `graph-runs-pure` (21) + `npm run check` clean.
+
+**G6 polish (built 2026-07-03, UI review pass).** Six presentation fixes from looking at the live
+table:
+- **Unified naming** — the sub-rows moved from the `memory/*` prefix to the SAME **`memory_recall/`**
+  stem as the parent and the rerank rows: `memory_recall/turn` · `/search` · `/rerank` · `/answer`.
+  `isGraphNodeSubstep` now matches `memory_recall/` (the `/` guards the bare parent), so all four
+  child kinds AND the rerank rows indent together.
+- **Node-column indent** — substep rows now indent the **node cell** too (a `.substep-node-cell`
+  pad), not only the step cell.
+- **Correct execution order** — reranks were emitted **live** inside each `memory.search` (so they
+  grabbed sub-steps `.1/.2` before the loop's own rows). Fixed by **deferring** the rerank ledger row
+  on the agentic path: `memory.search` gained `rerank_sink` (capture the cross-encoder usage, skip the
+  live `flush_graph_expand`), `SearchMemoryTool` gained `defer_rerank_ledger` (= `per_step_usage`),
+  and `build_recall_ledger_substeps` emits each rerank row **right after its search row** in transcript
+  order (deterministic — the sub-query `gather` preserves sid order). Knowledge/eval keep the live
+  flush (unchanged).
+- **Real previews + stats split** — `output_preview` now shows the **real recalled facts, numbered
+  and scored** (`1. Dana is Misho's wife [0.89] · 2. …`) via `format_recall_items_preview`; the
+  **stats** moved to `decision_detail` (`ret6/new6/acc6`, `1call/512tok`, `8facts/2turns/3searches`).
+  Search rows preview their NEW items, rerank rows the top reranked facts, turn rows the dispatched
+  sub-queries (or the exit-A answer), the answer row the draft, and the parent the top recalled facts.
+  Required threading a compact `{t,s}` preview into the transcript `sub_result` (new items + rerank
+  top) + `content_preview`/`answer_preview` on the turn/answer events.
+Tests: `build_recall_ledger_substeps` order+preview, `format_recall_items_preview`, `SearchMemoryTool`
+defer (flush suppressed + rerank block captured); 392 backend (memory/eval/node/ledger/knowledge-graph)
+green; `graph-runs-pure` (21) + `svelte-check` 0 errors. (The `memory/` mention above is superseded by
+`memory_recall/`.)
+
+**G6 polish 2 (built 2026-07-03, UI review pass 2).** Five more fixes from the rendered table:
+- **Numbered sub-nodes** — `memory_recall/turn1`, `/search1`, `/rerank1`, `/search2` … (index = turn no
+  / sub-query sid) so each is identifiable at a glance.
+- **Real per-op durations** — the per-row `elapsed_ms` was an inter-event ts delta, so concurrent
+  sub-queries after the first read a bogus ~0ms. Now each op is timed directly: `run_retrieval` records
+  the LLM turn/answer call duration, `SearchMemoryTool._run_one` records the real search duration; both
+  ride the transcript (`dur_ms`).
+- **Whole-turn span** — a search `turn` row's displayed elapsed now covers its whole turn (LLM decision
+  + the searches it launched: `dur_ms + (max sub-query end − turn end)`), so a turn is never shorter
+  than a search "inside" it.
+- **Parent shows recall cost** — the per-turn cost split had left the top `memory_recall` row blank
+  under `trace`. Reverted: the aggregate LLM cost is always written to the parent (like eval). To keep
+  the per-turn sub-rows visible *without* double-counting the run total, added a ledger **`no_fold`**
+  marker (`LedgerEntry`/`spawn_child`/`record_child`; honored in `RunAccumulator.fold_row`) — the
+  per-turn `turn`/`answer` sub-rows are priced + displayed but excluded from the run sum; rerank
+  sub-rows still fold (cross-encoder cost itemized separately, as in eval).
+- **Admin panel** — node-detail overlay is less transparent (`bg-card/80 → /90`) and the **Detail**
+  (decision_detail) field now sits right after **Output preview**. Plus (separate ask) the node-detail
+  panel became a **right-side overlay** (doesn't squeeze the table) with a **left-edge resize handle**
+  whose width persists in `localStorage` (`graphRunsNodeDetailWidth`).
+Tests updated (numbering, durations, whole-turn span, no_fold, parent aggregate, new-preview node test)
++ new `no_fold` fold test; 661 backend green (memory/eval/knowledge-graph/runtime); `svelte-check` 0.
+
 ### Implementation phases
 
 > High-level ordering only — a **detailed design is a later run**. Each phase leaves chat working.

@@ -21,6 +21,9 @@
   import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { RetrievalTraceDialogController } from './state/retrieval-trace-dialog.svelte';
+  import { onMount } from 'svelte';
+  import { PREF_KEYS } from '$lib/preferences/keys';
+  import { readLocalNumber, writeLocalNumber } from '$lib/preferences/storage';
 
   let {
     activePane,
@@ -114,6 +117,63 @@
   const detailAriaLabelledby = $derived(
     isRunDetailPane(activePane) ? graphRunTabId(activePane) : GRAPH_RUNS_SUBTAB_IDS.browse
   );
+
+  // Node detail panel is a right-side OVERLAY (doesn't squeeze the table) whose width the user can
+  // drag from its left edge; the width persists across reloads (localStorage). Clamped so it can't
+  // shrink past legibility or swallow the whole table.
+  const DETAIL_WIDTH_DEFAULT = 360;
+  const DETAIL_WIDTH_MIN = 280;
+  const DETAIL_WIDTH_MAX = 900;
+  const DETAIL_WIDTH_STEP = 24; // keyboard resize increment
+
+  let detailWidth = $state(DETAIL_WIDTH_DEFAULT);
+  let resizing = $state(false);
+  let resizeStartX = 0;
+  let resizeStartW = 0;
+
+  onMount(() => {
+    detailWidth = clampDetailWidth(
+      readLocalNumber(PREF_KEYS.graphRunsNodeDetailWidth, DETAIL_WIDTH_DEFAULT)
+    );
+  });
+
+  function clampDetailWidth(w: number): number {
+    return Math.max(DETAIL_WIDTH_MIN, Math.min(DETAIL_WIDTH_MAX, Math.round(w)));
+  }
+
+  function persistDetailWidth() {
+    writeLocalNumber(PREF_KEYS.graphRunsNodeDetailWidth, detailWidth);
+  }
+
+  function onResizeStart(event: PointerEvent) {
+    resizing = true;
+    resizeStartX = event.clientX;
+    resizeStartW = detailWidth;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function onResizeMove(event: PointerEvent) {
+    if (!resizing) return;
+    // The panel is pinned to the right, so dragging the LEFT handle leftward (clientX decreasing)
+    // widens it.
+    detailWidth = clampDetailWidth(resizeStartW + (resizeStartX - event.clientX));
+  }
+
+  function onResizeEnd(event: PointerEvent) {
+    if (!resizing) return;
+    resizing = false;
+    (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
+    persistDetailWidth();
+  }
+
+  function onResizeKeydown(event: KeyboardEvent) {
+    const dir = event.key === 'ArrowLeft' ? 1 : event.key === 'ArrowRight' ? -1 : 0;
+    if (dir === 0) return;
+    event.preventDefault();
+    detailWidth = clampDetailWidth(detailWidth + dir * DETAIL_WIDTH_STEP);
+    persistDetailWidth();
+  }
 </script>
 
 <div
@@ -158,10 +218,7 @@
       </p>
     {/if}
 
-    <div
-      class="run-detail-node-grid"
-      class:run-detail-node-grid--with-panel={nodeDetailRow !== null}
-    >
+    <div class="run-detail-node-grid" style="--node-detail-w: {detailWidth}px">
       <GraphRunsNodesTable
         {timeline}
         {nodeFieldList}
@@ -177,11 +234,36 @@
       />
 
       {#if nodeDetailRow}
-        <GraphRunsNodeDetailPanel
-          row={nodeDetailRow}
-          fields={nodeDetailFieldList}
-          onClose={onCloseNodeDetails}
-        />
+        <!-- Overlay: floats over the RIGHT of the (full-width) table instead of taking a grid column,
+             so opening it never squeezes the table. The inner element stays sticky-pinned on scroll. -->
+        <div class="node-detail-overlay" class:node-detail-overlay--resizing={resizing}>
+          <div class="node-detail-sticky">
+            <!-- Focusable splitter: role=separator + aria-valuenow is the correct pattern; the
+                 linter just doesn't treat it as interactive (same as LogsTablePanel's scroller). -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+            <div
+              class="node-detail-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize node details panel"
+              aria-valuemin={DETAIL_WIDTH_MIN}
+              aria-valuemax={DETAIL_WIDTH_MAX}
+              aria-valuenow={detailWidth}
+              tabindex="0"
+              title="Drag to resize (← / → to nudge)"
+              onpointerdown={onResizeStart}
+              onpointermove={onResizeMove}
+              onpointerup={onResizeEnd}
+              onpointercancel={onResizeEnd}
+              onkeydown={onResizeKeydown}
+            ></div>
+            <GraphRunsNodeDetailPanel
+              row={nodeDetailRow}
+              fields={nodeDetailFieldList}
+              onClose={onCloseNodeDetails}
+            />
+          </div>
+        </div>
       {/if}
     </div>
   </div>
@@ -269,52 +351,110 @@
 
   .run-detail-node-grid {
     display: grid;
+    /* ALWAYS single column: the table keeps full width; the detail panel floats OVER it as an
+       absolute overlay (below) rather than taking a second column that squeezes the table. */
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     min-height: 0;
     min-width: 0;
     align-items: stretch;
+    position: relative; /* containing block for the absolute detail overlay */
   }
 
-  /* No scroll-past-end padding on the table column. The side panel (col 2) is already capped to the
-     remaining viewport height, so it needs no extra-tall cell to pin against — and the old padding
-     made the page scroll the short node table up under its sticky header into empty space, hiding
-     all the rows. Without it the node grid lands flush under the sticky chrome with every row
-     visible and no phantom scroll. */
+  /* --- Node detail: right-side OVERLAY (does not squeeze the table) --------------------------- */
 
-  /* With the side panel open the table column is narrow; clip the wide ledger row's horizontal
-     overflow so it doesn't bleed under the (semi-transparent) panel. `clip` contains it WITHOUT
-     creating a scroll container, so the page-sticky header and sticky panel keep working. The
-     clipped right-hand columns are exactly the fields the open detail panel already shows. */
-  .run-detail-node-grid--with-panel > :global(.nodes-table-panel) {
-    overflow-x: clip;
+  /* Narrow screens: the overlay degrades to normal in-flow stacking (a row under the table), full
+     width, no resize handle — the pre-overlay behavior. */
+  .node-detail-overlay {
+    min-width: 0;
   }
 
-  .run-detail-node-grid--with-panel {
-    grid-template-columns: minmax(0, 1fr);
+  .node-detail-sticky {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
   }
 
-  .run-detail-node-grid > :global(.node-detail-panel) {
-    /* Stay pinned beside the page-scrolled nodes table (top matches the sticky chrome offset). */
-    position: sticky;
-    top: calc(
-      4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + 0.75rem
-    );
-    align-self: start;
-    min-height: 340px;
-    /* Fill the viewport height left below the sticky chrome instead of a fixed 70vh/720px cap, so
-       the panel grows to use the remaining space — and grows further as the header compacts on
-       scroll-up (var(--admin-page-header-h) shrinks when pinned). The trailing 1.5rem = the 0.75rem
-       sticky-top gap above + a matching 0.75rem breathing room at the bottom. */
-    max-height: calc(
-      100dvh - 4rem - var(--admin-page-header-h, 0px) - var(--admin-page-sticky-toolbar-h, 0px) -
-        1.5rem
-    );
+  .node-detail-sticky > :global(.node-detail-panel) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .node-detail-resizer {
+    display: none;
+  }
+
+  /* While dragging, suppress text selection (pointer capture already routes moves to the handle). */
+  .node-detail-overlay--resizing {
+    user-select: none;
   }
 
   @media (min-width: 760px) {
-    .run-detail-node-grid--with-panel {
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    /* Float the panel over the RIGHT edge of the table. inset top/bottom:0 makes the absolute box
+       span the node grid's height (= the page-scrolled table), so the sticky inner can travel the
+       full scroll range just like before. */
+    .node-detail-overlay {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: var(--node-detail-w, 360px);
+      z-index: 5;
+      /* Transparent gutters above/below the sticky panel let the table rows underneath stay
+         clickable; the panel + handle re-enable pointer events. */
+      pointer-events: none;
+    }
+
+    .node-detail-sticky {
+      pointer-events: auto;
+      /* Stay pinned beside the page-scrolled nodes table (top matches the sticky chrome offset). */
+      position: sticky;
+      top: calc(
+        4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + 0.75rem
+      );
+      min-height: 340px;
+      /* Fill the viewport height left below the sticky chrome (grows as the header compacts on
+         scroll-up). Trailing 1.5rem = the 0.75rem sticky-top gap + 0.75rem bottom breathing room. */
+      max-height: calc(
+        100dvh - 4rem - var(--admin-page-header-h, 0px) - var(--admin-page-sticky-toolbar-h, 0px) -
+          1.5rem
+      );
+    }
+
+    .node-detail-sticky > :global(.node-detail-panel) {
+      max-height: 100%;
+    }
+
+    /* Left-edge drag handle to resize the overlay width. */
+    .node-detail-resizer {
+      display: block;
+      flex: 0 0 auto;
+      width: 10px;
+      margin-right: -4px; /* sit the grip on the panel's left seam */
+      cursor: ew-resize;
+      touch-action: none;
+      align-self: stretch;
+      background: transparent;
+    }
+
+    .node-detail-resizer::before {
+      content: '';
+      display: block;
+      width: 2px;
+      height: 100%;
+      margin: 0 auto;
+      border-radius: 2px;
+      background: color-mix(in srgb, var(--border) 70%, transparent);
+      transition: background 100ms ease;
+    }
+
+    .node-detail-resizer:hover::before,
+    .node-detail-resizer:focus-visible::before,
+    .node-detail-overlay--resizing .node-detail-resizer::before {
+      background: var(--primary);
+    }
+
+    .node-detail-resizer:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 1px;
     }
   }
 

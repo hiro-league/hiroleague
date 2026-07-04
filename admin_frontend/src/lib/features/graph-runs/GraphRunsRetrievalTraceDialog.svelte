@@ -2,9 +2,9 @@
   import { Settings2 } from '@lucide/svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import Highlight from '$lib/search/Highlight.svelte';
   import type { RetrievalTraceRecord } from '$lib/api/graph-runs';
   import ExpandCollapseButtons from './shared/ExpandCollapseButtons.svelte';
-  import TraceAnswers from './shared/TraceAnswers.svelte';
   import TraceDialogShell from './shared/TraceDialogShell.svelte';
   import TraceOverviewAnswers from './shared/TraceOverviewAnswers.svelte';
   import TraceTabs, { type TraceTab } from './shared/TraceTabs.svelte';
@@ -110,6 +110,11 @@
 >
   {#snippet headActions()}
     {#if trace}
+      <!-- Question sits inline with the search box + action buttons (all on one header row). -->
+      <div class="trace-question" title={trace.query}>
+        <span class="trace-question__label">Q</span>
+        <span class="trace-question__text"><Highlight text={trace.query} query={search} /></span>
+      </div>
       <div class="trace-search">
         <SearchInput
           variant="inline"
@@ -148,7 +153,6 @@
 
   {#snippet headerDetail()}
     {#if trace}
-      <TraceAnswers question={trace.query} query={search} />
       {#if settingsOpen && onLaneTab}
         <span class="trace-config">
           recipe={trace.recipe} · temporal={trace.temporal} · top_k={trace.num_results} ·
@@ -231,13 +235,40 @@
     color: var(--primary);
   }
 
+  /* Question line, inline in the header row: takes the free space, truncates with an ellipsis so
+     the search box + action buttons stay put on the same line. */
+  .trace-question {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+  }
+
+  .trace-question__label {
+    flex: none;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted-foreground);
+  }
+
+  .trace-question__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--foreground);
+  }
+
   .trace-search {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex: 1 1 auto;
+    flex: 0 1 300px;
     min-width: 120px;
-    max-width: 380px;
     padding: 4px 8px;
     border: 1px solid color-mix(in srgb, var(--muted-foreground) 25%, transparent);
     border-radius: 6px;

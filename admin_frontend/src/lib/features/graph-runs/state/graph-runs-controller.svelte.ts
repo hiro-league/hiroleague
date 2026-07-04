@@ -36,6 +36,7 @@ import {
   RUN_ID_FIRST_CARD_CHARS,
   RUNS_TAB,
   trimRunIdForList,
+  formatLedgerField,
   isKnowledgeStandaloneRun,
   isGraphIngestRun,
   graphRunKindLabel,
@@ -150,7 +151,10 @@ export function createGraphRunsPageController(
       is_negative_control: false,
       answered_at: '',
       evidence_recall: null,
-      rubric: []
+      rubric: [],
+      // Chat recall row — flags the detail dialog to show a chat-only Overview (question + draft
+      // answer), not the eval judge pane (no gold/verdict/grounded for a live chat loop).
+      is_chat: true
     };
   }
 
@@ -552,15 +556,19 @@ export function createGraphRunsPageController(
   function runTabDisplayLabel(runId: string): string {
     const row = runSourceRowForOpenTab(runId);
     const preview = String(row?.input_preview ?? '').trim();
-    if (preview.length > 0) return preview;
-    return trimRunIdForList(runId);
+    const base = preview.length > 0 ? preview : trimRunIdForList(runId);
+    // Tabs are compact + horizontally scrollable, so cap the visible label at 15 chars
+    // (with an ellipsis) to keep every tab narrow; full text lives in the hover tooltip.
+    return base.length > 15 ? `${base.slice(0, 15)}…` : base;
   }
 
   function runTabTooltip(runId: string): string {
     const row = runSourceRowForOpenTab(runId);
     const preview = String(row?.input_preview ?? '').trim();
-    if (preview.length > 0) return `${runId} — ${preview}`;
-    return runId;
+    // Hover shows the formatted run time + input text (not the raw run id) for quick scanning.
+    const time = row ? formatLedgerField('ts', row) : '';
+    const parts = [time, preview].filter((s) => s && s !== '—');
+    return parts.length > 0 ? parts.join(' — ') : runId;
   }
 
   function toggleRunDetailCards() {

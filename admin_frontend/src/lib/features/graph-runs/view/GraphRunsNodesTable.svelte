@@ -127,7 +127,10 @@
           }}
         >
           {#each nodeFieldList as field (field)}
-            <td class="font-mono">
+            <td
+              class="font-mono"
+              class:substep-node-cell={field === 'node' && isGraphNodeSubstep(row.node)}
+            >
               {#if field === 'node' && rowHasEvalDetail(row)}
                 <span class="node-cell">
                   <span>{formatLedgerField(field, row)}</span>
@@ -229,9 +232,14 @@
     box-shadow: inset 4px 0 0 var(--primary);
   }
 
-  /* Nested sub-step rows (tools/*, knowledge/*) read as children via an indent on the step cell
-     plus their ``4.1`` numbering — the previous primary-tinted highlight was removed. */
+  /* Nested sub-step rows (tools/*, knowledge/*, memory_recall/*) read as children via an indent on
+     BOTH the step cell and the node cell, plus their ``4.1`` numbering — the previous primary-tinted
+     highlight was removed. */
   .nodes-table__data-row.substep td:first-child {
+    padding-left: 1.5rem;
+  }
+
+  .nodes-table__data-row .substep-node-cell {
     padding-left: 1.5rem;
   }
 

@@ -39,6 +39,7 @@ from hirocli.services.knowledge.graph.group_scope import (
 if TYPE_CHECKING:
     from hirocli.domain.preferences import KnowledgeGraphTemporalDefault
     from hirocli.runtime.agent_graph.ledger import LedgerSink
+    from hirocli.services.knowledge.graph.ledger_tracer import RerankUsage
     from hirocli.services.knowledge.graph.graphiti_ingest import GraphEventSink
     from hirocli.services.knowledge.graph.graphiti_service import GraphitiMemoryService
 
@@ -235,6 +236,7 @@ class GraphitiConversationMemory:
         rerank: bool | None = None,
         metadata_filters: dict[str, Any] | None = None,
         sid: int | None = None,
+        rerank_sink: "RerankUsage | None" = None,
     ) -> list[dict[str, Any]]:
         """Recall the facts that bear on ``query``, using the admin temporal lens
         (``graph.temporal_default`` — ``current`` hides superseded facts, ``all`` includes
@@ -265,7 +267,10 @@ class GraphitiConversationMemory:
 
         # Accumulate cross-encoder rerank usage so the priced ``rerank`` roll-up child carries
         # model + processed tokens. Stays empty for RRF/MMR / local rerankers (no priced child).
-        rerank_usage = RerankUsage()
+        # ``rerank_sink`` (agentic loop under per-step tracing): capture INTO the caller's object and
+        # DON'T flush the live child here — the loop emits the rerank ledger row itself, ordered right
+        # after its search sub-row (deferred emission). Knowledge/eval pass None → live flush, as before.
+        rerank_usage = rerank_sink if rerank_sink is not None else RerankUsage()
         rerank_token = current_rerank_usage.set(rerank_usage)
         # Deep per-stage retrieval trace (the ``trace`` observability tier) — mirrors knowledge's
         # ``graph_expand`` block: capture activates the re-hosted, traced edge pipeline and we
@@ -291,9 +296,12 @@ class GraphitiConversationMemory:
             if capture_token is not None:
                 current_capture.reset(capture_token)
         if (entry := current_entry.get()) is not None:
-            from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
+            # Deferred path (rerank_sink set): the loop owns the rerank ledger row, so skip the live
+            # flush — otherwise the rerank would be double-emitted (live child + deferred sub-row).
+            if rerank_sink is None:
+                from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
 
-            flush_graph_expand(entry, expansion, rerank_usage=rerank_usage)
+                flush_graph_expand(entry, expansion, rerank_usage=rerank_usage)
             if capture is not None and capture.trace is not None:
                 from hirocli.services.knowledge.graph.retrieval_trace import (
                     write_trace_sidecar,

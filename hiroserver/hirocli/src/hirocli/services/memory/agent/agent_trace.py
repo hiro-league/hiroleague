@@ -123,6 +123,250 @@ def build_retrieval_loop_payload(
     }
 
 
+_USAGE_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens")
+
+
+def _step_usage(model_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    """The ``record_child(usage=…)`` payload for one LLM turn/answer transcript row.
+
+    Carries the model id (so the sub-row prices) + whichever per-turn token counts the event
+    recorded. The provider prefix mirrors ``_write_recall_usage`` — the pricing catalog is keyed by
+    the prefixed ``provider:model`` id."""
+    usage: dict[str, Any] = {
+        "provider": model_id.partition(":")[0] if ":" in model_id else "",
+        "model": model_id,
+    }
+    for key in _USAGE_KEYS:
+        value = row.get(key)
+        if value is not None:
+            usage[key] = int(value)
+    return usage
+
+
+_RECALL_TEXT_KEYS = ("memory", "fact", "text", "summary", "content", "name")
+
+
+def compact_recall_item(item: dict[str, Any]) -> dict[str, Any]:
+    """``{"t": text, "s": score|None}`` — the minimal shape the numbered preview renders from.
+
+    Accepts a raw recall hit OR a serialized accumulator item (both carry a text field + score), so
+    the search / rerank / parent previews all normalize through one path."""
+    text = ""
+    for key in _RECALL_TEXT_KEYS:
+        val = str(item.get(key) or "").strip()
+        if val:
+            text = val
+            break
+    score = item.get("score")
+    return {"t": text, "s": float(score) if isinstance(score, (int, float)) else None}
+
+
+def format_recall_items_preview(
+    items: list[dict[str, Any]], *, max_items: int = 3, max_chars: int = 64
+) -> str:
+    """Numbered, score-annotated one-liner: ``1. <text> [0.89] · 2. <text> [0.72]``.
+
+    ``items`` may be compact ``{t,s}`` dicts OR full recall dicts (normalized via
+    :func:`compact_recall_item`). The score bracket is omitted when absent; empty-text items are
+    skipped so the numbering stays gap-free. This is the *real* recalled content the output_preview
+    shows (the stats move to ``decision_detail``)."""
+    parts: list[str] = []
+    for item in items:
+        compact = item if "t" in item else compact_recall_item(item)
+        text = str(compact.get("t") or "").strip()
+        if not text:
+            continue
+        if len(text) > max_chars:
+            text = text[: max_chars - 1] + "…"
+        idx = len(parts) + 1
+        score = compact.get("s")
+        if isinstance(score, (int, float)):
+            parts.append(f"{idx}. {text} [{score:.2f}]")
+        else:
+            parts.append(f"{idx}. {text}")
+        if len(parts) >= max_items:
+            break
+    return " · ".join(parts)
+
+
+def build_recall_ledger_substeps(
+    events: list[dict[str, Any]],
+    *,
+    model_id: str,
+) -> list[dict[str, Any]]:
+    """Map a retrieval-loop transcript into per-step ledger sub-rows (``record_child`` kwargs).
+
+    Turns the loop's internals into Graph-Runs sub-nodes under the ``memory_recall`` step — all under
+    the SAME ``memory_recall/`` stem as the parent + the rerank rows (so they group and indent
+    together), in true execution order (``turn`` → its ``search`` rows, each immediately followed by
+    its deferred ``rerank`` row → the next turn):
+
+    - ``memory_recall/turn`` — one per LLM decision turn (``turn`` event): model + per-turn tokens/
+      cost; decision ``search/Nq`` (decomposed into N sub-queries) or ``stop`` (exit A). Output = the
+      dispatched sub-queries / the stop-turn answer.
+    - ``memory_recall/search`` — one per sub-query (``sub_result`` event): NO model/cost (a graph-DB
+      search). Output = the real NEW facts recalled (numbered, scored); detail = ret/new/acc counts.
+      A failed sub-query / whole-tool error (``tool_error``) becomes an errored search row.
+    - ``memory_recall/rerank`` — the deferred cross-encoder roll-up for a sub-query (``rerank`` block
+      on the ``sub_result``): model + processed tokens/cost. Output = the top reranked facts (scored).
+    - ``memory_recall/answer`` — the optional exit-B compose call (``answer`` event): model + tokens.
+
+    ``decision_detail`` carries the STATS (slug-safe ``ret6/new6/acc8`` etc.); ``output_preview``
+    carries the REAL content. Pure over the transcript (the loop stays ledger-free); the node calls
+    ``record_child(**spec)`` per spec. ``elapsed_ms`` is the inter-event delta from ``ts_ms``."""
+    subs_by_turn: dict[int, list[dict[str, Any]]] = {}
+    for row in events:
+        if row.get("event") == "sub_result":
+            subs_by_turn.setdefault(int(row.get("turn") or 0), []).append(row)
+
+    specs: list[dict[str, Any]] = []
+    for row in events:
+        event = row.get("event")
+        if event not in ("turn", "sub_result", "tool_error", "answer"):
+            continue
+
+        if event == "turn":
+            turn_no = int(row.get("turn") or 0)
+            usage = _step_usage(model_id, row)
+            content = str(row.get("content_preview") or "").strip()
+            turn_dur = int(row.get("dur_ms") or 0)
+            if row.get("kind") == "stop":
+                specs.append(
+                    {
+                        # Numbered so a turn/search/rerank is identifiable at a glance (turn1, turn2…).
+                        "node": f"memory_recall/turn{turn_no}",
+                        "elapsed_ms": turn_dur,
+                        "input": f"turn {turn_no}: decide",
+                        "output": content or "stopped searching — has answer",
+                        "decision": ("stop", "exitA"),
+                        "usage": usage,
+                        "captures": ("usage", "decision"),
+                        # LLM cost lives on the parent memory_recall aggregate too (like eval); mark
+                        # the per-turn row display-only so the run total isn't double-counted.
+                        "no_fold": True,
+                    }
+                )
+            else:
+                subs = subs_by_turn.get(turn_no, [])
+                n_sub = int(row.get("sub_queries") or 0)
+                dispatched = " · ".join(
+                    f"{i}. {(str(s.get('goal') or s.get('query') or '')).strip()}"
+                    for i, s in enumerate(subs, 1)
+                    if str(s.get("goal") or s.get("query") or "").strip()
+                )
+                # A search turn's displayed elapsed spans the WHOLE turn: its own LLM decision call
+                # PLUS the searches it launched (which run after the decision, concurrently). Otherwise
+                # the turn read shorter than a search "inside" it. = LLM dur + (last search end − LLM
+                # end). Falls back to the LLM dur when the turn launched no searches.
+                turn_ts = int(row.get("ts_ms") or 0)
+                max_sub_ts = max((int(s.get("ts_ms") or 0) for s in subs), default=turn_ts)
+                whole_turn_ms = turn_dur + max(0, max_sub_ts - turn_ts)
+                specs.append(
+                    {
+                        "node": f"memory_recall/turn{turn_no}",
+                        "elapsed_ms": whole_turn_ms,
+                        "input": f"turn {turn_no}: decompose",
+                        "output": dispatched or f"{n_sub} sub-quer{'y' if n_sub == 1 else 'ies'}",
+                        "decision": ("search", f"{n_sub}q"),
+                        "usage": usage,
+                        "captures": ("usage", "decision"),
+                        "no_fold": True,
+                    }
+                )
+        elif event == "sub_result":
+            sid = row.get("sid")
+            goal = str(row.get("goal") or "").strip()
+            head = f"S{sid} · {goal}" if goal else f"S{sid}"
+            query = str(row.get("query") or "").strip()
+            inp = (
+                f"{head}: {query} "
+                f"[{row.get('temporal') or 'current'} · lim {row.get('limit')} · hop {row.get('hops')}]"
+            )
+            search_dur = int(row.get("dur_ms") or 0)
+            error = str(row.get("error") or "").strip()
+            if error:
+                specs.append(
+                    {
+                        "node": f"memory_recall/search{sid}",
+                        "elapsed_ms": search_dur,
+                        "input": inp,
+                        "fail": {
+                            "code": "search_error",
+                            "message": error,
+                            "decision": "search_error",
+                        },
+                    }
+                )
+            else:
+                returned = int(row.get("returned") or 0)
+                new = int(row.get("new") or 0)
+                acc = int(row.get("accumulated_total") or 0)
+                preview = format_recall_items_preview(row.get("new_items") or [])
+                specs.append(
+                    {
+                        "node": f"memory_recall/search{sid}",
+                        "elapsed_ms": search_dur,
+                        "input": inp,
+                        "output": preview or "(no new items)",
+                        "decision": ("recalled", f"ret{returned}/new{new}/acc{acc}"),
+                    }
+                )
+            # The deferred cross-encoder roll-up for THIS sub-query — emitted right after its search
+            # row so it reads in execution order (see memory.search ``rerank_sink``). Absent for
+            # RRF/MMR / local rerankers (no priced cross-encoder ran). It DOES fold (cheap cloud cost
+            # itemized in the run total, separate from the LLM aggregate on the parent).
+            rerank = row.get("rerank")
+            if isinstance(rerank, dict) and rerank.get("model"):
+                model = str(rerank.get("model") or "")
+                specs.append(
+                    {
+                        "node": f"memory_recall/rerank{sid}",
+                        "elapsed_ms": int(rerank.get("elapsed_ms") or 0),
+                        "input": f"{head}: cross-encoder rerank",
+                        "output": format_recall_items_preview(rerank.get("top") or [])
+                        or "(reranked)",
+                        "decision": (
+                            "rerank",
+                            f"{int(rerank.get('calls') or 0)}call/{int(rerank.get('tokens') or 0)}tok",
+                        ),
+                        "usage": {
+                            "provider": model.partition(":")[0] if ":" in model else "",
+                            "model": model,
+                            "input_tokens": int(rerank.get("tokens") or 0),
+                        },
+                        "captures": ("usage", "decision"),
+                    }
+                )
+        elif event == "tool_error":
+            specs.append(
+                {
+                    "node": "memory_recall/search",
+                    "elapsed_ms": 0,
+                    "input": "tool call",
+                    "fail": {
+                        "code": "tool_error",
+                        "message": str(row.get("error") or "").strip(),
+                        "decision": "tool_error",
+                    },
+                }
+            )
+        elif event == "answer":
+            answer = str(row.get("answer_preview") or "").strip()
+            specs.append(
+                {
+                    "node": "memory_recall/answer",
+                    "elapsed_ms": int(row.get("dur_ms") or 0),
+                    "input": "compose final answer (budget exhausted)",
+                    "output": answer or f"draft · {int(row.get('answer_len_chars') or 0)} chars",
+                    "decision": ("answered", "exitB"),
+                    "usage": _step_usage(model_id, row),
+                    "captures": ("usage", "decision"),
+                    "no_fold": True,
+                }
+            )
+    return specs
+
+
 def format_memory_recall_output_preview(
     events: list[dict[str, Any]],
     *,
@@ -255,7 +499,10 @@ def read_agent_retrieval_trace(workspace_path: Path, run_id: str) -> list[dict[s
 __all__ = [
     "AgentTranscriptSummary",
     "agent_trace_dir",
+    "build_recall_ledger_substeps",
     "build_retrieval_loop_payload",
+    "compact_recall_item",
+    "format_recall_items_preview",
     "format_memory_recall_output_preview",
     "read_agent_recall_result",
     "read_agent_retrieval_trace",

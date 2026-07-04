@@ -35,6 +35,8 @@ export const PREF_KEYS = {
   preferencesShowAdvanced: 'hiro.admin.preferences.showAdvanced',
   /** Expanded vs collapsed metric cards row on Graph Runs single-run view (toolbar card always stays). */
   graphRunsRunDetailCardsExpanded: 'hiro.admin.graphRuns.runDetail.cardsExpanded',
+  /** Width (px) of the Graph Runs node detail overlay panel — user-resizable via its left edge. */
+  graphRunsNodeDetailWidth: 'hiro.admin.graphRuns.nodeDetail.width',
   knowledgeLastFolderPrefix: 'hiro.admin.knowledge.lastFolder',
   /** Browse tab: render chunk text as formatted markdown (default on). */
   knowledgeChunkMarkdownFormat: 'hiro.admin.knowledge.chunkMarkdownFormat',

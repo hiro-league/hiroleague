@@ -158,7 +158,14 @@ export function filterGraphRunsRows(
 
 export function isGraphNodeSubstep(nodeName: string): boolean {
   const node = String(nodeName ?? '');
-  return node.startsWith('tools/') || node.startsWith('knowledge/');
+  // `memory_recall/*` = the retrieval-loop sub-nodes (memory_recall/turn · /search · /rerank · /answer)
+  // flushed under the `memory_recall` step when observability=trace. The `/` guards against matching
+  // the bare `memory_recall` parent, which stays a top-level step.
+  return (
+    node.startsWith('tools/') ||
+    node.startsWith('knowledge/') ||
+    node.startsWith('memory_recall/')
+  );
 }
 
 /** Secondary strip: ledger list vs opened run inspectors. */

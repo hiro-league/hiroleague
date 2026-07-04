@@ -26,6 +26,17 @@ export function writeLocalBoolean(key: string, value: boolean) {
   writeLocalString(key, String(value));
 }
 
+export function readLocalNumber(key: string, fallback: number): number {
+  const raw = readLocalString(key);
+  if (raw === null) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function writeLocalNumber(key: string, value: number) {
+  writeLocalString(key, String(value));
+}
+
 export function readSessionString(key: string): string | null {
   if (!browser) return null;
   return sessionStorage.getItem(key);

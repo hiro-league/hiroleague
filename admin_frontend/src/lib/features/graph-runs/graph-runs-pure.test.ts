@@ -81,10 +81,16 @@ describe('graphRunKindMatchesFilter', () => {
 });
 
 describe('isGraphNodeSubstep', () => {
-  it('is true for tools/ and knowledge/ node names', () => {
+  it('is true for tools/, knowledge/ and memory_recall/ node names', () => {
     expect(isGraphNodeSubstep('tools/search')).toBe(true);
     expect(isGraphNodeSubstep('knowledge/recall')).toBe(true);
+    expect(isGraphNodeSubstep('memory_recall/turn')).toBe(true);
+    expect(isGraphNodeSubstep('memory_recall/search')).toBe(true);
+    expect(isGraphNodeSubstep('memory_recall/rerank')).toBe(true);
+    expect(isGraphNodeSubstep('memory_recall/answer')).toBe(true);
     expect(isGraphNodeSubstep('agent')).toBe(false);
+    // The bare parent stays a top-level step (not indented).
+    expect(isGraphNodeSubstep('memory_recall')).toBe(false);
   });
 });
 
