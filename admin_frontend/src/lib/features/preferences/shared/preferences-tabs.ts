@@ -9,6 +9,7 @@ import {
   manifestSections,
   type PrefTabManifest
 } from '$lib/features/preferences/widgets/manifest/manifest-types';
+import { isFeatureActive, type FeatureId } from '$lib/shell/features';
 
 /** Page-level preference tabs (`?tab=` on `/preferences`). */
 export type PreferenceTabId =
@@ -46,6 +47,13 @@ export type PrefTabDescriptor = {
   legacyAliases?: readonly string[];
   /** Field paths + section titles a hand-rolled (non-manifest) tab contributes, in render order. */
   handRolled?: { fields: readonly string[]; sections: readonly string[] };
+  /**
+   * When set, this tab (its strip button + cards + Settings-search hits) is only shown while that
+   * feature is active (see features.ts). This is metadata only — the derived constants below stay
+   * COMPLETE (the full catalog of tabs), so the tab-map/search invariants hold regardless of what's
+   * currently exposed. Gating is applied at the render/search edge via `isPreferenceTabActive`.
+   */
+  feature?: FeatureId;
 };
 
 // Registry order drives the tab strip order AND the page's field/section render order.
@@ -83,12 +91,14 @@ export const PREFERENCE_TAB_REGISTRY: readonly PrefTabDescriptor[] = [
     label: 'Knowledge',
     manifest: KNOWLEDGE_MANIFEST,
     intro: { sectionKey: 'knowledge' },
-    headerAction: 'knowledgeBrowse'
+    headerAction: 'knowledgeBrowse',
+    feature: 'knowledge'
   },
   {
     id: 'eval',
     label: 'Eval',
     manifest: EVAL_MANIFEST,
+    feature: 'eval',
     intro: {
       text:
         'Settings for the evaluation harness — the answer and judge models the eval runs use, and ' +
@@ -117,6 +127,22 @@ export const PREFERENCE_TAB_PANEL_IDS = Object.fromEntries(
 export const PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] = PREFERENCE_TAB_REGISTRY.map(
   (tab) => ({ id: tab.id, label: tab.label })
 );
+
+// Feature gating (render/search edge only — the constants above stay complete). A tab tagged with a
+// `feature` is shown only while that feature is active in the ledger (features.ts).
+const TAB_FEATURE = new Map<PreferenceTabId, FeatureId>(
+  PREFERENCE_TAB_REGISTRY.filter((tab) => tab.feature).map((tab) => [tab.id, tab.feature as FeatureId])
+);
+
+/** True when a preference tab should be shown (untagged tabs are always active). */
+export function isPreferenceTabActive(tabId: PreferenceTabId): boolean {
+  const feature = TAB_FEATURE.get(tabId);
+  return !feature || isFeatureActive(feature);
+}
+
+/** The tabs to actually render/allow — `PREFERENCE_TABS` minus any whose feature is hidden. */
+export const VISIBLE_PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] =
+  PREFERENCE_TABS.filter((tab) => isPreferenceTabActive(tab.id));
 
 // ---------------------------------------------------------------------------
 // Path → tab assignment (Settings search / index)

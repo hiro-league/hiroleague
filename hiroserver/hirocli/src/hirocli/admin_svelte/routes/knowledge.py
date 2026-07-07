@@ -50,7 +50,15 @@ from hirocli.services.knowledge.live_registry import maybe_recover_abandoned_wor
 
 log = Logger.get("ADMIN.KNOWLEDGE")
 
+# Feature-gating split (no back-compat): endpoints that OTHER, non-gated features depend on live on
+# `knowledge_shared_router`, which is ALWAYS mounted (see admin_svelte/api.py); only the
+# Knowledge-admin-only endpoints stay on `knowledge_router`, which is gated behind the `knowledge`
+# feature. Shared = local embedder/reranker model management (Settings model pickers), the graph
+# VIEWER endpoints (the Memories page reuses the knowledge graph viewer), and the `/knowledge/events`
+# SSE stream (shell multiplexer + graph live-updates + eval progress). Same module scope, so both
+# routers share the module-level helpers/services — the split only changes what gets gated.
 knowledge_router = APIRouter()
+knowledge_shared_router = APIRouter()
 
 # Process-wide count of OPEN ``/knowledge/events`` SSE streams. After the frontend
 # multiplexer change each browser tab on the Knowledge page holds exactly ONE such stream
@@ -310,7 +318,7 @@ async def options(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.get("/knowledge/rerankers")
+@knowledge_shared_router.get("/knowledge/rerankers")
 async def list_rerankers(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
@@ -331,7 +339,7 @@ async def list_rerankers(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.post("/knowledge/rerankers/download")
+@knowledge_shared_router.post("/knowledge/rerankers/download")
 async def download_reranker(
     body: DownloadRerankerBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -362,7 +370,7 @@ async def download_reranker(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.post("/knowledge/rerankers/cancel")
+@knowledge_shared_router.post("/knowledge/rerankers/cancel")
 async def cancel_reranker_download(
     body: DownloadRerankerBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -387,7 +395,7 @@ async def cancel_reranker_download(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.get("/knowledge/embedders")
+@knowledge_shared_router.get("/knowledge/embedders")
 async def list_embedders(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
@@ -408,7 +416,7 @@ async def list_embedders(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.post("/knowledge/embedders/download")
+@knowledge_shared_router.post("/knowledge/embedders/download")
 async def download_embedder(
     body: DownloadEmbedderBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -434,7 +442,7 @@ async def download_embedder(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.post("/knowledge/embedders/cancel")
+@knowledge_shared_router.post("/knowledge/embedders/cancel")
 async def cancel_embedder_download(
     body: DownloadEmbedderBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -569,7 +577,7 @@ async def job_status(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.get("/knowledge/events")
+@knowledge_shared_router.get("/knowledge/events")
 async def stream_knowledge_events(
     request: Request,
     workspace: str | None = None,
@@ -834,7 +842,7 @@ class GraphSearchChunksBody(BaseModel):
     limit: int = 200
 
 
-@knowledge_router.post("/knowledge/graph/export")
+@knowledge_shared_router.post("/knowledge/graph/export")
 async def graph_export(
     body: GraphExportBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -889,7 +897,7 @@ async def graph_export(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.get("/knowledge/graph/groups")
+@knowledge_shared_router.get("/knowledge/graph/groups")
 async def graph_groups(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
@@ -924,7 +932,7 @@ class GraphEpisodesBody(BaseModel):
     limit: int = 2000
 
 
-@knowledge_router.post("/knowledge/graph/episodes")
+@knowledge_shared_router.post("/knowledge/graph/episodes")
 async def graph_episodes(
     body: GraphEpisodesBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -1034,7 +1042,7 @@ async def graph_remove_document(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.post("/knowledge/graph/chunks-detail")
+@knowledge_shared_router.post("/knowledge/graph/chunks-detail")
 async def graph_chunks_detail(
     body: GraphChunksDetailBody,
     workspace_id: SelectedWorkspaceIdDep,
@@ -1061,7 +1069,7 @@ async def graph_chunks_detail(
         return envelope_failure(str(exc))
 
 
-@knowledge_router.post("/knowledge/graph/search-chunks")
+@knowledge_shared_router.post("/knowledge/graph/search-chunks")
 async def graph_search_chunks(
     body: GraphSearchChunksBody,
     workspace_id: SelectedWorkspaceIdDep,

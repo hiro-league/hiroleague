@@ -105,7 +105,9 @@ export type ServerTabPreference = 'workspaces' | 'gateways' | 'metrics';
 export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type ChatOverlayMode = 'full' | 'partial';
-export type CatalogTabPreference = 'active-providers' | 'providers' | 'models';
+// Merged the former 'active-providers' tab into 'providers' — one providers list shows both
+// catalog + configured state, so the separate active tab no longer exists.
+export type CatalogTabPreference = 'providers' | 'models';
 export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type MemoriesTabPreference = 'memories' | 'graph';

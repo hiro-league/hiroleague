@@ -5,6 +5,7 @@
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import { createServerPreferences } from '$lib/preferences/server-preferences.svelte';
   import type { ServerTabPreference } from '$lib/preferences/keys';
+  import { isFeatureActive } from '$lib/shell/features';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
   import MetricsTab from '$lib/features/metrics/MetricsTab.svelte';
@@ -14,10 +15,15 @@
   const prefs = createServerPreferences();
   const toasts = createToastNotifier();
 
+  // The Metrics subtab is gated by the `metrics` feature (features.ts). When hidden its tab is
+  // dropped here and from the allowed-tab whitelist (server-preferences), so `?tab=metrics` falls
+  // back to the default (Workspaces) tab.
   const tabDescriptors: readonly AdminTabDescriptor<ServerTabPreference>[] = [
     { id: 'workspaces', label: 'Workspaces', kind: 'pane' },
     { id: 'gateways', label: 'Gateways', kind: 'pane' },
-    { id: 'metrics', label: 'Metrics', kind: 'pane' }
+    ...(isFeatureActive('metrics')
+      ? [{ id: 'metrics', label: 'Metrics', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
+      : [])
   ];
 
   onMount(() => {
@@ -35,12 +41,12 @@
     />
   {/snippet}
 
-  {#if prefs.activeTab === 'workspaces'}
-    <WorkspacesTab notify={toasts.notify} />
-  {:else if prefs.activeTab === 'gateways'}
+  {#if prefs.activeTab === 'gateways'}
     <GatewaysTab notify={toasts.notify} />
-  {:else}
+  {:else if prefs.activeTab === 'metrics' && isFeatureActive('metrics')}
     <MetricsTab notify={toasts.notify} />
+  {:else}
+    <WorkspacesTab notify={toasts.notify} />
   {/if}
 </AdminPageHeader>
 

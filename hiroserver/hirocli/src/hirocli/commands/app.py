@@ -12,6 +12,7 @@ from .character import register as register_character_commands
 from .device import register as register_device_commands
 from .logs import register as register_logs_commands
 from .knowledge import register as register_knowledge_commands
+from ..domain.features import feature_active
 from .metrics import register as register_metrics_commands
 from .root import register as register_root_commands
 from .catalog import register as register_catalog_commands
@@ -107,8 +108,13 @@ app.add_typer(channel_app, name="channel")
 app.add_typer(character_app, name="character")
 app.add_typer(device_app, name="device")
 app.add_typer(logs_app, name="logs")
-app.add_typer(knowledge_app, name="knowledge")
-app.add_typer(metrics_app, name="metrics")
+# Feature-gated: when Knowledge is hidden, its CLI group is neither mounted nor
+# populated, so `hiro knowledge ...` doesn't exist (not in --help, not runnable).
+if feature_active("knowledge"):
+    app.add_typer(knowledge_app, name="knowledge")
+# Feature-gated: when Metrics is hidden, `hiro metrics ...` is neither mounted nor populated.
+if feature_active("metrics"):
+    app.add_typer(metrics_app, name="metrics")
 app.add_typer(workspace_app, name="workspaces")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(provider_app, name="provider")
@@ -120,8 +126,10 @@ register_channel_commands(channel_app, console)
 register_character_commands(character_app, console)
 register_device_commands(device_app, console)
 register_logs_commands(logs_app, console)
-register_knowledge_commands(knowledge_app, console)
-register_metrics_commands(metrics_app, console)
+if feature_active("knowledge"):
+    register_knowledge_commands(knowledge_app, console)
+if feature_active("metrics"):
+    register_metrics_commands(metrics_app, console)
 register_workspace_commands(workspace_app, console)
 register_catalog_commands(catalog_app, console)
 register_provider_commands(provider_app, console)

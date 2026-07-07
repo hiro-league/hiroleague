@@ -7,6 +7,7 @@
  */
 import type { PreferencesSchemaMap } from '$lib/features/preferences/shared/preferences-schema';
 import type { PreferenceTabId } from '$lib/features/preferences/shared/preferences-tabs';
+import { isPreferenceTabActive } from '$lib/features/preferences/shared/preferences-tabs';
 import {
   buildPrefSearchIndex,
   countPrefMatchesByTab,
@@ -19,7 +20,11 @@ export function createPreferencesSearch(getSchema: () => PreferencesSchemaMap) {
   // Cursor into `matches`. -1 = no active match (blank query or no results).
   let activeIndex = $state(-1);
 
-  const index = $derived(buildPrefSearchIndex(getSchema()));
+  // Drop entries for tabs whose feature is hidden, so search never jumps to a gated tab. The index
+  // builder stays feature-agnostic (complete + unit-tested); gating is applied here at the edge.
+  const index = $derived(
+    buildPrefSearchIndex(getSchema()).filter((entry) => isPreferenceTabActive(entry.tabId))
+  );
   // Derived IN the controller (reads `query` in-scope) so it tracks reliably when consumed via the
   // `active` getter — a page-level `$derived(!!search.query.trim())` reading the raw-state getter
   // across modules did not register the dependency and never updated.

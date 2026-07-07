@@ -145,8 +145,27 @@ export function createCatalogController(notify: Notify) {
     }, {})
   );
 
+  // Merged tab row source: every catalog provider, plus any configured provider that isn't in the
+  // bundled catalog (built-in `local`, custom local endpoints) mapped into a minimal catalog row so
+  // it still appears and sorts. Catalog columns (credential env, recommended, updated) stay empty
+  // for those extras; their configured columns come from the active-providers join by provider_id.
+  const mergedProviders = $derived.by(() => {
+    const catalog = providersResource.data;
+    const known = new Set(catalog.map((p) => p.id));
+    const extras = activeProvidersStore.rows
+      .filter((row) => !known.has(row.provider_id))
+      .map(
+        (row): CatalogProviderRow => ({
+          id: row.provider_id,
+          display_name: row.display_name,
+          hosting: row.hosting
+        })
+      );
+    return [...catalog, ...extras];
+  });
+
   const providerCounts = $derived(
-    providersResource.data.reduce(
+    mergedProviders.reduce(
       (acc, provider) => {
         acc.total += 1;
         if (provider.hosting === 'cloud') acc.cloud += 1;
@@ -169,7 +188,7 @@ export function createCatalogController(notify: Notify) {
 
   const sortedProviders = $derived(
     sortProviders(
-      providersResource.data,
+      mergedProviders,
       providerSort.sortBy,
       asTableSortDirection(providerSort.direction),
       configuredWorkspaceProviderIds

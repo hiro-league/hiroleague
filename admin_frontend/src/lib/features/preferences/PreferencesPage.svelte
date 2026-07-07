@@ -20,7 +20,7 @@
     PREFERENCE_TAB_PANEL_IDS,
     PREFERENCE_TABLIST_LABEL,
     PREFERENCE_TAB_REGISTRY,
-    PREFERENCE_TABS,
+    VISIBLE_PREFERENCE_TABS,
     type PreferenceTabId
   } from '$lib/features/preferences/shared/preferences-tabs';
   import {
@@ -74,7 +74,7 @@
 
   // Per-tab result counts appear in the tab strip while a search is active (e.g. "Memory (3)").
   const subtabDescriptors = $derived<readonly AdminSubtabDescriptor<PreferenceTabId>[]>(
-    PREFERENCE_TABS.map((tab) => ({
+    VISIBLE_PREFERENCE_TABS.map((tab) => ({
       id: tab.id,
       label: tab.label,
       htmlId: PREFERENCE_TAB_IDS[tab.id],

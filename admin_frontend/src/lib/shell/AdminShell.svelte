@@ -34,6 +34,7 @@
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { navItems } from './nav';
+  import { isFeatureActive } from './features';
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import GlobalChatOverlay from '$lib/features/chat-channels/overlay/GlobalChatOverlay.svelte';
@@ -69,11 +70,15 @@
       : headerStatusLabel
   );
 
+  // Hide nav items whose feature is turned off in the ledger (features.ts). An empty
+  // group produces no <section>, so a fully-hidden group disappears too.
   const groups = $derived(
-    navItems.reduce<Record<string, typeof navItems>>((acc, item) => {
-      acc[item.group] = [...(acc[item.group] ?? []), item];
-      return acc;
-    }, {})
+    navItems
+      .filter((item) => !item.feature || isFeatureActive(item.feature))
+      .reduce<Record<string, typeof navItems>>((acc, item) => {
+        acc[item.group] = [...(acc[item.group] ?? []), item];
+        return acc;
+      }, {})
   );
 
   const iconMap = {

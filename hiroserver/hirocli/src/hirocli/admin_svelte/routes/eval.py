@@ -39,7 +39,11 @@ from hirocli.services.knowledge.graph.group_scope import KNOWLEDGE_GROUP_ID
 
 log = Logger.get("ADMIN.EVAL")
 
+# Feature-gating split (no back-compat): `/eval/row` is reused by the (non-gated) Graph Runs page,
+# so it lives on the always-mounted `eval_shared_router`; the rest of the eval batch surface stays on
+# the gated `eval_router`. See admin_svelte/api.py.
 eval_router = APIRouter()
+eval_shared_router = APIRouter()
 
 
 class EvalRunBody(BaseModel):
@@ -740,7 +744,7 @@ async def eval_results_clear(
         return envelope_failure(str(exc))
 
 
-@eval_router.get("/eval/row")
+@eval_shared_router.get("/eval/row")
 async def eval_row_by_run(
     workspace_id: SelectedWorkspaceIdDep,
     run_id: str = "",

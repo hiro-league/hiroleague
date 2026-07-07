@@ -1,19 +1,17 @@
 import type { PreferenceTabId } from '$lib/features/preferences/shared/preferences-tabs';
 import {
   DEFAULT_PREFERENCE_TAB,
+  VISIBLE_PREFERENCE_TABS,
   migrateLegacyPreferenceHash
 } from '$lib/features/preferences/shared/preferences-tabs';
 import { PREF_KEYS, type PreferencesTabPreference } from './keys';
 import { createTabPreferences } from './create-tab-preferences.svelte';
 
-const ALLOWED: readonly PreferencesTabPreference[] = [
-  'models',
-  'knowledge',
-  'graph-engine',
-  'eval',
-  'agent',
-  'tuning-profiles'
-] as const;
+// Only visible tabs are selectable — a hidden feature's tab id (e.g. `?tab=eval` when Eval is off)
+// fails validation in `normalise` and falls back to the default tab.
+const ALLOWED: readonly PreferencesTabPreference[] = VISIBLE_PREFERENCE_TABS.map(
+  (tab) => tab.id
+) as readonly PreferencesTabPreference[];
 
 export function createPreferencesTabPreferences() {
   const tabs = createTabPreferences<PreferencesTabPreference>({

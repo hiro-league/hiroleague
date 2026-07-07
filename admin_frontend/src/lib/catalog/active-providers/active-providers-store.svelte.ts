@@ -65,6 +65,11 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
 
   const configuredProviderIds = $derived(new Set(listResource.data.map((row) => row.provider_id)));
 
+  // Per-id lookup so the merged providers table can join catalog rows to their configured state.
+  const rowsByProviderId = $derived(
+    new Map(listResource.data.map((row) => [row.provider_id, row]))
+  );
+
   function providerKindLabel(provider: ActiveProviderRow): string {
     const kinds = [];
     if (provider.has_chat) kinds.push('chat');
@@ -164,7 +169,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     selectedProvider = null;
   }
 
-  async function openAddDialog() {
+  async function openAddDialog(preferredProviderId?: string) {
     openingDialog = true;
     addableProvidersLoading = true;
     try {
@@ -172,13 +177,16 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
       addableProviders = payload.data;
       checkResult = null;
       checking = false;
-      const first = addableProviders[0];
+      // Per-row "Add" passes the clicked provider so the dialog opens preselected to it;
+      // the generic add button falls back to the first addable provider.
+      const chosen =
+        (preferredProviderId && addableProviderById(preferredProviderId)) || addableProviders[0];
       addForm = {
-        provider_id: first?.id ?? '',
+        provider_id: chosen?.id ?? '',
         api_key: '',
         account_id: '',
         // Prefill the suggested endpoint for local providers (blank for cloud).
-        base_url: first?.default_base_url ?? ''
+        base_url: chosen?.default_base_url ?? ''
       };
       if (addableProviders.length === 0) {
         notify('info', 'All catalog providers are already configured.');
@@ -275,6 +283,9 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     },
     get configuredProviderIds(): Set<string> {
       return configuredProviderIds;
+    },
+    get rowsByProviderId(): Map<string, ActiveProviderRow> {
+      return rowsByProviderId;
     },
     get chatActiveProviderIds(): Set<string> {
       return activeProviderIdsFor((row) => row.has_chat);

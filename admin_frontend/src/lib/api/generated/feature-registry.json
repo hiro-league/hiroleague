@@ -1,0 +1,22 @@
+{
+  "eval": {
+    "label": "Eval",
+    "active": false,
+    "note": "Memory/knowledge evaluation harness."
+  },
+  "image_lab": {
+    "label": "Image Lab",
+    "active": false,
+    "note": "Text-to-image playground over the generate_image tool."
+  },
+  "knowledge": {
+    "label": "Knowledge",
+    "active": false,
+    "note": "Workspace knowledge base ingest/browse/search admin."
+  },
+  "metrics": {
+    "label": "Metrics",
+    "active": false,
+    "note": "Server resource metrics (CPU/memory/disk/network)."
+  }
+}
