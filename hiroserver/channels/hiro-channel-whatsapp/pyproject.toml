@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hiro-channel-whatsapp"
+version = "0.1.0"
+description = "WhatsApp channel plugin for Hiro-League (neonize / whatsmeow)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
+keywords = ["home", "server", "channel", "plugin", "whatsapp", "neonize"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Communications :: Chat",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "typer>=0.12",
+    # neonize: Python bindings over the Go `whatsmeow` multi-device library.
+    # Provides the async NewAClient used to link/receive/send over WhatsApp Web.
+    "neonize>=0.4,<0.5",
+    # qrcode: render the pairing QR as ASCII into the plugin log (P1 has no UI yet).
+    "qrcode>=7",
+    "hiro-channel-sdk~=0.1.3",
+    "hiro-commons~=0.1.3",
+]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
+
+[project.scripts]
+hiro-channel-whatsapp = "hiro_channel_whatsapp.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hiro_channel_whatsapp"]
+
+[tool.uv.sources]
+hiro-channel-sdk = { workspace = true }
+hiro-commons = { workspace = true }

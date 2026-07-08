@@ -47,6 +47,37 @@ function catalogModelDisplayNameMap(rows: CatalogModelRow[]): Record<string, str
   return out;
 }
 
+/** Per-provider catalog model count + supported kinds. These are intrinsic to the provider's
+ *  catalog (independent of whether it is configured in this workspace), so the providers table
+ *  shows them for every row — not just configured ones. */
+export type CatalogProviderModelStats = { count: number; kinds: string[] };
+
+function catalogProviderModelStats(
+  rows: CatalogModelRow[]
+): Record<string, CatalogProviderModelStats> {
+  const acc = new Map<string, { count: number; kinds: Set<string> }>();
+  for (const row of rows) {
+    let entry = acc.get(row.provider_id);
+    if (!entry) {
+      entry = { count: 0, kinds: new Set() };
+      acc.set(row.provider_id, entry);
+    }
+    entry.count += 1;
+    if (row.model_kind) entry.kinds.add(row.model_kind);
+    for (const extra of row.extra_kinds ?? []) entry.kinds.add(extra);
+  }
+  const order = [...MODEL_KIND_FILTER_IDS] as string[];
+  const rank = (k: string) => {
+    const i = order.indexOf(k);
+    return i === -1 ? order.length : i;
+  };
+  const out: Record<string, CatalogProviderModelStats> = {};
+  for (const [providerId, entry] of acc) {
+    out[providerId] = { count: entry.count, kinds: [...entry.kinds].sort((a, b) => rank(a) - rank(b)) };
+  }
+  return out;
+}
+
 export function createCatalogController(notify: Notify) {
   const prefs = createCatalogPreferences();
   const activeProvidersStore = createActiveProvidersStore(notify);
@@ -72,6 +103,8 @@ export function createCatalogController(notify: Notify) {
   let catalogVersion = $state<string | null>(null);
   /** All bundled models — used to resolve recommended_models ids to display names on the providers tab. */
   let catalogModelDisplayNames = $state<Record<string, string>>({});
+  /** Per-provider catalog model count + kinds (shown for every provider row, active or not). */
+  let catalogModelStatsByProvider = $state<Record<string, CatalogProviderModelStats>>({});
 
   const providersResource = createResource(
     async () => (await listCatalogProviders()).data,
@@ -131,6 +164,7 @@ export function createCatalogController(notify: Notify) {
         if (list) indexRows.push(...list);
       }
       catalogModelDisplayNames = catalogModelDisplayNameMap(indexRows);
+      catalogModelStatsByProvider = catalogProviderModelStats(indexRows);
       await activeProvidersStore.load({ silent: true });
       if (prefs.activeTab === 'models') {
         await modelsResource.load({ silent: true });
@@ -262,12 +296,15 @@ export function createCatalogController(notify: Notify) {
   async function loadCatalogModelIndex() {
     try {
       const payload = await listCatalogModels();
-      catalogModelDisplayNames = catalogModelDisplayNameMap(payload.data?.models ?? []);
+      const rows = payload.data?.models ?? [];
+      catalogModelDisplayNames = catalogModelDisplayNameMap(rows);
+      catalogModelStatsByProvider = catalogProviderModelStats(rows);
       if (payload.data?.catalog_version) {
         catalogVersion = payload.data.catalog_version;
       }
     } catch {
       catalogModelDisplayNames = {};
+      catalogModelStatsByProvider = {};
     }
   }
 
@@ -396,6 +433,9 @@ export function createCatalogController(notify: Notify) {
     },
     get catalogModelDisplayNames() {
       return catalogModelDisplayNames;
+    },
+    get catalogModelStatsByProvider() {
+      return catalogModelStatsByProvider;
     },
     get configuredWorkspaceProviderIds() {
       return configuredWorkspaceProviderIds;

@@ -92,6 +92,13 @@ export function catalogKindsTitle(model: CatalogModelRow): string {
     .join(' · ');
 }
 
+/** Compact text label for a provider's supported kinds (Providers table Kinds column).
+ *  `image_gen` is shortened to `image` to match the former active-provider label style. */
+export function formatProviderKindsLabel(kinds: string[]): string {
+  if (!kinds.length) return '-';
+  return kinds.map((k) => (k === 'image_gen' ? 'image' : k)).join(', ');
+}
+
 export function catalogHostingUiForRow(hosting: string | null | undefined) {
   const h = (hosting ?? '').trim().toLowerCase() as HostingFilterId;
   if (h in HOSTING_FILTER_UI) {

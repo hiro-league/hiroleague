@@ -12,7 +12,7 @@
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import ProviderFreeOffersBadge from '$lib/features/catalog/shared/ProviderFreeOffersBadge.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import { AVAILABILITY_FILTER_UI } from '$lib/features/catalog/shared/catalog-filter-ui';
+  import { AVAILABILITY_FILTER_UI, formatProviderKindsLabel } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
@@ -100,7 +100,9 @@
       hint={activeOnly ? 'Add a provider or turn off the active-only filter.' : undefined}
     />
   {:else}
-    <AdminTableShell stickyHead class={cn('min-w-[1180px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
+    <!-- min-w is shared with ModelsTab (keep in sync) so both tabs render at the same content width
+         and switching Providers↔Models doesn't jump. Sized just above the wider table's natural width. -->
+    <AdminTableShell stickyHead class={cn('min-w-[1540px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="online" sort={ctrl.providerSort} class="w-12 text-center">
@@ -121,6 +123,7 @@
         {#each visibleProviders as provider (provider.id)}
           {@const active = store.rowsByProviderId.get(provider.id)}
           {@const isOnline = ctrl.configuredWorkspaceProviderIds.has(provider.id)}
+          {@const stats = ctrl.catalogModelStatsByProvider[provider.id]}
           <tr class="border-t">
             <td class="px-2 py-3 text-center">
               {#if isOnline}
@@ -180,11 +183,14 @@
               <Badge variant={provider.hosting === 'cloud' ? 'secondary' : 'outline'}>{provider.hosting}</Badge>
             </td>
             <td class="truncate px-3 py-3 text-xs text-muted-foreground">{active?.auth_method ?? '-'}</td>
+            <!-- Models count & Kinds come from the provider's catalog (intrinsic to the provider),
+                 not the active-providers join, so they show for every row. Fall back to the active
+                 row for providers that aren't in the bundled catalog model list (e.g. built-in local). -->
             <td class="px-3 py-3 text-center text-xs text-muted-foreground">
-              {active ? active.available_model_count : '-'}
+              {stats ? stats.count : (active ? active.available_model_count : '-')}
             </td>
             <td class="truncate px-3 py-3 text-xs text-muted-foreground">
-              {active ? store.providerKindLabel(active) : '-'}
+              {stats ? formatProviderKindsLabel(stats.kinds) : (active ? store.providerKindLabel(active) : '-')}
             </td>
             <td class="truncate px-3 py-3 text-xs text-muted-foreground">
               {provider.credential_env_keys?.length ? provider.credential_env_keys.join(', ') : '-'}

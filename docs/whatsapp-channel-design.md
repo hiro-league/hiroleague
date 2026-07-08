@@ -16,6 +16,9 @@
 > **[neonize](https://github.com/krypton-byte/neonize)** — Python bindings over the Go
 > `whatsmeow` multi-device library, shipped as prebuilt wheels (`pip install neonize`).
 >
+> **Implementation plan:** [`whatsapp-channel-implementation.md`](whatsapp-channel-implementation.md)
+> (per-phase tasks, exact file paths/signatures, acceptance criteria).
+>
 > **Companions:** [Channel Plugins](../../hiro-docs/mintdocs/architecture/concepts/channel-plugins.mdx)
 > (plugin subprocess model + JSON-RPC contract), [Agent Graph](../../hiro-docs/mintdocs/architecture/concepts/agent-graph.mdx)
 > (STT → LLM → TTS pipeline this reuses), [network-topology](../../hiro-docs/mintdocs/architecture/concepts/network-topology.mdx).
@@ -51,12 +54,15 @@ neonize client object, which we treat as a swappable adapter.
 | Plugin topology | **Single Python plugin** (`ChannelPlugin` subclass) | neonize removes the need for a Node sidecar — one process, standard `uv`-installed plugin like every other channel. |
 | Distribution | **First-party but *optional*** | Authored/maintained by us, but **not mandatory** like `devices`; the user opts in. |
 | Dependency isolation | **Heavy deps (`neonize`, `ffmpeg`) installed only on opt-in** | Channels are separate packages in separate envs; `hirocli` depends on no channel, so nothing pulls WhatsApp deps unless the user adds this channel. |
+| Packaging | **Separate installable package** (like `devices`) | Opt-in `install` into its own isolated env; no bundling into core, no optional extra needed — per-plugin envs already isolate deps. |
 | Activation | **Hot spawn/stop — no restart** | `ChannelManager` gains `activate(name)`/`deactivate(name)`; a newly-enabled channel comes alive live. |
-| Onboarding | **CLI *and* Admin UI**, both over the same channel Tools | Reuse existing `ChannelSetupTool`/`ChannelEnableTool`/… per the Tools Architecture; UI owns configure/enable/pair/status. |
+| Onboarding | **CLI *and* Admin UI**, both over the same channel Tools | Reuse existing `ChannelSetupTool`/`ChannelEnableTool`/… per the Tools Architecture; both surfaces call the same `ChannelInstallTool`; UI owns configure/enable/pair/status. |
 | Auth | **QR / pair-code** login, surfaced in **Admin UI** | Standard WhatsApp Web linking; neonize persists session so re-login is rare. |
 | Session store | **SQLite** under the workspace | neonize's default; one file, no external DB needed. |
+| v1 scope | **1:1 chats, single linked account** | Groups and multiple WhatsApp accounts are deferred (see §5). |
+| Identity | **Allow-listed sender → default user + default character** | Single-user today (`get_default_user_id` = 1); becomes a real `number → user_id` table under future multi-user. |
 | Audio inbound | **Pass through to existing STT** | WhatsApp voice notes are OGG/Opus — already accepted by OpenAI/Gemini STT. No transcoding. |
-| Audio outbound | **Transcode TTS → OGG/Opus** before `send_audio(ptt=True)` | WhatsApp native voice notes require OGG/Opus; TTS emits MP3. `ffmpeg` invoked in-process. |
+| Audio outbound | **Always transcode TTS → OGG/Opus** + `ptt=true` | A native voice note *requires* OGG/Opus (`audio/ogg; codecs=opus`); MP3-as-PTT is broken. `ffmpeg` invoked in-process; file-send is an emergency fallback only. |
 
 **Why neonize over the Node libraries:** the underlying engine (`whatsmeow`) is the same class
 of multi-device client as Baileys — same protocol, same personal-account support, same QR
@@ -203,9 +209,14 @@ the reply renders as a native voice bubble rather than a file attachment.
   subprocesses in their own environments; `hirocli` does not depend on any channel package.
   Therefore `neonize` and `ffmpeg` are **only** pulled in when a user opts into WhatsApp — a
   user who never adds it pays nothing.
-- **Packaging.** WhatsApp's heavy dependencies (`neonize`, `ffmpeg`) are gated behind an
-  **optional dependency extra** so they install only on opt-in. (Extra-on-a-bundled-package vs
-  a fully separate installable package is the remaining packaging detail — see §10.)
+- **Packaging — separate installable package.** WhatsApp ships as its own distribution
+  (`hiro-channel-whatsapp`), installed opt-in via `uv tool install` into its **own isolated
+  environment**, exactly like `hiro-channel-devices`/`hiro-channel-echo`. Because per-plugin
+  envs already isolate dependencies, there is **no bundling into core and no optional extra** —
+  a user who never installs WhatsApp never pulls `neonize`/`ffmpeg`.
+- **v1 scope — 1:1, single account.** One linked WhatsApp account per plugin instance, 1:1
+  chats only. **Group chats** and **multiple accounts** are deferred (multi-account would mean
+  multiple neonize clients / plugin instances, since whatsmeow is one-session-per-client).
 - **Hot activation — no restart.** `ChannelManager` exposes `activate(name)` / `deactivate(name)`
   so enabling a channel spawns its subprocess live, and disabling it sends `channel.stop` and
   reaps the process. The scaffolding already exists (`_spawn_one`, the plugin WebSocket server,
@@ -269,8 +280,9 @@ stateDiagram-v2
 - **CLI and Admin UI both drive the same channel Tools** (`ChannelSetupTool`,
   `ChannelEnableTool`, `ChannelDisableTool`, `ChannelListTool`, `ChannelRemoveTool`) — per the
   Tools Architecture, one Tool backs CLI + HTTP + UI.
-- **Admin UI owns** configure, enable/disable, pair (QR), and live status. **Install** is an
-  optional-convenience button (curated first-party package) or handled by the optional extra.
+- **Admin UI owns** configure, enable/disable, pair (QR), and live status. **Install** is
+  offered from **both** the CLI (`hiro channel install whatsapp`) and an Admin UI button —
+  both call the same `ChannelInstallTool`.
 - **HTTP endpoints** expose the channel Tools to the Admin UI (config writes go through the
   server that owns `workspace.db`, like Preferences).
 - **Feature-flag** the Admin page via the codegen'd feature ledger
@@ -296,9 +308,14 @@ stateDiagram-v2
 - **Config** (stored in `workspace.db::channel_plugins.config`, edited via the new config
   editor / Admin UI): session-DB path, default character to route to, allow-list of permitted
   WhatsApp numbers (so strangers can't talk to your agent), audio on/off toggles. Exact keys TBD.
-- **Identity mapping:** neonize delivers a sender JID (`<number>@s.whatsapp.net`). The plugin
-  maps it to a Hiro user + character. **Open question** (§10): 1:1 number→character, a routing
-  table, or first-contact provisioning.
+- **Identity mapping:** WhatsApp has two identities — the **linked account** (the agent's own
+  number, chosen at QR pairing; the transport) and the **sender** (whoever messages it, a JID
+  `<number>@s.whatsapp.net`). Only the **sender** maps to a Hiro identity. **v1 rule:** an
+  **allow-listed sender number → the default `user_id` (`get_default_user_id`, = 1) → the
+  default character** (`default_character_id`); unknown senders are ignored. All WhatsApp chat
+  therefore lands in the single `mem_{user}_{character}` memory partition — consistent with the
+  current single-user model. Under future multi-user this degenerate one-row rule becomes a real
+  `number → user_id` table.
 - **Session persistence:** neonize stores the linked-device session in a **SQLite DB** under
   the workspace (e.g. `<workspace>/channels/whatsapp/session.db`). Present + linked ⇒ no QR on
   restart. Deleting it forces fresh QR pairing (the "log out / re-link" operation).
@@ -310,43 +327,59 @@ stateDiagram-v2
 | Direction | WhatsApp format | Hiro pipeline | Action |
 |-----------|-----------------|---------------|--------|
 | Inbound voice | OGG/Opus | STT accepts OGG/Opus | **Pass through**, no transcode |
-| Outbound voice | needs OGG/Opus (PTT) | TTS emits MP3 (OpenAI) / OGG (Gemini) | **Transcode MP3 → OGG/Opus**, then `send_audio(ptt=True)` |
+| Outbound voice | needs OGG/Opus (PTT) | TTS emits MP3 (OpenAI) / OGG (Gemini) | **Always transcode → OGG/Opus**, then `send_audio(ptt=True)` |
 
 `ffmpeg` becomes a runtime dependency of the plugin (invoked directly from Python — no separate
-process to manage beyond the ffmpeg call). Fallback if we want to defer transcoding: send the
-MP3 as a plain audio **document**, which shows as a file rather than a native voice bubble.
+process to manage beyond the ffmpeg call).
+
+**Implementation note (record for later):** a native WhatsApp voice note *requires* the Ogg
+container with the **Opus** codec and mimetype `audio/ogg; codecs=opus`, sent as a whatsmeow
+`AudioMessage` with `PTT=true`. Sending **MP3 with `ptt=true` is a known-broken combination**
+(it breaks playback on Android), so the transcode is mandatory, not optional. Sending the MP3
+as a plain audio **document** (a tap-to-open file, not a voice bubble) remains only as an
+emergency fallback if transcoding is unavailable.
 
 ---
 
 ## 10. Open questions (defer to implementation)
 
-1. **Identity/routing:** how WhatsApp numbers map to users/characters, and how unknown senders
-   are handled (ignore / allow-list / auto-provision).
-2. **Multi-account:** one WhatsApp number per plugin instance, or several? (whatsmeow is
-   one-session-per-client; multiple numbers ⇒ multiple plugin instances.)
-3. **Groups:** support WhatsApp group chats, or 1:1 only for v1? (Recommend 1:1 first.)
-4. **Transcode vs file** for outbound audio (native voice note vs audio file) — pick per §9.
-5. **Ban-resilience:** reconnect/backoff policy, and detecting + surfacing a logged-out/banned
-   session to the user.
-6. **Packaging shape:** deps-as-extra on a bundled package vs a fully separate installable
-   package; and how `ffmpeg` is provided (bundled vs system dependency documented in setup).
-   Confirm neonize wheels cover the target OSes (esp. Windows).
-7. **UI-triggered install:** offer an in-UI install button (curated first-party package only) as
-   an optional convenience, or keep install to CLI / the optional extra.
+Scope, identity, audio format, packaging, and install surfaces are **decided** (§2, §5, §8, §9).
+What remains genuinely open:
+
+1. **Ban-resilience:** reconnect/backoff policy, and how a logged-out/banned session is detected
+   and surfaced to the user (maps to the `Error` transitions in the §6.3 state machine).
+2. **ffmpeg provisioning:** bundled with the plugin vs a documented system dependency (first-time
+   setup); and confirm `neonize` prebuilt wheels cover the target OSes (esp. Windows).
+3. **Allow-list UX:** how the permitted sender number(s) are entered/managed in the config editor
+   (single number for v1 vs a small list).
+
+**Deferred (not planned for v1):** WhatsApp **group chats** and **multiple accounts** (§5).
 
 ---
 
 ## 11. Suggested phasing
 
-1. **Phase 1 — text round-trip.** Python plugin skeleton wrapping `neonize.NewAClient` + QR
-   login + config. Prove: WhatsApp text in → LLM → WhatsApp text out.
-2. **Phase 2 — inbound voice.** Download voice note → `audio` ContentItem → existing STT
-   transcribes → LLM replies (text). No new pipeline code expected.
-3. **Phase 3 — outbound voice.** Handle `message.voiced` in `send()`, transcode to OGG/Opus,
-   `send_audio(ptt=True)`.
-4. **Phase 4 — operability.** Config editor + HTTP endpoints, `ChannelManager` hot spawn/stop,
-   lifecycle-state surfacing, and the Admin UI channel page (install/configure/enable/pair/status).
-5. **Phase 5 — hardening.** Allow-list, reconnect/ban handling, packaging + ffmpeg docs.
+Phases are **vertical slices** — each ends at something testable, the riskiest/most-visible
+parts come first, and audio is deliberately late. Text send/receive works by P2; audio only
+appears at P6–P7 and blocks nothing before it.
+
+| Phase | Goal | What's built | Test milestone |
+|-------|------|--------------|----------------|
+| **P1 — Link & receive (raw)** | Prove the hard part early | Plugin skeleton wrapping `neonize.NewAClient`; QR login; SQLite session persistence; inbound messages **logged**, not yet routed. Install via CLI + restart. | Pair by scanning the QR; send the number a WhatsApp text and watch it arrive in the logs. No reply yet. |
+| **P2 — Text round-trip** | The core money shot | Wire inbound text → `emit(UnifiedMessage)` → agent → `send()` text back. Identity = default user + default character; allow-list defaulted. | Text the number → your character replies over WhatsApp. Full text conversation. |
+| **P3 — Settings / config editor** | Make it configurable | Server-owned `config` write + the config editor (closes the current gap); allow-listed sender, default character, on/off. CLI/API first. | Set the allowed sender + character in settings and see them enforced (unknown numbers ignored). |
+| **P4 — Admin UI onboarding** | See it in the app | Channels admin page: install button, enable/disable, configure form, **QR rendered in-UI**, connection status. Reuses the channel Tools over HTTP; feature-flagged via the ledger. | Install, pair (scan QR in the browser), and manage WhatsApp entirely from the Admin UI. |
+| **P5 — Hot spawn/stop + lifecycle** | No-restart UX | `ChannelManager.activate/deactivate`; surface the §6.3 state machine as live status. | Toggle enable in the UI → it connects live, no restart; watch the state advance. |
+| **P6 — Inbound voice** | Understand voice notes | Download voice note → `audio` ContentItem → existing STT → text reply. No new pipeline code expected. | Send a voice note → character understands it and replies (text). |
+| **P7 — Outbound voice** | Reply in voice | Handle `message.voiced` in `send()`; ffmpeg MP3→OGG/Opus; `send_audio(ptt=true)`. | Character replies with a real WhatsApp voice-note bubble. |
+| **P8 — Hardening** | Make it robust | Ban/logout detection + reconnect/backoff, error surfacing on the state machine, ffmpeg provisioning, packaging + first-time-setup docs. | Kill the network / log out the session → clean recovery and a clear status in the UI. |
+
+**Ordering rationale:** P1 front-loads all neonize/QR/session/Windows-wheel risk before any UI
+or audio investment; a real text conversation lands at P2 on a CLI install; install and settings
+appear early (P1 CLI → P3 settings → P4 UI install) without building UI before the core works;
+audio is isolated at the end and its two directions (P6/P7) are separable. **Flexibility:** P3
+and P4 can swap — the UI form and the config-write are the same underlying capability; config is
+ordered first only because the form needs something to write to.
 
 ---
 
@@ -355,18 +388,20 @@ MP3 as a plain audio **document**, which shows as a file rather than a native vo
 - **New channel plugin, single pure-Python process** using **neonize** (Python wrapper over Go
   `whatsmeow` — same multi-device protocol as the Node libs, native asyncio, `pip install`).
   No Node, no sidecar.
-- **First-party but optional**, with `neonize`/`ffmpeg` **isolated per-plugin** (installed only
-  on opt-in). Not mandatory like `devices`.
+- **First-party but optional**, shipped as a **separate installable package like `devices`**,
+  with `neonize`/`ffmpeg` **isolated per-plugin** (installed only on opt-in). Not mandatory.
+- **v1 scope:** 1:1 chats, single linked account. An **allow-listed sender → default user →
+  default character** (single-user today).
 - **Onboarding is three independent, restart-free steps** — install, activate (hot spawn/stop),
-  pair (QR) — driven from CLI **and** an Admin UI page over the existing channel Tools. Channel
-  status is a **lifecycle state machine**, not a boolean.
+  pair (QR) — driven from CLI **and** an Admin UI page over the existing channel Tools (same
+  `ChannelInstallTool`). Channel status is a **lifecycle state machine**, not a boolean.
 - **Two new engine pieces:** `ChannelManager` **hot spawn/stop**, and a **config editor**
   (today only the launch command + enabled are settable; `config` keys are not).
 - **STT/TTS and outbound routing already exist and are channel-agnostic** — we mostly wire, not
   build, the audio path.
-- **Inbound voice is free** (OGG/Opus → STT). **Outbound voice** needs an MP3→OGG/Opus `ffmpeg`
-  transcode before `send_audio(ptt=True)`.
+- **Inbound voice is free** (OGG/Opus → STT). **Outbound voice** is **always** transcoded
+  MP3→OGG/Opus before `send_audio(ptt=True)` — MP3-as-PTT is broken.
 - **Auth = QR** in Admin UI; session persisted to SQLite so re-login is rare.
 - **Accepted risk:** unofficial lib ⇒ ban/brittleness, confined behind the neonize client.
-- **Deferred (§10):** identity/routing, groups vs 1:1, multi-account, ban-resilience, packaging
-  shape, UI-triggered install.
+- **Genuinely open (§10):** ban-resilience policy, ffmpeg provisioning, allow-list UX.
+  **Deferred:** group chats, multiple accounts.

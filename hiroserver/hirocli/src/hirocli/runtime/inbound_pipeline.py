@@ -50,6 +50,33 @@ def _check_permissions(msg: UnifiedMessage) -> None:
     """Placeholder for inbound user/channel permission checks."""
 
 
+def _ensure_conversation(ctx: "ServerContext", msg: UnifiedMessage) -> None:
+    """Populate ``routing.metadata.chat_channel_id`` for channels that don't supply it.
+
+    Device clients include ``chat_channel_id`` (they synced the conversation
+    earlier). Channels like WhatsApp arrive with only a sender JID, so map
+    ``(channel, sender_id)`` to a conversation here — mutating the shared ``msg``
+    object *before* both persistence and agent dispatch read the key.
+    """
+    from ..domain.conversation_channel import (
+        CHAT_CHANNEL_ID_METADATA_KEY,
+        resolve_or_create_channel_for_sender,
+    )
+
+    if msg.message_type != MESSAGE_TYPE_MESSAGE:
+        return
+    meta = msg.routing.metadata
+    if meta.get(CHAT_CHANNEL_ID_METADATA_KEY):
+        return
+    sender = msg.routing.sender_id
+    if not sender:
+        return
+    conv = resolve_or_create_channel_for_sender(
+        ctx.workspace_path, channel=msg.routing.channel, sender_id=sender,
+    )
+    meta[CHAT_CHANNEL_ID_METADATA_KEY] = conv.id
+
+
 class InboundPipeline:
     """Routes inbound UnifiedMessages by ``message_type``."""
 
@@ -86,6 +113,16 @@ class InboundPipeline:
             msg = UnifiedMessage.model_validate(data)
         except Exception as exc:
             log.warning(f"⚠️ {LOG_IN} Dropping malformed message", error=str(exc))
+            return
+
+        try:
+            _ensure_conversation(self._ctx, msg)
+        except Exception as exc:
+            # Without a resolved conversation the message can't be threaded/persisted.
+            log.warning(
+                f"⚠️ {LOG_IN} Could not resolve conversation — dropping",
+                **comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
+            )
             return
 
         try:

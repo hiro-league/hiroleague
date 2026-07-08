@@ -53,7 +53,9 @@
   {:else if ctrl.filteredModels.length === 0}
     <InlineEmptyState message="No models match the current filters." />
   {:else}
-    <AdminTableShell stickyHead class={cn('min-w-[1180px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
+    <!-- min-w is shared with ProvidersTab (keep in sync) so both tabs render at the same content
+         width and switching Models↔Providers doesn't jump. -->
+    <AdminTableShell stickyHead class={cn('min-w-[1540px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="online" sort={ctrl.modelSort} class="w-12 text-center">

@@ -33,6 +33,7 @@ from hiro_channel_sdk.log_scope_fields import (
     log_preview_snippet,
     unified_message_text_preview,
 )
+from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_channel_sdk.models import (
     ContentItem,
     EventPayload,
@@ -284,6 +285,12 @@ class GraphEventSubscriber:
     ) -> None:
         """Re-broadcast the inbound user message so all paired devices see it."""
         if inbound.routing.direction != "inbound":
+            return
+        # The mirror is a devices fan-out: sibling devices see the row live, and
+        # the gateway excludes the origin device so it isn't echoed its own text.
+        # External channels (e.g. whatsapp) have no such exclusion, so mirroring
+        # there sends the user's own message straight back to them — skip it.
+        if inbound.routing.channel != MANDATORY_CHANNEL_NAME:
             return
         mirror = EnvelopeFactory.user_message_mirror(inbound)
         await emit(mirror)

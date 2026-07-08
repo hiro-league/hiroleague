@@ -451,8 +451,10 @@ class ChannelManager:
             payload.setdefault("gateway_url", self._ctx.config.gateway_url)
             payload.setdefault("device_id", self._ctx.config.device_id)
             payload.setdefault("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
-        if payload:
-            await self.configure_channel(channel_name, payload)
+        # Always send channel.configure — even with an empty payload. The plugin
+        # transport only calls on_start() from the configure handler, so a channel
+        # with no config (e.g. whatsapp in P1) would otherwise never start.
+        await self.configure_channel(channel_name, payload)
 
     # ------------------------------------------------------------------
     # Outbound API (Hiro → plugin)

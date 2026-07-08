@@ -271,6 +271,39 @@ def create_channel(
         return created
 
 
+def resolve_or_create_channel_for_sender(
+    workspace_path: Path,
+    *,
+    channel: str,
+    sender_id: str,
+    character_id: str | None = None,
+) -> ConversationChannel:
+    """Find or create the conversation for a channel peer (e.g. a WhatsApp sender).
+
+    Device clients supply ``chat_channel_id`` directly (they synced the channel
+    earlier). Channels like WhatsApp arrive with only a sender JID, so map
+    ``(channel, sender_id)`` to a stable, user-scoped conversation — created on
+    first contact with the default character — so messages thread consistently
+    and replies route back to the same channel.
+    """
+    from .character import default_character_id  # lazy: avoid import cycle
+
+    uid = get_default_user_id(workspace_path)
+    name = f"{channel}:{sender_id}"  # stable per-peer key (also the display name for now)
+    existing = _get_channel_by_name(workspace_path, name, user_id=uid)
+    if existing is not None:
+        return existing
+    char = character_id or default_character_id(workspace_path)
+    try:
+        return create_channel(workspace_path, name=name, character_id=char, user_id=uid)
+    except ValueError:
+        # A concurrent inbound raced us to create the same channel; re-fetch it.
+        found = _get_channel_by_name(workspace_path, name, user_id=uid)
+        if found is not None:
+            return found
+        raise
+
+
 def update_channel(
     workspace_path: Path,
     channel_id: int,

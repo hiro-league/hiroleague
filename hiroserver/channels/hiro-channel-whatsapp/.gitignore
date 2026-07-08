@@ -1,0 +1,3 @@
+# Dedicated plugin venv (dev): neonize needs protobuf 7.x, which conflicts with
+# the shared workspace venv's protobuf 6.x — so this channel runs from its own env.
+.venv/

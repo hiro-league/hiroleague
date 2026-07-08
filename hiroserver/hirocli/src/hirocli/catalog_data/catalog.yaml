@@ -6,7 +6,7 @@
 # tts_voices: preset ids for bundled TTS integrations — verify against vendor docs when upgrading SDKs.
 # catalog_version: PEP 440-style string (quote so YAML does not parse as float).
 # Pinned to 0.1.3 until the hirocli/app package version is published (bump together then).
-catalog_version: "0.1.4"
+catalog_version: "0.1.5"
 
 providers:
   - id: openai
@@ -86,8 +86,8 @@ providers:
     credential_env_keys: [ANTHROPIC_API_KEY]
     docs_url: https://platform.claude.com/docs
     recommended_models:
-      chat: anthropic:claude-sonnet-4-6
-    metadata_updated_at: "2026-03-27"
+      chat: anthropic:claude-sonnet-5
+    metadata_updated_at: "2026-07-07"
 
   # DeepSeek V4 — OpenAI-compatible (api.deepseek.com). Unified dual-mode models
   # (thinking / non-thinking) toggled per-request; old deepseek-chat/reasoner deprecate 2026-07-24.
@@ -685,7 +685,75 @@ models:
       pricing_updated_at: "2026-05-03"
       pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-pro-preview-tts
 
-  # --- Anthropic Claude 4.6 family (platform.claude.com/docs/.../models/overview) ---
+  # --- Anthropic Claude (platform.claude.com/docs/.../models/overview) ---
+  - id: anthropic:claude-sonnet-5
+    provider_id: anthropic
+    display_name: Claude Sonnet 5
+    released_at: "2026-06-30"
+    model_kind: chat
+    model_class: agentic
+    context_window: 1000000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, reasoning]
+    notes: Introductory pricing $2/$10 per MTok through 2026-08-31; standard $3/$15 thereafter. Adaptive thinking.
+    pricing:
+      input_per_1m_tokens: 3.00
+      cached_input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 15.00
+      pricing_updated_at: "2026-07-07"
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
+  - id: anthropic:claude-fable-5
+    provider_id: anthropic
+    display_name: Claude Fable 5
+    released_at: "2026-06-09"
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1000000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, reasoning]
+    notes: Mythos-class GA model; adaptive thinking always on. Some high-risk topics may fall back to Opus 4.8 per vendor safeguards.
+    pricing:
+      input_per_1m_tokens: 10.00
+      cached_input_per_1m_tokens: 1.00
+      output_per_1m_tokens: 50.00
+      pricing_updated_at: "2026-07-07"
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
+  - id: anthropic:claude-opus-4-8
+    provider_id: anthropic
+    display_name: Claude Opus 4.8
+    released_at: "2026-05-28"
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1000000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, reasoning]
+    notes: Adaptive thinking; effort defaults to high on API. Fast mode available at premium rates.
+    pricing:
+      input_per_1m_tokens: 5.00
+      cached_input_per_1m_tokens: 0.50
+      output_per_1m_tokens: 25.00
+      pricing_updated_at: "2026-07-07"
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
+  - id: anthropic:claude-opus-4-7
+    provider_id: anthropic
+    display_name: Claude Opus 4.7
+    released_at: "2026-04-16"
+    model_kind: chat
+    model_class: reasoning
+    context_window: 1000000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, reasoning]
+    notes: Adaptive thinking. Fast mode available at premium rates (deprecated 2026-07-24).
+    pricing:
+      input_per_1m_tokens: 5.00
+      cached_input_per_1m_tokens: 0.50
+      output_per_1m_tokens: 25.00
+      pricing_updated_at: "2026-07-07"
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
   - id: anthropic:claude-opus-4-6
     provider_id: anthropic
     display_name: Claude Opus 4.6
@@ -718,6 +786,23 @@ models:
       pricing_updated_at: "2026-05-14"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
+  - id: anthropic:claude-opus-4-5-20251101
+    provider_id: anthropic
+    display_name: Claude Opus 4.5
+    released_at: "2025-11-24"
+    model_kind: chat
+    model_class: reasoning
+    context_window: 200000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, reasoning]
+    notes: Alias claude-opus-4-5 may also work in the API; snapshot id is stable.
+    pricing:
+      input_per_1m_tokens: 5.00
+      cached_input_per_1m_tokens: 0.50
+      output_per_1m_tokens: 25.00
+      pricing_updated_at: "2026-07-07"
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
   - id: anthropic:claude-haiku-4-5-20251001
     provider_id: anthropic
     display_name: Claude Haiku 4.5
@@ -733,6 +818,23 @@ models:
       cached_input_per_1m_tokens: 0.10
       output_per_1m_tokens: 5.00
       pricing_updated_at: "2026-05-14"
+      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
+  - id: anthropic:claude-sonnet-4-5-20250929
+    provider_id: anthropic
+    display_name: Claude Sonnet 4.5
+    released_at: "2025-09-29"
+    model_kind: chat
+    model_class: agentic
+    context_window: 200000
+    modalities: [text, image_in]
+    features: [tools, structured_output, streaming, reasoning]
+    notes: Alias claude-sonnet-4-5 may also work in the API; snapshot id is stable.
+    pricing:
+      input_per_1m_tokens: 3.00
+      cached_input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 15.00
+      pricing_updated_at: "2026-07-07"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
   # --- DeepSeek V4 (api-docs.deepseek.com; OpenAI-compatible). Dual-mode: thinking
