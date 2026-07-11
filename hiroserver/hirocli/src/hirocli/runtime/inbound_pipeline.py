@@ -60,6 +60,7 @@ def _ensure_conversation(ctx: "ServerContext", msg: UnifiedMessage) -> None:
     """
     from ..domain.conversation_channel import (
         CHAT_CHANNEL_ID_METADATA_KEY,
+        resolve_default_channel,
         resolve_or_create_channel_for_sender,
     )
 
@@ -71,9 +72,14 @@ def _ensure_conversation(ctx: "ServerContext", msg: UnifiedMessage) -> None:
     sender = msg.routing.sender_id
     if not sender:
         return
-    conv = resolve_or_create_channel_for_sender(
-        ctx.workspace_path, channel=msg.routing.channel, sender_id=sender,
-    )
+    # A channel may hint that a known peer (e.g. the WhatsApp owner) belongs in the
+    # main General thread rather than its own per-sender channel.
+    if meta.get("route_to_default"):
+        conv = resolve_default_channel(ctx.workspace_path)
+    else:
+        conv = resolve_or_create_channel_for_sender(
+            ctx.workspace_path, channel=msg.routing.channel, sender_id=sender,
+        )
     meta[CHAT_CHANNEL_ID_METADATA_KEY] = conv.id
 
 

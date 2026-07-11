@@ -52,6 +52,35 @@ class InfraEventHandlers:
         handler.register("gateway_disconnected", self.handle_gateway_disconnected)
         handler.register("device_connected", self.handle_device_connected)
         handler.register("device_disconnected", self.handle_device_disconnected)
+        # WhatsApp channel surfaces its pairing QR + connection status for the
+        # Admin UI; cache the latest on the shared ctx for admin routes to read.
+        handler.register("whatsapp.qr", self.handle_whatsapp_qr)
+        handler.register("whatsapp.status", self.handle_whatsapp_status)
+
+    async def handle_whatsapp_qr(self, data: dict[str, Any]) -> None:
+        qr = str(data.get("qr") or "")
+        if not qr:
+            return
+        st = self._ctx.channel_status.setdefault("whatsapp", {})
+        st["qr"] = qr
+        st["qr_at"] = datetime.now(UTC).isoformat()
+
+    async def handle_whatsapp_status(self, data: dict[str, Any]) -> None:
+        state = str(data.get("state") or "")
+        st = self._ctx.channel_status.setdefault("whatsapp", {})
+        st["state"] = state
+        st["state_at"] = datetime.now(UTC).isoformat()
+        account = data.get("account")
+        if account:
+            st["account"] = str(account)
+        # Keep any diagnostic detail the plugin attached (reason/code/expire/message
+        # for logged_out/banned/error, backoff for reconnecting) so the admin UI can
+        # explain a terminal state instead of showing a bare status word.
+        detail = {k: v for k, v in data.items() if k not in ("state", "account")}
+        st["detail"] = detail
+        # Once linked, the QR is stale — drop it so the UI stops showing it.
+        if state in ("connected", "paired"):
+            st.pop("qr", None)
 
     async def handle_pairing_request(self, data: dict[str, Any]) -> None:
         if self._channel_manager is None:

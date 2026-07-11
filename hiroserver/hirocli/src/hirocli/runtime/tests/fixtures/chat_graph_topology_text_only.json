@@ -10,6 +10,7 @@
     "compose_context",
     "memory_recall",
     "memory_out",
+    "memory_ingest",
     "call_model",
     "tts",
     "finalize"
@@ -25,6 +26,9 @@
       "max_attempts": 2
     },
     "memory_out": {
+      "max_attempts": 2
+    },
+    "memory_ingest": {
       "max_attempts": 2
     },
     "tts": {
@@ -93,9 +97,19 @@
       "conditional": true
     },
     {
+      "source": "memory_ingest",
+      "target": "__end__",
+      "conditional": false
+    },
+    {
       "source": "memory_out",
       "target": "finalize",
       "conditional": true
+    },
+    {
+      "source": "memory_out",
+      "target": "memory_ingest",
+      "conditional": false
     },
     {
       "source": "memory_out",

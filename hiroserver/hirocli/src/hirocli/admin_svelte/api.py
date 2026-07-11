@@ -29,6 +29,7 @@ from hirocli.admin_svelte.routes.metrics import metrics_router
 from hirocli.admin_svelte.routes.preferences import preferences_router
 from hirocli.admin_svelte.routes.providers import providers_router
 from hirocli.admin_svelte.routes.runtime import runtime_router
+from hirocli.admin_svelte.routes.whatsapp import whatsapp_router
 from hirocli.admin_svelte.routes.workspaces import workspaces_router
 
 api_router = APIRouter(prefix="/api", tags=["hiro-admin"])
@@ -60,6 +61,10 @@ if feature_active("image_lab"):
 api_router.include_router(characters_router)
 api_router.include_router(chat_channels_router)
 api_router.include_router(channels_router)
+# Feature-gated: WhatsApp channel admin (QR pairing, status, config) — mounted only
+# when the feature is active so it's genuinely unusable while hidden.
+if feature_active("whatsapp"):
+    api_router.include_router(whatsapp_router)
 api_router.include_router(devices_router)
 api_router.include_router(logs_router)
 # Feature-gated: metrics_router is exclusive to the Metrics feature (only the Server-page Metrics

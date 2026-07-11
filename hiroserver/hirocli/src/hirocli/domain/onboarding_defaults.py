@@ -42,7 +42,9 @@ def compute_suggested_defaults(
 
     for pid in provider_ids_ordered:
         prov = catalog.get_provider(pid)
-        if prov is None:
+        # Hidden providers must not seed default suggestions, even when already configured
+        # (suggestions are an "offering" surface like pickers).
+        if prov is None or prov.hidden:
             continue
 
         for kind, mid in catalog.suggested_defaults(pid).items():

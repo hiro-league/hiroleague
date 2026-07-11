@@ -6,14 +6,21 @@ The flow is:
            → gather → input_gate
                        ├── trim_history → {memory_recall ∥ knowledge_retrieve?}
                        │      → context_build → compose_context → call_model
-                       │      → tools (loop) → memory_out → tts? → finalize → END
+                       │      → tools (loop) → memory_out ─┬─ tts? → finalize → END
+                       │                                   └─ memory_ingest → END
                        └── media_failed → tts? → finalize → END
+
+``memory_out`` finalizes the reply text/id and emits ``reply.completed``; from it two
+independent branches fan out and run in parallel — the reply path (``tts? → finalize``)
+and the long-term-memory write (``memory_ingest``) — so the voice/text reply is NOT held
+up by the (slow) Graphiti ingest. They rejoin only at graph end (``memory_ingest → END``,
+kept off ``finalize`` so the tts-skip edge can't double-fire the join).
 
 Groups (review §1.5):
 
 - ``MediaNodes`` — ingest, stt, vision, gather, media_failed (audio/image intake)
 - ``ContextNodes`` — trim_history, context_build, compose_context
-- ``MemoryNodes`` — memory_recall, memory_out
+- ``MemoryNodes`` — memory_recall, memory_out, memory_ingest
 - ``KnowledgeFanoutNodes`` — knowledge_retrieve + knowledge_fanout router
 - ``LLMNodes`` — call_model, tools + should_continue router
 - ``TTSNodes`` — tts, finalize + tts_gate router
@@ -101,9 +108,18 @@ class ChatAgentGraph:
         else:
             b.add_edge("call_model", "memory_out")
 
+        # From memory_out, two independent branches fan out and run in parallel:
+        #  (1) the reply path — tts? → finalize (voice/text delivery + run-completed)
+        #  (2) the long-term memory write — memory_ingest
+        # so the reply is not blocked by the (slow) Graphiti ingest. memory_ingest
+        # rejoins at END (NOT finalize): routing it to finalize would let the
+        # tts-skip edge (memory_out → finalize) and memory_ingest → finalize both
+        # trigger finalize in a text-only run, double-executing it.
         b.add_conditional_edges("memory_out", tts.tts_gate, ["tts", "finalize"])
+        b.add_edge("memory_out", "memory_ingest")
         b.add_conditional_edges("media_failed", tts.tts_gate, ["tts", "finalize"])
         b.add_edge("tts", "finalize")
+        b.add_edge("memory_ingest", END)
         b.add_edge("finalize", END)
 
         return b.compile(checkpointer=self.services.checkpointer)

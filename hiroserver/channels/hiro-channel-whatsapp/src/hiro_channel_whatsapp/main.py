@@ -51,7 +51,7 @@ def run(
     ),
 ) -> None:
     """Connect to Hiro and start the WhatsApp channel."""
-    plugin = WhatsAppChannel()
+    plugin = WhatsAppChannel(log_dir=log_dir)
     log_setup.init(f"channel-{plugin.info.name}", Path(log_dir), level=log_level)
     transport = PluginTransport(plugin, hiro_ws)
     asyncio.run(transport.run())

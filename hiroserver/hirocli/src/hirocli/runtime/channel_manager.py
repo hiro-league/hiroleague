@@ -214,6 +214,44 @@ class ChannelManager:
             remove_channel_pid(self._ctx.workspace_path, ch.name)
 
     # ------------------------------------------------------------------
+    # Live single-channel lifecycle (no server restart)
+    # ------------------------------------------------------------------
+
+    async def activate(self, channel_name: str) -> None:
+        """Spawn a configured channel live. No-op if it is already running.
+
+        Registration + ``channel.configure`` happen automatically when the plugin
+        connects (see ``_handle_connection`` → ``_push_config``).
+        """
+        existing = self._subprocesses.get(channel_name)
+        if existing is not None and existing.poll() is None:
+            log.info(f"Channel already running — {channel_name}")
+            return
+        cfg = load_channel_config(self._ctx.workspace_path, channel_name)
+        if cfg is None:
+            raise ValueError(f"Channel '{channel_name}' is not configured.")
+        await self._spawn_one(cfg, f"ws://{self._host}:{self._port}")
+
+    async def deactivate(self, channel_name: str) -> None:
+        """Stop a running channel live: graceful ``channel.stop``, then reap."""
+        ch = self._channels.pop(channel_name, None)
+        if ch is not None:
+            try:
+                await ch.ws.send(rpc.build_notification(METHOD_STOP, {}))
+            except Exception as exc:  # ws may already be closed
+                log.warning(f"⚠️ Stop notify failed — {channel_name}", error=str(exc))
+        proc = self._subprocesses.pop(channel_name, None)
+        if proc is not None and proc.poll() is None:
+            await asyncio.sleep(0.5)  # give the plugin a moment to exit after STOP
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception as exc:
+                    log.warning(f"⚠️ Terminate failed — {channel_name}", error=str(exc))
+        remove_channel_pid(self._ctx.workspace_path, channel_name)
+        log.info(f"🔌 Channel deactivated — {channel_name}")
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

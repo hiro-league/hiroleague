@@ -304,6 +304,26 @@ def resolve_or_create_channel_for_sender(
         raise
 
 
+def resolve_default_channel(workspace_path: Path) -> ConversationChannel:
+    """Return the seeded default ('General') conversation, creating it if missing.
+
+    Used to route a known peer (e.g. the WhatsApp owner's own number) to the main
+    General thread instead of a per-sender channel.
+    """
+    from .character import default_character_id  # lazy: avoid import cycle
+
+    uid = get_default_user_id(workspace_path)
+    existing = _get_default_channel(workspace_path, user_id=uid)
+    if existing is not None:
+        return existing
+    return create_channel(
+        workspace_path,
+        name=DEFAULT_CONVERSATION_CHANNEL_NAME,
+        character_id=default_character_id(workspace_path),
+        user_id=uid,
+    )
+
+
 def update_channel(
     workspace_path: Path,
     channel_id: int,

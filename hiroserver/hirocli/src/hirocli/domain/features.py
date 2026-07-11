@@ -70,6 +70,13 @@ _FEATURES: tuple[FeatureSpec, ...] = (
         active=False,
         note="Server resource metrics (CPU/memory/disk/network).",
     ),
+    FeatureSpec(
+        id="whatsapp",
+        label="WhatsApp",
+        # WhatsApp channel admin (QR pairing, connection status, config).
+        active=True,
+        note="WhatsApp channel admin: QR pairing, connection status, config.",
+    ),
 )
 
 FEATURES: dict[str, FeatureSpec] = {f.id: f for f in _FEATURES}

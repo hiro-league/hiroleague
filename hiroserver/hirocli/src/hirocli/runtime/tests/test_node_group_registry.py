@@ -21,7 +21,7 @@ from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, make_agent_serv
 
 MEDIA_NODE_LABELS = frozenset({"ingest", "stt", "vision", "gather", "media_failed"})
 CONTEXT_NODE_LABELS = frozenset({"trim_history", "context_build", "compose_context"})
-MEMORY_NODE_LABELS = frozenset({"memory_recall", "memory_out"})
+MEMORY_NODE_LABELS = frozenset({"memory_recall", "memory_out", "memory_ingest"})
 KNOWLEDGE_NODE_LABELS = frozenset({"knowledge_retrieve"})
 LLM_NODE_LABELS = frozenset({"call_model", "tools"})
 TTS_NODE_LABELS = frozenset({"tts", "finalize"})

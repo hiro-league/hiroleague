@@ -36,6 +36,14 @@
     }
   },
   {
+    "event": "graph.run.completed",
+    "payload": {
+      "inbound_id": "in-1",
+      "chat_channel_id": 1,
+      "reply_id": "reply-<uuid>"
+    }
+  },
+  {
     "event": "graph.memory.stored",
     "payload": {
       "inbound_id": "in-1",
@@ -45,14 +53,6 @@
       "elapsed_ms": 0,
       "windows": 0,
       "triggers": []
-    }
-  },
-  {
-    "event": "graph.run.completed",
-    "payload": {
-      "inbound_id": "in-1",
-      "chat_channel_id": 1,
-      "reply_id": "reply-<uuid>"
     }
   }
 ]

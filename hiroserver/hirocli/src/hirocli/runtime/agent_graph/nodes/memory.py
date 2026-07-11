@@ -66,6 +66,7 @@ class MemoryNodes(NodeGroup):
     _RETRY_POLICIES = {
         "memory_recall": RetryPolicy(max_attempts=2),
         "memory_out": RetryPolicy(max_attempts=2),
+        "memory_ingest": RetryPolicy(max_attempts=2),
     }
 
     def _recall_model_cache(self):
@@ -271,8 +272,10 @@ class MemoryNodes(NodeGroup):
     async def memory_out_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
         """Finalize the reply text and emit ``reply.completed``.
 
-        Surfaces the normalized reply text, announces it to subscribers, then stores the
-        user/assistant turn in long-term memory when enabled.
+        Surfaces the normalized reply text + a ``reply_id`` and announces them to
+        subscribers. Long-term memory ingestion is intentionally NOT done here —
+        it's split into the sibling ``memory_ingest`` node so the reply/TTS path
+        does not wait on the (slow) Graphiti write (see chat.py graph wiring).
         """
         msgs = state.get("messages", []) or []
         reply_text = ""
@@ -321,8 +324,28 @@ class MemoryNodes(NodeGroup):
                 event_identity_keys=IDENTITY_PEER_KEYS,
             ),
         )
-        await self._store_turn_memory(state, writer, reply_text, reply_id)
+        # NB: no memory ingest here — that runs in the parallel ``memory_ingest`` node.
         return {"reply_text": reply_text, "reply_id": reply_id}
+
+    @graph_logged(captures={"usage", "decision"}, on_error="degrade")
+    async def memory_ingest_node(self, state: GraphState, writer: StreamWriter) -> dict[str, Any]:
+        """Persist the user/assistant turn to long-term memory (Graphiti windowed write).
+
+        Split out of ``memory_out`` so it runs as a **parallel branch** alongside
+        ``tts`` and rejoins only at the graph's end — the voice/text reply no longer
+        waits on this (potentially multi-second) ingest. Reads the finalized reply
+        that ``memory_out`` put in state. ``on_error="degrade"``: a memory-write
+        failure must not fail a run whose reply already went out, nor interrupt the
+        concurrent TTS branch (Graphiti's own errors are already caught inside
+        ``_store_turn_memory``).
+        """
+        reply_text = state.get("reply_text") or ""
+        reply_id = state.get("reply_id") or ""
+        if not reply_text or not reply_id:
+            observe(decision=("skipped", "no_reply"), output="stored: 0; no reply")
+            return {}
+        await self._store_turn_memory(state, writer, reply_text, reply_id)
+        return {}
 
     def _reply_knowledge_sources(self, state: GraphState) -> list[dict[str, Any]]:
         """Serialized knowledge sources to attach to the reply — only when chat citations are on."""
@@ -373,10 +396,10 @@ class MemoryNodes(NodeGroup):
         memory_run_id = str(state.get("chat_channel_id") or state.get("thread_id") or "")
         character_id = state.get("character_id", "")
         ext = memory_prefs.extraction
-        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_out`` step:
+        # Nest Graphiti's per-episode / per-operation ingest rows under THIS ``memory_ingest`` step:
         # ``substep_scope`` sets ``current_substep``, and the graph-ingest ledger borrows THIS node's
         # run id from ``current_entry`` (a chat turn has no ``current_run`` accumulator) so its rows
-        # land as sub-rows of ``memory_out`` in the chat run — instead of spawning a standalone
+        # land as sub-rows of ``memory_ingest`` in the chat run — instead of spawning a standalone
         # ``knowledge_graph_ingest`` run the Graph Runs page can't render. ``self._ledger_sink``
         # (passed inside the controller) turns those rows on. Token cost prices on those sub-rows, so
         # this node's own row carries no usage.

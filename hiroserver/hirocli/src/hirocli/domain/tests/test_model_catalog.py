@@ -128,6 +128,71 @@ def test_list_models_filter_hosting() -> None:
     assert len(cloud) > 0 and len(local) > 0
 
 
+def test_hidden_provider_excluded_from_listings_but_resolvable(tmp_path: Path) -> None:
+    """``hidden: true`` removes a provider (and its models) from every listing surface,
+    while direct lookups / validation keep resolving so existing configs still work."""
+    doc = {
+        "catalog_version": "1.0.0",
+        "providers": [
+            {
+                "id": "p1",
+                "display_name": "P1 (hidden)",
+                "hosting": "cloud",
+                "hidden": True,
+                "credential_env_keys": ["P1_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
+            {
+                "id": "p2",
+                "display_name": "P2",
+                "hosting": "cloud",
+                "credential_env_keys": ["P2_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
+        ],
+        "models": [
+            {
+                "id": "p1:chat",
+                "provider_id": "p1",
+                "display_name": "Hidden chat",
+                "model_kind": "chat",
+            },
+            {
+                "id": "p2:chat",
+                "provider_id": "p2",
+                "display_name": "Visible chat",
+                "model_kind": "chat",
+            },
+        ],
+    }
+    path = tmp_path / "cat.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cat = ModelCatalog.load_from_path(path)
+
+    assert [p.id for p in cat.list_providers()] == ["p2"]
+    assert [m.id for m in cat.list_models()] == ["p2:chat"]
+    assert cat.list_models(provider_id="p1") == []
+    # scan-env / setup checks derive env keys from listings — hidden keys are not offered
+    assert cat.list_credential_env_keys() == ["P2_KEY"]
+    # lookups, validation, and pricing paths still resolve the hidden provider
+    assert cat.get_provider("p1") is not None
+    assert cat.get_model("p1:chat") is not None
+    assert cat.validate_model_ids(["p1:chat"]).known == ["p1:chat"]
+
+
+def test_bundled_hidden_providers_do_not_list() -> None:
+    """jan / lm_studio / cloudflare are hidden in the bundled catalog."""
+    cat = get_model_catalog()
+    hidden_ids = {"jan", "lm_studio", "cloudflare"}
+    listed = {p.id for p in cat.list_providers()}
+    assert listed.isdisjoint(hidden_ids)
+    assert all(m.provider_id not in hidden_ids for m in cat.list_models())
+    for pid in hidden_ids:
+        assert cat.get_provider(pid) is not None
+    # cloudflare's image model still resolves for existing image profiles / pricing
+    assert cat.get_model("cloudflare:flux-1-schnell") is not None
+
+
 def test_list_credential_env_keys_unique_sorted() -> None:
     cat = get_model_catalog()
     keys = cat.list_credential_env_keys()

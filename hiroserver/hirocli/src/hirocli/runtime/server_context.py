@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hiro_commons.log import Logger
@@ -27,6 +27,7 @@ log = Logger.get("CTX")
 
 if TYPE_CHECKING:
     from hirocli.domain.memory import MemoryService
+    from hirocli.runtime.channel_manager import ChannelManager
     from hirocli.runtime.knowledge_manager import KnowledgeManager
 
 
@@ -78,6 +79,14 @@ class ServerContext:
     preference_reactor: PreferenceReactor = field(init=False)
     memory_service: "MemoryService | None" = field(default=None, init=False)
     knowledge_manager: "KnowledgeManager | None" = field(default=None, init=False)
+    # Set by the composition root after the ChannelManager is built; lets admin
+    # routes drive live channel actions (enable/disable, logout, reconnect).
+    channel_manager: "ChannelManager | None" = field(default=None, init=False)
+
+    # Live per-channel UI state (e.g. WhatsApp QR string + connection status),
+    # written by channel event handlers and read by admin routes. Keyed by channel
+    # name. Ephemeral — not persisted.
+    channel_status: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
 
     # Mutable restart state — set by /_restart endpoint, read by shutdown handler.
     restart_requested: bool = field(default=False, init=False)

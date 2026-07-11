@@ -51,7 +51,10 @@ class AvailableModelsService:
         summaries: list[ConfiguredProviderSummary] = []
         for meta in self._store.list_configured():
             prov = self._catalog.get_provider(meta.provider_id)
-            if prov is None:
+            # Hidden providers are suppressed even when credentials are configured (user
+            # decision): the Providers page / CLI list must not show them. The credential
+            # stays in the store and keeps resolving for existing model selections.
+            if prov is None or prov.hidden:
                 continue
             models = self._catalog.list_models(provider_id=meta.provider_id)
             has_chat = any(m.supports_kind("chat") for m in models)

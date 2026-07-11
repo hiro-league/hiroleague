@@ -13,7 +13,10 @@
 > non-obvious changes; **prefer Tools Architecture** (CLI/HTTP/UI over one Tool) for new
 > operations; follow **human-first structured logging**; move shared helpers to `hiro-commons`.
 >
-> **Status:** Plan draft. Not yet implemented.
+> **Status:** P1–P8 implemented. Text + voice (in/out) working live; admin UI, hot
+> lifecycle, security allow-list, and reconnect/terminal-state hardening all in. Remaining:
+> mintdocs updates and external-publish packaging (see P8). Live re-confirm of the P7 voice
+> bubble after the mimetype+waveform fixes is the one open verification.
 
 ---
 
@@ -142,7 +145,7 @@ here — cheaply.
 
 **Goal:** the core deliverable — text a WhatsApp number, the character replies over WhatsApp.
 
-> **Status: implemented — pending live test.** Server: `resolve_or_create_channel_for_sender`
+> **Status: DONE — verified live.** Text round-trip works end to end. Server: `resolve_or_create_channel_for_sender`
 > (`conversation_channel.py`) + `_ensure_conversation` injected in `InboundPipeline.receive`
 > (mutates the shared `msg` so both persist + agent-dispatch see `chat_channel_id`). Plugin:
 > `_handle_inbound` maps text → `UnifiedMessage` and `emit()`s it (stashing the chat JID in
@@ -205,18 +208,21 @@ persisted to a WhatsApp-named conversation under the default user.
 
 ### P2 polish (deferred, tracked here)
 
-- **Delivery/read receipts.** Our linked device receives + replies but never sends WhatsApp
-  delivery/read receipts, so the sender's message stays on a single gray tick. whatsmeow/neonize
-  does not auto-mark read — call its receipt/`mark_read` API once the agent has handled an inbound
-  message so the sender sees ✓✓ / blue. (Candidate for P2-polish or P8.)
+- **Delivery/read receipts — DONE.** `wa_client` calls
+  `set_force_activate_delivery_receipts(True)` on connect (auto ✓✓ delivered) and
+  `mark_read(msg_id, chat=…, sender=…, receipt=ReceiptType.READ, timestamp=…)` per handled inbound
+  message (blue ticks — the assistant read + replied). A per-preference "send read receipts"
+  toggle can come in P3.
 - **`SendMessageReturnFunction` decode warning.** **Root cause narrowed (2026-07-08):**
   reproduced in **pure neonize** (isolated `NewAClient`+`connect`+`send_message`, zero Hiro code),
   so it is **not our plugin**. The message *is* delivered; only neonize's parse of its own send
   *return* fails. **Not** a protobuf runtime version issue — fails identically on protobuf 7.35.1
   and 7.34.1 (matching the gencode). Points to a defect inside neonize 0.4.1.post0 (Go-serialized
-  return vs Python gencode drift, or an error payload returned). We hold a minimal repro. Next:
-  try other neonize versions / dump the raw return bytes to classify / report upstream. Tolerated
-  as a soft warning meanwhile (delivery unaffected).
+  return vs Python gencode drift, or an error payload returned). We hold a minimal repro.
+  **RESOLVED (2026-07-08): pin neonize 0.3.18.post0.** The 0.4.x defect also corrupts media
+  downloads (see P6); downgrading to the API-compatible 0.3.18 drops the send-return warning count
+  10→0 and fixes downloads (`sha_match=True`). The `send_text` `DecodeError` tolerance stays as a
+  belt-and-braces guard.
 - **Conversation display name.** Replace the placeholder `whatsapp:<jid>` name with the pushname
   / phone number (see P3 identity work).
 
@@ -226,6 +232,20 @@ persisted to a WhatsApp-named conversation under the default user.
 
 **Goal:** make behavior configurable, and **close the current gap** that channel `config` keys
 have no editor (`channel setup` only sets `command` + `enabled`).
+
+> **Status: foundation implemented.** Config editor via Tools (`ChannelConfigShowTool` /
+> `ChannelConfigSetTool`, surfaces `cli`+`http`) + CLI `hiro channel config <name> [--set K
+> --value V | --unset K]` (values JSON-parsed, else string). Plugin honors: **workspace-scoped
+> session** (derived from `--log-dir`'s parent), a **closed-by-default allow-list** (empty ⇒
+> **deny all**; permit via `owner_number` (always allowed) and/or `allowed_senders`, matched on
+> normalized phone digits via `SenderAlt`), and a **`send_read_receipts`** toggle.
+> Config applies on restart (live re-push = P5). **Owner routing DONE:** config
+> `owner_number` (user's personal number, distinct from the linked account) → the plugin sets a
+> `route_to_default` hint → server `_ensure_conversation` routes it to the seeded **General**
+> thread (`resolve_default_channel`) instead of a per-sender channel; everyone else stays
+> per-sender. **Display-name work dropped** — only relevant for multi-contact use, which the
+> owner-routing model doesn't need. Configurable per-contact target character = later phase.
+> Admin UI form = P4.
 
 ### Config schema (stored in `channel_plugins.config` JSON)
 Define `WhatsAppChannelConfig` (pydantic), e.g.:
@@ -270,6 +290,26 @@ numbers are ignored; a config change reaches the running plugin without a restar
 
 **Goal:** install, configure, pair (QR in-browser), and manage WhatsApp entirely from the Admin UI.
 
+> **Status: P4 DONE (backend + frontend).** Frontend (P4b): route `src/routes/whatsapp/+page.svelte`
+> → `features/whatsapp/WhatsAppPage.svelte` (thin shell) + `state/whatsapp-controller.svelte.ts`
+> (factory + `$state` + `createPoller` live status) + `api/whatsapp.ts`. Connection card (status
+> badge + **QR rendered server-side via `render_qr_svg`** → DOMPurify `{@html}`, same as device
+> pairing) + Settings card (owner_number / allowed_senders / read-receipts via `FormField`+`Button`,
+> saved through the config Tools). Nav entry added (`shell/nav.ts`, gated on `whatsapp`); feature
+> flipped **`active=True`** + registry regenerated. `svelte-check` clean (0 errors). Live view needs
+> a server restart (mounts the routes). — Below is the original P4a backend detail.
+>
+> **P4a backend:** Feature `whatsapp` added
+> (`domain/features.py`, `active=False`; registry regenerated). Routes in
+> `admin_svelte/routes/whatsapp.py` (gated in `api.py`): `GET /whatsapp/status`, `GET
+> /whatsapp/qr`, `GET/POST /whatsapp/config` (reuse `ChannelConfig{Show,Set}Tool`), `POST
+> /whatsapp/install` (`ChannelInstallTool`). **QR/status cache:** new `ServerContext.channel_status`
+> dict, written by `InfraEventHandlers.handle_whatsapp_qr/status` (registered for the plugin's
+> `whatsapp.qr`/`whatsapp.status` events), read by the routes via `request.app.state.ctx`. Verified:
+> compile + API assembly + route list + cache-handler unit test (QR cached, cleared on connect).
+> **To exercise live / build the UI, flip `whatsapp` to `active=True`** and regenerate.
+> **P4b (next):** the Svelte channels page (install button, config form, QR render, status badge).
+
 ### Backend tasks
 - **Feature flag:** add to `domain/features.py:39`
   `FeatureSpec(id="whatsapp_channel", label="WhatsApp Channel", active=False, note=…)`;
@@ -300,6 +340,18 @@ From the Admin UI: install → configure → scan the QR in the browser → see 
 
 **Goal:** enable/disable takes effect live (no restart), and status reflects a real lifecycle.
 
+> **Status: DONE (incl. Log out / Reconnect).** `ServerContext.channel_manager` now exposed
+> (set in `server_process._wire_runtime`); admin routes on the same loop `await` it directly
+> (no cross-loop). `ChannelManager.activate(name)`/`deactivate(name)` (spawn / graceful
+> `channel.stop` + reap). New admin endpoints: `POST /whatsapp/{enable,disable,logout,reconnect}`
+> — enable/disable persist via `ChannelEnable/DisableTool` **and** activate/deactivate live;
+> logout/reconnect go `send_event_to_channel("whatsapp","whatsapp.logout"/".reconnect")` →
+> plugin `WhatsAppChannel.on_event` → `bridge.logout()` (neonize `logout()` → fresh QR) /
+> `bridge.reconnect()` (drop socket → reconnect loop re-links). `GET /whatsapp/status` now
+> returns `enabled`. Admin page: **Enable / Disable / Reconnect / Log out** buttons in the
+> Connection card. Verified: server compile+import (routes, activate/deactivate, ctx field),
+> plugin methods, `svelte-check` 0 errors. Live view needs a server restart.
+
 ### Tasks
 - **`ChannelManager.activate(name)` / `deactivate(name)`** (`runtime/channel_manager.py`):
   - `activate`: `load_channel_config` → `_spawn_one(cfg, hiro_ws)` → on plugin register,
@@ -322,6 +374,24 @@ through the lifecycle states.
 
 **Goal:** understand WhatsApp voice notes. No new pipeline code — reuse existing STT.
 
+> **Status: DONE (plugin-only).** `wa_client._attach_audio` downloads the voice note via neonize
+> `download_any(event.Message)` → base64, plus `mimetype` (stripped to base, e.g. `audio/ogg`) and
+> `seconds` from `audioMessage`. `plugin._handle_inbound` now builds an `audio` `ContentItem`
+> (body=b64, metadata `mime_type`/`duration_ms`/`size`) when a voice note is present, else text —
+> replacing the old "text-only until P6" skip. **Server unchanged** — the existing `ingest`/`stt`
+> nodes transcribe it. Verified: plugin import, `download_any` signature, `audioMessage.{mimetype,
+> seconds}` exist. **Prereq:** an STT provider (OpenAI/Gemini) must be configured. Reply is still
+> text (voice reply = P7).
+>
+> **⚠️ neonize 0.4.x is broken — PINNED to 0.3.18.post0.** First live test showed corrupt audio:
+> a SHA-256 integrity check (`hashlib.sha256(data) vs audioMessage.fileSHA256`) proved
+> `download_any` returned **right-length, wrong-content** bytes (`sha_match=False`) — the neonize
+> Go→Python protobuf-return defect (same family as the send-ack `SendMessageReturnFunction "Wire
+> format corrupt"`). 0.4.0 additionally fails to import (`consume_cstring`). **0.3.18.post0**
+> (API-compatible aioze client) fixes **both**: `sha_match=True` on downloads, and the send-return
+> warning count dropped 10→0. Pinned in the plugin `pyproject.toml`. Switching the running plugin
+> to 0.3.18 required a **re-pair** (session schema differs across the 0.3↔0.4 boundary).
+
 ### Plugin tasks
 - On an inbound audio `MessageEv`: `download_media(...)` via neonize → OGG/Opus bytes → base64.
 - Build `ContentItem(content_type="audio", body=<b64>, metadata={"mime_type": "audio/ogg",
@@ -340,6 +410,46 @@ Send a WhatsApp voice note → the character transcribes it and replies (text at
 ---
 
 ## 7. Phase 7 — Outbound voice
+
+> **Status: code DONE + mobile-render fixed — pending one live re-confirm.** First live send
+> transcoded fine but didn't render on the phone; fixed by forcing the PTT mimetype to
+> `audio/ogg; codecs=opus` (see below) and adding a `compute_waveform` envelope for the bubble
+> bars. ffmpeg is auto-provisioned (bundled `static-ffmpeg`). New module
+> `audio.py` (`transcode_to_ogg_opus`) shells `ffmpeg` stdin→stdout to turn the TTS
+> MP3 into OGG/Opus. `wa_client` gains `send_audio(ptt=True)` (with a "recording…"
+> presence, mirroring the typing indicator) + a `send_document` fallback, both
+> sharing the usync/DecodeError retry (`_send_with_retry` now takes a send thunk).
+> `plugin.send()` was restructured to branch on `message_type`: a `message` →
+> `send_text` (P2); an `event` of type `message.voiced` → decode base64 MP3 →
+> transcode → `send_audio(ptt=True)`, falling back to sending the MP3 as a file if
+> the transcode fails. Gated by a new `audio_out` config (default **True**) with an
+> admin toggle in the WhatsApp **Settings** card ("Reply with voice notes…").
+>
+> **ffmpeg provisioning (settles the P8 open question): bundled, not a manual step.**
+> Outbound voice needs both `ffmpeg` (my transcode) and `ffprobe` (neonize's
+> `build_audio_message` shells it to read duration at send time). The plugin now
+> declares `static-ffmpeg` (ships **both** binaries) and calls
+> `audio.ensure_ffmpeg_on_path()` — `static_ffmpeg.add_paths(weak=True)` — as a
+> background task in `on_start()`, so first-run binaries download+cache without
+> blocking startup and **defer to a system ffmpeg if already present**. End users
+> of the opt-in WhatsApp plugin get voice with **zero manual install**; core Hiro is
+> untouched (ffmpeg rides only with this plugin's venv). If provisioning fails
+> (offline first run), the reply falls back to sending the MP3 as a file.
+> Verified end-to-end: base64 MP3 → OGG/Opus (`OggS`, `codec_name=opus`), ffprobe-readable.
+>
+> **Mobile-render fix (live test):** the first live voice reply sent but never
+> appeared on the phone. Root cause (grounded in whatsmeow discussion #213): neonize's
+> `send_audio` sets the mimetype from libmagic → bare `audio/ogg`, which WhatsApp
+> **mobile silently drops** for PTT. Fix: `wa_client._send_audio_once` builds the
+> message via `build_audio_message`, forces `audioMessage.mimetype =
+> "audio/ogg; codecs=opus"`, then `send_message`. (The `NEONIZE tags field:
+> 'NoneType' object is not iterable` warning from its ffprobe parse is **benign** —
+> duration is still read correctly.)
+>
+> **Waveform bars:** neonize leaves `audioMessage.waveform` empty → WhatsApp draws a
+> flat placeholder. `audio.compute_waveform` now decodes the OGG to mono 8 kHz PCM
+> and RMS-reduces it to the 64-byte (0..100) envelope WhatsApp expects, set on the
+> message before send. Best-effort — an empty result falls back to flat (still plays).
 
 **Goal:** reply with a native WhatsApp voice-note bubble.
 
@@ -370,6 +480,25 @@ Ask a question → the character answers with a playable WhatsApp voice-note bub
 ---
 
 ## 8. Phase 8 — Hardening
+
+> **Status: code DONE (mintdocs excluded).** Reconnect/backoff aligned to the devices
+> pattern (base 1s → **max 60s**, resets on a successful connect) with a `reconnecting`
+> status emitted only after a first successful connect (so it doesn't confuse the
+> initial QR-cycling). **Terminal-state detection** wired via new neonize handlers —
+> `TemporaryBanEv` → `banned` (code/expire), `ConnectFailureEv` → `error`
+> (reason/message), `StreamReplacedEv` → `replaced`, `ClientOutdatedEv` →
+> `error(client_outdated)`, and `LoggedOutEv` now carries its `Reason`. The plugin
+> forwards the detail (`whatsapp.status` event); `infra_event_handlers` stashes it in
+> `channel_status["whatsapp"]["detail"]`; the `/whatsapp/status` route exposes it; and the
+> admin **WhatsApp page** shows a red dot + a destructive **re-pair banner** with a
+> human message (controller `needsRepair` / `statusMessage`) for `logged_out` / `banned`
+> / `replaced` / `error`. **ffmpeg provisioning** settled in P7 (bundled `static-ffmpeg`).
+> **Packaging validated:** the plugin wheel builds clean (`hatchling`) with correct
+> `Requires-Dist` (incl. `neonize==0.3.18.post0`, `static-ffmpeg>=2.13`) and the
+> `hiro-channel-whatsapp` console entry point. **Remaining (out of scope here):** publish
+> the workspace deps (`hiro-channel-sdk`/`hiro-commons`) for a fully external
+> `hiro channel install whatsapp`, and the **mintdocs** updates (channel-plugins page +
+> WhatsApp how-to + first-time-setup ffmpeg note).
 
 **Goal:** make it robust and shippable.
 
@@ -434,8 +563,9 @@ Kill the network / log the session out → the plugin recovers cleanly (or clear
 
 ## Appendix B — Open questions & deferred (from design §10)
 
-- **Open:** ban-resilience policy (P8); ffmpeg provisioning + neonize Windows wheels (P8);
-  allow-list UX (P3).
+- **Open:** ban-resilience policy (P8); allow-list UX (P3).
+- **Resolved (P7):** ffmpeg provisioning → **bundled `static-ffmpeg`** (ffmpeg+ffprobe,
+  auto-downloaded on first plugin start, defers to system ffmpeg); no manual install.
 - **Deferred (not v1):** WhatsApp **group chats**, **multiple accounts**.
 
 ---

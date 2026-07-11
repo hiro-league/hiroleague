@@ -112,17 +112,16 @@ async def test_text_only_turn_contract(tmp_path: Path) -> None:
     env = make_inbound_envelope(text="hello there")
     result = await run_graph(compiled, _state(tmp_path, env))
 
-    # Events — exact ordered sequence for this linear flow. No GRAPH_MEMORY_RETRIEVED: the P2
-    # recall node runs the agentic loop, which needs a chat model; this harness configures none, so
-    # recall bails ("no_model") and emits no retrieval event. (Recall behavior: test_retrieval_agent
-    # + test_agent_graph_preferences.)
-    assert result.event_names() == [
-        GRAPH_INGEST_COMPLETED,
-        GRAPH_LLM_USAGE,
-        GRAPH_REPLY_COMPLETED,
-        GRAPH_MEMORY_STORED,
-        GRAPH_RUN_COMPLETED,
-    ]
+    # Events. The reply path (…→ reply.completed → run.completed) and the memory write
+    # (memory.stored) fan out from memory_out and run in PARALLEL, so memory.stored and
+    # run.completed are unordered relative to each other — assert the stable prefix, then
+    # that both terminal events are present. No GRAPH_MEMORY_RETRIEVED: the P2 recall node
+    # runs the agentic loop, which needs a chat model; this harness configures none, so
+    # recall bails ("no_model") and emits no retrieval event. (Recall behavior:
+    # test_retrieval_agent + test_agent_graph_preferences.)
+    events = result.event_names()
+    assert events[:3] == [GRAPH_INGEST_COMPLETED, GRAPH_LLM_USAGE, GRAPH_REPLY_COMPLETED]
+    assert set(events[3:]) == {GRAPH_MEMORY_STORED, GRAPH_RUN_COMPLETED}
     # Final state — reply produced; context never leaked into durable history.
     assert result.final["reply_text"] == "final reply"
     assert result.final.get("reply_id", "").startswith("reply-")
@@ -130,10 +129,13 @@ async def test_text_only_turn_contract(tmp_path: Path) -> None:
     assert "## Instructions" not in history and "Memories retrieved" not in history
     # Ledger — the @graph_logged nodes flushed with the expected decisions.
     nodes = set(sink.nodes())
-    assert {"memory_recall", "compose_context", "call_model", "memory_out", "finalize"} <= nodes
+    assert {
+        "memory_recall", "compose_context", "call_model", "memory_out", "memory_ingest", "finalize"
+    } <= nodes
     decisions = sink.decisions()
     assert decisions["call_model"][0] == "text_reply"
-    assert decisions["memory_out"][0] == "stored"
+    # Ingest moved to its own parallel node — memory_out no longer stores.
+    assert decisions["memory_ingest"][0] == "stored"
     assert decisions["finalize"][0] == "completed"
     assert sink.has_usage("call_model")
 

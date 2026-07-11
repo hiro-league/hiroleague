@@ -153,6 +153,53 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             "\nRestart Hiro to activate: [bold]hiro stop[/bold] then [bold]hiro start[/bold]"
         )
 
+    @channel_app.command("config")
+    def channel_config(
+        name: str = typer.Argument(..., help="Channel name, e.g. 'whatsapp'"),
+        set_key: Optional[str] = typer.Option(
+            None, "--set", help="Config key to set (pair with --value)."
+        ),
+        value: Optional[str] = typer.Option(
+            None, "--value", help="Value for --set (JSON like '[\"123\"]'/true/5, else a string)."
+        ),
+        unset: Optional[str] = typer.Option(None, "--unset", help="Config key to remove."),
+        workspace: Optional[str] = typer.Option(
+            None, "--workspace", "-W", help="Workspace name (default: registry default)."
+        ),
+    ) -> None:
+        """Show or edit a channel plugin's stored config values."""
+        from ..tools.channel import ChannelConfigSetTool, ChannelConfigShowTool
+
+        try:
+            if unset:
+                result = ChannelConfigSetTool().execute(
+                    channel_name=name, key=unset, value=None, workspace=workspace
+                )
+            elif set_key is not None:
+                result = ChannelConfigSetTool().execute(
+                    channel_name=name, key=set_key, value=value, workspace=workspace
+                )
+            else:
+                result = ChannelConfigShowTool().execute(channel_name=name, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+
+        if not result.config:
+            console.print("[dim]No config set.[/dim]")
+        else:
+            table = Table(title=f"'{result.name}' config", show_header=True)
+            table.add_column("Key", style="bold")
+            table.add_column("Value")
+            for k, v in sorted(result.config.items()):
+                table.add_row(k, v if isinstance(v, str) else json.dumps(v))
+            console.print(table)
+
+        if unset or set_key is not None:
+            console.print(
+                "\n[dim]Restart to apply: [bold]hiro stop[/bold] then [bold]hiro start[/bold][/dim]"
+            )
+
     @channel_app.command("enable")
     def channel_enable(
         name: str = typer.Argument(..., help="Channel name"),

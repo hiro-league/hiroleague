@@ -30,9 +30,21 @@ dependencies = [
     "typer>=0.12",
     # neonize: Python bindings over the Go `whatsmeow` multi-device library.
     # Provides the async NewAClient used to link/receive/send over WhatsApp Web.
-    "neonize>=0.4,<0.5",
+    # PINNED to 0.3.18.post0: the 0.4.x line has a binary-marshaling defect in its
+    # Go→Python protobuf-return path that corrupts media downloads (download_any
+    # returns right-length/wrong-content bytes; sha256 mismatch) AND the send ack
+    # (SendMessageReturnFunction "Wire format corrupt"). 0.3.18 has neither, with an
+    # API-compatible aioze client. 0.4.0 additionally fails to import (consume_cstring).
+    "neonize==0.3.18.post0",
     # qrcode: render the pairing QR as ASCII into the plugin log (P1 has no UI yet).
     "qrcode>=7",
+    # static-ffmpeg: bundles BOTH ffmpeg and ffprobe (downloaded+cached on first
+    # use, no admin) and prepends them to PATH. Outbound voice (P7) needs ffmpeg
+    # for the MP3→OGG/Opus transcode AND ffprobe because neonize's
+    # build_audio_message shells `ffprobe` to read the clip duration at send time.
+    # `add_paths(weak=True)` defers to a system ffmpeg if one is already present,
+    # so end users of the WhatsApp plugin get voice with zero manual install.
+    "static-ffmpeg>=2.13",
     "hiro-channel-sdk~=0.1.3",
     "hiro-commons~=0.1.3",
 ]

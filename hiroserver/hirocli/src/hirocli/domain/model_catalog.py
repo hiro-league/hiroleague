@@ -133,6 +133,12 @@ class Provider(BaseModel):
     tts_voices: list[TtsVoicePreset] = Field(default_factory=list)
     # Editorial free-tier / trial notes surfaced in admin provider tables.
     free_offers: list[ProviderFreeOffer] = Field(default_factory=list)
+    # Hidden providers are excluded from every *listing* surface — admin catalog browser,
+    # model pickers, CLI listings, add-provider flows, and scan-env import — including for
+    # already-configured providers. Direct lookups (get_provider / get_model), model-id
+    # validation, and pricing estimators still resolve them so existing configurations,
+    # selected models, and cost reporting keep working.
+    hidden: bool = False
     metadata_updated_at: str
     notes: str | None = None
 
@@ -357,7 +363,8 @@ class ModelCatalog:
         return self._providers_by_id.get(provider_id)
 
     def list_providers(self, *, hosting: Hosting | None = None) -> list[Provider]:
-        out = list(self._doc.providers)
+        # Hidden providers never list (see Provider.hidden) — no opt-out by design.
+        out = [p for p in self._doc.providers if not p.hidden]
         if hosting is not None:
             out = [p for p in out if p.hosting == hosting]
         return sorted(out, key=lambda p: p.id)
@@ -375,16 +382,19 @@ class ModelCatalog:
     ) -> list[ModelSpec]:
         out: list[ModelSpec] = []
         for m in self._doc.models:
+            # Models of hidden providers never list either — otherwise pickers/catalog rows
+            # would reference a provider that no listing surface can show.
+            prov = self._providers_by_id.get(m.provider_id)
+            if prov is None or prov.hidden:
+                continue
             if provider_id is not None and m.provider_id != provider_id:
                 continue
             if model_kind is not None and not m.supports_kind(model_kind):
                 continue
             if model_class is not None and m.model_class != model_class:
                 continue
-            if hosting is not None:
-                prov = self._providers_by_id.get(m.provider_id)
-                if prov is None or prov.hosting != hosting:
-                    continue
+            if hosting is not None and prov.hosting != hosting:
+                continue
             out.append(m)
         return sorted(out, key=lambda x: x.id)
 

@@ -7,6 +7,7 @@ ephemeral in-memory state, not persistent config, so it is not a tool.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,6 +75,20 @@ class ChannelDisableResult:
 class ChannelRemoveResult:
     name: str
     removed: bool
+
+
+@dataclass
+class ChannelConfigResult:
+    name: str
+    config: dict[str, Any] = field(default_factory=dict)
+
+
+def _parse_config_value(raw: str) -> Any:
+    """Parse a CLI value: JSON when it parses (list/bool/int/…), else the raw string."""
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return raw
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +249,57 @@ class ChannelDisableTool(Tool):
         cfg.enabled = False
         save_channel_config(workspace_path, cfg)
         return ChannelDisableResult(name=channel_name, enabled=False)
+
+
+class ChannelConfigShowTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "channel_config_show"
+    description = "Show a channel plugin's stored config values"
+    params = {
+        "channel_name": ToolParam(str, "Channel name, e.g. 'whatsapp'"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, channel_name: str, workspace: str | None = None) -> ChannelConfigResult:
+        workspace_path = _resolve_path(workspace)
+        cfg = load_channel_config(workspace_path, channel_name)
+        if cfg is None:
+            raise ValueError(f"Channel '{channel_name}' is not configured.")
+        return ChannelConfigResult(name=channel_name, config=dict(cfg.config))
+
+
+class ChannelConfigSetTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "channel_config_set"
+    description = "Set (or, with no value, unset) a config key on a channel plugin"
+    params = {
+        "channel_name": ToolParam(str, "Channel name, e.g. 'whatsapp'"),
+        "key": ToolParam(str, "Config key to set or unset"),
+        "value": ToolParam(str, "JSON or string value; omit to unset the key", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(
+        self,
+        channel_name: str,
+        key: str,
+        value: str | None = None,
+        workspace: str | None = None,
+    ) -> ChannelConfigResult:
+        workspace_path = _resolve_path(workspace)
+        cfg = load_channel_config(workspace_path, channel_name)
+        if cfg is None:
+            raise ValueError(
+                f"Channel '{channel_name}' is not configured. Run channel_setup first."
+            )
+        # Config changes reach a running plugin on the next channel.configure push
+        # (i.e. after a restart); live re-push is a later phase (hot reload).
+        if value is None:
+            cfg.config.pop(key, None)
+        else:
+            cfg.config[key] = _parse_config_value(value)
+        save_channel_config(workspace_path, cfg)
+        return ChannelConfigResult(name=channel_name, config=dict(cfg.config))
 
 
 class ChannelRemoveTool(Tool):

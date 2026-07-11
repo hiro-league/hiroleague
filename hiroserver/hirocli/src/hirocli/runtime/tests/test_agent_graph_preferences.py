@@ -243,9 +243,11 @@ def _patch_ingest(monkeypatch, *, returns: int, sink: list[dict]):
 
 
 @pytest.mark.asyncio
-async def test_memory_out_delegates_to_windowed_ingest(tmp_path, monkeypatch) -> None:
-    """memory_out gathers the turn + windowing prefs and delegates to the windowed controller,
-    splicing the CURRENT reply so its exchange can complete with no lag."""
+async def test_memory_ingest_delegates_to_windowed_ingest(tmp_path, monkeypatch) -> None:
+    """memory_ingest reads the finalized reply from state, gathers the windowing prefs, and
+    delegates to the windowed controller, splicing the CURRENT reply so its exchange
+    completes with no lag. (Ingest was split out of memory_out so the reply/TTS path
+    doesn't wait on it.)"""
     memory = _MemoryService()
     runtime = WorkspacePreferencesRuntime(tmp_path)
     _enable_memory(runtime)
@@ -256,9 +258,11 @@ async def test_memory_out_delegates_to_windowed_ingest(tmp_path, monkeypatch) ->
     _patch_ingest(monkeypatch, returns=1, sink=calls)
     events: list[dict] = []
 
-    result = await graph.memory_out_node(
+    # memory_out puts reply_text/reply_id in state; memory_ingest consumes them.
+    result = await graph.memory_ingest_node(
         {
-            "messages": [AIMessage(content="Noted.")],
+            "reply_text": "Noted.",
+            "reply_id": "reply-abc",
             "user_text": "remember that I like tea",
             "thread_id": "thread-1",
             "chat_channel_id": 12,
@@ -268,7 +272,7 @@ async def test_memory_out_delegates_to_windowed_ingest(tmp_path, monkeypatch) ->
         events.append,
     )
 
-    assert result["reply_text"] == "Noted."
+    assert result == {}
     assert events[-1]["event"] == GRAPH_MEMORY_STORED
     assert len(calls) == 1
     kw = calls[0]
@@ -278,7 +282,7 @@ async def test_memory_out_delegates_to_windowed_ingest(tmp_path, monkeypatch) ->
     assert kw["user_id"] == get_default_user_id(tmp_path)
     # The current reply is spliced (external_id == the turn's reply_id) so no lag.
     assert kw["current_reply_text"] == "Noted."
-    assert kw["current_reply_id"] == result["reply_id"]
+    assert kw["current_reply_id"] == "reply-abc"
     # Windowing knobs threaded from memory.extraction.* (defaults).
     assert kw["window_turns"] == 4
     assert kw["session_gap_minutes"] == 120
@@ -289,7 +293,7 @@ async def test_memory_out_delegates_to_windowed_ingest(tmp_path, monkeypatch) ->
 async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
     tmp_path, monkeypatch
 ) -> None:
-    """``memory_out`` forwards the turn's ledger_sink to the windowed write (so Graphiti's ingest
+    """``memory_ingest`` forwards the turn's ledger_sink to the windowed write (so Graphiti's ingest
     steps nest under this node in Graph Runs) and records decision + preview — but NOT usage: the
     extraction cost is priced on the nested sub-rows, so folding it here too would double-count."""
     memory = _MemoryService()
@@ -304,7 +308,7 @@ async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
     sink = LedgerSink(tmp_path)
     entry = LedgerEntry(
         sink=sink,
-        node="memory_out",
+        node="memory_ingest",
         run_id="run-1",
         step_index=1,
         captures=frozenset({"usage", "decision"}),
@@ -355,7 +359,7 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path, monkeyp
     sink = LedgerSink(tmp_path)
     entry = LedgerEntry(
         sink=sink,
-        node="memory_out",
+        node="memory_ingest",
         run_id="run-1",
         step_index=1,
         captures=frozenset({"usage", "decision"}),

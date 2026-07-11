@@ -15,6 +15,7 @@ export const navItems: NavItem[] = [
   { group: 'Communication', label: 'Channels & Devices', path: '/channels-devices/', icon: 'cpu' },
   { group: 'Communication', label: 'Characters', path: '/characters/', icon: 'user' },
   { group: 'Communication', label: 'Chat channels', path: '/chats/', icon: 'message' },
+  { group: 'Communication', label: 'WhatsApp', path: '/whatsapp/', icon: 'message', feature: 'whatsapp' },
   { group: 'Operations', label: 'Knowledge', path: '/knowledge/', icon: 'database', feature: 'knowledge' },
   { group: 'Operations', label: 'Memories', path: '/memories/', icon: 'brain' },
   { group: 'Operations', label: 'Image Lab', path: '/image-lab/', icon: 'image', feature: 'image_lab' },

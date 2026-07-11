@@ -7,32 +7,54 @@ Routing inbound → agent and sending replies arrive in Phase 2; audio in P6/P7.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import io
 from pathlib import Path
 from typing import Any
 
 from hiro_channel_sdk.base import ChannelPlugin
-from hiro_channel_sdk.models import ChannelInfo, ContentItem, MessageRouting, UnifiedMessage
+from hiro_channel_sdk.constants import (
+    EVENT_TYPE_MESSAGE_VOICED,
+    MESSAGE_TYPE_EVENT,
+    MESSAGE_TYPE_MESSAGE,
+)
+from hiro_channel_sdk.models import (
+    ChannelInfo,
+    ContentItem,
+    EventPayload,
+    MessageRouting,
+    UnifiedMessage,
+)
 from hiro_commons.log import Logger
 
+from .audio import TranscodeError, ensure_ffmpeg_on_path, transcode_to_ogg_opus
 from .wa_client import WhatsAppBridge
 
 log = Logger.get("WHATSAPP")
 
-# Fallback session location when the server hasn't pushed one via config.
-# Phase 3 (config editor) will push a workspace-scoped path; until then a single
-# dev workspace uses this home-dir default.
-_DEFAULT_SESSION_DB = Path.home() / ".hiro" / "whatsapp" / "session.db"
+# Home-dir fallback used only when the plugin wasn't told its workspace (no
+# --log-dir). Normally the session lives in the workspace (see _default_session).
+_HOME_SESSION_DB = Path.home() / ".hiro" / "whatsapp" / "session.db"
 
 
 class WhatsAppChannel(ChannelPlugin):
     """WhatsApp channel backed by neonize (whatsmeow multi-device)."""
 
-    def __init__(self) -> None:
+    def __init__(self, log_dir: str = "") -> None:
+        self._log_dir = log_dir
         self._config: dict[str, Any] = {}
         self._bridge: WhatsAppBridge | None = None
         self._task: asyncio.Task[None] | None = None
+        self._ffmpeg_task: asyncio.Task[bool] | None = None
         self._session_db: str = ""
+        # Config-driven policy (P3). Defaults: accept everyone, send read receipts.
+        self._allowed_senders: set[str] = set()
+        self._send_read_receipts: bool = True
+        self._owner_number: str = ""  # user's own number → routes to General/Hiro
+        # P7: relay TTS replies as WhatsApp voice notes. On by default — if the
+        # character speaks (TTS ran), WhatsApp gets the voice note too.
+        self._audio_out: bool = True
 
     @property
     def info(self) -> ChannelInfo:
@@ -42,18 +64,55 @@ class WhatsAppChannel(ChannelPlugin):
             description="WhatsApp channel (neonize / whatsmeow multi-device).",
         )
 
+    def _default_session(self) -> Path:
+        # The ChannelManager passes --log-dir = <workspace>/logs, so the workspace
+        # is its parent — keep the WhatsApp session inside the workspace.
+        if self._log_dir:
+            return Path(self._log_dir).parent / "channels" / "whatsapp" / "session.db"
+        return _HOME_SESSION_DB
+
     async def on_configure(self, config: dict[str, Any]) -> None:
         self._config = dict(config or {})
-        log.info("WhatsApp channel configured", keys=sorted(self._config.keys()))
+        self._send_read_receipts = bool(self._config.get("send_read_receipts", True))
+        self._audio_out = bool(self._config.get("audio_out", True))
+        self._owner_number = _normalize_number(str(self._config.get("owner_number") or ""))
+        # Allow-list is CLOSED by default (security): with nothing configured, no
+        # sender may reach the agent. The owner's own number is always permitted;
+        # add more via `allowed_senders`.
+        raw_allowed = self._config.get("allowed_senders") or []
+        allowed = {_normalize_number(str(s)) for s in raw_allowed if str(s).strip()}
+        if self._owner_number:
+            allowed.add(self._owner_number)
+        self._allowed_senders = allowed
+        if not self._allowed_senders:
+            log.warning(
+                "⚠️ WhatsApp allow-list is empty — NO senders permitted. Set "
+                "'owner_number' or 'allowed_senders' for the agent to receive messages."
+            )
+        log.info(
+            "WhatsApp channel configured",
+            keys=sorted(self._config.keys()),
+            allowed=len(self._allowed_senders),
+            read_receipts=self._send_read_receipts,
+            audio_out=self._audio_out,
+            owner_set=bool(self._owner_number),
+        )
 
     async def on_start(self) -> None:
-        self._session_db = str(self._config.get("session_db_path") or _DEFAULT_SESSION_DB)
+        self._session_db = str(self._config.get("session_db_path") or self._default_session())
         log.info("🔌 Starting WhatsApp channel", session_db=self._session_db)
+        # Provision ffmpeg/ffprobe (needed for outbound voice) in the background so
+        # a first-run binary download never delays startup or QR pairing. The first
+        # voice reply can only happen after the user messages in, so there's ample
+        # time; if it fails, voice falls back to sending audio as a file.
+        if self._audio_out:
+            self._ffmpeg_task = asyncio.create_task(ensure_ffmpeg_on_path())
         self._bridge = WhatsAppBridge(
             self._session_db,
             on_qr=self._handle_qr,
             on_status=self._handle_status,
             on_message=self._handle_inbound,
+            send_read_receipts=self._send_read_receipts,
         )
         # Run the client loop in the background so on_start returns and the
         # transport keeps servicing the ChannelManager connection.
@@ -63,6 +122,8 @@ class WhatsAppChannel(ChannelPlugin):
         log.info("Stopping WhatsApp channel")
         if self._bridge is not None:
             await self._bridge.stop()
+        if self._ffmpeg_task is not None and not self._ffmpeg_task.done():
+            self._ffmpeg_task.cancel()  # abandon an in-flight ffmpeg download on shutdown
         if self._task is not None:
             self._task.cancel()
             try:
@@ -70,23 +131,87 @@ class WhatsAppChannel(ChannelPlugin):
             except asyncio.CancelledError:
                 pass
 
-    async def send(self, message: UnifiedMessage) -> None:
-        # P2: outbound text replies. P7 will add the message.voiced (audio) event.
-        if message.message_type != "message":
+    async def on_event(self, event: str, data: dict[str, Any]) -> None:
+        # Admin-driven actions (P5): log out / re-pair or force reconnect.
+        if self._bridge is None:
             return
+        if event == "whatsapp.logout":
+            await self._bridge.logout()
+        elif event == "whatsapp.reconnect":
+            await self._bridge.reconnect()
+
+    async def send(self, message: UnifiedMessage) -> None:
+        # Outbound dispatch. A reply arrives as a "message" (text) and, when the
+        # character has TTS, additionally as an "event" (message.voiced) carrying
+        # the spoken audio — P2 handles the former, P7 the latter.
         if self._bridge is None:
             log.warning("⚠️ WhatsApp send skipped — bridge not started")
             return
-        text = _first_text_body(message.content)
         # Reply target: the server's reply envelope leaves recipient_id unset
-        # (broadcast), but copies inbound metadata — so the WhatsApp chat JID we
+        # (broadcast) but copies inbound metadata — so the WhatsApp chat JID we
         # stashed on the inbound message round-trips back here.
-        jid = message.routing.recipient_id or str(message.routing.metadata.get("wa_chat_jid") or "")
-        if not text or not jid:
-            log.warning("⚠️ WhatsApp send skipped — no text or target", has_text=bool(text), jid=jid)
+        jid = _reply_jid(message)
+        if not jid:
+            log.warning("⚠️ WhatsApp send skipped — no reply target", kind=message.message_type)
+            return
+        if message.message_type == MESSAGE_TYPE_EVENT:
+            await self._send_event(message, jid)
+        elif message.message_type == MESSAGE_TYPE_MESSAGE:
+            await self._send_text_message(message, jid)
+
+    async def _send_text_message(self, message: UnifiedMessage, jid: str) -> None:
+        text = _first_text_body(message.content)
+        if not text:
+            log.warning("⚠️ WhatsApp send skipped — no text body", jid=jid)
             return
         await self._bridge.send_text(jid, text)
         log.info(f"⬆️ WhatsApp sent — {jid} · text", preview=text[:80])
+
+    async def _send_event(self, message: UnifiedMessage, jid: str) -> None:
+        # Only message.voiced is actionable on WhatsApp today (other events —
+        # transcribed, received — are device-facing modality mirrors, no-ops here).
+        event = message.event
+        if event is None or event.type != EVENT_TYPE_MESSAGE_VOICED:
+            return
+        if not self._audio_out:
+            log.info("WhatsApp voice reply suppressed — audio_out disabled", jid=jid)
+            return
+        await self._send_voice_note(event, jid)
+
+    async def _send_voice_note(self, event: EventPayload, jid: str) -> None:
+        audio_b64 = str(event.data.get("audio") or "")
+        if not audio_b64:
+            log.warning("⚠️ WhatsApp voiced event carried no audio", jid=jid)
+            return
+        try:
+            mp3 = base64.b64decode(audio_b64)
+        except (ValueError, binascii.Error) as exc:
+            log.warning("⚠️ WhatsApp voiced audio was not valid base64", error=str(exc))
+            return
+        # A native voice-note bubble requires OGG/Opus + PTT (design §9); the TTS
+        # pipeline yields MP3, so transcode. On failure, fall back to a file so the
+        # user still hears the reply (just not as a voice bubble).
+        try:
+            ogg = await transcode_to_ogg_opus(mp3)
+        except TranscodeError as exc:
+            log.warning(
+                "⚠️ WhatsApp voice transcode failed — sending audio as file",
+                error=str(exc),
+                jid=jid,
+            )
+            await self._send_voice_fallback(mp3, event, jid)
+            return
+        await self._bridge.send_audio(jid, ogg, ptt=True)
+        log.info(f"⬆️ WhatsApp sent — {jid} · voice", size=len(ogg))
+
+    async def _send_voice_fallback(self, mp3: bytes, event: EventPayload, jid: str) -> None:
+        mime = str(event.data.get("mime_type") or "audio/mpeg")
+        ext = "mp3" if "mpeg" in mime else "ogg"
+        try:
+            await self._bridge.send_document(jid, mp3, filename=f"reply.{ext}", mimetype=mime)
+            log.info(f"⬆️ WhatsApp sent — {jid} · voice (file fallback)", size=len(mp3))
+        except Exception as exc:  # external send boundary — surface, don't crash send()
+            log.error("❌ WhatsApp voice fallback failed", error=str(exc), exc_info=True, jid=jid)
 
     # -- bridge callbacks --------------------------------------------------
 
@@ -120,6 +245,16 @@ class WhatsAppChannel(ChannelPlugin):
         await self.emit_event("whatsapp.status", {"state": state, **detail})
 
     async def _handle_inbound(self, inbound: dict[str, Any]) -> None:
+        # Allow-list is closed by default: only explicitly permitted numbers reach
+        # the agent (unknown/LID-only senders with no phone match are dropped).
+        pn = _normalize_number(inbound.get("sender_pn", ""))
+        if pn not in self._allowed_senders:
+            log.info(
+                "WhatsApp inbound ignored — sender not permitted (allow-list closed)",
+                sender=inbound.get("sender_jid"),
+                allowed=len(self._allowed_senders),
+            )
+            return
         kind = "voice" if inbound.get("has_audio") else "text"
         preview = inbound.get("text", "")[:80]
         log.info(
@@ -129,24 +264,61 @@ class WhatsAppChannel(ChannelPlugin):
             msg_id=inbound.get("msg_id"),
         )
         text = inbound.get("text") or ""
-        if not text:
-            # Voice notes / other media are handled from Phase 6 onward.
-            log.info("WhatsApp non-text message ignored (text-only until P6)", kind=kind)
+        # Build the content item: a voice note (P6) → audio, otherwise text. The
+        # server's STT node transcribes audio; anything else with no text is dropped.
+        if inbound.get("audio_b64"):
+            content = ContentItem(
+                content_type="audio",
+                body=inbound["audio_b64"],
+                metadata={
+                    "mime_type": inbound.get("audio_mime", "audio/ogg"),
+                    "duration_ms": int(inbound.get("audio_seconds", 0)) * 1000,
+                    "size": inbound.get("audio_size", 0),
+                },
+            )
+        elif text:
+            content = ContentItem(content_type="text", body=text)
+        else:
+            log.info("WhatsApp message ignored — no text or audio", kind=kind)
             return
+        metadata: dict[str, Any] = {
+            # Round-trip the reply target JID so the reply's send() can address it —
+            # the server copies inbound metadata onto the outbound reply. reply_jid
+            # prefers the phone-number JID over LID (see wa_client).
+            "wa_chat_jid": inbound.get("reply_jid") or inbound.get("chat_jid", ""),
+        }
+        # Reply in kind (P7): a voice note in → ask the graph for a spoken reply.
+        # request_voice_reply drives the graph's TTS gate (agent_manager reads it
+        # from inbound metadata); the resulting message.voiced event is what send()
+        # relays as a native WhatsApp voice note. Gated by audio_out; a text
+        # message gets a text reply as before. Set only for audio so we don't voice
+        # every text turn.
+        if self._audio_out and inbound.get("audio_b64"):
+            metadata["request_voice_reply"] = True
+        # Owner's own number → route to the General/Hiro thread, not a per-sender one.
+        if self._owner_number and _normalize_number(inbound.get("sender_pn", "")) == self._owner_number:
+            metadata["route_to_default"] = True
         um = UnifiedMessage(
             routing=MessageRouting(
                 channel="whatsapp",
                 direction="inbound",
                 sender_id=inbound.get("sender_jid", ""),
                 recipient_id="server",
-                # Round-trip the reply target JID so the reply's send() can address
-                # it — the server copies inbound metadata onto the outbound reply.
-                # reply_jid prefers the phone-number JID over LID (see wa_client).
-                metadata={"wa_chat_jid": inbound.get("reply_jid") or inbound.get("chat_jid", "")},
+                metadata=metadata,
             ),
-            content=[ContentItem(content_type="text", body=text)],
+            content=[content],
         )
         await self.emit(um)
+
+
+def _reply_jid(message: UnifiedMessage) -> str:
+    """Resolve the WhatsApp chat JID to reply to from an outbound envelope."""
+    return message.routing.recipient_id or str(message.routing.metadata.get("wa_chat_jid") or "")
+
+
+def _normalize_number(raw: str) -> str:
+    """Reduce a phone number / JID user part to bare digits for allow-list matching."""
+    return "".join(ch for ch in raw if ch.isdigit())
 
 
 def _first_text_body(content: list[ContentItem]) -> str:

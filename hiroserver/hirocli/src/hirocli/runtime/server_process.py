@@ -94,6 +94,9 @@ def _wire_runtime(
     log.info("Registered special channel event handlers")
 
     channel_manager = ChannelManager(ctx)
+    # Expose on ctx so admin routes can drive live channel actions (enable/disable,
+    # logout, reconnect) — same loop, so they await its coroutines directly.
+    ctx.channel_manager = channel_manager
 
     comm_manager = CommunicationManager(
         ctx=ctx,

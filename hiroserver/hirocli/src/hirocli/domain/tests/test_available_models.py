@@ -37,6 +37,14 @@ def _minimal_catalog(tmp_path: Path) -> ModelCatalog:
                 "credential_env_keys": ["PB_KEY"],
                 "metadata_updated_at": "2026-01-01",
             },
+            {
+                "id": "pc",
+                "display_name": "PC (hidden)",
+                "hosting": "cloud",
+                "hidden": True,
+                "credential_env_keys": ["PC_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
         ],
         "models": [
             {
@@ -61,6 +69,12 @@ def _minimal_catalog(tmp_path: Path) -> ModelCatalog:
                 "id": "pb:chat2",
                 "provider_id": "pb",
                 "display_name": "Chat2",
+                "model_kind": "chat",
+            },
+            {
+                "id": "pc:chat3",
+                "provider_id": "pc",
+                "display_name": "Chat3",
                 "model_kind": "chat",
             },
         ],
@@ -97,6 +111,26 @@ def test_list_configured_providers_reports_embedding_kind(
     assert summary.has_chat is True
     assert summary.has_tts is True
     assert summary.has_embedding is True
+
+
+def test_hidden_provider_suppressed_even_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured hidden provider is absent from configured listings and model pickers,
+    while its credential and existing model selections keep resolving."""
+    cat = _minimal_catalog(tmp_path)
+    monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
+    secrets: dict[tuple[str, str], str] = {}
+    store = CredentialStore(tmp_path, "w1", _test_secrets=secrets)
+    store.set_api_key("pa", "key")
+    store.set_api_key("pc", "key")
+    ams = AvailableModelsService(cat, store)
+    assert [s.provider_id for s in ams.list_configured_providers()] == ["pa"]
+    assert {m.id for m in ams.list_available_models()} == {"pa:chat1", "pa:tts1", "pa:embed1"}
+    # credential + resolution still work for existing selections
+    assert store.get_api_key("pc") == "key"
+    assert ams.is_model_available("pc:chat3")
+    assert ams.validate_character_models(llm_models=["pc:chat3"], voice_models=[]).unavailable_llm == []
 
 
 def test_validate_character_models_buckets(

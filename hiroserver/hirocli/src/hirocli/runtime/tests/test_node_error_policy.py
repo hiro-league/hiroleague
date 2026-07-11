@@ -31,7 +31,7 @@ from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalN
 EXPECTED_POLICY: dict[type[NodeGroup], dict[str, str]] = {
     MediaNodes: {"stt": "degrade", "vision": "degrade", "media_failed": "raise"},
     ContextNodes: {"compose_context": "raise"},
-    MemoryNodes: {"memory_recall": "degrade", "memory_out": "raise"},
+    MemoryNodes: {"memory_recall": "degrade", "memory_out": "raise", "memory_ingest": "degrade"},
     KnowledgeFanoutNodes: {"knowledge_retrieve": "degrade"},
     LLMNodes: {"call_model": "raise", "tools": "degrade"},
     TTSNodes: {"tts": "degrade", "finalize": "raise"},
