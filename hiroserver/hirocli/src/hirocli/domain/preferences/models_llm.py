@@ -62,6 +62,9 @@ class LLMPreferences(BaseModel):
     # server-side idle timeout (~60-240s), so very large values buy nothing past that. Read at
     # model-build time → takes effect on server restart.
     http_keepalive_s: int = pref_field(
+        # Advanced: a shared HTTP-connection tuning knob most users never touch (hidden behind the
+        # "show advanced" toggle).
+        advanced=True,
         default=300,
         ge=5,
         le=1800,

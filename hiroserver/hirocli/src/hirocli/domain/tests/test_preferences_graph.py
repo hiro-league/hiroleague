@@ -27,8 +27,8 @@ from hirocli.domain.preferences import (
 def test_default_prefs_have_graph_section_off() -> None:
     prefs = WorkspacePreferences()
     assert prefs.graph.backend == "off"
-    assert prefs.graph.k_hop == 1
-    assert prefs.graph.temporal_default == "current"
+    assert prefs.graph.k_hop == 2
+    assert prefs.graph.temporal_default == "all"
     assert (
         prefs.graph.extraction_tuning_profile
         == DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID
@@ -143,10 +143,10 @@ def test_reranker_resolvers_fall_back_to_default() -> None:
 
 
 def test_graph_reranker_defaults() -> None:
-    # Cross-encoder reranker sub-prefs: off-by-default, no model, no gate.
+    # Cross-encoder reranker sub-prefs: no model, relevance gate at the 0.3 default.
     rr = WorkspacePreferences().graph.reranker
     assert rr.model_id is None  # null → fall back to the workspace default reranker
-    assert rr.min_relevance == 0.0  # keep all (gate disabled)
+    assert rr.min_relevance == 0.3  # drop facts below 0.3 cross-encoder relevance
     assert rr.device is None
 
 

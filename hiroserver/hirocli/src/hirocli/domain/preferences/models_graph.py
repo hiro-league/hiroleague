@@ -89,7 +89,7 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     # RRF/MMR scores are rank-fusion artifacts, so this is ignored for those recipes.
     min_relevance: float = pref_field(
         step=0.05,
-        default=0.0,
+        default=0.3,
         ge=0.0,
         le=1.0,
         title="Min relevance",
@@ -243,9 +243,10 @@ class GraphEvalPreferences(BaseModel):
     # ``show_superseded`` annotate supersession. Defaults = a single timestamp per fact (Zep-style):
     # event_time on, the rest off. Applied identically to the answer, judge, and evidence-check
     # renders of a question (see eval_judge.RecallRenderOptions).
-    show_event_time: bool = Field(default=True, title="Show event_time (valid date)")
-    show_expired_at: bool = Field(default=False, title="Show expired_at (invalid date)")
-    show_superseded: bool = Field(default=False, title="Show SUPERSEDED flag")
+    # Advanced: eval-only recalled-context annotations hidden behind the "show advanced" toggle.
+    show_event_time: bool = pref_field(advanced=True, default=True, title="Show event_time (valid date)")
+    show_expired_at: bool = pref_field(advanced=True, default=False, title="Show expired_at (invalid date)")
+    show_superseded: bool = pref_field(advanced=True, default=False, title="Show SUPERSEDED flag")
     # Answer-context render caps (eval answerer + judge + evidence-check). The recall leg can surface
     # a large, noisy element set (100s of facts/entities/episodes) that buries the answer-relevant
     # ones; these bound what reaches the prompt. Each kind is score-ranked desc, the top
@@ -385,7 +386,7 @@ class GraphPreferences(BaseModel):
     )
     # Default temporal lens at retrieval: current facts only vs include historical.
     temporal_default: KnowledgeGraphTemporalDefault = Field(
-        default="current",
+        default="all",
         title="Temporal lens (default)",
         description=(
             "Default time lens at retrieval. Current = only facts valid now (superseded facts "
@@ -394,7 +395,7 @@ class GraphPreferences(BaseModel):
     )
     # Retrieval expansion radius (hops) when gathering related facts/chunks.
     k_hop: int = Field(
-        default=1,
+        default=2,
         ge=1,
         le=3,
         title="Expansion hops (k)",
@@ -438,7 +439,7 @@ class GraphPreferences(BaseModel):
     # drops facts that don't fit). Changing this needs a re-ingest to rebuild the graph.
     entity_ontology: KnowledgeGraphEntityOntology = pref_field(
         advanced=True,
-        default="open",
+        default="typed",
         title="Extraction ontology",
         description=(
             "Which entity types extraction may use. Open = no predefined types; the model "
@@ -483,7 +484,7 @@ class GraphPreferences(BaseModel):
     # (rrf/mmr/cross_encoder), since each uses cosine_similarity as a search method.
     sim_min_score: float = pref_field(
         step=0.05,
-        default=0.3,
+        default=0.4,
         ge=0.0,
         le=1.0,
         title="Candidate similarity floor",

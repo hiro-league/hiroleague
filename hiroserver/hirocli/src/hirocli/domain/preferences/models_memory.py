@@ -48,7 +48,7 @@ class MemoryExtractionPreferences(BaseModel):
     # mid-conversation is safe — the ingest watermark stores a position, not N. (P1: fields only;
     # the controller that consumes them lands in P2.)
     window_turns: int = Field(
-        default=4,
+        default=3,
         ge=1,
         le=50,
         title="Turns per memory batch",
@@ -60,7 +60,9 @@ class MemoryExtractionPreferences(BaseModel):
     # Guard so a batched episode never trips Graphiti's internal chunker (episode == chunk ==
     # point_id must hold). Mirrors graphiti_core CHUNK_MIN_TOKENS (default 1000); an oversized
     # window sheds turns to fit, a single oversized turn is trimmed. Keep at or below Graphiti's.
-    chunk_min_tokens: int = Field(
+    chunk_min_tokens: int = pref_field(
+        # Advanced: a Graphiti-chunker guard rail, not a day-to-day knob.
+        advanced=True,
         default=1000,
         ge=100,
         le=8000,
@@ -74,7 +76,9 @@ class MemoryExtractionPreferences(BaseModel):
     # Reactive session boundary: if the next message arrives more than this after the last pending
     # turn, the pending turns are flushed as a finished session and a new batch starts. Keeps a
     # window's turns temporally tight so its single reference_time stays representative.
-    session_gap_minutes: int = Field(
+    session_gap_minutes: int = pref_field(
+        # Advanced: batching-boundary tuning hidden behind the "show advanced" toggle.
+        advanced=True,
         default=120,
         ge=1,
         le=10080,
@@ -86,7 +90,9 @@ class MemoryExtractionPreferences(BaseModel):
     )
     # Backstop: a background sweep flushes a conversation's pending (un-batched) turns after this
     # long idle, so an abandoned conversation's memories still land even if the user never returns.
-    idle_flush_hours: int = Field(
+    idle_flush_hours: int = pref_field(
+        # Advanced: background-sweep backstop tuning hidden behind the "show advanced" toggle.
+        advanced=True,
         default=12,
         ge=1,
         le=168,
@@ -99,7 +105,9 @@ class MemoryExtractionPreferences(BaseModel):
     # Extraction-time guidance appended to the graph extractor for chat memory only (NOT knowledge
     # documents or eval, and NOT the answer-time chat instructions). Governs WHICH facts enter the
     # graph from a two-speaker window — by default, only the user's.
-    instructions: str = Field(
+    instructions: str = pref_field(
+        # Advanced: fact-extraction guidance most users leave at the default.
+        advanced=True,
         default=DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
         max_length=4000,
         title="Memory extraction instructions",
@@ -179,7 +187,7 @@ class MemoryPreferences(BaseModel):
     when that engine can't be built. The mem0-legacy model / embedder / reranker fields are
     gone (mem0 → Graphiti, Phase 5)."""
 
-    enabled: bool = Field(default=False, title="Enable agent memory")
+    enabled: bool = Field(default=True, title="Enable agent memory")
     default_tuning_profile: str = pref_field(
         tuning_profile_ref=True, default=DEFAULT_MEMORY_TUNING_PROFILE_ID
     )

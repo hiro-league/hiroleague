@@ -49,7 +49,7 @@
   {/snippet}
 
   {#if prefs.activeTab === 'channels'}
-    <ChannelsTab ctrl={channelsCtrl} />
+    <ChannelsTab ctrl={channelsCtrl} notify={toasts.notify} />
   {:else}
     <DevicesTab ctrl={devicesCtrl} />
   {/if}

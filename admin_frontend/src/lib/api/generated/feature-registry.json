@@ -18,10 +18,5 @@
     "label": "Metrics",
     "active": false,
     "note": "Server resource metrics (CPU/memory/disk/network)."
-  },
-  "whatsapp": {
-    "label": "WhatsApp",
-    "active": true,
-    "note": "WhatsApp channel admin: QR pairing, connection status, config."
   }
 }

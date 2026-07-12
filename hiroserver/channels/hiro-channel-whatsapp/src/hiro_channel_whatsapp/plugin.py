@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from hiro_channel_sdk.base import ChannelPlugin
+from hiro_channel_sdk.capabilities import (
+    ACTION_LOGOUT,
+    ACTION_RECONNECT,
+    PAIRING_QR,
+    ChannelCapabilities,
+)
 from hiro_channel_sdk.constants import (
     EVENT_TYPE_MESSAGE_VOICED,
     MESSAGE_TYPE_EVENT,
@@ -29,7 +35,19 @@ from hiro_channel_sdk.models import (
 from hiro_commons.log import Logger
 
 from .audio import TranscodeError, ensure_ffmpeg_on_path, transcode_to_ogg_opus
+from .config import WhatsAppChannelConfig
 from .wa_client import WhatsAppBridge
+
+# Onboarding lifecycle states (design §6.3) surfaced to the admin UI, ordered
+# most-preliminary → ready.
+_STATE_MACHINE = [
+    "installed",
+    "enabled",
+    "spawned",
+    "connected",
+    "paired",
+    "ready",
+]
 
 log = Logger.get("WHATSAPP")
 
@@ -62,6 +80,17 @@ class WhatsAppChannel(ChannelPlugin):
             name="whatsapp",
             version="0.1.0",
             description="WhatsApp channel (neonize / whatsmeow multi-device).",
+            # §5.1 — ship the config schema so the server validates writes and the
+            # admin UI renders the settings form without importing this package.
+            config_schema=WhatsAppChannelConfig.model_json_schema(),
+            # §5.2 — WhatsApp links via QR, supports log out / reconnect, and reports
+            # a live connection status through the whatsapp.status event.
+            capabilities=ChannelCapabilities(
+                pairing=PAIRING_QR,
+                actions=[ACTION_LOGOUT, ACTION_RECONNECT],
+                live_status=True,
+                state_machine=_STATE_MACHINE,
+            ).model_dump(),
         )
 
     def _default_session(self) -> Path:
@@ -132,12 +161,14 @@ class WhatsAppChannel(ChannelPlugin):
                 pass
 
     async def on_event(self, event: str, data: dict[str, Any]) -> None:
-        # Admin-driven actions (P5): log out / re-pair or force reconnect.
+        # Generic admin-driven actions (§5.4): log out / re-pair or force reconnect.
+        # Action names are declared in ChannelCapabilities.actions and arrive as
+        # channel.<action> events.
         if self._bridge is None:
             return
-        if event == "whatsapp.logout":
+        if event == "channel.logout":
             await self._bridge.logout()
-        elif event == "whatsapp.reconnect":
+        elif event == "channel.reconnect":
             await self._bridge.reconnect()
 
     async def send(self, message: UnifiedMessage) -> None:
@@ -226,7 +257,8 @@ class WhatsAppChannel(ChannelPlugin):
             ascii_qr = _render_ascii_qr(code)
             if ascii_qr:
                 log.info(f"📱 Scan this WhatsApp QR to link the account:\n{ascii_qr}")
-        await self.emit_event("whatsapp.qr", {"qr": code})
+        # §5.4 — generic pairing event; `kind` tells the UI how to render it (QR here).
+        await self.emit_event("channel.pairing", {"kind": "qr", "qr": code})
 
     def _write_qr_png(self, code: str) -> str:
         """Write the current QR to ``<session dir>/qr.png``; empty str on failure."""
@@ -242,7 +274,8 @@ class WhatsAppChannel(ChannelPlugin):
 
     async def _handle_status(self, state: str, detail: dict[str, Any]) -> None:
         log.info(f"WhatsApp status — {state}", **detail)
-        await self.emit_event("whatsapp.status", {"state": state, **detail})
+        # §5.4 — generic connection-status event (channel name injected server-side).
+        await self.emit_event("channel.status", {"state": state, **detail})
 
     async def _handle_inbound(self, inbound: dict[str, Any]) -> None:
         # Allow-list is closed by default: only explicitly permitted numbers reach

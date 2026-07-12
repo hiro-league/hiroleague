@@ -1,17 +1,32 @@
 <script lang="ts">
-  import { Lock, Power, PowerOff } from '@lucide/svelte';
+  import { Lock, Power, PowerOff, Settings2 } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import type { Notify } from '$lib/ui/toast-types';
   import type { ChannelsController } from '../state/channels-controller.svelte';
   import RefreshableSectionCard from '../shared/RefreshableSectionCard.svelte';
+  import ChannelDetail from './ChannelDetail.svelte';
 
-  let { ctrl }: { ctrl: ChannelsController } = $props();
+  let { ctrl, notify }: { ctrl: ChannelsController; notify: Notify } = $props();
 
-  const CHANNEL_GRID = '180px 120px 1.5fr 1fr 140px';
+  // Which channel's generic detail view (§5.5) is open; null = the list.
+  let selected = $state<string | null>(null);
+
+  const CHANNEL_GRID = '180px 110px 1.4fr 1fr 210px';
 </script>
 
+{#if selected}
+  {#key selected}
+    <ChannelDetail
+      name={selected}
+      {notify}
+      onBack={() => (selected = null)}
+      onChanged={() => void ctrl.load()}
+    />
+  {/key}
+{:else}
 <RefreshableSectionCard
   title="Channels"
   countText="{ctrl.rows.length} configured / {ctrl.enabledCount} enabled"
@@ -52,7 +67,15 @@
               <small class="text-muted-foreground">-</small>
             {/if}
           </span>
-          <span class="flex justify-end">
+          <span class="flex justify-end gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={() => (selected = row.name)}
+              title="Manage channel"
+            >
+              <Settings2 size={13} /> Manage
+            </Button>
             {#if ctrl.isMandatory(row)}
               <Button
                 size="icon"
@@ -66,16 +89,16 @@
               </Button>
             {:else}
               {@const ToggleIcon = row.enabled ? PowerOff : Power}
-              {@const toggleLabel = row.enabled ? 'Disable' : 'Enable'}
               {@const toggleTitle = row.enabled ? 'Disable channel' : 'Enable channel'}
               <Button
-                size="sm"
-                variant="outline"
+                size="icon"
+                variant="ghost"
                 disabled={ctrl.isBusy(row)}
                 onclick={() => void ctrl.toggle(row)}
                 title={toggleTitle}
+                aria-label={toggleTitle}
               >
-                <ToggleIcon size={13} /> {toggleLabel}
+                <ToggleIcon size={15} />
               </Button>
             {/if}
           </span>
@@ -84,3 +107,4 @@
     {/snippet}
   </AdminTableShell>
 </RefreshableSectionCard>
+{/if}

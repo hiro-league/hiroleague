@@ -23,14 +23,14 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
       "file": false
     },
     "output": {
-      "voice": false,
+      "voice": true,
       "image": false,
       "video": false,
       "file": false
     }
   },
   "memory": {
-    "enabled": false,
+    "enabled": true,
     "default_tuning_profile": "memory_extraction",
     "user_name": "",
     "search": {
@@ -38,7 +38,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     },
     "extraction": {
       "enabled": true,
-      "window_turns": 4,
+      "window_turns": 3,
       "chunk_min_tokens": 1000,
       "session_gap_minutes": 120,
       "idle_flush_hours": 12,
@@ -109,18 +109,18 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "small_model": null,
     "small_tuning_profile": "graphiti_small",
     "embedder_model": null,
-    "temporal_default": "current",
-    "k_hop": 1,
+    "temporal_default": "all",
+    "k_hop": 2,
     "search_recipe": "rrf",
     "search_scope": "edges",
-    "entity_ontology": "open",
+    "entity_ontology": "typed",
     "custom_extraction_instructions": "Capture first-person preferences, goals, habits and activities as facts even when only the speaker is named; treat the activity/topic/object as the second entity.",
-    "sim_min_score": 0.3,
+    "sim_min_score": 0.4,
     "query_timeout_s": 60,
     "observability": "ledger",
     "reranker": {
       "model_id": null,
-      "min_relevance": 0.0,
+      "min_relevance": 0.3,
       "device": null
     },
     "eval": {
@@ -176,7 +176,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "instructions": "## Instructions\n- This is a conversation between you (the character) and the user.\n- Use the **Knowledge retrieved** (from the workspace knowledge base) and **Memories retrieved** below as optional background.\n- You choose what is relevant \u2014 you do not need to use all, or any, of it.\n- source rank and score suggest the search relevancy of the knowledge item to the user message/context\n- Answer **Last User Message** in your own style.",
     "max_messages": 6,
     "cite_sources": false,
-    "tools_enabled": true,
+    "tools_enabled": false,
     "preferred_answering_language": "en"
   },
   "tuning_profiles": {

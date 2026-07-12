@@ -115,10 +115,10 @@ def test_resolve_llm_none_without_default(tmp_path: Path, monkeypatch: pytest.Mo
 def test_workspace_preferences_media_defaults() -> None:
     prefs = WorkspacePreferences()
     assert prefs.media.input.voice is True
-    assert prefs.media.output.voice is False
+    assert prefs.media.output.voice is True
     assert prefs.media.input.image is False
     assert prefs.media.output.file is False
-    assert prefs.memory.enabled is False
+    assert prefs.memory.enabled is True
     assert prefs.chat.max_messages == 6
     assert prefs.llm.default_tuning_profile == "balanced_chat"
     assert prefs.memory.default_tuning_profile == "memory_extraction"

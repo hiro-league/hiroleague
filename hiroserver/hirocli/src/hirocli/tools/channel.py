@@ -24,6 +24,13 @@ from ..domain.channel_config import (
     load_channel_config,
     save_channel_config,
 )
+from ..domain.channel_descriptor import (
+    coerce_and_validate_config,
+    load_channel_descriptor,
+    secret_keys,
+)
+from ..domain.channel_secret_store import SECRET_MARKER, ChannelSecretStore
+from ..domain.workspace import workspace_id_for_path
 from ..domain.config import load_config, master_key_path
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
@@ -89,6 +96,29 @@ def _parse_config_value(raw: str) -> Any:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return raw
+
+
+def _apply_secret_write(
+    workspace_path: Path,
+    channel_name: str,
+    key: str,
+    value: str | None,
+    cfg: ChannelConfig,
+) -> None:
+    """Store a secret-declared config key in the keyring; keep only a marker in config (§5.6)."""
+    wid = workspace_id_for_path(workspace_path)
+    if wid is None:
+        raise ValueError(
+            "Cannot store a channel secret: this workspace is not in the registry."
+        )
+    store = ChannelSecretStore(workspace_path, wid)
+    if value is None:
+        store.delete(channel_name, key)
+        cfg.config.pop(key, None)
+    else:
+        # value is the raw string as typed — secrets are never JSON-coerced.
+        store.set(channel_name, key, value)
+        cfg.config[key] = dict(SECRET_MARKER)
 
 
 # ---------------------------------------------------------------------------
@@ -294,10 +324,27 @@ class ChannelConfigSetTool(Tool):
             )
         # Config changes reach a running plugin on the next channel.configure push
         # (i.e. after a restart); live re-push is a later phase (hot reload).
-        if value is None:
-            cfg.config.pop(key, None)
+        descriptor = load_channel_descriptor(workspace_path, channel_name)
+        schema = descriptor.config_schema if descriptor is not None else None
+        secrets = secret_keys(schema) if schema else set()
+        if key in secrets:
+            # §5.6 — secret-declared keys go to the keyring; config keeps only a marker.
+            _apply_secret_write(workspace_path, channel_name, key, value, cfg)
         else:
-            cfg.config[key] = _parse_config_value(value)
+            if value is None:
+                cfg.config.pop(key, None)
+            else:
+                cfg.config[key] = _parse_config_value(value)
+            # §5.1 — validate against the schema the plugin declared at registration
+            # (persisted as a descriptor). Coercion aligns loosely-typed CLI/HTTP values
+            # with the declared types (e.g. a phone number typed as digits → string)
+            # before validating; the coerced dict is what we persist. Secret keys hold a
+            # marker, so they're excluded from value validation. A channel that never
+            # registered has no descriptor, so writes pass through unvalidated.
+            if schema:
+                cfg.config = coerce_and_validate_config(
+                    schema, cfg.config, secret_keys=secrets
+                )
         save_channel_config(workspace_path, cfg)
         return ChannelConfigResult(name=channel_name, config=dict(cfg.config))
 

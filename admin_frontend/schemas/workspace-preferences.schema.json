@@ -45,12 +45,13 @@
           "type": "integer"
         },
         "cite_sources": {
+          "advanced": true,
           "default": false,
           "title": "Cite knowledge sources in chat replies",
           "type": "boolean"
         },
         "tools_enabled": {
-          "default": true,
+          "default": false,
           "title": "Enable agent tools in chat",
           "type": "boolean"
         },
@@ -156,16 +157,19 @@
           "type": "string"
         },
         "show_event_time": {
+          "advanced": true,
           "default": true,
           "title": "Show event_time (valid date)",
           "type": "boolean"
         },
         "show_expired_at": {
+          "advanced": true,
           "default": false,
           "title": "Show expired_at (invalid date)",
           "type": "boolean"
         },
         "show_superseded": {
+          "advanced": true,
           "default": false,
           "title": "Show SUPERSEDED flag",
           "type": "boolean"
@@ -318,7 +322,7 @@
           "title": "Embedder model"
         },
         "temporal_default": {
-          "default": "current",
+          "default": "all",
           "description": "Default time lens at retrieval. Current = only facts valid now (superseded facts hidden). Include historical = also surface invalidated facts. Overridable per query.",
           "enum": [
             "current",
@@ -328,7 +332,7 @@
           "type": "string"
         },
         "k_hop": {
-          "default": 1,
+          "default": 2,
           "description": "Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost.",
           "maximum": 3,
           "minimum": 1,
@@ -360,7 +364,7 @@
         },
         "entity_ontology": {
           "advanced": true,
-          "default": "open",
+          "default": "typed",
           "description": "Which entity types extraction may use. Open = no predefined types; the model extracts freely (everything becomes a generic Entity) \u2014 broadest recall, captures activities, interests, media, and preferences. Typed = pin the 5-type vocabulary (Person / Place / Organization / Event / Object) \u2014 more precise, but drops first-person facts that don't fit those types. Changing this rebuilds the graph at the next ingest, so a re-ingest is required to take effect.",
           "enum": [
             "open",
@@ -378,7 +382,7 @@
           "type": "string"
         },
         "sim_min_score": {
-          "default": 0.3,
+          "default": 0.4,
           "description": "Minimum cosine similarity (0\u20131) for a fact to even become a search candidate. Keep low (\u22480.3) for recall \u2014 too high and paraphrased questions (e.g. asking 'wife' when the stored fact says 'married to') return no facts at all. Graphiti's own default is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here.",
           "maximum": 1.0,
           "minimum": 0.0,
@@ -655,7 +659,7 @@
           "title": "Reranker model"
         },
         "min_relevance": {
-          "default": 0.0,
+          "default": 0.3,
           "description": "Drop facts whose cross-encoder relevance is below this (0\u20131). 0 = keep all. Ignored by RRF/MMR.",
           "maximum": 1.0,
           "minimum": 0.0,
@@ -929,6 +933,7 @@
           "title": "Default embedder model"
         },
         "http_keepalive_s": {
+          "advanced": true,
           "default": 300,
           "description": "How long idle HTTPS connections to model providers (OpenAI, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.",
           "maximum": 1800,
@@ -1003,7 +1008,7 @@
           "type": "boolean"
         },
         "window_turns": {
-          "default": 4,
+          "default": 3,
           "description": "Conversation turns (user+agent exchanges) accumulated into one memory episode before extraction. 1 = ingest every turn; higher batches more turns into a richer episode.",
           "maximum": 50,
           "minimum": 1,
@@ -1011,6 +1016,7 @@
           "type": "integer"
         },
         "chunk_min_tokens": {
+          "advanced": true,
           "default": 1000,
           "description": "Token budget for a batched memory episode. A window over this sheds turns to fit (a lone oversized turn is trimmed). Keep at/below Graphiti's chunk threshold so an episode is never re-split.",
           "maximum": 8000,
@@ -1019,6 +1025,7 @@
           "type": "integer"
         },
         "session_gap_minutes": {
+          "advanced": true,
           "default": 120,
           "description": "If the next message arrives more than this many minutes after the previous one, the pending turns are ingested as a finished session and a new batch starts.",
           "maximum": 10080,
@@ -1027,6 +1034,7 @@
           "type": "integer"
         },
         "idle_flush_hours": {
+          "advanced": true,
           "default": 12,
           "description": "A background sweep ingests a conversation's pending turns after this many hours of inactivity, so an abandoned conversation's memories still land.",
           "maximum": 168,
@@ -1035,6 +1043,7 @@
           "type": "integer"
         },
         "instructions": {
+          "advanced": true,
           "default": "This text is a chat transcript. In it, \"{user}\" is the human user and \"{character}\" is the AI assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines purely as context for resolving what {user} refers to \u2014 never record a fact asserted by {character} that {user} did not state or confirm.",
           "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge or eval.",
           "maxLength": 4000,
@@ -1057,7 +1066,7 @@
       "description": "Agent memory settings \u2014 a thin feature layer over the shared Graphiti graph engine.\n\nGated purely by ``enabled``; the engine (extraction model, embedder, search) comes from\nthe top-level ``graph`` preferences, and ``create_memory_service`` degrades to ``None``\nwhen that engine can't be built. The mem0-legacy model / embedder / reranker fields are\ngone (mem0 \u2192 Graphiti, Phase 5).",
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enable agent memory",
           "type": "boolean"
         },

@@ -79,6 +79,10 @@ class _ConnectedChannel:
     version: str
     description: str
     ws: ServerConnection
+    # §5.1/§5.2 — the config JSON Schema + capability descriptor the plugin declared
+    # at registration (None for channels that declare neither).
+    config_schema: dict[str, Any] | None = None
+    capabilities: dict[str, Any] | None = None
     pending: dict[str, asyncio.Future[Any]] = field(default_factory=dict)
 
 
@@ -317,7 +321,13 @@ class ChannelManager:
                             version=params.get("version", "?"),
                             description=params.get("description", ""),
                             ws=ws,
+                            config_schema=params.get("config_schema"),
+                            capabilities=params.get("capabilities"),
                         )
+                        # §5.1/§5.2 — persist the declared schema + capabilities so the
+                        # config Tools / admin routes can validate + render generically,
+                        # even from the CLI or after a restart.
+                        self._persist_descriptor(channel_name, params)
                         with log_scope(
                             traffic_class=TRAFFIC_CLASS_INFRA_TRANSPORT,
                             traffic_subclass="register",
@@ -415,8 +425,18 @@ class ChannelManager:
                                 **log_kwargs,
                             )
                             if self._on_event and isinstance(event_name, str):
+                                # §5.4 — event names are no longer channel-scoped
+                                # (channel.status/channel.pairing), so tell the handler
+                                # which channel emitted it. The manager is authoritative
+                                # for the connection's name; copy so the logged dict above
+                                # is left untouched.
+                                dispatch_data = (
+                                    {**raw_event_data, "channel": channel_name}
+                                    if isinstance(raw_event_data, dict)
+                                    else raw_event_data
+                                )
                                 try:
-                                    await self._on_event(event_name, raw_event_data)
+                                    await self._on_event(event_name, dispatch_data)
                                 except Exception as exc:
                                     log.error(
                                         f"❌ on_event handler error — ({channel_name})",
@@ -482,13 +502,32 @@ class ChannelManager:
             else:
                 fut.set_result(data.get("result"))
 
+    def _persist_descriptor(self, channel_name: str, params: dict[str, Any]) -> None:
+        """Persist a plugin's declared config schema + capabilities (§5.1/§5.2)."""
+        from ..domain.channel_descriptor import ChannelDescriptor, save_channel_descriptor
+
+        save_channel_descriptor(
+            self._ctx.workspace_path,
+            ChannelDescriptor(
+                channel=channel_name,
+                version=str(params.get("version", "")),
+                config_schema=params.get("config_schema"),
+                capabilities=params.get("capabilities"),
+            ),
+        )
+
     async def _push_config(self, channel_name: str) -> None:
+        from ..domain.channel_secret_store import resolve_channel_secrets
+
         cfg = load_channel_config(self._ctx.workspace_path, channel_name)
         payload = dict(cfg.config) if cfg else {}
         if channel_name == MANDATORY_CHANNEL_NAME:
             payload.setdefault("gateway_url", self._ctx.config.gateway_url)
             payload.setdefault("device_id", self._ctx.config.device_id)
             payload.setdefault("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
+        # §5.6 — swap any secret markers for real keyring values right before the push,
+        # so the plugin receives usable config while the DB keeps only markers.
+        payload = resolve_channel_secrets(self._ctx.workspace_path, channel_name, payload)
         # Always send channel.configure — even with an empty payload. The plugin
         # transport only calls on_start() from the configure handler, so a channel
         # with no config (e.g. whatsapp in P1) would otherwise never start.

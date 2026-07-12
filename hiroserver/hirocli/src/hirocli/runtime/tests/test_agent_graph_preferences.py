@@ -284,7 +284,7 @@ async def test_memory_ingest_delegates_to_windowed_ingest(tmp_path, monkeypatch)
     assert kw["current_reply_text"] == "Noted."
     assert kw["current_reply_id"] == "reply-abc"
     # Windowing knobs threaded from memory.extraction.* (defaults).
-    assert kw["window_turns"] == 4
+    assert kw["window_turns"] == 3
     assert kw["session_gap_minutes"] == 120
     assert kw["chunk_min_tokens"] == 1000
 

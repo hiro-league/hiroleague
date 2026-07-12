@@ -17,7 +17,8 @@ def default_input_modalities() -> ModalityFlags:
 
 
 def default_output_modalities() -> ModalityFlags:
-    return ModalityFlags()
+    # Voice output on by default so a fresh workspace can speak replies without extra setup.
+    return ModalityFlags(voice=True)
 
 
 class MediaPreferences(BaseModel):

@@ -63,6 +63,10 @@ dependencies = [
     "aiosqlite>=0.20",
     "sqlmodel>=0.0.21",
     "qrcode>=8.0",
+    # Validate channel config writes against the JSON Schema a plugin declares at
+    # registration (domain/channel_descriptor.py). Already present transitively via
+    # langchain; pinned explicitly since we now depend on it directly.
+    "jsonschema>=4.25",
     "psutil>=7.0",
     "pillow>=12.2",
     "hiro-commons~=0.1.3",

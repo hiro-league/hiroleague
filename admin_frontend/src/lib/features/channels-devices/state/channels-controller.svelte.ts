@@ -34,11 +34,14 @@ export function createChannelsController(notify: Notify) {
   async function toggle(row: ChannelRow) {
     busyChannel = row.name;
     try {
-      const result = row.enabled ? await disableChannel(row.name) : await enableChannel(row.name);
-      notify(
-        'success',
-        result.data ?? `Channel '${row.name}' ${row.enabled ? 'disabled' : 'enabled'}.`
-      );
+      // enable/disable return {enabled} now (they also hot-activate, §5.3) — the
+      // message is composed here, not read from the payload.
+      if (row.enabled) {
+        await disableChannel(row.name);
+      } else {
+        await enableChannel(row.name);
+      }
+      notify('success', `Channel '${row.name}' ${row.enabled ? 'disabled' : 'enabled'}.`);
       await load();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Channel update failed.');

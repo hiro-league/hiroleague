@@ -87,7 +87,7 @@ describe('toggle', () => {
   it('disables an enabled channel, notifies, and reloads', async () => {
     const { ctrl, notify } = make();
     const row = channelRow({ name: 'telegram', enabled: true });
-    vi.mocked(api.disableChannel).mockResolvedValue({ data: 'disabled' } as never);
+    vi.mocked(api.disableChannel).mockResolvedValue({ data: { enabled: false } } as never);
     vi.mocked(api.listChannels).mockResolvedValue({
       data: { channels: [row], mandatory_channel_name: 'devices' }
     } as never);
@@ -95,7 +95,7 @@ describe('toggle', () => {
     await ctrl.toggle(row);
 
     expect(api.disableChannel).toHaveBeenCalledWith('telegram');
-    expect(notify).toHaveBeenCalledWith('success', 'disabled');
+    expect(notify).toHaveBeenCalledWith('success', "Channel 'telegram' disabled.");
     expect(api.listChannels).toHaveBeenCalledTimes(1);
     expect(ctrl.busyChannel).toBeNull();
   });

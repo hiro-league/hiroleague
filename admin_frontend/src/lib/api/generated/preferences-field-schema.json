@@ -57,6 +57,7 @@
     "step": 5,
     "title": "Provider connection keepalive (seconds)",
     "description": "How long idle HTTPS connections to model providers (OpenAI, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.",
+    "advanced": true,
     "min": 5,
     "max": 1800
   },
@@ -144,7 +145,7 @@
     "path": "memory.enabled",
     "nullable": false,
     "type": "boolean",
-    "default": false,
+    "default": true,
     "title": "Enable agent memory"
   },
   "memory.default_tuning_profile": {
@@ -179,7 +180,7 @@
     "path": "memory.extraction.window_turns",
     "nullable": false,
     "type": "integer",
-    "default": 4,
+    "default": 3,
     "title": "Turns per memory batch",
     "description": "Conversation turns (user+agent exchanges) accumulated into one memory episode before extraction. 1 = ingest every turn; higher batches more turns into a richer episode.",
     "min": 1,
@@ -192,6 +193,7 @@
     "default": 1000,
     "title": "Max tokens per memory episode",
     "description": "Token budget for a batched memory episode. A window over this sheds turns to fit (a lone oversized turn is trimmed). Keep at/below Graphiti's chunk threshold so an episode is never re-split.",
+    "advanced": true,
     "min": 100,
     "max": 8000
   },
@@ -202,6 +204,7 @@
     "default": 120,
     "title": "New-session gap (minutes)",
     "description": "If the next message arrives more than this many minutes after the previous one, the pending turns are ingested as a finished session and a new batch starts.",
+    "advanced": true,
     "min": 1,
     "max": 10080
   },
@@ -212,6 +215,7 @@
     "default": 12,
     "title": "Idle flush (hours)",
     "description": "A background sweep ingests a conversation's pending turns after this many hours of inactivity, so an abandoned conversation's memories still land.",
+    "advanced": true,
     "min": 1,
     "max": 168
   },
@@ -221,7 +225,8 @@
     "type": "string",
     "default": "This text is a chat transcript. In it, \"{user}\" is the human user and \"{character}\" is the AI assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines purely as context for resolving what {user} refers to \u2014 never record a fact asserted by {character} that {user} did not state or confirm.",
     "title": "Memory extraction instructions",
-    "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge or eval."
+    "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge or eval.",
+    "advanced": true
   },
   "memory.retrieval.active_prompt_id": {
     "path": "memory.retrieval.active_prompt_id",
@@ -613,7 +618,7 @@
     "path": "graph.temporal_default",
     "nullable": false,
     "type": "string",
-    "default": "current",
+    "default": "all",
     "enum": [
       "current",
       "all"
@@ -625,7 +630,7 @@
     "path": "graph.k_hop",
     "nullable": false,
     "type": "integer",
-    "default": 1,
+    "default": 2,
     "title": "Expansion hops (k)",
     "description": "Relationship hops out from matched entities when gathering related facts. 1 = direct neighbors only (precise); higher reaches further at more noise/cost.",
     "min": 1,
@@ -662,7 +667,7 @@
     "path": "graph.entity_ontology",
     "nullable": false,
     "type": "string",
-    "default": "open",
+    "default": "typed",
     "enum": [
       "open",
       "typed"
@@ -684,7 +689,7 @@
     "path": "graph.sim_min_score",
     "nullable": false,
     "type": "number",
-    "default": 0.3,
+    "default": 0.4,
     "step": 0.05,
     "title": "Candidate similarity floor",
     "description": "Minimum cosine similarity (0\u20131) for a fact to even become a search candidate. Keep low (\u22480.3) for recall \u2014 too high and paraphrased questions (e.g. asking 'wife' when the stored fact says 'married to') return no facts at all. Graphiti's own default is a strict 0.6. Precision belongs in the reranker's Min relevance below, not here.",
@@ -728,7 +733,7 @@
     "path": "graph.reranker.min_relevance",
     "nullable": false,
     "type": "number",
-    "default": 0.0,
+    "default": 0.3,
     "step": 0.05,
     "title": "Min relevance",
     "description": "Drop facts whose cross-encoder relevance is below this (0\u20131). 0 = keep all. Ignored by RRF/MMR.",
@@ -822,21 +827,24 @@
     "nullable": false,
     "type": "boolean",
     "default": true,
-    "title": "Show event_time (valid date)"
+    "title": "Show event_time (valid date)",
+    "advanced": true
   },
   "graph.eval.show_expired_at": {
     "path": "graph.eval.show_expired_at",
     "nullable": false,
     "type": "boolean",
     "default": false,
-    "title": "Show expired_at (invalid date)"
+    "title": "Show expired_at (invalid date)",
+    "advanced": true
   },
   "graph.eval.show_superseded": {
     "path": "graph.eval.show_superseded",
     "nullable": false,
     "type": "boolean",
     "default": false,
-    "title": "Show SUPERSEDED flag"
+    "title": "Show SUPERSEDED flag",
+    "advanced": true
   },
   "graph.eval.max_elements_per_kind": {
     "path": "graph.eval.max_elements_per_kind",
@@ -990,13 +998,14 @@
     "nullable": false,
     "type": "boolean",
     "default": false,
-    "title": "Cite knowledge sources in chat replies"
+    "title": "Cite knowledge sources in chat replies",
+    "advanced": true
   },
   "chat.tools_enabled": {
     "path": "chat.tools_enabled",
     "nullable": false,
     "type": "boolean",
-    "default": true,
+    "default": false,
     "title": "Enable agent tools in chat"
   },
   "chat.preferred_answering_language": {

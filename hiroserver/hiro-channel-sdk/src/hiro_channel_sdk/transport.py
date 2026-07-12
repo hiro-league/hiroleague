@@ -110,6 +110,10 @@ class PluginTransport:
                         "name": self._plugin.info.name,
                         "version": self._plugin.info.version,
                         "description": self._plugin.info.description,
+                        # §5.1/§5.2 — ship the config schema + capability descriptor so
+                        # the server can validate config and drive the admin UI generically.
+                        "config_schema": self._plugin.info.config_schema,
+                        "capabilities": self._plugin.info.capabilities,
                     },
                 )
             )

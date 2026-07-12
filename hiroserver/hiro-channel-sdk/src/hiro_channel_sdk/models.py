@@ -181,3 +181,11 @@ class ChannelInfo(BaseModel):
     name: str
     version: str = "0.1.0"
     description: str = ""
+    # Design §5.1 — JSON Schema (from the plugin's pydantic config model via
+    # ``model_json_schema()``) describing this channel's config keys. The server
+    # validates config writes against it and the admin UI renders a settings form
+    # generically — WITHOUT importing the plugin package. None ⇒ no configurable keys.
+    config_schema: dict[str, Any] | None = None
+    # Design §5.2 — capability descriptor (see capabilities.ChannelCapabilities)
+    # driving the non-config admin surface (pairing / actions / status) generically.
+    capabilities: dict[str, Any] | None = None

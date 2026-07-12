@@ -13,6 +13,15 @@ Exports the key building blocks every plugin author needs:
 
 from . import constants, log_setup
 from .base import ChannelPlugin
+from .capabilities import (
+    ACTION_LOGOUT,
+    ACTION_RECONNECT,
+    PAIRING_NONE,
+    PAIRING_OAUTH,
+    PAIRING_QR,
+    PAIRING_TOKEN,
+    ChannelCapabilities,
+)
 from .log_scope_fields import (
     METADATA_LOG_REPLY_TO_MSG_ID,
     METADATA_LOG_RPC_METHOD,
@@ -32,6 +41,13 @@ __all__ = [
     "unified_message_log_scope",
     "ChannelPlugin",
     "ChannelInfo",
+    "ChannelCapabilities",
+    "PAIRING_NONE",
+    "PAIRING_QR",
+    "PAIRING_TOKEN",
+    "PAIRING_OAUTH",
+    "ACTION_LOGOUT",
+    "ACTION_RECONNECT",
     "ContentItem",
     "EventPayload",
     "MessageRouting",

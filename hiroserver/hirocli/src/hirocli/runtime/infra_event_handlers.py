@@ -52,22 +52,30 @@ class InfraEventHandlers:
         handler.register("gateway_disconnected", self.handle_gateway_disconnected)
         handler.register("device_connected", self.handle_device_connected)
         handler.register("device_disconnected", self.handle_device_disconnected)
-        # WhatsApp channel surfaces its pairing QR + connection status for the
-        # Admin UI; cache the latest on the shared ctx for admin routes to read.
-        handler.register("whatsapp.qr", self.handle_whatsapp_qr)
-        handler.register("whatsapp.status", self.handle_whatsapp_status)
+        # §5.4 — channels surface pairing (QR/token) + connection status generically;
+        # cache the latest per channel on the shared ctx for the admin routes to read.
+        # The emitting channel name is injected into the event data by ChannelManager.
+        handler.register("channel.pairing", self.handle_channel_pairing)
+        handler.register("channel.status", self.handle_channel_status)
 
-    async def handle_whatsapp_qr(self, data: dict[str, Any]) -> None:
-        qr = str(data.get("qr") or "")
-        if not qr:
+    async def handle_channel_pairing(self, data: dict[str, Any]) -> None:
+        channel = str(data.get("channel") or "")
+        # QR channels push the pairing code here; token/oauth channels omit it (the
+        # code is user-entered, not server-issued).
+        code = str(data.get("qr") or data.get("code") or "")
+        if not channel or not code:
             return
-        st = self._ctx.channel_status.setdefault("whatsapp", {})
-        st["qr"] = qr
+        st = self._ctx.channel_status.setdefault(channel, {})
+        st["qr"] = code
         st["qr_at"] = datetime.now(UTC).isoformat()
+        st["pairing_kind"] = str(data.get("kind") or "qr")
 
-    async def handle_whatsapp_status(self, data: dict[str, Any]) -> None:
+    async def handle_channel_status(self, data: dict[str, Any]) -> None:
+        channel = str(data.get("channel") or "")
+        if not channel:
+            return
         state = str(data.get("state") or "")
-        st = self._ctx.channel_status.setdefault("whatsapp", {})
+        st = self._ctx.channel_status.setdefault(channel, {})
         st["state"] = state
         st["state_at"] = datetime.now(UTC).isoformat()
         account = data.get("account")
@@ -76,7 +84,7 @@ class InfraEventHandlers:
         # Keep any diagnostic detail the plugin attached (reason/code/expire/message
         # for logged_out/banned/error, backoff for reconnecting) so the admin UI can
         # explain a terminal state instead of showing a bare status word.
-        detail = {k: v for k, v in data.items() if k not in ("state", "account")}
+        detail = {k: v for k, v in data.items() if k not in ("state", "account", "channel")}
         st["detail"] = detail
         # Once linked, the QR is stale — drop it so the UI stops showing it.
         if state in ("connected", "paired"):

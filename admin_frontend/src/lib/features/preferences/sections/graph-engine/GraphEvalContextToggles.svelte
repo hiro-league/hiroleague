@@ -7,10 +7,17 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefToggleField from '$lib/features/preferences/widgets/PrefToggleField.svelte';
+  import { usePrefAdvancedVisibility } from '$lib/features/preferences/shared/preferences-advanced.svelte';
 
   let { ctrl }: { ctrl: PreferencesController } = $props();
+
+  // All three toggles below are `advanced` in the schema; gate the whole fieldset (legend +
+  // explainer) on the same "show advanced" flag so the labeled block doesn't linger empty when
+  // advanced is off. The toggles themselves also self-hide, but the framing copy is card-local.
+  const vis = usePrefAdvancedVisibility(() => true);
 </script>
 
+{#if vis.visible}
 <fieldset class="grid gap-2 border-0 p-0">
   <legend class="font-sans text-sm font-medium">Eval recalled-context format</legend>
   <p class="text-xs text-muted-foreground">
@@ -37,3 +44,4 @@
     />
   </PrefFieldGrid>
 </fieldset>
+{/if}

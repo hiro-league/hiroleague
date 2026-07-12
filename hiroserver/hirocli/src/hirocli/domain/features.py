@@ -70,13 +70,9 @@ _FEATURES: tuple[FeatureSpec, ...] = (
         active=False,
         note="Server resource metrics (CPU/memory/disk/network).",
     ),
-    FeatureSpec(
-        id="whatsapp",
-        label="WhatsApp",
-        # WhatsApp channel admin (QR pairing, connection status, config).
-        active=True,
-        note="WhatsApp channel admin: QR pairing, connection status, config.",
-    ),
+    # WhatsApp is no longer a standalone feature/page — channel management (WhatsApp
+    # and every other plugin) now lives in the generic Channels & Devices page (§5.5),
+    # driven by each channel's declared schema + capabilities. No per-channel flag.
 )
 
 FEATURES: dict[str, FeatureSpec] = {f.id: f for f in _FEATURES}
