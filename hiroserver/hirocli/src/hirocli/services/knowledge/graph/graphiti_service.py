@@ -7,7 +7,7 @@ rip-out-able (decision G3/G8, docs/knowledge-graphiti-pivot-design.md §4).
 Bootstrap wires:
 
   Graphiti(
-      graph_driver = KuzuDriver(workspace/knowledge/graph/graphiti_kuzu.db),
+      graph_driver = KuzuDriver(workspace/db/graphiti_kuzu.db),
       llm_client   = GraphitiLLMClient(model_factory + tuning profiles + ledger),
       embedder     = GraphitiEmbedderClient(shared knowledge embedder),
       cross_encoder= RRF passthrough (avoids Graphiti's default OpenAI reranker),
@@ -34,6 +34,7 @@ from graphiti_core.driver.kuzu_driver import KuzuDriver
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.search.search_config_recipes import EDGE_HYBRID_SEARCH_RRF
 from graphiti_core.utils.maintenance import node_operations as _graphiti_node_ops
+from hiro_commons.constants.storage import DB_DIR
 from hiro_commons.log import Logger
 
 from hirocli.domain.preferences import (
@@ -45,7 +46,7 @@ from hirocli.domain.preferences import (
     resolve_graphiti_extraction_model,
     resolve_graphiti_small_model,
 )
-from hirocli.services.knowledge.constants import GRAPH_DIR, KNOWLEDGE_DIR, KUZU_DB_FILENAME
+from hirocli.services.knowledge.constants import KUZU_DB_FILENAME
 
 from . import kuzu_registry
 from .graphiti_adapters import (
@@ -219,8 +220,8 @@ def _spec(resolved: ResolvedModel) -> GraphitiModelSpec:
 
 
 def graphiti_db_path(workspace_path: Path) -> Path:
-    """Per-workspace Kuzu DB file for the Graphiti graph."""
-    return workspace_path / KNOWLEDGE_DIR / GRAPH_DIR / KUZU_DB_FILENAME
+    """Per-workspace Kuzu DB file for the Graphiti graph (consolidated db/ folder)."""
+    return workspace_path / DB_DIR / KUZU_DB_FILENAME
 
 
 # Graphiti tags every entity with this base label in addition to its ontology type
@@ -487,14 +488,15 @@ class GraphitiMemoryService:
 
     @property
     def workspace_path(self) -> Path:
-        """Workspace root derived from the Kuzu DB location (``<workspace>/knowledge/graph/graphiti_kuzu.db``).
+        """Workspace root derived from the Kuzu DB location (``<workspace>/db/graphiti_kuzu.db``).
 
         Exposed so callers that hold only the service (e.g. memory recall) can persist
         per-workspace artifacts — like the retrieval-trace sidecar — without threading
         ``workspace_path`` through every API."""
         # ``Path(...)`` so a caller that injected a plain string db_path (unit stubs that
         # bypass ``__init__``) doesn't crash on ``.parent`` — production always holds a Path.
-        return Path(self._db_path).parent.parent.parent
+        # Two levels up: db/graphiti_kuzu.db → db/ → <workspace> (consolidated db/ layout).
+        return Path(self._db_path).parent.parent
 
     @property
     def observability(self) -> str:
@@ -1080,7 +1082,8 @@ async def _snapshot_read_driver(path: Path, purpose: str = "") -> AsyncIterator[
     try:
         from hirocli.domain.preferences import load_preferences
 
-        timeout_s = load_preferences(path.parent.parent.parent).graph.query_timeout_s
+        # db/graphiti_kuzu.db → db/ → <workspace> (consolidated db/ layout).
+        timeout_s = load_preferences(path.parent.parent).graph.query_timeout_s
     except Exception:
         log.warning("⚠️ graphiti — query-timeout pref read failed; using default", exc_info=True)
     _apply_query_timeout(read_driver.client, timeout_s)

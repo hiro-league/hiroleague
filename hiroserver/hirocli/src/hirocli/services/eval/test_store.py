@@ -36,11 +36,11 @@ def _row(
 
 
 def test_db_path_under_workspace_knowledge_dir(tmp_path: Path) -> None:
-    assert eval_results_db_path(tmp_path) == tmp_path / "knowledge" / "eval_results.db"
+    assert eval_results_db_path(tmp_path) == tmp_path / "db" / "eval_results.db"
 
 
 def test_upsert_read_roundtrip(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.upsert_row("adam", "q1", _row("q1", "✓"), mark="✓", cost_usd=0.01)
     store.upsert_row("adam", "q2", _row("q2", "✗"), mark="✗", cost_usd=0.02)
 
@@ -48,12 +48,12 @@ def test_upsert_read_roundtrip(tmp_path: Path) -> None:
     assert set(rows) == {"q1", "q2"}
     assert rows["q1"]["legs"]["recall"]["mark"] == "✓"
     # Parent dir is created lazily on first write.
-    assert (tmp_path / "knowledge" / "eval_results.db").exists()
+    assert (tmp_path / "db" / "eval_results.db").exists()
 
 
 def test_find_row_by_run_id_resolves_recall_node(tmp_path: Path) -> None:
     """The Graph-Runs → eval-detail bridge resolves a memory_recall node's run_id back to its row."""
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     r1 = _row("q1", "✓")
     r1["legs"]["recall"]["run_id"] = "memory_eval_q-adam-run42-q1"
     r2 = _row("q2", "✗")
@@ -71,7 +71,7 @@ def test_find_row_by_run_id_resolves_recall_node(tmp_path: Path) -> None:
 
 def test_rerun_upserts_in_place_and_keeps_others(tmp_path: Path) -> None:
     """Re-running one question overwrites only its row; the rest of the corpus stays."""
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.upsert_row("adam", "q1", _row("q1", "✗", answer="old"), mark="✗", cost_usd=0.01)
     store.upsert_row("adam", "q2", _row("q2", "✓"), mark="✓", cost_usd=0.01)
 
@@ -86,7 +86,7 @@ def test_rerun_upserts_in_place_and_keeps_others(tmp_path: Path) -> None:
 
 
 def test_corpus_isolation(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.upsert_row("adam", "q1", _row("q1", "✓"), mark="✓", cost_usd=0.0)
     store.upsert_row("other", "q1", _row("q1", "✗"), mark="✗", cost_usd=0.0)
 
@@ -95,7 +95,7 @@ def test_corpus_isolation(tmp_path: Path) -> None:
 
 
 def test_clear_corpus_is_results_only_and_scoped(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.upsert_row("adam", "q1", _row("q1", "✓"), mark="✓", cost_usd=0.0)
     store.upsert_row("adam", "q2", _row("q2", "✓"), mark="✓", cost_usd=0.0)
     store.upsert_row("other", "q1", _row("q1", "✓"), mark="✓", cost_usd=0.0)
@@ -108,14 +108,14 @@ def test_clear_corpus_is_results_only_and_scoped(tmp_path: Path) -> None:
 
 
 def test_read_missing_db_is_empty(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     # No writes yet → no DB file → empty read, no crash.
     assert store.read_corpus("adam") == {}
     assert store.clear_corpus("adam") == 0
 
 
 def test_blank_ids_are_ignored(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.upsert_row("", "q1", _row("q1", "✓"), mark="✓", cost_usd=0.0)
     store.upsert_row("adam", "", _row("", "✓"), mark="✓", cost_usd=0.0)
     assert store.read_corpus("adam") == {}
@@ -128,7 +128,7 @@ def test_get_eval_result_store_is_cached_per_workspace(tmp_path: Path) -> None:
 
 
 def test_ingested_ranges_append_upsert_and_read(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.append_range("adam", 0, 50, 0.10)
     store.append_range("adam", 50, 50, 0.20)
     assert store.read_ranges("adam") == [
@@ -151,7 +151,7 @@ def test_ingested_ranges_append_upsert_and_read(tmp_path: Path) -> None:
 
 
 def test_ingested_ranges_clear_and_isolation(tmp_path: Path) -> None:
-    store = EvalResultStore(tmp_path / "knowledge" / "eval_results.db")
+    store = EvalResultStore(tmp_path / "db" / "eval_results.db")
     store.append_range("adam", 0, 50)
     store.append_range("other", 0, 10)
     # Clearing ranges is corpus-scoped and independent of the results table.
@@ -169,7 +169,7 @@ def test_ranges_survive_preexisting_db_without_the_table(tmp_path: Path) -> None
     (no-migration: the table is created on access)."""
     import sqlite3
 
-    db = tmp_path / "knowledge" / "eval_results.db"
+    db = tmp_path / "db" / "eval_results.db"
     db.parent.mkdir(parents=True, exist_ok=True)
     # Simulate the OLD schema: only the results table, no memory_eval_ingested_ranges.
     with sqlite3.connect(db) as con:

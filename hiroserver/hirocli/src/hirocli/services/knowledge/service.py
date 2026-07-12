@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hiro_commons.constants.storage import DB_DIR
 from hiro_commons.log import Logger
 from qdrant_client import models as qm
 
@@ -117,9 +118,12 @@ class KnowledgeService:
     ) -> None:
         self.workspace_path = Path(workspace_path)
         self._prefs_provider = prefs_provider
+        # knowledge/ still hosts regenerable caches (fastembed); the databases themselves
+        # (knowledge.db + qdrant/) live in the consolidated db/ folder.
         self.knowledge_path = self.workspace_path / KNOWLEDGE_DIR
-        self.db_path = self.knowledge_path / DB_FILENAME
-        self.qdrant_path = self.knowledge_path / QDRANT_DIR
+        db_root = self.workspace_path / DB_DIR
+        self.db_path = db_root / DB_FILENAME
+        self.qdrant_path = db_root / QDRANT_DIR
         self.embedder = embedder or self._default_embedder_for_workspace()
         # BM25 sparse backend for hybrid retrieval — local and independent of the dense model.
         self.sparse_embedder = sparse_embedder or self._default_sparse_embedder_for_workspace()

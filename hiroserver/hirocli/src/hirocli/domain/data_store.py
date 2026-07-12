@@ -15,7 +15,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from hiro_commons.constants.storage import DATA_DB_FILENAME, DATA_DIR, MEDIA_DIR
+from hiro_commons.constants.storage import DATA_DB_FILENAME, DATA_DIR, DB_DIR, MEDIA_DIR
 from hiro_commons.log import Logger
 from hiro_commons.timestamps import utc_iso, utc_now
 
@@ -153,7 +153,8 @@ def data_dir(workspace_path: Path) -> Path:
 
 
 def data_db_path(workspace_path: Path) -> Path:
-    return data_dir(workspace_path) / DATA_DB_FILENAME
+    # data.db lives under the consolidated db/ folder; media blobs stay under data/.
+    return workspace_path / DB_DIR / DATA_DB_FILENAME
 
 
 def media_dir(workspace_path: Path) -> Path:
@@ -186,6 +187,8 @@ def ensure_data_db(workspace_path: Path) -> None:
 
     data_dir(workspace_path).mkdir(parents=True, exist_ok=True)
     media_dir(workspace_path).mkdir(parents=True, exist_ok=True)
+    # data.db now lives under db/, not data/ — ensure that folder exists too.
+    data_db_path(workspace_path).parent.mkdir(parents=True, exist_ok=True)
 
     db = str(data_db_path(workspace_path))
     with sqlite3.connect(db) as conn:

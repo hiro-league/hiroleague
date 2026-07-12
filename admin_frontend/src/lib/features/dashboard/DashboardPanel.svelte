@@ -97,51 +97,55 @@
             {ctrl.loading ? 'Loading' : ctrl.runningWorkspaceName}
           </strong>
         </div>
-        {#if ctrl.gatewayLink}
-          <span
-            class="inline-flex max-w-full items-center gap-2 rounded-full bg-gradient-to-r from-emerald-500/20 via-brand/20 to-cyan-500/20 px-3 py-1 font-sans text-xs font-extrabold text-foreground"
-          >
-            <span class="truncate">{ctrl.gatewayLink.workspace}</span>
-            <Cable size={13} />
-            <span class="truncate">{ctrl.gatewayLink.gateway}</span>
-          </span>
-        {:else if !ctrl.loading}
-          <span
-            class="inline-flex w-fit rounded-full border border-border px-3 py-1 font-sans text-xs font-bold text-muted-foreground"
-          >
-            No gateway link
-          </span>
+        {#if ctrl.gatewayActive}
+          {#if ctrl.gatewayLink}
+            <span
+              class="inline-flex max-w-full items-center gap-2 rounded-full bg-gradient-to-r from-emerald-500/20 via-brand/20 to-cyan-500/20 px-3 py-1 font-sans text-xs font-extrabold text-foreground"
+            >
+              <span class="truncate">{ctrl.gatewayLink.workspace}</span>
+              <Cable size={13} />
+              <span class="truncate">{ctrl.gatewayLink.gateway}</span>
+            </span>
+          {:else if !ctrl.loading}
+            <span
+              class="inline-flex w-fit rounded-full border border-border px-3 py-1 font-sans text-xs font-bold text-muted-foreground"
+            >
+              No gateway link
+            </span>
+          {/if}
         {/if}
       {/snippet}
     </StatTile>
 
-    <StatTile
-      href={`${base}/server/?tab=gateways`}
-      title="Gateways"
-      subtitle="Registered and running"
-      icon={Router}
-      accent="cyan"
-    >
-      {#snippet children()}
-        <div class="flex flex-wrap gap-2">
-          <span class="rounded-full border bg-muted px-3 py-1 font-sans text-xs font-bold text-muted-foreground">
-            {ctrl.gateways.length} registered
-          </span>
-          <span
-            class="rounded-full bg-cyan-500/15 px-3 py-1 font-sans text-xs font-bold text-cyan-700 dark:text-cyan-300"
-          >
-            {ctrl.runningGateways.length} running
-          </span>
-        </div>
-        <div class="flex min-w-0 items-center gap-2">
-          <span class="font-sans text-sm font-semibold text-muted-foreground">Running</span>
-          <strong
-            class="min-w-0 truncate rounded-full bg-primary/20 px-3 py-1 font-sans text-lg font-extrabold leading-tight text-primary"
-          >
-            {ctrl.loading ? 'Loading' : ctrl.runningGatewayName}
-          </strong>
-        </div>
-      {/snippet}
-    </StatTile>
+    {#if ctrl.gatewayActive}
+      <StatTile
+        href={`${base}/server/?tab=gateways`}
+        title="Gateways"
+        subtitle="Registered and running"
+        icon={Router}
+        accent="cyan"
+      >
+        {#snippet children()}
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border bg-muted px-3 py-1 font-sans text-xs font-bold text-muted-foreground">
+              {ctrl.gateways.length} registered
+            </span>
+            <span
+              class="rounded-full bg-cyan-500/15 px-3 py-1 font-sans text-xs font-bold text-cyan-700 dark:text-cyan-300"
+            >
+              {ctrl.runningGateways.length} running
+            </span>
+          </div>
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="font-sans text-sm font-semibold text-muted-foreground">Running</span>
+            <strong
+              class="min-w-0 truncate rounded-full bg-primary/20 px-3 py-1 font-sans text-lg font-extrabold leading-tight text-primary"
+            >
+              {ctrl.loading ? 'Loading' : ctrl.runningGatewayName}
+            </strong>
+          </div>
+        {/snippet}
+      </StatTile>
+    {/if}
   </section>
 </div>

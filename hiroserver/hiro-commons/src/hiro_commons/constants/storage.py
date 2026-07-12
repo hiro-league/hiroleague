@@ -14,6 +14,12 @@ WORKSPACE_DB_FILENAME: str = "workspace.db"
 PREFERENCES_FILENAME: str = "preferences.json"
 PROVIDERS_FILENAME: str = "providers.json"
 
+# All databases live together under <workspace>/db/ to keep the workspace root clean:
+# workspace.db, data.db, knowledge.db, eval_results.db, the Kuzu graph (graphiti_kuzu.db)
+# and the Qdrant vector store. Content blobs (data/media, data/channel_photos) and
+# regenerable caches (knowledge/fastembed_cache) deliberately stay outside this folder.
+DB_DIR: str = "db"
+
 DATA_DIR: str = "data"
 DATA_DB_FILENAME: str = "data.db"
 MEDIA_DIR: str = "media"

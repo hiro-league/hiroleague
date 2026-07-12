@@ -1,6 +1,7 @@
 import { createActiveProvidersStore } from '$lib/catalog/active-providers/active-providers-store.svelte';
 import { listGateways, listWorkspaces, type GatewayRow, type WorkspaceRow } from '$lib/api/server';
 import { featureErrorFrom } from '$lib/runtime/feature-errors';
+import { isFeatureActive } from '$lib/shell/features';
 import { activeProviderDisplayNames, activeProviderOverflowCount } from '../shared/dashboard-derive';
 import { findGatewayLink, type GatewayLink } from '../shared/dashboard-gateway';
 
@@ -26,17 +27,21 @@ export function createDashboardController() {
   const runningGatewayName = $derived(runningGateways[0]?.name ?? 'None');
   const gatewayLink = $derived(findGatewayLink(workspaces, gateways));
 
+  // The gateway feature is remote-device connectivity only; when hidden its admin API is unmounted,
+  // so skip the call (avoids a 404) and report no gateways. The panel hides the gateway cards to match.
+  const gatewayActive = isFeatureActive('gateway');
+
   async function load() {
     loading = true;
     error = null;
     try {
-      const [workspacePayload, gatewayPayload] = await Promise.all([
+      const [workspacePayload, gatewayRows] = await Promise.all([
         listWorkspaces(),
-        listGateways()
+        gatewayActive ? listGateways().then((payload) => payload.data) : Promise.resolve([] as GatewayRow[])
       ]);
       await activeProvidersStore.load({ silent: true });
       workspaces = workspacePayload.data;
-      gateways = gatewayPayload.data;
+      gateways = gatewayRows;
     } catch (err) {
       error = featureErrorFrom(err, 'Unable to load dashboard status.');
       workspaces = [];
@@ -82,6 +87,9 @@ export function createDashboardController() {
     },
     get gatewayLink() {
       return gatewayLink as GatewayLink | null;
+    },
+    get gatewayActive() {
+      return gatewayActive;
     },
     load
   };

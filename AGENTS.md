@@ -24,8 +24,9 @@ Run `npm run check` (admin_frontend) and the preferences tests after, and rememb
 
 ## Inspecting a workspace (DBs, ledger, traces)
 
-- **Kuzu graph DB** (`<workspace>/knowledge/graph/graphiti_kuzu.db`) is **exclusively locked while the server runs** — can't open or even copy it. To query: `hiro stop`, inspect, then `hiro start` (admin flag).
-- Readable **while the server runs** (no lock): eval results `<workspace>/knowledge/eval_results.db` (SQLite; per-question `row_json` has recalled facts/answer/judge), the Graph Runs ledger `<workspace>/logs/graph.log` (CSV), and per-stage retrieval/ingest traces `<workspace>/logs/retrieval_trace/*.jsonl`. Live settings are in `<workspace>/preferences.json`. **Memory** eval corpora live in the **sibling `eval-corpus` repo** (`../hiro-code-reports/eval-corpus`; override with `$HIRO_EVAL_CORPUS_DIR`) — `benchmarks.yaml` groups them into benchmarks (LoCoMo, BEAM-128k). The **knowledge** corpus (`l3_synthetic`) stays in hiroleague's own `eval/`.
+- **All databases live under `<workspace>/db/`** (consolidated layout): `workspace.db`, `data.db`, `knowledge.db`, `eval_results.db`, `graphiti_kuzu.db`, and the `qdrant/` vector store. Content blobs (`data/media`, `data/channel_photos`) and the `knowledge/fastembed_cache` stay outside `db/`.
+- **Kuzu graph DB** (`<workspace>/db/graphiti_kuzu.db`) is **exclusively locked while the server runs** — can't open or even copy it. To query: `hiro stop`, inspect, then `hiro start` (admin flag).
+- Readable **while the server runs** (no lock): eval results `<workspace>/db/eval_results.db` (SQLite; per-question `row_json` has recalled facts/answer/judge), the Graph Runs ledger `<workspace>/logs/graph.log` (CSV), and per-stage retrieval/ingest traces `<workspace>/logs/retrieval_trace/*.jsonl`. Live settings are in `<workspace>/preferences.json`. **Memory** eval corpora live in the **sibling `eval-corpus` repo** (`../hiro-code-reports/eval-corpus`; override with `$HIRO_EVAL_CORPUS_DIR`) — `benchmarks.yaml` groups them into benchmarks (LoCoMo, BEAM-128k). The **knowledge** corpus (`l3_synthetic`) stays in hiroleague's own `eval/`.
 
 # Architecture Documentation Index
 

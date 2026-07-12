@@ -33,7 +33,7 @@ so ``hiro stop`` (and ``hirogate stop`` if relevant) before running this.
 Usage
 -----
   # dry rebuild next to the original, verify only, no swap:
-  python scripts/compact_kuzu_db.py "<workspace>/knowledge/graph/graphiti_kuzu.db"
+  python scripts/compact_kuzu_db.py "<workspace>/db/graphiti_kuzu.db"
 
   # rebuild and swap in place (keeps graphiti_kuzu.db.bloated-YYYYmmdd-HHMMSS):
   python scripts/compact_kuzu_db.py "<path>/graphiti_kuzu.db" --swap

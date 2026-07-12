@@ -33,7 +33,12 @@ from hirocli.admin_svelte.routes.workspaces import workspaces_router
 
 api_router = APIRouter(prefix="/api", tags=["hiro-admin"])
 api_router.include_router(workspaces_router)
-api_router.include_router(gateways_router)
+# Feature-gated: the gateway (Hiro Gate relay) is remote-device connectivity only.
+# Hidden for first public builds, its admin API is unmounted (Server "Gateways" tab
+# + dashboard cards are hidden in the UI to match). gateways_router is exclusive to
+# the gateway feature, so the whole router is gated (no shared-endpoint split).
+if feature_active("gateway"):
+    api_router.include_router(gateways_router)
 api_router.include_router(graph_runs_router)
 # Shared knowledge/eval endpoints (embedder/reranker model mgmt, the graph viewer, the
 # `/knowledge/events` SSE, and `/eval/row`) are used by NON-gated features — Settings model pickers,
@@ -63,7 +68,11 @@ api_router.include_router(chat_channels_router)
 # enable-disable/actions for every channel plugin (WhatsApp, Telegram, …). Always
 # mounted; per-channel visibility is gated in the UI nav by feature flag.
 api_router.include_router(channels_router)
-api_router.include_router(devices_router)
+# Feature-gated: device pairing admin (exclusive to the devices channel). Hidden for
+# first public builds — the Channels & Devices "Devices" tab is dropped in the UI to
+# match, and the devices channel itself is not spawned (see ensure_mandatory_devices_channel).
+if feature_active("devices"):
+    api_router.include_router(devices_router)
 api_router.include_router(logs_router)
 # Feature-gated: metrics_router is exclusive to the Metrics feature (only the Server-page Metrics
 # subtab calls /metrics/*), so the whole router is gated — no shared-endpoint split needed.

@@ -12,9 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hiro_commons.constants.storage import DB_DIR
 from hiro_commons.log import Logger
-
-from hirocli.services.knowledge.constants import GRAPH_DIR, KNOWLEDGE_DIR
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH")
 
@@ -22,7 +21,8 @@ _MARKER_NAME = ".graph_indexed"
 
 
 def graph_index_marker_path(workspace_path: Path) -> Path:
-    return Path(workspace_path) / KNOWLEDGE_DIR / GRAPH_DIR / _MARKER_NAME
+    # Sidecar next to the Kuzu DB, which now lives in the consolidated db/ folder.
+    return Path(workspace_path) / DB_DIR / _MARKER_NAME
 
 
 def is_graph_indexed(workspace_path: Path) -> bool:

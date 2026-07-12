@@ -2,11 +2,12 @@ import { PREF_KEYS, type ServerTabPreference } from './keys';
 import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 import { isFeatureActive } from '$lib/shell/features';
 
-// `metrics` is only selectable while the Metrics feature is active — a hidden `?tab=metrics` then
-// fails validation in `normalise` and falls back to the default (Workspaces) tab.
+// `gateways` and `metrics` are each only selectable while their feature is active — a hidden
+// `?tab=gateways`/`?tab=metrics` then fails validation in `normalise` and falls back to the
+// default (Workspaces) tab.
 const ALLOWED: readonly ServerTabPreference[] = [
   'workspaces',
-  'gateways',
+  ...(isFeatureActive('gateway') ? (['gateways'] as const) : []),
   ...(isFeatureActive('metrics') ? (['metrics'] as const) : [])
 ];
 

@@ -30,6 +30,7 @@ from ..domain.channel_descriptor import (
     secret_keys,
 )
 from ..domain.channel_secret_store import SECRET_MARKER, ChannelSecretStore
+from ..domain.features import feature_active
 from ..domain.workspace import workspace_id_for_path
 from ..domain.config import load_config, master_key_path
 from ..domain.workspace import resolve_workspace
@@ -203,7 +204,9 @@ class ChannelSetupTool(Tool):
         workspace_path = _resolve_path(workspace)
         existing = load_channel_config(workspace_path, channel_name)
 
-        if channel_name == MANDATORY_CHANNEL_NAME:
+        # The devices channel is force-enabled only while the `devices` feature is
+        # active; when the feature is hidden it is treated like any other channel.
+        if channel_name == MANDATORY_CHANNEL_NAME and feature_active(MANDATORY_CHANNEL_NAME):
             enabled = True
 
         cmd_parts = command.split()
@@ -271,7 +274,8 @@ class ChannelDisableTool(Tool):
 
     def execute(self, channel_name: str, workspace: str | None = None) -> ChannelDisableResult:
         workspace_path = _resolve_path(workspace)
-        if channel_name == MANDATORY_CHANNEL_NAME:
+        # Mandatory only while the `devices` feature is active (see features.py).
+        if channel_name == MANDATORY_CHANNEL_NAME and feature_active(MANDATORY_CHANNEL_NAME):
             raise ValueError(f"The '{MANDATORY_CHANNEL_NAME}' channel is mandatory and cannot be disabled.")
         cfg = load_channel_config(workspace_path, channel_name)
         if cfg is None:
@@ -360,7 +364,8 @@ class ChannelRemoveTool(Tool):
 
     def execute(self, channel_name: str, workspace: str | None = None) -> ChannelRemoveResult:
         workspace_path = _resolve_path(workspace)
-        if channel_name == MANDATORY_CHANNEL_NAME:
+        # Mandatory only while the `devices` feature is active (see features.py).
+        if channel_name == MANDATORY_CHANNEL_NAME and feature_active(MANDATORY_CHANNEL_NAME):
             raise ValueError(f"The '{MANDATORY_CHANNEL_NAME}' channel is mandatory and cannot be removed.")
         removed = delete_channel_config(workspace_path, channel_name)
         return ChannelRemoveResult(name=channel_name, removed=removed)

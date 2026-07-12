@@ -36,7 +36,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from hiro_commons.constants.storage import WORKSPACE_DB_FILENAME
+from hiro_commons.constants.storage import DB_DIR, WORKSPACE_DB_FILENAME
 
 # Per-process cache: paths for which ensure_db has already run successfully.
 # Keyed by the resolved string workspace path.
@@ -118,7 +118,8 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
 
 def db_path(workspace_path: Path) -> Path:
     """Return the absolute path to workspace.db inside *workspace_path*."""
-    return workspace_path / WORKSPACE_DB_FILENAME
+    # All DBs live under <workspace>/db/ (consolidated layout) — see storage.DB_DIR.
+    return workspace_path / DB_DIR / WORKSPACE_DB_FILENAME
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +141,8 @@ def ensure_db(workspace_path: Path) -> None:
     if key in _initialized:
         return
 
-    workspace_path.mkdir(parents=True, exist_ok=True)
+    # Ensure the consolidated db/ folder exists before SQLite opens the file.
+    db_path(workspace_path).parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         for ddl in _DDL:

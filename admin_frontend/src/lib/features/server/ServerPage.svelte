@@ -15,12 +15,14 @@
   const prefs = createServerPreferences();
   const toasts = createToastNotifier();
 
-  // The Metrics subtab is gated by the `metrics` feature (features.ts). When hidden its tab is
-  // dropped here and from the allowed-tab whitelist (server-preferences), so `?tab=metrics` falls
-  // back to the default (Workspaces) tab.
+  // The Gateways and Metrics subtabs are each gated by their feature (features.ts). When hidden a
+  // tab is dropped here and from the allowed-tab whitelist (server-preferences), so a hidden
+  // `?tab=gateways`/`?tab=metrics` falls back to the default (Workspaces) tab.
   const tabDescriptors: readonly AdminTabDescriptor<ServerTabPreference>[] = [
     { id: 'workspaces', label: 'Workspaces', kind: 'pane' },
-    { id: 'gateways', label: 'Gateways', kind: 'pane' },
+    ...(isFeatureActive('gateway')
+      ? [{ id: 'gateways', label: 'Gateways', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
+      : []),
     ...(isFeatureActive('metrics')
       ? [{ id: 'metrics', label: 'Metrics', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
       : [])
@@ -41,7 +43,7 @@
     />
   {/snippet}
 
-  {#if prefs.activeTab === 'gateways'}
+  {#if prefs.activeTab === 'gateways' && isFeatureActive('gateway')}
     <GatewaysTab notify={toasts.notify} />
   {:else if prefs.activeTab === 'metrics' && isFeatureActive('metrics')}
     <MetricsTab notify={toasts.notify} />

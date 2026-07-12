@@ -4,16 +4,25 @@ import {
   listChannels,
   type ChannelRow
 } from '$lib/api/channels-devices';
+import { isFeatureActive } from '$lib/shell/features';
 import type { Notify } from '$lib/ui/toast-types';
 
 export type ChannelsController = ReturnType<typeof createChannelsController>;
 
 export function createChannelsController(notify: Notify) {
-  let rows = $state<ChannelRow[]>([]);
+  let allRows = $state<ChannelRow[]>([]);
   let mandatoryChannelName = $state('');
   let loading = $state(true);
   let busyChannel = $state<string | null>(null);
   let error = $state<string | null>(null);
+
+  // When the `devices` feature is hidden, the mandatory devices channel is dropped from the
+  // Channels list entirely (its own tab is already gated) so first public builds show only
+  // user-facing channels like WhatsApp.
+  const devicesActive = isFeatureActive('devices');
+  const rows = $derived(
+    devicesActive ? allRows : allRows.filter((row) => row.name !== mandatoryChannelName)
+  );
 
   const enabledCount = $derived(rows.filter((row) => row.enabled).length);
 
@@ -22,7 +31,7 @@ export function createChannelsController(notify: Notify) {
     error = null;
     try {
       const payload = await listChannels();
-      rows = payload.data.channels;
+      allRows = payload.data.channels;
       mandatoryChannelName = payload.data.mandatory_channel_name;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load channels.';

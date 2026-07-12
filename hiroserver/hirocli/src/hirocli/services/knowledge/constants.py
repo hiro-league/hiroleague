@@ -6,11 +6,8 @@ KNOWLEDGE_DIR = "knowledge"
 DB_FILENAME = "knowledge.db"
 QDRANT_DIR = "qdrant"
 COLLECTION_NAME = "hiro_knowledge"
-# Per-workspace embedded graph dir. Backs the Graphiti temporal knowledge graph
-# (entities + facts + temporal windows); chunk evidence stays in Qdrant. See
-# docs/knowledge-graphiti-pivot-design.md.
-GRAPH_DIR = "graph"
-# The embedded Kuzu graph DB file that backs Graphiti.
+# The embedded Kuzu graph DB file that backs Graphiti (entities + facts + temporal
+# windows; chunk evidence stays in Qdrant). Lives in the consolidated db/ folder.
 KUZU_DB_FILENAME = "graphiti_kuzu.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_VECTOR_SIZE = 384

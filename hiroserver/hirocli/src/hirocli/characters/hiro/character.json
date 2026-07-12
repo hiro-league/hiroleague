@@ -3,9 +3,12 @@
   "name": "Hiro",
   "description": "Your personal AI assistant running on Hiro League.",
   "llm_models": [],
+  "tuning_profile": "balanced_chat",
   "voice_models": [],
-  "tts_instructions": "",
-  "tts_voice_by_provider": {},
+  "tts_instructions": "Read the following transcript based on the audio profile and director's note.\n\n# Audio Profile\nA helpful and professional personal assistant.\n\n# Director's note\nStyle: The \"Vocal Smile\": The soft palate is raised to keep the tone bright, sunny, and explicitly inviting. Pace: Natural. Accent: American (Gen).",
+  "tts_voice_by_provider": {
+    "google": "Callirrhoe"
+  },
   "emotions_enabled": false,
   "extras": {}
 }

@@ -34,6 +34,7 @@ from ..autostart import (
 from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from ..domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
 from ..domain.config import Config, load_config, master_key_path, workspace_log_dir
+from ..domain.features import feature_active
 from ..domain.crypto import load_or_create_master_key
 from ..domain.workspace import WorkspaceError, WorkspaceRegistry, create_workspace, resolve_workspace
 
@@ -155,8 +156,20 @@ def graceful_http_stop(http_port: int, pid: int, workspace_path: Path, timeout: 
 
 
 def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> None:
-    """Create/update the mandatory ``devices`` channel config inside the workspace."""
+    """Create/update the mandatory ``devices`` channel config inside the workspace.
+
+    Gated by the ``devices`` feature: when it is hidden (first public builds that
+    rely only on the admin chat + WhatsApp), the devices channel is NOT seeded or
+    enabled, so ChannelManager never spawns it and no gateway connection is
+    attempted. An already-seeded row is flipped to disabled so existing
+    workspaces self-heal on the next restart; a fresh workspace gets no row at all.
+    """
     existing = load_channel_config(workspace_path, MANDATORY_CHANNEL_NAME)
+    if not feature_active(MANDATORY_CHANNEL_NAME):
+        if existing is not None and existing.enabled:
+            existing.enabled = False
+            save_channel_config(workspace_path, existing)
+        return
     uv_workspace = find_workspace_root()
     # Installed packages should use the installed hiro-channel-devices executable,
     # not a stale dev workspace recorded by an earlier source checkout.

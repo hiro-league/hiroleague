@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING
 
 from qdrant_client import QdrantClient
 
+from hiro_commons.constants.storage import DB_DIR
+
 from hirocli.services.knowledge.catalog_store import CatalogStore
-from hirocli.services.knowledge.constants import COLLECTION_NAME, DB_FILENAME, KNOWLEDGE_DIR, QDRANT_DIR
+from hirocli.services.knowledge.constants import COLLECTION_NAME, DB_FILENAME, QDRANT_DIR
 from hirocli.services.knowledge.runtime_owner import is_owner_token_alive
 
 if TYPE_CHECKING:
@@ -59,7 +61,7 @@ def maybe_recover_abandoned_work(workspace_path: Path) -> None:
     resolved = Path(workspace_path).resolve()
     if has_live_knowledge_service(resolved):
         return
-    db_path = resolved / KNOWLEDGE_DIR / DB_FILENAME
+    db_path = resolved / DB_DIR / DB_FILENAME
     if not db_path.exists():
         return
     catalog = CatalogStore(db_path)
@@ -79,11 +81,11 @@ def count_knowledge_points(workspace_path: Path) -> int:
         except Exception:
             continue
     if services:
-        db_path = Path(workspace_path) / KNOWLEDGE_DIR / DB_FILENAME
+        db_path = Path(workspace_path) / DB_DIR / DB_FILENAME
         return CatalogStore.sql_known_chunk_count(db_path)
-    db_path = Path(workspace_path) / KNOWLEDGE_DIR / DB_FILENAME
+    db_path = Path(workspace_path) / DB_DIR / DB_FILENAME
     sql_count = CatalogStore.sql_known_chunk_count(db_path)
-    qdrant_path = Path(workspace_path) / KNOWLEDGE_DIR / QDRANT_DIR
+    qdrant_path = Path(workspace_path) / DB_DIR / QDRANT_DIR
     if not qdrant_path.exists():
         return sql_count
     try:

@@ -32,19 +32,19 @@ from typing import Any
 
 from hiro_commons.log import Logger
 
-from hirocli.services.knowledge.constants import KNOWLEDGE_DIR
+from hiro_commons.constants.storage import DB_DIR
 from hirocli.services.knowledge.converters import utc_now_iso
 
 log = Logger.get("SVC.KNOWLEDGE.EVAL.STORE")
 
-# Lives beside the catalog DB (``knowledge/knowledge.db``) under the workspace's
-# knowledge dir. Separate file from the catalog so eval is fully isolated.
+# Lives in the consolidated db/ folder beside the other databases. Separate file from the
+# knowledge catalog so eval is fully isolated.
 EVAL_DB_FILENAME = "eval_results.db"
 
 
 def eval_results_db_path(workspace_path: Path) -> Path:
-    """Resolve the per-workspace eval-results DB path (``knowledge/eval_results.db``)."""
-    return Path(workspace_path) / KNOWLEDGE_DIR / EVAL_DB_FILENAME
+    """Resolve the per-workspace eval-results DB path (``db/eval_results.db``)."""
+    return Path(workspace_path) / DB_DIR / EVAL_DB_FILENAME
 
 
 class EvalResultStore:

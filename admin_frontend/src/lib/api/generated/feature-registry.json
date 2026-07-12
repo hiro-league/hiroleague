@@ -1,8 +1,18 @@
 {
+  "devices": {
+    "label": "Devices",
+    "active": false,
+    "note": "Device pairing + the mandatory gateway-backed devices channel."
+  },
   "eval": {
     "label": "Eval",
     "active": false,
     "note": "Memory/knowledge evaluation harness."
+  },
+  "gateway": {
+    "label": "Gateway",
+    "active": false,
+    "note": "Hiro Gate relay for remote device connectivity."
   },
   "image_lab": {
     "label": "Image Lab",
