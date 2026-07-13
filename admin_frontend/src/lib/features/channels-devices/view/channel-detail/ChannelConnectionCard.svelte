@@ -52,7 +52,24 @@
         Disable
       </Button>
     {:else}
-      <Button size="sm" onclick={() => ctrl.enable()} disabled={ctrl.busy}>Enable</Button>
+      <Button
+        size="sm"
+        variant="secondary"
+        onclick={() => ctrl.install()}
+        disabled={ctrl.busy || ctrl.installing}
+      >
+        {ctrl.installing ? 'Installing…' : 'Install'}
+      </Button>
+      <Button size="sm" onclick={() => ctrl.enable()} disabled={ctrl.busy || ctrl.installing}>
+        Enable
+      </Button>
     {/if}
   </div>
+
+  {#if ctrl.installing}
+    <p class="text-xs text-muted-foreground">
+      Installing the plugin (uv tool install) — this can take a few minutes on first run while
+      native dependencies download.
+    </p>
+  {/if}
 </SectionCard>

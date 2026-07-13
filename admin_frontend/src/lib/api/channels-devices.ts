@@ -58,6 +58,18 @@ export async function listChannels() {
   return apiRequest<ChannelListData>('/channels');
 }
 
+/**
+ * Install the channel's plugin package (`uv tool install hiro-channel-<name>`), a one-time
+ * provisioning step before enable. It builds an isolated env and can pull large native deps
+ * (e.g. neonize's Go lib + ffmpeg), so it may run for minutes — hence the long timeout.
+ */
+export async function installChannel(name: string) {
+  return apiRequest<{ package: string; output: string }>(
+    `/channels/${encodeURIComponent(name)}/install`,
+    { method: 'POST', body: {}, timeoutMs: 600000 }
+  );
+}
+
 export async function enableChannel(name: string) {
   return apiRequest<{ enabled: boolean }>(`/channels/${encodeURIComponent(name)}/enable`, {
     method: 'POST'

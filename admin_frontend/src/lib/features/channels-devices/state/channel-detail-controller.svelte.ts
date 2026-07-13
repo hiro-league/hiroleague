@@ -6,6 +6,7 @@ import {
   getChannelDescriptor,
   getChannelPairing,
   getChannelStatus,
+  installChannel,
   setChannelConfig,
   type ChannelStatus
 } from '$lib/api/channels-devices';
@@ -32,6 +33,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   let loading = $state(true);
   let saving = $state(false);
   let busy = $state(false);
+  let installing = $state(false); // uv tool install in flight (can run for minutes)
   let error = $state<string | null>(null);
 
   // Editable field values, bound by the form. Baseline is the last-loaded snapshot;
@@ -140,6 +142,23 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     }
   }
 
+  // Install is separate from the enable/disable lifecycle: it provisions the plugin package
+  // (uv tool install) and can run for minutes, so it uses its own `installing` flag rather
+  // than the shared `busy` used by the instant lifecycle actions.
+  async function install() {
+    installing = true;
+    try {
+      const res = await installChannel(name);
+      notify('success', `Installed ${res.data.package}. You can now enable the channel.`);
+      await refreshStatus();
+      onChanged?.();
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Failed to install the channel plugin.');
+    } finally {
+      installing = false;
+    }
+  }
+
   const enable = () => runLifecycle(() => enableChannel(name), 'Channel enabled.', 'Failed to enable.');
   const disable = () => runLifecycle(() => disableChannel(name), 'Channel disabled.', 'Failed to disable.');
   const runAction = (action: string) =>
@@ -171,6 +190,9 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     get busy() {
       return busy;
     },
+    get installing() {
+      return installing;
+    },
     get error() {
       return error;
     },
@@ -196,6 +218,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     startPolling,
     save,
     clearSecret,
+    install,
     enable,
     disable,
     runAction
