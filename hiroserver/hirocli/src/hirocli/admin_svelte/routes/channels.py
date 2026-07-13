@@ -195,7 +195,7 @@ class ConfigSetRequest(BaseModel):
 
 @channels_router.post("/channels/{name}/config")
 async def channel_config_set(
-    name: str, body: ConfigSetRequest, workspace_id: SelectedWorkspaceIdDep
+    name: str, body: ConfigSetRequest, request: Request, workspace_id: SelectedWorkspaceIdDep
 ) -> dict[str, Any]:
     # The Tool takes a string and JSON-parses it; serialize non-string values so
     # lists/bools round-trip (a plain string is passed through as-is).
@@ -213,7 +213,22 @@ async def channel_config_set(
         # ValueError: schema-validation failures (unknown key / wrong type, §5.1) or a
         # secret write on a non-registry workspace. RuntimeError: keyring unavailable (§5.6).
         return envelope_failure(str(exc))
-    return {"ok": True, "error": None, "data": {"config": result.config}}
+    # Live-apply: re-push the saved config to the running plugin (secrets resolved) so
+    # changes like the allow-list take effect immediately, no restart. No-op if the
+    # channel isn't running; failure here must not fail the save.
+    applied = False
+    cm = _channel_manager(request)
+    if cm is not None:
+        try:
+            await cm._push_config(name)
+            applied = True
+        except Exception as exc:
+            log.warning(
+                "⚠️ Saved config but could not live-apply to the running channel",
+                channel=name,
+                error=str(exc),
+            )
+    return {"ok": True, "error": None, "data": {"config": result.config, "applied": applied}}
 
 
 # ---------------------------------------------------------------------------

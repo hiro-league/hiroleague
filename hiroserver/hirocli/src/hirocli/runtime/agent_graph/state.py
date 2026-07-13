@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import operator
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -93,16 +92,36 @@ class ReplyAudio(TypedDict):
     audio_b64: str
 
 
+def append_or_reset(left: list[Any] | None, right: list[Any] | None) -> list[Any]:
+    """Reducer for per-turn fan-out scratch that must merge across parallel ``Send`` branches
+    *within* a turn but reset *between* turns.
+
+    Plain ``operator.add`` accumulates forever once the durable per-``thread_id`` checkpointer
+    persists the channel: stale STT transcripts / vision descriptions from earlier turns then
+    leak into every later turn's ``user_text`` (``gather_node`` re-joins them). A ``None`` update
+    clears the channel — the turn's entry node (``ingest_node``) emits ``None`` to drop the prior
+    turn's checkpointed scratch before this turn's STT / vision branches append their results.
+    """
+    if right is None:
+        return []
+    return (left or []) + list(right)
+
+
 class GraphState(TypedDict, total=False):
     """Single state schema for the chat agent graph.
 
     Invariants (LangGraph channel semantics — keep this schema **flat**):
 
     1. **Checkpoint surface = ``messages`` only.** Every other field is per-turn scratch,
-       overwritten each turn; its cross-turn value is undefined.
+       overwritten each turn; its cross-turn value is undefined. The reducer-merged fan-out
+       fields hold this only because ``ingest_node`` resets them each turn (see #4) — plain
+       ``operator.add`` would let the durable checkpointer accumulate them across turns.
     2. **Reducer fields (``messages``, ``transcripts``, ``visions``, ``errors``) must stay
        top-level** — LangGraph keys reducers on channels; nesting them breaks parallel
        ``Send`` merges (default dict-overwrite loses data or raises ``InvalidUpdateError``).
+    4. **Fan-out scratch resets each turn.** ``transcripts`` / ``visions`` / ``errors`` use
+       ``append_or_reset`` (merge parallel branches, but a ``None`` clears); ``ingest_node``
+       emits ``None`` at turn start so a durable checkpoint never carries them forward.
     3. **Bytes never enter the checkpoint** — audio/image bodies ride ``Send`` sub-states only;
        ``gather_node`` clears ``audio_items`` / ``image_items``.
     """
@@ -122,9 +141,12 @@ class GraphState(TypedDict, total=False):
     audio_items: list[AudioItem]
     image_items: list[ImageItem]
     text_inputs: list[str]
-    transcripts: Annotated[list[Transcript], operator.add]
-    visions: Annotated[list[Vision], operator.add]
-    errors: Annotated[list[NodeError], operator.add]
+    # append_or_reset (not operator.add): merge parallel Send branches within a turn but
+    # reset between turns. operator.add + the durable checkpointer accumulated these across
+    # turns, leaking stale transcripts/visions into later user_text (ingest_node resets them).
+    transcripts: Annotated[list[Transcript], append_or_reset]
+    visions: Annotated[list[Vision], append_or_reset]
+    errors: Annotated[list[NodeError], append_or_reset]
 
     # --- Retrieval scratch (parallel) ---
     user_text: str | None

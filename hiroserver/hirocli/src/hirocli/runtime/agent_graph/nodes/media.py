@@ -129,6 +129,13 @@ class MediaNodes(NodeGroup):
             "audio_items": audio_items,
             "image_items": image_items,
             "text_inputs": text_inputs,
+            # Reset per-turn fan-out scratch (append_or_reset reducer): a None clears any
+            # value the durable checkpointer carried over from a prior turn, before this
+            # turn's STT / vision branches append. Without this, old transcripts/visions
+            # accumulated and leaked into every later turn's user_text via gather_node.
+            "transcripts": None,
+            "visions": None,
+            "errors": None,
         }
 
 

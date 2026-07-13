@@ -66,13 +66,22 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     qrSvg = status?.has_qr ? sanitizePairingQrSvg((await getChannelPairing(name)).data.qr_svg) : '';
   }
 
+  // The descriptor (config schema + capabilities → the settings form, pairing pane and
+  // action buttons) only exists once the plugin has registered, which can be a few
+  // seconds after Enable. Track whether we have it so the poller can keep trying.
+  let descriptorLoaded = false;
+  async function loadDescriptor() {
+    const descriptor = (await getChannelDescriptor(name)).data;
+    fields = fieldsFromSchema(descriptor.config_schema);
+    capabilities = descriptor.capabilities;
+    if (descriptor.capabilities) descriptorLoaded = true;
+  }
+
   async function load() {
     loading = true;
     error = null;
     try {
-      const descriptor = (await getChannelDescriptor(name)).data;
-      fields = fieldsFromSchema(descriptor.config_schema);
-      capabilities = descriptor.capabilities;
+      await loadDescriptor();
       baseline = {};
       await Promise.all([loadConfig(), refreshStatus()]);
     } catch (err) {
@@ -82,11 +91,20 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     }
   }
 
-  // Poll status/QR so pairing + disconnects reflect live, only while the channel
-  // reports a live status (capabilities.live_status).
+  // Poll status/QR live. Until the descriptor has loaded (plugin registered), also
+  // re-fetch it while the channel is enabled — so the QR pane, actions and settings
+  // form appear on their own after Enable, with no manual refresh.
+  async function poll() {
+    await refreshStatus();
+    if (!descriptorLoaded && (status?.enabled ?? false)) {
+      await loadDescriptor();
+      if (descriptorLoaded) await loadConfig();
+    }
+  }
+
   function startPolling(): () => void {
     if (!(capabilities?.live_status ?? true)) return () => {};
-    const poller = createPoller(() => refreshStatus(), {
+    const poller = createPoller(() => poll(), {
       intervalMs: 2500,
       immediate: false,
       pauseWhenHidden: true
@@ -97,18 +115,32 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   async function save() {
     saving = true;
     try {
+      let wrote = false;
+      let applied = false;
       for (const field of fields) {
         const value = draft[field.key];
         if (field.secret) {
           // Only write a secret when a new value was typed; blank = leave unchanged.
           if (typeof value === 'string' && value.trim() !== '') {
-            await setChannelConfig(name, field.key, value);
+            applied = (await setChannelConfig(name, field.key, value)).data.applied ?? false;
+            wrote = true;
           }
         } else if (value !== baseline[field.key]) {
-          await setChannelConfig(name, field.key, parseDraftValue(field, value));
+          applied = (await setChannelConfig(name, field.key, parseDraftValue(field, value))).data
+            .applied ?? false;
+          wrote = true;
         }
       }
-      notify('success', 'Settings saved. Restart the server to apply.');
+      // The server live-applies to a running plugin (applied=true); otherwise the change
+      // lands on the next Enable/start.
+      notify(
+        'success',
+        !wrote
+          ? 'No changes to save.'
+          : applied
+            ? 'Settings saved and applied to the running channel.'
+            : 'Settings saved. Enable the channel to apply.'
+      );
       await loadConfig();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to save settings.');

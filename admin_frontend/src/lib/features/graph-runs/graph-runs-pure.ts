@@ -45,7 +45,7 @@ export const KNOWLEDGE_RUN_ID_PREFIX = 'knowledge-';
 export const CHAT_RUN_ID_PREFIX = 'chat-';
 
 /** Standalone L3 graph-ingest runs written by ``GraphIngestService.ingest_chunks``. */
-export const GRAPH_INGEST_RUN_ID_PREFIX = 'knowledge_graph_ingest-';
+export const GRAPH_INGEST_RUN_ID_PREFIX = 'graphiti_ingest-';
 
 export type GraphRunKindFilter = '' | 'chat' | 'knowledge' | 'ingest';
 
@@ -63,7 +63,7 @@ export function isChatAgentRun(runId: string): boolean {
 
 export function graphRunKindLabel(runId: string): string {
   // Check ingest before knowledge: both start with "knowledge" but the prefixes don't overlap
-  // (``knowledge_graph_ingest-`` vs ``knowledge-``); ordering is defensive, not load-bearing.
+  // (``graphiti_ingest-`` vs ``knowledge-``); ordering is defensive, not load-bearing.
   if (isGraphIngestRun(runId)) return 'Ingest';
   if (isKnowledgeStandaloneRun(runId)) return 'Knowledge';
   if (isChatAgentRun(runId)) return 'Chat';
@@ -159,12 +159,14 @@ export function filterGraphRunsRows(
 export function isGraphNodeSubstep(nodeName: string): boolean {
   const node = String(nodeName ?? '');
   // `memory_recall/*` = the retrieval-loop sub-nodes (memory_recall/turn · /search · /rerank · /answer)
-  // flushed under the `memory_recall` step when observability=trace. The `/` guards against matching
-  // the bare `memory_recall` parent, which stays a top-level step.
+  // flushed under the `memory_recall` step when observability=trace. `graphiti_ingest/*` = the
+  // Graphiti episode/per-operation ingest rows nested under `memory_ingest` (conversation memory) or
+  // under a standalone KB ingest run. The `/` guards against matching a bare parent step.
   return (
     node.startsWith('tools/') ||
     node.startsWith('knowledge/') ||
-    node.startsWith('memory_recall/')
+    node.startsWith('memory_recall/') ||
+    node.startsWith('graphiti_ingest/')
   );
 }
 

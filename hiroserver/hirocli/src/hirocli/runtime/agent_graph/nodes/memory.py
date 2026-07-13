@@ -400,7 +400,7 @@ class MemoryNodes(NodeGroup):
         # ``substep_scope`` sets ``current_substep``, and the graph-ingest ledger borrows THIS node's
         # run id from ``current_entry`` (a chat turn has no ``current_run`` accumulator) so its rows
         # land as sub-rows of ``memory_ingest`` in the chat run — instead of spawning a standalone
-        # ``knowledge_graph_ingest`` run the Graph Runs page can't render. ``self._ledger_sink``
+        # ``graphiti_ingest`` run the Graph Runs page can't render. ``self._ledger_sink``
         # (passed inside the controller) turns those rows on. Token cost prices on those sub-rows, so
         # this node's own row carries no usage.
         with substep_scope():

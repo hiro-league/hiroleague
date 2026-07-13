@@ -113,6 +113,12 @@ class WhatsAppChannel(ChannelPlugin):
         if self._owner_number:
             allowed.add(self._owner_number)
         self._allowed_senders = allowed
+        # on_configure is also called on a live re-push (settings saved while running),
+        # so apply anything the running bridge caches. The allow-list / owner / audio_out
+        # are read live from self.* at message time, but read-receipts is held by the
+        # bridge — update it so a settings change takes effect without a restart.
+        if self._bridge is not None:
+            self._bridge.set_send_read_receipts(self._send_read_receipts)
         if not self._allowed_senders:
             log.warning(
                 "⚠️ WhatsApp allow-list is empty — NO senders permitted. Set "

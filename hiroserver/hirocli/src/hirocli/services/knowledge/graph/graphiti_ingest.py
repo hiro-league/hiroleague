@@ -45,7 +45,7 @@ from .group_scope import GroupPolicyError
 from .ingest_ledger import (
     apply_episode_span_rollup,
     finalize_graph_ingest_run,
-    knowledge_graph_ingest_ledger,
+    graphiti_ingest_ledger,
     ledger_episode,
 )
 from .ingest_trace import (
@@ -358,7 +358,7 @@ async def ingest_episodes(
     doc_id = episodes[0].document_id if episodes else ""
     doc_title = episodes[0].document_title if episodes else ""
 
-    async with knowledge_graph_ingest_ledger(
+    async with graphiti_ingest_ledger(
         sink=ledger_sink, document_id=doc_id
     ) as run:
         try:

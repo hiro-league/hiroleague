@@ -154,6 +154,10 @@ class WhatsAppBridge:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, _RECONNECT_BACKOFF_MAX_S)
 
+    def set_send_read_receipts(self, value: bool) -> None:
+        """Live-update the read-receipt policy (settings changed while running)."""
+        self._send_read_receipts = value
+
     async def stop(self) -> None:
         self._stopping = True
         client = self._client

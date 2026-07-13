@@ -81,8 +81,10 @@ _FEATURES: tuple[FeatureSpec, ...] = (
         id="knowledge",
         label="Knowledge",
         # Knowledge base admin (ingest/browse/search) — retrieval quality still
-        # immature; hide the management surface until it is more complete. This
-        # gates only the admin UI/CLI/API, not the agent's runtime retrieval.
+        # immature; hide it until it is more complete. Gates the admin UI/CLI/API
+        # AND the agent's runtime retrieval: when inactive, agent_manager
+        # ._build_knowledge_subgraph returns None so the chat graph omits the
+        # knowledge branch entirely (no per-turn rewrite call). A RUNTIME gate.
         active=False,
         note="Workspace knowledge base ingest/browse/search admin.",
     ),

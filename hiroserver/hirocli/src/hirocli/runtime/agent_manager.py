@@ -1004,6 +1004,15 @@ class AgentManager:
         branch entirely. The subgraph is invoked per chat turn and inherits the chat run's ledger,
         so its ``knowledge/*`` node costs fold into that turn (no separate run).
         """
+        # Runtime gate: when the ``knowledge`` feature is disabled, don't wire the
+        # retrieval subgraph at all. Returning None makes the chat graph omit the
+        # knowledge branch (see nodes/knowledge.py is_active), so there is no per-turn
+        # rewrite LLM call and no empty knowledge context block. Mirrors the `devices`
+        # runtime gate — the feature flag now controls runtime, not just UI/CLI/API.
+        from ..domain.features import feature_active
+
+        if not feature_active("knowledge"):
+            return None
         manager = getattr(self._ctx, "knowledge_manager", None)
         service = getattr(manager, "service", None) if manager is not None else None
         if service is None:

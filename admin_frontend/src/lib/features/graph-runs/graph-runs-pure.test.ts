@@ -50,16 +50,16 @@ describe('runStatusDataValue', () => {
 describe('run-kind predicates', () => {
   it('match their prefixes', () => {
     expect(isKnowledgeStandaloneRun('knowledge-42')).toBe(true);
-    expect(isGraphIngestRun('knowledge_graph_ingest-42')).toBe(true);
+    expect(isGraphIngestRun('graphiti_ingest-42')).toBe(true);
     expect(isChatAgentRun('chat-42')).toBe(true);
     // An ingest run must NOT count as a knowledge run (prefixes 'knowledge_' vs 'knowledge-').
-    expect(isKnowledgeStandaloneRun('knowledge_graph_ingest-42')).toBe(false);
+    expect(isKnowledgeStandaloneRun('graphiti_ingest-42')).toBe(false);
   });
 });
 
 describe('graphRunKindLabel', () => {
   it('checks ingest before knowledge so ingest runs read as "Ingest"', () => {
-    expect(graphRunKindLabel('knowledge_graph_ingest-1')).toBe('Ingest');
+    expect(graphRunKindLabel('graphiti_ingest-1')).toBe('Ingest');
     expect(graphRunKindLabel('knowledge-1')).toBe('Knowledge');
     expect(graphRunKindLabel('chat-1')).toBe('Chat');
     expect(graphRunKindLabel('something-else')).toBe('Other');
@@ -72,22 +72,25 @@ describe('graphRunKindMatchesFilter', () => {
   });
 
   it('matches by kind, and ingest runs do not match the knowledge filter', () => {
-    expect(graphRunKindMatchesFilter('knowledge_graph_ingest-1', 'ingest')).toBe(true);
+    expect(graphRunKindMatchesFilter('graphiti_ingest-1', 'ingest')).toBe(true);
     expect(graphRunKindMatchesFilter('knowledge-1', 'knowledge')).toBe(true);
     expect(graphRunKindMatchesFilter('chat-1', 'chat')).toBe(true);
-    expect(graphRunKindMatchesFilter('knowledge_graph_ingest-1', 'knowledge')).toBe(false);
+    expect(graphRunKindMatchesFilter('graphiti_ingest-1', 'knowledge')).toBe(false);
     expect(graphRunKindMatchesFilter('chat-1', 'ingest')).toBe(false);
   });
 });
 
 describe('isGraphNodeSubstep', () => {
-  it('is true for tools/, knowledge/ and memory_recall/ node names', () => {
+  it('is true for tools/, knowledge/, memory_recall/ and graphiti_ingest/ node names', () => {
     expect(isGraphNodeSubstep('tools/search')).toBe(true);
     expect(isGraphNodeSubstep('knowledge/recall')).toBe(true);
     expect(isGraphNodeSubstep('memory_recall/turn')).toBe(true);
     expect(isGraphNodeSubstep('memory_recall/search')).toBe(true);
     expect(isGraphNodeSubstep('memory_recall/rerank')).toBe(true);
     expect(isGraphNodeSubstep('memory_recall/answer')).toBe(true);
+    // Graphiti ingest rows (episode + per-operation) nest under memory_ingest / a KB ingest run.
+    expect(isGraphNodeSubstep('graphiti_ingest/episode')).toBe(true);
+    expect(isGraphNodeSubstep('graphiti_ingest/extract_entities')).toBe(true);
     expect(isGraphNodeSubstep('agent')).toBe(false);
     // The bare parent stays a top-level step (not indented).
     expect(isGraphNodeSubstep('memory_recall')).toBe(false);
@@ -129,7 +132,7 @@ describe('fieldLabel', () => {
 describe('trimRunIdForList', () => {
   it('keeps short ids, elides long ones', () => {
     expect(trimRunIdForList('chat-123')).toBe('chat-123');
-    expect(trimRunIdForList('knowledge_graph_ingest-abcdef123456')).toBe('knowledge_…123456');
+    expect(trimRunIdForList('graphiti_ingest-abcdef123456')).toBe('graphiti_i…123456');
   });
 });
 
@@ -173,7 +176,7 @@ describe('listRowCharacter / listRowChannelName', () => {
   ]);
 
   it('labels standalone ingest/knowledge runs without a character photo', () => {
-    expect(listRowCharacter(ledger({ run_id: 'knowledge_graph_ingest-1' }), charMap, chanById)).toEqual({
+    expect(listRowCharacter(ledger({ run_id: 'graphiti_ingest-1' }), charMap, chanById)).toEqual({
       name: 'Graph ingest',
       photo: null
     });

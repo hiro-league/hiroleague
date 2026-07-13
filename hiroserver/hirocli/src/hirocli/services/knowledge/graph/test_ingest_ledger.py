@@ -120,7 +120,7 @@ async def test_ingest_writes_run_and_per_operation_nodes(tmp_path: Path) -> None
     # --- aggregate @run row ------------------------------------------------
     assert len(run_rows) == 1
     run = run_rows[0]
-    assert run["run_id"].startswith("knowledge_graph_ingest-")
+    assert run["run_id"].startswith("graphiti_ingest-")
     assert run["node"] == "@run"
     assert run["decision_detail"] == "graph_ingest"
     assert run["input_preview"].startswith("doc: 'Adam's Year'")
@@ -130,7 +130,7 @@ async def test_ingest_writes_run_and_per_operation_nodes(tmp_path: Path) -> None
     assert run["output_tokens"] == "50"
 
     # --- per-episode parent step: carries the ROLLED-UP usage of all internal LLM ops ----
-    episode = by_node["knowledge_graph_ingest/episode"]
+    episode = by_node["graphiti_ingest/episode"]
     assert episode["step_index"] == "1"
     assert episode["sub_step"] == ""
     assert episode["model"] == _MODEL
@@ -146,8 +146,8 @@ async def test_ingest_writes_run_and_per_operation_nodes(tmp_path: Path) -> None
     assert "llm=4 calls" in episode["output_preview"]
 
     # --- NO per-operation / embed / persist sub-rows (the breakdown moved to the trace tier) ---
-    assert [n for n in by_node if n.startswith("knowledge_graph_ingest/") and n
-            != "knowledge_graph_ingest/episode"] == []
+    assert [n for n in by_node if n.startswith("graphiti_ingest/") and n
+            != "graphiti_ingest/episode"] == []
 
 
 @pytest.mark.asyncio
@@ -184,11 +184,11 @@ async def test_ingest_ledger_nests_under_active_chat_node(tmp_path) -> None:
     """A memory ingest during a chat turn (active ``current_entry`` = ``memory_out``, no
     ``current_run``) must NEST under the chat run — borrow the node's run id and set it as
     ``current_run`` so per-episode entries resolve the chat run id — instead of spawning a rogue
-    standalone ``knowledge_graph_ingest`` run the Graph Runs page can't render."""
+    standalone ``graphiti_ingest`` run the Graph Runs page can't render."""
     from hirocli.runtime.agent_graph.ledger import current_entry, current_run, current_substep
     from hirocli.services.knowledge.graph.ingest_ledger import (
         GRAPH_INGEST_RUN_ID_PREFIX,
-        knowledge_graph_ingest_ledger,
+        graphiti_ingest_ledger,
     )
 
     sink = LedgerSink(tmp_path)
@@ -197,7 +197,7 @@ async def test_ingest_ledger_nests_under_active_chat_node(tmp_path) -> None:
     tok_e = current_entry.set(entry)
     tok_s = current_substep.set(entry.step_index)
     try:
-        async with knowledge_graph_ingest_ledger(sink=sink) as run:
+        async with graphiti_ingest_ledger(sink=sink) as run:
             assert run.nested is True
             assert run.run_id == "chat-abc"
             assert not run.run_id.startswith(GRAPH_INGEST_RUN_ID_PREFIX)  # no rogue standalone run
@@ -213,10 +213,10 @@ async def test_ingest_ledger_standalone_without_active_node(tmp_path) -> None:
     """Knowledge-doc ingest / CLI (no active node entry) keeps its own top-level run."""
     from hirocli.services.knowledge.graph.ingest_ledger import (
         GRAPH_INGEST_RUN_ID_PREFIX,
-        knowledge_graph_ingest_ledger,
+        graphiti_ingest_ledger,
     )
 
     sink = LedgerSink(tmp_path)
-    async with knowledge_graph_ingest_ledger(sink=sink, document_id="doc-1") as run:
+    async with graphiti_ingest_ledger(sink=sink, document_id="doc-1") as run:
         assert run.nested is False
         assert run.run_id.startswith(GRAPH_INGEST_RUN_ID_PREFIX)

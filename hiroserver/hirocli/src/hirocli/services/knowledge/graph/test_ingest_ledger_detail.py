@@ -36,7 +36,7 @@ _MODEL = "google:gemini-3-flash-preview"
 # Totals the fake feeds (extract_entities + extract_edges + 2× EdgeDuplicate):
 _TOTAL_IN = 100 + 80 + 30 + 28  # 238
 _TOTAL_OUT = 20 + 15 + 5 + 6  # 46
-_EPISODE = "knowledge_graph_ingest/episode"
+_EPISODE = "graphiti_ingest/episode"
 
 
 class _Result:
@@ -132,7 +132,7 @@ async def test_episode_row_carries_rolled_up_usage_and_prices(tmp_path: Path) ->
     assert episode["pricing_version"] != ""
 
     # NO per-operation sub-rows anymore (they moved to the trace sidecar).
-    children = [n for n in by_node if n.startswith("knowledge_graph_ingest/") and n != _EPISODE]
+    children = [n for n in by_node if n.startswith("graphiti_ingest/") and n != _EPISODE]
     assert children == [], children
 
     # The roll-up summary preview still surfaces structure (entities/facts/invalidated/tokens).

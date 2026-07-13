@@ -8,7 +8,7 @@ but every LLM call routes through our :class:`GraphitiLLMClient`, which now
 tags each call with the Graphiti **response-model name** (the only handle on
 *which* step it serves). This module turns that stream into ledger rows:
 
-* :func:`knowledge_graph_ingest_ledger` — opens a run (sets ``current_run``), one
+* :func:`graphiti_ingest_ledger` — opens a run (sets ``current_run``), one
   per ``ingest_chunks`` call (== per document). Writes the aggregate ``@run`` row.
 * :func:`ledger_episode` — per-episode context manager. Opens a parent step entry
   and an :class:`EpisodeLedger` collector (via ``current_ingest_episode``); on exit
@@ -47,8 +47,8 @@ from .ledger_tracer import SpanRecord, current_spans
 
 # Node-name prefix so every ingest row groups + sorts together in Graph Runs,
 # matching the retrieval-side convention (``knowledge/parse_query`` etc.).
-GRAPH_INGEST_NODE_PREFIX = "knowledge_graph_ingest"
-GRAPH_INGEST_RUN_ID_PREFIX = "knowledge_graph_ingest-"
+GRAPH_INGEST_NODE_PREFIX = "graphiti_ingest"
+GRAPH_INGEST_RUN_ID_PREFIX = "graphiti_ingest-"
 
 EPISODE_NODE = f"{GRAPH_INGEST_NODE_PREFIX}/episode"
 
@@ -222,7 +222,7 @@ class GraphIngestLedgerRun:
 
 
 @asynccontextmanager
-async def knowledge_graph_ingest_ledger(
+async def graphiti_ingest_ledger(
     *,
     sink: LedgerSink | None,
     document_id: str = "",
@@ -246,7 +246,7 @@ async def knowledge_graph_ingest_ledger(
 
     # Chat-turn ingest (conversation memory ``memory_out``): a chat turn ledgers per-node ENTRIES,
     # not a ``current_run`` accumulator, so without this a memory ingest would fall through to the
-    # standalone branch and spawn a rogue top-level ``knowledge_graph_ingest`` run (mem_ group +
+    # standalone branch and spawn a rogue top-level ``graphiti_ingest`` run (mem_ group +
     # ``conv:`` doc) that the Graph Runs page can't render. Instead, nest under the active node's run
     # by borrowing its run_id: set a same-run accumulator so the per-episode entries resolve the
     # CHAT run_id (via ``resolve_ledger_identity`` → ``current_run``) and land as sub-rows of
@@ -542,7 +542,7 @@ __all__ = [
     "apply_episode_span_rollup",
     "current_ingest_episode",
     "finalize_graph_ingest_run",
-    "knowledge_graph_ingest_ledger",
+    "graphiti_ingest_ledger",
     "ledger_episode",
     "preview_ingest_input",
     "preview_ingest_output",

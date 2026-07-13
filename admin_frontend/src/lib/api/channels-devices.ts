@@ -45,7 +45,11 @@ export type ChannelDescriptorData = {
   version: string;
 };
 
-export type ChannelConfigData = { config: Record<string, unknown> };
+export type ChannelConfigData = {
+  config: Record<string, unknown>;
+  /** POST /config only: true when the change was live-pushed to the running plugin. */
+  applied?: boolean;
+};
 
 export type DeviceRow = {
   device_id: string;
