@@ -24,6 +24,7 @@ from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hirocli.admin.features.channels.service import ChannelService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
+from hirocli.domain.channel_catalog import available_channels, catalog_channel
 from hirocli.domain.channel_config import load_channel_config
 from hirocli.domain.channel_descriptor import load_channel_descriptor
 from hirocli.qr_rendering import render_qr_svg
@@ -33,6 +34,7 @@ from hirocli.tools.channel import (
     ChannelDisableTool,
     ChannelEnableTool,
     ChannelInstallTool,
+    ChannelSetupTool,
 )
 
 channels_router = APIRouter()
@@ -182,6 +184,37 @@ async def channel_config_set(
 class InstallRequest(BaseModel):
     package: str | None = None
     editable: bool = False
+
+
+@channels_router.get("/channels/available")
+async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    # Catalog channels the UI can add + install without prior CLI setup, minus any
+    # already configured (so "Add a channel" never offers a duplicate).
+    listing = await run_in_threadpool(ChannelService().list_channels, workspace_id)
+    if not listing.ok:
+        return _api_from_result(listing)
+    configured = {str(row.get("name", "")) for row in (listing.data or [])}
+    channels = [
+        {"name": c.name, "label": c.label, "description": c.description, "package": c.package}
+        for c in available_channels(configured)
+    ]
+    return {"ok": True, "error": None, "data": {"channels": channels}}
+
+
+@channels_router.post("/channels/{name}/setup")
+async def setup_channel(name: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    # Add a catalog channel: write its config (so it joins the list) but leave it
+    # DISABLED — the package isn't installed yet. The UI flow is add → install → enable.
+    entry = catalog_channel(name)
+    if entry is None:
+        return envelope_failure(f"'{name}' is not an installable channel.")
+    try:
+        result = await run_in_threadpool(
+            ChannelSetupTool().execute, name, entry.command, False, workspace_id
+        )
+    except (ValueError, RuntimeError) as exc:
+        return envelope_failure(str(exc))
+    return {"ok": True, "error": None, "data": {"name": result.name, "enabled": result.enabled}}
 
 
 @channels_router.post("/channels/{name}/install")

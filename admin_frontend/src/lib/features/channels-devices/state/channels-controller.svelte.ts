@@ -1,7 +1,10 @@
 import {
+  addChannel,
   disableChannel,
   enableChannel,
+  listAvailableChannels,
   listChannels,
+  type AvailableChannel,
   type ChannelRow
 } from '$lib/api/channels-devices';
 import { isFeatureActive } from '$lib/shell/features';
@@ -11,9 +14,11 @@ export type ChannelsController = ReturnType<typeof createChannelsController>;
 
 export function createChannelsController(notify: Notify) {
   let allRows = $state<ChannelRow[]>([]);
+  let available = $state<AvailableChannel[]>([]);
   let mandatoryChannelName = $state('');
   let loading = $state(true);
   let busyChannel = $state<string | null>(null);
+  let adding = $state(false);
   let error = $state<string | null>(null);
 
   // When the `devices` feature is hidden, the mandatory devices channel is dropped from the
@@ -30,13 +35,37 @@ export function createChannelsController(notify: Notify) {
     loading = true;
     error = null;
     try {
-      const payload = await listChannels();
-      allRows = payload.data.channels;
-      mandatoryChannelName = payload.data.mandatory_channel_name;
+      const list = await listChannels();
+      allRows = list.data.channels;
+      mandatoryChannelName = list.data.mandatory_channel_name;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load channels.';
     } finally {
       loading = false;
+    }
+    // Available (installable) channels are best-effort: an older server without the
+    // /channels/available route must not break the list — just hide the Add picker.
+    try {
+      available = (await listAvailableChannels()).data.channels;
+    } catch {
+      available = [];
+    }
+  }
+
+  // Add a catalog channel (writes its config, disabled) so it joins the list — the caller
+  // then opens its detail to Install → Enable. Returns true on success.
+  async function add(name: string): Promise<boolean> {
+    adding = true;
+    try {
+      await addChannel(name);
+      notify('success', `Added '${name}'. Install it, then enable.`);
+      await load();
+      return true;
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : `Failed to add '${name}'.`);
+      return false;
+    } finally {
+      adding = false;
     }
   }
 
@@ -71,6 +100,12 @@ export function createChannelsController(notify: Notify) {
     get rows() {
       return rows;
     },
+    get available() {
+      return available;
+    },
+    get adding() {
+      return adding;
+    },
     get mandatoryChannelName() {
       return mandatoryChannelName;
     },
@@ -87,6 +122,7 @@ export function createChannelsController(notify: Notify) {
       return enabledCount;
     },
     load,
+    add,
     toggle,
     isMandatory,
     isBusy

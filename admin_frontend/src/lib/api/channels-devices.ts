@@ -12,6 +12,14 @@ export type ChannelListData = {
   mandatory_channel_name: string;
 };
 
+/** An installable channel from the catalog, not yet configured in this workspace. */
+export type AvailableChannel = {
+  name: string;
+  label: string;
+  description: string;
+  package: string;
+};
+
 export type ChannelCapabilities = {
   pairing?: string;
   actions?: string[];
@@ -56,6 +64,19 @@ export type DevicePairingData = {
 
 export async function listChannels() {
   return apiRequest<ChannelListData>('/channels');
+}
+
+/** Installable channels (catalog minus already-configured) for the "Add a channel" picker. */
+export async function listAvailableChannels() {
+  return apiRequest<{ channels: AvailableChannel[] }>('/channels/available');
+}
+
+/** Add a catalog channel: writes its config (disabled) so it joins the list; then install + enable. */
+export async function addChannel(name: string) {
+  return apiRequest<{ name: string; enabled: boolean }>(
+    `/channels/${encodeURIComponent(name)}/setup`,
+    { method: 'POST', body: {} }
+  );
 }
 
 /**

@@ -2,6 +2,7 @@
   import { Lock, Power, PowerOff, Settings2 } from '@lucide/svelte';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
+  import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import type { Notify } from '$lib/ui/toast-types';
@@ -13,6 +14,24 @@
 
   // Which channel's generic detail view (§5.5) is open; null = the list.
   let selected = $state<string | null>(null);
+
+  // "Add a channel" picker — the chosen catalog channel to add.
+  let chosen = $state('');
+  // Keep `chosen` valid: default to the first available and reset if it's been added away.
+  $effect(() => {
+    const names = ctrl.available.map((c) => c.name);
+    if (ctrl.available.length && !names.includes(chosen)) chosen = ctrl.available[0].name;
+  });
+  const chosenDescription = $derived(
+    ctrl.available.find((c) => c.name === chosen)?.description ?? ''
+  );
+
+  async function handleAdd() {
+    const name = chosen;
+    if (!name) return;
+    // On success, open the new channel's detail so the user can Install → Enable.
+    if (await ctrl.add(name)) selected = name;
+  }
 
   const CHANNEL_GRID = '180px 110px 1.4fr 1fr 210px';
 </script>
@@ -27,6 +46,35 @@
     />
   {/key}
 {:else}
+<div class="flex flex-col gap-4">
+{#if ctrl.available.length > 0}
+  <SectionCard class="grid gap-3">
+    <div>
+      <h3 class="text-lg font-semibold">Add a channel</h3>
+      <span class="font-sans text-sm text-muted-foreground">
+        Set up a new channel, then install and enable it.
+      </span>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <select
+        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        bind:value={chosen}
+        aria-label="Channel to add"
+      >
+        {#each ctrl.available as ch (ch.name)}
+          <option value={ch.name}>{ch.label}</option>
+        {/each}
+      </select>
+      <Button size="sm" onclick={() => void handleAdd()} disabled={ctrl.adding || !chosen}>
+        {ctrl.adding ? 'Adding…' : 'Add'}
+      </Button>
+    </div>
+    {#if chosenDescription}
+      <p class="text-xs text-muted-foreground">{chosenDescription}</p>
+    {/if}
+  </SectionCard>
+{/if}
+
 <RefreshableSectionCard
   title="Channels"
   countText="{ctrl.rows.length} configured / {ctrl.enabledCount} enabled"
@@ -107,4 +155,5 @@
     {/snippet}
   </AdminTableShell>
 </RefreshableSectionCard>
+</div>
 {/if}
