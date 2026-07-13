@@ -14,7 +14,12 @@ live actions). All endpoints return the ``{ok, error, data}`` envelope.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+from pathlib import Path
 from typing import Any
+
+from hiro_commons.log import Logger
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -39,6 +44,39 @@ from hirocli.tools.channel import (
 )
 
 channels_router = APIRouter()
+log = Logger.get("CHANNELS")
+
+
+def _installed_channel_command(name: str, fallback: str) -> str:
+    """Command the channel config should run to start the plugin.
+
+    Prefer the ABSOLUTE path to where ``uv tool install`` places the
+    ``hiro-channel-<name>`` binary, so Enable spawns it regardless of whether the
+    server process's PATH includes uv's tool-bin dir (a common cause of a channel
+    that installs fine but never starts). Falls back to the bare command.
+    """
+    try:
+        out = subprocess.run(
+            ["uv", "tool", "dir", "--bin"], capture_output=True, text=True, timeout=15
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("⚠️ Could not resolve uv tool bin dir; using bare command", error=str(exc))
+        return fallback
+    bin_dir = out.stdout.strip()
+    if out.returncode != 0 or not bin_dir:
+        log.warning("⚠️ `uv tool dir --bin` returned nothing; using bare command")
+        return fallback
+    exe = f"hiro-channel-{name}" + (".exe" if os.name == "nt" else "")
+    candidate = str(Path(bin_dir) / exe)
+    # ChannelSetupTool splits the command string on whitespace, so a path containing
+    # spaces would be mangled — fall back to the bare command (relies on PATH) there.
+    if " " in candidate:
+        log.warning(
+            "⚠️ uv tool bin path has spaces; using bare command (ensure it's on PATH)",
+            path=candidate,
+        )
+        return fallback
+    return candidate
 
 
 def _ctx(request: Request) -> Any:
@@ -211,9 +249,12 @@ async def setup_channel(name: str, workspace_id: SelectedWorkspaceIdDep) -> dict
     entry = catalog_channel(name)
     if entry is None:
         return envelope_failure(f"'{name}' is not an installable channel.")
+    # Use the ABSOLUTE installed-binary path so Enable works even if uv's tool-bin
+    # isn't on the server's PATH; the binary lands there once Install runs.
+    command = await run_in_threadpool(_installed_channel_command, name, entry.command)
     try:
         result = await run_in_threadpool(
-            ChannelSetupTool().execute, name, entry.command, False, workspace_id, ""
+            ChannelSetupTool().execute, name, command, False, workspace_id, ""
         )
     except (ValueError, RuntimeError) as exc:
         return envelope_failure(str(exc))
