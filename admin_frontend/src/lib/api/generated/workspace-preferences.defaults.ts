@@ -47,20 +47,20 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "retrieval": {
       "active_prompt_id": "chat",
       "limits": {
-        "max_agent_turns": 4,
+        "max_agent_turns": 3,
         "max_parallel_searches": 3,
-        "limit_default": 20,
-        "limit_min": 10,
-        "limit_max": 40,
+        "limit_default": 10,
+        "limit_min": 5,
+        "limit_max": 25,
         "hops_max": 3
       },
       "model": null,
-      "tuning_profile": "knowledge_answering",
+      "tuning_profile": "memory_extraction",
       "render": {
         "show_event_time": true,
         "show_expired_at": false,
         "show_superseded": false,
-        "max_elements_per_kind": 30,
+        "max_elements_per_kind": 15,
         "max_fact_chars": 240,
         "max_episode_chars": 300,
         "max_summary_chars": 400
@@ -181,7 +181,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
   },
   "tuning_profiles": {
     "balanced_chat": {
-      "temperature": 0.7,
+      "temperature": 0.3,
       "max_tokens": 2048,
       "thinking": null,
       "num_ctx": null,
@@ -193,7 +193,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
       "max_tokens": 8192,
       "thinking": "low",
       "num_ctx": null,
-      "label": "Memory extraction",
+      "label": "Retrieval Agent Profile",
       "locked": true
     },
     "knowledge_answering": {

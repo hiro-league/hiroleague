@@ -15,12 +15,21 @@ from pydantic import BaseModel, Field
 # ``chat.instructions`` (answer-time persona guidance, a different pipeline stage).
 from .defaults import (
     DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
-    DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
     DEFAULT_MEMORY_TUNING_PROFILE_ID,
     pref_field,
 )
 from .models_graph import RetrievalAgentLimits
+
+
+def default_chat_retrieval_limits() -> RetrievalAgentLimits:
+    """Chat retrieval-loop defaults — intentionally leaner than the shared eval defaults
+    (fewer agent turns and smaller result counts) so chat recall stays fast and cheap. Kept as a
+    chat-only factory so ``graph.eval.retrieval_agent`` keeps the ``RetrievalAgentLimits`` class
+    defaults (they no longer share the same numbers)."""
+    return RetrievalAgentLimits(
+        max_agent_turns=3, limit_default=10, limit_min=5, limit_max=25
+    )
 
 
 class MemorySearchPreferences(BaseModel):
@@ -134,7 +143,7 @@ class MemoryRetrievalRenderPreferences(BaseModel):
     show_superseded: bool = Field(default=False, title="Show SUPERSEDED flag")
     # Render caps: each kind is score-ranked desc, top-N kept, every element sanitized to one capped
     # line — so a large recalled set doesn't bury the answer-relevant elements or blow the prompt.
-    max_elements_per_kind: int = pref_field(advanced=True, default=30, ge=1, le=200, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.")
+    max_elements_per_kind: int = pref_field(advanced=True, default=15, ge=1, le=200, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.")
     max_fact_chars: int = pref_field(advanced=True, default=240, ge=40, le=2000, title="Max fact chars", description="Each recalled fact → one sanitized line capped here.")
     max_episode_chars: int = pref_field(advanced=True, default=300, ge=40, le=2000, title="Max message chars", description="Per-episode/message text cap (one sanitized line).")
     max_summary_chars: int = pref_field(advanced=True, default=400, ge=40, le=4000, title="Max entity summary chars", description="Per-entity summary cap (one sanitized line).")
@@ -156,9 +165,9 @@ class MemoryRetrievalPreferences(BaseModel):
         title="Active prompt profile",
         description="Which shared retrieval-agent prompt profile the CHAT recall loop uses.",
     )
-    # Chat's OWN loop caps (default max_agent_turns=4 — eval parity, per the accepted recommendation;
-    # NOT a tight turns=1). Split from eval so chat can be tuned independently later.
-    limits: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
+    # Chat's OWN loop caps — leaner than eval (max_agent_turns=3, num-results 5/10/25). Split from
+    # eval (its own factory) so chat is tuned independently; eval keeps the class defaults.
+    limits: RetrievalAgentLimits = Field(default_factory=default_chat_retrieval_limits)
     model: str | None = pref_field(
         model_kind="chat",
         default=None,
@@ -170,7 +179,8 @@ class MemoryRetrievalPreferences(BaseModel):
     )
     tuning_profile: str = pref_field(
         tuning_profile_ref=True,
-        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
+        # Defaults to the "Retrieval Agent Profile" (deterministic, roomy budget, light reasoning).
+        default=DEFAULT_MEMORY_TUNING_PROFILE_ID,
         title="Retrieval agent profile",
         description="Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.",
     )

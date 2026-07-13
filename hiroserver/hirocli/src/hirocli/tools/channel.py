@@ -192,6 +192,12 @@ class ChannelSetupTool(Tool):
         "command": ToolParam(str, "Executable to run for this channel, e.g. 'hiro-channel-telegram'"),
         "enabled": ToolParam(bool, "Whether to enable the channel immediately", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+        "workspace_dir": ToolParam(
+            str,
+            "Working dir for `uv run`. Empty string runs the command as-is (e.g. an "
+            "isolated `uv tool install` binary); omit to auto-detect the uv workspace.",
+            required=False,
+        ),
     }
 
     def execute(
@@ -200,6 +206,7 @@ class ChannelSetupTool(Tool):
         command: str,
         enabled: bool = True,
         workspace: str | None = None,
+        workspace_dir: str | None = None,
     ) -> ChannelSetupResult:
         workspace_path = _resolve_path(workspace)
         existing = load_channel_config(workspace_path, channel_name)
@@ -210,10 +217,17 @@ class ChannelSetupTool(Tool):
             enabled = True
 
         cmd_parts = command.split()
-        uv_workspace = find_workspace_root()
-        workspace_dir = str(uv_workspace) if uv_workspace else (
-            existing.workspace_dir if existing else ""
-        )
+        # An explicit workspace_dir (including "") wins: a channel installed as an
+        # isolated `uv tool` binary must run the command as-is, NOT be wrapped in
+        # `uv run --directory <workspace>` (which would use the shared workspace env
+        # and break plugins that need their own deps, e.g. WhatsApp's protobuf 7).
+        if workspace_dir is not None:
+            resolved_workspace_dir = workspace_dir
+        else:
+            uv_workspace = find_workspace_root()
+            resolved_workspace_dir = str(uv_workspace) if uv_workspace else (
+                existing.workspace_dir if existing else ""
+            )
 
         channel_data = existing.config if existing else {}
         if channel_name == MANDATORY_CHANNEL_NAME:
@@ -231,7 +245,7 @@ class ChannelSetupTool(Tool):
             enabled=enabled,
             command=cmd_parts,
             config=channel_data,
-            workspace_dir=workspace_dir,
+            workspace_dir=resolved_workspace_dir,
         )
         save_channel_config(workspace_path, cfg)
 
@@ -239,7 +253,7 @@ class ChannelSetupTool(Tool):
             name=channel_name,
             enabled=enabled,
             command=command,
-            workspace_dir=workspace_dir,
+            workspace_dir=resolved_workspace_dir,
         )
 
 

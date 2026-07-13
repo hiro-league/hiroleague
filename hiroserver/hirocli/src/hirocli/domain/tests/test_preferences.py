@@ -317,10 +317,15 @@ def test_chat_retrieval_agent_prompt_is_locked_default_and_resolves() -> None:
     assert resolve_retrieval_agent_prompt(prefs)[0] == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
 
 
-def test_memory_retrieval_defaults_parity_with_eval_caps() -> None:
-    """The chat retrieval caps default to eval parity (max_agent_turns=4), NOT a tight turns=1."""
+def test_memory_retrieval_defaults() -> None:
+    """The chat retrieval caps default leaner than eval (max_agent_turns=3, num-results 5/10/25),
+    tuned independently via their own factory."""
     retrieval = WorkspacePreferences().memory.retrieval
-    assert retrieval.limits.max_agent_turns == 4
+    assert retrieval.limits.max_agent_turns == 3
+    assert retrieval.limits.limit_default == 10
+    assert retrieval.limits.limit_min == 5
+    assert retrieval.limits.limit_max == 25
+    assert retrieval.tuning_profile == "memory_extraction"
     assert retrieval.active_prompt_id == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
     assert retrieval.model is None
 

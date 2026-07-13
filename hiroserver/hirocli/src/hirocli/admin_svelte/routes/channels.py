@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
+from hiro_commons.process import find_workspace_root
 from hirocli.admin.features.channels.service import ChannelService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
@@ -205,23 +206,41 @@ async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[
 async def setup_channel(name: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
     # Add a catalog channel: write its config (so it joins the list) but leave it
     # DISABLED — the package isn't installed yet. The UI flow is add → install → enable.
+    # workspace_dir="" pins the isolated-tool model: enable runs the plugin's bare
+    # `uv tool install` binary as-is instead of `uv run` in the shared workspace env.
     entry = catalog_channel(name)
     if entry is None:
         return envelope_failure(f"'{name}' is not an installable channel.")
     try:
         result = await run_in_threadpool(
-            ChannelSetupTool().execute, name, entry.command, False, workspace_id
+            ChannelSetupTool().execute, name, entry.command, False, workspace_id, ""
         )
     except (ValueError, RuntimeError) as exc:
         return envelope_failure(str(exc))
     return {"ok": True, "error": None, "data": {"name": result.name, "enabled": result.enabled}}
 
 
+def _install_source(name: str, override: str | None) -> str:
+    """Resolve what ``uv tool install`` should install: an explicit override, else a
+    local source checkout when present (so the UI Install works on a source tree without
+    publishing), else the catalog's registry package name (resolved from the index)."""
+    if override:
+        return override
+    root = find_workspace_root()
+    if root is not None:
+        local = root / "channels" / f"hiro-channel-{name}"
+        if local.is_dir():
+            return str(local)
+    entry = catalog_channel(name)
+    return entry.package if entry is not None else f"hiro-channel-{name}"
+
+
 @channels_router.post("/channels/{name}/install")
 async def channel_install(name: str, body: InstallRequest) -> dict[str, Any]:
+    source = _install_source(name, body.package)
     try:
         result = await run_in_threadpool(
-            ChannelInstallTool().execute, name, body.package, body.editable
+            ChannelInstallTool().execute, name, source, body.editable
         )
     except RuntimeError as exc:
         return envelope_failure(str(exc))

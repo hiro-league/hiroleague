@@ -1130,7 +1130,7 @@
           "title": "Retrieval agent model"
         },
         "tuning_profile": {
-          "default": "knowledge_answering",
+          "default": "memory_extraction",
           "description": "Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.",
           "title": "Retrieval agent profile",
           "tuning_profile_ref": true,
@@ -1170,7 +1170,7 @@
         },
         "max_elements_per_kind": {
           "advanced": true,
-          "default": 30,
+          "default": 15,
           "description": "Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.",
           "maximum": 200,
           "minimum": 1,

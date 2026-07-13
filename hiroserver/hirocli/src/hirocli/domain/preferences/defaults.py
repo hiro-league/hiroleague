@@ -175,12 +175,14 @@ def default_tuning_profiles() -> dict[str, TuningProfile]:
         DEFAULT_CHAT_TUNING_PROFILE_ID: TuningProfile(
             label="Balanced chat",
             locked=True,
-            temperature=0.7,
+            temperature=0.3,
             max_tokens=2048,
             thinking=None,
         ),
+        # Doubles as the default profile for the chat retrieval agent (memory.retrieval.tuning_profile),
+        # hence the label — deterministic (temp 0), roomy budget, light reasoning.
         DEFAULT_MEMORY_TUNING_PROFILE_ID: TuningProfile(
-            label="Memory extraction",
+            label="Retrieval Agent Profile",
             locked=True,
             temperature=0,
             max_tokens=8192,

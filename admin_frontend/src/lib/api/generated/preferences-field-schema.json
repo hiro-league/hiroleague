@@ -309,7 +309,7 @@
     "path": "memory.retrieval.tuning_profile",
     "nullable": false,
     "type": "string",
-    "default": "knowledge_answering",
+    "default": "memory_extraction",
     "title": "Retrieval agent profile",
     "description": "Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model."
   },
@@ -338,7 +338,7 @@
     "path": "memory.retrieval.render.max_elements_per_kind",
     "nullable": false,
     "type": "integer",
-    "default": 30,
+    "default": 15,
     "title": "Max elements / kind",
     "description": "Top-N facts / entities / messages (by retrieval score) kept in the recalled-memory block.",
     "advanced": true,

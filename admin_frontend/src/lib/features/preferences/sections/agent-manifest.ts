@@ -41,7 +41,7 @@ export const AGENT_MANIFEST: PrefTabManifest = {
               kind: 'text',
               path: 'memory.user_name',
               maxlength: 120,
-              placeholder: 'e.g. Misho',
+              placeholder: 'e.g. Alex',
               hint: 'Anchors your remembered facts to a named person in the memory graph (instead of a generic “User”). Set this once, early. Changing it later won’t rename existing memories — it starts a separate identity and fragments recall. Leave blank to use “User”.'
             },
             { kind: 'number', path: 'chat.max_messages' }

@@ -80,6 +80,7 @@ PACKAGES_BUILD_PATHS=(
     "hiro-channel-sdk"
     "gateway"
     "channels/hiro-channel-devices"
+    "channels/hiro-channel-whatsapp"
     "hirocli"
     "hiroleague"
 )
@@ -91,6 +92,7 @@ PACKAGES_DIST_PREFIXES=(
     "hiro_channel_sdk"
     "hirogate"
     "hiro_channel_devices"
+    "hiro_channel_whatsapp"
     "hirocli"
     "hiroleague"
 )
