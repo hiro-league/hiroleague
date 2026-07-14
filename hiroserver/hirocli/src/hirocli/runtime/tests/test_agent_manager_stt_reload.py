@@ -250,7 +250,8 @@ async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
             "hirocli.services.memory.create_memory_service",
             side_effect=fake_create_memory_service,
         ):
-            mgr._ctx.preferences.update_many({"memory.enabled": True})
+            # memory.enabled defaults to True — must flip for an effective change / reload.
+            mgr._ctx.preferences.update_many({"memory.enabled": False})
             await asyncio.sleep(0.1)
 
         assert rebuilds == [(tmp_path, None)]
