@@ -1,4 +1,9 @@
-from hiro_commons.version import package_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
-# Read from installed metadata so it can never drift from pyproject.toml.
-__version__ = package_version("hiro-channel-echo")
+# Version from this package's own installed metadata (source of truth =
+# pyproject.toml); stdlib-only, no sibling-package import.
+try:
+    __version__ = _pkg_version("hiro-channel-echo")
+except PackageNotFoundError:  # raw source tree, not installed
+    __version__ = "0.0.0+unknown"
