@@ -28,10 +28,13 @@ from .log_scope_fields import (
     METADATA_LOG_TEXT_PREVIEW,
     unified_message_log_scope,
 )
+from hiro_commons.version import package_version
+
 from .models import ChannelInfo, ContentItem, EventPayload, MessageRouting, RpcRequest, RpcResponse, UnifiedMessage
 from .transport import PluginTransport
 
-__version__ = "0.1.0"
+# Read from installed metadata so it can never drift from pyproject.toml.
+__version__ = package_version("hiro-channel-sdk")
 __all__ = [
     "log_setup",
     "constants",

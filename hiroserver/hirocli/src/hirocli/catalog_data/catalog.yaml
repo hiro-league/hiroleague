@@ -5,10 +5,10 @@
 # released_at: vendor model/API launch date (ISO YYYY-MM-DD); used for admin sort — verify release notes.
 # tts_voices: preset ids for bundled TTS integrations — verify against vendor docs when upgrading SDKs.
 # catalog_version: PEP 440-style string (quote so YAML does not parse as float).
-# Pinned to 0.1.3 until the hirocli/app package version is published (bump together then).
+# Kept in lockstep with the workspace package version (same release axis) — bump together.
 # hidden: provider is excluded from all listing surfaces (admin/CLI/pickers/scan-env/add flows)
 # but still resolves for existing configurations — see Provider.hidden in model_catalog.py.
-catalog_version: "0.1.6"
+catalog_version: "0.2.0"
 
 providers:
   - id: openai

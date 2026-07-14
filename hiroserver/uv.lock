@@ -1126,7 +1126,7 @@ wheels = [
 
 [[package]]
 name = "hiro-channel-devices"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "channels/hiro-channel-devices" }
 dependencies = [
     { name = "cryptography" },
@@ -1147,7 +1147,7 @@ requires-dist = [
 
 [[package]]
 name = "hiro-channel-echo"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "channels/hiro-channel-echo" }
 dependencies = [
     { name = "hiro-channel-sdk" },
@@ -1164,7 +1164,7 @@ requires-dist = [
 
 [[package]]
 name = "hiro-channel-sdk"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "hiro-channel-sdk" }
 dependencies = [
     { name = "hiro-commons" },
@@ -1195,7 +1195,7 @@ dev = [
 
 [[package]]
 name = "hiro-channel-whatsapp"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "channels/hiro-channel-whatsapp" }
 dependencies = [
     { name = "hiro-channel-sdk" },
@@ -1218,7 +1218,7 @@ requires-dist = [
 
 [[package]]
 name = "hiro-commons"
-version = "0.1.4"
+version = "0.2.0"
 source = { editable = "hiro-commons" }
 dependencies = [
     { name = "colorama" },
@@ -1235,7 +1235,7 @@ requires-dist = [
 
 [[package]]
 name = "hirocli"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "hirocli" }
 dependencies = [
     { name = "aiosqlite" },
@@ -1344,7 +1344,7 @@ dev = [
 
 [[package]]
 name = "hirogate"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "gateway" }
 dependencies = [
     { name = "cryptography" },
@@ -1383,7 +1383,7 @@ dev = [
 
 [[package]]
 name = "hiroleague"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "hiroleague" }
 dependencies = [
     { name = "hiro-channel-devices" },

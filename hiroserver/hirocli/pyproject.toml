@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hirocli"
-version = "0.1.3"
+version = "0.2.0"
 description = "Desktop server CLI for Hiro-League(the `hiro` command)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -69,13 +69,13 @@ dependencies = [
     "jsonschema>=4.25",
     "psutil>=7.0",
     "pillow>=12.2",
-    "hiro-commons~=0.1.3",
-    "hiro-channel-sdk~=0.1.3",
+    "hiro-commons~=0.2.0",
+    "hiro-channel-sdk~=0.2.0",
     # hirocli imports hirogateway.service / .instance / .config to drive the
     # `hiro gateway *` lifecycle commands, so hirogate is a real library
     # dependency of hirocli, not just a co-located process. VPS-only deploys
     # are unaffected — those install `hirogate` alone, never `hirocli`.
-    "hirogate~=0.1.3",
+    "hirogate~=0.2.0",
     "langchain-qdrant>=1.1.0",
     "langdetect>=1.0.9",
     "graphiti-core==0.29.1",
