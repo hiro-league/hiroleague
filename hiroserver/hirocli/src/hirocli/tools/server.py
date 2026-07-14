@@ -206,7 +206,9 @@ class StartTool(Tool):
         self,
         workspace: str | None = None,
         foreground: bool = False,
-        admin: bool = False,
+        # Admin UI is on by default (end-user product default); pass admin=False
+        # (CLI: --no-admin) for headless runs.
+        admin: bool = True,
         metrics: bool = False,
     ) -> StartResult:
         entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
@@ -291,7 +293,9 @@ class RestartTool(Tool):
         self,
         workspace: str | None = None,
         foreground: bool = False,
-        admin: bool = False,
+        # Admin UI is on by default (end-user product default); pass admin=False
+        # (CLI: --no-admin) for headless runs.
+        admin: bool = True,
         metrics: bool = False,
     ) -> RestartResult:
         entry, _, workspace_path = ctrl.resolve_or_create(workspace)
@@ -387,6 +391,7 @@ class StatusTool(Tool):
                     device_id=config.device_id,
                     http_host=config.http_host,
                     http_port=config.http_port,
+                    admin_port=config.admin_port,
                 )
             )
         return StatusResult(workspaces=entries)

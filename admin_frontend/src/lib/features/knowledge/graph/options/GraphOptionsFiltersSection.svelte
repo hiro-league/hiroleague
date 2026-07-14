@@ -52,8 +52,12 @@
     if (!s) return [0, 0];
     return r ? [r.lo, r.hi] : [s.lo, s.hi];
   });
+  // Do NOT round: a rounded step rarely divides the span evenly, so the grid's last stop falls
+  // short of (or past) span.hi — the newest/today date becomes unreachable and the thumb snaps to
+  // a value that disagrees with normalizeRange's endpoint snapping. An exact hundredth of the span
+  // puts a grid stop precisely on both endpoints (lo + 100*step === hi).
   const rangeStep = (s: { lo: number; hi: number } | null): number =>
-    s ? Math.max(1, Math.round((s.hi - s.lo) / 100)) : 1;
+    s && s.hi > s.lo ? (s.hi - s.lo) / 100 : 1;
   const fmtDate = (v: number): string =>
     new Date(v).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const maxConnUnlimited = $derived(graph.maxConnPerNode() >= MAX_CONN_PER_NODE_CAP);

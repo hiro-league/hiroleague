@@ -7,6 +7,7 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
   import type { Notify } from '$lib/ui/toast-types';
   import { createChannelDetailController } from '../state/channel-detail-controller.svelte';
   import ChannelConnectionCard from './channel-detail/ChannelConnectionCard.svelte';
@@ -32,6 +33,13 @@
     void ctrl.load();
   });
   $effect(() => ctrl.startPolling());
+
+  let confirmingUninstall = $state(false);
+  async function confirmUninstall() {
+    const ok = await ctrl.uninstall();
+    confirmingUninstall = false;
+    if (ok) onBack(); // channel no longer exists — return to the list
+  }
 </script>
 
 <div class="flex flex-col gap-4">
@@ -48,7 +56,7 @@
   {:else if ctrl.error}
     <InlineDestructiveAlert message={ctrl.error} />
   {:else}
-    <ChannelConnectionCard {ctrl} />
+    <ChannelConnectionCard {ctrl} onRequestUninstall={() => (confirmingUninstall = true)} />
 
     <SectionCard class="grid gap-3">
       <h2 class={ADMIN_SECTION_TITLE}>Settings</h2>
@@ -65,9 +73,21 @@
           <Button onclick={() => ctrl.save()} disabled={ctrl.saving}>
             {ctrl.saving ? 'Saving…' : 'Save settings'}
           </Button>
-          <span class="text-xs text-muted-foreground">Changes apply after a server restart.</span>
+          <span class="text-xs text-muted-foreground">
+            Applied live to a running channel; otherwise on next Enable.
+          </span>
         </div>
       {/if}
     </SectionCard>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={confirmingUninstall}
+  onOpenChange={(next) => (confirmingUninstall = next)}
+  title="Uninstall '{name}'?"
+  message="This stops the channel, deletes its configuration, and uninstalls its plugin package. You can install it again later."
+  confirmLabel="Uninstall"
+  pending={ctrl.uninstalling}
+  onConfirm={() => void confirmUninstall()}
+/>

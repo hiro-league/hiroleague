@@ -13,26 +13,9 @@ import {
   writeLocalString,
   writeSessionString
 } from '$lib/preferences/storage';
-import {
-  CENTER_STRENGTH,
-  CHARGE_STRENGTH,
-  COLLIDE_SCALE_DEFAULT,
-  NODE_FADE_FULL_DEFAULT,
-  NODE_FADE_START_DEFAULT,
-  NODE_REVEAL_LO_DEFAULT,
-  NODE_REVEAL_HI_DEFAULT,
-  RADIAL_RING
-} from './engine/graph-forces';
-import {
-  EDGE_FONT_MAX,
-  EDGE_FONT_MIN,
-  EDGE_ZOOM_MAX,
-  EDGE_ZOOM_MIN,
-  NODE_FONT_MAX,
-  NODE_FONT_MIN,
-  NODE_ZOOM_MAX,
-  NODE_ZOOM_MIN
-} from './engine/graph-config';
+// Only the physics constants whose defaults still track the force module are imported now; the
+// remaining option defaults are curated literals below (see GRAPH_OPTION_DEFAULTS).
+import { CENTER_STRENGTH, RADIAL_RING } from './engine/graph-forces';
 
 /** Node-node repulsion ("charge") slider bounds. d3 charge is NEGATIVE (repulsion); more
  *  negative = nodes push apart harder (airier). 0 = no repulsion. Left = spread, right = clump. */
@@ -155,32 +138,35 @@ export const CENTER_STRENGTH_MAX = 0.5;
 export const RADIAL_RING_MIN = 0;
 export const RADIAL_RING_MAX = 200;
 
+// Curated product defaults for the graph options (also the "Reset" target). Chosen for a readable
+// typical memory graph; intentionally literal, so they may differ from the engine's fallback
+// constants in graph-forces.ts / graph-config.ts (those are overwritten once options are applied).
 export const GRAPH_OPTION_DEFAULTS: GraphOptions = {
-  linkStrength: 0.5,
+  linkStrength: 0.1,
   linkDistance: 80,
   centerStrength: CENTER_STRENGTH,
   radialRing: RADIAL_RING,
   curveAmount: 0.15,
-  chargeStrength: CHARGE_STRENGTH,
-  hubSeparation: 0, // off by default → identical to the pre-feature layout
-  hubSpacing: 1, // baseline spread when hub separation is enabled
-  collideScale: COLLIDE_SCALE_DEFAULT, // 1 = normal collide radius (no extra label spacing)
-  nodeFadeStart: NODE_FADE_START_DEFAULT, // 0/0 = node fade OFF (every node fully solid)
-  nodeFadeFull: NODE_FADE_FULL_DEFAULT,
-  nodeRevealLo: NODE_REVEAL_LO_DEFAULT, // zoom-reveal: hazy below this zoom…
-  nodeRevealHi: NODE_REVEAL_HI_DEFAULT, // …clear above this zoom (only active once Node fade is on)
-  nodeSizeMin: 8, // degree-based sizing ON by default (least-connected radius)
-  nodeSizeMax: 22, // most-connected radius
+  chargeStrength: -60, // "Node repulsion" 60 (slider shows Math.abs; d3 charge is negative)
+  hubSeparation: 0.5, // spread high-degree hubs apart by default
+  hubSpacing: 3, // how far the separated hubs settle
+  collideScale: 1.85, // extra collide room so labels overlap less
+  nodeFadeStart: 0, // node fade range 0 → 0.5 (fades small/far nodes)
+  nodeFadeFull: 0.5,
+  nodeRevealLo: 0.1, // zoom-reveal: hazy below this zoom…
+  nodeRevealHi: 3.5, // …clear above this zoom
+  nodeSizeMin: 10, // degree-based sizing (least-connected radius)
+  nodeSizeMax: 50, // most-connected radius
   searchFocusMode: 'highlight',
-  selectionFocusMode: 'all',
-  edgeZoomMin: EDGE_ZOOM_MIN,
-  edgeZoomMax: EDGE_ZOOM_MAX,
-  edgeFontMin: EDGE_FONT_MIN,
-  edgeFontMax: EDGE_FONT_MAX,
-  nodeZoomMin: NODE_ZOOM_MIN,
-  nodeZoomMax: NODE_ZOOM_MAX,
-  nodeFontMin: NODE_FONT_MIN,
-  nodeFontMax: NODE_FONT_MAX,
+  selectionFocusMode: 'dim',
+  edgeZoomMin: 0.3, // edge label visible-zoom range
+  edgeZoomMax: 1.5,
+  edgeFontMin: 6, // edge label font-size (px) range
+  edgeFontMax: 24,
+  nodeZoomMin: 0.2, // node label visible-zoom range
+  nodeZoomMax: 1.2,
+  nodeFontMin: 4, // node label font-size (px) range
+  nodeFontMax: 12,
   edgeLabelMax: 22
 };
 

@@ -1,7 +1,7 @@
 import {
-  addChannel,
   disableChannel,
   enableChannel,
+  installChannel,
   listAvailableChannels,
   listChannels,
   type AvailableChannel,
@@ -18,7 +18,7 @@ export function createChannelsController(notify: Notify) {
   let mandatoryChannelName = $state('');
   let loading = $state(true);
   let busyChannel = $state<string | null>(null);
-  let adding = $state(false);
+  let installing = $state<string | null>(null); // name being installed (uv install can take minutes)
   let error = $state<string | null>(null);
 
   // When the `devices` feature is hidden, the mandatory devices channel is dropped from the
@@ -44,7 +44,7 @@ export function createChannelsController(notify: Notify) {
       loading = false;
     }
     // Available (installable) channels are best-effort: an older server without the
-    // /channels/available route must not break the list — just hide the Add picker.
+    // /channels/available route must not break the list — just hide the Install picker.
     try {
       available = (await listAvailableChannels()).data.channels;
     } catch {
@@ -52,20 +52,22 @@ export function createChannelsController(notify: Notify) {
     }
   }
 
-  // Add a catalog channel (writes its config, disabled) so it joins the list — the caller
-  // then opens its detail to Install → Enable. Returns true on success.
-  async function add(name: string): Promise<boolean> {
-    adding = true;
+  // Install a catalog channel in one step (uv tool install + config write, disabled) so it
+  // joins the list — the caller then opens its detail to configure + Enable. This runs the
+  // isolated `uv tool install` which can take minutes, hence its own `installing` flag.
+  // Returns true on success.
+  async function install(name: string): Promise<boolean> {
+    installing = name;
     try {
-      await addChannel(name);
-      notify('success', `Added '${name}'. Install it, then enable.`);
+      const res = await installChannel(name);
+      notify('success', `Installed ${res.data.package}. Configure it, then enable.`);
       await load();
       return true;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : `Failed to add '${name}'.`);
+      notify('error', err instanceof Error ? err.message : `Failed to install '${name}'.`);
       return false;
     } finally {
-      adding = false;
+      installing = null;
     }
   }
 
@@ -103,8 +105,8 @@ export function createChannelsController(notify: Notify) {
     get available() {
       return available;
     },
-    get adding() {
-      return adding;
+    get installing() {
+      return installing;
     },
     get mandatoryChannelName() {
       return mandatoryChannelName;
@@ -122,7 +124,7 @@ export function createChannelsController(notify: Notify) {
       return enabledCount;
     },
     load,
-    add,
+    install,
     toggle,
     isMandatory,
     isBusy

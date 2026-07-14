@@ -8,6 +8,7 @@
    */
   import SearchInput from '$lib/search/SearchInput.svelte';
   import { cn } from '$lib/utils';
+  import type { GraphEpisode } from '$lib/api/knowledge';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import KnowledgeGraphFilterBar from './KnowledgeGraphFilterBar.svelte';
   import MultiSelectFilter, {
@@ -37,16 +38,33 @@
     graph.search(value);
   }
 
-  // Episode multi-select options, in corpus order (backend sorts by chunk_id). The episode ID
-  // is the label — it's the stable identifier you actually select by (no numbering: one
-  // timestamp can hold several episodes, so a positional "#n" would be misleading). The text
-  // snippet stays searchable via `keywords`. `count` = graph items the episode contributes, so
-  // graphless episodes visibly read 0.
+  // Episode multi-select options, in corpus order (backend sorts by chunk_id). The label is a
+  // readable "{start time} · {speaker turns}" built from the snippet: the window's start time
+  // shown once, then the turns with the redundant inline "[ts]" stamps stripped. The opaque
+  // episode id stays the select `value` and stays searchable via `keywords`; `tooltip` shows the
+  // longer de-stamped transcript (backend `preview`). `count` = graph items the episode contributes.
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // First "YYYY-MM-DD HH:MM" (or ISO) stamp anywhere in the text → "Mon D, HH:MM", formatted
+  // WITHOUT Date() so it matches the transcript wall-clock instead of shifting by timezone.
+  function fmtStamp(s: string | null | undefined): string {
+    const m = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(s ?? '');
+    if (!m) return '';
+    const [, , mo, d, hh, mm] = m;
+    return `${MONTHS[Number(mo) - 1]} ${Number(d)}, ${hh}:${mm}`;
+  }
+  // Drop inline "[2026-07-08 09:56] " stamps; the label carries the start time separately.
+  const STAMP_STRIP = /\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?\]\s*/g;
+  function episodeLabel(ep: GraphEpisode): string {
+    const when = fmtStamp(ep.snippet) || fmtStamp(ep.valid_at);
+    const body = ep.snippet.replace(STAMP_STRIP, '').replace(/\s+/g, ' ').trim() || ep.id;
+    return when ? `${when} · ${body}` : body;
+  }
   const episodeOptions = $derived<MultiSelectOption[]>(
     graph.episodes().map((ep) => ({
       value: ep.id,
-      label: ep.id,
-      keywords: ep.snippet,
+      label: episodeLabel(ep),
+      keywords: `${ep.id} ${ep.snippet}`,
+      tooltip: ep.preview || ep.snippet.replace(STAMP_STRIP, '').trim(),
       count: graph.episodeItemCount(ep.id)
     }))
   );

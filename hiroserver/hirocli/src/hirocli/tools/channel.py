@@ -1,6 +1,8 @@
 """Channel plugin management tools.
 
-Six operations: list, install, setup, enable, disable, remove.
+Operations: list, install, uninstall, setup, enable, disable, remove, config.
+The admin UI composes these into two lifecycle poles — Install (uv install + setup)
+and Uninstall (deactivate + remove + uv uninstall).
 'channel status' (runtime connectivity query) is CLI/HTTP-only — it reads
 ephemeral in-memory state, not persistent config, so it is not a tool.
 """
@@ -54,6 +56,13 @@ class ChannelListResult:
 
 @dataclass
 class ChannelInstallResult:
+    package: str
+    success: bool
+    output: str
+
+
+@dataclass
+class ChannelUninstallResult:
     package: str
     success: bool
     output: str
@@ -181,6 +190,34 @@ class ChannelInstallTool(Tool):
             )
 
         return ChannelInstallResult(package=pkg, success=True, output=output)
+
+
+class ChannelUninstallTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "channel_uninstall"
+    description = "Uninstall a channel plugin package via uv tool uninstall"
+    params = {
+        "channel_name": ToolParam(str, "Channel name, e.g. 'whatsapp'"),
+        "package": ToolParam(str, "Package name override (default: hiro-channel-<name>)", required=False),
+    }
+
+    def execute(
+        self,
+        channel_name: str,
+        package: str | None = None,
+    ) -> ChannelUninstallResult:
+        pkg = package or f"hiro-channel-{channel_name}"
+        proc = subprocess.run(  # noqa: S603
+            ["uv", "tool", "uninstall", pkg], capture_output=True, text=True
+        )
+        output = (proc.stdout or proc.stderr).strip()
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"Uninstall failed (exit {proc.returncode}): {proc.stderr.strip()}"
+            )
+
+        return ChannelUninstallResult(package=pkg, success=True, output=output)
 
 
 class ChannelSetupTool(Tool):

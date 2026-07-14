@@ -155,7 +155,7 @@ async def graph_episodes_payload(
 ) -> dict[str, Any]:
     """List a graph partition's episodes for the admin Graph tab's episode filter.
 
-    Returns ``{"episodes": [{id, snippet, valid_at, document_id}]}`` ordered by chunk_id
+    Returns ``{"episodes": [{id, snippet, preview, valid_at, document_id}]}`` ordered by chunk_id
     (== corpus episode order). Each ``id`` is a chunk_id the client matches against node/edge
     ``chunk_ids`` to filter the graph to those episodes. Empty when the group has no episodes
     / no graph built yet.

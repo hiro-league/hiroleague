@@ -12,7 +12,7 @@
         "name": "Server only - External Vite UI, no gateway (fastest)",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh --no-gateway --external-ui",
+        "command": "cd \"$(cygpath \"${workspaceFolder}\")\" && ./dev-sync-fast.sh --no-gateway --external-ui --channels",
         "autoAttachChildProcesses": false
       },
       {

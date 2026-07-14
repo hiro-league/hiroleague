@@ -40,6 +40,45 @@ from ..domain.workspace import WorkspaceError, WorkspaceRegistry, create_workspa
 
 
 # ---------------------------------------------------------------------------
+# Admin UI readiness
+# ---------------------------------------------------------------------------
+
+
+def admin_ui_ready(admin_port: int, timeout: float = 0.3) -> bool:
+    """Return True if something is accepting TCP connections on the admin port.
+
+    A successful connect means the in-process admin UI (see server_process.py)
+    has bound ``admin_port`` and is ready to serve. Used to avoid advertising a
+    dashboard URL before it actually responds.
+    """
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", admin_port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_admin_ui(admin_port: int, timeout: float = 15.0) -> bool:
+    """Poll ``admin_port`` until the admin UI is bound, or ``timeout`` elapses.
+
+    Background ``hiro start`` returns as soon as the server PID file appears, but
+    the admin UI binds its port a moment later (it is launched as an async task).
+    Callers use this to wait for a real, clickable URL and to detect a bind
+    failure instead of printing a dead link. Returns True once bound.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if admin_ui_ready(admin_port):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Server process control
 # ---------------------------------------------------------------------------
 

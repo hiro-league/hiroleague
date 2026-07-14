@@ -75,21 +75,13 @@ export async function listAvailableChannels() {
   return apiRequest<{ channels: AvailableChannel[] }>('/channels/available');
 }
 
-/** Add a catalog channel: writes its config (disabled) so it joins the list; then install + enable. */
-export async function addChannel(name: string) {
-  return apiRequest<{ name: string; enabled: boolean }>(
-    `/channels/${encodeURIComponent(name)}/setup`,
-    { method: 'POST', body: {} }
-  );
-}
-
 /**
- * Install the channel's plugin package (`uv tool install hiro-channel-<name>`), a one-time
- * provisioning step before enable. It builds an isolated env and can pull large native deps
- * (e.g. neonize's Go lib + ffmpeg), so it may run for minutes — hence the long timeout.
+ * Install a channel in one step: `uv tool install hiro-channel-<name>` (isolated env, may pull
+ * large native deps like neonize's Go lib + ffmpeg), then write its config so it joins the
+ * managed list (disabled). No separate "add" step. Long timeout — install can run for minutes.
  */
 export async function installChannel(name: string) {
-  return apiRequest<{ package: string; output: string }>(
+  return apiRequest<{ package: string; name: string; enabled: boolean }>(
     `/channels/${encodeURIComponent(name)}/install`,
     { method: 'POST', body: {}, timeoutMs: 600000 }
   );
@@ -105,6 +97,14 @@ export async function disableChannel(name: string) {
   return apiRequest<{ enabled: boolean }>(`/channels/${encodeURIComponent(name)}/disable`, {
     method: 'POST'
   });
+}
+
+/** Uninstall = inverse of install: stop the plugin, delete its config, uninstall the package. */
+export async function uninstallChannel(name: string) {
+  return apiRequest<{ uninstalled: boolean }>(
+    `/channels/${encodeURIComponent(name)}/uninstall`,
+    { method: 'POST', timeoutMs: 120000 }
+  );
 }
 
 // --- Generic per-channel admin (design §5.3): status / pairing / descriptor / config / actions ---

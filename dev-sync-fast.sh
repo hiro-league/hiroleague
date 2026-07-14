@@ -6,6 +6,8 @@
 #   --no-gateway    skip the gateway entirely (no stop / reinstall / start) — server only.
 #   --external-ui   skip building the Svelte UI into the server; serve it from a separately
 #                   started vite dev server on http://127.0.0.1:5173 (start it yourself).
+#   --channels      install the channel-plugin binaries (devices + whatsapp + any future).
+#                   Off by default so the fast loop skips them; pass it when you need channels.
 # Flags combine, e.g. `./dev-sync-fast.sh --no-gateway --external-ui` for the fastest server-only loop.
 # If anything looks off, fall back to ./dev-sync.sh which always does a full rebuild.
 
@@ -44,17 +46,30 @@ fi
 #                    server on http://127.0.0.1:5173 (NOT managed by this script — start it
 #                    yourself via `npm --prefix admin_frontend run dev`). Sets
 #                    HIRO_ADMIN_UI_EXTERNAL=1 so the server serves only /api.
+#   --channels       install the channel-plugin tool binaries (devices + whatsapp + any
+#                    future plugin listed in CHANNEL_PLUGINS below). Off by default so the
+#                    fast loop skips channel installs entirely; the UI's "Install a channel"
+#                    button remains the other way to provision a channel on demand.
 FORCE_SYNC=0
 MANAGE_GATEWAY=1
 PACKAGE_UI=1
+INSTALL_CHANNELS=0
 for arg in "$@"; do
   case "$arg" in
     --force|-f) FORCE_SYNC=1 ;;
     --no-gateway) MANAGE_GATEWAY=0 ;;
     --external-ui) PACKAGE_UI=0 ;;
-    *) echo "==> Unknown flag '$arg' (supported: --force/-f, --no-gateway, --external-ui)" >&2; exit 2 ;;
+    --channels) INSTALL_CHANNELS=1 ;;
+    *) echo "==> Unknown flag '$arg' (supported: --force/-f, --no-gateway, --external-ui, --channels)" >&2; exit 2 ;;
   esac
 done
+
+# Channel plugins installed (as editable uv tools) when --channels is passed. Add future
+# plugins here as "<tool-name> <path-relative-to-hiroserver>" entries.
+CHANNEL_PLUGINS=(
+  "hiro-channel-devices channels/hiro-channel-devices"
+  "hiro-channel-whatsapp channels/hiro-channel-whatsapp"
+)
 
 if [ "$PACKAGE_UI" = "0" ]; then
   export HIRO_ADMIN_UI_EXTERNAL=1
@@ -183,7 +198,16 @@ install_tool_if_changed() {
 }
 
 install_tool_if_changed hirocli hirocli
-install_tool_if_changed hiro-channel-devices channels/hiro-channel-devices
+
+if [ "$INSTALL_CHANNELS" = "1" ]; then
+  for entry in "${CHANNEL_PLUGINS[@]}"; do
+    # shellcheck disable=SC2086 # entry is intentionally two space-separated fields
+    install_tool_if_changed $entry
+  done
+else
+  echo "==> --channels not passed: skipping channel-plugin installs (devices/whatsapp/…)"
+fi
+
 if [ "$MANAGE_GATEWAY" = "1" ]; then
   install_tool_if_changed hirogate gateway
 else
@@ -193,7 +217,10 @@ fi
 echo ""
 echo "Done. All tool binaries are up to date."
 echo "  hiro                 -> run: hiro --help"
-echo "  hiro-channel-devices -> run: hiro-channel-devices --help"
+if [ "$INSTALL_CHANNELS" = "1" ]; then
+  echo "  hiro-channel-devices -> run: hiro-channel-devices --help"
+  echo "  hiro-channel-whatsapp (installed via --channels)"
+fi
 echo "  hirogate             -> run: hirogate --help"
 
 # Foreground gateway in a shell background job so Hiro can keep the terminal (both use -f).

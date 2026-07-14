@@ -6,8 +6,8 @@ import {
   getChannelDescriptor,
   getChannelPairing,
   getChannelStatus,
-  installChannel,
   setChannelConfig,
+  uninstallChannel,
   type ChannelStatus
 } from '$lib/api/channels-devices';
 import { createPoller } from '$lib/state/create-poller.svelte';
@@ -33,7 +33,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   let loading = $state(true);
   let saving = $state(false);
   let busy = $state(false);
-  let installing = $state(false); // uv tool install in flight (can run for minutes)
+  let uninstalling = $state(false); // full teardown (uninstall) in flight
   let error = $state<string | null>(null);
 
   // Editable field values, bound by the form. Baseline is the last-loaded snapshot;
@@ -174,20 +174,25 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     }
   }
 
-  // Install is separate from the enable/disable lifecycle: it provisions the plugin package
-  // (uv tool install) and can run for minutes, so it uses its own `installing` flag rather
-  // than the shared `busy` used by the instant lifecycle actions.
-  async function install() {
-    installing = true;
+  // Full teardown (inverse of Install): stop + delete config + uv uninstall. Returns true
+  // so the caller can navigate back to the list (the channel no longer exists).
+  async function uninstall(): Promise<boolean> {
+    uninstalling = true;
     try {
-      const res = await installChannel(name);
-      notify('success', `Installed ${res.data.package}. You can now enable the channel.`);
-      await refreshStatus();
+      const res = await uninstallChannel(name);
+      notify(
+        'success',
+        res.data.uninstalled
+          ? `Uninstalled '${name}' and removed its package.`
+          : `Uninstalled '${name}' (package left in place).`
+      );
       onChanged?.();
+      return true;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to install the channel plugin.');
+      notify('error', err instanceof Error ? err.message : `Failed to uninstall '${name}'.`);
+      return false;
     } finally {
-      installing = false;
+      uninstalling = false;
     }
   }
 
@@ -222,8 +227,8 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     get busy() {
       return busy;
     },
-    get installing() {
-      return installing;
+    get uninstalling() {
+      return uninstalling;
     },
     get error() {
       return error;
@@ -250,7 +255,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
     startPolling,
     save,
     clearSecret,
-    install,
+    uninstall,
     enable,
     disable,
     runAction

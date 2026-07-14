@@ -1330,8 +1330,11 @@ async def read_graph_episodes(
     Ordered by ``uuid`` ascending: corpus episode ids are structured + zero-padded
     (``..._m0002``, ``ep_001``), so a lexical sort reproduces the true 1-based corpus order
     WITHOUT relying on ``valid_at`` (which is not unique across a session and would tie — the
-    reason a timestamp sort was rejected). Returns ``[{id, snippet, valid_at, document_id}]``,
-    or ``[]`` when the DB file doesn't exist / the group has no episodes.
+    reason a timestamp sort was rejected). Returns
+    ``[{id, snippet, preview, valid_at, document_id}]``, or ``[]`` when the DB file doesn't exist /
+    the group has no episodes. ``preview`` is the de-stamped transcript for the picker's hover
+    tooltip (see :func:`clean_episode_transcript`); the compact "time · turns" label is built
+    client-side from ``snippet``.
 
     Pages via ``uuid_cursor`` (``get_by_group_ids`` orders uuid DESC) so a large group can't
     strand a tail behind the page limit. Read-only on a dedicated connection (lock-free; safe
@@ -1339,6 +1342,8 @@ async def read_graph_episodes(
     """
     from graphiti_core.errors import GroupsNodesNotFoundError
     from graphiti_core.nodes import EpisodicNode
+
+    from hirocli.services.knowledge.graph.episode_summary import clean_episode_transcript
 
     gid = (group_id or "").strip()
     path = Path(db_path)
@@ -1366,6 +1371,9 @@ async def read_graph_episodes(
                     {
                         "id": uuid,
                         "snippet": " ".join(content.split())[:120],
+                        # Clean multi-line transcript (speaker turns, no "[ts]" stamps) for the
+                        # picker's hover tooltip; the compact label is derived client-side.
+                        "preview": clean_episode_transcript(content),
                         "valid_at": valid_at.isoformat()
                         if isinstance(valid_at, dt.datetime)
                         else None,

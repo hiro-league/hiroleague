@@ -78,12 +78,26 @@ export function createGraphEdgeFilters(deps: {
     persistModes();
   }
 
+  // Guard against the controlled bits-ui Slider feedback loop: the slider snaps its value to
+  // the `step` grid and re-emits onValueChange when we feed a normalized value back in, while
+  // normalizeRange snaps to the raw data-span endpoints. The two snappings disagree, so without
+  // this equality check the write→derive→re-emit cycle never settles (effect_update_depth_exceeded).
+  function rangesEqual(a: DateRange, b: DateRange): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return a.lo === b.lo && a.hi === b.hi;
+  }
+
   function setValidRange(range: DateRange): void {
-    validRange = normalizeRange(range, deps.getValidAtSpan());
+    const next = normalizeRange(range, deps.getValidAtSpan());
+    if (rangesEqual(next, validRange)) return;
+    validRange = next;
   }
 
   function setCreationRange(range: DateRange): void {
-    creationRange = normalizeRange(range, deps.getCreatedAtSpan());
+    const next = normalizeRange(range, deps.getCreatedAtSpan());
+    if (rangesEqual(next, creationRange)) return;
+    creationRange = next;
   }
 
   function resetEdgeFilters(): void {

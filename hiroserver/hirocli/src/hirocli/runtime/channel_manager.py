@@ -237,13 +237,29 @@ class ChannelManager:
         await self._spawn_one(cfg, f"ws://{self._host}:{self._port}")
 
     async def deactivate(self, channel_name: str) -> None:
-        """Stop a running channel live: graceful ``channel.stop``, then reap."""
+        """Stop a running channel live: graceful ``channel.stop``, then reap.
+
+        Authoritative teardown — a deactivated channel must stop flowing entirely:
+          1. STOP notification, then **close the websocket** so the inbound receive
+             loop (``_handle_connection``) stops dispatching messages to the agent
+             even if the OS process lingers a moment before exiting.
+          2. Reap the tracked ``Popen`` (fast path for a plugin this server spawned).
+          3. Force-kill by the recorded PID with a **tree kill** — covers plugins
+             spawned by a previous server run (absent from ``self._subprocesses``)
+             and ``uv``-launcher children that ``proc.terminate()`` would orphan.
+        """
         ch = self._channels.pop(channel_name, None)
         if ch is not None:
             try:
                 await ch.ws.send(rpc.build_notification(METHOD_STOP, {}))
             except Exception as exc:  # ws may already be closed
                 log.warning(f"⚠️ Stop notify failed — {channel_name}", error=str(exc))
+            # Close the socket so no further channel.receive is dispatched (fix: a
+            # disabled/removed channel was still processing inbound messages).
+            try:
+                await ch.ws.close()
+            except Exception as exc:
+                log.warning(f"⚠️ WS close failed — {channel_name}", error=str(exc))
         proc = self._subprocesses.pop(channel_name, None)
         if proc is not None and proc.poll() is None:
             await asyncio.sleep(0.5)  # give the plugin a moment to exit after STOP
@@ -252,6 +268,11 @@ class ChannelManager:
                     proc.terminate()
                 except Exception as exc:
                     log.warning(f"⚠️ Terminate failed — {channel_name}", error=str(exc))
+        # Authoritative reap by recorded PID (force + tree), independent of whether
+        # this server instance is the one that spawned the plugin.
+        pid = read_channel_pid(self._ctx.workspace_path, channel_name)
+        if pid is not None and is_running(pid):
+            kill_process(pid, include_tree=True)
         remove_channel_pid(self._ctx.workspace_path, channel_name)
         log.info(f"🔌 Channel deactivated — {channel_name}")
 

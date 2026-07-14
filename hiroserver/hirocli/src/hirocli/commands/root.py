@@ -35,8 +35,8 @@ def register(app: typer.Typer, console: Console) -> None:
             ),
         ),
         admin: bool = typer.Option(
-            False, "--admin",
-            help="Also start the admin UI on its dedicated port (localhost only).",
+            True, "--admin/--no-admin",
+            help="Serve the admin UI on its dedicated port (localhost only). On by default; use --no-admin for headless runs.",
         ),
         metrics: bool = typer.Option(
             False, "--metrics",
@@ -59,15 +59,23 @@ def register(app: typer.Typer, console: Console) -> None:
 
         if result.already_running:
             console.print(f"[yellow]Server already running (PID {result.pid}).[/yellow]")
+            # Foreground restarts never reach here; only re-advertise the dashboard
+            # for a background server whose admin UI is actually bound.
+            from ..tools.server_control import admin_ui_ready
+
+            if result.admin_port and not foreground and admin_ui_ready(result.admin_port):
+                _print_admin_ready_panel(console, result.admin_port)
         else:
             console.print(
                 f"[green]Server started[/green] (PID {result.pid}). "
                 f"HTTP: http://{result.http_host}:{result.http_port}/status"
             )
-            if result.admin_port:
-                console.print(
-                    f"  Admin UI: [cyan]http://127.0.0.1:{result.admin_port}[/cyan]"
-                )
+            # Background mode only: wait for the admin UI to bind its port before
+            # printing a clickable URL, so we never advertise a dead link. On
+            # timeout we surface a clear error instead (foreground blocks until
+            # exit, so there is nothing to advertise there).
+            if result.admin_port and not foreground:
+                _announce_admin_ui(console, result.admin_port)
 
     @app.command()
     def stop(
@@ -106,8 +114,8 @@ def register(app: typer.Typer, console: Console) -> None:
             ),
         ),
         admin: bool = typer.Option(
-            False, "--admin",
-            help="Also start the admin UI on its dedicated port (localhost only).",
+            True, "--admin/--no-admin",
+            help="Serve the admin UI on its dedicated port (localhost only). On by default; use --no-admin for headless runs.",
         ),
         metrics: bool = typer.Option(
             False, "--metrics",
@@ -142,10 +150,11 @@ def register(app: typer.Typer, console: Console) -> None:
         console.print(
             f"  HTTP: http://{result.http_host}:{result.http_port}/status"
         )
-        if result.admin_port:
-            console.print(
-                f"  Admin UI: [cyan]http://127.0.0.1:{result.admin_port}[/cyan]"
-            )
+        # Background mode only: wait for the admin UI to rebind before advertising
+        # a clickable URL (an in-process restart returns new_pid=None from the HTTP
+        # surface, not from this CLI path).
+        if result.admin_port and not foreground:
+            _announce_admin_ui(console, result.admin_port)
 
     @app.command()
     def status(
@@ -331,6 +340,42 @@ def register(app: typer.Typer, console: Console) -> None:
         )
 
 
+def _print_admin_ready_panel(console: Console, admin_port: int) -> None:
+    """Render the friendly, clickable admin-dashboard panel."""
+    from rich.panel import Panel
+
+    url = f"http://localhost:{admin_port}"
+    console.print(
+        Panel(
+            f"🌐  Admin dashboard:  [bold cyan]{url}[/bold cyan]",
+            title="[green]Hiro is running[/green]",
+            border_style="green",
+            expand=False,
+        )
+    )
+
+
+def _announce_admin_ui(console: Console, admin_port: int) -> None:
+    """Wait for the admin UI to bind (background start), then advertise its URL.
+
+    On timeout, surface a clear error and log it rather than printing a dead
+    link — the server itself is already up; only the admin UI failed to bind.
+    """
+    from ..tools.server_control import wait_for_admin_ui
+
+    if wait_for_admin_ui(admin_port):
+        _print_admin_ready_panel(console, admin_port)
+    else:
+        log.error(
+            "❌ Admin UI did not bind — HiroServer · admin UI",
+            admin_port=admin_port,
+        )
+        console.print(
+            f"[yellow]Admin UI did not become ready on port {admin_port} in time. "
+            f"The server is running; check logs/stderr.log for the admin UI error.[/yellow]"
+        )
+
+
 def _print_workspace_status_entry(
     console: Console,
     ws: object,
@@ -360,5 +405,13 @@ def _print_workspace_status_entry(
         "HTTP API",
         f"http://{ws.http_host}:{ws.http_port}/status" if ws.server_running else "—",
     )
+    # Only advertise the dashboard when it is actually accepting connections —
+    # the server may be running with --no-admin.
+    from ..tools.server_control import admin_ui_ready
+
+    admin_url = "—"
+    if ws.server_running and admin_ui_ready(ws.admin_port):
+        admin_url = f"http://localhost:{ws.admin_port}"
+    table.add_row("Admin UI", admin_url)
 
     console.print(table)

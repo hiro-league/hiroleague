@@ -40,7 +40,9 @@ from hirocli.tools.channel import (
     ChannelDisableTool,
     ChannelEnableTool,
     ChannelInstallTool,
+    ChannelRemoveTool,
     ChannelSetupTool,
+    ChannelUninstallTool,
 )
 
 channels_router = APIRouter()
@@ -242,8 +244,8 @@ class InstallRequest(BaseModel):
 
 @channels_router.get("/channels/available")
 async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
-    # Catalog channels the UI can add + install without prior CLI setup, minus any
-    # already configured (so "Add a channel" never offers a duplicate).
+    # Catalog channels the UI can install without prior CLI setup, minus any already
+    # configured (so the "Install a channel" picker never offers a duplicate).
     listing = await run_in_threadpool(ChannelService().list_channels, workspace_id)
     if not listing.ok:
         return _api_from_result(listing)
@@ -253,27 +255,6 @@ async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[
         for c in available_channels(configured)
     ]
     return {"ok": True, "error": None, "data": {"channels": channels}}
-
-
-@channels_router.post("/channels/{name}/setup")
-async def setup_channel(name: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
-    # Add a catalog channel: write its config (so it joins the list) but leave it
-    # DISABLED — the package isn't installed yet. The UI flow is add → install → enable.
-    # workspace_dir="" pins the isolated-tool model: enable runs the plugin's bare
-    # `uv tool install` binary as-is instead of `uv run` in the shared workspace env.
-    entry = catalog_channel(name)
-    if entry is None:
-        return envelope_failure(f"'{name}' is not an installable channel.")
-    # Use the ABSOLUTE installed-binary path so Enable works even if uv's tool-bin
-    # isn't on the server's PATH; the binary lands there once Install runs.
-    command = await run_in_threadpool(_installed_channel_command, name, entry.command)
-    try:
-        result = await run_in_threadpool(
-            ChannelSetupTool().execute, name, command, False, workspace_id, ""
-        )
-    except (ValueError, RuntimeError) as exc:
-        return envelope_failure(str(exc))
-    return {"ok": True, "error": None, "data": {"name": result.name, "enabled": result.enabled}}
 
 
 def _install_source(name: str, override: str | None) -> str:
@@ -292,15 +273,36 @@ def _install_source(name: str, override: str | None) -> str:
 
 
 @channels_router.post("/channels/{name}/install")
-async def channel_install(name: str, body: InstallRequest) -> dict[str, Any]:
+async def channel_install(name: str, body: InstallRequest, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    # Install = provision the channel in one step (there is no separate "add"):
+    #   1. `uv tool install` the plugin package (isolated tool env), then
+    #   2. write its config row (DISABLED) so it joins the managed list.
+    # Order matters: install first, so a failed install leaves no dangling config; and
+    # the config's start command is the ABSOLUTE installed-binary path (resolved only
+    # after install, when the binary exists) so Enable works even if uv's tool-bin dir
+    # isn't on the server's PATH. workspace_dir="" pins the isolated-tool model (run the
+    # binary as-is, not wrapped in `uv run` against the shared workspace env).
     source = _install_source(name, body.package)
     try:
-        result = await run_in_threadpool(
+        install = await run_in_threadpool(
             ChannelInstallTool().execute, name, source, body.editable
         )
     except RuntimeError as exc:
         return envelope_failure(str(exc))
-    return {"ok": True, "error": None, "data": {"package": result.package, "output": result.output}}
+    entry = catalog_channel(name)
+    fallback = entry.command if entry is not None else f"hiro-channel-{name}"
+    command = await run_in_threadpool(_installed_channel_command, name, fallback)
+    try:
+        setup = await run_in_threadpool(
+            ChannelSetupTool().execute, name, command, False, workspace_id, ""
+        )
+    except (ValueError, RuntimeError) as exc:
+        return envelope_failure(str(exc))
+    return {
+        "ok": True,
+        "error": None,
+        "data": {"package": install.package, "name": setup.name, "enabled": setup.enabled},
+    }
 
 
 @channels_router.post("/channels/{name}/enable")
@@ -334,6 +336,38 @@ async def disable_channel(
     if ctx is not None:
         ctx.channel_status.setdefault(name, {})["state"] = "disabled"
     return {"ok": True, "error": None, "data": {"enabled": False}}
+
+
+@channels_router.post("/channels/{name}/uninstall")
+async def uninstall_channel(
+    name: str, request: Request, workspace_id: SelectedWorkspaceIdDep
+) -> dict[str, Any]:
+    # Uninstall is the exact inverse of Install: stop the running plugin, delete its
+    # config so it leaves the managed list (returns to the "Install a channel" picker),
+    # then `uv tool uninstall` the package. Package uninstall is best-effort — the
+    # channel is already gone, so a leftover package must not fail the operation.
+    cm = _channel_manager(request)
+    if cm is not None:
+        await cm.deactivate(name)  # stop + reap the subprocess if running; no-op otherwise
+    try:
+        await run_in_threadpool(ChannelRemoveTool().execute, name, workspace_id)
+    except (ValueError, RuntimeError) as exc:
+        # e.g. a mandatory channel can't be uninstalled.
+        return envelope_failure(str(exc))
+    uninstalled = False
+    try:
+        await run_in_threadpool(ChannelUninstallTool().execute, name)
+        uninstalled = True
+    except (RuntimeError, OSError) as exc:
+        log.warning(
+            "⚠️ Deleted channel config but package uninstall failed",
+            channel=name,
+            error=str(exc),
+        )
+    ctx = _ctx(request)
+    if ctx is not None:
+        getattr(ctx, "channel_status", {}).pop(name, None)
+    return {"ok": True, "error": None, "data": {"uninstalled": uninstalled}}
 
 
 @channels_router.post("/channels/{name}/action/{action}")

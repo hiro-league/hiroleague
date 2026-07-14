@@ -64,6 +64,7 @@ class WorkspaceStatusEntry:
     device_id: str
     http_host: str
     http_port: int
+    admin_port: int
 
 
 @dataclass

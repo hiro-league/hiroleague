@@ -273,16 +273,29 @@ def read_running_pid(base_path: Path, pid_filename: str) -> int | None:
     return None
 
 
-def kill_process(pid: int) -> bool:
-    """Send termination signal. Returns True if the signal was sent."""
+def kill_process(pid: int, *, include_tree: bool = False) -> bool:
+    """Send termination signal. Returns True if the signal was sent.
+
+    ``include_tree`` also kills child processes. Needed for launcher-wrapped
+    processes — e.g. a channel plugin spawned via ``uv run`` where ``pid`` is the
+    ``uv`` launcher and the real plugin is its child: signalling only the launcher
+    would orphan the plugin (it keeps its network connections alive).
+    """
     try:
         if sys.platform == "win32":
+            args = ["taskkill", "/PID", str(pid), "/F"]
+            if include_tree:
+                args.append("/T")  # terminate the whole process tree
             subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F"],
+                args,
                 capture_output=True,
                 check=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
+        elif include_tree:
+            # Child was spawned with start_new_session, so it leads its own process
+            # group; signal the group to catch launcher + real process together.
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
         else:
             os.kill(pid, signal.SIGTERM)
         return True

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run from the repo root after every git pull or when switching environments: ./dev-sync.sh
 # Keeps workspace dependencies and all installed tool binaries in sync.
+#   --channels   also install the channel-plugin binaries (devices + whatsapp + any future
+#                plugin in CHANNEL_PLUGINS). Off by default; pass it when you need channels.
 
 set -e
 
@@ -9,6 +11,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/scripts/stop-hiro-dev-processes.sh"
 
 export HIRO_ENV="${HIRO_ENV:-dev}"
+
+# Flags: --channels installs the channel-plugin tool binaries (off by default).
+INSTALL_CHANNELS=0
+for arg in "$@"; do
+  case "$arg" in
+    --channels) INSTALL_CHANNELS=1 ;;
+    *) echo "==> Unknown flag '$arg' (supported: --channels)" >&2; exit 2 ;;
+  esac
+done
+
+# Channel plugins installed when --channels is passed. Add future plugins here as
+# "<tool-name> <path-relative-to-hiroserver>" entries.
+CHANNEL_PLUGINS=(
+  "hiro-channel-devices channels/hiro-channel-devices"
+  "hiro-channel-whatsapp channels/hiro-channel-whatsapp"
+)
 
 # Graph deep-trace sidecars are now a workspace preference, not an env var: set
 # Settings → Graph engine → Graph observability = "Trace" (or graph.observability="trace" in
@@ -65,9 +83,17 @@ uv tool uninstall hiroleague 2>/dev/null || true
 uv tool uninstall hirocli 2>/dev/null || true
 uv tool install --editable hirocli --upgrade --force --python "$HIRO_UV_PYTHON"
 
-echo "==> Updating hiro-channel-devices tool binary..."
-uv tool uninstall hiro-channel-devices 2>/dev/null || true
-uv tool install --editable channels/hiro-channel-devices --upgrade --force --python "$HIRO_UV_PYTHON"
+if [ "$INSTALL_CHANNELS" = "1" ]; then
+  for entry in "${CHANNEL_PLUGINS[@]}"; do
+    # entry is "<tool-name> <path>" (relative to hiroserver, this script's cwd here).
+    read -r tool_name tool_path <<< "$entry"
+    echo "==> Updating $tool_name tool binary..."
+    uv tool uninstall "$tool_name" 2>/dev/null || true
+    uv tool install --editable "$tool_path" --upgrade --force --python "$HIRO_UV_PYTHON"
+  done
+else
+  echo "==> --channels not passed: skipping channel-plugin installs (devices/whatsapp/…)"
+fi
 
 echo "==> Updating hirogate tool binary..."
 uv tool uninstall hirogate 2>/dev/null || true
@@ -76,7 +102,10 @@ uv tool install --editable gateway --upgrade --force --python "$HIRO_UV_PYTHON"
 echo ""
 echo "Done. All tool binaries are up to date."
 echo "  hiro                 -> run: hiro --help"
-echo "  hiro-channel-devices -> run: hiro-channel-devices --help"
+if [ "$INSTALL_CHANNELS" = "1" ]; then
+  echo "  hiro-channel-devices -> run: hiro-channel-devices --help"
+  echo "  hiro-channel-whatsapp (installed via --channels)"
+fi
 echo "  hirogate             -> run: hirogate --help"
 
 # Foreground gateway in a shell background job so Hiro can keep the terminal (both use -f).

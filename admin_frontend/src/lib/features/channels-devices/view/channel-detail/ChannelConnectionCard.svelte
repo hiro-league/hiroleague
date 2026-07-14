@@ -6,7 +6,10 @@
   import type { ChannelDetailController } from '../../state/channel-detail-controller.svelte';
   import ChannelPairingPane from './ChannelPairingPane.svelte';
 
-  let { ctrl }: { ctrl: ChannelDetailController } = $props();
+  let { ctrl, onRequestUninstall }: {
+    ctrl: ChannelDetailController;
+    onRequestUninstall: () => void;
+  } = $props();
 
   // Friendlier labels for the common declared actions; fall back to the raw name.
   const ACTION_LABELS: Record<string, string> = { logout: 'Log out', reconnect: 'Reconnect' };
@@ -52,24 +55,18 @@
         Disable
       </Button>
     {:else}
-      <Button
-        size="sm"
-        variant="secondary"
-        onclick={() => ctrl.install()}
-        disabled={ctrl.busy || ctrl.installing}
-      >
-        {ctrl.installing ? 'Installing…' : 'Install'}
-      </Button>
-      <Button size="sm" onclick={() => ctrl.enable()} disabled={ctrl.busy || ctrl.installing}>
+      <Button size="sm" onclick={() => ctrl.enable()} disabled={ctrl.busy}>
         Enable
       </Button>
     {/if}
+    <Button
+      variant="destructive-outline"
+      size="sm"
+      class="ml-auto"
+      onclick={onRequestUninstall}
+      disabled={ctrl.busy || ctrl.uninstalling}
+    >
+      {ctrl.uninstalling ? 'Uninstalling…' : 'Uninstall'}
+    </Button>
   </div>
-
-  {#if ctrl.installing}
-    <p class="text-xs text-muted-foreground">
-      Installing the plugin (uv tool install) — this can take a few minutes on first run while
-      native dependencies download.
-    </p>
-  {/if}
 </SectionCard>

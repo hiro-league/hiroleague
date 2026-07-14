@@ -15,9 +15,9 @@
   // Which channel's generic detail view (§5.5) is open; null = the list.
   let selected = $state<string | null>(null);
 
-  // "Add a channel" picker — the chosen catalog channel to add.
+  // "Install a channel" picker — the chosen catalog channel to install.
   let chosen = $state('');
-  // Keep `chosen` valid: default to the first available and reset if it's been added away.
+  // Keep `chosen` valid: default to the first available and reset if it's been installed away.
   $effect(() => {
     const names = ctrl.available.map((c) => c.name);
     if (ctrl.available.length && !names.includes(chosen)) chosen = ctrl.available[0].name;
@@ -26,11 +26,11 @@
     ctrl.available.find((c) => c.name === chosen)?.description ?? ''
   );
 
-  async function handleAdd() {
+  async function handleInstall() {
     const name = chosen;
     if (!name) return;
-    // On success, open the new channel's detail so the user can Install → Enable.
-    if (await ctrl.add(name)) selected = name;
+    // On success, open the new channel's detail so the user can configure + Enable.
+    if (await ctrl.install(name)) selected = name;
   }
 
   const CHANNEL_GRID = '180px 110px 1.4fr 1fr 210px';
@@ -50,27 +50,34 @@
 {#if ctrl.available.length > 0}
   <SectionCard class="grid gap-3">
     <div>
-      <h3 class="text-lg font-semibold">Add a channel</h3>
+      <h3 class="text-lg font-semibold">Install a channel</h3>
       <span class="font-sans text-sm text-muted-foreground">
-        Set up a new channel, then install and enable it.
+        Install a channel plugin, then configure and enable it.
       </span>
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <select
         class="h-9 rounded-md border border-input bg-background px-2 text-sm"
         bind:value={chosen}
-        aria-label="Channel to add"
+        aria-label="Channel to install"
+        disabled={!!ctrl.installing}
       >
         {#each ctrl.available as ch (ch.name)}
           <option value={ch.name}>{ch.label}</option>
         {/each}
       </select>
-      <Button size="sm" onclick={() => void handleAdd()} disabled={ctrl.adding || !chosen}>
-        {ctrl.adding ? 'Adding…' : 'Add'}
+      <Button size="sm" onclick={() => void handleInstall()} disabled={!!ctrl.installing || !chosen}>
+        {ctrl.installing ? 'Installing…' : 'Install'}
       </Button>
     </div>
     {#if chosenDescription}
       <p class="text-xs text-muted-foreground">{chosenDescription}</p>
+    {/if}
+    {#if ctrl.installing}
+      <p class="text-xs text-muted-foreground">
+        Installing '{ctrl.installing}' (uv tool install) — this can take a few minutes on first
+        run while native dependencies download.
+      </p>
     {/if}
   </SectionCard>
 {/if}

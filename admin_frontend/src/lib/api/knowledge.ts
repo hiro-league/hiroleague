@@ -632,6 +632,9 @@ export function listKnowledgeGraphGroups(): Promise<ApiResponse<KnowledgeGraphGr
 export type GraphEpisode = {
   id: string;
   snippet: string;
+  /** De-stamped multi-line transcript (speaker turns, no inline "[ts]") shown as the picker's
+   *  hover tooltip. The compact "time · turns" label is derived client-side from `snippet`. */
+  preview: string;
   valid_at: string | null;
   document_id: string;
 };

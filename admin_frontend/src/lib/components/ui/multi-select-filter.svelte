@@ -19,7 +19,15 @@
 
   // `keywords` (optional) extends the search match beyond the visible label — e.g. a full id
   // when the label only shows a short form. Matched but not rendered.
-  export type MultiSelectOption = { value: string; label: string; count?: number; keywords?: string };
+  // `tooltip` (optional) is shown as the row's native title on hover — e.g. a longer preview when
+  // the label is a one-line summary.
+  export type MultiSelectOption = {
+    value: string;
+    label: string;
+    count?: number;
+    keywords?: string;
+    tooltip?: string;
+  };
 
   let {
     label,
@@ -138,6 +146,7 @@
           <Combobox.Item
             value={opt.value}
             label={opt.label}
+            title={opt.tooltip}
             class="relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden data-highlighted:bg-muted data-highlighted:text-foreground"
           >
             {#snippet children({ selected: isSelected })}
@@ -146,7 +155,7 @@
                   <Check size={14} aria-hidden="true" />
                 {/if}
               </span>
-              <span class="truncate">{opt.label}</span>
+              <span class="truncate" title={opt.tooltip}>{opt.label}</span>
               {#if opt.count != null}
                 <span class="ml-auto tabular-nums text-xs text-muted-foreground">{opt.count}</span>
               {/if}
