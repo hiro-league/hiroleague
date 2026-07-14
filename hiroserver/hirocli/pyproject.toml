@@ -100,6 +100,10 @@ en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/dow
 [tool.hatch.build.targets.wheel]
 packages = ["src/hirocli"]
 artifacts = ["src/hirocli/admin_svelte/static/**"]
+# Tests live in-src (src/hirocli/**/tests/ and test_*.py mixed into some
+# packages). Keep them out of the published wheel — no production module imports
+# them, so excluding is safe and shrinks the distribution.
+exclude = ["**/tests", "**/test_*.py", "**/conftest.py"]
 
 [dependency-groups]
 dev = [

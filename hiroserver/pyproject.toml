@@ -6,5 +6,14 @@ dev = ["debugpy>=1.8,<2"]
 
 # Workspace-level runs collect several test files with the same basename.
 # Importlib mode gives each file a unique import path during collection.
+#
+# consider_namespace_packages: the `hirocli` member DIRECTORY has the same name
+# as the importable `hirocli` package (unique among members — the others differ,
+# e.g. gateway/->hirogate). Without this, a workspace-root collection resolves
+# `hirocli` to the member dir as an implicit namespace package (whose code lives
+# under src/, so hirocli.domain/.services/... aren't found) and every hirocli
+# test errors on collection. This flag makes pytest resolve to the real editable
+# package instead. See docs/build/local-build/packaging-releases.
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+consider_namespace_packages = true
