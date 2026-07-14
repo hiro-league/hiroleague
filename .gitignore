@@ -56,3 +56,6 @@ admin_frontend/.svelte-kit/
 admin_frontend/.vite/
 admin_frontend/dist/
 hiroserver/hirocli/src/hirocli/admin_svelte/static/
+
+# Stray runtime workspace DB if the server is ever started from the source tree
+hiroserver/hirocli/db/

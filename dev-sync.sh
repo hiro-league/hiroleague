@@ -47,8 +47,8 @@ echo "==> Stopping Hiro server (if running)..."
 hiro stop 2>/dev/null || true
 hirocli stop 2>/dev/null || true
 
-echo "==> Stopping hiro-channel-devices (if running)..."
-stop_orphaned_hiro_channel_devices
+echo "==> Stopping channel plugins (if running)..."
+stop_orphaned_hiro_channel_plugins
 
 echo "==> Stopping hirogate (if running)..."
 # Stop via CLI / PID file (same idea as hiro stop), not image-wide taskkill, so Windows releases the lock on hirogate.exe before reinstalling.

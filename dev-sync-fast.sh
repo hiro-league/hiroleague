@@ -108,8 +108,8 @@ echo "==> Stopping Hiro server (if running)..."
 hiro stop 2>/dev/null || true
 hirocli stop 2>/dev/null || true
 
-echo "==> Stopping hiro-channel-devices (if running)..."
-stop_orphaned_hiro_channel_devices
+echo "==> Stopping channel plugins (if running)..."
+stop_orphaned_hiro_channel_plugins
 
 if [ "$MANAGE_GATEWAY" = "1" ]; then
   echo "==> Stopping hirogate (if running)..."
