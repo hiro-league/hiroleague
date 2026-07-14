@@ -8,7 +8,9 @@ version = "0.2.0"
 description = "Hiro is your private, personal Assistant. Works for you, your home and your family."
 # Package-local readme: ../../README.md breaks hatchling isolated builds (path outside pkg root).
 readme = "README.md"
-requires-python = ">=3.11"
+# Match hirocli's window: ceiling <3.14 (hard-pinned kuzu==0.11.3 has no 3.14
+# Windows/macOS wheel), floor 3.12 (tested dev interpreter). See hirocli/pyproject.toml.
+requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
 authors = [
     { name = "Michel Habib", email = "michelhabib@gmail.com" },
@@ -21,8 +23,8 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
     "hirocli~=0.2.0",

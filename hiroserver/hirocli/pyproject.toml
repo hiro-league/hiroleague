@@ -7,7 +7,10 @@ name = "hirocli"
 version = "0.2.0"
 description = "Desktop server CLI for Hiro-League(the `hiro` command)"
 readme = "README.md"
-requires-python = ">=3.11"
+# Ceiling: hard-pinned kuzu==0.11.3 has no Windows/macOS wheel for 3.14 (tops out
+# at 3.13); floor 3.12 matches the tested dev interpreter. Lift <3.14 when kuzu
+# ships a 3.14 wheel. The lightweight libs (hiro-commons/-sdk) stay >=3.11.
+requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
 authors = [
     { name = "Michel Habib", email = "michelhabib@gmail.com" },
@@ -20,8 +23,8 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
     "typer>=0.12",
