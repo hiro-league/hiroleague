@@ -46,6 +46,30 @@ from .server_models import (
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _count_configured_providers(workspace_path: Path, workspace_id: str) -> int:
+    """Return how many providers have stored credentials (0 on any read error).
+
+    Used only to decide whether `start` prints the "no providers configured"
+    nudge after auto-provisioning; a failure here must never block startup, so
+    we log and fall back to 0 (which shows the harmless nudge).
+    """
+    from ..domain.credential_store import CredentialStore
+
+    try:
+        return len(CredentialStore(workspace_path, workspace_id).list_configured())
+    except Exception:
+        Logger.get("TOOLS.START").warning(
+            "⚠️ Could not read provider credentials for startup nudge — HiroServer · start",
+            exc_info=True,
+        )
+        return 0
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -213,11 +237,25 @@ class StartTool(Tool):
     ) -> StartResult:
         entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
 
+        # Zero-config first run: a truly fresh workspace (no config.json yet) is
+        # auto-provisioned with a minimal setup instead of forcing the user to
+        # run `hiro workspaces setup` first. Reuses SetupTool (Tool composition)
+        # with env-key scanning and auto-start registration disabled — writes
+        # only the mandatory skeleton (config + default preferences; master key
+        # and devices channel are ensured by start_server below). A missing
+        # config.json only ever happens pre-first-setup, so this is scoped to
+        # genuinely fresh workspaces and never stomps an existing config.
+        provisioned = False
+        providers_configured = 0
         if not (workspace_path / "config.json").exists():
-            raise ValueError(
-                f"Workspace '{entry.name}' is not configured. "
-                f"Run 'hiro workspaces setup {entry.name}' first."
+            SetupTool().execute(
+                gateway_url=Config.model_fields["gateway_url"].default,
+                workspace=entry.name,
+                skip_autostart=True,
+                skip_env_import=True,
             )
+            provisioned = True
+            providers_configured = _count_configured_providers(workspace_path, entry.id)
 
         config = load_config(workspace_path)
 
@@ -247,6 +285,8 @@ class StartTool(Tool):
             http_host=config.http_host,
             http_port=config.http_port,
             admin_port=config.admin_port if admin else None,
+            provisioned=provisioned,
+            providers_configured=providers_configured,
         )
 
 

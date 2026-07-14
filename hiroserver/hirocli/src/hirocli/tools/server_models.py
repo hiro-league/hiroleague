@@ -30,6 +30,11 @@ class StartResult:
     http_host: str
     http_port: int
     admin_port: int | None = None
+    # Zero-config first run: set when `start` auto-provisioned a fresh workspace
+    # (minimal setup) instead of erroring. ``providers_configured`` drives the
+    # "no providers configured" nudge printed by the CLI after such a run.
+    provisioned: bool = False
+    providers_configured: int = 0
 
 
 @dataclass

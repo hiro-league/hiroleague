@@ -66,10 +66,24 @@ def register(app: typer.Typer, console: Console) -> None:
             if result.admin_port and not foreground and admin_ui_ready(result.admin_port):
                 _print_admin_ready_panel(console, result.admin_port)
         else:
+            # Zero-config first run: `start` auto-provisioned a fresh workspace
+            # with a minimal setup. Tell the user what happened and, since no
+            # provider keys were imported, nudge them to add one so the
+            # assistant can actually respond.
+            if result.provisioned:
+                console.print(
+                    f"[cyan]Auto-provisioned fresh workspace '[bold]{result.workspace}[/bold]' "
+                    f"(minimal setup — no provider keys, no auto-start).[/cyan]"
+                )
             console.print(
                 f"[green]Server started[/green] (PID {result.pid}). "
                 f"HTTP: http://{result.http_host}:{result.http_port}/status"
             )
+            if result.provisioned and result.providers_configured == 0:
+                console.print(
+                    "[yellow]No providers configured[/yellow] — run "
+                    "[bold]hiro provider add <provider>[/bold] to enable the assistant."
+                )
             # Background mode only: wait for the admin UI to bind its port before
             # printing a clickable URL, so we never advertise a dead link. On
             # timeout we surface a clear error instead (foreground blocks until
