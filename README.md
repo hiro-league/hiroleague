@@ -8,7 +8,13 @@ Hiro is your private, personal assistant. It works for you, your home, and your 
 
 
 ```bash
-uv tool install hiroleague
+uv tool install hiroleague --python 3.12
+```
+
+## Run
+
+```bash
+hiro start
 ```
 
 ## Links
