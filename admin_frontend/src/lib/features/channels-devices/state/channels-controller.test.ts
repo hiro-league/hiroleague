@@ -7,7 +7,15 @@ vi.mock('$lib/api/channels-devices', () => ({
   disableChannel: vi.fn()
 }));
 
+// The controller hides the mandatory channel while the `devices` feature is hidden (feature
+// ledger, 2026-07-12). These tests predate that, so they now state the feature they assume:
+// active by default, hidden in the test that covers the hiding.
+vi.mock('$lib/shell/features', () => ({
+  isFeatureActive: vi.fn(() => true)
+}));
+
 import * as api from '$lib/api/channels-devices';
+import { isFeatureActive } from '$lib/shell/features';
 import { createChannelsController } from './channels-controller.svelte';
 
 const channelRow = (over: Partial<ChannelRow> = {}): ChannelRow => ({
@@ -26,6 +34,7 @@ function make() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isFeatureActive).mockReturnValue(true);
   vi.mocked(api.listChannels).mockResolvedValue({
     data: { channels: [], mandatory_channel_name: 'devices' }
   } as never);
@@ -57,6 +66,20 @@ describe('load', () => {
     expect(ctrl.enabledCount).toBe(1);
     expect(ctrl.loading).toBe(false);
     expect(ctrl.error).toBeNull();
+  });
+
+  it('drops the mandatory channel from the rows while the devices feature is hidden', async () => {
+    vi.mocked(isFeatureActive).mockReturnValue(false);
+    const { ctrl } = make();
+    vi.mocked(api.listChannels).mockResolvedValue({
+      data: {
+        channels: [channelRow({ name: 'a', enabled: true }), channelRow({ name: 'b', enabled: false })],
+        mandatory_channel_name: 'a'
+      }
+    } as never);
+    await ctrl.load();
+    expect(ctrl.rows.map((r) => r.name)).toEqual(['b']);
+    expect(ctrl.enabledCount).toBe(0);
   });
 
   it('records the error message on failure', async () => {

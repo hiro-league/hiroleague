@@ -61,7 +61,10 @@
 # Exit codes:
 #   0  Success.
 #   1  User aborted or invalid arguments.
-#   2  Build or publish failed.
+#   2  Check, build or publish failed.
+#
+# Every run starts with the repo's check (scripts/check.sh: the admin_frontend
+# checks and unit tests, and the hiroserver test suite) and stops if it fails.
 #
 # This script is the manual / emergency path. The blessed flow is the
 # `publish-pypi.yml` GitHub Actions workflow with PyPI Trusted Publishing
@@ -260,6 +263,19 @@ if [[ "$token" != pypi-* ]]; then
 fi
 
 echo "==> Auth: token loaded from ${token_source} (${#token} chars, prefix '${token:0:5}...')"
+
+# ---- Check ----------------------------------------------------------------
+
+# A release runs the repo's one check first and stops on a failure (hiro-docs
+# standards/building-and-releasing.md). After the prompts, so nobody waits at
+# the keyboard while the suite runs; before any build, so nothing is built or
+# uploaded from code that fails its checks. Every mode runs it, --dry-run too.
+echo ""
+echo "==> Running the repo's check (scripts/check.sh)"
+if ! "${REPO_ROOT}/scripts/check.sh"; then
+    echo "error: the check failed (above): nothing was built or published" >&2
+    exit 2
+fi
 
 # ---- Build admin_frontend (Svelte → hirocli static artifact) -------------
 

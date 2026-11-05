@@ -1,5 +1,12 @@
 @AGENTS.md
 
+# Building and releasing
+
+The standard every Hiro repo follows (one check command, `./scripts/check.sh`; a release runs it first), in the sibling
+hiro-docs repo:
+
+@../hiro-docs/standards/building-and-releasing.md
+
 
 
 # Answer Style

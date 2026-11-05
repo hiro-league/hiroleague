@@ -225,13 +225,17 @@ describe('editsForSave', () => {
   it('picks up nested graph and knowledge changes without manual enumeration', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);
-    draft.graph.k_hop = 2;
+    // Changed relative to the baseline: the defaults moved (k_hop 2, tools_enabled false) and
+    // the old fixed values no longer differed from them, so nothing showed up as edited.
+    const kHop = baseline.graph.k_hop + 1;
+    const toolsEnabled = !baseline.chat.tools_enabled;
+    draft.graph.k_hop = kHop;
     draft.knowledge.retrieval.top_k = 12;
-    draft.chat.tools_enabled = false;
+    draft.chat.tools_enabled = toolsEnabled;
     expect(diffEdits(baseline, draft)).toEqual({
-      'graph.k_hop': 2,
+      'graph.k_hop': kHop,
       'knowledge.retrieval.top_k': 12,
-      'chat.tools_enabled': false
+      'chat.tools_enabled': toolsEnabled
     });
   });
 
