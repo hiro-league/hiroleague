@@ -22,6 +22,14 @@ AutostartMethod = Literal["schtasks", "registry", "none"]
 # so already-registered entries can still be cleaned up. Flip back to True to resume.
 AUTOSTART_ENABLED = False
 
+# Linux has no per-login auto-start: a server there starts at boot as a systemd system service,
+# which needs root and is installed explicitly (hiro_commons.systemd_service; for the Hiro server
+# `sudo hiro service install`), never as a side effect of setup.
+_LINUX_AUTOSTART_MESSAGE = (
+    "On Linux, Hiro starts at boot as a systemd service instead of at sign-in: "
+    "install it with `sudo hiro service install`."
+)
+
 
 def _task_name(entry_name_prefix: str, target_name: str) -> str:
     return f"{entry_name_prefix}-{target_name}"
@@ -147,7 +155,7 @@ def register_autostart(
         return _register_windows(task_name, reg_key, command_line)
     if sys.platform == "darwin":
         raise NotImplementedError("macOS launchd auto-start is not yet implemented.")
-    raise NotImplementedError("Linux systemd auto-start is not yet implemented.")
+    raise NotImplementedError(_LINUX_AUTOSTART_MESSAGE)
 
 
 def register_autostart_elevated(
@@ -175,7 +183,7 @@ def unregister_autostart(target_name: str, *, entry_name_prefix: str) -> None:
     elif sys.platform == "darwin":
         raise NotImplementedError("macOS launchd auto-start is not yet implemented.")
     else:
-        raise NotImplementedError("Linux systemd auto-start is not yet implemented.")
+        raise NotImplementedError(_LINUX_AUTOSTART_MESSAGE)
 
 
 def unregister_autostart_elevated(target_name: str, *, entry_name_prefix: str) -> bool:

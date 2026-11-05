@@ -58,6 +58,14 @@ def register(app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1)
 
         if result.already_running:
+            if foreground:
+                # A foreground start that does nothing must fail: under systemd (`hiro service`)
+                # a clean exit here would leave the service "stopped" with no error to see.
+                console.print(
+                    f"[red]Server already running (PID {result.pid}); not starting a second one.[/red] "
+                    "Stop it first with [bold]hiro stop[/bold]."
+                )
+                raise typer.Exit(1)
             console.print(f"[yellow]Server already running (PID {result.pid}).[/yellow]")
             # Foreground restarts never reach here; only re-advertise the dashboard
             # for a background server whose admin UI is actually bound.

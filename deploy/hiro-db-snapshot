@@ -1,0 +1,247 @@
+#!/usr/bin/python3 -I
+"""Copy, or put back, the databases of a stopped HiroLeague service. Runs as root.
+
+    hiro-db-snapshot save    hiro.service
+    hiro-db-snapshot restore hiro.service
+
+Used by deploy/deploy.sh between stopping the service and starting the new version. Root, because
+the databases belong to the service's user, which may be a dedicated user the deploy user can't
+read (or its own user: both work the same). Installed once by the admin, root-owned, outside the
+deploy user's reach:
+
+    sudo install -o root -g root -m 0755 deploy/hiro-db-snapshot /usr/local/sbin/hiro-db-snapshot
+
+and allowed with exactly these arguments in sudoers (deploy guide: hiro-docs mintdocs/build/local-build/server-deploy.mdx). It only takes those two
+forms, finds everything else itself, and refuses to run while the service is running.
+
+What it copies: every workspace of the service's user (their registry.json), its <workspace>/db/
+folder: the SQLite files (through SQLite's backup, so what is still in a -wal file comes too, then
+checked with quick_check), the Kuzu graph and the Qdrant store (as files: only consistent while
+the server is stopped). One copy per service, replaced by the next deploy, in
+/var/backups/hiro/<service>/ (root only). The nightly backup is separate.
+
+Restore puts each copied db/ folder back, owned by the service user; the db/ folder it replaces is
+kept next to it as db.rolled-back/ (one, the latest) to look at.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SNAPSHOT_ROOT = Path("/var/backups/hiro")
+SYSTEMCTL = "/usr/bin/systemctl"
+DB_DIRNAME = "db"
+ROLLED_BACK_DIRNAME = "db.rolled-back"
+MANIFEST = "manifest.json"
+SQLITE_HEADER = b"SQLite format 3\x00"
+SQLITE_SIDE_FILES = ("-wal", "-shm", "-journal")
+UNIT_RE = re.compile(r"^[A-Za-z0-9:_.\-]+\.service$")
+# Free space to keep beyond the copy itself.
+SPACE_MARGIN = 1.10
+
+
+class SnapshotError(Exception):
+    pass
+
+
+def say(msg: str) -> None:
+    print(f"hiro-db-snapshot: {msg}", flush=True)
+
+
+def systemctl_show(unit: str, prop: str) -> str:
+    out = subprocess.run(
+        [SYSTEMCTL, "show", "-p", prop, "--value", unit], capture_output=True, text=True, check=False
+    )
+    if out.returncode != 0:
+        raise SnapshotError(f"systemctl show {unit} failed: {out.stderr.strip()}")
+    return out.stdout.strip()
+
+
+def service_user(unit: str) -> pwd.struct_passwd:
+    if systemctl_show(unit, "LoadState") != "loaded":
+        raise SnapshotError(f"{unit} is not installed.")
+    active = systemctl_show(unit, "ActiveState")
+    if active not in ("inactive", "failed"):
+        # The Kuzu graph is locked and SQLite may be mid-write while the server runs.
+        raise SnapshotError(f"{unit} is {active}; stop it first (copies are only consistent while it is stopped).")
+    user = systemctl_show(unit, "User")
+    if not user or user == "root":
+        raise SnapshotError(f"{unit} runs as root or has no User=; only `hiro service install` units are supported.")
+    try:
+        return pwd.getpwnam(user)
+    except KeyError as exc:
+        raise SnapshotError(f"{unit} runs as '{user}', which does not exist.") from exc
+
+
+def workspaces(user: pwd.struct_passwd) -> list[dict[str, str]]:
+    """The user's workspaces from their registry (platformdirs' Linux data folder for `hiro`)."""
+    registry = Path(user.pw_dir) / ".local" / "share" / "hiro" / "registry.json"
+    if not registry.exists():
+        return []  # never started yet: nothing to copy
+    try:
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        return [
+            {"id": ws_id, "name": str(entry.get("name", ws_id)), "path": str(entry["path"])}
+            for ws_id, entry in (data.get("workspaces") or {}).items()
+        ]
+    except (OSError, ValueError, KeyError, AttributeError) as exc:
+        raise SnapshotError(f"Cannot read {registry}: {exc}") from exc
+
+
+def tree_size(path: Path) -> int:
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file() and not p.is_symlink())
+
+
+def is_sqlite(path: Path) -> bool:
+    try:
+        with path.open("rb") as fh:
+            return fh.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+    except OSError:
+        return False
+
+
+def consolidate_sqlite(path: Path) -> None:
+    """Fold a copied SQLite file's -wal into it with SQLite's backup, check it, drop the side files."""
+    target = path.with_name(path.name + ".backup")
+    src = sqlite3.connect(str(path))
+    try:
+        dst = sqlite3.connect(str(target))
+        try:
+            src.backup(dst)
+            result = dst.execute("PRAGMA quick_check").fetchone()
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    if not result or result[0] != "ok":
+        raise SnapshotError(f"SQLite finds the copy of {path.name} unsound: {result}")
+    os.replace(target, path)
+    for suffix in SQLITE_SIDE_FILES:
+        side = path.with_name(path.name + suffix)
+        if side.exists():
+            side.unlink()
+
+
+def save(unit: str) -> None:
+    user = service_user(unit)
+    dest_root = SNAPSHOT_ROOT / unit
+    found = workspaces(user)
+    entries = []
+    total = 0
+    for ws in found:
+        db = Path(ws["path"]) / DB_DIRNAME
+        ws["had_db"] = db.is_dir()
+        if ws["had_db"]:
+            total += tree_size(db)
+        entries.append(ws)
+
+    # The previous copy goes first: on a small disk there may be room for only one.
+    if dest_root.exists():
+        shutil.rmtree(dest_root)
+    SNAPSHOT_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    free = shutil.disk_usage(SNAPSHOT_ROOT).free
+    if total * SPACE_MARGIN > free:
+        raise SnapshotError(
+            f"Not enough disk space to copy the databases: need {total * SPACE_MARGIN / 1e6:.0f} MB, "
+            f"{free / 1e6:.0f} MB free under {SNAPSHOT_ROOT}."
+        )
+    dest_root.mkdir(mode=0o700)
+    for ws in entries:
+        if not ws["had_db"]:
+            continue
+        src = Path(ws["path"]) / DB_DIRNAME
+        dst = dest_root / ws["id"] / DB_DIRNAME
+        # Plain copy first (consistent: the server is stopped), then each SQLite file is rebuilt
+        # through the backup API on the copy, never on the live file (no root-owned -wal/-shm
+        # files left in the user's workspace).
+        shutil.copytree(src, dst, symlinks=True)
+        for path in sorted(dst.rglob("*")):
+            if path.is_file() and not path.name.endswith(SQLITE_SIDE_FILES) and is_sqlite(path):
+                consolidate_sqlite(path)
+    manifest = {
+        "unit": unit,
+        "user": user.pw_name,
+        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "workspaces": entries,
+    }
+    (dest_root / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    copied = sum(1 for ws in entries if ws["had_db"])
+    say(f"copied the databases of {copied} workspace(s) of {user.pw_name} ({total / 1e6:.1f} MB) to {dest_root}")
+
+
+def human_time(iso: str) -> str:
+    """"Today, 1:15 PM" / "Yesterday, ..." / "Mon, Sep 28, 9:05 AM" in local time (12-hour, with the
+    day). Mirrors hiro_commons.timestamps.human_datetime: this script runs on the system Python,
+    without HiroLeague's packages."""
+    moment = datetime.fromisoformat(iso).astimezone()
+    today = datetime.now().astimezone().date()
+    clock = f"{moment.hour % 12 or 12}:{moment.minute:02d} {'AM' if moment.hour < 12 else 'PM'}"
+    days = (today - moment.date()).days
+    if days == 0:
+        return f"Today, {clock}"
+    if days == 1:
+        return f"Yesterday, {clock}"
+    weekday = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[moment.weekday()]
+    month = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[moment.month - 1]
+    year = f", {moment.year}" if moment.year != today.year else ""
+    return f"{weekday}, {month} {moment.day}{year}, {clock}"
+
+
+def chown_tree(path: Path, uid: int, gid: int) -> None:
+    os.chown(path, uid, gid, follow_symlinks=False)
+    for p in path.rglob("*"):
+        os.chown(p, uid, gid, follow_symlinks=False)
+
+
+def restore(unit: str) -> None:
+    user = service_user(unit)
+    src_root = SNAPSHOT_ROOT / unit
+    manifest_path = src_root / MANIFEST
+    if not manifest_path.exists():
+        raise SnapshotError(f"No copy to restore in {src_root}.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("user") != user.pw_name:
+        raise SnapshotError(f"The copy is of user {manifest.get('user')}, but {unit} now runs as {user.pw_name}.")
+    for ws in manifest["workspaces"]:
+        live = Path(ws["path"]) / DB_DIRNAME
+        aside = Path(ws["path"]) / ROLLED_BACK_DIRNAME
+        if live.exists():
+            if aside.exists():
+                shutil.rmtree(aside)
+            live.rename(aside)
+        if ws["had_db"]:
+            shutil.copytree(src_root / ws["id"] / DB_DIRNAME, live, symlinks=True)
+            chown_tree(live, user.pw_uid, user.pw_gid)
+        say(f"workspace {ws['name']}: databases put back as they were at {human_time(manifest['created_utc'])}")
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 3 or argv[1] not in ("save", "restore") or not UNIT_RE.match(argv[2]):
+        print("usage: hiro-db-snapshot save|restore <name>.service", file=sys.stderr)
+        return 2
+    if os.geteuid() != 0:
+        print("hiro-db-snapshot: must run as root (sudo).", file=sys.stderr)
+        return 2
+    os.umask(0o077)
+    try:
+        if argv[1] == "save":
+            save(argv[2])
+        else:
+            restore(argv[2])
+    except (SnapshotError, OSError, sqlite3.Error) as exc:
+        print(f"hiro-db-snapshot: {argv[1]} failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

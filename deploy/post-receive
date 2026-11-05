@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Server-side hook in ~/hiroleague.git (a bare repo on the server). `git push <server> main` from
+# the PC checks main out into ~/hiroleague and runs deploy/deploy.sh; its output streams back to
+# the pusher. Pushes to other branches are ignored.
+# Install: the deploy guide, hiro-docs mintdocs/build/local-build/server-deploy.mdx ("First-time setup").
+set -euo pipefail
+unset GIT_DIR
+DEPLOY_BRANCH=main
+while read -r _old _new ref; do
+  if [ "$ref" != "refs/heads/$DEPLOY_BRANCH" ]; then
+    echo "hiroleague: ignoring $ref (only $DEPLOY_BRANCH deploys)"
+    continue
+  fi
+  mkdir -p "$HOME/hiroleague"
+  git --git-dir="$HOME/hiroleague.git" --work-tree="$HOME/hiroleague" checkout -f "$DEPLOY_BRANCH"
+  # Files deleted from the repo must not linger in the work tree (check.sh and the build see it).
+  # Ignored files (node_modules, .venv, the built admin UI) stay: no -x.
+  git --git-dir="$HOME/hiroleague.git" --work-tree="$HOME/hiroleague" clean -fdq
+  "$HOME/hiroleague/deploy/deploy.sh"
+done

@@ -25,7 +25,15 @@ from pathlib import Path
 from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
 
-from hirocli.constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
+from hirocli.constants import (
+    ENV_ADMIN_UI,
+    ENV_METRICS,
+    ENV_SERVICE_MANAGER,
+    ENV_WORKSPACE,
+    ENV_WORKSPACE_PATH,
+    PID_FILENAME,
+    SERVICE_RESTART_EXIT_CODE,
+)
 from hirocli.domain.config import load_config, mark_disconnected, workspace_log_dir
 from hirocli.domain.crypto import load_or_create_master_key
 from hirocli.domain.character import seed_default_characters
@@ -305,6 +313,15 @@ async def _main(
         get_domain_event_bus().detach_loop()
 
     if ctx.restart_requested:
+        if os.environ.get(ENV_SERVICE_MANAGER) == "systemd":
+            # Under systemd a detached successor would be killed with this process's service,
+            # so exit with the status the unit restarts on (RestartForceExitStatus=).
+            mark_disconnected(workspace_path)
+            log.info(
+                "Restart requested — exiting so systemd starts a fresh server",
+                exit_code=SERVICE_RESTART_EXIT_CODE,
+            )
+            raise SystemExit(SERVICE_RESTART_EXIT_CODE)
         log.info("Restart requested — spawning new server process")
         _spawn_server(workspace_path, admin=ctx.restart_admin)
 
