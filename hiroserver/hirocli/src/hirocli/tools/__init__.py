@@ -114,6 +114,10 @@ _LAZY_EXPORTS: dict[str, str] = {
     "TeardownTool": ".server",
     "UninstallTool": ".server",
     "UpgradeTool": ".server",
+    # service (Linux systemd; CLI-only)
+    "ServiceInstallTool": ".service",
+    "ServiceStatusTool": ".service",
+    "ServiceUninstallTool": ".service",
     # policy
     "PolicyGetTool": ".policy",
     # workspace
@@ -237,6 +241,7 @@ def all_tools() -> list[Tool]:
         UninstallTool,
         UpgradeTool,
     )
+    from .service import ServiceInstallTool, ServiceStatusTool, ServiceUninstallTool
     from .workspace import (
         WorkspaceCreateTool,
         WorkspaceListTool,
@@ -283,6 +288,9 @@ def all_tools() -> list[Tool]:
         TeardownTool(),
         UninstallTool(),
         UpgradeTool(),
+        ServiceInstallTool(),
+        ServiceUninstallTool(),
+        ServiceStatusTool(),
         PolicyGetTool(),
         GatewayStatusTool(),
         GatewayStartTool(),
@@ -417,6 +425,11 @@ if TYPE_CHECKING:  # pragma: no cover
         TeardownTool,
         UninstallTool,
         UpgradeTool,
+    )
+    from .service import (  # noqa: F401
+        ServiceInstallTool,
+        ServiceStatusTool,
+        ServiceUninstallTool,
     )
     from .workspace import (  # noqa: F401
         WorkspaceCreateTool,
