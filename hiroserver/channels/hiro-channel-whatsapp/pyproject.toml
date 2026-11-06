@@ -30,12 +30,15 @@ dependencies = [
     "typer>=0.12",
     # neonize: Python bindings over the Go `whatsmeow` multi-device library.
     # Provides the async NewAClient used to link/receive/send over WhatsApp Web.
-    # PINNED to 0.3.18.post0: the 0.4.x line has a binary-marshaling defect in its
-    # Go→Python protobuf-return path that corrupts media downloads (download_any
-    # returns right-length/wrong-content bytes; sha256 mismatch) AND the send ack
-    # (SendMessageReturnFunction "Wire format corrupt"). 0.3.18 has neither, with an
-    # API-compatible aioze client. 0.4.0 additionally fails to import (consume_cstring).
-    "neonize==0.3.18.post0",
+    # PINNED to 0.5.2 (2026-11-06). 0.3.18.post0 was pinned before because the 0.4.x
+    # line corrupted media downloads (download_any: right length, wrong bytes) and the
+    # send ack ("Wire format corrupt"), and 0.4.0 failed to import. But WhatsApp now
+    # refuses 0.3.18's whatsmeow ("Client outdated", 405), so it can't connect at all.
+    # 0.5.2 connects today (HomeHiro runs it on the same server) and its aioze API is
+    # the one this plugin uses; 0.6.1–0.10.0 came out in a two-day burst (Nov 2–3),
+    # too new to trust. wa_client.py logs sha_match on every voice note download, so a
+    # return of the media defect shows in the plugin's log.
+    "neonize==0.5.2",
     # qrcode: render the pairing QR as ASCII into the plugin log (P1 has no UI yet).
     "qrcode>=7",
     # static-ffmpeg: bundles BOTH ffmpeg and ffprobe (downloaded+cached on first
