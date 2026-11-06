@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import httpx
+import httpx2
 
 from hirocli.domain.model_http import KEEPALIVE_EXPIRY_S, openai_http_kwargs
 
 
-def _pool_keepalive(client: httpx.Client | httpx.AsyncClient) -> float:
+def _pool_keepalive(client: httpx2.Client | httpx2.AsyncClient) -> float:
     """Read the keepalive_expiry off the client's httpcore connection pool."""
     return client._transport._pool._keepalive_expiry
 
@@ -15,8 +15,8 @@ def _pool_keepalive(client: httpx.Client | httpx.AsyncClient) -> float:
 def test_openai_streaming_wires_sync_and_async_clients_with_keepalive() -> None:
     kwargs = openai_http_kwargs(streaming=True)
     assert set(kwargs) == {"http_client", "http_async_client"}
-    assert isinstance(kwargs["http_client"], httpx.Client)
-    assert isinstance(kwargs["http_async_client"], httpx.AsyncClient)
+    assert isinstance(kwargs["http_client"], httpx2.Client)
+    assert isinstance(kwargs["http_async_client"], httpx2.AsyncClient)
     # The pool keepalive (the actual fix — not overridden per request) carries our policy.
     assert _pool_keepalive(kwargs["http_client"]) == KEEPALIVE_EXPIRY_S
     assert _pool_keepalive(kwargs["http_async_client"]) == KEEPALIVE_EXPIRY_S

@@ -124,7 +124,7 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
 
 
 # ---------------------------------------------------------------------------
-# LLM selection (canonical catalog ids: ``openai:gpt-5.4``)
+# LLM selection (canonical catalog ids: ``openai:gpt-6.1-sol``)
 # ---------------------------------------------------------------------------
 
 LLMPurpose = Literal["chat", "stt", "tts"]

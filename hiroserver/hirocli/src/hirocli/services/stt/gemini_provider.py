@@ -1,9 +1,8 @@
 """Gemini STT provider — audio transcription via Google GenAI SDK.
 
-Models offered:
-  • gemini-2.5-flash        (default, stable) — best price-performance, audio input supported
-  • gemini-3-flash-preview  (preview) — frontier multimodal, advanced capabilities
-  • gemini-3.1-flash-lite-preview (preview) — cost-efficient, high-volume
+Models offered (chat models that accept audio input; must match catalog ``extra_kinds: [stt]``):
+  • gemini-3.8-flash       (default) — current Flash; 2.5 Flash auto-routes to newer models Dec 1, 2026
+  • gemini-3.5-flash-lite  — cost-efficient, high-volume
 
 Gemini does not expose a dedicated transcription endpoint. Instead we pass the
 audio bytes as a multimodal Part alongside a verbatim-transcription instruction
@@ -27,7 +26,7 @@ from .provider import ModelInfo, STTProvider, TranscriptionResult
 
 log = Logger.get("STT.GEMINI")
 
-_DEFAULT_MODEL = "gemini-2.5-flash"
+_DEFAULT_MODEL = "gemini-3.8-flash"
 
 
 def _usage_dict(value: Any) -> dict[str, Any] | None:
@@ -76,23 +75,18 @@ _TRANSCRIPTION_PROMPT = (
     "If the audio is silent or contains no speech, return an empty string."
 )
 
-# Model IDs must match the actual Gemini API model codes exactly.
-# Gemini 3.x models are preview-only and require the -preview suffix.
+# Model IDs must match the actual Gemini API model codes exactly. The STT service routes a model
+# to its provider through this list, so it must mirror the catalog's STT-capable Gemini rows.
 _MODELS: list[ModelInfo] = [
     ModelInfo(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.8-flash",
         provider="gemini",
-        display_name="Gemini 2.5 Flash (stable)",
+        display_name="Gemini 3.8 Flash",
     ),
     ModelInfo(
-        model_id="gemini-3-flash-preview",
+        model_id="gemini-3.5-flash-lite",
         provider="gemini",
-        display_name="Gemini 3 Flash (preview)",
-    ),
-    ModelInfo(
-        model_id="gemini-3.1-flash-lite-preview",
-        provider="gemini",
-        display_name="Gemini 3.1 Flash-Lite (preview)",
+        display_name="Gemini 3.5 Flash-Lite",
     ),
 ]
 
@@ -137,7 +131,7 @@ class GeminiSTTProvider(STTProvider):
         Args:
             audio_bytes: Raw audio data.
             model:       One of the model_ids from supported_models(). Defaults to
-                         gemini-2.5-flash.
+                         gemini-3.8-flash.
             mime_type:   MIME type of the audio data (e.g. "audio/mp4",
                          "audio/webm"). Passed to Gemini's Part.from_bytes().
             prompt:      Custom transcription instruction. Defaults to the built-in

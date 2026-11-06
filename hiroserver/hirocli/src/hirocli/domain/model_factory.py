@@ -154,16 +154,16 @@ def build_chat_model_from_tuning(
         key = store.get_api_key("anthropic")
         if not key:
             raise ValueError("Anthropic API key missing (keyring or ANTHROPIC_API_KEY).")
+        # No temperature: the anthropic 2.x SDK speaks API version 2026-10-21, which rejects
+        # temperature/top_p/top_k on every model (and Claude 4.7+ rejected non-default values
+        # even before). Thinking depth is steered with adaptive thinking + effort instead.
         kwargs = {
             "model_provider": "anthropic",
             "api_key": key,
-            "temperature": effective.temperature,
             "max_tokens": effective.max_tokens,
             "callbacks": cb,
         }
-        thinking = _anthropic_thinking(effective.thinking, effective.max_tokens, spec)
-        if thinking is not None:
-            kwargs["thinking"] = thinking
+        kwargs.update(_anthropic_thinking_kwargs(effective.thinking, spec))
         return init_chat_model(
             api_model,
             **kwargs,
@@ -173,14 +173,15 @@ def build_chat_model_from_tuning(
         key = store.get_api_key("google")
         if not key:
             raise ValueError("Google API key missing (keyring or GOOGLE_API_KEY).")
+        # No temperature: Gemini deprecated temperature/top_p/top_k on Jul 21, 2026 (ignored now,
+        # documented to become a 400 on future models). Every catalog Gemini row is 3.5+.
         kwargs = {
             "model_provider": "google_genai",
             "google_api_key": key,
-            "temperature": effective.temperature,
             "max_output_tokens": effective.max_tokens,
             "callbacks": cb,
         }
-        kwargs.update(_google_thinking_kwargs(effective.thinking, api_model, spec))
+        kwargs.update(_google_thinking_kwargs(effective.thinking, spec))
         # NOTE: no warm-keepalive client here. google-genai's ASYNC path uses aiohttp and forwards
         # client_args into ``ClientSession.request(**args)`` alongside its own ``timeout=``, so any
         # httpx-shaped kwarg collides ("multiple values for keyword argument 'timeout'"). Left on
@@ -297,20 +298,20 @@ def with_structured_output_compat(model: Any, schema: type, *, include_raw: bool
     return model.with_structured_output(schema, include_raw=include_raw)
 
 
-# OpenAI reasoning_effort vocabulary, ordered low→high effort. Used to clamp the neutral
-# ThinkingLevel onto whatever a given model accepts (the set varies by GPT-5 generation).
-_OPENAI_EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+# Effort vocabulary shared by every provider, ordered low→high. Used to clamp the neutral
+# ThinkingLevel onto whatever a given model accepts (catalog ``reasoning_efforts``). ``max`` is new
+# with GPT-5.6/GPT-6, Claude 5.x and DeepSeek V4; ``minimal`` survives only on some Gemini models.
+_EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def _openai_reasoning_effort(thinking: ThinkingLevel | None, spec: ModelSpec) -> str | None:
     """Map the neutral ``ThinkingLevel`` onto a ``reasoning_effort`` the *model* accepts.
 
-    OpenAI's effort vocabulary differs by generation (GPT-5.0: minimal/low/medium/high;
-    GPT-5.4+: none/low/medium/high/xhigh — no ``minimal``), and pro tiers accept ``high`` only.
-    Sending an unsupported level 400s ("does not support 'minimal' with this model"), so we clamp
-    to the nearest value in the catalog ``reasoning_efforts``. ``off`` maps to an explicit ``none``
-    when the model has it, else omits the param so the model applies its own default effort. Models
-    without a catalog vocabulary fall back to sending the level verbatim (legacy behavior).
+    OpenAI's effort vocabulary differs by model (GPT-6: low…max; Terra/Luna also accept ``none``;
+    no GPT-5.6/6 model accepts ``minimal``). Sending an unsupported level 400s, so we clamp to the
+    nearest value in the catalog ``reasoning_efforts``. ``off`` maps to an explicit ``none`` when the
+    model has it, else omits the param so the model applies its own default effort. Models without
+    a catalog vocabulary fall back to sending the level verbatim.
     """
     if thinking is None:
         return None
@@ -319,26 +320,38 @@ def _openai_reasoning_effort(thinking: ThinkingLevel | None, spec: ModelSpec) ->
         return None if thinking == "off" else thinking
     if thinking == "off":
         return "none" if "none" in supported else None
-    return _clamp_openai_effort(thinking, supported)
+    return _clamp_effort(thinking, supported)
 
 
-def _clamp_openai_effort(desired: str, supported: set[str]) -> str | None:
-    """Nearest supported OpenAI ``reasoning_effort`` to ``desired``; ties resolve to the higher.
+def _clamp_effort(desired: str, supported: set[str]) -> str | None:
+    """Nearest supported effort to ``desired``; ties resolve to the higher.
 
     The tie-break-toward-higher is deliberate: it lands neutral ``minimal`` on ``low`` (not
-    ``none``) for GPT-5.4+ models that dropped ``minimal``, and collapses sub-``high`` levels onto
-    ``high`` for high-only pro tiers.
+    ``none``) for models that dropped ``minimal``.
     """
     if desired in supported:
         return desired
-    candidates = [e for e in supported if e in _OPENAI_EFFORT_ORDER]
-    if desired not in _OPENAI_EFFORT_ORDER or not candidates:
+    candidates = [e for e in supported if e in _EFFORT_ORDER]
+    if desired not in _EFFORT_ORDER or not candidates:
         return None
-    target = _OPENAI_EFFORT_ORDER.index(desired)
+    target = _EFFORT_ORDER.index(desired)
     return min(
         candidates,
-        key=lambda e: (abs(_OPENAI_EFFORT_ORDER.index(e) - target), -_OPENAI_EFFORT_ORDER.index(e)),
+        key=lambda e: (abs(_EFFORT_ORDER.index(e) - target), -_EFFORT_ORDER.index(e)),
     )
+
+
+def _lowest_effort(supported: list[str]) -> str | None:
+    """Lowest catalog effort that still means "thinking on" (skips ``none``)."""
+    ordered = sorted(
+        (e for e in supported if e in _EFFORT_ORDER and e != "none"), key=_EFFORT_ORDER.index
+    )
+    return ordered[0] if ordered else None
+
+
+# DeepSeek V4 effort values are none/low/high/max (``low`` added Aug 13, 2026; ``none`` = thinking
+# off, which we express through extra_body instead). Neutral levels map onto the enabled ones.
+_DEEPSEEK_EFFORT = {"minimal": "low", "low": "low", "medium": "high", "high": "max"}
 
 
 def _deepseek_reasoning_effort(
@@ -347,51 +360,57 @@ def _deepseek_reasoning_effort(
 ) -> str | None:
     """Map ThinkingLevel → DeepSeek ``reasoning_effort``, or None to disable thinking.
 
-    DeepSeek V4 is dual-mode and only exposes ``high``/``max`` effort (default ``high``),
-    so we clamp: ``high`` → ``"max"``, any other enabled level → ``"high"``. ``None``/``off``
-    (or a non-reasoning model) returns None → caller disables thinking and honors temperature.
+    ``minimal``/``low`` → ``low``, ``medium`` → ``high``, ``high`` → ``max``. ``None``/``off`` (or a
+    non-reasoning model) returns None → caller disables thinking and honors temperature.
     """
     if thinking in (None, "off") or not spec.supports_reasoning():
         return None
-    return "max" if thinking == "high" else "high"
+    return _DEEPSEEK_EFFORT.get(thinking, "high")
 
 
-def _google_thinking_kwargs(
-    thinking: ThinkingLevel | None,
-    api_model: str,
-    spec: ModelSpec,
-) -> dict[str, Any]:
+def _google_thinking_kwargs(thinking: ThinkingLevel | None, spec: ModelSpec) -> dict[str, Any]:
+    """Map ThinkingLevel → Gemini ``thinking_level`` clamped to what the model accepts.
+
+    Gemini 3.5+ only documents ``thinking_level`` (``thinking_budget`` is gone from the docs), and
+    the level set differs per model: ``minimal`` returns an error on 3.8 Flash and 4 Argon. These
+    models cannot turn thinking fully off, so ``off`` maps to the model's lowest level.
+    """
     if thinking is None or not spec.supports_reasoning():
         return {}
-    lower = api_model.lower()
+    efforts = list(spec.reasoning_efforts)
     if thinking == "off":
-        return {"thinking_budget": 0}
-    if lower.startswith("gemini-3"):
+        lowest = _lowest_effort(efforts)
+        return {"thinking_level": lowest} if lowest else {}
+    if not efforts:
         return {"thinking_level": thinking}
-    return {"thinking_budget": _thinking_budget_tokens(thinking)}
+    level = _clamp_effort(thinking, set(efforts))
+    return {"thinking_level": level} if level else {}
 
 
-def _anthropic_thinking(
-    thinking: ThinkingLevel | None,
-    max_tokens: int,
-    spec: ModelSpec,
-) -> dict[str, Any] | None:
-    if thinking in (None, "off") or not spec.supports_reasoning():
-        return None
-    return {
-        "type": "enabled",
-        "budget_tokens": min(max(_thinking_budget_tokens(thinking), 1024), max_tokens),
-    }
+def _anthropic_thinking_kwargs(thinking: ThinkingLevel | None, spec: ModelSpec) -> dict[str, Any]:
+    """Map ThinkingLevel → Claude adaptive thinking + ``effort`` (sent as ``output_config.effort``).
 
-
-def _thinking_budget_tokens(thinking: ThinkingLevel) -> int:
-    return {
-        "minimal": 256,
-        "low": 1024,
-        "medium": 4096,
-        "high": 8192,
-        "off": 0,
-    }[thinking]
+    Every current Claude model (5.x) uses adaptive thinking; ``enabled`` + ``budget_tokens`` is a
+    400 on them. Depth is steered with ``effort`` (low…max). ``off`` uses the model's
+    ``thinking_off_type`` ("disabled" / "between_tools") where it has one; models that cannot turn
+    thinking off (Opus 5.5, Fable 5.1) get adaptive thinking at their lowest effort instead.
+    ``None`` sends nothing, so the model applies its own default (adaptive, default effort).
+    """
+    if thinking is None or not spec.supports_reasoning():
+        return {}
+    efforts = list(spec.reasoning_efforts)
+    if thinking == "off":
+        if spec.thinking_off_type:
+            # "disabled"/"between_tools" are only accepted at effort <= high; the model's default
+            # effort (medium/high) satisfies that, so no effort is sent alongside.
+            return {"thinking": {"type": spec.thinking_off_type}}
+        effort = _lowest_effort(efforts)
+    else:
+        effort = _clamp_effort(thinking, set(efforts)) if efforts else thinking
+    out: dict[str, Any] = {"thinking": {"type": "adaptive"}}
+    if effort:
+        out["effort"] = effort
+    return out
 
 
 def catalog_embedding_dimensions(model_id: str) -> int:

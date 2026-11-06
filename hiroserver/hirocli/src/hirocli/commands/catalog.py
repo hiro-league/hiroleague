@@ -94,7 +94,7 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
 
     @catalog_app.command("model")
     def catalog_model(
-        model_id: str = typer.Argument(..., help="Canonical id, e.g. openai:gpt-5.4"),
+        model_id: str = typer.Argument(..., help="Canonical id, e.g. openai:gpt-6.1-sol"),
     ) -> None:
         """Show one model and its provider from the catalog."""
         from ..tools.llm_catalog import LlmCatalogGetModelTool

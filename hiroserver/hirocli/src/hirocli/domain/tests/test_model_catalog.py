@@ -30,9 +30,10 @@ def test_bundled_catalog_loads() -> None:
     cat = get_model_catalog()
     assert cat.catalog_version == expected_version
     assert cat.get_provider("openai") is not None
-    assert cat.get_model("openai:gpt-5.4") is not None
-    assert cat.get_model("openai:gpt-5.5") is not None
-    assert cat.get_model("openai:gpt-image-2") is not None
+    assert cat.get_model("openai:gpt-6.1-sol") is not None
+    assert cat.get_model("openai:gpt-6-astra") is not None
+    assert cat.get_model("openai:gpt-image-2.6-sunburst") is not None
+    assert cat.get_model("openai:gpt-transcribe") is not None
     openai = cat.get_provider("openai")
     assert openai is not None and len(openai.tts_voices) >= 10
     assert cat.get_model("openai:tts-1") is not None
@@ -41,37 +42,46 @@ def test_bundled_catalog_loads() -> None:
     assert google is not None and len(google.tts_voices) >= 25
     assert any(v.id == "Kore" for v in google.tts_voices)
     for mid in (
-        "google:gemini-3-flash-preview",
-        "google:gemini-3.1-flash-lite-preview",
-        "google:gemini-3.1-pro-preview",
-        "google:gemini-3.1-flash-tts-preview",
-        "google:gemini-2.5-flash-preview-tts",
-        "google:gemini-2.5-pro-preview-tts",
+        "google:gemini-4-argon",
+        "google:gemini-3.8-flash",
+        "google:gemini-3.5-flash-lite",
+        "google:gemini-3.8-flash-tts",
+        "google:gemini-3.8-flash-lite-tts",
     ):
         assert cat.get_model(mid) is not None
 
-    g3 = cat.get_model("google:gemini-3-flash-preview")
-    assert g3 is not None
-    assert g3.supports_kind("chat")
-    assert g3.supports_kind("stt")
+    g38 = cat.get_model("google:gemini-3.8-flash")
+    assert g38 is not None
+    assert g38.supports_kind("chat")
+    assert g38.supports_kind("stt")
+    # `minimal` is an error on 3.8 Flash — the catalog must not offer it.
+    assert "minimal" not in g38.reasoning_efforts
     assert cat.list_models(model_kind="stt")
-    assert any(m.id == "google:gemini-3-flash-preview" for m in cat.list_models(model_kind="stt"))
+    assert any(m.id == "google:gemini-3.8-flash" for m in cat.list_models(model_kind="stt"))
 
-    voyage_rr = cat.get_model("voyage:rerank-2.5")
+    # Claude 5.x: adaptive thinking + effort; thinking-off support differs per model.
+    sonnet = cat.get_model("anthropic:claude-sonnet-5-5")
+    assert sonnet is not None and sonnet.thinking_off_type == "between_tools"
+    assert "max" in sonnet.reasoning_efforts
+    opus = cat.get_model("anthropic:claude-opus-5-5")
+    assert opus is not None and opus.thinking_off_type is None
+
+    voyage_rr = cat.get_model("voyage:rerank-3")
     assert voyage_rr is not None and voyage_rr.pricing is not None
     assert voyage_rr.pricing.per_1k_tokens == 0.00005
     assert voyage_rr.pricing.input_per_1m_tokens == 0.05
     assert voyage_rr.pricing.estimated_usd_per_request == 0.0025
 
-    cohere_rr = cat.get_model("cohere:rerank-v4.0-pro")
+    # Rerank 5 is priced per token (Rerank 4 was per search unit).
+    cohere_rr = cat.get_model("cohere:rerank-v5.0-pro")
     assert cohere_rr is not None and cohere_rr.pricing is not None
-    assert cohere_rr.pricing.estimated_usd_per_1k_searches == 2.50
+    assert cohere_rr.pricing.input_per_1m_tokens == 0.05
 
     voyage = cat.get_provider("voyage")
     assert voyage is not None and len(voyage.free_offers) == 1
     assert voyage.free_offers[0].label == "Free rerank"
     assert "200" in voyage.free_offers[0].summary
-    assert voyage.free_offers[0].updated_at == "2026-05-30"
+    assert voyage.free_offers[0].updated_at == "2026-11-06"
     assert voyage.free_offers[0].details_url is not None
 
     cohere = cat.get_provider("cohere")
@@ -326,26 +336,27 @@ def test_pricing_version_is_stable_and_changes_with_pricing(tmp_path: Path) -> N
     assert first.pricing_version != changed.pricing_version
 
 
-def test_gemini_3_flash_preview_cost_uses_cached_input_rate() -> None:
+def test_gemini_flash_cost_uses_cached_input_rate() -> None:
     cat = get_model_catalog()
 
     first = cat.estimate_token_usage_cost(
-        model_id="google:gemini-3-flash-preview",
+        model_id="google:gemini-3.8-flash",
         input_tokens=7_466,
         cached_input_tokens=5_931,
         output_tokens=73,
     )
     second = cat.estimate_token_usage_cost(
-        model_id="google:gemini-3-flash-preview",
+        model_id="google:gemini-3.8-flash",
         input_tokens=7_750,
         cached_input_tokens=5_931,
         output_tokens=88,
     )
 
     assert first.pricing_available is True
-    assert first.estimated_total == pytest.approx(0.00128305)
-    assert second.estimated_total == pytest.approx(0.00147005)
-    assert first.estimated_total + second.estimated_total == pytest.approx(0.0027531)
+    # $0.75 uncached / $0.075 cached / $3.75 output per MTok.
+    assert first.estimated_total == pytest.approx(0.001869825)
+    assert second.estimated_total == pytest.approx(0.002139075)
+    assert first.estimated_total + second.estimated_total == pytest.approx(0.0040089)
 
 
 def test_estimate_tts_usage_cost_openai_character_priced() -> None:
@@ -381,13 +392,14 @@ def test_estimate_tts_usage_cost_gemini_uses_text_and_audio_tokens() -> None:
 
     estimate = cat.estimate_tts_usage_cost(
         provider_id="gemini",
-        model_id="gemini-3.1-flash-tts-preview",
+        model_id="gemini-3.8-flash-tts",
         input_text_tokens=100,
         output_audio_tokens=200,
     )
 
+    # $0.50 text in / $9 audio out per MTok.
     assert estimate.pricing_available is True
-    assert estimate.estimated_total == pytest.approx(0.0041)
+    assert estimate.estimated_total == pytest.approx(0.00185)
 
 
 def test_estimate_tts_usage_cost_unsupported_provider_is_unpriced() -> None:

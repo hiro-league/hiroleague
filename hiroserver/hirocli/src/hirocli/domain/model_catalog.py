@@ -161,11 +161,17 @@ class ModelSpec(BaseModel):
     context_window: int | None = None
     modalities: list[str] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
-    # OpenAI-style reasoning_effort values this model actually accepts. The vocabulary differs by
-    # generation (GPT-5.0: minimal/low/medium/high; GPT-5.4+: none/low/medium/high/xhigh), so the
-    # factory clamps the neutral ThinkingLevel onto this set. Empty = no catalog vocabulary (the
-    # factory falls back to sending the level verbatim).
+    # Effort / thinking-level values this model actually accepts, in the vendor's own words:
+    # OpenAI ``reasoning_effort`` (GPT-6: low…max, some also ``none``), Anthropic
+    # ``output_config.effort`` (low/medium/high/xhigh/max), Gemini ``thinking_level`` (``minimal``
+    # only on some models), DeepSeek ``reasoning_effort`` (low/high/max). The sets differ per model,
+    # and an unsupported value is a 400, so the factory clamps the neutral ThinkingLevel onto this
+    # set. Empty = no catalog vocabulary (the factory falls back to sending the level verbatim).
     reasoning_efforts: list[str] = Field(default_factory=list)
+    # Anthropic: the ``thinking.type`` that turns up-front thinking off on this model — "disabled"
+    # (Haiku 5.5) or "between_tools" (Sonnet 5.5). None = thinking cannot be turned off (Opus 5.5,
+    # Fable 5.1 reject both), so a ThinkingLevel of "off" maps to the lowest effort instead.
+    thinking_off_type: str | None = None
     tags: list[str] = Field(default_factory=list)
     pricing: PricingBlock | None = None
     released_at: str | None = Field(

@@ -138,7 +138,7 @@ def test_check_endpoint_online_reconciles_installed_models() -> None:
     resp = MagicMock()
     resp.raise_for_status.return_value = None
     resp.json.return_value = {
-        "models": [{"name": "gemma4:12b"}, {"name": "llama3.3:latest"}]
+        "models": [{"name": "gemma4:12b"}, {"name": "qwen3.8:latest"}]
     }
     with (
         patch("hirocli.tools.provider.resolve_workspace", return_value=(_ws_entry(), None)),
@@ -151,7 +151,7 @@ def test_check_endpoint_online_reconciles_installed_models() -> None:
     assert G.call_args[0][0] == "http://localhost:11434/api/tags"
     by_name = {s.name: s for s in result.catalog_status}
     assert by_name["gemma4:12b"].pulled  # exact tag match
-    assert by_name["llama3.3"].pulled  # matched via :latest
+    assert by_name["qwen3.8"].pulled  # matched via :latest
     assert not by_name["gemma4:26b"].pulled
     assert by_name["gemma4:26b"].pull_cmd == "ollama pull gemma4:26b"
 

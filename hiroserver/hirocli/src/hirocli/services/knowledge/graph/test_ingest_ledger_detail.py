@@ -32,7 +32,7 @@ from hirocli.services.knowledge.graph.ingest_ledger import (
 )
 from hirocli.services.knowledge.graph.ledger_tracer import SpanRecord, current_spans
 
-_MODEL = "google:gemini-3-flash-preview"
+_MODEL = "google:gemini-3.8-flash"
 # Totals the fake feeds (extract_entities + extract_edges + 2× EdgeDuplicate):
 _TOTAL_IN = 100 + 80 + 30 + 28  # 238
 _TOTAL_OUT = 20 + 15 + 5 + 6  # 46

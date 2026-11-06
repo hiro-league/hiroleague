@@ -46,7 +46,7 @@ class TranscribeTool(Tool):
     description = (
         "Transcribe an audio file to text. "
         "Provide the audio as a URL, a data URI, or a base64-encoded string. "
-        "Optionally specify a model (e.g. 'gpt-4o-transcribe', 'gemini-3.1-flash-lite')."
+        "Optionally specify a model (e.g. 'gpt-transcribe', 'gemini-3.8-flash')."
     )
     params = {
         "source": ToolParam(

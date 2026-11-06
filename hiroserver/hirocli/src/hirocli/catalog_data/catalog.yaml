@@ -1,6 +1,9 @@
 # Hiro LLM catalog — curated reference data.
-# Model *names* follow vendor APIs as of 2026-05 (see developers.openai.com/api/docs/models,
-# ai.google.dev/gemini-api/docs/models, platform.claude.com/docs/.../models/overview).
+# Model *names* follow vendor APIs as of 2026-11-06 (see developers.openai.com/api/docs/models,
+# aistudio.google.com/docs/models, platform.claude.com/docs/.../models/overview).
+# Policy: keep only the current lineup per provider/kind — drop models a newer, comparable,
+# reasonably priced model replaces (no history rows). Embedding models are the exception: a swap
+# means re-embedding the vector store, so they change only deliberately.
 # Pricing is approximate; pricing_source points to vendor API pricing pages (verify before billing).
 # released_at: vendor model/API launch date (ISO YYYY-MM-DD); used for admin sort — verify release notes.
 # tts_voices: preset ids for bundled TTS integrations — verify against vendor docs when upgrading SDKs.
@@ -17,11 +20,11 @@ providers:
     credential_env_keys: [OPENAI_API_KEY]
     docs_url: https://platform.openai.com/docs
     recommended_models:
-      chat: openai:gpt-5.5
+      chat: openai:gpt-6.1-sol
       tts: openai:gpt-4o-mini-tts
-      stt: openai:gpt-4o-transcribe
+      stt: openai:gpt-transcribe
       embedding: openai:text-embedding-3-small
-    # Audio speech API — gpt-4o-mini-tts (instructions); tts-1 / tts-1-hd (character-classic; smaller voice set in docs).
+    # Audio speech API — gpt-4o-mini-tts (instructions); tts-1 / tts-1-hd. All end Jan 6, 2027.
     tts_voices:
       - { id: alloy, display_name: Alloy }
       - { id: ash, display_name: Ash }
@@ -36,19 +39,20 @@ providers:
       - { id: sage, display_name: Sage }
       - { id: shimmer, display_name: Shimmer }
       - { id: verse, display_name: Verse }
-    metadata_updated_at: "2026-05-18"
+    metadata_updated_at: "2026-11-06"
 
   - id: google
     display_name: Google (Gemini)
     hosting: cloud
     credential_env_keys: [GOOGLE_API_KEY]
-    docs_url: https://ai.google.dev/gemini-api/docs
+    docs_url: https://aistudio.google.com/docs
     recommended_models:
-      chat: google:gemini-3-flash-preview
-      stt: google:gemini-3-flash-preview
-      tts: google:gemini-3.1-flash-tts-preview
+      chat: google:gemini-3.8-flash
+      stt: google:gemini-3.8-flash
+      tts: google:gemini-3.8-flash-tts
       embedding: google:gemini-embedding-001
-    # Gemini speech generation — PrebuiltVoiceConfig.voice_name (see ai.google.dev/gemini-api/docs/speech-generation).
+    # Gemini speech generation — PrebuiltVoiceConfig.voice_name (aistudio.google.com/docs/speech-generation).
+    # Same 30 prebuilt voices on the 3.8 TTS models.
     tts_voices:
       - { id: Achernar, description: "Soft, Higher pitch" }
       - { id: Achird, description: "Friendly, Lower middle pitch" }
@@ -80,7 +84,7 @@ providers:
       - { id: Vindemiatrix, description: "Gentle, Middle pitch" }
       - { id: Zephyr, description: "Current, Bright, Higher pitch" }
       - { id: Zubenelgenubi, description: "Casual, Lower middle pitch" }
-    metadata_updated_at: "2026-05-03"
+    metadata_updated_at: "2026-11-06"
 
   - id: anthropic
     display_name: Anthropic
@@ -88,11 +92,11 @@ providers:
     credential_env_keys: [ANTHROPIC_API_KEY]
     docs_url: https://platform.claude.com/docs
     recommended_models:
-      chat: anthropic:claude-sonnet-5
-    metadata_updated_at: "2026-07-07"
+      chat: anthropic:claude-sonnet-5-5
+    metadata_updated_at: "2026-11-06"
 
   # DeepSeek V4 — OpenAI-compatible (api.deepseek.com). Unified dual-mode models
-  # (thinking / non-thinking) toggled per-request; old deepseek-chat/reasoner deprecate 2026-07-24.
+  # (thinking / non-thinking) toggled per-request; deepseek-chat/reasoner were retired 2026-07-24.
   - id: deepseek
     display_name: DeepSeek
     hosting: cloud
@@ -100,8 +104,8 @@ providers:
     default_base_url: https://api.deepseek.com
     docs_url: https://api-docs.deepseek.com
     recommended_models:
-      chat: deepseek:deepseek-v4-flash
-    metadata_updated_at: "2026-06-10"
+      chat: deepseek:deepseek-flash
+    metadata_updated_at: "2026-11-06"
 
   - id: ollama
     display_name: Ollama (local)
@@ -110,9 +114,9 @@ providers:
     default_base_url: http://localhost:11434
     docs_url: https://github.com/ollama/ollama
     recommended_models:
-      chat: ollama:llama3.3
+      chat: ollama:gemma4:e4b
       embedding: ollama:nomic-embed-text
-    metadata_updated_at: "2026-03-27"
+    metadata_updated_at: "2026-11-06"
 
   - id: lm_studio
     display_name: LM Studio (local)
@@ -146,18 +150,17 @@ providers:
     credential_env_keys: [VOYAGE_API_KEY]
     docs_url: https://docs.voyageai.com
     recommended_models:
-      rerank: voyage:rerank-2.5
+      rerank: voyage:rerank-3
     free_offers:
       - label: Free rerank
-        summary: 200M processed rerank tokens per account (rerank-2.5 family)
-        updated_at: "2026-05-30"
+        summary: 200M processed rerank tokens per account (rerank-3 family)
+        updated_at: "2026-11-06"
         details: |
           Voyage waives charges for the first 200 million processed rerank tokens per account
-          on rerank-2.5 and rerank-2.5-lite. Processed tokens = (query tokens × document count)
-          + sum of document tokens. Legacy rerank-2 / rerank-2-lite rows do not include this
-          allowance. Verify current limits on the pricing page before production use.
+          on rerank-3 and rerank-3-lite. Processed tokens = (query tokens × document count)
+          + sum of document tokens. Verify current limits on the pricing page before production use.
         details_url: https://docs.voyageai.com/docs/pricing
-    metadata_updated_at: "2026-05-30"
+    metadata_updated_at: "2026-11-06"
 
   - id: cohere
     display_name: Cohere
@@ -165,7 +168,7 @@ providers:
     credential_env_keys: [COHERE_API_KEY]
     docs_url: https://docs.cohere.com
     recommended_models:
-      rerank: cohere:rerank-v4.0-pro
+      rerank: cohere:rerank-v5.0-pro
     free_offers:
       - label: Trial API
         summary: "Trial key: 1,000 API calls/mo (all endpoints), Rerank 10 req/min — non-production"
@@ -196,206 +199,121 @@ providers:
     notes: REST endpoint embeds the account id — both token and account id are required.
 
 models:
-  # --- OpenAI cloud (developers.openai.com/api/docs/models; pricing openai.com/api/pricing) ---
-  - id: openai:gpt-5.5
+  # --- OpenAI cloud (developers.openai.com/api/docs/models; checked 2026-11-06) ---
+  # Current lineup only: GPT-6 replaced GPT-5.x at lower prices (gpt-5 / -mini / -nano / -pro shut down
+  # Dec 11, 2026). Common to these rows: 1.05M context (922K max input), 128K max output; prompts over
+  # 272K input tokens bill 2x input and 1.5x output for the whole request. No GPT-6 model accepts
+  # `minimal` effort or a custom temperature; tool calling needs the Responses API, which the factory
+  # always uses for reasoning models. Separate *-pro ids are gone: `reasoning.mode: "pro"` replaces them.
+  - id: openai:gpt-6-astra
     provider_id: openai
-    display_name: GPT-5.5
-    released_at: "2026-04-23"
+    display_name: GPT-6 Astra
+    released_at: "2026-09-03"
     model_kind: chat
     model_class: reasoning
     context_window: 1050000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
-    reasoning_efforts: [none, low, medium, high, xhigh]
-    notes: Frontier model; prompts with >272K input tokens use 2x input and 1.5x output for the full session (see OpenAI pricing).
+    # Flagship: no `none` effort (use low); never accepts temperature / top_p / logprobs.
+    reasoning_efforts: [low, medium, high, xhigh, max]
+    notes: OpenAI flagship. Tool calling only through the Responses API. Effort low–max (default medium).
     pricing:
-      input_per_1m_tokens: 5.00
-      cached_input_per_1m_tokens: 0.50
-      output_per_1m_tokens: 30.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://openai.com/api/pricing
+      input_per_1m_tokens: 10.00
+      cached_input_per_1m_tokens: 1.00
+      output_per_1m_tokens: 50.00
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-6-astra
 
-  # GPT-5.5 pro: OpenAI docs — streaming not supported; no cached-input discount; Responses/Batch oriented.
-  - id: openai:gpt-5.5-pro
+  - id: openai:gpt-6.1-sol
     provider_id: openai
-    display_name: GPT-5.5 pro
-    released_at: "2026-04-23"
-    model_kind: chat
-    model_class: reasoning
-    context_window: 1050000
-    modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, json_mode, reasoning]
-    # Pro tier — like gpt-5-pro it accepts `high` only (verify against OpenAI docs); sub-high levels clamp up.
-    reasoning_efforts: [high]
-    notes: Pro tier (more compute than GPT-5.5). Streaming not supported per OpenAI model docs; long jobs may need background mode. No cached-input pricing tier (verify openai.com/api/pricing).
-    pricing:
-      input_per_1m_tokens: 30.00
-      output_per_1m_tokens: 180.00
-      pricing_updated_at: "2026-05-18"
-      pricing_source: https://developers.openai.com/api/docs/models/gpt-5.5-pro
-
-  - id: openai:gpt-5.4
-    provider_id: openai
-    display_name: GPT-5.4
-    released_at: "2026-03-05"
+    display_name: GPT-6.1 Sol
+    released_at: "2026-09-29"
     model_kind: chat
     model_class: agentic
-    context_window: 1000000
-    modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
-    # Verified via live API 400: this generation dropped `minimal`, added `none`/`xhigh`.
-    reasoning_efforts: [none, low, medium, high, xhigh]
-    pricing:
-      input_per_1m_tokens: 2.50
-      cached_input_per_1m_tokens: 0.25
-      output_per_1m_tokens: 15.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://openai.com/api/pricing
-
-  # GPT-5.4 pro: OpenAI docs — structured outputs not supported; long-context surcharges match GPT-5.4 above 272K input.
-  - id: openai:gpt-5.4-pro
-    provider_id: openai
-    display_name: GPT-5.4 pro
-    released_at: "2026-03-05"
-    model_kind: chat
-    model_class: reasoning
     context_window: 1050000
     modalities: [text, image_in]
-    features: [tools, parallel_tools, streaming, json_mode, reasoning]
-    # Pro tier — `high` only (verify against OpenAI docs); sub-high levels clamp up.
-    reasoning_efforts: [high]
-    notes: Pro tier; structured outputs not supported per OpenAI docs. Responses API–centric for advanced flows; prompts with >272K input tokens use 2x input and 1.5x output for the full session (same long-context rule as GPT-5.4).
-    pricing:
-      input_per_1m_tokens: 30.00
-      output_per_1m_tokens: 180.00
-      pricing_updated_at: "2026-05-18"
-      pricing_source: https://developers.openai.com/api/docs/models/gpt-5.4-pro
-
-  - id: openai:gpt-5.4-mini
-    provider_id: openai
-    display_name: GPT-5.4 mini
-    released_at: "2026-03-17"
-    model_kind: chat
-    model_class: fast
-    context_window: 400000
-    modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
-    reasoning_efforts: [none, low, medium, high, xhigh]
+    # Like Astra, 6.1 Sol has no `none` effort: ThinkingLevel "off" leaves the model default (medium).
+    reasoning_efforts: [low, medium, high, xhigh, max]
+    notes: Replaces gpt-6-sol (same price, cheaper cache reads). Tool calling only through the Responses API.
     pricing:
-      input_per_1m_tokens: 0.75
-      cached_input_per_1m_tokens: 0.075
-      output_per_1m_tokens: 4.50
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://openai.com/api/pricing
-
-  - id: openai:gpt-5.4-nano
-    provider_id: openai
-    display_name: GPT-5.4 nano
-    released_at: "2026-03-17"
-    model_kind: chat
-    model_class: fast
-    context_window: 400000
-    modalities: [text, image_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    reasoning_efforts: [none, low, medium, high, xhigh]
-    pricing:
-      input_per_1m_tokens: 0.20
-      cached_input_per_1m_tokens: 0.02
-      output_per_1m_tokens: 1.25
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://openai.com/api/pricing
-
-  # Prior GPT-5 generation (API ids gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-pro). OpenAI recommends newer GPT-5.x for new work.
-  - id: openai:gpt-5
-    provider_id: openai
-    display_name: GPT-5
-    released_at: "2025-08-07"
-    model_kind: chat
-    model_class: reasoning
-    context_window: 400000
-    modalities: [text, image_in]
-    features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
-    # GPT-5.0 generation effort scale (minimal–high); no `none`/`xhigh` (those are GPT-5.4+).
-    reasoning_efforts: [minimal, low, medium, high]
-    notes: Previous-gen reasoning model; OpenAI points new projects to GPT-5.1+ (see latest model guide). reasoning.effort minimal–high.
-    pricing:
-      input_per_1m_tokens: 1.25
-      cached_input_per_1m_tokens: 0.125
+      input_per_1m_tokens: 2.00
+      cached_input_per_1m_tokens: 0.10
       output_per_1m_tokens: 10.00
-      pricing_updated_at: "2026-05-18"
-      pricing_source: https://developers.openai.com/api/docs/models/gpt-5
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-6.1-sol
 
-  - id: openai:gpt-5-mini
+  - id: openai:gpt-6.1-terra
     provider_id: openai
-    display_name: GPT-5 mini
-    released_at: "2025-08-07"
+    display_name: GPT-6.1 Terra
+    released_at: "2026-10-26"
     model_kind: chat
-    model_class: fast
-    context_window: 400000
+    model_class: balanced
+    context_window: 1050000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
-    reasoning_efforts: [minimal, low, medium, high]
-    notes: Cost/latency tier vs GPT-5; OpenAI recommends GPT-5.4 mini for new high-volume workloads.
+    reasoning_efforts: [none, low, medium, high, xhigh, max]
+    notes: Mid tier ("mini" class). Tool calling only through the Responses API.
     pricing:
-      input_per_1m_tokens: 0.25
-      cached_input_per_1m_tokens: 0.025
-      output_per_1m_tokens: 2.00
-      pricing_updated_at: "2026-05-18"
-      pricing_source: https://developers.openai.com/api/docs/models/gpt-5-mini
+      input_per_1m_tokens: 1.00
+      cached_input_per_1m_tokens: 0.05
+      output_per_1m_tokens: 5.00
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-6.1-terra
 
-  - id: openai:gpt-5-nano
+  - id: openai:gpt-6-luna
     provider_id: openai
-    display_name: GPT-5 nano
-    released_at: "2025-08-07"
+    display_name: GPT-6 Luna
+    released_at: "2026-09-22"
     model_kind: chat
     model_class: fast
-    context_window: 400000
-    modalities: [text, image_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    reasoning_efforts: [minimal, low, medium, high]
-    notes: Fastest/cheapest GPT-5 variant; OpenAI recommends GPT-5.4 nano for new speed-sensitive workloads.
-    pricing:
-      input_per_1m_tokens: 0.05
-      cached_input_per_1m_tokens: 0.005
-      output_per_1m_tokens: 0.40
-      pricing_updated_at: "2026-05-18"
-      pricing_source: https://developers.openai.com/api/docs/models/gpt-5-nano
-
-  - id: openai:gpt-5-pro
-    provider_id: openai
-    display_name: GPT-5 pro
-    released_at: "2025-08-07"
-    model_kind: chat
-    model_class: reasoning
-    context_window: 400000
+    context_window: 1050000
     modalities: [text, image_in]
     features: [tools, structured_output, parallel_tools, streaming, json_mode, reasoning]
-    # Highest-compute GPT-5; accepts `high` only (per OpenAI docs). Sub-high levels clamp up to high.
-    reasoning_efforts: [high]
-    notes: Highest-compute GPT-5; defaults to reasoning.effort high only. Oriented to Responses API; long requests may need background mode. Cached-input tier not listed on model pricing table — verify vendor.
+    reasoning_efforts: [none, low, medium, high, xhigh, max]
+    notes: Fastest / cheapest tier ("nano" class).
     pricing:
-      input_per_1m_tokens: 15.00
-      output_per_1m_tokens: 120.00
-      pricing_updated_at: "2026-05-18"
-      pricing_source: https://developers.openai.com/api/docs/models/gpt-5-pro
+      input_per_1m_tokens: 0.10
+      cached_input_per_1m_tokens: 0.01
+      output_per_1m_tokens: 0.50
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-6-luna
 
-  - id: openai:gpt-image-2
+  # Image generation (not implemented as an ImageGenProvider yet — listed for reference/pricing).
+  - id: openai:gpt-image-2.6-sunburst
     provider_id: openai
-    display_name: GPT Image 2
-    released_at: "2026-04-21"
+    display_name: GPT Image 2.6 Sunburst
+    released_at: "2026-11-04"
     model_kind: image_gen
     modalities: [text, image_in, image_out]
     features: []
-    notes: Image generation/editing; rates below are image-token list prices — verify modality mix on OpenAI pricing.
+    notes: Image generation/editing; adds complexity setting, markup-guided edits, SVG and animated GIF output. Text input $5/MTok; rates below are image-token prices.
     pricing:
       input_per_1m_tokens: 8.00
       cached_input_per_1m_tokens: 2.00
       output_per_1m_tokens: 30.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://openai.com/api/pricing
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst
+
+  - id: openai:gpt-image-2.6-flare
+    provider_id: openai
+    display_name: GPT Image 2.6 Flare
+    released_at: "2026-11-04"
+    model_kind: image_gen
+    modalities: [text, image_in, image_out]
+    features: []
+    notes: Fast variant of GPT Image 2.6 Sunburst; same token rates.
+    pricing:
+      input_per_1m_tokens: 8.00
+      cached_input_per_1m_tokens: 2.00
+      output_per_1m_tokens: 30.00
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-image-2.6-flare
 
   # OpenAI speech / TTS. Token fields = vendor list price. estimated_usd_per_1k_chars_speech = table estimate
   # for ~1k chars of script → speech (gpt-4o-mini: 250 in-tok @ $/MTok + ~6 audio tok per in-tok; tts-1/tts-1-hd: $/M char rate).
+  # All three shut down Jan 6, 2027 and OpenAI has NO /v1/audio/speech successor (its replacement,
+  # gpt-realtime-2.1-mini, is Realtime-API only). Kept until Hiro picks a replacement path.
   - id: openai:gpt-4o-mini-tts
     provider_id: openai
     display_name: GPT-4o mini TTS
@@ -403,13 +321,14 @@ models:
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
-    notes: Supports optional instructions (style) in API; max ~2k input tokens per vendor docs.
+    deprecated_since: "2026-10-01"
+    notes: Shuts down Jan 6, 2027 (no Speech-API successor). Supports optional instructions (style); max ~2k input tokens.
     pricing:
       input_per_1m_tokens: 0.60
       output_per_1m_tokens: 12.00
       estimated_usd_per_1k_chars_speech: 0.018
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://openai.com/api/pricing
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/pricing
 
   - id: openai:tts-1
     provider_id: openai
@@ -418,13 +337,14 @@ models:
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
-    notes: Latency-optimized speech; voice set smaller than gpt-4o-mini-tts on some tiers (see text-to-speech guide).
+    deprecated_since: "2026-10-01"
+    notes: Shuts down Jan 6, 2027 (no Speech-API successor). Latency-optimized; no style instructions.
     pricing:
       per_character: 0.000015
       output_per_1m_tokens: 15.00
       estimated_usd_per_1k_chars_speech: 0.015
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://openai.com/api/pricing
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/pricing
 
   - id: openai:tts-1-hd
     provider_id: openai
@@ -433,58 +353,29 @@ models:
     model_kind: tts
     modalities: [text, audio_out]
     features: [streaming]
-    notes: Higher-quality than tts-1; same /v1/audio/speech endpoint.
+    deprecated_since: "2026-10-01"
+    notes: Shuts down Jan 6, 2027 (no Speech-API successor). Higher quality than tts-1; no style instructions.
     pricing:
       per_character: 0.00003
       output_per_1m_tokens: 30.00
       estimated_usd_per_1k_chars_speech: 0.03
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://openai.com/api/pricing
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/pricing
 
-  - id: openai:gpt-4o-transcribe
+  # Replaced gpt-4o-transcribe / -mini / -diarize and whisper-1 (all shut down Feb 26, 2027).
+  # Billed per minute ($0.0045/min) → per_second; language hint is `languages` (list).
+  - id: openai:gpt-transcribe
     provider_id: openai
-    display_name: GPT-4o Transcribe
-    released_at: "2025-03-20"
+    display_name: GPT Transcribe
+    released_at: "2026-07-28"
     model_kind: stt
     modalities: [audio_in, text]
     features: []
-    # Token-based metering (preferred): audio_input + output per 1M tokens (docs/model_pricing.md).
-    # ``per_second`` is kept as a duration-based fallback when provider usage is unavailable.
+    notes: Same /v1/audio/transcriptions endpoint; 25 MB file limit; supports keyword and context hints.
     pricing:
-      per_second: 0.0001
-      input_per_1m_tokens: 2.50
-      output_per_1m_tokens: 10.00
-      pricing_updated_at: "2026-03-27"
-      pricing_source: https://openai.com/api/pricing
-
-  - id: openai:gpt-4o-mini-transcribe
-    provider_id: openai
-    display_name: GPT-4o mini Transcribe
-    released_at: "2025-03-20"
-    model_kind: stt
-    model_class: fast
-    modalities: [audio_in, text]
-    features: []
-    # Token-based metering (preferred); ``per_second`` kept as the duration fallback.
-    pricing:
-      per_second: 0.00005
-      input_per_1m_tokens: 1.25
-      output_per_1m_tokens: 5.00
-      pricing_updated_at: "2026-03-27"
-      pricing_source: https://openai.com/api/pricing
-
-  - id: openai:gpt-4o-transcribe-diarize
-    provider_id: openai
-    display_name: GPT-4o Transcribe (diarization)
-    released_at: "2025-10-15"
-    model_kind: stt
-    modalities: [audio_in, text]
-    features: []
-    notes: Speaker segmentation; same API family as gpt-4o-transcribe.
-    pricing:
-      per_second: 0.00012
-      pricing_updated_at: "2026-03-27"
-      pricing_source: https://openai.com/api/pricing
+      per_second: 0.000075
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://developers.openai.com/api/docs/models/gpt-transcribe
 
   - id: openai:text-embedding-3-small
     provider_id: openai
@@ -500,136 +391,76 @@ models:
       pricing_updated_at: "2026-03-27"
       pricing_source: https://openai.com/api/pricing
 
-  # --- Google Gemini (stable + current preview; ai.google.dev/gemini-api/docs/models) ---
-  - id: google:gemini-2.5-flash-lite
+  # --- Google Gemini (aistudio.google.com/docs/models; checked 2026-11-06) ---
+  # Current lineup only. 2.5 Pro / Flash auto-route to 3.x models on Dec 1, 2026; 3.5 Flash already
+  # routes to 3.6 Flash; 3.1 Flash-Lite preview is shut down. Thinking is set with `thinking_level`
+  # (values differ per model — reasoning_efforts below); these models cannot turn thinking fully off.
+  # temperature / top_p / top_k are deprecated (ignored, future 400) and are never sent.
+  # Audio-input rates are not published for these rows; audio_input_per_1m_tokens is a 2x-text
+  # estimate (the ratio of the earlier 3.x rows) — verify on the pricing page.
+  - id: google:gemini-4-argon
     provider_id: google
-    display_name: Gemini 2.5 Flash-Lite
-    released_at: "2025-07-22"
-    model_kind: chat
-    model_class: fast
-    context_window: 1048576
-    modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    pricing:
-      input_per_1m_tokens: 0.04
-      cached_input_per_1m_tokens: 0.01
-      output_per_1m_tokens: 0.15
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-flash-lite
-
-  - id: google:gemini-2.5-flash
-    provider_id: google
-    display_name: Gemini 2.5 Flash
-    released_at: "2025-06-17"
-    model_kind: chat
-    extra_kinds: [stt]
-    model_class: balanced
-    context_window: 1048576
-    modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    pricing:
-      input_per_1m_tokens: 0.075
-      cached_input_per_1m_tokens: 0.03
-      output_per_1m_tokens: 0.30
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-flash
-
-  - id: google:gemini-2.5-pro
-    provider_id: google
-    display_name: Gemini 2.5 Pro
-    released_at: "2025-06-17"
-    model_kind: chat
-    model_class: agentic
-    context_window: 1048576
-    modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    pricing:
-      input_per_1m_tokens: 1.25
-      cached_input_per_1m_tokens: 0.125
-      output_per_1m_tokens: 10.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-pro
-
-  - id: google:gemini-3-flash-preview
-    provider_id: google
-    display_name: Gemini 3 Flash Preview
-    released_at: "2025-12-17"
-    model_kind: chat
-    extra_kinds: [stt]
-    model_class: balanced
-    context_window: 1048576
-    modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    notes: Preview model id may change; audio input billed higher per vendor pricing — see pricing page.
-    pricing:
-      input_per_1m_tokens: 0.50
-      cached_input_per_1m_tokens: 0.05
-      output_per_1m_tokens: 3.00
-      # STT audio input is billed higher than text input (docs/model_pricing.md).
-      audio_input_per_1m_tokens: 1.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3-flash-preview
-
-  - id: google:gemini-3.1-flash-lite-preview
-    provider_id: google
-    display_name: Gemini 3.1 Flash-Lite Preview
-    released_at: "2026-03-03"
-    model_kind: chat
-    extra_kinds: [stt]
-    model_class: fast
-    context_window: 1048576
-    modalities: [text, image_in, audio_in, video_in]
-    features: [tools, structured_output, streaming, json_mode, reasoning]
-    notes: Preview model id may change; audio input billed higher per vendor pricing — see pricing page.
-    pricing:
-      input_per_1m_tokens: 0.25
-      cached_input_per_1m_tokens: 0.025
-      output_per_1m_tokens: 1.50
-      # STT audio input is billed higher than text input (docs/model_pricing.md).
-      audio_input_per_1m_tokens: 0.50
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-flash-lite-preview
-
-  - id: google:gemini-3.1-pro-preview
-    provider_id: google
-    display_name: Gemini 3.1 Pro Preview
-    released_at: "2026-02-19"
+    display_name: Gemini 4 Argon
+    released_at: "2026-10-13"
     model_kind: chat
     model_class: reasoning
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
     features: [tools, structured_output, streaming, json_mode, reasoning]
-    notes: Preview model id may change; check Gemini release notes before production.
+    reasoning_efforts: [low, medium, high]
+    notes: >-
+      Gemini flagship. Input and output share the 1M window (default 64K output cap). Introductory
+      price below runs to Nov 30, 2026; from Dec 1 it is $4 / $0.20 / $20. No explicit caching, not on
+      the free tier; long generations need client timeouts of 15 minutes or more.
     pricing:
-      input_per_1m_tokens: 1.50
-      cached_input_per_1m_tokens: 0.20
-      output_per_1m_tokens: 12.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-pro-preview
+      input_per_1m_tokens: 2.00
+      cached_input_per_1m_tokens: 0.10
+      output_per_1m_tokens: 10.00
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://aistudio.google.com/docs/pricing
 
-  # Gemini 3.5 Flash — GA (no -preview suffix), launched at I/O 2026. Direct successor to
-  # gemini-3-flash-preview: same balanced chat + STT (audio-in) role, 1M context. Audio input
-  # is billed above text input; Google has not published a separate 3.5 audio rate, so the
-  # audio_input rate below mirrors the 2x ratio of the sibling 3.x rows (estimate — verify).
-  - id: google:gemini-3.5-flash
+  - id: google:gemini-3.8-flash
     provider_id: google
-    display_name: Gemini 3.5 Flash
-    released_at: "2026-05-19"
+    display_name: Gemini 3.8 Flash
+    released_at: "2026-09-02"
     model_kind: chat
     extra_kinds: [stt]
     model_class: balanced
     context_window: 1048576
     modalities: [text, image_in, audio_in, video_in]
     features: [tools, structured_output, streaming, json_mode, reasoning]
-    notes: GA (not preview). Adjustable thinking (minimal–high). Audio input billed higher than text — see pricing page; audio_input rate below is an estimate pending a published 3.5 figure.
+    # `minimal` returns an error on 3.8 Flash.
+    reasoning_efforts: [low, medium, high]
+    notes: Current Flash (default thinking medium). Introductory price below runs to Dec 31, 2026; from Jan 1, 2027 it is $1.50 / $0.15 / $7.50.
     pricing:
-      input_per_1m_tokens: 1.50
-      cached_input_per_1m_tokens: 0.15
-      output_per_1m_tokens: 9.00
-      # STT audio input billed higher than text (docs/model_pricing.md); 2x estimate (no published 3.5 rate).
-      audio_input_per_1m_tokens: 3.00
-      pricing_updated_at: "2026-06-24"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.5-flash
+      input_per_1m_tokens: 0.75
+      cached_input_per_1m_tokens: 0.075
+      output_per_1m_tokens: 3.75
+      # STT audio input billed higher than text (docs/model_pricing.md); 2x estimate (no published rate).
+      audio_input_per_1m_tokens: 1.50
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://aistudio.google.com/docs/pricing
+
+  - id: google:gemini-3.5-flash-lite
+    provider_id: google
+    display_name: Gemini 3.5 Flash-Lite
+    released_at: "2026-07-21"
+    model_kind: chat
+    extra_kinds: [stt]
+    model_class: fast
+    context_window: 1048576
+    modalities: [text, image_in, audio_in, video_in]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    reasoning_efforts: [minimal, low, medium, high]
+    notes: Cost-efficient, high-volume tier (default thinking minimal).
+    pricing:
+      input_per_1m_tokens: 0.30
+      cached_input_per_1m_tokens: 0.03
+      output_per_1m_tokens: 2.50
+      # STT audio input billed higher than text (docs/model_pricing.md); 2x estimate (no published rate).
+      audio_input_per_1m_tokens: 0.60
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://aistudio.google.com/docs/pricing
 
   - id: google:gemini-embedding-001
     provider_id: google
@@ -644,265 +475,161 @@ models:
       pricing_updated_at: "2026-03-27"
       pricing_source: https://ai.google.dev/gemini-api/docs/pricing
 
-  # Gemini TTS estimates: ~14 chars/sec speech, 25 audio tok/sec → audio tok ≈ (1000/14)*25 per 1k script chars; plus 250 text in-tok @ 4 chars/tok.
-  - id: google:gemini-3.1-flash-tts-preview
+  # Gemini 3.8 TTS (GA Sep 22, 2026; replaced the 3.1 / 2.5 preview TTS models, which shut down
+  # Nov 17, 2026). Same 30 prebuilt voices; 8,192 input tokens. Returns WAV; text is spoken verbatim
+  # and style goes in speech_metadata.style (handled in services/tts/gemini_provider.py).
+  # Estimate: ~14 chars/sec speech, 25 audio tok/sec → ≈1,786 audio tok per 1k script chars, plus
+  # 250 text in-tok @ 4 chars/tok. Prices below are introductory and double on Jan 1, 2027.
+  - id: google:gemini-3.8-flash-tts
     provider_id: google
-    display_name: Gemini 3.1 Flash TTS (preview)
-    released_at: "2026-04-16"
+    display_name: Gemini 3.8 Flash TTS
+    released_at: "2026-09-22"
     model_kind: tts
     modalities: [text, audio_out]
     features: []
-    notes: Preview; same generate_content + AUDIO path as other Gemini TTS model ids.
-    pricing:
-      input_per_1m_tokens: 1.00
-      output_per_1m_tokens: 20.00
-      estimated_usd_per_1k_chars_speech: 0.036
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.1-flash-tts-preview
-
-  - id: google:gemini-2.5-flash-preview-tts
-    provider_id: google
-    display_name: Gemini 2.5 Flash TTS (preview)
-    released_at: "2025-12-10"
-    model_kind: tts
-    modalities: [text, audio_out]
-    features: []
-    notes: Preview-only via Gemini API key path; verify model id in ai.google.dev docs before production.
+    notes: From Jan 1, 2027 $1 text in / $18 audio out per MTok. Supports voice design and voice replication.
     pricing:
       input_per_1m_tokens: 0.50
-      output_per_1m_tokens: 10.00
-      estimated_usd_per_1k_chars_speech: 0.018
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-flash-preview-tts
+      output_per_1m_tokens: 9.00
+      estimated_usd_per_1k_chars_speech: 0.016
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://aistudio.google.com/docs/pricing
 
-  - id: google:gemini-2.5-pro-preview-tts
+  - id: google:gemini-3.8-flash-lite-tts
     provider_id: google
-    display_name: Gemini 2.5 Pro TTS (preview)
-    released_at: "2025-09-30"
+    display_name: Gemini 3.8 Flash-Lite TTS
+    released_at: "2026-09-22"
     model_kind: tts
     modalities: [text, audio_out]
     features: []
-    notes: Preview; higher-quality / Pro tier per vendor docs — verify availability for your API key.
+    notes: Cheaper TTS tier. From Jan 1, 2027 $1 text in / $12 audio out per MTok.
     pricing:
-      input_per_1m_tokens: 1.00
-      output_per_1m_tokens: 20.00
-      estimated_usd_per_1k_chars_speech: 0.036
-      pricing_updated_at: "2026-05-03"
-      pricing_source: https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-pro-preview-tts
+      input_per_1m_tokens: 0.50
+      output_per_1m_tokens: 6.00
+      estimated_usd_per_1k_chars_speech: 0.011
+      pricing_updated_at: "2026-11-06"
+      pricing_source: https://aistudio.google.com/docs/pricing
 
-  # --- Anthropic Claude (platform.claude.com/docs/.../models/overview) ---
-  - id: anthropic:claude-sonnet-5
+  # --- Anthropic Claude (platform.claude.com/docs/en/about-claude/models/overview; checked 2026-11-06) ---
+  # Current lineup only. All four: 1M context, 128K max output, adaptive thinking steered by
+  # `effort` (low–max). None accepts temperature (and the 2.x SDK's API version rejects it on every
+  # model). thinking_off_type = how to switch up-front thinking off; Opus 5.5 / Fable 5.1 cannot.
+  - id: anthropic:claude-fable-5-1
     provider_id: anthropic
-    display_name: Claude Sonnet 5
-    released_at: "2026-06-30"
-    model_kind: chat
-    model_class: agentic
-    context_window: 1000000
-    modalities: [text, image_in]
-    features: [tools, structured_output, streaming, reasoning]
-    notes: Introductory pricing $2/$10 per MTok through 2026-08-31; standard $3/$15 thereafter. Adaptive thinking.
-    pricing:
-      input_per_1m_tokens: 3.00
-      cached_input_per_1m_tokens: 0.30
-      output_per_1m_tokens: 15.00
-      pricing_updated_at: "2026-07-07"
-      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
-
-  - id: anthropic:claude-fable-5
-    provider_id: anthropic
-    display_name: Claude Fable 5
-    released_at: "2026-06-09"
+    display_name: Claude Fable 5.1
+    released_at: "2026-09-01"
     model_kind: chat
     model_class: reasoning
     context_window: 1000000
     modalities: [text, image_in]
     features: [tools, structured_output, streaming, reasoning]
-    notes: Mythos-class GA model; adaptive thinking always on. Some high-risk topics may fall back to Opus 4.8 per vendor safeguards.
+    reasoning_efforts: [low, medium, high, xhigh, max]
+    notes: Most capable Claude model; adaptive thinking always on (default effort high).
     pricing:
       input_per_1m_tokens: 10.00
-      cached_input_per_1m_tokens: 1.00
+      cached_input_per_1m_tokens: 0.25
       output_per_1m_tokens: 50.00
-      pricing_updated_at: "2026-07-07"
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
-  - id: anthropic:claude-opus-4-8
+  - id: anthropic:claude-opus-5-5
     provider_id: anthropic
-    display_name: Claude Opus 4.8
-    released_at: "2026-05-28"
+    display_name: Claude Opus 5.5
+    released_at: "2026-09-22"
     model_kind: chat
     model_class: reasoning
     context_window: 1000000
     modalities: [text, image_in]
     features: [tools, structured_output, streaming, reasoning]
-    notes: Adaptive thinking; effort defaults to high on API. Fast mode available at premium rates.
+    reasoning_efforts: [low, medium, high, xhigh, max]
+    notes: Adaptive thinking always on (cannot be disabled; default effort medium). Rejects forced tool_choice.
     pricing:
-      input_per_1m_tokens: 5.00
-      cached_input_per_1m_tokens: 0.50
-      output_per_1m_tokens: 25.00
-      pricing_updated_at: "2026-07-07"
+      input_per_1m_tokens: 4.00
+      cached_input_per_1m_tokens: 0.20
+      output_per_1m_tokens: 20.00
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
-  - id: anthropic:claude-opus-4-7
+  - id: anthropic:claude-sonnet-5-5
     provider_id: anthropic
-    display_name: Claude Opus 4.7
-    released_at: "2026-04-16"
-    model_kind: chat
-    model_class: reasoning
-    context_window: 1000000
-    modalities: [text, image_in]
-    features: [tools, structured_output, streaming, reasoning]
-    notes: Adaptive thinking. Fast mode available at premium rates (deprecated 2026-07-24).
-    pricing:
-      input_per_1m_tokens: 5.00
-      cached_input_per_1m_tokens: 0.50
-      output_per_1m_tokens: 25.00
-      pricing_updated_at: "2026-07-07"
-      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
-
-  - id: anthropic:claude-opus-4-6
-    provider_id: anthropic
-    display_name: Claude Opus 4.6
-    released_at: "2026-02-05"
-    model_kind: chat
-    model_class: reasoning
-    context_window: 1000000
-    modalities: [text, image_in]
-    features: [tools, structured_output, streaming, reasoning]
-    pricing:
-      input_per_1m_tokens: 5.00
-      cached_input_per_1m_tokens: 0.50
-      output_per_1m_tokens: 25.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
-
-  - id: anthropic:claude-sonnet-4-6
-    provider_id: anthropic
-    display_name: Claude Sonnet 4.6
-    released_at: "2026-02-17"
+    display_name: Claude Sonnet 5.5
+    released_at: "2026-09-28"
     model_kind: chat
     model_class: agentic
     context_window: 1000000
     modalities: [text, image_in]
-    features: [tools, structured_output, streaming]
-    pricing:
-      input_per_1m_tokens: 3.00
-      cached_input_per_1m_tokens: 0.30
-      output_per_1m_tokens: 15.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
-
-  - id: anthropic:claude-opus-4-5-20251101
-    provider_id: anthropic
-    display_name: Claude Opus 4.5
-    released_at: "2025-11-24"
-    model_kind: chat
-    model_class: reasoning
-    context_window: 200000
-    modalities: [text, image_in]
     features: [tools, structured_output, streaming, reasoning]
-    notes: Alias claude-opus-4-5 may also work in the API; snapshot id is stable.
+    reasoning_efforts: [low, medium, high, xhigh, max]
+    # Rejects "disabled"; its lowest setting is between_tools (turns off up-front thinking).
+    thinking_off_type: between_tools
+    notes: Adaptive thinking (default effort high). Rejects forced tool_choice.
     pricing:
-      input_per_1m_tokens: 5.00
-      cached_input_per_1m_tokens: 0.50
-      output_per_1m_tokens: 25.00
-      pricing_updated_at: "2026-07-07"
+      input_per_1m_tokens: 2.00
+      cached_input_per_1m_tokens: 0.10
+      output_per_1m_tokens: 10.00
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
-  - id: anthropic:claude-haiku-4-5-20251001
+  - id: anthropic:claude-haiku-5-5
     provider_id: anthropic
-    display_name: Claude Haiku 4.5
-    released_at: "2025-10-15"
+    display_name: Claude Haiku 5.5
+    released_at: "2026-10-07"
     model_kind: chat
     model_class: fast
-    context_window: 200000
-    modalities: [text, image_in]
-    features: [tools, structured_output, streaming]
-    notes: Alias claude-haiku-4-5 may also work in the API; snapshot id is stable.
-    pricing:
-      input_per_1m_tokens: 1.00
-      cached_input_per_1m_tokens: 0.10
-      output_per_1m_tokens: 5.00
-      pricing_updated_at: "2026-05-14"
-      pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
-
-  - id: anthropic:claude-sonnet-4-5-20250929
-    provider_id: anthropic
-    display_name: Claude Sonnet 4.5
-    released_at: "2025-09-29"
-    model_kind: chat
-    model_class: agentic
-    context_window: 200000
+    context_window: 1000000
     modalities: [text, image_in]
     features: [tools, structured_output, streaming, reasoning]
-    notes: Alias claude-sonnet-4-5 may also work in the API; snapshot id is stable.
+    reasoning_efforts: [low, medium, high, xhigh, max]
+    thinking_off_type: disabled
+    notes: Fastest Claude (default effort medium). Prices below are for prompts up to 100K tokens; above that $0.50 / $0.05 / $2.50.
     pricing:
-      input_per_1m_tokens: 3.00
-      cached_input_per_1m_tokens: 0.30
-      output_per_1m_tokens: 15.00
-      pricing_updated_at: "2026-07-07"
+      input_per_1m_tokens: 0.10
+      cached_input_per_1m_tokens: 0.01
+      output_per_1m_tokens: 0.50
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
 
-  # --- DeepSeek V4 (api-docs.deepseek.com; OpenAI-compatible). Dual-mode: thinking
-  #     toggled via extra_body.thinking; structured output via function calling. ---
-  - id: deepseek:deepseek-v4-flash
+  # --- DeepSeek (api-docs.deepseek.com; OpenAI-compatible; checked 2026-11-06). Dual-mode: thinking
+  #     toggled via extra_body.thinking; reasoning_effort none/low/high/max. Prices below are the
+  #     PEAK rate (01:00–04:00 and 06:00–10:00 UTC, Mon–Fri); off-peak is half. Thinking mode
+  #     rejects forced tool_choice (structured output falls back to json_mode). ---
+  - id: deepseek:deepseek-flash
     provider_id: deepseek
-    display_name: DeepSeek V4 Flash
-    released_at: "2026-04-24"
+    display_name: DeepSeek Flash (V4.1)
+    released_at: "2026-09-10"
     model_kind: chat
     model_class: fast
     context_window: 1048576
-    modalities: [text]
+    modalities: [text, image_in]
     features: [tools, structured_output, streaming, json_mode, reasoning]
-    notes: Fast/economical tier (284B total / 13B active). 1M context, up to 131K output. Thinking mode ignores temperature.
+    reasoning_efforts: [low, high, max]
+    notes: Replaced deepseek-v4-flash (old name still served temporarily). 1M context, up to 384K output; adds vision. Thinking mode ignores temperature.
     pricing:
-      input_per_1m_tokens: 0.14
-      cached_input_per_1m_tokens: 0.0028
-      output_per_1m_tokens: 0.28
-      pricing_updated_at: "2026-06-10"
+      input_per_1m_tokens: 0.30
+      cached_input_per_1m_tokens: 0.006
+      output_per_1m_tokens: 1.20
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://api-docs.deepseek.com/quick_start/pricing
 
   - id: deepseek:deepseek-v4-pro
     provider_id: deepseek
     display_name: DeepSeek V4 Pro
-    released_at: "2026-04-24"
+    released_at: "2026-08-13"
     model_kind: chat
     model_class: reasoning
     context_window: 1048576
     modalities: [text]
     features: [tools, structured_output, streaming, json_mode, reasoning]
-    notes: Frontier tier (1.6T total / 49B active). 1M context, up to 384K output. Thinking mode ignores temperature.
+    reasoning_efforts: [low, high, max]
+    notes: Frontier tier (V4-Pro-0813). 1M context, up to 384K output, text only. Thinking mode ignores temperature.
     pricing:
-      input_per_1m_tokens: 0.435
-      cached_input_per_1m_tokens: 0.003625
-      output_per_1m_tokens: 0.87
-      pricing_updated_at: "2026-06-10"
+      input_per_1m_tokens: 1.32
+      cached_input_per_1m_tokens: 0.044
+      output_per_1m_tokens: 3.96
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://api-docs.deepseek.com/quick_start/pricing
 
   # --- Local: Ollama (library names; pull the tag you use) ---
-  - id: ollama:llama3.2
-    provider_id: ollama
-    display_name: Llama 3.2
-    released_at: "2024-09-25"
-    model_kind: chat
-    model_class: balanced
-    context_window: 131072
-    modalities: [text]
-    features: [tools, streaming]
-    tags: [open_weights]
-    notes: Common default-sized instruct model; use llama3.3 for larger workloads if pulled.
-
-  - id: ollama:llama3.3
-    provider_id: ollama
-    display_name: Llama 3.3
-    released_at: "2024-12-06"
-    model_kind: chat
-    model_class: agentic
-    context_window: 131072
-    modalities: [text]
-    features: [tools, streaming]
-    tags: [open_weights]
-    notes: Heavier checkpoint; verify VRAM before using as default.
-
   # Gemma 4 (Google open-weights, Apache 2.0; released 2026-04-02). Configurable thinking is a
   # binary on/off toggle in Ollama (the `<|think|>` system token → ChatOllama `reasoning` bool),
   # not graded effort — our ThinkingLevel collapses to on/off here. Native tool calling + JSON
@@ -956,6 +683,18 @@ models:
     tags: [open_weights]
     notes: 30.7B dense; 256K context. Heaviest / highest quality — verify VRAM.
 
+  # Qwen 3.8 (27B dense, ~18 GB). Vision, tools and binary thinking toggle like Gemma 4.
+  - id: ollama:qwen3.8
+    provider_id: ollama
+    display_name: Qwen 3.8 27B
+    model_kind: chat
+    model_class: agentic
+    context_window: 262144
+    modalities: [text, image]
+    features: [tools, structured_output, streaming, json_mode, reasoning]
+    tags: [open_weights]
+    notes: 27B dense, about 18 GB; 256K context. Verify VRAM before raising num_ctx toward the full window.
+
   - id: ollama:nomic-embed-text
     provider_id: ollama
     display_name: nomic-embed-text
@@ -992,85 +731,71 @@ models:
   # Voyage: processed tokens = (query_tokens × num_docs) + sum(doc tokens); 200M free tokens/account.
   #   per_1k_tokens / input_per_1m_tokens = list price per processed token; estimated_usd_per_request =
   #   vendor table (100 docs; query + each document token count sums to 500).
-  # Cohere: billed per search unit (1 query + up to 100 docs; docs >500 tokens split into chunks).
-  - id: voyage:rerank-2.5
+  # Cohere Rerank 5 is billed per token (Rerank 4 was per search unit).
+  - id: voyage:rerank-3
     provider_id: voyage
-    display_name: Voyage rerank-2.5
-    released_at: "2025-08-11"
+    display_name: Voyage rerank-3
+    released_at: "2026-09-30"
     model_kind: rerank
     context_window: 32000
     modalities: [text]
     features: [multilingual]
     tags: [reranker]
-    notes: Latest Voyage generalist reranker; instruction-following; 32K context; 200M free processed tokens/account. Use rerank-2.5-lite for lower cost/latency.
+    notes: Current Voyage generalist reranker (query up to 8K tokens); 32K context; 200M free processed tokens/account. Use rerank-3-lite for lower cost/latency. Release date from the dated snapshot id.
     pricing:
       per_1k_tokens: 0.00005
       input_per_1m_tokens: 0.05
       estimated_usd_per_request: 0.0025
-      pricing_updated_at: "2026-05-30"
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://docs.voyageai.com/docs/pricing
 
-  - id: voyage:rerank-2.5-lite
+  - id: voyage:rerank-3-lite
     provider_id: voyage
-    display_name: Voyage rerank-2.5-lite
-    released_at: "2025-08-11"
+    display_name: Voyage rerank-3-lite
+    released_at: "2026-09-30"
     model_kind: rerank
     context_window: 32000
     modalities: [text]
     features: [multilingual]
     tags: [reranker]
-    notes: Latency/cost-balanced sibling of rerank-2.5; same 32K context; 200M free processed tokens/account.
+    notes: Latency/cost-balanced sibling of rerank-3; same 32K context; 200M free processed tokens/account.
     pricing:
       per_1k_tokens: 0.00002
       input_per_1m_tokens: 0.02
       estimated_usd_per_request: 0.001
-      pricing_updated_at: "2026-05-30"
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://docs.voyageai.com/docs/pricing
 
-  - id: cohere:rerank-v4.0-pro
+  - id: cohere:rerank-v5.0-pro
     provider_id: cohere
-    display_name: Cohere Rerank 4.0 Pro
-    released_at: "2026-04-06"
+    display_name: Cohere Rerank 5.0 Pro
+    released_at: "2026-10-21"
     model_kind: rerank
-    context_window: 32000
+    context_window: 32768
     modalities: [text]
     features: [multilingual]
     tags: [reranker]
-    notes: State-of-the-art multilingual reranker; semi-structured/JSON docs; 32K context.
+    notes: Latest Cohere reranker; 100+ languages, JSON/table/YAML documents, calibrated scores. Per-token price is from third-party listings (cohere.com/pricing shows no rerank rates) — verify before billing.
     pricing:
-      estimated_usd_per_1k_searches: 2.50
-      pricing_updated_at: "2026-05-30"
+      per_1k_tokens: 0.00005
+      input_per_1m_tokens: 0.05
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://cohere.com/pricing
 
-  - id: cohere:rerank-v4.0-fast
+  - id: cohere:rerank-v5.0-fast
     provider_id: cohere
-    display_name: Cohere Rerank 4.0 Fast
-    released_at: "2026-04-06"
+    display_name: Cohere Rerank 5.0 Fast
+    released_at: "2026-10-21"
     model_kind: rerank
-    context_window: 32000
+    context_window: 32768
     modalities: [text]
     features: [multilingual]
     tags: [reranker]
-    notes: Lower-latency v4 variant; same 32K context and JSON support.
+    notes: Lower-latency v5 variant (Cohere says it beats Rerank 4 Pro). Per-token price is from third-party listings — verify before billing.
     pricing:
-      estimated_usd_per_1k_searches: 2.00
-      pricing_updated_at: "2026-05-30"
-      pricing_source: https://cohere.com/pricing
-
-  - id: cohere:rerank-v3.5
-    provider_id: cohere
-    display_name: Cohere Rerank 3.5
-    released_at: "2024-12-01"
-    model_kind: rerank
-    context_window: 4096
-    modalities: [text]
-    features: [multilingual]
-    tags: [reranker]
-    replacement_id: cohere:rerank-v4.0-pro
-    notes: Prior generation (4K context). Prefer rerank-v4.0-pro for new work.
-    pricing:
-      estimated_usd_per_1k_searches: 2.00
-      pricing_updated_at: "2026-05-30"
+      per_1k_tokens: 0.00002
+      input_per_1m_tokens: 0.02
+      pricing_updated_at: "2026-11-06"
       pricing_source: https://cohere.com/pricing
 
   # --- Cloudflare Workers AI (developers.cloudflare.com/workers-ai/models) ---
