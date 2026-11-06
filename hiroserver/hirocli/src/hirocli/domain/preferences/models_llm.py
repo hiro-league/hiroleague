@@ -77,6 +77,38 @@ class LLMPreferences(BaseModel):
             "on server restart."
         ),
     )
+    # One timeout + retry policy for every cloud model call (chat, STT, TTS) on every provider.
+    # Before this, each SDK used its own: Gemini had NO timeout and 6 attempts (plus 4 more in our
+    # STT/TTS wrappers), so a Gemini 503 spell on 2026-11-06 left a chat turn waiting minutes.
+    # Applied in model_factory (chat) and the STT/TTS builders via model_http.ProviderCallPolicy.
+    # Local endpoints (Ollama, LM Studio) are excluded: a slow local model is not an outage.
+    request_timeout_s: int = pref_field(
+        advanced=True,
+        default=180,
+        ge=10,
+        le=1800,
+        step=10,
+        title="Provider response timeout (seconds)",
+        description=(
+            "How long to wait for a cloud model provider to answer (or to send the next part of a "
+            "streamed answer) before that attempt counts as failed. Applies to chat, "
+            "speech-to-text and text-to-speech on every cloud provider. Takes effect on server "
+            "restart."
+        ),
+    )
+    max_retries: int = pref_field(
+        advanced=True,
+        default=2,
+        ge=0,
+        le=6,
+        step=1,
+        title="Provider retries",
+        description=(
+            "How many times a failed or timed-out cloud model call (provider overloaded, rate "
+            "limited, network error) is retried before the error is reported. 0 = no retry. "
+            "Takes effect on server restart."
+        ),
+    )
     default_image_gen: str | None = pref_field(
         model_kind="chat",
         save_skip=True,

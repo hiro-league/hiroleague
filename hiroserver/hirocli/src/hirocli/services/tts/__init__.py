@@ -57,6 +57,7 @@ def create_tts_service(
     """
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.model_catalog import get_model_catalog
+    from hirocli.domain.model_http import ProviderCallPolicy
     from hirocli.domain.preferences import load_preferences, resolve_llm
     from hirocli.domain.workspace import workspace_id_for_path
 
@@ -69,6 +70,7 @@ def create_tts_service(
         return None
 
     cat = get_model_catalog()
+    policy = ProviderCallPolicy.from_prefs(prefs)
     providers: list[TTSProvider] = []
     # Phase 5: load every TTS provider the workspace has credentials for so character
     # voice_models can use a different vendor than llm.default_tts.
@@ -79,7 +81,8 @@ def create_tts_service(
             m.supports_kind("tts") for m in cat.list_models(provider_id=provider_id)
         ):
             continue
-        inst = cls(api_key=store.get_api_key(provider_id))
+        # Workspace timeout/retry policy (llm.request_timeout_s / max_retries).
+        inst = cls(api_key=store.get_api_key(provider_id), policy=policy)
         if inst.is_available():
             providers.append(inst)
 

@@ -21,6 +21,7 @@ from typing import Any
 
 from hiro_commons.llm_usage import modality_token_count
 from hiro_commons.log import Logger
+from hirocli.domain.model_http import ProviderCallPolicy, gemini_single_attempt_http_options
 
 from .provider import ModelInfo, STTProvider, TranscriptionResult
 
@@ -98,8 +99,13 @@ class GeminiSTTProvider(STTProvider):
     Retries on transient errors with exponential backoff.
     """
 
-    def __init__(self, *, api_key: str | None = None) -> None:
+    def __init__(
+        self, *, api_key: str | None = None, policy: ProviderCallPolicy | None = None
+    ) -> None:
         self._api_key = api_key
+        # Workspace timeout/retry policy (llm.request_timeout_s / max_retries); was a fixed 4
+        # tenacity attempts stacked on the SDK's own retries, with no timeout on Gemini.
+        self._policy = policy or ProviderCallPolicy()
 
     @property
     def name(self) -> str:
@@ -144,7 +150,11 @@ class GeminiSTTProvider(STTProvider):
         effective_model = model or _DEFAULT_MODEL
         effective_prompt = prompt or _TRANSCRIPTION_PROMPT
 
-        client = genai.Client(api_key=self._api_key)
+        # Policy timeout; the SDK's own retry is off — the tenacity wrapper below is the one layer.
+        client = genai.Client(
+            api_key=self._api_key,
+            http_options=gemini_single_attempt_http_options(self._policy),
+        )
 
         log.info(
             "Transcribing via Gemini",
@@ -156,7 +166,7 @@ class GeminiSTTProvider(STTProvider):
         @retry(
             reraise=True,
             wait=wait_exponential(min=1, max=20, multiplier=2),
-            stop=stop_after_attempt(4),
+            stop=stop_after_attempt(self._policy.attempts),
         )
         async def _call():
             return await client.aio.models.generate_content(

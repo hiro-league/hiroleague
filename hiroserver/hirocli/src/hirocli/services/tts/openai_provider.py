@@ -18,6 +18,7 @@ from __future__ import annotations
 import time
 
 from hiro_commons.log import Logger
+from hirocli.domain.model_http import ProviderCallPolicy
 
 from .provider import TTSModelInfo, TTSProvider, TTSResult
 
@@ -60,8 +61,13 @@ class OpenAITTSProvider(TTSProvider):
     Retries on transient RateLimitError / APIError with exponential backoff.
     """
 
-    def __init__(self, *, api_key: str | None = None) -> None:
+    def __init__(
+        self, *, api_key: str | None = None, policy: ProviderCallPolicy | None = None
+    ) -> None:
         self._api_key = api_key
+        # Workspace timeout/retry policy (llm.request_timeout_s / max_retries); was a fixed 4
+        # tenacity attempts stacked on the SDK's own retries, with no timeout on Gemini.
+        self._policy = policy or ProviderCallPolicy()
 
     @property
     def name(self) -> str:
@@ -103,7 +109,10 @@ class OpenAITTSProvider(TTSProvider):
         effective_model = model or _DEFAULT_MODEL
         effective_voice = voice or _DEFAULT_VOICE
 
-        client = AsyncOpenAI(api_key=self._api_key)
+        # Policy timeout; SDK retries off (max_retries=0) — the tenacity wrapper below retries.
+        client = AsyncOpenAI(
+            api_key=self._api_key, timeout=self._policy.timeout_s, max_retries=0
+        )
 
         log.info(
             "Synthesizing via OpenAI",
@@ -116,7 +125,7 @@ class OpenAITTSProvider(TTSProvider):
         @retry(
             reraise=True,
             wait=wait_exponential(min=1, max=20, multiplier=2),
-            stop=stop_after_attempt(4),
+            stop=stop_after_attempt(self._policy.attempts),
             retry=lambda exc: isinstance(exc, (RateLimitError, APIError)),
         )
         async def _call() -> bytes:

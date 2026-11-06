@@ -17,6 +17,14 @@ export type DefaultEmbedderModel = string | null;
  * How long idle HTTPS connections to model providers (OpenAI, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.
  */
 export type ProviderConnectionKeepaliveSeconds = number;
+/**
+ * How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat, speech-to-text and text-to-speech on every cloud provider. Takes effect on server restart.
+ */
+export type ProviderResponseTimeoutSeconds = number;
+/**
+ * How many times a failed or timed-out cloud model call (provider overloaded, rate limited, network error) is retried before the error is reported. 0 = no retry. Takes effect on server restart.
+ */
+export type ProviderRetries = number;
 export type DefaultImageGen = string | null;
 export type DefaultChatModelProfile = string;
 export type DefaultImageProfile = string;
@@ -333,6 +341,8 @@ export interface LLMPreferences {
   default_reranker: DefaultRerankerModel;
   default_embedder: DefaultEmbedderModel;
   http_keepalive_s: ProviderConnectionKeepaliveSeconds;
+  request_timeout_s: ProviderResponseTimeoutSeconds;
+  max_retries: ProviderRetries;
   default_image_gen: DefaultImageGen;
   default_tuning_profile: DefaultChatModelProfile;
   default_image_profile: DefaultImageProfile;

@@ -600,3 +600,72 @@ def test_openai_chat_model_gets_warm_keepalive_http_clients(
     # The async client is the chat hot path (langchain streams over it); assert the pool keepalive.
     pool = model.http_async_client._transport._pool
     assert pool._keepalive_expiry == KEEPALIVE_EXPIRY_S
+
+
+def _store_with_keys(tmp_path: Path, wid: str) -> CredentialStore:
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    for pid, key in (("openai", "sk-t"), ("google", "gk-t"), ("anthropic", "ak-t"), ("deepseek", "dk-t")):
+        store.set_api_key(pid, key)
+    return store
+
+
+def test_cloud_chat_models_use_the_workspace_timeout_and_retry_prefs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llm.request_timeout_s / llm.max_retries reach every cloud chat provider (one policy, not each
+    SDK's own default — Gemini's was no timeout + 6 attempts)."""
+    from hirocli.domain.preferences import WorkspacePreferences
+    from hirocli.domain.preferences.io import save_preferences
+
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = _store_with_keys(tmp_path, wid)
+    prefs = WorkspacePreferences()
+    prefs.llm.request_timeout_s = 45
+    prefs.llm.max_retries = 1
+    save_preferences(tmp_path, prefs)
+
+    def build(mid: str):
+        return create_chat_model(mid, workspace_path=tmp_path, credential_store=store)
+
+    google = build("google:gemini-3.8-flash")
+    assert google.timeout == 45
+    assert google.max_retries == 2  # google-genai counts attempts, first try included
+
+    claude = build("anthropic:claude-sonnet-5-5")
+    assert claude.default_request_timeout == 45
+    assert claude.max_retries == 1
+
+    for mid in ("openai:gpt-6.1-terra", "deepseek:deepseek-flash"):
+        m = build(mid)
+        assert m.max_retries == 1, mid
+        assert m.http_async_client.timeout.read == 45, mid
+
+
+def test_cloud_chat_policy_defaults_without_prefs_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = _store_with_keys(tmp_path, wid)
+
+    google = create_chat_model("google:gemini-3.8-flash", workspace_path=tmp_path, credential_store=store)
+    assert google.timeout == 180
+    assert google.max_retries == 3
+
+
+def test_with_structured_output_compat_anthropic_uses_native_json_schema() -> None:
+    """Claude 5.x rejects forced tool_choice, so the tool-calling method can come back as plain text;
+    the helper asks for Claude's native structured outputs (method=json_schema) instead."""
+
+    class ChatAnthropic:  # noqa: N801 — the helper keys on this class name.
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def with_structured_output(self, schema, include_raw=False, **kwargs):  # noqa: ANN001
+            self.calls.append({"include_raw": include_raw, **kwargs})
+            return "structured"
+
+    claude = ChatAnthropic()
+    assert with_structured_output_compat(claude, dict) == "structured"
+    assert claude.calls == [{"include_raw": True, "method": "json_schema"}]

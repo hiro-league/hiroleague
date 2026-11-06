@@ -46,6 +46,10 @@ dependencies = [
     "anthropic>=2.6",
     # model_http builds httpx2 clients for the OpenAI/DeepSeek SDKs (openai 3.x transport).
     "httpx2>=2.16",
+    # Plain httpx is imported directly (workspace server client, provider checks, Cloudflare image
+    # gen). openai 3.x no longer pulls it in, so it is declared here instead of arriving by chance
+    # through other packages.
+    "httpx>=0.28",
     "lameenc>=1.8.2",
     "langchain>=1.4",
     "langgraph>=1.2",

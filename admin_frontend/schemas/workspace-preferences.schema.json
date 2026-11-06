@@ -942,6 +942,26 @@
           "title": "Provider connection keepalive (seconds)",
           "type": "integer"
         },
+        "request_timeout_s": {
+          "advanced": true,
+          "default": 180,
+          "description": "How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat, speech-to-text and text-to-speech on every cloud provider. Takes effect on server restart.",
+          "maximum": 1800,
+          "minimum": 10,
+          "step": 10,
+          "title": "Provider response timeout (seconds)",
+          "type": "integer"
+        },
+        "max_retries": {
+          "advanced": true,
+          "default": 2,
+          "description": "How many times a failed or timed-out cloud model call (provider overloaded, rate limited, network error) is retried before the error is reported. 0 = no retry. Takes effect on server restart.",
+          "maximum": 6,
+          "minimum": 0,
+          "step": 1,
+          "title": "Provider retries",
+          "type": "integer"
+        },
         "default_image_gen": {
           "anyOf": [
             {
@@ -978,6 +998,8 @@
         "default_reranker",
         "default_embedder",
         "http_keepalive_s",
+        "request_timeout_s",
+        "max_retries",
         "default_image_gen",
         "default_tuning_profile",
         "default_image_profile"
