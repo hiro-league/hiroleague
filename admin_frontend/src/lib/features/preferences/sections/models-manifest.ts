@@ -44,10 +44,18 @@ export const MODELS_MANIFEST: PrefTabManifest = {
             }
           ]
         },
-        // Workspace-wide provider connection keepalive (seconds). Its own row below the model
-        // pickers — it's a shared HTTP-connection setting, not a per-model choice. Bounds/step come
-        // from the schema (5–1800, step 5); takes effect on server restart.
-        { kind: 'grid', fields: [{ kind: 'number', path: 'llm.http_keepalive_s' }] }
+        // Workspace-wide provider HTTP settings: connection keepalive, plus the response timeout and
+        // retry count every cloud chat/STT/TTS call uses. Their own row below the model pickers —
+        // shared settings, not per-model choices. Bounds/step come from the schema; all take effect
+        // on server restart.
+        {
+          kind: 'grid',
+          fields: [
+            { kind: 'number', path: 'llm.http_keepalive_s' },
+            { kind: 'number', path: 'llm.request_timeout_s' },
+            { kind: 'number', path: 'llm.max_retries' }
+          ]
+        }
       ]
     },
     {

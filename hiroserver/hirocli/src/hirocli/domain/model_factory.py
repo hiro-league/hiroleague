@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 
 from .credential_store import CredentialStore
 from .model_catalog import ModelCatalog, ModelSpec, get_model_catalog
-from .model_http import openai_http_kwargs
+from .model_http import ProviderCallPolicy, openai_http_kwargs
 from .preferences import ModelTuning, ThinkingLevel
 from .workspace import workspace_id_for_path
 
@@ -24,24 +24,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _http_keepalive_s(workspace_path: Path) -> float | None:
-    """Workspace-configured provider keepalive window (``llm.http_keepalive_s``) for model_http.
+def _http_settings(workspace_path: Path) -> tuple[float | None, ProviderCallPolicy]:
+    """Workspace HTTP settings for model calls: keepalive window + timeout/retry policy.
 
-    Read here (model_factory already receives ``workspace_path``) so the keepalive pref reaches the
-    HTTP-client build without threading a param through every caller. Best-effort: a prefs read /
-    validation hiccup falls back to the model_http default rather than blocking model construction —
-    keepalive is perf tuning, not correctness. Returns ``None`` on any failure (helper applies the
-    default)."""
+    Read here (model_factory already receives ``workspace_path``) so the ``llm.*`` HTTP prefs reach
+    the client build without threading params through every caller. Best-effort: a prefs read /
+    validation hiccup falls back to the defaults rather than blocking model construction. Returns
+    ``(None, default policy)`` on any failure (model_http applies the keepalive default)."""
     try:
         from .preferences.io import load_preferences
 
-        return float(load_preferences(workspace_path).llm.http_keepalive_s)
+        prefs = load_preferences(workspace_path)
+        return float(prefs.llm.http_keepalive_s), ProviderCallPolicy.from_prefs(prefs)
     except Exception:
         logger.warning(
-            "⚠️ model factory — could not read llm.http_keepalive_s; using default keepalive",
+            "⚠️ model factory — could not read the llm HTTP preferences; using defaults",
             exc_info=True,
         )
-        return None
+        return None, ProviderCallPolicy()
 
 
 def _api_model_id(canonical_id: str) -> str:
@@ -118,8 +118,9 @@ def build_chat_model_from_tuning(
     pid = spec.provider_id
     effective = tuning or ModelTuning()
     cb = callbacks or []
-    # Workspace keepalive window for the warm-connection HTTP clients wired below (cloud providers).
-    keepalive_s = _http_keepalive_s(workspace_path)
+    # Workspace keepalive window for the warm-connection HTTP clients wired below (cloud providers),
+    # and the timeout/retry policy every cloud branch applies (llm.request_timeout_s / max_retries).
+    keepalive_s, policy = _http_settings(workspace_path)
 
     if pid == "openai":
         key = store.get_api_key("openai")
@@ -143,8 +144,10 @@ def build_chat_model_from_tuning(
             kwargs["temperature"] = effective.temperature
             kwargs["max_tokens"] = effective.max_tokens
         # Warm-keepalive HTTP clients (centralized in model_http) so a human-paced turn doesn't
-        # re-handshake on its first call. streaming=True → wires both sync + async clients.
-        kwargs.update(openai_http_kwargs(streaming=True, keepalive_s=keepalive_s))
+        # re-handshake on its first call. streaming=True → wires both sync + async clients; the
+        # client's read timeout is the workspace policy's, and the SDK retries per the policy.
+        kwargs.update(openai_http_kwargs(streaming=True, keepalive_s=keepalive_s, policy=policy))
+        kwargs["max_retries"] = policy.max_retries
         return init_chat_model(
             api_model,
             **kwargs,
@@ -162,6 +165,9 @@ def build_chat_model_from_tuning(
             "api_key": key,
             "max_tokens": effective.max_tokens,
             "callbacks": cb,
+            # Workspace timeout/retry policy instead of the SDK's own 600s / 2 retries.
+            "timeout": policy.timeout_s,
+            "max_retries": policy.max_retries,
         }
         kwargs.update(_anthropic_thinking_kwargs(effective.thinking, spec))
         return init_chat_model(
@@ -180,6 +186,11 @@ def build_chat_model_from_tuning(
             "google_api_key": key,
             "max_output_tokens": effective.max_tokens,
             "callbacks": cb,
+            # Workspace timeout/retry policy. langchain-google-genai's defaults were no timeout and
+            # 6 attempts, which hung chat turns for minutes during a Gemini 503 spell (2026-11-06).
+            # Its max_retries is google-genai's ``attempts`` (first try included) → policy.attempts.
+            "timeout": policy.timeout_s,
+            "max_retries": policy.attempts,
         }
         kwargs.update(_google_thinking_kwargs(effective.thinking, spec))
         # NOTE: no warm-keepalive client here. google-genai's ASYNC path uses aiohttp and forwards
@@ -226,7 +237,8 @@ def build_chat_model_from_tuning(
             ds_kwargs["reasoning_effort"] = effort
         # DeepSeek is the langchain_openai family (ChatDeepSeek exposes http_client) — same
         # warm-keepalive policy as OpenAI chat.
-        ds_kwargs.update(openai_http_kwargs(streaming=True, keepalive_s=keepalive_s))
+        ds_kwargs.update(openai_http_kwargs(streaming=True, keepalive_s=keepalive_s, policy=policy))
+        ds_kwargs["max_retries"] = policy.max_retries
         return ChatDeepSeek(**ds_kwargs)
 
     if pid == "lm_studio":
@@ -295,6 +307,13 @@ def with_structured_output_compat(model: Any, schema: type, *, include_raw: bool
         thinking = (extra.get("thinking") or {}).get("type") if isinstance(extra, dict) else None
         if thinking == "enabled":
             return model.with_structured_output(schema, include_raw=include_raw, method="json_mode")
+    if model.__class__.__name__ == "ChatAnthropic":
+        # Claude 5.x rejects the FORCED tool_choice langchain's default function_calling method
+        # relies on, so langchain drops the force and the model may simply answer in text —
+        # OutputParserException (seen live 2026-11-06: Sonnet 5.5 with thinking off). Claude's
+        # native structured outputs (json_schema) enforce the schema itself; verified live on
+        # Opus/Sonnet/Haiku 5.5, thinking on and off, nested schemas included.
+        return model.with_structured_output(schema, include_raw=include_raw, method="json_schema")
     return model.with_structured_output(schema, include_raw=include_raw)
 
 
@@ -510,9 +529,9 @@ def create_embedding_model(
 
     api_model = _api_model_id(model_id)
     pid = spec.provider_id
-    provider_kwargs = _embedding_provider_kwargs(
-        pid, store=store, cat=cat, keepalive_s=_http_keepalive_s(workspace_path)
-    )
+    # Embeddings keep model_http's fixed 30s fast timeout; only the keepalive pref applies here.
+    keepalive_s, _policy = _http_settings(workspace_path)
+    provider_kwargs = _embedding_provider_kwargs(pid, store=store, cat=cat, keepalive_s=keepalive_s)
 
     # LM Studio is OpenAI-compatible but not a built-in init_embeddings provider key.
     if pid == "lm_studio":

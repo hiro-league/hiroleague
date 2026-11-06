@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx2
 
-from hirocli.domain.model_http import KEEPALIVE_EXPIRY_S, openai_http_kwargs
+from hirocli.domain.model_http import KEEPALIVE_EXPIRY_S, ProviderCallPolicy, openai_http_kwargs
 
 
 def _pool_keepalive(client: httpx2.Client | httpx2.AsyncClient) -> float:
@@ -20,8 +20,11 @@ def test_openai_streaming_wires_sync_and_async_clients_with_keepalive() -> None:
     # The pool keepalive (the actual fix — not overridden per request) carries our policy.
     assert _pool_keepalive(kwargs["http_client"]) == KEEPALIVE_EXPIRY_S
     assert _pool_keepalive(kwargs["http_async_client"]) == KEEPALIVE_EXPIRY_S
-    # Chat keeps a generous read so long / reasoning generations aren't cut off mid-stream.
-    assert kwargs["http_client"].timeout.read == 600.0
+    # Chat's read timeout is the workspace call policy's (llm.request_timeout_s, default 180s).
+    assert kwargs["http_client"].timeout.read == 180.0
+    custom = openai_http_kwargs(streaming=True, policy=ProviderCallPolicy(timeout_s=45))
+    assert custom["http_async_client"].timeout.read == 45.0
+    assert custom["http_async_client"].timeout.connect == 15.0
 
 
 def test_openai_non_streaming_is_sync_only() -> None:

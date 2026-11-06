@@ -61,6 +61,30 @@
     "min": 5,
     "max": 1800
   },
+  "llm.request_timeout_s": {
+    "path": "llm.request_timeout_s",
+    "nullable": false,
+    "type": "integer",
+    "default": 180,
+    "step": 10,
+    "title": "Provider response timeout (seconds)",
+    "description": "How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat, speech-to-text and text-to-speech on every cloud provider. Takes effect on server restart.",
+    "advanced": true,
+    "min": 10,
+    "max": 1800
+  },
+  "llm.max_retries": {
+    "path": "llm.max_retries",
+    "nullable": false,
+    "type": "integer",
+    "default": 2,
+    "step": 1,
+    "title": "Provider retries",
+    "description": "How many times a failed or timed-out cloud model call (provider overloaded, rate limited, network error) is retried before the error is reported. 0 = no retry. Takes effect on server restart.",
+    "advanced": true,
+    "min": 0,
+    "max": 6
+  },
   "llm.default_image_gen": {
     "path": "llm.default_image_gen",
     "nullable": true,

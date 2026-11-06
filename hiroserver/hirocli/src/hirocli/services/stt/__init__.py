@@ -58,6 +58,7 @@ def create_stt_service(
     """
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.model_catalog import get_model_catalog
+    from hirocli.domain.model_http import ProviderCallPolicy
     from hirocli.domain.preferences import load_preferences, resolve_llm
     from hirocli.domain.workspace import workspace_id_for_path
 
@@ -83,6 +84,7 @@ def create_stt_service(
             else:
                 default_model = stt_resolved.model_id.split(":", 1)[1]
                 key = store.get_api_key(spec.provider_id) if store else None
-                providers = [cls(api_key=key)]
+                # Workspace timeout/retry policy (llm.request_timeout_s / max_retries).
+                providers = [cls(api_key=key, policy=ProviderCallPolicy.from_prefs(prefs))]
 
     return STTService(providers=providers, default_model=default_model)

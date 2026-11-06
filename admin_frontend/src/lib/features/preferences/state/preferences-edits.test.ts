@@ -35,6 +35,8 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
       default_reranker: null,
       default_embedder: null,
       http_keepalive_s: 300,
+      request_timeout_s: 180,
+      max_retries: 2,
       default_image_gen: null,
       default_tuning_profile: 'balanced_chat',
       default_image_profile: 'image_playground'
