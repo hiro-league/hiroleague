@@ -66,6 +66,17 @@ _TYPING_DELAY_S = (1.0, 2.0)         # how long "typing…" shows before the rep
 # dropped WhatsApp socket retries without hammering the WA servers.
 _RECONNECT_BACKOFF_MAX_S = 60.0
 
+# whatsmeow's QR login: the first code is valid 60 s, each later one 20 s, and after
+# the last one WhatsApp closes the linking window (about 2.5 min in all). neonize 0.5.x
+# signals nothing when that happens (its login-status callback is a no-op) and its
+# idle() only returns once the client is stopped, so without help the plugin would
+# sit on a dead code forever (the phone says "couldn't link device"). The bridge arms
+# a watchdog on every code; when no new code, pairing or connection follows within
+# the code's lifetime plus a grace, it stops the client and run() opens a new window.
+_QR_FIRST_CODE_S = 60.0
+_QR_NEXT_CODE_S = 20.0
+_QR_GRACE_S = 10.0
+
 # WhatsApp mobile only renders a voice-note (PTT) bubble when the audio mimetype
 # spells out the codec; bare "audio/ogg" (what libmagic sniffs) is dropped.
 _PTT_MIMETYPE = "audio/ogg; codecs=opus"
@@ -102,6 +113,13 @@ class WhatsAppBridge:
         # Background fire-and-forget tasks (delayed read receipts); referenced so
         # they are not garbage-collected mid-flight.
         self._tasks: set[asyncio.Task[None]] = set()
+        # QR-window watchdog (see _QR_FIRST_CODE_S) and how many codes the current
+        # client has issued (the first one lives longer).
+        self._qr_watchdog: asyncio.Task[None] | None = None
+        self._qr_codes_issued = 0
+        # True once the current client was stopped. neonize's Go Stop() deletes the
+        # client, and a later Disconnect() on it panics, so it is stopped only once.
+        self._client_ended = False
         # The session DB is created by neonize; ensure its parent dir exists so a
         # fresh install (no prior session) can write it and trigger QR pairing.
         Path(session_db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -114,8 +132,53 @@ class WhatsAppBridge:
         props = DeviceProps(os=_DEVICE_OS, platformType=_DEVICE_PLATFORM)
         client = NewAClient(self._session_db_path, props=props)
         self._client = client
+        self._client_ended = False
+        self._qr_codes_issued = 0
         self._register_handlers()
         return client
+
+    async def _end_client(self, client: NewAClient) -> None:
+        """Close the socket and stop neonize's Go session for ``client``.
+
+        neonize 0.5.x's idle() returns only after Stop(), not after Disconnect(), so
+        every path that wants run() to rebuild (stop, reconnect, logout, an expired
+        QR window) ends here. Stop() also deletes the Go-side client, after which a
+        Disconnect() panics, so this runs once per client.
+        """
+        if client is not self._client or self._client_ended:
+            return
+        self._client_ended = True
+        self._cancel_qr_watchdog()
+        try:
+            await client.disconnect()
+        except Exception as exc:  # best-effort teardown; Stop() below still ends it
+            log.warning("⚠️ WhatsApp disconnect failed", error=str(exc))
+        try:
+            await client.stop()
+        except Exception as exc:
+            log.error("❌ WhatsApp client stop failed — channel may need a restart", error=str(exc))
+
+    def _arm_qr_watchdog(self, client: NewAClient) -> None:
+        # Called on every QR code: the window is open as long as codes keep coming.
+        self._cancel_qr_watchdog()
+        lifetime = _QR_FIRST_CODE_S if self._qr_codes_issued == 0 else _QR_NEXT_CODE_S
+        self._qr_codes_issued += 1
+        self._qr_watchdog = asyncio.ensure_future(
+            self._expire_qr_window(client, lifetime + _QR_GRACE_S)
+        )
+
+    def _cancel_qr_watchdog(self) -> None:
+        watchdog = self._qr_watchdog
+        self._qr_watchdog = None
+        if watchdog is not None and watchdog is not asyncio.current_task():
+            watchdog.cancel()
+
+    async def _expire_qr_window(self, client: NewAClient, delay_s: float) -> None:
+        await asyncio.sleep(delay_s)
+        if self._stopping or client is not self._client:
+            return
+        log.info("🔗 WhatsApp QR window closed unscanned — opening a new one")
+        await self._end_client(client)
 
     def _schedule(self, coro: Coroutine[Any, Any, None]) -> None:
         # Fire-and-forget a coroutine, keeping a reference until it finishes so the
@@ -163,37 +226,31 @@ class WhatsAppBridge:
         client = self._client
         if client is None:
             return
-        try:
-            await client.disconnect()
-        except Exception as exc:  # best-effort teardown; log and move on
-            log.warning("⚠️ WhatsApp disconnect error", error=str(exc))
+        # Stop, not just disconnect: on neonize 0.5.x only Stop() lets idle() return.
+        await self._end_client(client)
 
     async def reconnect(self) -> None:
-        """Force a re-link: drop the socket so run()'s loop rebuilds + reconnects
+        """Force a re-link: end the client so run()'s loop rebuilds + reconnects
         using the saved session (no new QR)."""
         client = self._client
         if client is None:
             return
-        try:
-            await client.disconnect()
-        except Exception as exc:
-            log.warning("⚠️ WhatsApp reconnect (disconnect) failed", error=str(exc))
+        # Stop, not just disconnect: on neonize 0.5.x only Stop() lets idle() return.
+        await self._end_client(client)
 
     async def logout(self) -> None:
         """Unlink the account: log out on WhatsApp + clear the local session, then
         the run() loop rebuilds and issues a fresh QR to re-pair."""
         client = self._client
-        if client is None:
+        if client is None or self._client_ended:
             return
         try:
             await client.logout()  # unlink device on WA + clear local session store
             log.info("👋 WhatsApp logged out")
         except Exception as exc:
             log.warning("⚠️ WhatsApp logout failed", error=str(exc))
-        try:
-            await client.disconnect()  # ensure the run loop rebuilds → fresh QR
-        except Exception as exc:
-            log.warning("⚠️ WhatsApp disconnect after logout failed", error=str(exc))
+        # Ensure the run loop rebuilds → fresh QR (Stop() is what releases idle()).
+        await self._end_client(client)
 
     async def _enable_receipts(self, client: NewAClient) -> None:
         # Make whatsmeow send delivery receipts (✓✓) for incoming messages; without
@@ -396,12 +453,13 @@ class WhatsAppBridge:
 
     # -- neonize event handlers -------------------------------------------
 
-    async def _on_qr_event(self, _client: NewAClient, data_qr: bytes) -> None:
+    async def _on_qr_event(self, client: NewAClient, data_qr: bytes) -> None:
         # neonize's qr callback delivers the raw pairing payload as bytes.
         code = data_qr.decode("utf-8", "replace") if data_qr else ""
         if not code:
             return
         log.info("🔗 WhatsApp QR issued — scan to link the account")
+        self._arm_qr_watchdog(client)
         try:
             await self._on_qr(code)
         except Exception as exc:
@@ -409,11 +467,13 @@ class WhatsAppBridge:
 
     async def _on_pair_status(self, _client: NewAClient, event: PairStatusEv) -> None:
         account = getattr(event.ID, "User", "") if event.ID else ""
+        self._cancel_qr_watchdog()  # linked: the QR window must not be recycled
         log.info(f"✅ WhatsApp paired — {account}")
         await self._safe_status("paired", {"account": account})
 
     async def _on_connected(self, _client: NewAClient, _event: ConnectedEv) -> None:
         log.info("✅ WhatsApp connected")
+        self._cancel_qr_watchdog()
         self._was_connected = True
         await self._safe_status("connected", {})
 
