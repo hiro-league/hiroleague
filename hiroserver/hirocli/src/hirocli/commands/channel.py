@@ -114,15 +114,19 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         enable: bool = typer.Option(True, "--enable/--no-enable", help="Enable on setup"),
     ) -> None:
         """Configure and register a channel plugin."""
-        from ..tools.channel import ChannelSetupTool
+        from ..tools.channel import ChannelSetupTool, installed_channel_command
 
         workspace_path = _resolve_workspace_path(workspace, console)
         existing = load_channel_config(workspace_path, name)
 
+        # Default to the plugin's full path when `uv tool install` put it there, as the admin's
+        # install does: a bare name only starts where uv's tool-bin dir is on the PATH, which a
+        # server started by systemd doesn't have (2026-11-06).
+        installed = installed_channel_command(name)
         if command is None and existing and existing.command:
             default_cmd = " ".join(existing.command)
         else:
-            default_cmd = command or f"hiro-channel-{name}"
+            default_cmd = command or installed or f"hiro-channel-{name}"
 
         resolved_command: str = typer.prompt(
             f"Command to start the '{name}' plugin",
@@ -137,6 +141,9 @@ def register(channel_app: typer.Typer, console: Console) -> None:
                 command=resolved_command,
                 enabled=enable,
                 workspace=workspace,
+                # An installed uv tool runs as-is, never wrapped in `uv run` against a source
+                # workspace (it has its own environment), as the admin's install registers it.
+                workspace_dir="" if installed and resolved_command == installed else None,
             )
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")

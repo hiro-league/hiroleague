@@ -10,12 +10,14 @@ ephemeral in-memory state, not persistent config, so it is not a tool.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
+from hiro_commons.log import Logger
 
 from hiro_commons.process import find_workspace_root
 
@@ -38,10 +40,49 @@ from ..domain.config import load_config, master_key_path
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 
+log = Logger.get("CHANNELS")
+
 
 def _resolve_path(workspace: str | None) -> Path:
     entry, _ = resolve_workspace(workspace)
     return Path(entry.path)
+
+
+def installed_channel_command(name: str) -> str | None:
+    """ABSOLUTE path of the ``hiro-channel-<name>`` binary ``uv tool install`` placed, or None.
+
+    A channel registered by its full path starts whoever runs the server: a server started
+    by systemd has a short PATH without uv's tool-bin dir (``~/.local/bin``), so a bare
+    command name only works where that dir is on the PATH. Shared by the admin's install
+    and ``hiro channel setup`` (moved here from admin_svelte/routes/channels.py so the CLI
+    registers channels the same way; 2026-11-06). None when uv can't say, the binary isn't
+    there, or the path has spaces (ChannelSetupTool splits the command on whitespace).
+    """
+    try:
+        out = subprocess.run(  # noqa: S603
+            ["uv", "tool", "dir", "--bin"], capture_output=True, text=True, timeout=15
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning(
+            f"⚠️ Could not resolve uv tool bin dir — channel {name} · using the bare command",
+            error=str(exc),
+        )
+        return None
+    bin_dir = out.stdout.strip()
+    if out.returncode != 0 or not bin_dir:
+        log.warning(f"⚠️ `uv tool dir --bin` returned nothing — channel {name} · using the bare command")
+        return None
+    exe = f"hiro-channel-{name}" + (".exe" if os.name == "nt" else "")
+    candidate = Path(bin_dir) / exe
+    if not candidate.is_file():
+        return None
+    if " " in str(candidate):
+        log.warning(
+            f"⚠️ uv tool bin path has spaces — channel {name} · using the bare command",
+            path=str(candidate),
+        )
+        return None
+    return str(candidate)
 
 
 # ---------------------------------------------------------------------------
