@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hiro-channel-echo"
-version = "0.2.0"
+version = "0.3.0"
 description = "Minimal sample channel plugin for Hiro-League - Echo"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,8 +28,8 @@ classifiers = [
 ]
 dependencies = [
     "typer>=0.12",
-    "hiro-channel-sdk~=0.2.0",
-    "hiro-commons~=0.2.0",
+    "hiro-channel-sdk~=0.3.0",
+    "hiro-commons~=0.3.0",
 ]
 
 [project.urls]
