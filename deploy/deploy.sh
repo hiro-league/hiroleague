@@ -82,12 +82,22 @@ if ! (cd hiroserver && uv export --frozen --no-emit-workspace --no-dev --no-hash
         --package hiroleague -o "$CONSTRAINTS" >/dev/null); then
   cleanup_release; die "could not export uv.lock: nothing was changed."
 fi
+# Rebuild HiroLeague's own packages from this checkout every time. uv caches a build of a local
+# package by its version and pyproject.toml, so without this a release whose code changed but whose
+# version didn't (0.2.0) would install the OLD cached code, and checks pass on the checkout regardless
+# (seen 2026-11-06: Phase 3's extension socket missing from the release). Other packages stay cached.
+REFRESH=()
+for member in hiroserver/hiroleague hiroserver/hirocli hiroserver/gateway hiroserver/hiro-channel-sdk \
+              hiroserver/hiro-commons hiroserver/channels/*; do
+  name=$(sed -n 's/^name = "\(.*\)"/\1/p' "$member/pyproject.toml" 2>/dev/null | head -n 1)
+  [ -n "$name" ] && REFRESH+=(--refresh-package "$name")
+done
 # Each release gets its own tool and command folders, so the previous one stays installed and
 # going back is moving a link. Python goes in a folder under HIRO_HOME too: anything uv puts in
 # the deploy user's home would not be readable by a dedicated service user.
 if ! UV_TOOL_DIR="${RELEASE_DIR}/tools" UV_TOOL_BIN_DIR="${RELEASE_DIR}/bin" \
      UV_PYTHON_INSTALL_DIR="${HIRO_HOME}/python" \
-     uv tool install --python "$HIRO_PYTHON" --constraints "$CONSTRAINTS" ./hiroserver/hiroleague; then
+     uv tool install --python "$HIRO_PYTHON" --constraints "$CONSTRAINTS" "${REFRESH[@]}" ./hiroserver/hiroleague; then
   cleanup_release; die "install failed: nothing was changed."
 fi
 "${RELEASE_DIR}/bin/hiro" --help >/dev/null 2>&1 \
