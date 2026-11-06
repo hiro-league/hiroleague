@@ -34,6 +34,14 @@ log = Logger.get("REQUEST")
 
 EmitOutbound = Callable[[UnifiedMessage], Awaitable[None]]
 
+# Who sent a request. Each method says which callers may use it, so an extension
+# that is signed in can't read chat history just because it is connected.
+CALLER_DEVICE = "device"        # the app, through a channel (the devices plugin)
+CALLER_EXTENSION = "extension"  # a program signed in on the extension socket
+DEVICES_ONLY: frozenset[str] = frozenset({CALLER_DEVICE})
+EXTENSIONS_ONLY: frozenset[str] = frozenset({CALLER_EXTENSION})
+ALL_CALLERS: frozenset[str] = frozenset({CALLER_DEVICE, CALLER_EXTENSION})
+
 
 class RequestContext:
     """Context passed to method handlers."""
@@ -78,22 +86,33 @@ class RequestHandler:
         self._ctx = ctx
         self._resource_versions = resource_versions
         self._methods: dict[str, MethodHandler] = {}
+        self._callers: dict[str, frozenset[str]] = {}
 
-    def register(self, method: str, handler: MethodHandler) -> None:
-        """Register an async handler for the given method name."""
+    def register(
+        self,
+        method: str,
+        handler: MethodHandler,
+        *,
+        callers: frozenset[str] = DEVICES_ONLY,
+    ) -> None:
+        """Register an async handler for the given method name and who may call it."""
         self._methods[method] = handler
-        log.fineinfo(f"✅ Registered request method: {method}")
+        self._callers[method] = callers
+        log.fineinfo(f"✅ Registered request method: {method}", callers=sorted(callers))
 
     async def handle(
         self,
         msg: UnifiedMessage,
         *,
         emit_outbound: EmitOutbound,
+        caller: str = CALLER_DEVICE,
     ) -> UnifiedMessage | None:
         """Dispatch a request message and return the response envelope, if any.
 
         Handlers may emit additional envelopes via ``RequestContext.emit_outbound`` and
         return ``None`` (e.g. ``files.get`` ack + stream + terminal already emitted).
+        A method the caller may not use answers ``method_not_found`` (not "forbidden",
+        so a caller can't probe which methods exist for others).
         """
         method, params = _parse_request(msg)
         log.fineinfo(
@@ -111,6 +130,9 @@ class RequestHandler:
             )
 
         handler = self._methods.get(method)
+        if handler is not None and caller not in self._callers.get(method, DEVICES_ONLY):
+            log.warning("Request method not open to this caller", method=method, caller=caller)
+            handler = None
         if handler is None:
             log.warning("Unknown request method", method=method)
             return EnvelopeFactory.response(

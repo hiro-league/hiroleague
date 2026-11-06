@@ -7,6 +7,7 @@ Exports the key building blocks every plugin author needs:
   - EventPayload     — event payload for message_type "event"
   - ChannelPlugin    — abstract base class to implement
   - PluginTransport  — handles WS connection to the Hiro server, JSON-RPC dispatch
+  - ExtensionClient  — connects a program that runs on its own (an extension) to the core
   - rpc              — JSON-RPC 2.0 helpers (build / parse)
   - constants        — protocol constants (RPC methods, WS close codes, etc.)
 """
@@ -30,6 +31,13 @@ from .log_scope_fields import (
     METADATA_LOG_RPC_METHOD,
     METADATA_LOG_TEXT_PREVIEW,
     unified_message_log_scope,
+)
+from .extension import (
+    ExtensionClient,
+    ExtensionCredentials,
+    ExtensionInfo,
+    ExtensionOffers,
+    ExtensionRequestError,
 )
 from .models import ChannelInfo, ContentItem, EventPayload, MessageRouting, RpcRequest, RpcResponse, UnifiedMessage
 from .transport import PluginTransport
@@ -63,4 +71,9 @@ __all__ = [
     "RpcResponse",
     "UnifiedMessage",
     "PluginTransport",
+    "ExtensionClient",
+    "ExtensionCredentials",
+    "ExtensionInfo",
+    "ExtensionOffers",
+    "ExtensionRequestError",
 ]

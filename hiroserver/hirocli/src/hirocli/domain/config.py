@@ -39,6 +39,7 @@ from hiro_commons.constants.network import (
     DEFAULT_GATEWAY_PORT,
     DEFAULT_LOCALHOST,
     PORT_OFFSET_ADMIN,
+    PORT_OFFSET_EXTENSION,
     PORT_OFFSET_HTTP,
     PORT_OFFSET_PLUGIN,
     PORT_RANGE_START,
@@ -55,6 +56,14 @@ class Config(BaseModel):
     http_port: int = PORT_RANGE_START + PORT_OFFSET_HTTP
     plugin_port: int = PORT_RANGE_START + PORT_OFFSET_PLUGIN
     admin_port: int = PORT_RANGE_START + PORT_OFFSET_ADMIN
+    # Extensions (programs that connect on their own, HomeHiro first) sign in on this
+    # address. 127.0.0.1 = same machine only; set the Docker bridge or LAN address to
+    # reach an extension in a normal Docker network or on another machine. The socket
+    # isn't encrypted: on the LAN its messages can be read (sign-in still holds).
+    extension_host: str = DEFAULT_LOCALHOST
+    # None = the workspace slot's extension port, derived from plugin_port (see
+    # effective_extension_port), so existing workspaces need no re-setup.
+    extension_port: int | None = None
     master_key_file: str = MASTER_KEY_FILENAME
     pairing_code_length: int = DEFAULT_PAIRING_CODE_LENGTH
     pairing_code_ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS
@@ -70,6 +79,12 @@ class Config(BaseModel):
     # Set by setup; used by teardown to pick the correct removal path without user input.
     # Values: "elevated" | "schtasks" | "registry" | "skipped" | "failed" | None
     autostart_method: str | None = None
+
+    def effective_extension_port(self) -> int:
+        """The extension socket's port: the configured one, else the slot's (plugin port + 1)."""
+        if self.extension_port:
+            return self.extension_port
+        return self.plugin_port - PORT_OFFSET_PLUGIN + PORT_OFFSET_EXTENSION
 
 
 class State(BaseModel):

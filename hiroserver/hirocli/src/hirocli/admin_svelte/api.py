@@ -19,6 +19,7 @@ from hirocli.admin_svelte.routes.config import config_router
 from hirocli.admin_svelte.routes.devices import devices_router
 from hirocli.admin_svelte.routes.eval import eval_router, eval_shared_router
 from hirocli.admin_svelte.routes.events import events_router
+from hirocli.admin_svelte.routes.extensions import extensions_router
 from hirocli.admin_svelte.routes.gateways import gateways_router
 from hirocli.admin_svelte.routes.graph_runs import graph_runs_router
 from hirocli.admin_svelte.routes.image_lab import image_lab_router
@@ -73,6 +74,9 @@ api_router.include_router(channels_router)
 # match, and the devices channel itself is not spawned (see ensure_mandatory_devices_channel).
 if feature_active("devices"):
     api_router.include_router(devices_router)
+# Extensions (HomeHiro first): pairing codes, the paired list with live status,
+# removal, the listen address and the core's test call. Always mounted.
+api_router.include_router(extensions_router)
 api_router.include_router(logs_router)
 # Feature-gated: metrics_router is exclusive to the Metrics feature (only the Server-page Metrics
 # subtab calls /metrics/*), so the whole router is gated — no shared-endpoint split needed.

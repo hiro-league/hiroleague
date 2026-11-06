@@ -28,6 +28,7 @@ log = Logger.get("CTX")
 if TYPE_CHECKING:
     from hirocli.domain.memory import MemoryService
     from hirocli.runtime.channel_manager import ChannelManager
+    from hirocli.runtime.extension_manager import ExtensionManager
     from hirocli.runtime.knowledge_manager import KnowledgeManager
 
 
@@ -82,6 +83,9 @@ class ServerContext:
     # Set by the composition root after the ChannelManager is built; lets admin
     # routes drive live channel actions (enable/disable, logout, reconnect).
     channel_manager: "ChannelManager | None" = field(default=None, init=False)
+    # Set by the composition root; lets admin routes list connected extensions,
+    # run the test call and disconnect a removed one.
+    extension_manager: "ExtensionManager | None" = field(default=None, init=False)
 
     # Live per-channel UI state (e.g. WhatsApp QR string + connection status),
     # written by channel event handlers and read by admin routes. Keyed by channel
