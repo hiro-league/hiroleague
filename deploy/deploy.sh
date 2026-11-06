@@ -168,9 +168,13 @@ sudo -n "$SYSTEMCTL" start "$UNIT" || say "start failed"
 if healthy; then
   # Keep the newest HIRO_KEEP_RELEASES releases (names sort by time); never the current one.
   current_target="$(readlink "$CURRENT")"
+  # A release someone ran with sudo (`sudo .../bin/hiro service install`) holds root-owned
+  # __pycache__ files the deploy user can't delete. Not removing an old release must not fail a
+  # deploy that already answers (set -e ended the script here on 2026-11-06): say how to remove it.
   find "${HIRO_HOME}/releases" -mindepth 1 -maxdepth 1 -type d | sort -r \
     | tail -n +"$((HIRO_KEEP_RELEASES + 1))" | while read -r old; do
-        [ "$old" = "$current_target" ] || rm -rf "$old"
+        [ "$old" = "$current_target" ] || rm -rf "$old" 2>/dev/null \
+          || say "could not remove the old release $(basename "$old") (files owned by another user, e.g. root from a sudo run); remove it with: sudo rm -rf $old"
       done
   say "deployed ${RELEASE_ID}: ${HIRO_HEALTH_URL} answers."
   exit 0
