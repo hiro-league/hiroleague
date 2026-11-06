@@ -38,6 +38,45 @@ WS_CLOSE_DESKTOP_NOT_CONNECTED: int = 4006
 WS_CLOSE_PAIRING_TIMEOUT: int = 4008
 WS_CLOSE_DUPLICATE_DEVICE: int = 4009
 WS_CLOSE_CHANNEL_REPLACED: int = 4010
+WS_CLOSE_EXTENSION_DENIED: int = 4011    # extension sign-in or pairing refused
+WS_CLOSE_EXTENSION_REPLACED: int = 4012  # a newer connection of the same extension took over
+WS_CLOSE_EXTENSION_REMOVED: int = 4013   # the extension was removed in the core's admin
+
+# ---------------------------------------------------------------------------
+# Extensions — programs that connect to the core on their own (HomeHiro first)
+#
+# Unlike a channel plugin, the core doesn't start an extension, so it signs in:
+#   1. core → extension   {"type": "auth_challenge", "nonce": "<hex>"}
+#   2. extension → core   {"type": "pair", "code", "public_key", "signature", "info"}   first time
+#                         {"type": "auth", "extension_id", "signature", "info"}          after that
+#      ``signature`` = the nonce signed with the extension's own Ed25519 key.
+#   3. core → extension   {"type": "welcome", "extension_id", "core": {...}}
+#                      or {"type": "denied", "reason", "message"} and the socket closes
+# After the welcome both sides exchange UnifiedMessage frames: requests, responses
+# and events (the device language), on routing.channel EXTENSION_CHANNEL.
+# ---------------------------------------------------------------------------
+
+EXTENSION_FRAME_CHALLENGE: str = "auth_challenge"
+EXTENSION_FRAME_PAIR: str = "pair"
+EXTENSION_FRAME_AUTH: str = "auth"
+EXTENSION_FRAME_WELCOME: str = "welcome"
+EXTENSION_FRAME_DENIED: str = "denied"
+
+# Reasons carried by a "denied" frame.
+EXTENSION_DENIED_NOT_PAIRED: str = "not_paired"        # unknown extension_id (never paired, or removed)
+EXTENSION_DENIED_BAD_CODE: str = "bad_code"            # pairing code wrong or expired
+EXTENSION_DENIED_BAD_SIGNATURE: str = "bad_signature"  # challenge signature didn't verify
+EXTENSION_DENIED_BAD_FRAME: str = "bad_frame"          # first frame unreadable or incomplete
+
+EXTENSION_CHANNEL: str = "extension"  # routing.channel on every extension message
+CORE_SENDER_ID: str = "server"        # routing.sender_id on messages the core sends (same as to devices)
+
+# Request methods every extension and the core answer (Phase 3's test calls).
+METHOD_CORE_INFO: str = "core.info"            # extension → core: the core's name and version
+METHOD_EXTENSION_INFO: str = "extension.info"  # core → extension: the extension's name and version
+
+EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
+EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0
 
 # ---------------------------------------------------------------------------
 # Auth roles

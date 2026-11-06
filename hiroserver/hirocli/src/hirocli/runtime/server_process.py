@@ -44,6 +44,7 @@ from hirocli.runtime.channel_event_handler import ChannelEventHandler
 from hirocli.runtime.channel_manager import ChannelManager
 from hirocli.runtime.communication_manager import CommunicationManager
 from hirocli.runtime.event_handler import EventHandler
+from hirocli.runtime.extension_manager import ExtensionManager
 from hirocli.runtime.http_server import app as http_app, run_http_server
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
 from hirocli.runtime.request_handler import RequestHandler
@@ -82,7 +83,7 @@ def _build_context(
 
 def _wire_runtime(
     ctx: ServerContext,
-) -> tuple[CommunicationManager, ChannelManager, ResourceChangeBroadcaster]:
+) -> tuple[CommunicationManager, ChannelManager, ResourceChangeBroadcaster, ExtensionManager]:
     """Build handlers, ChannelManager, and CommunicationManager.
 
     The agent graph (formerly the adapter pipeline + post-adapt hooks) is
@@ -125,7 +126,12 @@ def _wire_runtime(
     infra_handlers.set_channel_manager(channel_manager)
     infra_handlers.set_resource_change_broadcaster(resource_change_broadcaster)
 
-    return comm_manager, channel_manager, resource_change_broadcaster
+    # Extensions (HomeHiro first) sign in on their own socket and share the request
+    # dispatcher, limited to the methods open to extensions.
+    extension_manager = ExtensionManager(ctx, request_handler)
+    ctx.extension_manager = extension_manager
+
+    return comm_manager, channel_manager, resource_change_broadcaster, extension_manager
 
 
 def _register_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -237,7 +243,7 @@ async def _main(
     log.info("Metrics collector configured", enabled=effective_metrics, interval=ctx.config.metrics_interval)
 
     # --- Wire communication + channel stacks ---
-    comm_manager, channel_manager, resource_change_broadcaster = _wire_runtime(ctx)
+    comm_manager, channel_manager, resource_change_broadcaster, extension_manager = _wire_runtime(ctx)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
@@ -270,6 +276,7 @@ async def _main(
         workspace=str(workspace_path),
         http=f"http://{ctx.config.http_host}:{ctx.config.http_port}/status",
         plugin_ws=f"ws://127.0.0.1:{ctx.config.plugin_port}",
+        extension_ws=f"ws://{ctx.config.extension_host}:{ctx.config.effective_extension_port()}",
         device_id=ctx.config.device_id,
     )
 
@@ -283,6 +290,7 @@ async def _main(
     coros: list = [
         run_http_server(ctx),
         channel_manager.run(),
+        extension_manager.run(),
         comm_manager.serve(),
         agent_manager.serve(),
         knowledge_manager.serve(),

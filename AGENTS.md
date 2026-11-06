@@ -60,6 +60,7 @@ This mirrors the `Architecture` tab in `../hiro-docs/mintdocs/docs.json`; use it
 - [Agent Graph](../hiro-docs/mintdocs/architecture/concepts/agent-graph.mdx) — Use this for the per-message assistant workflow nodes, LangGraph event stream, model/tool loop, optional STT/vision/TTS, failure semantics, and agent metadata.
 - [Resource Sync](../hiro-docs/mintdocs/architecture/concepts/resource-sync.mdx) — Use this for the `resource.changed` invalidation pattern, server/device sync registries, version counters, reconnect recovery, and adding new cached resources.
 - [Channel Plugins](../hiro-docs/mintdocs/architecture/concepts/channel-plugins.mdx) — Use this for standalone plugin topology, plugin lifecycle, Channel Manager JSON-RPC methods, persisted plugin configuration, and the built-in `devices` plugin.
+- [Extensions](../hiro-docs/mintdocs/architecture/concepts/extensions.mdx) — Use this for programs that connect on their own (HomeHiro first): the extension socket and its listen address, pairing + signed challenge, requests/events with who-may-call per method, and the SDK's `ExtensionClient`.
 - [Domain Event Bus](../hiro-docs/mintdocs/architecture/concepts/domain-event-bus.mdx) — Use this for the thread-safe bridge from synchronous domain mutations to async runtime subscribers, domain event types, publishing/subscribing rules, and preference reactors.
 
 ## Protocol

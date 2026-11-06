@@ -8,6 +8,13 @@
       "port": 5180
     },
     {
+      "name": "hiro-server",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["--directory", "hiroserver", "run", "hiro", "start", "--foreground", "--admin"],
+      "env": { "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8" },
+      "port": 18083
+    },
+    {
       "name": "admin-frontend-preview",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "admin_frontend", "run", "dev", "--", "--port", "5191", "--strictPort"],

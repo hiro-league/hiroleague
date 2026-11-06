@@ -127,6 +127,9 @@ class SetupTool(Tool):
             http_port=http_port or http_port_for(registry, entry.port_slot),
             plugin_port=plugin_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),
+            # Carry the extension address forward so re-running setup keeps it.
+            extension_host=existing.extension_host,
+            extension_port=existing.extension_port,
             master_key_file=existing.master_key_file,
             pairing_code_length=existing.pairing_code_length,
             pairing_code_ttl_seconds=existing.pairing_code_ttl_seconds,

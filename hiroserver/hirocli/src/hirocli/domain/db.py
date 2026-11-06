@@ -76,6 +76,18 @@ _DDL = [
         workspace_dir TEXT NOT NULL DEFAULT ''
     )
     """,
+    # Paired extensions (programs that sign in on the extension socket, HomeHiro
+    # first): the public half of each one's key, and what it last said about itself.
+    """
+    CREATE TABLE IF NOT EXISTS extensions (
+        extension_id  TEXT PRIMARY KEY,
+        name          TEXT NOT NULL DEFAULT '',
+        public_key    TEXT NOT NULL,
+        paired_at     TEXT NOT NULL,
+        last_seen     TEXT,
+        info          TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------
@@ -109,6 +121,12 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("channel_plugins", "command",       "TEXT NOT NULL DEFAULT '[]'"),
     ("channel_plugins", "config",        "TEXT NOT NULL DEFAULT '{}'"),
     ("channel_plugins", "workspace_dir", "TEXT NOT NULL DEFAULT ''"),
+    # extensions
+    ("extensions", "name",       "TEXT NOT NULL DEFAULT ''"),
+    ("extensions", "public_key", "TEXT NOT NULL DEFAULT ''"),
+    ("extensions", "paired_at",  "TEXT NOT NULL DEFAULT ''"),
+    ("extensions", "last_seen",  "TEXT"),
+    ("extensions", "info",       "TEXT NOT NULL DEFAULT '{}'"),
 ]
 
 

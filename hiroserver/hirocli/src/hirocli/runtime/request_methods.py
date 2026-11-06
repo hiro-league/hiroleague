@@ -14,6 +14,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any, Final
 
+from hiro_channel_sdk.constants import METHOD_CORE_INFO
 from hiro_commons.log import Logger
 
 from ..domain.blob_store import (
@@ -32,7 +33,7 @@ from ..tools.conversation import (
 from ..tools.files import FilesHeadTool
 from ..tools.policy import PolicyGetTool
 from .envelope_factory import EnvelopeFactory
-from .request_handler import RequestContext, RequestHandler
+from .request_handler import ALL_CALLERS, DEVICES_ONLY, RequestContext, RequestHandler
 from .stream_sender import send_file_as_stream
 
 log = Logger.get("REQUEST")
@@ -287,24 +288,39 @@ async def handle_files_get(params: dict[str, Any], ctx: RequestContext) -> None:
     await emit(terminal)
 
 
-_REGISTERED_HANDLERS: Final[tuple[tuple[str, Any], ...]] = (
-    ("channels.list", handle_channels_list),
-    ("channels.clear_messages", handle_channels_clear_messages),
-    ("characters.list", handle_characters_list),
-    ("files.head", handle_files_head),
-    ("files.get", handle_files_get),
-    ("messages.history", handle_messages_history),
-    ("policy.get", handle_policy_get),
+async def handle_core_info(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """The core's name and version — an extension's first call (Phase 3's test call)."""
+    del params
+    from .. import __version__
+
+    return {
+        "name": "HiroLeague",
+        "version": __version__,
+        "workspace": ctx.server_ctx.workspace_name,
+    }
+
+
+# (method, handler, who may call it). The app's methods stay devices only: a
+# signed-in extension doesn't get chat history or files by being connected.
+_REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
+    ("channels.list", handle_channels_list, DEVICES_ONLY),
+    ("channels.clear_messages", handle_channels_clear_messages, DEVICES_ONLY),
+    ("characters.list", handle_characters_list, DEVICES_ONLY),
+    ("files.head", handle_files_head, DEVICES_ONLY),
+    ("files.get", handle_files_get, DEVICES_ONLY),
+    ("messages.history", handle_messages_history, DEVICES_ONLY),
+    ("policy.get", handle_policy_get, DEVICES_ONLY),
+    (METHOD_CORE_INFO, handle_core_info, ALL_CALLERS),
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(
-    name for name, _ in _REGISTERED_HANDLERS
+    name for name, _, _ in _REGISTERED_HANDLERS
 )
 
 
 def register_request_methods(handler: RequestHandler) -> None:
-    """Register all data-plane request methods."""    
-    for name, fn in _REGISTERED_HANDLERS:
-        handler.register(name, fn)
+    """Register all data-plane request methods."""
+    for name, fn, callers in _REGISTERED_HANDLERS:
+        handler.register(name, fn, callers=callers)
     log.info("✅ Registered all request methods")
 
