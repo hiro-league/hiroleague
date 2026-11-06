@@ -141,7 +141,9 @@ def test_open_folder_success(system: str, tmp_path) -> None:
     folder = str(tmp_path)
     with patch("platform.system", return_value=system):
         if system == "Windows":
-            with patch("os.startfile") as startfile:
+            # create=True: os.startfile exists only on Windows, and these tests also run on Linux
+            # (the server deploy's checks, 2026-11-06).
+            with patch("os.startfile", create=True) as startfile:
                 r = WorkspaceService().open_folder(folder)
             assert r.ok
             startfile.assert_called_once()
@@ -156,7 +158,7 @@ def test_open_folder_normalizes_forward_slashes_on_windows(tmp_path) -> None:
     folder = str(tmp_path).replace("\\", "/")
     with (
         patch("platform.system", return_value="Windows"),
-        patch("os.startfile") as startfile,
+        patch("os.startfile", create=True) as startfile,  # Windows-only attribute; tests run on Linux too
     ):
         r = WorkspaceService().open_folder(folder)
     assert r.ok
