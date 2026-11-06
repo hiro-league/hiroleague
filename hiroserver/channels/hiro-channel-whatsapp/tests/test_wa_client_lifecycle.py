@@ -136,6 +136,47 @@ def test_client_is_stopped_only_once(wa_client, tmp_path):
     assert client.calls == ["disconnect", "stop"]
 
 
+class HangingClient(FakeClient):
+    """idle() never returns, like neonize 0.5.x stopped mid-QR-window."""
+
+    async def connect(self) -> None:
+        self.calls.append("connect")
+
+    async def idle(self) -> None:
+        await asyncio.Event().wait()
+
+
+def test_run_moves_on_when_a_stopped_client_hangs(wa_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(wa_client, "_STOPPED_IDLE_GRACE_S", 0.01)
+    clients: list[HangingClient] = []
+
+    async def scenario() -> None:
+        bridge = wa_client.WhatsAppBridge(
+            str(tmp_path / "session.db"), on_qr=_noop, on_status=_noop, on_message=_noop
+        )
+
+        def build() -> HangingClient:
+            client = HangingClient()
+            clients.append(client)
+            bridge._client = client
+            bridge._client_ended = False
+            bridge._client_ended_event = asyncio.Event()
+            return client
+
+        monkeypatch.setattr(bridge, "_build_client", build)
+        monkeypatch.setattr(bridge, "_enable_receipts", _noop)
+        runner = asyncio.ensure_future(bridge.run())
+        await asyncio.sleep(0.05)
+        await bridge._end_client(clients[0])  # e.g. the QR watchdog fired
+        await asyncio.sleep(1.5)  # grace + run()'s 1 s reconnect backoff
+        await bridge.stop()
+        await asyncio.wait_for(runner, 1)  # stop() ends run() even with a hung client
+
+    asyncio.run(scenario())
+    assert len(clients) >= 2, "run() stayed on the hung client"
+    assert clients[0].calls == ["connect", "disconnect", "stop"]
+
+
 def test_logout_unlinks_then_stops(wa_client, tmp_path):
     client = FakeClient()
 

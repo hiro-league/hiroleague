@@ -76,6 +76,11 @@ _RECONNECT_BACKOFF_MAX_S = 60.0
 _QR_FIRST_CODE_S = 60.0
 _QR_NEXT_CODE_S = 20.0
 _QR_GRACE_S = 10.0
+# How long run() waits for idle() once the client was stopped. A Stop() that lands
+# while a QR window is still open leaves neonize's Go call blocked for good (seen on
+# Simone, 2026-11-06), so past this run() gives up on that client (one blocked Go
+# thread) and builds a new one instead of leaving the channel dead.
+_STOPPED_IDLE_GRACE_S = 15.0
 
 # WhatsApp mobile only renders a voice-note (PTT) bubble when the audio mimetype
 # spells out the codec; bare "audio/ogg" (what libmagic sniffs) is dropped.
@@ -120,6 +125,8 @@ class WhatsAppBridge:
         # True once the current client was stopped. neonize's Go Stop() deletes the
         # client, and a later Disconnect() on it panics, so it is stopped only once.
         self._client_ended = False
+        # Set together with _client_ended; run() waits on it next to idle().
+        self._client_ended_event: asyncio.Event | None = None
         # The session DB is created by neonize; ensure its parent dir exists so a
         # fresh install (no prior session) can write it and trigger QR pairing.
         Path(session_db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -133,9 +140,36 @@ class WhatsAppBridge:
         client = NewAClient(self._session_db_path, props=props)
         self._client = client
         self._client_ended = False
+        self._client_ended_event = asyncio.Event()
         self._qr_codes_issued = 0
         self._register_handlers()
         return client
+
+    async def _idle(self, client: NewAClient) -> None:
+        """Wait until ``client``'s session ends: idle() returns, or the bridge
+        stopped the client and idle() didn't follow within the grace."""
+        ended = self._client_ended_event
+        idle_task = asyncio.ensure_future(client.idle())
+        ended_task = asyncio.ensure_future(ended.wait()) if ended is not None else None
+        waiting = {idle_task} if ended_task is None else {idle_task, ended_task}
+        try:
+            done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if ended_task is not None:
+                ended_task.cancel()
+        if idle_task in done:
+            idle_task.result()  # surface a neonize error to run()'s handler
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(idle_task), _STOPPED_IDLE_GRACE_S)
+        except asyncio.TimeoutError:
+            # Leave the blocked call behind; consume its eventual result so asyncio
+            # doesn't warn about an unretrieved exception.
+            idle_task.add_done_callback(_consume_result)
+            log.warning(
+                "⚠️ WhatsApp client didn't shut down after stop — starting a new one",
+                waited_s=_STOPPED_IDLE_GRACE_S,
+            )
 
     async def _end_client(self, client: NewAClient) -> None:
         """Close the socket and stop neonize's Go session for ``client``.
@@ -149,6 +183,8 @@ class WhatsAppBridge:
             return
         self._client_ended = True
         self._cancel_qr_watchdog()
+        if self._client_ended_event is not None:
+            self._client_ended_event.set()
         try:
             await client.disconnect()
         except Exception as exc:  # best-effort teardown; Stop() below still ends it
@@ -203,7 +239,9 @@ class WhatsAppBridge:
                 await client.connect()
                 await self._enable_receipts(client)
                 backoff = 1.0  # reset after a successful connect so a later drop restarts fresh
-                await client.idle()
+                # Not client.idle() directly: on neonize 0.5.x it can stay blocked
+                # after a stop (see _STOPPED_IDLE_GRACE_S).
+                await self._idle(client)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # external library boundary — never crash silently
@@ -612,6 +650,12 @@ class WhatsAppBridge:
             await self._on_status(state, detail)
         except Exception as exc:
             log.error("❌ Status callback failed", state=state, error=str(exc), exc_info=True)
+
+
+def _consume_result(task: asyncio.Future[Any]) -> None:
+    # Done-callback for an abandoned neonize idle() (see WhatsAppBridge._idle).
+    if not task.cancelled() and task.exception() is not None:
+        log.warning("⚠️ Abandoned WhatsApp client ended with an error", error=str(task.exception()))
 
 
 def _parse_jid(jid_str: str):
