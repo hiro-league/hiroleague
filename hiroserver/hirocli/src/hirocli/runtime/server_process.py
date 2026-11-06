@@ -268,6 +268,7 @@ async def _main(
     # Bind the runner so InboundPipeline can dispatch ``message`` payloads
     # straight into the graph runner without going through a queue.
     comm_manager.attach_agent_manager(agent_manager)
+    ctx.agent_manager = agent_manager
 
     _register_signal_handlers(stop_event)
 

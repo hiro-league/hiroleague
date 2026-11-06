@@ -33,6 +33,7 @@ from hiro_commons.process import (
 
 from hiro_channel_sdk.constants import (
     JSONRPC_ERROR_METHOD_NOT_FOUND,
+    METHOD_CALL,
     MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_STREAM,
     METHOD_CONFIGURE,
@@ -64,6 +65,22 @@ if TYPE_CHECKING:
     from .server_context import ServerContext
 
 log = Logger.get("CHANNEL_MAN")
+
+# How long the core waits for a plugin to answer a channel.call. A WhatsApp send
+# uploads a picture and may retry once, so leave room.
+CHANNEL_CALL_TIMEOUT_SECONDS = 45.0
+
+
+class ChannelCallError(RuntimeError):
+    """A channel.call that failed: not running, timed out, or refused by the plugin.
+
+    ``reason`` is a short code (the plugin's refusal reason, or ``not_running`` /
+    ``timeout``); the message is meant for people.
+    """
+
+    def __init__(self, message: str, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 # Routine transport churn — plugin/handler layers already log the owning transition.
 _FINEINFO_CHANNEL_EVENTS = frozenset({
@@ -519,7 +536,13 @@ class ChannelManager:
         fut = ch.pending.pop(resp_id, None)
         if fut and not fut.done():
             if data.get("error"):
-                fut.set_exception(RuntimeError(data["error"]["message"]))
+                # Keep the plugin's reason (channel.call refusals carry one) so the
+                # caller can tell "not connected" from "failed" (Phase 4).
+                err = data["error"]
+                err_data = err.get("data") if isinstance(err.get("data"), dict) else {}
+                fut.set_exception(
+                    ChannelCallError(str(err.get("message") or "channel error"), str(err_data.get("reason") or ""))
+                )
             else:
                 fut.set_result(data.get("result"))
 
@@ -660,6 +683,40 @@ class ChannelManager:
         except asyncio.TimeoutError:
             ch.pending.pop(req_id, None)
             return None
+
+    async def call_channel(
+        self,
+        channel_name: str,
+        name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float = CHANNEL_CALL_TIMEOUT_SECONDS,
+    ) -> Any:
+        """Ask a plugin a named request (``channel.call``) and wait for its answer.
+
+        Raises ChannelCallError: reason ``not_running`` when the plugin isn't
+        connected, ``timeout``, or the plugin's own reason when it refused.
+        """
+        ch = self._channels.get(channel_name)
+        if ch is None:
+            raise ChannelCallError(f"The {channel_name} channel isn't running", "not_running")
+        from uuid import uuid4
+
+        req_id = uuid4().hex
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        ch.pending[req_id] = fut
+        log.info(f"{LOG_OUT} Channel call — ({channel_name}) · {name}")
+        try:
+            await ch.ws.send(rpc.build_request(METHOD_CALL, {"name": name, "params": params or {}}, request_id=req_id))
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise ChannelCallError(
+                f"The {channel_name} channel didn't answer {name} in {timeout:.0f}s", "timeout"
+            ) from exc
+        except ConnectionClosed as exc:
+            raise ChannelCallError(f"The {channel_name} channel disconnected", "not_running") from exc
+        finally:
+            ch.pending.pop(req_id, None)
 
     def get_connected_channels(self) -> list[str]:
         return list(self._channels.keys())

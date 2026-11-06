@@ -69,3 +69,34 @@ class ChannelPlugin(ABC):
     async def on_event(self, event: str, data: dict[str, Any]) -> None:
         """Optional inbound event from Hiro to the plugin."""
         _ = (event, data)
+
+    async def on_call(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Optional: answer a named request from Hiro (``channel.call``).
+
+        Hiro waits for the answer, unlike ``send``. Return the result; raise to answer
+        with an error (its message reaches the caller). A plugin that doesn't know
+        ``name`` raises ``ChannelCallNotSupported``.
+        """
+        _ = params
+        raise ChannelCallNotSupported(name)
+
+
+class ChannelCallRefused(Exception):
+    """An expected refusal from ``on_call`` (e.g. "WhatsApp isn't connected").
+
+    Answered as an error carrying ``reason`` (a short code the caller can act on)
+    and logged as a warning, not as a crash.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+
+
+class ChannelCallNotSupported(Exception):
+    """The plugin has no ``channel.call`` of that name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"This channel has no call named {name!r}")
+        self.name = name
