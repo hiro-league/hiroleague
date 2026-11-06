@@ -86,24 +86,6 @@ if ! UV_TOOL_DIR="${RELEASE_DIR}/tools" UV_TOOL_BIN_DIR="${RELEASE_DIR}/bin" \
 fi
 "${RELEASE_DIR}/bin/hiro" --help >/dev/null 2>&1 \
   || { cleanup_release; die "the new release's 'hiro' does not run: nothing was changed."; }
-
-# The WhatsApp channel plugin, in the same release as its own uv tool (its own environment: it
-# needs protobuf 7, which hiroleague's doesn't share). Installing it from the admin page can't work
-# under /opt (it runs `uv tool install` as the service's user, into that user's own folders), and
-# the service finds `hiro-channel-whatsapp` here because the release's bin folder starts its PATH.
-WA_CONSTRAINTS="${RELEASE_DIR}/constraints-whatsapp.txt"
-if ! (cd hiroserver && uv export --frozen --no-emit-workspace --no-dev --no-hashes \
-        --package hiro-channel-whatsapp -o "$WA_CONSTRAINTS" >/dev/null); then
-  cleanup_release; die "could not export uv.lock for the WhatsApp plugin: nothing was changed."
-fi
-if ! UV_TOOL_DIR="${RELEASE_DIR}/tools" UV_TOOL_BIN_DIR="${RELEASE_DIR}/bin" \
-     UV_PYTHON_INSTALL_DIR="${HIRO_HOME}/python" \
-     uv tool install --python "$HIRO_PYTHON" --constraints "$WA_CONSTRAINTS" \
-       ./hiroserver/channels/hiro-channel-whatsapp; then
-  cleanup_release; die "WhatsApp plugin install failed: nothing was changed."
-fi
-[ -x "${RELEASE_DIR}/bin/hiro-channel-whatsapp" ] \
-  || { cleanup_release; die "the new release has no 'hiro-channel-whatsapp': nothing was changed."; }
 chmod -R a+rX "$RELEASE_DIR" "${HIRO_HOME}/python" 2>/dev/null || true
 
 switch_current() {  # $1 = release folder; atomic: a new link renamed over the old one
