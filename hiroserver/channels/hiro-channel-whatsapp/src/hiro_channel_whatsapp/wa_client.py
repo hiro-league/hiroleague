@@ -566,7 +566,7 @@ class WhatsAppBridge:
         # list: usync query timed out" — it can't resolve a LID's devices).
         # Translate to the phone-number JID now, while we still hold the real
         # sender JID object, so the reply is addressable.
-        await self._resolve_reply_pn(inbound, event)
+        await self._resolve_lid_sender(inbound, event)
         # Voice notes (P6): download the audio bytes so the plugin can hand them to
         # the STT pipeline. Done here where we still hold the raw Message proto.
         if inbound.get("has_audio"):
@@ -612,19 +612,26 @@ class WhatsAppBridge:
         inbound["audio_seconds"] = int(am.seconds or 0)
         inbound["audio_size"] = len(data)
 
-    async def _resolve_reply_pn(self, inbound: dict[str, Any], event: MessageEv) -> None:
-        # Only needed when the reply target is a LID (…@lid); a phone-number JID
-        # already sends fine. Look the PN up in whatsmeow's local LID map (a store
-        # read, no network — so it can't time out like the send's usync query) and
-        # rewrite the reply target to it.
+    async def _resolve_lid_sender(self, inbound: dict[str, Any], event: MessageEv) -> None:
+        # Needed when the sender is addressed by LID (…@lid) and the message didn't
+        # carry its phone number (SenderAlt). Look the PN up in whatsmeow's local LID
+        # map (a store read, no network — so it can't time out like the send's usync
+        # query) and use it for both:
+        #   - the reply target: a @lid target makes whatsmeow's send fail;
+        #   - sender_pn, the number the allow-list checks. neonize 0.5.x delivers
+        #     LID senders without SenderAlt (2026-11-06), so before this fix the
+        #     owner's own messages were "not permitted" though the PN was resolved.
         reply = str(inbound.get("reply_jid") or "")
-        if not reply.endswith("@lid"):
+        needs_reply = reply.endswith("@lid")
+        src = event.Info.MessageSource
+        sender_is_lid = getattr(src.Sender, "Server", "") == "lid"
+        needs_pn = not inbound.get("sender_pn") and sender_is_lid
+        if not (needs_reply or needs_pn):
             return
         client = self._client
         if client is None:
             return
-        src = event.Info.MessageSource
-        lid_jid = src.Sender if getattr(src.Sender, "Server", "") == "lid" else src.Chat
+        lid_jid = src.Sender if sender_is_lid else src.Chat
         try:
             # Strip the device index (JIDToNonAD) so the lookup is per-user.
             pn = await client.get_pn_from_lid(JIDToNonAD(lid_jid))
@@ -640,8 +647,17 @@ class WhatsAppBridge:
             log.warning("⚠️ LID → phone number returned empty; reply may fail", lid=reply)
             return
         resolved = Jid2String(build_jid(user, "s.whatsapp.net"))
-        log.info("🔁 Resolved LID → phone number for reply", lid=reply, pn=resolved)
-        inbound["reply_jid"] = resolved
+        log.info(
+            "🔁 Resolved LID → phone number",
+            for_reply=needs_reply,
+            for_sender=needs_pn,
+            lid=Jid2String(lid_jid),
+            pn=resolved,
+        )
+        if needs_reply:
+            inbound["reply_jid"] = resolved
+        if needs_pn:
+            inbound["sender_pn"] = user
 
     # -- helpers -----------------------------------------------------------
 

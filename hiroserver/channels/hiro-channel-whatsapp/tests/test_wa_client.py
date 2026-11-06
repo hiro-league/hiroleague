@@ -1,4 +1,4 @@
-"""WhatsAppBridge client lifecycle on neonize 0.5.x.
+"""WhatsAppBridge on neonize 0.5.x: client lifecycle and LID senders.
 
 neonize 0.5.x's idle() only returns after Stop() (not Disconnect()), WhatsApp's QR
 window expires silently, and a Disconnect() after Stop() panics in Go. These tests
@@ -175,6 +175,34 @@ def test_run_moves_on_when_a_stopped_client_hangs(wa_client, tmp_path, monkeypat
     asyncio.run(scenario())
     assert len(clients) >= 2, "run() stayed on the hung client"
     assert clients[0].calls == ["connect", "disconnect", "stop"]
+
+
+class LidClient(FakeClient):
+    async def get_pn_from_lid(self, jid: Any) -> Any:
+        return types.SimpleNamespace(User="201223504849", Server="s.whatsapp.net")
+
+
+def _lid_event() -> Any:
+    lid = types.SimpleNamespace(User="59515412152504", Server="lid")
+    source = types.SimpleNamespace(Sender=lid, Chat=lid)
+    return types.SimpleNamespace(Info=types.SimpleNamespace(MessageSource=source))
+
+
+def test_lid_sender_gets_its_phone_number_for_the_allow_list(wa_client, tmp_path, monkeypatch):
+    # neonize 0.5.x: a direct message from a LID contact carries no SenderAlt, so
+    # _extract_inbound leaves sender_pn empty and the reply target is the @lid.
+    monkeypatch.setattr(wa_client, "Jid2String", lambda j: f"{j.User}@{j.Server}")
+    monkeypatch.setattr(wa_client, "build_jid", lambda u, s: types.SimpleNamespace(User=u, Server=s))
+    monkeypatch.setattr(wa_client, "JIDToNonAD", lambda j: j)
+    inbound = {"reply_jid": "59515412152504@lid", "sender_pn": ""}
+
+    async def scenario() -> None:
+        bridge = _bridge(wa_client, tmp_path, LidClient())
+        await bridge._resolve_lid_sender(inbound, _lid_event())
+
+    asyncio.run(scenario())
+    assert inbound["sender_pn"] == "201223504849"
+    assert inbound["reply_jid"] == "201223504849@s.whatsapp.net"
 
 
 def test_logout_unlinks_then_stops(wa_client, tmp_path):
