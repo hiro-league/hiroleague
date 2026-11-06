@@ -229,7 +229,7 @@ class CharacterCreateTool(Tool):
         "backstory": ToolParam(str, "Static backstory markdown", required=False),
         "llm_models_json": ToolParam(
             str,
-            'JSON array of preferred LLM ids, e.g. ["openai:gpt-5.4"]',
+            'JSON array of preferred LLM ids, e.g. ["openai:gpt-6.1-sol"]',
             required=False,
         ),
         "voice_models_json": ToolParam(

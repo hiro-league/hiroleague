@@ -62,14 +62,14 @@ def test_cloud_rerank_emits_one_priced_rollup(tmp_path: Path) -> None:
     """A catalogued cloud reranker → ONE ``rerank`` child with provider/model/tokens + a real
     cost, nested under the parent. No other sub-steps."""
     usage = RerankUsage(
-        model_id="voyage:rerank-2.5", processed_tokens=5000, calls=1, elapsed_ms=42.0
+        model_id="voyage:rerank-3", processed_tokens=5000, calls=1, elapsed_ms=42.0
     )
     by_node = _flush_and_read(tmp_path, usage)
 
     rerank = by_node.get(f"{_GE}/rerank")
     assert rerank is not None, "priced rerank roll-up child should be spawned"
     assert rerank["provider"] == "voyage"
-    assert rerank["model"] == "voyage:rerank-2.5"  # FULL prefixed id → catalog resolves + prices
+    assert rerank["model"] == "voyage:rerank-3"  # FULL prefixed id → catalog resolves + prices
     assert rerank["input_tokens"] == "5000"
     assert rerank["cost_usd"] not in ("", "0")  # a real, non-zero cost
     assert rerank["pricing_version"] != ""

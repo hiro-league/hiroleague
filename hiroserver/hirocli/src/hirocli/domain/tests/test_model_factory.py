@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 import yaml
 
@@ -65,6 +65,13 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "metadata_updated_at": "2026-01-01",
             },
             {
+                "id": "anthropic",
+                "display_name": "Anthropic",
+                "hosting": "cloud",
+                "credential_env_keys": ["ANTHROPIC_API_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
+            {
                 "id": "deepseek",
                 "display_name": "DeepSeek",
                 "hosting": "cloud",
@@ -82,50 +89,81 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         ],
         "models": [
             {
-                "id": "openai:gpt-5.4",
+                # GPT-6.1 Terra / 6 Luna: none..max (no `minimal`).
+                "id": "openai:gpt-6.1-terra",
                 "provider_id": "openai",
-                "display_name": "GPT 5.4",
+                "display_name": "GPT-6.1 Terra",
                 "model_kind": "chat",
-                "model_class": "reasoning",
+                "model_class": "balanced",
                 "features": ["reasoning"],
-                # GPT-5.4 generation dropped `minimal`, added `none`/`xhigh`.
-                "reasoning_efforts": ["none", "low", "medium", "high", "xhigh"],
+                "reasoning_efforts": ["none", "low", "medium", "high", "xhigh", "max"],
             },
             {
-                # GPT-5.0 generation still has `minimal`, lacks `none`/`xhigh`.
-                "id": "openai:gpt-5",
+                # GPT-6 Astra / 6.1 Sol: no `none` either.
+                "id": "openai:gpt-6.1-sol",
                 "provider_id": "openai",
-                "display_name": "GPT 5",
+                "display_name": "GPT-6.1 Sol",
                 "model_kind": "chat",
-                "model_class": "reasoning",
+                "model_class": "agentic",
+                "features": ["reasoning"],
+                "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
+            },
+            {
+                # Gemini 3.8 Flash: `minimal` is an error.
+                "id": "google:gemini-3.8-flash",
+                "provider_id": "google",
+                "display_name": "Gemini 3.8 Flash",
+                "model_kind": "chat",
+                "model_class": "balanced",
+                "features": ["reasoning"],
+                "reasoning_efforts": ["low", "medium", "high"],
+            },
+            {
+                "id": "google:gemini-3.5-flash-lite",
+                "provider_id": "google",
+                "display_name": "Gemini 3.5 Flash-Lite",
+                "model_kind": "chat",
+                "model_class": "fast",
                 "features": ["reasoning"],
                 "reasoning_efforts": ["minimal", "low", "medium", "high"],
             },
             {
-                # Pro tier — high only; every enabled level clamps up to high.
-                "id": "openai:gpt-5-pro",
-                "provider_id": "openai",
-                "display_name": "GPT 5 pro",
+                "id": "anthropic:claude-opus-5-5",
+                "provider_id": "anthropic",
+                "display_name": "Claude Opus 5.5",
                 "model_kind": "chat",
                 "model_class": "reasoning",
-                "features": ["reasoning"],
-                "reasoning_efforts": ["high"],
+                "features": ["tools", "reasoning"],
+                "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
             },
             {
-                "id": "google:gemini-3-flash-preview",
-                "provider_id": "google",
-                "display_name": "Gemini 3 Flash Preview",
+                "id": "anthropic:claude-sonnet-5-5",
+                "provider_id": "anthropic",
+                "display_name": "Claude Sonnet 5.5",
                 "model_kind": "chat",
-                "model_class": "balanced",
-                "features": ["reasoning"],
+                "model_class": "agentic",
+                "features": ["tools", "reasoning"],
+                "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
+                "thinking_off_type": "between_tools",
             },
             {
-                "id": "deepseek:deepseek-v4-flash",
+                "id": "anthropic:claude-haiku-5-5",
+                "provider_id": "anthropic",
+                "display_name": "Claude Haiku 5.5",
+                "model_kind": "chat",
+                "model_class": "fast",
+                "features": ["tools", "reasoning"],
+                "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
+                "thinking_off_type": "disabled",
+            },
+            {
+                "id": "deepseek:deepseek-flash",
                 "provider_id": "deepseek",
-                "display_name": "DeepSeek V4 Flash",
+                "display_name": "DeepSeek Flash",
                 "model_kind": "chat",
                 "model_class": "fast",
                 "features": ["tools", "structured_output", "reasoning"],
+                "reasoning_efforts": ["low", "high", "max"],
             },
             {
                 "id": "openai:text-embedding-3-small",
@@ -143,9 +181,10 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "features": ["tools", "structured_output", "reasoning"],
             },
             {
-                "id": "ollama:llama3.3",
+                # A local model without the `reasoning` feature.
+                "id": "ollama:plain-model",
                 "provider_id": "ollama",
-                "display_name": "Llama 3.3",
+                "display_name": "Plain local model",
                 "model_kind": "chat",
                 "model_class": "agentic",
                 "features": ["tools", "streaming"],
@@ -173,7 +212,7 @@ def test_unconfigured_provider_raises(tmp_path: Path, monkeypatch: pytest.Monkey
     _registry(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="not configured"):
         create_chat_model(
-            "openai:gpt-5.4",
+            "openai:gpt-6.1-terra",
             workspace_path=tmp_path,
         )
 
@@ -187,36 +226,23 @@ def test_openai_reasoning_uses_completion_tokens_and_effort(
     store.set_api_key("openai", "sk-test")
 
     model = create_chat_model(
-        "openai:gpt-5.4",
+        "openai:gpt-6.1-terra",
         workspace_path=tmp_path,
         credential_store=store,
         max_tokens=4096,
         thinking="minimal",
     )
 
-    assert model._default_params["model"] == "gpt-5.4"
+    assert model._default_params["model"] == "gpt-6.1-terra"
     assert model._default_params["max_completion_tokens"] == 4096
-    # GPT-5.4 dropped `minimal` (live API 400s on it) — neutral `minimal` clamps up to `low`.
+    # No GPT-5.6/6 model accepts `minimal` — neutral `minimal` clamps up to `low` (not `none`).
     assert model.reasoning_effort == "low"
     assert "max_tokens" not in model._default_params
-    # Reasoning models must route through the Responses API — /v1/chat/completions 400s on
-    # reasoning_effort + function tools for GPT-5.x.
+    # Reasoning models must route through the Responses API — GPT-6 rejects tool calling on
+    # /v1/chat/completions ("Tool calling requires the Responses API").
     assert model.use_responses_api is True
-
-
-def test_openai_minimal_passes_through_on_gpt5_generation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    wid = _registry(monkeypatch, tmp_path)
-    _patch_catalog(tmp_path, monkeypatch)
-    store = CredentialStore(tmp_path, wid, _test_secrets={})
-    store.set_api_key("openai", "sk-test")
-
-    # GPT-5.0 keeps `minimal` in its vocabulary, so it is sent verbatim (no clamp).
-    model = create_chat_model(
-        "openai:gpt-5", workspace_path=tmp_path, credential_store=store, thinking="minimal",
-    )
-    assert model.reasoning_effort == "minimal"
+    # Reasoning models never get a temperature.
+    assert model.temperature is None
 
 
 def test_openai_off_maps_to_none_when_supported_else_omits(
@@ -227,35 +253,20 @@ def test_openai_off_maps_to_none_when_supported_else_omits(
     store = CredentialStore(tmp_path, wid, _test_secrets={})
     store.set_api_key("openai", "sk-test")
 
-    # gpt-5.4 has an explicit `none` effort → `off` maps to it.
+    # 6.1 Terra has an explicit `none` effort → `off` maps to it.
     model_none = create_chat_model(
-        "openai:gpt-5.4", workspace_path=tmp_path, credential_store=store, thinking="off",
+        "openai:gpt-6.1-terra", workspace_path=tmp_path, credential_store=store, thinking="off",
     )
     assert model_none.reasoning_effort == "none"
 
-    # gpt-5.0 has no `none` → `off` omits reasoning_effort (model applies its default effort).
+    # 6.1 Sol has no `none` → `off` omits reasoning_effort (model applies its default effort).
     model_omit = create_chat_model(
-        "openai:gpt-5", workspace_path=tmp_path, credential_store=store, thinking="off",
+        "openai:gpt-6.1-sol", workspace_path=tmp_path, credential_store=store, thinking="off",
     )
     assert model_omit.reasoning_effort is None
 
 
-def test_openai_pro_clamps_every_level_up_to_high(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    wid = _registry(monkeypatch, tmp_path)
-    _patch_catalog(tmp_path, monkeypatch)
-    store = CredentialStore(tmp_path, wid, _test_secrets={})
-    store.set_api_key("openai", "sk-test")
-
-    # Pro tier accepts `high` only; a sub-high request clamps up rather than 400ing.
-    model = create_chat_model(
-        "openai:gpt-5-pro", workspace_path=tmp_path, credential_store=store, thinking="low",
-    )
-    assert model.reasoning_effort == "high"
-
-
-def test_google_thinking_level_maps_for_gemini_3(
+def test_google_thinking_level_clamps_to_model_levels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wid = _registry(monkeypatch, tmp_path)
@@ -264,17 +275,91 @@ def test_google_thinking_level_maps_for_gemini_3(
     store.set_api_key("google", "gk-test")
 
     model = create_chat_model(
-        "google:gemini-3-flash-preview",
+        "google:gemini-3.8-flash",
         workspace_path=tmp_path,
         credential_store=store,
         temperature=0,
         max_tokens=8192,
-        thinking="low",
+        thinking="minimal",
     )
 
-    assert model.model == "gemini-3-flash-preview"
+    assert model.model == "gemini-3.8-flash"
+    # `minimal` is an error on 3.8 Flash → clamps up to `low`.
     assert model.thinking_level == "low"
     assert model.max_output_tokens == 8192
+    # Sampling params are deprecated on Gemini — never sent.
+    assert model.temperature is None
+
+
+def test_google_off_maps_to_lowest_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("google", "gk-test")
+
+    # Gemini 3.x can't turn thinking fully off: `off` → the model's lowest level.
+    flash = create_chat_model(
+        "google:gemini-3.8-flash", workspace_path=tmp_path, credential_store=store, thinking="off",
+    )
+    assert flash.thinking_level == "low"
+    lite = create_chat_model(
+        "google:gemini-3.5-flash-lite", workspace_path=tmp_path, credential_store=store, thinking="off",
+    )
+    assert lite.thinking_level == "minimal"
+    assert lite.thinking_budget is None
+
+
+def _anthropic_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_id: str, **kw):
+    wid = _registry(monkeypatch, tmp_path)
+    _patch_catalog(tmp_path, monkeypatch)
+    store = CredentialStore(tmp_path, wid, _test_secrets={})
+    store.set_api_key("anthropic", "sk-ant-test")
+    return create_chat_model(model_id, workspace_path=tmp_path, credential_store=store, **kw)
+
+
+def test_anthropic_sends_adaptive_thinking_and_effort_never_temperature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _anthropic_model(
+        tmp_path, monkeypatch, "anthropic:claude-opus-5-5",
+        temperature=0.7, max_tokens=4096, thinking="minimal",
+    )
+    # API version 2026-10-21 (anthropic 2.x) rejects temperature on every model.
+    assert model.temperature is None
+    assert model.max_tokens == 4096
+    # enabled+budget_tokens is a 400 on Claude 5.x — adaptive thinking + effort instead.
+    assert model.thinking == {"type": "adaptive"}
+    assert model.effort == "low"  # `minimal` is not a Claude effort → clamps up to low
+    params = model._get_request_payload("hi")
+    assert "temperature" not in params
+    assert params["output_config"] == {"effort": "low"}
+
+    high = _anthropic_model(tmp_path, monkeypatch, "anthropic:claude-opus-5-5", thinking="high")
+    assert high.effort == "high"
+
+
+def test_anthropic_off_uses_model_specific_off_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Sonnet 5.5 rejects "disabled"; its lowest setting is "between_tools".
+    sonnet = _anthropic_model(tmp_path, monkeypatch, "anthropic:claude-sonnet-5-5", thinking="off")
+    assert sonnet.thinking == {"type": "between_tools"}
+    assert sonnet.effort is None
+    # Haiku 5.5 accepts "disabled".
+    haiku = _anthropic_model(tmp_path, monkeypatch, "anthropic:claude-haiku-5-5", thinking="off")
+    assert haiku.thinking == {"type": "disabled"}
+    # Opus 5.5 cannot turn thinking off → adaptive at its lowest effort.
+    opus = _anthropic_model(tmp_path, monkeypatch, "anthropic:claude-opus-5-5", thinking="off")
+    assert opus.thinking == {"type": "adaptive"}
+    assert opus.effort == "low"
+
+
+def test_anthropic_no_thinking_level_sends_model_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _anthropic_model(tmp_path, monkeypatch, "anthropic:claude-sonnet-5-5")
+    assert model.thinking is None
+    assert model.effort is None
 
 
 def test_deepseek_thinking_enables_reasoning_effort(
@@ -286,7 +371,7 @@ def test_deepseek_thinking_enables_reasoning_effort(
     store.set_api_key("deepseek", "ds-test")
 
     model = create_chat_model(
-        "deepseek:deepseek-v4-flash",
+        "deepseek:deepseek-flash",
         workspace_path=tmp_path,
         credential_store=store,
         temperature=0.7,
@@ -294,11 +379,21 @@ def test_deepseek_thinking_enables_reasoning_effort(
         thinking="high",
     )
 
-    assert model.model_name == "deepseek-v4-flash"
+    assert model.model_name == "deepseek-flash"
     assert str(model.api_base).startswith("https://api.deepseek.com")
     # high → "max"; thinking enabled and temperature NOT sent (DeepSeek ignores it in thinking mode).
     assert model.reasoning_effort == "max"
     assert model.extra_body == {"thinking": {"type": "enabled"}}
+
+    # DeepSeek added a `low` effort (Aug 2026): low → low, medium → high.
+    low = create_chat_model(
+        "deepseek:deepseek-flash", workspace_path=tmp_path, credential_store=store, thinking="low",
+    )
+    assert low.reasoning_effort == "low"
+    medium = create_chat_model(
+        "deepseek:deepseek-flash", workspace_path=tmp_path, credential_store=store, thinking="medium",
+    )
+    assert medium.reasoning_effort == "high"
 
 
 def test_deepseek_off_disables_thinking_and_keeps_temperature(
@@ -310,7 +405,7 @@ def test_deepseek_off_disables_thinking_and_keeps_temperature(
     store.set_api_key("deepseek", "ds-test")
 
     model = create_chat_model(
-        "deepseek:deepseek-v4-flash",
+        "deepseek:deepseek-flash",
         workspace_path=tmp_path,
         credential_store=store,
         temperature=0.2,
@@ -379,10 +474,10 @@ def test_ollama_non_reasoning_model_omits_think_flag(
     store = CredentialStore(tmp_path, wid, _test_secrets={})
     store.set_local_endpoint("ollama", "http://localhost:11434")
 
-    # llama3.3 lacks the `reasoning` catalog feature, so the think flag must not be sent even
+    # This model lacks the `reasoning` catalog feature, so the think flag must not be sent even
     # when a thinking level is requested.
     model = create_chat_model(
-        "ollama:llama3.3",
+        "ollama:plain-model",
         workspace_path=tmp_path,
         credential_store=store,
         thinking="high",
@@ -479,7 +574,7 @@ def test_create_embedding_model_delegates_to_init_embeddings(
     # A warm-keepalive http_client is injected so human-paced chat turns don't re-handshake on
     # every query embed (see _embedding_provider_kwargs); assert it's wired with our keepalive.
     http_client = kwargs["http_client"]
-    assert isinstance(http_client, httpx.Client)
+    assert isinstance(http_client, httpx2.Client)
     assert http_client.timeout.read == 30.0
     assert set(kwargs) == {"api_key", "http_client"}
 
@@ -497,11 +592,11 @@ def test_openai_chat_model_gets_warm_keepalive_http_clients(
     store.set_api_key("openai", "sk-test")
 
     model = create_chat_model(
-        "openai:gpt-5.4", workspace_path=tmp_path, credential_store=store,
+        "openai:gpt-6.1-terra", workspace_path=tmp_path, credential_store=store,
     )
 
-    assert isinstance(model.http_client, httpx.Client)
-    assert isinstance(model.http_async_client, httpx.AsyncClient)
+    assert isinstance(model.http_client, httpx2.Client)
+    assert isinstance(model.http_async_client, httpx2.AsyncClient)
     # The async client is the chat hot path (langchain streams over it); assert the pool keepalive.
     pool = model.http_async_client._transport._pool
     assert pool._keepalive_expiry == KEEPALIVE_EXPIRY_S

@@ -72,7 +72,7 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
             "inbound_id": inbound.routing.id,
             "chat_channel_id": channel.id,
             "character_id": "hiro",
-            "model_id": "openai:gpt-5.4-mini",
+            "model_id": "openai:gpt-6-luna",
         },
     )
     await sub.dispatch(
@@ -81,7 +81,7 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
         {
             "inbound_id": inbound.routing.id,
             "chat_channel_id": channel.id,
-            "model_id": "openai:gpt-5.4-mini",
+            "model_id": "openai:gpt-6-luna",
             "usage_available": True,
             "input_tokens": 10,
             "output_tokens": 4,
@@ -94,7 +94,7 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
         {
             "inbound_id": inbound.routing.id,
             "chat_channel_id": channel.id,
-            "model_id": "openai:gpt-5.4-mini",
+            "model_id": "openai:gpt-6-luna",
             "usage_available": True,
             "input_tokens": 3,
             "output_tokens": 2,
@@ -177,7 +177,7 @@ async def test_graph_events_patch_compact_agent_metadata(tmp_path) -> None:
     assert isinstance(inbound_agent["elapsed_ms"], int)
     assert inbound_agent["cost"] == {
         "currency": "USD",
-        "estimated_total": 0.00003675,
+        "estimated_total": 0.0000043,  # gpt-6-luna: 13 × $0.10 + 6 × $0.50 per MTok
         "pricing_available": True,
     }
     assert reply_agent == inbound_agent
@@ -215,7 +215,7 @@ async def test_tts_cost_accumulates_with_existing_llm_cost(tmp_path) -> None:
             "inbound_id": inbound.routing.id,
             "chat_channel_id": channel.id,
             "character_id": "hiro",
-            "model_id": "openai:gpt-5.4-mini",
+            "model_id": "openai:gpt-6-luna",
         },
     )
     await sub.dispatch(
@@ -224,7 +224,7 @@ async def test_tts_cost_accumulates_with_existing_llm_cost(tmp_path) -> None:
         {
             "inbound_id": inbound.routing.id,
             "chat_channel_id": channel.id,
-            "model_id": "openai:gpt-5.4-mini",
+            "model_id": "openai:gpt-6-luna",
             "usage_available": True,
             "input_tokens": 10,
             "output_tokens": 4,
@@ -276,7 +276,7 @@ async def test_tts_cost_accumulates_with_existing_llm_cost(tmp_path) -> None:
     agent = by_id["reply-tts-cost"]["metadata"]["agent"]
     assert agent["cost"] == {
         "currency": "USD",
-        "estimated_total": 0.0150255,
+        "estimated_total": 0.015003,  # tts-1 $0.015 + gpt-6-luna $0.000003
         "pricing_available": True,
     }
 

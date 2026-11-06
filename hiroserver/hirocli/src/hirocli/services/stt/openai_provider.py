@@ -1,9 +1,8 @@
 """OpenAI STT provider — direct AsyncOpenAI integration.
 
 Models offered:
-  • gpt-4o-mini-transcribe  (default) — fast, low word-error rate, fewer hallucinations
-  • gpt-4o-transcribe                  — higher quality, best accuracy
-  • gpt-4o-transcribe-diarize          — speaker identification / segmentation
+  • gpt-transcribe (default) — OpenAI's current file transcription model ($0.0045/min). It
+    replaced gpt-4o-transcribe / -mini / -diarize and whisper-1, which shut down Feb 26, 2027.
 
 The openai SDK is imported lazily inside methods so this module can be imported
 even when the openai package is not installed (provider will report unavailable).
@@ -26,7 +25,7 @@ from .provider import ModelInfo, STTProvider, TranscriptionResult
 
 log = Logger.get("STT.OPENAI")
 
-_DEFAULT_MODEL = "gpt-4o-mini-transcribe"
+_DEFAULT_MODEL = "gpt-transcribe"
 
 
 def _openai_stt_usage(usage: Any) -> dict[str, int] | None:
@@ -94,21 +93,29 @@ def _ext_for_mime(mime_type: str | None) -> str:
 
 _MODELS: list[ModelInfo] = [
     ModelInfo(
-        model_id="gpt-4o-mini-transcribe",
+        model_id="gpt-transcribe",
         provider="openai",
-        display_name="GPT-4o Mini Transcribe",
-    ),
-    ModelInfo(
-        model_id="gpt-4o-transcribe",
-        provider="openai",
-        display_name="GPT-4o Transcribe",
-    ),
-    ModelInfo(
-        model_id="gpt-4o-transcribe-diarize",
-        provider="openai",
-        display_name="GPT-4o Transcribe (with Diarization)",
+        display_name="GPT Transcribe",
     ),
 ]
+
+
+def _transcription_kwargs(
+    *, model: str, language: str | None, prompt: str | None
+) -> dict[str, Any]:
+    """Request kwargs for ``audio.transcriptions.create``, sending only what is set.
+
+    gpt-transcribe takes the language hint as ``languages`` (a list); the guide says never to send
+    ``language`` and ``languages`` together. Unset values are left out rather than sent as null
+    (openai 3.x marks these params ``Omit``). ``temperature`` is not sent: the gpt-transcribe docs
+    don't list it.
+    """
+    kwargs: dict[str, Any] = {"model": model}
+    if language:
+        kwargs["languages"] = [language]
+    if prompt:
+        kwargs["prompt"] = prompt
+    return kwargs
 
 
 class OpenAISTTProvider(STTProvider):
@@ -153,13 +160,14 @@ class OpenAISTTProvider(STTProvider):
         Args:
             audio_bytes: Raw audio data.
             model:       One of the model_ids from supported_models(). Defaults to
-                         gpt-4o-mini-transcribe.
+                         gpt-transcribe.
             mime_type:   MIME type of the audio data. Mapped to a filename extension
                          so OpenAI can infer the format correctly.
             language:    Optional ISO-639-1 language hint (e.g. "en") to improve
                          accuracy and reduce latency.
             prompt:      Optional free-text prompt to guide transcription style.
-            temperature: Sampling temperature (0.0 = deterministic).
+            temperature: Accepted for interface compatibility; not sent (gpt-transcribe does
+                         not document it).
         """
         from openai import AsyncOpenAI, APIError, RateLimitError
         from tenacity import retry, stop_after_attempt, wait_exponential
@@ -187,11 +195,8 @@ class OpenAISTTProvider(STTProvider):
         )
         async def _call():
             return await client.audio.transcriptions.create(
-                model=effective_model,
                 file=audio_file,
-                language=language,
-                prompt=prompt,
-                temperature=temperature,
+                **_transcription_kwargs(model=effective_model, language=language, prompt=prompt),
             )
 
         resp = await _call()
@@ -201,6 +206,7 @@ class OpenAISTTProvider(STTProvider):
             text=transcript,
             model=effective_model,
             provider="openai",
-            # gpt-4o-transcribe models return token usage; whisper-1 does not (priced per second).
+            # Token usage when the API reports it; gpt-transcribe is billed per minute, so a
+            # duration-only usage falls back to the catalog per_second rate.
             usage_metadata=_openai_stt_usage(getattr(resp, "usage", None)),
         )

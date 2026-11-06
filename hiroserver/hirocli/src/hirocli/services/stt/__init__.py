@@ -5,7 +5,7 @@ Public API
     STTProvider     — ABC for all STT providers
     ModelInfo       — dataclass describing a single model
     STTService      — orchestrator that aggregates providers and routes by model ID
-    OpenAISTTProvider — OpenAI gpt-4o-transcribe family
+    OpenAISTTProvider — OpenAI gpt-transcribe
     GeminiSTTProvider — Google Gemini multimodal transcription
     create_stt_service — factory that builds an STTService from workspace preferences
 """

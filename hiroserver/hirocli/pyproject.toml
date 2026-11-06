@@ -35,16 +35,27 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=13",
     "cryptography>=43",
-    "openai>=2.0",
-    "google-genai>=1.66",
+    # openai 3.x runs on httpx2 (model_http builds httpx2 clients) and checks TLS against the OS
+    # trust store, so a host needs system CA certificates (ca-certificates on Linux).
+    "openai>=3.46",
+    # Held below 3.0: google-genai 3.0 defaults to the v1 API, which has no audio output, so
+    # Gemini TTS (v1beta-only) would fail. langchain-google-genai is not tested on 3.0 yet either.
+    "google-genai>=2.20,<3",
+    # Claude SDK 2.x speaks API version 2026-10-21 (no sampling params on any model);
+    # model_factory never sends temperature to Claude. Explicit so the 2.x floor is ours.
+    "anthropic>=2.6",
+    # model_http builds httpx2 clients for the OpenAI/DeepSeek SDKs (openai 3.x transport).
+    "httpx2>=2.16",
     "lameenc>=1.8.2",
-    "langchain>=1.0",
-    "langgraph>=1.0",
+    "langchain>=1.4",
+    "langgraph>=1.2",
     "langgraph-checkpoint-sqlite>=2.0",
-    "langsmith>=0.8.0",
-    "langchain-openai>=0.3",
-    "langchain-anthropic>=1.4",
-    "langchain-google-genai>=4.2",
+    "langsmith>=0.14",
+    "langchain-openai>=1.7",
+    # >=1.7 maps `effort` to output_config.effort (adaptive thinking on Claude 5.x models).
+    "langchain-anthropic>=1.7.10",
+    # >=4.4 has thinking_level (Gemini 3.x) and no implicit default temperature.
+    "langchain-google-genai>=4.4",
     "langchain-deepseek>=1.0",
     "langchain-ollama>=1.0.1",
     "langchain-community>=0.3",

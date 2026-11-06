@@ -37,7 +37,7 @@ __all__ = [
 _log = Logger.get("IMAGEGEN")
 
 # Catalog provider ids with an actual ImageGenProvider implementation. The catalog may
-# carry image_gen models from other vendors (e.g. openai:gpt-image-2) before we implement
+# carry image_gen models from other vendors (e.g. openai:gpt-image-2.6-sunburst) before we implement
 # them — UIs must not offer those for generation.
 IMPLEMENTED_IMAGE_GEN_PROVIDERS: frozenset[str] = frozenset({"cloudflare"})
 

@@ -105,7 +105,7 @@ def register(character_app: typer.Typer, console: Console) -> None:
         prompt: Optional[str] = typer.Option(None, "--prompt", "-p", help="System prompt text."),
         backstory: Optional[str] = typer.Option(None, "--backstory", "-b"),
         llm_models_json: Optional[str] = typer.Option(
-            None, "--llm-models-json", help='JSON array, e.g. ["openai:gpt-5.4"]',
+            None, "--llm-models-json", help='JSON array, e.g. ["openai:gpt-6.1-sol"]',
         ),
         voice_models_json: Optional[str] = typer.Option(
             None, "--voice-models-json", help="JSON array of voice ids.",

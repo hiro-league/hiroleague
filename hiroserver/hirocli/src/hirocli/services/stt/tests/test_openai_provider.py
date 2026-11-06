@@ -51,3 +51,18 @@ def test_ext_for_mime_returns_dot_prefixed_value() -> None:
     leading dot is required so ``audio.webm`` (not ``audiowebm``) is sent."""
     assert _ext_for_mime("audio/webm").startswith(".")
     assert _ext_for_mime("audio/webm;codecs=opus").startswith(".")
+
+
+def test_transcription_kwargs_sends_languages_list_and_skips_unset() -> None:
+    # gpt-transcribe takes the language hint as `languages` (a list), never `language`; unset
+    # values are omitted instead of sent as null, and temperature is not sent.
+    from hirocli.services.stt.openai_provider import _transcription_kwargs
+
+    assert _transcription_kwargs(model="gpt-transcribe", language="en", prompt="names: Hiro") == {
+        "model": "gpt-transcribe",
+        "languages": ["en"],
+        "prompt": "names: Hiro",
+    }
+    assert _transcription_kwargs(model="gpt-transcribe", language=None, prompt=None) == {
+        "model": "gpt-transcribe",
+    }

@@ -34,7 +34,7 @@ class ImageLabService:
 
             models: list[dict[str, Any]] = []
             for spec in cat.list_models(model_kind="image_gen"):
-                # Catalog rows without a provider implementation (e.g. openai:gpt-image-2)
+                # Catalog rows without a provider implementation (e.g. openai:gpt-image-2.6-sunburst)
                 # would fail at generation time — don't offer them in the Lab.
                 if spec.provider_id not in IMPLEMENTED_IMAGE_GEN_PROVIDERS:
                     continue

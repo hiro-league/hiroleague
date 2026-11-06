@@ -47,7 +47,7 @@ class LedgerProbeGraph(NodeGroup):
         entry = current_entry.get()
         assert entry is not None
         child = entry.spawn_child(node="tools/search", elapsed_ms=7)
-        child.add_usage(provider="openai", model="openai:gpt-5.4", input_tokens=10)
+        child.add_usage(provider="openai", model="openai:gpt-6.1-sol", input_tokens=10)
         child.set_decision("ok", "ok")
         return {}
 
@@ -55,7 +55,7 @@ class LedgerProbeGraph(NodeGroup):
     async def timing_only_node(self, state: dict[str, Any]) -> dict[str, Any]:
         entry = current_entry.get()
         assert entry is not None
-        entry.add_usage(provider="openai", model="openai:gpt-5.4", input_tokens=10)
+        entry.add_usage(provider="openai", model="openai:gpt-6.1-sol", input_tokens=10)
         entry.set_decision("text_reply", "ok")
         return {}
 
@@ -65,7 +65,7 @@ class LedgerProbeGraph(NodeGroup):
         assert entry is not None
         entry.add_usage(
             provider="openai",
-            model="openai:gpt-5.4",
+            model="openai:gpt-6.1-sol",
             input_tokens=100,
             output_tokens=20,
             cached_input_tokens=10,
@@ -244,14 +244,14 @@ def test_stt_priced_by_duration_fallback(tmp_path: Path) -> None:
     priced = price_row(
         {
             "provider": "openai",
-            "model": "openai:gpt-4o-transcribe",
+            "model": "openai:gpt-transcribe",
             "stt_audio_seconds": 12.5,
         },
         graph._ledger_sink.catalog,
     )
 
-    # gpt-4o-transcribe per_second = 0.0001 → 12.5 × 0.0001 = 0.00125.
-    assert priced["cost_usd"] == "0.00125"
+    # gpt-transcribe per_second = 0.000075 ($0.0045/min) → 12.5 × 0.000075 = 0.0009375.
+    assert priced["cost_usd"] == "0.0009375"
     assert priced["pricing_version"]
 
 
@@ -261,8 +261,8 @@ def test_stt_priced_by_tokens_when_usage_present(tmp_path: Path) -> None:
 
     priced = price_row(
         {
-            "provider": "openai",
-            "model": "openai:gpt-4o-mini-transcribe",
+            "provider": "google",
+            "model": "google:gemini-3.8-flash",
             "stt_audio_seconds": 8.4,
             "stt_audio_tokens": 1200,
             "output_tokens": 80,
@@ -270,8 +270,8 @@ def test_stt_priced_by_tokens_when_usage_present(tmp_path: Path) -> None:
         graph._ledger_sink.catalog,
     )
 
-    # 1200 × 1.25/1e6 + 80 × 5.00/1e6 = 0.0019 (token path wins over the per-second fallback).
-    assert priced["cost_usd"] == "0.0019"
+    # 1200 × 1.50/1e6 (audio in) + 80 × 3.75/1e6 = 0.0021 (token path wins over the per-second fallback).
+    assert priced["cost_usd"] == "0.0021"
     assert priced["pricing_version"]
 
 
@@ -326,7 +326,7 @@ def test_gemini_tts_prices_with_audio_tokens(tmp_path: Path) -> None:
     priced = price_row(
         {
             "provider": "gemini",
-            "model": "gemini-2.5-flash-preview-tts",
+            "model": "gemini-3.8-flash-tts",
             "tts_chars": 80,
             "tts_text_tokens": 18,
             "tts_audio_tokens": 240,
@@ -348,7 +348,7 @@ def test_gemini_tts_without_audio_tokens_stays_unpriced(tmp_path: Path) -> None:
     priced = price_row(
         {
             "provider": "gemini",
-            "model": "gemini-2.5-flash-preview-tts",
+            "model": "gemini-3.8-flash-tts",
             "tts_chars": 80,
             "tts_text_tokens": 18,
             "tts_audio_seconds": 4.0,
@@ -398,7 +398,7 @@ async def test_run_accumulator_writes_aggregate_and_evicts_run(tmp_path: Path) -
     assert run_row["output_tokens"] == "20"
     assert run_row["cached_input_tokens"] == "10"
     assert run_row["reasoning_tokens"] == "3"
-    assert run_row["model"] == "openai:gpt-5.4"
+    assert run_row["model"] == "openai:gpt-6.1-sol"
     assert run_row["cost_usd"] == node_row["cost_usd"]
     assert len(run_row["input_preview"]) == 280
     assert len(run_row["output_preview"]) == 280
@@ -455,7 +455,7 @@ def _state(inbound_id: str) -> dict[str, Any]:
         "inbound_id": inbound_id,
         "chat_channel_id": 5,
         "character_id": "hiro",
-        "model_id": "openai:gpt-5.4",
+        "model_id": "openai:gpt-6.1-sol",
     }
 
 

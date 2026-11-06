@@ -154,12 +154,12 @@ class LlmCatalogGetModelTool(Tool):
     name = "llm_catalog_get_model"
     description = (
         "Return full catalog metadata for one model by canonical id (e.g. "
-        "'openai:gpt-5.4'), including pricing block and parent provider summary."
+        "'openai:gpt-6.1-sol'), including pricing block and parent provider summary."
     )
     params = {
         "model_id": ToolParam(
             str,
-            "Canonical model id: provider:api_id, e.g. openai:gpt-5.4",
+            "Canonical model id: provider:api_id, e.g. openai:gpt-6.1-sol",
         ),
     }
 

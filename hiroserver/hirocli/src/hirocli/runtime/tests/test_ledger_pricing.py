@@ -19,7 +19,7 @@ def test_rerank_branch_uses_input_tokens(catalog) -> None:
     priced = price_row(
         {
             "provider": "voyage",
-            "model": "voyage:rerank-2.5",
+            "model": "voyage:rerank-3",
             "input_tokens": 500,
         },
         catalog,
@@ -32,27 +32,27 @@ def test_stt_duration_fallback(catalog) -> None:
     priced = price_row(
         {
             "provider": "openai",
-            "model": "openai:gpt-4o-transcribe",
+            "model": "openai:gpt-transcribe",
             "stt_audio_seconds": 12.5,
         },
         catalog,
     )
-    assert priced["cost_usd"] == "0.00125"
+    assert priced["cost_usd"] == "0.0009375"
     assert priced["pricing_version"]
 
 
 def test_stt_token_path(catalog) -> None:
     priced = price_row(
         {
-            "provider": "openai",
-            "model": "openai:gpt-4o-mini-transcribe",
+            "provider": "google",
+            "model": "google:gemini-3.8-flash",
             "stt_audio_seconds": 8.4,
             "stt_audio_tokens": 1200,
             "output_tokens": 80,
         },
         catalog,
     )
-    assert priced["cost_usd"] == "0.0019"
+    assert priced["cost_usd"] == "0.0021"
     assert priced["pricing_version"]
 
 
@@ -60,7 +60,7 @@ def test_tts_gemini_with_audio_tokens(catalog) -> None:
     priced = price_row(
         {
             "provider": "gemini",
-            "model": "gemini-2.5-flash-preview-tts",
+            "model": "gemini-3.8-flash-tts",
             "tts_chars": 80,
             "tts_text_tokens": 18,
             "tts_audio_tokens": 240,
@@ -78,7 +78,7 @@ def test_tts_gemini_without_audio_tokens_unpriced(catalog) -> None:
     priced = price_row(
         {
             "provider": "gemini",
-            "model": "gemini-2.5-flash-preview-tts",
+            "model": "gemini-3.8-flash-tts",
             "tts_chars": 80,
             "tts_text_tokens": 18,
             "tts_audio_seconds": 4.0,
@@ -94,7 +94,7 @@ def test_token_usage_default_branch(catalog) -> None:
     priced = price_row(
         {
             "provider": "openai",
-            "model": "openai:gpt-5.4",
+            "model": "openai:gpt-6.1-sol",
             "input_tokens": 100,
             "output_tokens": 20,
             "cached_input_tokens": 10,
