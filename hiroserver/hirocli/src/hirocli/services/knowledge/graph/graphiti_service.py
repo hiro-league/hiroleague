@@ -60,7 +60,9 @@ from .graphiti_ingest import (
     GraphEventSink,
     GraphitiEpisodeInput,
     GraphitiIngestStats,
+    ensure_fts_indices,
     ingest_episodes,
+    missing_fts_indices,
     rebuild_fts_indices,
 )
 from .graphiti_ontology import GRAPHITI_ENTITY_TYPES
@@ -874,10 +876,12 @@ class GraphitiMemoryService:
         ``group_ids`` explicitly to the search, so the multi-group ``driver._database``
         write-path concern does not apply here.
 
-        Read-only; does not require :meth:`initialize` (the graph was built at
-        ingest). Returns an empty expansion on a blank query — the caller folds
-        ``chunk_ids`` into the Qdrant filter and falls back to flat search when empty.
+        Does not run the full :meth:`initialize`, but first makes sure the Kuzu FTS
+        indices exist (:meth:`_ensure_search_indices`) — searching before any ingest used
+        to fail every keyword leg. Returns an empty expansion on a blank query — the caller
+        folds ``chunk_ids`` into the Qdrant filter and falls back to flat search when empty.
         """
+        await self._ensure_search_indices()
         return await _search_chunk_ids(
             self._graphiti,
             query,
@@ -891,6 +895,34 @@ class GraphitiMemoryService:
             scope=self._search_scope,
             show_expiry=show_expiry,
         )
+
+    async def _ensure_search_indices(self) -> None:
+        """Create any missing Kuzu FTS index before a search reads it.
+
+        Why: the FTS indices used to come only from :meth:`initialize`, which runs on the
+        first ingest. On Simone (Nov 7, 2026) memory recall ran before any ingest in the
+        process — the graph had never had the indices — so every search failed with
+        "doesn't have an index with name edge_name_and_fact" and recall came back empty.
+
+        Each call is one cheap ``SHOW_INDEXES`` read; the write lock is taken only when an
+        index is missing (then re-checked under the lock, so a search that lands between an
+        ingest rebuild's DROP and CREATE just waits for it instead of creating a duplicate).
+        Non-fatal: if the check or CREATE fails we log and let the search run — it then
+        fails the way it did before and the caller's error handling applies."""
+        driver = getattr(self._graphiti, "driver", None)
+        if driver is None:
+            return
+        try:
+            if not await missing_fts_indices(driver):
+                return
+            async with kuzu_registry.write_lock(self._registry_key):
+                await ensure_fts_indices(driver)
+        except Exception:
+            log.warning(
+                "⚠️ graphiti — could not create missing FTS indices before search · path=%s",
+                self._db_path,
+                exc_info=True,
+            )
 
     async def close(self) -> None:
         """Release the Graphiti client + Kuzu driver. Safe to call multiple times."""

@@ -396,3 +396,66 @@ def test_graph_preferences_query_timeout_default_and_bounds() -> None:
         GraphPreferences(query_timeout_s=-1)
     with _pytest.raises(ValidationError):
         GraphPreferences(query_timeout_s=601)
+
+
+_ALL_FTS = [
+    ("Episodic", "episode_content"),
+    ("Entity", "node_name_and_summary"),
+    ("Community", "community_name"),
+    ("RelatesToNode_", "edge_name_and_fact"),
+]
+
+
+@pytest.mark.asyncio
+async def test_search_before_any_ingest_creates_fts_indices(tmp_path, monkeypatch) -> None:
+    """Regression (Simone, Nov 7, 2026): memory recall ran before the first ingest, when
+    ``initialize()`` had never created the Kuzu FTS indices, so every search failed with
+    "Table RelatesToNode_ doesn't have an index with name edge_name_and_fact". The search
+    path must create the missing indices BEFORE the graphiti query runs."""
+    from hirocli.services.knowledge.graph import graphiti_service
+    from hirocli.services.knowledge.graph.graphiti_ingest import missing_fts_indices
+
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    seen_missing: list[list[tuple[str, str]]] = []
+
+    async def _fake_search(graphiti, query, **kwargs):
+        # Runs where graphiti's QUERY_FTS_INDEX would — record what is missing right then.
+        seen_missing.append(await missing_fts_indices(graphiti.driver))
+        return "expansion"
+
+    monkeypatch.setattr(graphiti_service, "_search_chunk_ids", _fake_search)
+    try:
+        driver = svc.graphiti.driver
+        assert await missing_fts_indices(driver) == _ALL_FTS  # fresh DB, never initialized
+        assert await svc.search_chunk_ids("Maro", group_id="mem_1_hiro") == "expansion"
+        assert seen_missing == [[]]
+        # Second search: indices already there → nothing to create, still searches.
+        assert await svc.search_chunk_ids("Maro", group_id="mem_1_hiro") == "expansion"
+        assert seen_missing == [[], []]
+    finally:
+        await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_ensure_fts_indices_recreates_only_the_missing_one(tmp_path) -> None:
+    """A rebuild that DROPs an index and then fails its CREATE leaves that one index gone;
+    ``ensure_fts_indices`` re-creates just it and leaves the others alone."""
+    from hirocli.services.knowledge.graph.graphiti_ingest import (
+        ensure_fts_indices,
+        missing_fts_indices,
+    )
+
+    db = graphiti_db_path(tmp_path)
+    svc = GraphitiMemoryService(db_path=db, llm_client=_StubLLM(), embedder=_StubEmbedder())
+    try:
+        await svc.initialize()
+        driver = svc.graphiti.driver
+        assert await missing_fts_indices(driver) == []
+        await driver.execute_query("CALL DROP_FTS_INDEX('RelatesToNode_', 'edge_name_and_fact');")
+        assert await missing_fts_indices(driver) == [("RelatesToNode_", "edge_name_and_fact")]
+        assert await ensure_fts_indices(driver) == [("RelatesToNode_", "edge_name_and_fact")]
+        assert await missing_fts_indices(driver) == []
+        assert await ensure_fts_indices(driver) == []  # idempotent
+    finally:
+        await svc.close()

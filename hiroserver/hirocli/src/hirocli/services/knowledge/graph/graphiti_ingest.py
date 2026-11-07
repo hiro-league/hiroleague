@@ -114,6 +114,52 @@ async def rebuild_fts_indices(driver: Any) -> None:
             raise
     log.info("✅ graphiti — Kuzu FTS indices rebuilt · count=%d", len(_KUZU_FTS_INDICES))
 
+
+async def missing_fts_indices(driver: Any) -> list[tuple[str, str]]:
+    """The ``(table, index_name)`` FTS indices graphiti needs that the Kuzu DB lacks.
+
+    One cheap catalog read (``SHOW_INDEXES``); ``[]`` on non-Kuzu backends."""
+    if getattr(driver, "provider", None) != GraphProvider.KUZU:
+        return []
+    records, _, _ = await driver.execute_query("CALL SHOW_INDEXES() RETURN *;")
+    present = {
+        (r.get("table_name"), r.get("index_name"))
+        for r in records or []
+        if str(r.get("index_type", "")).upper() == "FTS"
+    }
+    return [pair for pair in _KUZU_FTS_INDICES if pair not in present]
+
+
+async def ensure_fts_indices(driver: Any) -> list[tuple[str, str]]:
+    """CREATE only the missing Kuzu FTS indices (no drop) → the pairs it created.
+
+    WHY (Simone, Nov 7, 2026): the indices were created only by ``initialize()``, which runs
+    lazily on the first INGEST. A fresh server process (or a graph that was never ingested
+    into) answered memory recall before any ingest, so every ``QUERY_FTS_INDEX`` failed with
+    "Table RelatesToNode_ doesn't have an index with name edge_name_and_fact" and recall came
+    back empty. The search path calls this first so the indices always exist before a query.
+    Also heals the gap a failed CREATE leaves after ``rebuild_fts_indices`` dropped an index.
+    Caller holds the per-workspace write lock (CREATE_FTS_INDEX is a write)."""
+    missing = await missing_fts_indices(driver)
+    if not missing:
+        return []
+    wanted = set(missing)
+    for (table, name), stmt in zip(
+        _KUZU_FTS_INDICES, get_fulltext_indices(driver.provider), strict=True
+    ):
+        if (table, name) not in wanted:
+            continue
+        try:
+            await driver.execute_query(stmt)
+        except Exception:
+            log.exception("❌ graphiti — FTS create failed · table=%s index=%s", table, name)
+            raise
+    log.info(
+        "✅ graphiti — created missing Kuzu FTS indices · %s",
+        ", ".join(f"{t}.{n}" for t, n in missing),
+    )
+    return missing
+
 # F7 — source-role allow-list (supersedes the earlier ingest's gate). Allow-list,
 # not deny-list: a future ingest path that forgets to tag its role is REJECTED by
 # default. Add roles here explicitly as new ingest sources are wired up.
