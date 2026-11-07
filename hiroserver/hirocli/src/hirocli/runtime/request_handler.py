@@ -43,6 +43,19 @@ EXTENSIONS_ONLY: frozenset[str] = frozenset({CALLER_EXTENSION})
 ALL_CALLERS: frozenset[str] = frozenset({CALLER_DEVICE, CALLER_EXTENSION})
 
 
+class RequestRefused(Exception):
+    """Raised by a handler to answer with an error the caller can act on.
+
+    ``code`` is a short machine code (e.g. ``invalid_params``, ``whatsapp_not_connected``);
+    ``message`` is meant for people.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
+
+
 class RequestContext:
     """Context passed to method handlers."""
 
@@ -152,6 +165,15 @@ class RequestHandler:
             if result is None:
                 return None
             return EnvelopeFactory.response(msg, status="ok", payload=result)
+        except RequestRefused as exc:
+            # An expected "no" (e.g. WhatsApp isn't linked): the caller gets the code
+            # and message; logged as a warning, not as a crash with a traceback.
+            log.warning(f"⚠️ Request refused — {method} · {exc.code}", error=exc.message)
+            return EnvelopeFactory.response(
+                msg,
+                status="error",
+                payload={"code": exc.code, "message": exc.message},
+            )
         except Exception as exc:
             log.error(
                 "Request handler error",

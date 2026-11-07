@@ -14,6 +14,7 @@ from __future__ import annotations
 JSONRPC_VERSION: str = "2.0"
 JSONRPC_ERROR_METHOD_NOT_FOUND: int = -32601
 JSONRPC_ERROR_INTERNAL: int = -32603
+JSONRPC_ERROR_CALL_REFUSED: int = -32000  # channel.call refused on purpose; data.reason says why
 
 # ---------------------------------------------------------------------------
 # Channel RPC methods
@@ -26,6 +27,14 @@ METHOD_SEND: str = "channel.send"
 METHOD_CONFIGURE: str = "channel.configure"
 METHOD_STOP: str = "channel.stop"
 METHOD_STATUS: str = "channel.status"
+# core → plugin: a named request the plugin answers (params {"name", "params"}).
+# Unlike channel.send (a reply the core hands over and forgets), the core waits for
+# the answer: Phase 4's sends for an extension report "sent" or why not.
+METHOD_CALL: str = "channel.call"
+
+# Calls the WhatsApp plugin answers (channel.call names).
+WHATSAPP_CALL_SEND: str = "send"    # {to, text?, image_b64?, voice_b64?, voice_seconds?, waveform_b64?} → {"sent": true}
+WHATSAPP_CALL_CHECK: str = "check"  # {numbers: [...]} → {"answers": [{query, on_whatsapp, jid}]}
 
 # ---------------------------------------------------------------------------
 # WebSocket close codes (Hiro application range 4000–4999)
@@ -74,6 +83,26 @@ CORE_SENDER_ID: str = "server"        # routing.sender_id on messages the core s
 # Request methods every extension and the core answer (Phase 3's test calls).
 METHOD_CORE_INFO: str = "core.info"            # extension → core: the core's name and version
 METHOD_EXTENSION_INFO: str = "extension.info"  # core → extension: the extension's name and version
+
+# Requests an extension makes of the core's WhatsApp (Phase 4: HomeHiro's messages go
+# out through the core). Extensions only; errors come back as ExtensionRequestError
+# with one of the WHATSAPP_ERROR_* codes (or invalid_params / internal_error).
+#   whatsapp.send    {to, text?, image_b64?, voice_b64?, voice_seconds?, waveform_b64?, transcript?}
+#                    → {"sent": true}. `to` = digits with country code, or a JID. One of: text,
+#                    image (text = caption), voice (OGG/Opus; seconds and the 64-byte waveform are
+#                    what WhatsApp shows). `transcript` is what a voice note says: never sent, only
+#                    written to the owner's conversation when `to` is the owner's number.
+#   whatsapp.check   {numbers: [...]} (at most WHATSAPP_CHECK_MAX) → {"answers": [{query, on_whatsapp, jid}]}
+#   whatsapp.status  {} → {"running", "state", "detail", "waiting_for_link", "account"}; state is the
+#                    plugin's last report ("" none yet): connected, paired, reconnecting, disconnected,
+#                    logged_out, banned, error, replaced.
+METHOD_WHATSAPP_SEND: str = "whatsapp.send"
+METHOD_WHATSAPP_CHECK: str = "whatsapp.check"
+METHOD_WHATSAPP_STATUS: str = "whatsapp.status"
+WHATSAPP_CHECK_MAX: int = 20
+WHATSAPP_ERROR_NOT_RUNNING: str = "whatsapp_not_running"      # the plugin isn't connected to the core
+WHATSAPP_ERROR_NOT_CONNECTED: str = "whatsapp_not_connected"  # the plugin runs, but WhatsApp isn't linked/online
+WHATSAPP_ERROR_FAILED: str = "whatsapp_failed"                # WhatsApp refused or the send failed
 
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from hirocli.domain.memory import MemoryService
     from hirocli.runtime.channel_manager import ChannelManager
     from hirocli.runtime.extension_manager import ExtensionManager
+    from hirocli.runtime.agent_manager import AgentManager
     from hirocli.runtime.knowledge_manager import KnowledgeManager
 
 
@@ -86,6 +87,9 @@ class ServerContext:
     # Set by the composition root; lets admin routes list connected extensions,
     # run the test call and disconnect a removed one.
     extension_manager: "ExtensionManager | None" = field(default=None, init=False)
+    # Set by the composition root; lets an extension's WhatsApp send to the owner
+    # land in Hiro's own thread too, so Hiro knows it when the owner replies.
+    agent_manager: "AgentManager | None" = field(default=None, init=False)
 
     # Live per-channel UI state (e.g. WhatsApp QR string + connection status),
     # written by channel event handlers and read by admin routes. Keyed by channel

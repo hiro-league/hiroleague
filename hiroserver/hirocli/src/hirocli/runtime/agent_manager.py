@@ -697,12 +697,67 @@ class AgentManager:
 
     def _resolve_thread_character(self, msg: UnifiedMessage) -> tuple[str, int, str, int]:
         """Return ``(thread_id, channel_id, character_id, data_user_id)`` for this conversation."""
-        from ..domain.character import default_character_id
         from ..domain.conversation_channel import resolve_chat_channel_from_metadata
 
         channel = resolve_chat_channel_from_metadata(
             self._ctx.workspace_path, msg.routing.metadata,
         )
+        return self._resolve_thread_character_for(channel)
+
+    async def add_sent_message(self, chat_channel_id: int, text: str) -> bool:
+        """Add a message the core sent unprompted to Hiro's thread, as Hiro's words.
+
+        Phase 4: an extension's WhatsApp to the owner (e.g. HomeHiro's "Joe is home")
+        is saved to the owner's conversation, but Hiro's replies read their own
+        checkpointed thread, not the saved conversation. Without this, the owner's
+        "who's with him?" would reach a Hiro that never saw the alert.
+
+        Returns False when there's nothing to add to (no chat model, agent not
+        started); the message is still in the conversation.
+        """
+        from langchain_core.messages import AIMessage
+
+        from ..domain.character import effective_character_system_prompt
+        from ..domain.conversation_channel import (
+            CHAT_CHANNEL_ID_METADATA_KEY,
+            resolve_chat_channel_from_metadata,
+        )
+        from ..domain.preferences import resolve_character_llm
+
+        if self._graph is None or self._checkpointer is None:
+            log.warning("⚠️ Sent message not added to Hiro's thread — agent not started")
+            return False
+        thread_id, _channel_id, character_id, _user = self._resolve_thread_character_for(
+            resolve_chat_channel_from_metadata(
+                self._ctx.workspace_path, {CHAT_CHANNEL_ID_METADATA_KEY: chat_channel_id}
+            )
+        )
+        ch = self._load_character_for_channel(character_id)
+        llm_entry = resolve_character_llm(
+            ch.llm_models,
+            self._current_preferences(),
+            self._ctx.workspace_path,
+            tuning_profile=getattr(ch, "tuning_profile", None),
+            credential_store=self._credentials,
+        )
+        if llm_entry is None:
+            log.warning("⚠️ Sent message not added to Hiro's thread — no chat model", thread_id=thread_id)
+            return False
+        compiled = self._get_or_compile(llm_entry, effective_character_system_prompt(ch))
+        # Written as if the graph's last node ran, so the thread is left finished
+        # (nothing pending) and the next turn starts from the top as usual.
+        await compiled.aupdate_state(
+            {"configurable": {"thread_id": thread_id}},
+            {"messages": [AIMessage(content=text)]},
+            as_node="finalize",
+        )
+        log.info("✅ Sent message added to Hiro's thread", thread_id=thread_id, character_id=character_id)
+        return True
+
+    def _resolve_thread_character_for(self, channel: Any) -> tuple[str, int, str, int]:
+        """``_resolve_thread_character`` for an already-resolved conversation channel."""
+        from ..domain.character import default_character_id
+
         channel_id = int(channel.id)
         character_id = (channel.character_id or "").strip() or default_character_id(
             self._ctx.workspace_path,

@@ -13,7 +13,7 @@ import io
 from pathlib import Path
 from typing import Any
 
-from hiro_channel_sdk.base import ChannelPlugin
+from hiro_channel_sdk.base import ChannelCallNotSupported, ChannelCallRefused, ChannelPlugin
 from hiro_channel_sdk.capabilities import (
     ACTION_LOGOUT,
     ACTION_RECONNECT,
@@ -24,6 +24,10 @@ from hiro_channel_sdk.constants import (
     EVENT_TYPE_MESSAGE_VOICED,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_MESSAGE,
+    WHATSAPP_CALL_CHECK,
+    WHATSAPP_CALL_SEND,
+    WHATSAPP_ERROR_FAILED,
+    WHATSAPP_ERROR_NOT_CONNECTED,
 )
 from hiro_channel_sdk.models import (
     ChannelInfo,
@@ -36,7 +40,7 @@ from hiro_commons.log import Logger
 
 from .audio import TranscodeError, ensure_ffmpeg_on_path, transcode_to_ogg_opus
 from .config import WhatsAppChannelConfig
-from .wa_client import WhatsAppBridge
+from .wa_client import WhatsAppBridge, WhatsAppNotConnected
 
 # Onboarding lifecycle states (design §6.3) surfaced to the admin UI, ordered
 # most-preliminary → ready.
@@ -176,6 +180,61 @@ class WhatsAppChannel(ChannelPlugin):
             await self._bridge.logout()
         elif event == "channel.reconnect":
             await self._bridge.reconnect()
+
+    async def on_call(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        # Requests the core waits on (Phase 4: an extension's sends, e.g. HomeHiro's
+        # alerts). Unlike send(), a failure is answered, never skipped silently.
+        if name == WHATSAPP_CALL_SEND:
+            return await self._call_send(params)
+        if name == WHATSAPP_CALL_CHECK:
+            return await self._call_check(params)
+        raise ChannelCallNotSupported(name)
+
+    async def _call_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        bridge = self._require_bridge()
+        to = str(params.get("to") or "").strip()
+        if not to:
+            raise ChannelCallRefused("invalid_params", "Who to send to is missing")
+        # Decoded before the send, so bad input is "invalid_params", not "failed".
+        image = _b64_param(params, "image_b64")
+        voice = _b64_param(params, "voice_b64")
+        waveform = _b64_param(params, "waveform_b64") or b""
+        try:
+            await bridge.send_for_extension(
+                to,
+                text=str(params.get("text") or ""),
+                image=image,
+                voice=voice,
+                voice_seconds=float(params.get("voice_seconds") or 0),
+                waveform=waveform,
+            )
+        except WhatsAppNotConnected as exc:
+            raise ChannelCallRefused(WHATSAPP_ERROR_NOT_CONNECTED, str(exc)) from exc
+        except ValueError as exc:
+            raise ChannelCallRefused("invalid_params", str(exc)) from exc
+        except Exception as exc:  # WhatsApp refused or the send failed: say so
+            log.error(f"❌ WhatsApp send for an extension failed — {to}", error=str(exc), exc_info=True)
+            raise ChannelCallRefused(WHATSAPP_ERROR_FAILED, f"WhatsApp didn't send it: {exc}") from exc
+        return {"sent": True}
+
+    async def _call_check(self, params: dict[str, Any]) -> dict[str, Any]:
+        bridge = self._require_bridge()
+        numbers = [str(n).strip() for n in params.get("numbers") or [] if str(n).strip()]
+        if not numbers:
+            raise ChannelCallRefused("invalid_params", "No numbers to check")
+        try:
+            answers = await bridge.check_numbers(numbers)
+        except WhatsAppNotConnected as exc:
+            raise ChannelCallRefused(WHATSAPP_ERROR_NOT_CONNECTED, str(exc)) from exc
+        except Exception as exc:
+            log.error("❌ WhatsApp number check failed", error=str(exc), exc_info=True)
+            raise ChannelCallRefused(WHATSAPP_ERROR_FAILED, f"WhatsApp didn't answer the check: {exc}") from exc
+        return {"answers": answers}
+
+    def _require_bridge(self) -> WhatsAppBridge:
+        if self._bridge is None:
+            raise ChannelCallRefused(WHATSAPP_ERROR_NOT_CONNECTED, "WhatsApp hasn't started yet")
+        return self._bridge
 
     async def send(self, message: UnifiedMessage) -> None:
         # Outbound dispatch. A reply arrives as a "message" (text) and, when the
@@ -348,6 +407,17 @@ class WhatsAppChannel(ChannelPlugin):
             content=[content],
         )
         await self.emit(um)
+
+
+def _b64_param(params: dict[str, Any], key: str) -> bytes | None:
+    """Decode a base64 call parameter; None when absent, refused when not base64."""
+    raw = params.get(key)
+    if not raw:
+        return None
+    try:
+        return base64.b64decode(str(raw), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ChannelCallRefused("invalid_params", f"{key} isn't valid base64") from exc
 
 
 def _reply_jid(message: UnifiedMessage) -> str:

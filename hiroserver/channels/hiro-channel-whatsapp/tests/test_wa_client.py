@@ -1,4 +1,4 @@
-"""WhatsAppBridge on neonize 0.5.x: client lifecycle and LID senders.
+"""WhatsAppBridge on neonize 0.5.x: client lifecycle, LID senders, sends for an extension.
 
 neonize 0.5.x's idle() only returns after Stop() (not Disconnect()), WhatsApp's QR
 window expires silently, and a Disconnect() after Stop() panics in Go. These tests
@@ -25,6 +25,8 @@ _NEONIZE_MODULES = (
     "neonize.proto",
     "neonize.proto.waCompanionReg",
     "neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2",
+    "neonize.proto.waE2E",
+    "neonize.proto.waE2E.WAWebProtobufsE2E_pb2",
     "neonize.utils",
     "neonize.utils.enum",
 )
@@ -214,3 +216,119 @@ def test_logout_unlinks_then_stops(wa_client, tmp_path):
 
     asyncio.run(scenario())
     assert client.calls == ["logout", "disconnect", "stop"]
+
+
+# -- sends for an extension (Phase 4: HomeHiro's messages through the core) ------
+
+
+class SendingClient(FakeClient):
+    async def send_message(self, jid: Any, message: Any) -> None:
+        self.calls.append(f"text:{jid.User}:{message}")
+
+    async def send_image(self, jid: Any, image: bytes, caption: Any = None) -> None:
+        self.calls.append(f"image:{jid.User}:{len(image)}:{caption}")
+
+    async def is_on_whatsapp(self, *numbers: str) -> list[Any]:
+        return [
+            types.SimpleNamespace(Query=n, IsIn=n.endswith("9"), JID=types.SimpleNamespace(User=n, Server="s.whatsapp.net"))
+            for n in numbers
+        ]
+
+
+@pytest.fixture
+def plain_jids(wa_client, monkeypatch):
+    monkeypatch.setattr(wa_client, "build_jid", lambda u, s: types.SimpleNamespace(User=u, Server=s))
+    return wa_client
+
+
+def test_extension_send_refused_while_not_connected(plain_jids, tmp_path):
+    bridge = _bridge(plain_jids, tmp_path, SendingClient())  # never reported "connected"
+    with pytest.raises(plain_jids.WhatsAppNotConnected):
+        asyncio.run(bridge.send_for_extension("201001234569", text="hi"))
+
+
+def test_extension_send_text_and_picture_once_connected(plain_jids, tmp_path):
+    client = SendingClient()
+
+    async def scenario() -> None:
+        bridge = _bridge(plain_jids, tmp_path, client)
+        await bridge._safe_status("connected", {})
+        await bridge.send_for_extension("201001234569", text="Joe is home")
+        await bridge.send_for_extension("201001234569@s.whatsapp.net", text="at the door", image=b"jpeg")
+        await bridge._safe_status("disconnected", {})
+        with pytest.raises(plain_jids.WhatsAppNotConnected):
+            await bridge.send_for_extension("201001234569", text="again")
+
+    asyncio.run(scenario())
+    assert client.calls == ["text:201001234569:Joe is home", "image:201001234569:4:at the door"]
+
+
+def test_number_check_answers_each_number(plain_jids, tmp_path):
+    async def scenario() -> list[dict[str, Any]]:
+        bridge = _bridge(plain_jids, tmp_path, SendingClient())
+        await bridge._safe_status("connected", {})
+        return await bridge.check_numbers(["201001234569", "201001234560"])
+
+    answers = asyncio.run(scenario())
+    assert answers == [
+        {"query": "201001234569", "on_whatsapp": True, "jid": "201001234569@s.whatsapp.net"},
+        {"query": "201001234560", "on_whatsapp": False, "jid": "201001234560@s.whatsapp.net"},
+    ]
+
+
+@pytest.fixture
+def plugin_module(wa_client):
+    sys.modules.pop("hiro_channel_whatsapp.plugin", None)
+    module = importlib.import_module("hiro_channel_whatsapp.plugin")
+    yield module
+    sys.modules.pop("hiro_channel_whatsapp.plugin", None)
+
+
+class FakeBridge:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.error = error
+
+    async def send_for_extension(self, to: str, **kwargs: Any) -> None:
+        if self.error is not None:
+            raise self.error
+        self.sent.append({"to": to, **kwargs})
+
+
+def test_plugin_call_send_decodes_and_answers(plugin_module):
+    plugin = plugin_module.WhatsAppChannel()
+    bridge = FakeBridge()
+    plugin._bridge = bridge
+    result = asyncio.run(
+        plugin.on_call("send", {"to": "201001234569", "voice_b64": "T2dnUw==", "voice_seconds": 2.4, "waveform_b64": "YWI="})
+    )
+    assert result == {"sent": True}
+    assert bridge.sent == [
+        {"to": "201001234569", "text": "", "image": None, "voice": b"OggS", "voice_seconds": 2.4, "waveform": b"ab"}
+    ]
+
+
+def test_plugin_call_send_says_why_not(plugin_module, wa_client):
+    from hiro_channel_sdk.base import ChannelCallNotSupported, ChannelCallRefused
+
+    plugin = plugin_module.WhatsAppChannel()
+    with pytest.raises(ChannelCallRefused) as not_started:
+        asyncio.run(plugin.on_call("send", {"to": "201001234569", "text": "hi"}))
+    assert not_started.value.reason == "whatsapp_not_connected"
+
+    plugin._bridge = FakeBridge(error=plugin_module.WhatsAppNotConnected("WhatsApp isn't connected"))
+    with pytest.raises(ChannelCallRefused) as offline:
+        asyncio.run(plugin.on_call("send", {"to": "201001234569", "text": "hi"}))
+    assert offline.value.reason == "whatsapp_not_connected"
+
+    plugin._bridge = FakeBridge(error=RuntimeError("usync timeout"))
+    with pytest.raises(ChannelCallRefused) as failed:
+        asyncio.run(plugin.on_call("send", {"to": "201001234569", "text": "hi"}))
+    assert failed.value.reason == "whatsapp_failed"
+
+    with pytest.raises(ChannelCallRefused) as bad:
+        asyncio.run(plugin.on_call("send", {"to": "201001234569", "image_b64": "not base64!"}))
+    assert bad.value.reason == "invalid_params"
+
+    with pytest.raises(ChannelCallNotSupported):
+        asyncio.run(plugin.on_call("dance", {}))

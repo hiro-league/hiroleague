@@ -15,6 +15,7 @@ import asyncio
 import base64
 import hashlib
 import random
+from functools import partial
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Coroutine
 
@@ -40,8 +41,9 @@ from neonize.aioze.events import (
 )
 from neonize.exc import SendMessageError
 from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 import DeviceProps
+from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import AudioMessage, Message
 from neonize.utils import Jid2String, JIDToNonAD, build_jid
-from neonize.utils.enum import ChatPresence, ChatPresenceMedia, Presence, ReceiptType
+from neonize.utils.enum import ChatPresence, ChatPresenceMedia, MediaType, Presence, ReceiptType
 
 log = Logger.get("WHATSAPP.CLIENT")
 
@@ -92,6 +94,10 @@ StatusCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 MessageCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+class WhatsAppNotConnected(Exception):
+    """A send or check for an extension while WhatsApp isn't connected."""
+
+
 class WhatsAppBridge:
     """Owns a neonize ``NewAClient`` and forwards its events to async callbacks."""
 
@@ -115,6 +121,10 @@ class WhatsAppBridge:
         # post-pair reconnect (emit "reconnecting") from the initial QR-cycling loop
         # (where the UI is showing a QR and a "reconnecting" status would confuse).
         self._was_connected = False
+        # True only while WhatsApp is connected (the last reported state is
+        # "connected"). Sends for an extension (Phase 4) are refused otherwise, so
+        # the caller hears "not connected" instead of a silent skip.
+        self._online = False
         # Background fire-and-forget tasks (delayed read receipts); referenced so
         # they are not garbage-collected mid-flight.
         self._tasks: set[asyncio.Task[None]] = set()
@@ -182,6 +192,7 @@ class WhatsAppBridge:
         if client is not self._client or self._client_ended:
             return
         self._client_ended = True
+        self._online = False  # a stopped client can't send, whatever it last reported
         self._cancel_qr_watchdog()
         if self._client_ended_event is not None:
             self._client_ended_event.set()
@@ -390,6 +401,78 @@ class WhatsAppBridge:
             lambda: client.send_document(jid, data, filename=filename, mimetype=mimetype),
             jid,
         )
+
+    # -- sends for an extension (Phase 4: HomeHiro's messages through the core) --
+    #
+    # Unlike the reply path above, these raise when WhatsApp can't send, so the
+    # caller is told why. No "typing…" presence: HomeHiro never showed one.
+
+    def connected_client(self) -> NewAClient:
+        """The client, if WhatsApp is connected; raises WhatsAppNotConnected otherwise."""
+        client = self._client
+        if client is None or not self._online:
+            raise WhatsAppNotConnected("WhatsApp isn't connected (link it in Channels → WhatsApp)")
+        return client
+
+    async def send_for_extension(
+        self,
+        to: str,
+        *,
+        text: str = "",
+        image: bytes | None = None,
+        voice: bytes | None = None,
+        voice_seconds: float = 0,
+        waveform: bytes = b"",
+    ) -> None:
+        """Send text, a picture (text = caption) or a ready OGG/Opus voice note."""
+        client = self.connected_client()
+        jid = _parse_jid(to)
+        if image:
+            kind = "picture"
+            send: Callable[[], Awaitable[Any]] = partial(client.send_image, jid, image, caption=text or None)
+        elif voice:
+            kind = "voice"
+            send = partial(self._send_voice_note_once, client, jid, voice, voice_seconds, waveform)
+        elif text:
+            kind = "text"
+            send = partial(client.send_message, jid, text)
+        else:
+            raise ValueError("nothing to send")
+        log.info(f"⬆️ WhatsApp send for an extension — {to} · {kind}", server=jid.Server, user=jid.User)
+        await self._send_with_retry(send, jid)
+
+    async def _send_voice_note_once(
+        self, client: NewAClient, jid: Any, ogg_opus: bytes, seconds: float, waveform: bytes
+    ) -> None:
+        # Built by hand rather than with build_audio_message, which shells out to
+        # ffprobe for the length (the caller knows it) and computes its own waveform.
+        # WhatsApp on phones shows a voice-note bubble only when the codec is spelled
+        # out (see _PTT_MIMETYPE). Ported from HomeHiro's WhatsApp worker.
+        upload = await client.upload(ogg_opus, MediaType.MediaAudio)
+        message = Message(
+            audioMessage=AudioMessage(
+                URL=upload.url,
+                directPath=upload.DirectPath,
+                fileEncSHA256=upload.FileEncSHA256,
+                fileLength=upload.FileLength,
+                fileSHA256=upload.FileSHA256,
+                mediaKey=upload.MediaKey,
+                mimetype=_PTT_MIMETYPE,
+                seconds=max(1, round(seconds)),
+                PTT=True,
+                waveform=waveform,
+            )
+        )
+        await client.send_message(jid, message)
+
+    async def check_numbers(self, numbers: list[str]) -> list[dict[str, Any]]:
+        """Which numbers have WhatsApp, and the address to send to."""
+        client = self.connected_client()
+        answers = await client.is_on_whatsapp(*numbers)
+        return [
+            {"query": a.Query, "on_whatsapp": bool(a.IsIn), "jid": f"{a.JID.User}@{a.JID.Server}"}
+            for a in answers
+        ]
 
     async def _send_with_retry(self, send: Callable[[], Awaitable[Any]], jid: Any) -> None:
         # whatsmeow resolves the recipient's device list (a "usync" query) on send,
@@ -662,6 +745,8 @@ class WhatsAppBridge:
     # -- helpers -----------------------------------------------------------
 
     async def _safe_status(self, state: str, detail: dict[str, Any]) -> None:
+        # Every state change passes here, so this is where "online" is tracked.
+        self._online = state == "connected"
         try:
             await self._on_status(state, detail)
         except Exception as exc:

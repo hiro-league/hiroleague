@@ -27,10 +27,12 @@ from websockets.exceptions import ConnectionClosed
 from hiro_commons.log import Logger
 
 from . import rpc
-from .base import ChannelPlugin
+from .base import ChannelCallNotSupported, ChannelCallRefused, ChannelPlugin
 from .constants import (
+    JSONRPC_ERROR_CALL_REFUSED,
     JSONRPC_ERROR_INTERNAL,
     JSONRPC_ERROR_METHOD_NOT_FOUND,
+    METHOD_CALL,
     METHOD_CONFIGURE,
     METHOD_EVENT,
     METHOD_RECEIVE,
@@ -193,6 +195,27 @@ class PluginTransport:
                     self._stop_event.set()
                     result = {"ok": True}
 
+                case _ if req.method == METHOD_CALL:
+                    # A named request the core waits on (Phase 4: WhatsApp sends for an
+                    # extension report "sent" or why not, unlike channel.send).
+                    name = req.params.get("name")
+                    call_params = req.params.get("params") or {}
+                    if not isinstance(name, str) or not name:
+                        raise ValueError(f"{METHOD_CALL} requires params.name")
+                    if not isinstance(call_params, dict):
+                        raise ValueError(f"{METHOD_CALL} params.params must be an object")
+                    try:
+                        result = await self._plugin.on_call(name, call_params)
+                    except ChannelCallNotSupported as exc:
+                        error = {"code": JSONRPC_ERROR_METHOD_NOT_FOUND, "message": str(exc)}
+                    except ChannelCallRefused as exc:
+                        log.warning(f"⚠️ Channel call refused — {name} · {exc.reason}", error=exc.message)
+                        error = {
+                            "code": JSONRPC_ERROR_CALL_REFUSED,
+                            "message": exc.message,
+                            "data": {"reason": exc.reason},
+                        }
+
                 case _ if req.method == METHOD_STATUS:
                     result = {
                         "name": self._plugin.info.name,
@@ -217,7 +240,7 @@ class PluginTransport:
         if req.id is not None and self._ws is not None:
             if error:
                 await self._ws.send(
-                    rpc.build_error(error["code"], error["message"], req.id)
+                    rpc.build_error(error["code"], error["message"], req.id, error.get("data"))
                 )
             else:
                 await self._ws.send(rpc.build_success(result, req.id))
