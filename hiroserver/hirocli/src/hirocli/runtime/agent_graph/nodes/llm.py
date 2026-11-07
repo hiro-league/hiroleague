@@ -41,7 +41,7 @@ from ..ledger import graph_logged, observe, record_child
 from ..node_group import NodeGroup
 from ..state import GraphState
 from ._helpers import _error_slug
-from .call_model_support import inject_turn_context
+from .call_model_support import inject_turn_context, retire_live_results
 
 if TYPE_CHECKING:
     from ..services import AgentServices
@@ -109,6 +109,8 @@ class LLMNodes(NodeGroup):
         # Always-on tools (Tool.agent_always): the model used when tools are off for the turn.
         always = [t for t in config.tools if getattr(t, "name", "") in config.always_tool_names]
         self._bound_always = config.model.bind_tools(always) if always else config.model
+        # Live tools (Tool.agent_live): their results from earlier turns reach the model as out of date.
+        self._live_tool_names = config.live_tool_names
 
     def is_active(self, label: str) -> bool:
         """``tools`` is registered only when the build config supplied a non-empty tool list."""
@@ -143,7 +145,10 @@ class LLMNodes(NodeGroup):
         # question last — so it sits next to the query and never persists in ``messages``.
         # ``turn_context`` is absent for non-chat variants that skip compose_context.
         turn_context = (state.get("turn_context") or "").strip()
-        inputs = inject_turn_context(messages, turn_context, self._system_prompt)
+        # Live tools' earlier results go to the model as "out of date, read again" (not stored).
+        inputs = inject_turn_context(
+            retire_live_results(messages, self._live_tool_names), turn_context, self._system_prompt
+        )
         # Preview the clean stored turn (not the enriched copy) + the tuning that ran. Model
         # is in the model column, so it's not repeated here.
         tuning = (
@@ -274,6 +279,8 @@ class LLMNodes(NodeGroup):
                 ToolMessage(
                     content=content,
                     tool_call_id=call_id or tool_name,
+                    # The tool's name, so later turns can tell which results were live reads.
+                    name=tool_name or None,
                 )
             )
 

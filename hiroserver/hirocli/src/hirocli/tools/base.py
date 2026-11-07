@@ -42,6 +42,10 @@ class Tool(ABC):
                       when tools are off for a turn (``chat.tools_enabled`` off, or
                       the per-message opt-out). For Hiro's own safe, read-only
                       abilities (e.g. reading what extensions know).
+      - agent_live:   when True the result is only true at the moment it is read
+                      (live state, e.g. who is home). Results from earlier turns
+                      are shown to the model as out of date, so it reads again
+                      instead of answering from an old read kept in the history.
 
     Workspace-scoped tools use ``runtime = False`` (default). Tools that expose
     ``execute_async()`` are invoked via ``ToolRegistry.invoke_async`` from the
@@ -59,6 +63,8 @@ class Tool(ABC):
     agent_default: bool = True
     # Offered to the agent even when tools are off for the turn (always-on tools).
     agent_always: bool = False
+    # Live result: earlier turns' results are shown to the model as out of date.
+    agent_live: bool = False
 
     def attach_runtime(self, ctx: Any) -> None:
         """Inject registry runtime context — no-op unless a subclass overrides."""

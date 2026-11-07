@@ -671,6 +671,8 @@ class AgentManager:
                 tools=self._lc_agent_tools,
                 # Always-on tools stay offered when tools are off for a turn (Tool.agent_always).
                 always_tool_names=reg.agent_always_tool_names() if reg is not None else frozenset(),
+                # Live tools' older results reach the model as out of date (Tool.agent_live).
+                live_tool_names=reg.agent_live_tool_names() if reg is not None else frozenset(),
                 model_id=llm_entry.model_id,
                 system_prompt=system_prompt,
                 temperature=llm_entry.temperature,

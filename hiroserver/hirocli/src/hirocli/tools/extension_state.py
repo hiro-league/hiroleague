@@ -38,12 +38,15 @@ class ExtensionStateTool(Tool):
     surfaces = frozenset({"agent", "http"})
     # Always on: Hiro can read the home even with chat tools switched off (read-only, safe).
     agent_always = True
+    # Live: a read from an earlier turn is shown to Hiro as out of date, so it reads again.
+    agent_live = True
     name = "extension_state"
     description = (
         "Read what the programs connected to Hiro know right now, live. The home (HomeHiro) "
         "tells who is home, who is away and since when, and which room each person is in and "
-        "what they are doing. Use it when asked where someone is, who is home, or what is "
-        "happening at home now."
+        "what they are doing. Use it when asked where someone is, who is home, when someone "
+        "came or left, or what is happening at home now. The answer is only true when read: "
+        "read it again for every such question, never answer from an earlier read."
     )
     params = {
         "extension": ToolParam(str, "Only this extension (its name, e.g. home); all connected ones when empty", required=False),

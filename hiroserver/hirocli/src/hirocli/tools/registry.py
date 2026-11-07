@@ -105,6 +105,10 @@ class ToolRegistry:
         """Names of the always-on agent tools: offered even when tools are off for a turn."""
         return frozenset(t.name for t in self.tool_instances(surface="agent") if type(t).agent_always)
 
+    def agent_live_tool_names(self) -> frozenset[str]:
+        """Names of the agent tools whose results are live: older reads are shown as out of date."""
+        return frozenset(t.name for t in self.tool_instances(surface="agent") if type(t).agent_live)
+
     def schema(self) -> list[dict[str, Any]]:
         """Return a JSON-serialisable schema for all registered tools."""
         result = []

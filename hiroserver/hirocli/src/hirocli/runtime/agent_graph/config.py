@@ -28,3 +28,6 @@ class ChatGraphConfig:
     # Names of the ``tools`` that are always on: offered to the model even when tools are
     # off for the turn (``chat.tools_enabled`` or the per-message opt-out). Tool.agent_always.
     always_tool_names: frozenset[str] = frozenset()
+    # Names of the ``tools`` whose results are live (Tool.agent_live): their results from
+    # earlier turns reach the model as "out of date, read again", never as current facts.
+    live_tool_names: frozenset[str] = frozenset()
