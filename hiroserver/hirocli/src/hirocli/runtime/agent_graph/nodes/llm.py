@@ -106,6 +106,9 @@ class LLMNodes(NodeGroup):
         self._model = config.model
         self._bound = config.model.bind_tools(config.tools) if config.tools else config.model
         self._tools_by_name = {getattr(t, "name", ""): t for t in config.tools}
+        # Always-on tools (Tool.agent_always): the model used when tools are off for the turn.
+        always = [t for t in config.tools if getattr(t, "name", "") in config.always_tool_names]
+        self._bound_always = config.model.bind_tools(always) if always else config.model
 
     def is_active(self, label: str) -> bool:
         """``tools`` is registered only when the build config supplied a non-empty tool list."""
@@ -158,10 +161,11 @@ class LLMNodes(NodeGroup):
         # wrapper otherwise stamps only the exception class name, e.g. "googlegenerativeai").
         effective_model = self._model_id or str(state.get("model_id") or "")
         provider = effective_model.split(":", 1)[0] if ":" in effective_model else ""
-        # Per-turn tools kill-switch: invoke the un-bound model when tools are disabled for this
-        # turn (preference or per-chat opt-out) so no tool calls are emitted; should_continue then
-        # routes to memory_out. ``bound`` already == model when no tools were compiled in.
-        active = self._bound if state.get("tools_enabled", True) else self._model
+        # Per-turn tools kill-switch: when tools are disabled for this turn (preference or
+        # per-chat opt-out), only the always-on tools are offered (``_bound_always`` is the
+        # un-bound model when there are none), so no other tool calls are emitted.
+        # ``bound`` already == model when no tools were compiled in.
+        active = self._bound if state.get("tools_enabled", True) else self._bound_always
         try:
             response = await active.ainvoke(inputs)
         except Exception as exc:

@@ -73,6 +73,9 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ExtensionAddressTool": ".extension",
     "ExtensionListTool": ".extension",
     "ExtensionRemoveTool": ".extension",
+    "ExtensionStateTool": ".extension_state",
+    # notify (Phase 5)
+    "NotifyTool": ".notify",
     # files
     "FilesHeadTool": ".files",
     # gateway
@@ -189,6 +192,8 @@ def all_tools() -> list[Tool]:
     )
     from .device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
     from .extension import ExtensionAddressTool, ExtensionAddTool, ExtensionListTool, ExtensionRemoveTool
+    from .extension_state import ExtensionStateTool
+    from .notify import NotifyTool
     from .files import FilesHeadTool
     from .gateway import (
         GatewaySetupTool,
@@ -270,6 +275,8 @@ def all_tools() -> list[Tool]:
         ExtensionListTool(),
         ExtensionRemoveTool(),
         ExtensionAddressTool(),
+        ExtensionStateTool(),
+        NotifyTool(),
         FilesHeadTool(),
         ChannelListTool(),
         ChannelInstallTool(),
@@ -384,6 +391,8 @@ if TYPE_CHECKING:  # pragma: no cover
         ExtensionListTool,
         ExtensionRemoveTool,
     )
+    from .extension_state import ExtensionStateTool  # noqa: F401
+    from .notify import NotifyTool  # noqa: F401
     from .files import FilesHeadTool  # noqa: F401
     from .gateway import (  # noqa: F401
         GatewaySetupTool,

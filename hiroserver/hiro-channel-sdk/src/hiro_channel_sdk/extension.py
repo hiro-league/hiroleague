@@ -86,8 +86,9 @@ _IDENTITY_FILENAME = "extension_identity.json"
 class ExtensionOffers(BaseModel):
     """What the extension offers the core: the hero contract's slots.
 
-    Empty in Phase 3; later phases add entries (e.g. Home's "send a WhatsApp
-    message" in Phase 4, "who is where" in Phase 5). Each entry is a small dict
+    Still empty: extensions declaring what they know and can do waits until Home
+    is mature enough (the plan's Later). For now the core asks every extension
+    the same ``extension.state`` (Phase 5). Each entry will be a small dict
     naming the request method or event and describing it.
     """
 

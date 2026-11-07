@@ -38,6 +38,10 @@ class Tool(ABC):
       - agent_default: when True (default) the tool is included in the agent's
                       active tool set. Set False for tools that should remain
                       agent-surfaced but are opt-in only (dangerous / noisy ops).
+      - agent_always: when True the tool is always on: offered to the agent even
+                      when tools are off for a turn (``chat.tools_enabled`` off, or
+                      the per-message opt-out). For Hiro's own safe, read-only
+                      abilities (e.g. reading what extensions know).
 
     Workspace-scoped tools use ``runtime = False`` (default). Tools that expose
     ``execute_async()`` are invoked via ``ToolRegistry.invoke_async`` from the
@@ -53,6 +57,8 @@ class Tool(ABC):
     surfaces: frozenset[str] = frozenset({"cli", "agent", "http"})
     # Included in the agent's active set by default. False = opt-in only.
     agent_default: bool = True
+    # Offered to the agent even when tools are off for the turn (always-on tools).
+    agent_always: bool = False
 
     def attach_runtime(self, ctx: Any) -> None:
         """Inject registry runtime context — no-op unless a subclass overrides."""
