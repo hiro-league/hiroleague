@@ -181,7 +181,7 @@ Cross-page rules.
 9. **Form inputs.** Use `FormField` (label+input) or `class={ADMIN_INPUT}` (bare). No raw `h-10 rounded-md border border-input …` soup.
 10. **Section cards.** Two blessed variants only: `<SectionCard>` (solid) and `<SectionCardMuted>` (translucent, nested).
 11. **Dialogs.** One family — `$lib/components/ui/dialog/`. No `Modal.svelte`.
-12. **Shared domain helpers.** Active providers, catalog reload, unknown-model merge live in `$lib/catalog/`. Unsaved-changes uses the canonical `createUnsavedGuard` (page-specific predicate passed in).
+12. **Shared domain helpers.** Active providers, catalog reload, and the selected-model check (`selectedModelIssue`: a saved id gone from the catalog or with an unconfigured provider) live in `$lib/catalog/`. Unsaved-changes uses the canonical `createUnsavedGuard` (page-specific predicate passed in).
 13. **Panel portability.** Tab content is a `*Panel.svelte` (or `*Tab.svelte`) that: (a) has no `<svelte:head>` / `AdminPageHeader` / page wrapper; (b) accepts state and notifier as props; (c) namespaces any URL params it owns (no top-level `?tab=` assumption); (d) renders self-contained section markup; (e) uses shared loading/error/empty primitives.
 14. **Page size target ≤ 200 lines.** Above that, decompose per §1 and §8.
 

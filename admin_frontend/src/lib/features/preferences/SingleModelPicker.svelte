@@ -4,6 +4,8 @@
   import Button from '$lib/components/ui/button.svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
+  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import { selectedModelIssue } from '$lib/catalog/selected-model-issue';
   import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
   import {
     isThinkingCatalogModel,
@@ -18,6 +20,7 @@
     hint,
     selectedId = null,
     catalogModels,
+    catalogLoaded,
     catalogAllProviders,
     workspaceActiveProvidersResolved,
     workspaceActiveProviderIds,
@@ -37,6 +40,8 @@
     hint: string;
     selectedId?: string | null;
     catalogModels: CatalogModelRow[];
+    /** False until the catalog lists load; a saved id is flagged as removed only after that. */
+    catalogLoaded: boolean;
     catalogAllProviders: CatalogProviderRow[];
     workspaceActiveProvidersResolved: boolean;
     workspaceActiveProviderIds: Set<string>;
@@ -93,6 +98,20 @@
     selectedId ? catalogModels.find((model) => model.id === selectedId) : undefined
   );
 
+  // A saved id that is gone from the catalog (e.g. removed by a models refresh) or whose provider is
+  // not set up can't run on the server; say so under the selected model instead of showing it as a
+  // normal choice.
+  const issue = $derived(
+    selectedModelIssue({
+      selectedId,
+      catalogModels,
+      catalogLoaded,
+      activeProviderIds: workspaceActiveProviderIds,
+      activeProvidersResolved: workspaceActiveProvidersResolved,
+      providers: catalogAllProviders
+    })
+  );
+
   function providerConfigured(providerId: string): boolean {
     return !workspaceActiveProvidersResolved || workspaceActiveProviderIds.has(providerId);
   }
@@ -127,17 +146,27 @@
 {#snippet selectedCard()}
   {#if selectedId}
     {@const inactive = selectedRowInactive(selectedRow)}
-    <div class="flex items-center gap-3 rounded-md border border-input bg-card/65 p-3">
+    {@const missing = issue?.kind === 'missing'}
+    <div
+      class={cn(
+        'flex items-center gap-3 rounded-md border bg-card/65 p-3',
+        issue ? 'border-amber-500/50' : 'border-input'
+      )}
+    >
       <span
         class={cn(
           'size-2 shrink-0 rounded-full shadow-sm ring-2 ring-background',
-          workspaceActiveProvidersResolved
-            ? inactive
-              ? 'bg-red-500'
-              : 'bg-emerald-500'
-            : 'bg-muted-foreground/40'
+          missing || (workspaceActiveProvidersResolved && inactive)
+            ? 'bg-red-500'
+            : workspaceActiveProvidersResolved
+              ? 'bg-emerald-500'
+              : 'bg-muted-foreground/40'
         )}
-        title={inactive ? 'Provider is not configured in Active Providers.' : 'Provider is configured.'}
+        title={missing
+          ? 'Model is no longer in the catalog.'
+          : inactive
+            ? 'Provider is not configured in Active Providers.'
+            : 'Provider is configured.'}
         aria-hidden="true"
       ></span>
       <span class="min-w-0 flex-1 grid gap-0.5">
@@ -182,6 +211,9 @@
         <Trash2 size={17} />
       </Button>
     </div>
+    {#if issue}
+      <InlineWarningAlert message={issue.message} />
+    {/if}
   {:else}
     <div
       class="flex items-center justify-between gap-3 rounded-md border border-dashed border-input bg-background/40 p-3"

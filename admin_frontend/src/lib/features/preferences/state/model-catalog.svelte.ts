@@ -18,8 +18,6 @@ import {
   catalogReloadSuccessMessage,
   reloadCatalogAndRefetch
 } from '$lib/catalog/catalog-reload';
-import { includeUnknownModel } from '$lib/catalog/include-unknown-model';
-import type { WorkspacePreferences } from '$lib/api/preferences';
 import type { ToastKind } from '$lib/ui/toast-types';
 
 type Notify = (kind: ToastKind, message: string) => void;
@@ -36,6 +34,9 @@ export function createModelCatalog(notify: Notify) {
   let rerankLocalOptions = $state<CatalogModelRow[]>([]);
   let catalogAllProviders = $state<CatalogProviderRow[]>([]);
   let reloadBusy = $state(false);
+  // Pickers flag a saved id as "no longer available" only once the lists are in — before that an
+  // empty list means "not loaded", not "removed".
+  let loaded = $state(false);
 
   const embeddingPickerOptions = $derived<CatalogModelRow[]>([
     ...embeddingCatalogOptions,
@@ -46,9 +47,10 @@ export function createModelCatalog(notify: Notify) {
     ...rerankLocalOptions
   ]);
 
-  /** Initial load: fetch every catalog kind + providers concurrently, then merge the prefs-selected
-   * model ids (so an unknown/uninstalled default still shows in its picker). */
-  async function load(prefs: WorkspacePreferences) {
+  /** Initial load: fetch every catalog kind + providers concurrently. A saved model id that is not
+   * in these lists is NOT merged in any more (that made a removed model look like a normal choice);
+   * the picker flags it via `selectedModelIssue` instead. */
+  async function load() {
     const [
       chatPayload,
       sttPayload,
@@ -68,20 +70,15 @@ export function createModelCatalog(notify: Notify) {
       listLocalCatalogModels('embedding'),
       listLocalCatalogModels('rerank')
     ]);
-    chatOptions = prefs.llm.default_chat
-      ? includeUnknownModel(chatPayload.data.models, prefs.llm.default_chat, 'chat')
-      : chatPayload.data.models;
-    sttOptions = prefs.llm.default_stt
-      ? includeUnknownModel(sttPayload.data.models, prefs.llm.default_stt, 'stt')
-      : sttPayload.data.models;
-    ttsOptions = prefs.llm.default_tts
-      ? includeUnknownModel(ttsPayload.data.models, prefs.llm.default_tts, 'tts')
-      : ttsPayload.data.models;
+    chatOptions = chatPayload.data.models;
+    sttOptions = sttPayload.data.models;
+    ttsOptions = ttsPayload.data.models;
     embeddingCatalogOptions = embeddingPayload.data.models;
     embeddingLocalOptions = embeddingLocal;
     rerankCatalogOptions = rerankPayload.data.models;
     rerankLocalOptions = rerankLocal;
     catalogAllProviders = providersPayload.data;
+    loaded = true;
     await activeProvidersStore.load({ silent: true });
   }
 
@@ -135,6 +132,9 @@ export function createModelCatalog(notify: Notify) {
     },
     get reloadBusy() {
       return reloadBusy;
+    },
+    get loaded() {
+      return loaded;
     },
     load,
     reload

@@ -174,9 +174,9 @@ export function createPreferencesController(notify: Notify) {
       fieldSchema = schemaPayload.ok ? (schemaPayload.data.fields ?? null) : null;
       const prefs = prefsPayload.data.preferences;
       setDraftFromServer(prefs);
-      // Catalog options need the resolved prefs (to surface an unknown selected model); once prefs
-      // are in, fetch the catalog and the download-status rows concurrently.
-      await Promise.all([catalog.load(prefs), downloads.load()]);
+      // Catalog lists no longer depend on prefs (a saved id missing from the catalog is flagged by
+      // the picker, not merged into the options); fetch them with the download-status rows.
+      await Promise.all([catalog.load(), downloads.load()]);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load preferences.';
     } finally {
@@ -282,6 +282,9 @@ export function createPreferencesController(notify: Notify) {
     },
     get rerankerBusy() {
       return downloads.rerankerBusy;
+    },
+    get catalogLoaded() {
+      return catalog.loaded;
     },
     get catalogAllProviders() {
       return catalog.catalogAllProviders;

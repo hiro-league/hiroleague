@@ -65,6 +65,7 @@
   {hint}
   {selectedId}
   catalogModels={catalog.catalogModels}
+  catalogLoaded={ctrl.catalogLoaded}
   catalogAllProviders={ctrl.catalogAllProviders}
   workspaceActiveProvidersResolved={ctrl.activeProvidersStore.resolved}
   workspaceActiveProviderIds={catalog.workspaceActiveProviderIds}
