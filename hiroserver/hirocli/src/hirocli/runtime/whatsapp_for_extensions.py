@@ -48,7 +48,7 @@ log = Logger.get("WHATSAPP_EXT")
 WHATSAPP_CHANNEL = "whatsapp"
 
 # The extension waits up to 60 s for a send; the plugin gets most of that.
-_SEND_TIMEOUT_S = 50.0
+SEND_TIMEOUT_S = 50.0
 _CHECK_TIMEOUT_S = 25.0
 
 # What's passed to the plugin. ``transcript`` stays in the core: it's only written
@@ -56,7 +56,7 @@ _CHECK_TIMEOUT_S = 25.0
 _SEND_KEYS = ("to", "text", "image_b64", "voice_b64", "voice_seconds", "waveform_b64")
 
 
-def _sender_label(ctx: RequestContext) -> str:
+def sender_label(ctx: RequestContext) -> str:
     """The extension's name for logs (who signed in), else its id."""
     sender = getattr(getattr(ctx.msg, "routing", None), "sender_id", "") or "extension"
     ext = ctx.server_ctx.extension_manager
@@ -67,7 +67,7 @@ def _sender_label(ctx: RequestContext) -> str:
     return sender
 
 
-def _digits(value: str) -> str:
+def digits(value: str) -> str:
     """The number part of a number or JID, as bare digits ("2010…@s.whatsapp.net" → "2010…")."""
     return "".join(ch for ch in value.partition("@")[0].split(":", 1)[0] if ch.isdigit())
 
@@ -83,7 +83,7 @@ def _refusal(exc: ChannelCallError) -> RequestRefused:
 
 def _validated_send(params: dict[str, Any]) -> dict[str, Any]:
     to = str(params.get("to") or "").strip()
-    if not _digits(to):
+    if not digits(to):
         raise RequestRefused("invalid_params", "Who to send to is missing (a number with its country code)")
     text = str(params.get("text") or "")
     has_image = bool(params.get("image_b64"))
@@ -95,11 +95,11 @@ def _validated_send(params: dict[str, Any]) -> dict[str, Any]:
     return {key: params[key] for key in _SEND_KEYS if params.get(key) not in (None, "")}
 
 
-def _owner_number(server_ctx: ServerContext) -> str:
+def owner_number(server_ctx: ServerContext) -> str:
     from ..domain.channel_config import load_channel_config
 
     cfg = load_channel_config(server_ctx.workspace_path, WHATSAPP_CHANNEL)
-    return _digits(str((cfg.config if cfg else {}).get("owner_number") or ""))
+    return digits(str((cfg.config if cfg else {}).get("owner_number") or ""))
 
 
 def _record_text(params: dict[str, Any]) -> str:
@@ -113,7 +113,7 @@ def _record_text(params: dict[str, Any]) -> str:
     return text
 
 
-async def _record_for_owner(server_ctx: ServerContext, params: dict[str, Any], sender: str) -> None:
+async def record_for_owner(server_ctx: ServerContext, params: dict[str, Any], sender: str) -> None:
     """Write a message sent to the owner into the owner's conversation and Hiro's thread.
 
     Best effort: the message already went out, so a failure here is logged, never
@@ -155,22 +155,22 @@ async def _record_for_owner(server_ctx: ServerContext, params: dict[str, Any], s
 async def handle_whatsapp_send(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     send = _validated_send(params)
     server_ctx = ctx.server_ctx
-    sender = _sender_label(ctx)
+    sender = sender_label(ctx)
     channels = server_ctx.channel_manager
     if channels is None:
         raise RequestRefused(WHATSAPP_ERROR_NOT_RUNNING, "WhatsApp isn't running in HiroLeague")
     to = send["to"]
     try:
-        await channels.call_channel(WHATSAPP_CHANNEL, WHATSAPP_CALL_SEND, send, timeout=_SEND_TIMEOUT_S)
+        await channels.call_channel(WHATSAPP_CHANNEL, WHATSAPP_CALL_SEND, send, timeout=SEND_TIMEOUT_S)
     except ChannelCallError as exc:
         raise _refusal(exc) from exc
-    is_owner = bool(_digits(to)) and _digits(to) == _owner_number(server_ctx)
+    is_owner = bool(digits(to)) and digits(to) == owner_number(server_ctx)
     log.info(
         f"⬆️ WhatsApp sent for {sender} — {'the owner' if is_owner else to}",
         kind="picture" if "image_b64" in send else "voice" if "voice_b64" in send else "text",
     )
     if is_owner:
-        await _record_for_owner(server_ctx, params, sender)
+        await record_for_owner(server_ctx, params, sender)
     return {"sent": True}
 
 

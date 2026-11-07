@@ -104,6 +104,24 @@ WHATSAPP_ERROR_NOT_RUNNING: str = "whatsapp_not_running"      # the plugin isn't
 WHATSAPP_ERROR_NOT_CONNECTED: str = "whatsapp_not_connected"  # the plugin runs, but WhatsApp isn't linked/online
 WHATSAPP_ERROR_FAILED: str = "whatsapp_failed"                # WhatsApp refused or the send failed
 
+# Phase 5: the core uses Home.
+#   extension.state  core → extension, {} → {"state": {...}}: what the extension knows right now
+#                    (Home: who is where), as plain JSON with names, built live when asked (never
+#                    stored). The core's agent tool hands it to Hiro as it is; the shape is the
+#                    extension's own.
+#   notify           extension → core, {to: [{name, number}], medium, text, style}
+#                    → {"results": [{name, number, sent, error?}]}. Hiro tells people something:
+#                    style "exact" sends `text` as it is, "character" has Hiro's character write it
+#                    in its own voice from `text`. Hiro's own preferences decide text or a voice
+#                    note. medium: NOTIFY_MEDIUM_WHATSAPP only for now; number = digits with the
+#                    country code. Extensions only; a failed person doesn't stop the others.
+METHOD_EXTENSION_STATE: str = "extension.state"
+METHOD_NOTIFY: str = "notify"
+NOTIFY_MEDIUM_WHATSAPP: str = "whatsapp"
+NOTIFY_STYLE_EXACT: str = "exact"
+NOTIFY_STYLE_CHARACTER: str = "character"
+NOTIFY_MAX_RECIPIENTS: int = 10
+
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0
 

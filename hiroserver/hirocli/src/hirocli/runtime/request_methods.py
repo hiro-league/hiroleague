@@ -33,6 +33,7 @@ from ..tools.conversation import (
 from ..tools.files import FilesHeadTool
 from ..tools.policy import PolicyGetTool
 from .envelope_factory import EnvelopeFactory
+from .notify import NOTIFY_REQUEST_HANDLERS
 from .request_handler import ALL_CALLERS, DEVICES_ONLY, RequestContext, RequestHandler
 from .stream_sender import send_file_as_stream
 from .whatsapp_for_extensions import WHATSAPP_REQUEST_HANDLERS
@@ -314,6 +315,8 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     (METHOD_CORE_INFO, handle_core_info, ALL_CALLERS),
     # Phase 4: an extension's WhatsApp messages go out through the core (extensions only).
     *WHATSAPP_REQUEST_HANDLERS,
+    # Phase 5: an extension asks Hiro to tell people something (extensions only).
+    *NOTIFY_REQUEST_HANDLERS,
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

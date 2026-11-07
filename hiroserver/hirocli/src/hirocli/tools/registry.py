@@ -95,11 +95,15 @@ class ToolRegistry:
         return [t for t in items if surface in type(t).surfaces]
 
     def agent_tools(self) -> list[Tool]:
-        """Return tools that are both agent-surfaced and enabled by default."""
+        """Return tools that are agent-surfaced and enabled by default (always-on ones included)."""
         return [
             t for t in self.tool_instances(surface="agent")
-            if type(t).agent_default
+            if type(t).agent_default or type(t).agent_always
         ]
+
+    def agent_always_tool_names(self) -> frozenset[str]:
+        """Names of the always-on agent tools: offered even when tools are off for a turn."""
+        return frozenset(t.name for t in self.tool_instances(surface="agent") if type(t).agent_always)
 
     def schema(self) -> list[dict[str, Any]]:
         """Return a JSON-serialisable schema for all registered tools."""

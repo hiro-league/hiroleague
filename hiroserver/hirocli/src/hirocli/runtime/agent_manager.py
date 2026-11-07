@@ -631,6 +631,7 @@ class AgentManager:
             count=len(tools),
             total=len(reg.tool_instances()),
             names=[t.name for t in tools],
+            always_on=sorted(reg.agent_always_tool_names()),
         )
         return to_langchain_list(tools)
 
@@ -663,10 +664,13 @@ class AgentManager:
         # runtime decision (state["tools_enabled"]) handled in call_model, not a recompile.
         if self._lc_agent_tools is None:
             self._lc_agent_tools = self._langchain_tools_for_agent()
+        reg = self._tool_registry
         compiled = self._graph.build(
             ChatGraphConfig(
                 model=model,
                 tools=self._lc_agent_tools,
+                # Always-on tools stay offered when tools are off for a turn (Tool.agent_always).
+                always_tool_names=reg.agent_always_tool_names() if reg is not None else frozenset(),
                 model_id=llm_entry.model_id,
                 system_prompt=system_prompt,
                 temperature=llm_entry.temperature,
@@ -753,6 +757,78 @@ class AgentManager:
         )
         log.info("✅ Sent message added to Hiro's thread", thread_id=thread_id, character_id=character_id)
         return True
+
+    async def write_as_character(self, chat_channel_id: int | None, instruction: str) -> tuple[str, str]:
+        """One message written by a character, outside any chat turn: ``(text, character name)``.
+
+        Phase 5's notify with style "character": Hiro tells someone something in its
+        own voice. The character is the one of ``chat_channel_id``'s conversation (the
+        owner's General), or the default character for someone with no conversation.
+        Uses the character's own chat model and tuning, like its replies. Raises when
+        there's no chat model or the model call fails; the caller reports it.
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from ..domain.character import effective_character_system_prompt
+        from ..domain.conversation_channel import (
+            CHAT_CHANNEL_ID_METADATA_KEY,
+            resolve_chat_channel_from_metadata,
+        )
+        from ..domain.model_factory import create_chat_model
+        from ..domain.preferences import resolve_character_llm
+        from .agent_graph.graph_kit import normalize_reply_content
+
+        character_id = ""
+        if chat_channel_id is not None:
+            _thread, _cid, character_id, _user = self._resolve_thread_character_for(
+                resolve_chat_channel_from_metadata(
+                    self._ctx.workspace_path, {CHAT_CHANNEL_ID_METADATA_KEY: chat_channel_id}
+                )
+            )
+        ch = self._load_character_for_channel(character_id)
+        llm_entry = resolve_character_llm(
+            ch.llm_models,
+            self._current_preferences(),
+            self._ctx.workspace_path,
+            tuning_profile=getattr(ch, "tuning_profile", None),
+            credential_store=self._credentials,
+        )
+        if llm_entry is None:
+            raise RuntimeError(f"{ch.name} has no chat model set")
+        model = create_chat_model(
+            llm_entry.model_id,
+            workspace_path=self._ctx.workspace_path,
+            temperature=llm_entry.temperature,
+            max_tokens=llm_entry.max_tokens,
+            thinking=getattr(llm_entry, "thinking", None),
+            num_ctx=getattr(llm_entry, "num_ctx", None),
+            credential_store=self._credentials,
+        )
+        t0 = time.perf_counter()
+        try:
+            reply = await model.ainvoke(
+                [SystemMessage(content=effective_character_system_prompt(ch)), HumanMessage(content=instruction)]
+            )
+        except Exception as exc:
+            log.error(
+                f"❌ LLM failed writing a message — {ch.name} · notify",
+                error=str(exc), model=llm_entry.model_id,
+                elapsed_ms=int((time.perf_counter() - t0) * 1000), exc_info=True,
+            )
+            raise
+        text = normalize_reply_content(reply.content).strip()
+        usage = getattr(reply, "usage_metadata", None) or {}
+        log.info(
+            f"✅ Message written — {ch.name} · notify",
+            model=llm_entry.model_id,
+            chars=len(text),
+            tokens_in=usage.get("input_tokens"),
+            tokens_out=usage.get("output_tokens"),
+            elapsed_ms=int((time.perf_counter() - t0) * 1000),
+        )
+        if not text:
+            raise RuntimeError(f"{ch.name}'s model wrote nothing")
+        return text, ch.name
 
     def _resolve_thread_character_for(self, channel: Any) -> tuple[str, int, str, int]:
         """``_resolve_thread_character`` for an already-resolved conversation channel."""
