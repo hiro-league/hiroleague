@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,12 +10,15 @@ from typing import Literal
 
 import keyring
 from hiro_commons.constants.storage import PROVIDERS_FILENAME
+from hiro_commons.log import Logger
 from keyring.errors import PasswordDeleteError
 from pydantic import BaseModel, Field
 
 from .model_catalog import get_model_catalog
 
-logger = logging.getLogger(__name__)
+# The structured logger: the calls below pass fields (provider_id=, error=) that the stdlib logger
+# rejects with a TypeError, which turned a locked keyring (SSH, no login session) into a crash.
+logger = Logger.get("CREDENTIALS")
 
 AuthMethod = Literal["api_key", "local_endpoint", "oauth"]
 
