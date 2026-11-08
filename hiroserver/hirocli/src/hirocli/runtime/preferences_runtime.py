@@ -108,6 +108,30 @@ class WorkspacePreferencesRuntime:
             return self._current.model_copy(deep=True)
 
 
+# The running server's runtime per workspace (registered by ServerContext). A tool that writes
+# preferences (Phase 7a: ai_uses_set / ai_uses_forget) goes through it when the server runs in this
+# process, so the server's in-memory copy never goes stale and a later admin PATCH can't write the
+# old ``ai`` section back over the tool's change.
+_LIVE: dict[str, WorkspacePreferencesRuntime] = {}
+
+
+def register_live_preferences(runtime: WorkspacePreferencesRuntime) -> None:
+    _LIVE[_runtime_key(runtime._workspace_path)] = runtime
+
+
+def preferences_runtime_for(workspace_path: Path) -> WorkspacePreferencesRuntime:
+    """The running server's runtime for this workspace, else a fresh one over the file."""
+    live = _LIVE.get(_runtime_key(workspace_path))
+    return live if live is not None else WorkspacePreferencesRuntime(workspace_path)
+
+
+def _runtime_key(workspace_path: Path) -> str:
+    try:
+        return str(workspace_path.resolve())
+    except OSError:
+        return str(workspace_path)
+
+
 def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
     parts = path.split(".")
     if len(parts) == 1:

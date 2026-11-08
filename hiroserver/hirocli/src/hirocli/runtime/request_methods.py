@@ -32,6 +32,7 @@ from ..tools.conversation import (
 )
 from ..tools.files import FilesHeadTool
 from ..tools.policy import PolicyGetTool
+from .ai_for_extensions import AI_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
 from .people_for_extensions import PEOPLE_REQUEST_HANDLERS
@@ -320,6 +321,8 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *NOTIFY_REQUEST_HANDLERS,
     # Phase 6: the family list lives in the core; extensions read and change it (extensions only).
     *PEOPLE_REQUEST_HANDLERS,
+    # Phase 7a: extensions ask the core's AI on its AI profiles (extensions only).
+    *AI_REQUEST_HANDLERS,
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

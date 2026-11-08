@@ -71,7 +71,9 @@ function makeDraft(): WorkspacePreferences {
       preferred_answering_language: 'en'
     },
     tuning_profiles: {},
-    image_profiles: {}
+    image_profiles: {},
+    // Phase 7a: AI profiles + uses (edited by the Catalog's AI tabs, never by the Preferences page).
+    ai: { profiles: {}, uses: {}, local_servers: {} }
   };
 }
 

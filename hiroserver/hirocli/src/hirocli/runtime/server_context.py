@@ -21,7 +21,7 @@ from hiro_commons.log import Logger
 from hirocli.domain.config import Config, resolve_log_dir
 from hirocli.domain.pairing import get_device_name
 from hirocli.runtime.preference_reactor import PreferenceReactor
-from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
+from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime, register_live_preferences
 
 log = Logger.get("CTX")
 
@@ -105,4 +105,6 @@ class ServerContext:
         self.log_dir = resolve_log_dir(self.workspace_path, self.config)
         self.device_names = DeviceNameResolver(self.workspace_path)
         self.preferences = WorkspacePreferencesRuntime(self.workspace_path)
+        # Phase 7a: tools that write preferences in this process go through this runtime.
+        register_live_preferences(self.preferences)
         self.preference_reactor = PreferenceReactor(self.workspace_path)

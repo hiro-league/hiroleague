@@ -48,7 +48,9 @@ from hiro_channel_sdk.constants import (
     EXTENSION_FRAME_DENIED,
     EXTENSION_FRAME_PAIR,
     EXTENSION_FRAME_WELCOME,
+    EXTENSION_MAX_MESSAGE_BYTES,
     EXTENSION_REQUEST_TIMEOUT_SECONDS,
+    METHOD_EXTENSION_INFO,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_REQUEST,
     MESSAGE_TYPE_RESPONSE,
@@ -135,7 +137,10 @@ class ExtensionManager:
         shown on the admin's Extensions page; it never stops the rest of the core.
         """
         try:
-            async with websockets.serve(self._handle_connection, self._host, self._port):
+            # max_size: an AI ask carries up to 60 pictures as base64 (Phase 7a); the 1 MiB default is too small.
+            async with websockets.serve(
+                self._handle_connection, self._host, self._port, max_size=EXTENSION_MAX_MESSAGE_BYTES
+            ):
                 self._listening = True
                 log.info(f"✅ Extension socket listening at ws://{self._host}:{self._port}")
                 await self._ctx.stop_event.wait()
@@ -213,6 +218,31 @@ class ExtensionManager:
         finally:
             self._pending.pop(request_id, None)
 
+    async def refresh_info(self, extension_id: str) -> dict[str, Any]:
+        """Ask a connected extension for its self-description again and keep it (Phase 7a).
+
+        The Uses page's Refresh: the extension may declare new AI uses without signing in
+        again. Stored like a sign-in's info (``touch_paired_extension``), so the uses it no
+        longer declares and the new ones show. Raises ExtensionRequestError.
+        """
+        data = await self.request(extension_id, METHOD_EXTENSION_INFO)
+        try:
+            info = ExtensionInfo.model_validate(data)
+        except ValidationError as exc:
+            raise ExtensionRequestError("bad_answer", f"unreadable extension.info answer: {exc}") from exc
+        dumped = info.model_dump(mode="json", by_alias=True)
+        await asyncio.to_thread(touch_paired_extension, self._ctx.workspace_path, extension_id, info=dumped)
+        conn = self._connections.get(extension_id)
+        if conn is not None:
+            conn.info = dumped
+            conn.name = info.name
+        log.info(
+            f"✅ Extension info read again — {info.name} {info.version}",
+            uses=len(info.uses),
+            extension_id=extension_id,
+        )
+        return dumped
+
     async def send_event(self, extension_id: str, event_type: str, data: dict[str, Any] | None = None) -> bool:
         conn = self._connections.get(extension_id)
         if conn is None:
@@ -257,7 +287,8 @@ class ExtensionManager:
         conn = _Connection(
             extension_id=extension.extension_id,
             name=info.name,
-            info=info.model_dump(mode="json"),
+            # by_alias: an ExtensionUse's answer flag is "json" on the wire (Phase 7a contract).
+            info=info.model_dump(mode="json", by_alias=True),
             ws=ws,
             connected_at=datetime.now(UTC),
             remote=remote,
@@ -305,7 +336,7 @@ class ExtensionManager:
             if not _signature_ok(found.public_key, nonce, signature):
                 raise _Denied(EXTENSION_DENIED_BAD_SIGNATURE, "signature doesn't match the paired key")
             await asyncio.to_thread(
-                touch_paired_extension, workspace, extension_id, info=info.model_dump(mode="json")
+                touch_paired_extension, workspace, extension_id, info=info.model_dump(mode="json", by_alias=True)
             )
             extension = found
         else:
@@ -355,7 +386,7 @@ class ExtensionManager:
             workspace,
             name=info.name,
             public_key=public_key,
-            info=info.model_dump(mode="json"),
+            info=info.model_dump(mode="json", by_alias=True),
         )
         await asyncio.to_thread(clear_extension_pairing, workspace)  # one code, one extension
         self._wrong_codes = 0

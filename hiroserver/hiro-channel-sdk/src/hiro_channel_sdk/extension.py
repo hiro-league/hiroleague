@@ -54,6 +54,7 @@ from .constants import (
     EXTENSION_FRAME_DENIED,
     EXTENSION_FRAME_PAIR,
     EXTENSION_FRAME_WELCOME,
+    EXTENSION_MAX_MESSAGE_BYTES,
     EXTENSION_REQUEST_TIMEOUT_SECONDS,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_REQUEST,
@@ -98,13 +99,28 @@ class ExtensionOffers(BaseModel):
     shows: list[dict[str, Any]] = Field(default_factory=list)   # pages it has
 
 
+class ExtensionUse(BaseModel):
+    """One thing the extension asks the core's AI for (Phase 7a): the core's admin points
+    each use at an AI profile. ``pictures`` is the most pictures one ask carries (0 = none)."""
+
+    id: str
+    name: str
+    pictures: int = 0
+    sound: bool = False
+    json_answer: bool = Field(default=True, alias="json")
+
+    model_config = {"populate_by_name": True}
+
+
 class ExtensionInfo(BaseModel):
-    """Self-description an extension sends when it signs in."""
+    """Self-description an extension sends when it signs in (and answers to extension.info)."""
 
     name: str
     version: str = "0.0.0"
     description: str = ""
     offers: ExtensionOffers = Field(default_factory=ExtensionOffers)
+    # What it asks the core's AI for (Phase 7a); the core keeps the last list it was given.
+    uses: list[ExtensionUse] = Field(default_factory=list)
 
 
 class ExtensionRequestError(Exception):
@@ -535,13 +551,16 @@ class ExtensionClient:
     async def _session(self) -> bool:
         """One connection: sign in, then serve frames. True once welcomed."""
         key = self._credentials.private_key()
-        async with websockets.connect(self._url, open_timeout=EXTENSION_AUTH_TIMEOUT_SECONDS) as ws:
+        # max_size: an AI ask can carry up to 60 pictures as base64 (Phase 7a); the default 1 MiB is far too small.
+        async with websockets.connect(
+            self._url, open_timeout=EXTENSION_AUTH_TIMEOUT_SECONDS, max_size=EXTENSION_MAX_MESSAGE_BYTES
+        ) as ws:
             challenge = await self._recv_json(ws)
             nonce = challenge.get("nonce")
             if challenge.get("type") != EXTENSION_FRAME_CHALLENGE or not isinstance(nonce, str):
                 raise _Denied(EXTENSION_DENIED_BAD_FRAME, "The address answered, but not like a HiroLeague core.")
             signature = sign_nonce(key, nonce)
-            info = self._info.model_dump(mode="json")
+            info = self._info.model_dump(mode="json", by_alias=True)
             code = self._pairing_code
             if code:
                 frame: dict[str, Any] = {
@@ -637,7 +656,8 @@ class ExtensionClient:
         self, msg: UnifiedMessage, method: str, params: dict[str, Any], sender: str
     ) -> UnifiedMessage:
         if method == METHOD_EXTENSION_INFO:
-            data = {"name": self._info.name, "version": self._info.version, "description": self._info.description}
+            # The whole self-description, uses included: the core's Uses page Refresh asks this (Phase 7a).
+            data = self._info.model_dump(mode="json", by_alias=True)
             return build_response(msg, sender_id=sender, direction="inbound", data=data)
         handler = self._request_handlers.get(method)
         if handler is None:

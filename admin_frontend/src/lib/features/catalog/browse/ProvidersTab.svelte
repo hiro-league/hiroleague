@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { Filter, Plus, RefreshCw, Search, Trash2 } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
@@ -18,9 +19,14 @@
 
   type Props = {
     ctrl: CatalogController;
+    // Optional extension points (Phase 7a mock-up); omitted = the table renders exactly as before.
+    /** Catalog providers whose row a caller draws itself in `extraRows` (still counted above). */
+    replacedProviderIds?: ReadonlySet<string>;
+    /** Extra `<tr>` rows after the catalog rows (same 10 columns); gets the "active only" flag. */
+    extraRows?: Snippet<[boolean]>;
   };
 
-  let { ctrl }: Props = $props();
+  let { ctrl, replacedProviderIds, extraRows }: Props = $props();
 
   // Configured-provider store: this tab merges the bundled catalog with the workspace's configured
   // providers, so each catalog row can show its credential/auth state and offer add/remove inline.
@@ -40,10 +46,16 @@
         acc.total += 1;
         if (p.hosting === 'cloud') acc.cloud += 1;
         if (p.hosting === 'local') acc.local += 1;
+        // Phase 7a: the catalog's plan-tool providers (Claude Code, Codex).
+        if (p.hosting === 'plan') acc.plan += 1;
         return acc;
       },
-      { total: 0, cloud: 0, local: 0 }
+      { total: 0, cloud: 0, local: 0, plan: 0 }
     )
+  );
+
+  const tableProviders = $derived(
+    replacedProviderIds?.size ? visibleProviders.filter((p) => !replacedProviderIds.has(p.id)) : visibleProviders
   );
 
   // Per-row expand state for the Recommended models column (collapsed shows the first entry only).
@@ -55,7 +67,7 @@
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>Providers</h3>
       <span class="font-sans text-sm text-muted-foreground">
-        {counts.total} {activeOnly ? 'active' : 'providers'} / {counts.cloud} cloud / {counts.local} local
+        {counts.total} {activeOnly ? 'active' : 'providers'} / {counts.cloud} cloud / {counts.local} local{counts.plan ? ` / ${counts.plan} plan` : ''}
       </span>
     </div>
     <div class="flex flex-wrap items-center justify-end gap-2">
@@ -120,7 +132,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each visibleProviders as provider (provider.id)}
+        {#each tableProviders as provider (provider.id)}
           {@const active = store.rowsByProviderId.get(provider.id)}
           {@const isOnline = ctrl.configuredWorkspaceProviderIds.has(provider.id)}
           {@const stats = ctrl.catalogModelStatsByProvider[provider.id]}
@@ -267,6 +279,7 @@
             </td>
           </tr>
         {/each}
+        {@render extraRows?.(activeOnly)}
       </tbody>
     </AdminTableShell>
   {/if}

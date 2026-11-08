@@ -291,6 +291,7 @@ async def _main(
     # the existing admin_task in the gather list so cancellation propagates on
     # shutdown.
     from hirocli.runtime.loop_sentinel import run_loop_stall_sentinel
+    from hirocli.services.ai_ask.background import run_ai_background
 
     coros: list = [
         run_http_server(ctx),
@@ -303,6 +304,8 @@ async def _main(
         # Stall forensics: logs a WARNING (with duration) whenever a blocking/native call
         # starves the event loop — the silent multi-minute freezes become named evidence.
         run_loop_stall_sentinel(),
+        # Phase 7a Part B: idle local models unloaded, plan sign-ins tidied, plan tools updated nightly.
+        run_ai_background(ctx),
     ]
     if admin_task is not None:
         coros.append(admin_task)

@@ -49,7 +49,7 @@ class LlmCatalogListProvidersTool(Tool):
     params = {
         "hosting": ToolParam(
             str,
-            "Filter: 'cloud' or 'local' (omit for all providers)",
+            "Filter: 'cloud', 'local' or 'plan' (omit for all providers)",
             required=False,
         ),
     }
@@ -59,8 +59,9 @@ class LlmCatalogListProvidersTool(Tool):
         hosting: Hosting | None = None
         if raw is not None and str(raw).strip() != "":
             s = str(raw).strip().lower()
-            if s not in ("cloud", "local"):
-                raise ValueError("hosting must be 'cloud' or 'local' when provided")
+            # "plan": Claude Code / Codex on the owner's plan (Phase 7a Part B).
+            if s not in ("cloud", "local", "plan"):
+                raise ValueError("hosting must be 'cloud', 'local' or 'plan' when provided")
             hosting = s  # type: ignore[assignment]
         cat = get_model_catalog()
         providers = cat.list_providers(hosting=hosting)

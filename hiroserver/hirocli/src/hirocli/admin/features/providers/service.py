@@ -48,7 +48,8 @@ class ProvidersPageService:
             cat = get_model_catalog()
             addable: list[dict[str, Any]] = []
             for p in cat.list_providers():
-                if p.id in configured:
+                # Plan tools sign in on the Catalog's AI tabs (plan_sign_in), not with a key or an address.
+                if p.id in configured or p.hosting == "plan":
                     continue
                 addable.append(
                     {

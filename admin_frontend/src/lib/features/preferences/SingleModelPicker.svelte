@@ -32,7 +32,9 @@
     toolbar,
     embedded = false,
     labelled = false,
-    emptyFallbackId = null
+    emptyFallbackId = null,
+    emptyText = 'No workspace default set.',
+    clearTitle = 'Clear default'
   }: {
     label: string;
     /** Dotted preference path; shown as a hover tooltip on the label. */
@@ -66,6 +68,10 @@
      * stand in for each picker's label) — e.g. the Graphiti model pickers.
      */
     labelled?: boolean;
+    /** Text in the empty box (no model picked). Defaults to the Preferences wording. */
+    emptyText?: string;
+    /** Tooltip of the clear (trash) button. Defaults to the Preferences wording. */
+    clearTitle?: string;
   } = $props();
 
   // Dialog selection is staged: the provider/model panes only mutate `pendingId`,
@@ -205,7 +211,7 @@
         class="size-9 shrink-0 text-destructive hover:text-destructive"
         disabled={busy}
         aria-label={`Clear ${label}`}
-        title="Clear default"
+        title={clearTitle}
         onclick={clearModel}
       >
         <Trash2 size={17} />
@@ -231,7 +237,7 @@
           </span>
         </span>
       {:else}
-        <p class="text-sm text-muted-foreground">No workspace default set.</p>
+        <p class="text-sm text-muted-foreground">{emptyText}</p>
       {/if}
       <Button
         variant="outline"

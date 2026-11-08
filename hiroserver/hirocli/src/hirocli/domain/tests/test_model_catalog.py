@@ -191,9 +191,9 @@ def test_hidden_provider_excluded_from_listings_but_resolvable(tmp_path: Path) -
 
 
 def test_bundled_hidden_providers_do_not_list() -> None:
-    """jan / lm_studio / cloudflare are hidden in the bundled catalog."""
+    """jan / cloudflare are hidden in the bundled catalog (lm_studio un-hidden for Phase 7a)."""
     cat = get_model_catalog()
-    hidden_ids = {"jan", "lm_studio", "cloudflare"}
+    hidden_ids = {"jan", "cloudflare"}
     listed = {p.id for p in cat.list_providers()}
     assert listed.isdisjoint(hidden_ids)
     assert all(m.provider_id not in hidden_ids for m in cat.list_models())
@@ -201,6 +201,8 @@ def test_bundled_hidden_providers_do_not_list() -> None:
         assert cat.get_provider(pid) is not None
     # cloudflare's image model still resolves for existing image profiles / pricing
     assert cat.get_model("cloudflare:flux-1-schnell") is not None
+    # Phase 7a: LM Studio lists again, so AI profiles can point at the models it reports.
+    assert "lm_studio" in listed
 
 
 def test_list_credential_env_keys_unique_sorted() -> None:

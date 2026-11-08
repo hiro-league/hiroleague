@@ -145,8 +145,27 @@ METHOD_ROLES_RENAME: str = "roles.rename"
 METHOD_ROLES_REMOVE: str = "roles.remove"
 EVENT_PEOPLE_CHANGED: str = "people.changed"
 
+# Phase 7a: the core answers questions (docs/phase7a-ai-asks-design.md in hiroleague).
+#   ai.ask       extension → core, {use, profile?, prompt, pictures?: [base64 JPEG], picture_labels?,
+#                sound?: {b64, mime}, schema?, detail?, local_only?, timeout?, wait?}
+#                → {text, profile_id, profile_name, provider, model, plan, ms, tokens, tokens_in,
+#                tokens_out, cost, estimate, notes, tries}. `use` is the extension's own use id
+#                (ExtensionInfo.uses); the core reads the profile picked for "<extension>:<use>".
+#   ai.profiles  extension → core, {} → {"profiles": [...], "uses": {use id: profile id | None}}.
+#   Errors (the response's error code): no_profile, budget, busy, failed, invalid.
+METHOD_AI_ASK: str = "ai.ask"
+METHOD_AI_PROFILES: str = "ai.profiles"
+AI_ERROR_NO_PROFILE: str = "no_profile"  # no profile given and none picked for the use
+AI_ERROR_BUDGET: str = "budget"          # every profile in the chain is over its limit
+AI_ERROR_BUSY: str = "busy"              # wait=false and the plan tool is already answering as many as allowed
+AI_ERROR_FAILED: str = "failed"          # every profile tried failed (the message says why)
+AI_ERROR_INVALID: str = "invalid"        # the ask itself is wrong (no prompt, bad picture, bad schema)
+
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0
+# Largest frame on the extension socket, both ends. An AI ask (ai.ask, Phase 7a) carries up to 60
+# pictures as base64; websockets' default of 1 MiB would close the connection on it.
+EXTENSION_MAX_MESSAGE_BYTES: int = 64 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Auth roles

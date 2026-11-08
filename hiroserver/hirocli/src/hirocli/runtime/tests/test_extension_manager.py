@@ -103,7 +103,13 @@ def test_pair_call_both_ways_remove_and_sign_in_again(tmp_path: Path) -> None:
 
         # Test call 2: the core asks the extension.
         info = await manager.request(paired.extension_id, "extension.info")
-        assert info == {"name": "home", "version": "9.9.9", "description": ""}
+        # The whole self-description, uses included (Phase 7a's Uses page Refresh reads it).
+        assert {k: info[k] for k in ("name", "version", "description", "uses")} == {
+            "name": "home",
+            "version": "9.9.9",
+            "description": "",
+            "uses": [],
+        }
 
         # Restart of the extension: it signs in again with its key, no code.
         await client.stop()

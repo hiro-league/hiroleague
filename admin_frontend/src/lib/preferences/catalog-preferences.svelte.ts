@@ -1,7 +1,7 @@
 import { PREF_KEYS, type CatalogTabPreference } from './keys';
 import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
-const ALLOWED: readonly CatalogTabPreference[] = ['providers', 'models'] as const;
+const ALLOWED: readonly CatalogTabPreference[] = ['providers', 'models', 'profiles', 'uses'] as const;
 
 export function createCatalogPreferences(): TabPreferences<CatalogTabPreference> {
   return createTabPreferences<CatalogTabPreference>({

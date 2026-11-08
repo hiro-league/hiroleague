@@ -254,5 +254,10 @@
       "style_suffix": "",
       "seed": null
     }
+  },
+  "ai": {
+    "profiles": {},
+    "uses": {},
+    "local_servers": {}
   }
 }

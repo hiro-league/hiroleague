@@ -24,6 +24,16 @@ from .defaults import (
     pref_field,
     seed_default_profiles,
 )
+from .models_ai import (
+    AI_LOCAL_SERVER_KINDS,
+    AI_MAX_FALLBACKS,
+    AI_PLAN_PROVIDERS,
+    AiPreferences,
+    AiProfile,
+    LocalServerSettings,
+    ai_fallback_chain,
+    check_ai_model_id,
+)
 from .models_chat import DEFAULT_MAX_HISTORY_MESSAGES, ChatPreferences
 from .models_graph import (
     GraphEvalPreferences,
@@ -100,6 +110,15 @@ __all__ = [
     "GraphViewPreferences",
     "GraphEvalPreferences",
     "GraphPreferences",
+    # AI asks (Phase 7a)
+    "AI_LOCAL_SERVER_KINDS",
+    "AI_MAX_FALLBACKS",
+    "AI_PLAN_PROVIDERS",
+    "AiPreferences",
+    "AiProfile",
+    "LocalServerSettings",
+    "ai_fallback_chain",
+    "check_ai_model_id",
     # Chat
     "DEFAULT_MAX_HISTORY_MESSAGES",
     "ChatPreferences",
@@ -133,6 +152,12 @@ class WorkspacePreferences(BaseModel):
     image_profiles: dict[str, ImageProfile] = pref_field(
         save_skip=True,
         default_factory=default_image_profiles,
+    )
+    # Phase 7a: AI profiles + which profile each extension use asks. Edited by the Catalog's AI
+    # tabs (like image_profiles by the Image Lab), so the Preferences page never sends it.
+    ai: AiPreferences = pref_field(
+        save_skip=True,
+        default_factory=AiPreferences,
     )
 
     @model_validator(mode="after")

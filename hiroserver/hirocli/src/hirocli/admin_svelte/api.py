@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from hirocli.domain.features import feature_active
+from hirocli.admin_svelte.routes.ai import ai_router
 from hirocli.admin_svelte.routes.auth import auth_router
 from hirocli.admin_svelte.routes.catalog import catalog_router
 from hirocli.admin_svelte.routes.channels import channels_router
@@ -81,6 +82,8 @@ if feature_active("devices"):
 # Extensions (HomeHiro first): pairing codes, the paired list with live status,
 # removal, the listen address and the core's test call. Always mounted.
 api_router.include_router(extensions_router)
+# AI profiles, uses, Try it and local servers' models (Phase 7a: the Catalog's AI tabs). Always mounted.
+api_router.include_router(ai_router)
 # The family list, its roles and admin sign-ins (Phase 6). Always mounted.
 api_router.include_router(people_router)
 api_router.include_router(logs_router)

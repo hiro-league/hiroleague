@@ -20,7 +20,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
-Hosting = Literal["cloud", "local"]
+# "plan" (Phase 7a Part B): a command-line AI tool signed in with the owner's own plan (Claude Code,
+# Codex). Its models come from the tool itself (services/plans/models.py), never catalog rows.
+Hosting = Literal["cloud", "local", "plan"]
 ModelKind = Literal["chat", "tts", "stt", "embedding", "image_gen", "rerank"]
 # Single source of truth for valid kinds — derived from the Literal so adding a new kind
 # (e.g. "rerank") only requires editing ModelKind. Validators and Tool allowlists use this.
@@ -139,6 +141,9 @@ class Provider(BaseModel):
     # validation, and pricing estimators still resolve them so existing configurations,
     # selected models, and cost reporting keep working.
     hidden: bool = False
+    # False for providers that can't take the chat agent's function tools (plan tools answer one
+    # question per run): chat pickers must not offer them; AI profiles may (Phase 7a Part B).
+    tool_calling: bool = True
     metadata_updated_at: str
     notes: str | None = None
 

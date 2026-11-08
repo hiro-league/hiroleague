@@ -91,10 +91,15 @@ def build_chat_model_from_tuning(
     tuning: ModelTuning | None = None,
     credential_store: CredentialStore | None = None,
     callbacks: list[Any] | None = None,
+    spec: ModelSpec | None = None,
 ) -> BaseChatModel:
-    """Build a chat model and map provider-neutral tuning to provider kwargs."""
+    """Build a chat model and map provider-neutral tuning to provider kwargs.
+
+    ``spec`` overrides the catalog lookup: a model a local server reports with no catalog row
+    (Phase 7a, ``discovered_models.discovered_model_spec``) is built from its synthetic row.
+    """
     cat = get_model_catalog()
-    spec = cat.get_model(model_id)
+    spec = spec or cat.get_model(model_id)
     if spec is None:
         raise ValueError(f"Unknown model id: {model_id}")
     if spec.model_kind != "chat":
@@ -245,9 +250,15 @@ def build_chat_model_from_tuning(
         from langchain_openai import ChatOpenAI
 
         cred = store.get("lm_studio")
-        base_url = getattr(cred, "base_url", None)
+        prov = cat.get_provider("lm_studio")
+        base_url = (getattr(cred, "base_url", None) or (prov.default_base_url if prov else None) or "").rstrip("/")
         if not base_url:
             raise ValueError("LM Studio base_url missing for chat model")
+        # The stored endpoint is the server root (provider_check_endpoint probes {base}/v1/models), but
+        # the OpenAI client appends /chat/completions to base_url itself: LM Studio needs the /v1 prefix
+        # (found un-hiding LM Studio for Phase 7a; the hidden provider had never been used for chat).
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
         return ChatOpenAI(
             model=api_model,
             base_url=base_url,
@@ -290,31 +301,44 @@ def build_chat_model_from_tuning(
     raise ValueError(f"Model factory does not support provider {pid!r} yet.")
 
 
-def with_structured_output_compat(model: Any, schema: type, *, include_raw: bool = True) -> Any:
+def with_structured_output_compat(model: Any, schema: type | dict[str, Any], *, include_raw: bool = True) -> Any:
     """``with_structured_output`` that survives provider quirks; use instead of calling it raw.
+
+    ``schema`` is a pydantic class or a JSON schema dict (Phase 7a's AI asks pass the extension's
+    schema as a dict). The method per provider is ``structured_output_method``.
+    """
+    method = structured_output_method(model)
+    if method is None:
+        return model.with_structured_output(schema, include_raw=include_raw)
+    return model.with_structured_output(schema, include_raw=include_raw, method=method)
+
+
+def structured_output_method(model: Any) -> str | None:
+    """The ``with_structured_output`` method a model needs, or None for langchain's default.
 
     DeepSeek thinking mode rejects the forced tool_choice that langchain's default
     function_calling method sends (API 400: "Thinking mode does not support this tool_choice").
     Dual-mode DeepSeek models built with thinking enabled (``build_chat_model_from_tuning`` sets
-    ``extra_body.thinking.type='enabled'``) therefore fall back to ``method='json_mode'`` —
-    verified working against the live API. json_mode only guarantees valid JSON, NOT the schema:
-    the caller's prompt MUST describe the expected JSON fields (field descriptions on the pydantic
-    schema never reach the model in this mode). Every other provider/mode keeps langchain's
-    default method. Class-name check (not isinstance) so langchain_deepseek stays a lazy import.
+    ``extra_body.thinking.type='enabled'``) therefore fall back to ``json_mode`` — verified working
+    against the live API. json_mode only guarantees valid JSON, NOT the schema: the caller's prompt
+    MUST describe the expected JSON fields (field descriptions on the schema never reach the model in
+    this mode). Claude 5.x rejects the FORCED tool_choice langchain's default function_calling
+    method relies on, so langchain drops the force and the model may simply answer in text —
+    OutputParserException (seen live 2026-11-06: Sonnet 5.5 with thinking off). Claude's native
+    structured outputs (``json_schema``) enforce the schema itself; verified live on
+    Opus/Sonnet/Haiku 5.5, thinking on and off, nested schemas included. Every other provider/mode
+    keeps langchain's default method. Class-name check (not isinstance) so the provider packages
+    stay lazy imports. (Split out of ``with_structured_output_compat`` for Phase 7a: the AI ask
+    must know when json_mode is used, to put the schema in the prompt.)
     """
     if model.__class__.__name__ == "ChatDeepSeek":
         extra = getattr(model, "extra_body", None)
         thinking = (extra.get("thinking") or {}).get("type") if isinstance(extra, dict) else None
         if thinking == "enabled":
-            return model.with_structured_output(schema, include_raw=include_raw, method="json_mode")
+            return "json_mode"
     if model.__class__.__name__ == "ChatAnthropic":
-        # Claude 5.x rejects the FORCED tool_choice langchain's default function_calling method
-        # relies on, so langchain drops the force and the model may simply answer in text —
-        # OutputParserException (seen live 2026-11-06: Sonnet 5.5 with thinking off). Claude's
-        # native structured outputs (json_schema) enforce the schema itself; verified live on
-        # Opus/Sonnet/Haiku 5.5, thinking on and off, nested schemas included.
-        return model.with_structured_output(schema, include_raw=include_raw, method="json_schema")
-    return model.with_structured_output(schema, include_raw=include_raw)
+        return "json_schema"
+    return None
 
 
 # Effort vocabulary shared by every provider, ordered low→high. Used to clamp the neutral

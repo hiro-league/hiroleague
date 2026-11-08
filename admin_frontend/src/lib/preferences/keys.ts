@@ -107,7 +107,8 @@ export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type ChatOverlayMode = 'full' | 'partial';
 // Merged the former 'active-providers' tab into 'providers' — one providers list shows both
 // catalog + configured state, so the separate active tab no longer exists.
-export type CatalogTabPreference = 'providers' | 'models';
+// Phase 7a mock-up: 'profiles' (AI profiles) and 'uses' (extension uses → profile).
+export type CatalogTabPreference = 'providers' | 'models' | 'profiles' | 'uses';
 export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type MemoriesTabPreference = 'memories' | 'graph';

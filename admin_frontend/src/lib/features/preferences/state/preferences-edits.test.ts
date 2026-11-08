@@ -87,7 +87,9 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
         num_ctx: null
       }
     },
-    image_profiles: {}
+    image_profiles: {},
+    // Phase 7a: AI profiles + uses (edited by the Catalog's AI tabs, never by the Preferences page).
+    ai: { profiles: {}, uses: {}, local_servers: {} }
   };
   return normalizeWorkspacePreferences({ ...base, ...overrides });
 }

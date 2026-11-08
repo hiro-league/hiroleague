@@ -7,6 +7,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from .ai import register as register_ai_commands
+from .ai_plans import register as register_ai_plan_commands
 from .channel import register as register_channel_commands
 from .character import register as register_character_commands
 from .device import register as register_device_commands
@@ -71,6 +73,26 @@ extension_app = typer.Typer(
     help="Pair and manage extensions (programs such as HomeHiro that connect on their own).",
     add_completion=False,
 )
+ai_app = typer.Typer(
+    name="ai",
+    help="AI profiles: list, try, and which profile each extension use asks (Phase 7a).",
+    add_completion=False,
+)
+ai_uses_app = typer.Typer(
+    name="uses",
+    help="Extension AI uses and the profile each one asks.",
+    add_completion=False,
+)
+ai_plan_app = typer.Typer(
+    name="plan",
+    help="Claude Code / Codex on your own plans: status, sign-in, sign-out, update, test.",
+    add_completion=False,
+)
+ai_local_app = typer.Typer(
+    name="local",
+    help="Local model servers (LM Studio / Ollama): status and settings.",
+    add_completion=False,
+)
 people_app = typer.Typer(
     name="people",
     help="The family list, its roles, and admin sign-ins.",
@@ -127,6 +149,10 @@ app.add_typer(character_app, name="character")
 app.add_typer(device_app, name="device")
 app.add_typer(extension_app, name="extension")
 app.add_typer(people_app, name="people")
+ai_app.add_typer(ai_uses_app, name="uses")
+ai_app.add_typer(ai_plan_app, name="plan")
+ai_app.add_typer(ai_local_app, name="local")
+app.add_typer(ai_app, name="ai")
 app.add_typer(logs_app, name="logs")
 # Feature-gated: when Knowledge is hidden, its CLI group is neither mounted nor
 # populated, so `hiro knowledge ...` doesn't exist (not in --help, not runnable).
@@ -148,6 +174,8 @@ register_character_commands(character_app, console)
 register_device_commands(device_app, console)
 register_extension_commands(extension_app, console)
 register_people_commands(people_app, console)
+register_ai_commands(ai_app, ai_uses_app, console)
+register_ai_plan_commands(ai_plan_app, ai_local_app, console)
 register_logs_commands(logs_app, console)
 if feature_active("knowledge"):
     register_knowledge_commands(knowledge_app, console)

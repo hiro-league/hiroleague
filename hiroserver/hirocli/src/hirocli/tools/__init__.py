@@ -69,6 +69,22 @@ _LAZY_EXPORTS: dict[str, str] = {
     "DeviceListTool": ".device",
     "DeviceRevokeTool": ".device",
     # extension
+    # AI profiles and uses (Phase 7a)
+    "AiProfilesListTool": ".ai",
+    "AiTryTool": ".ai",
+    "AiUsesForgetTool": ".ai",
+    "AiUsesListTool": ".ai",
+    "AiUsesRefreshTool": ".ai",
+    "AiUsesSetTool": ".ai",
+    "LocalServerCheckTool": ".ai",
+    "LocalServerSetTool": ".ai",
+    "AiImportHomeHiroTool": ".ai",
+    # plan tools (Phase 7a Part B)
+    "PlanSignInTool": ".ai_plans",
+    "PlanSignOutTool": ".ai_plans",
+    "PlanStatusTool": ".ai_plans",
+    "PlanTestTool": ".ai_plans",
+    "PlanUpdateTool": ".ai_plans",
     "ExtensionAddTool": ".extension",
     "ExtensionAddressTool": ".extension",
     "ExtensionListTool": ".extension",
@@ -175,6 +191,18 @@ def all_tools() -> list[Tool]:
     Imports happen inside the function so listing the registry is the only
     code path that pays the full transitive import cost.
     """
+    from .ai import (
+        AiProfilesListTool,
+        AiTryTool,
+        AiUsesForgetTool,
+        AiUsesListTool,
+        AiUsesRefreshTool,
+        AiUsesSetTool,
+        AiImportHomeHiroTool,
+        LocalServerCheckTool,
+        LocalServerSetTool,
+    )
+    from .ai_plans import PlanSignInTool, PlanSignOutTool, PlanStatusTool, PlanTestTool, PlanUpdateTool
     from .channel import (
         ChannelDisableTool,
         ChannelEnableTool,
@@ -299,6 +327,20 @@ def all_tools() -> list[Tool]:
         ExtensionRemoveTool(),
         ExtensionAddressTool(),
         ExtensionStateTool(),
+        AiProfilesListTool(),
+        AiTryTool(),
+        AiUsesListTool(),
+        AiUsesSetTool(),
+        AiUsesForgetTool(),
+        AiUsesRefreshTool(),
+        LocalServerCheckTool(),
+        LocalServerSetTool(),
+        AiImportHomeHiroTool(),
+        PlanStatusTool(),
+        PlanSignInTool(),
+        PlanSignOutTool(),
+        PlanUpdateTool(),
+        PlanTestTool(),
         NotifyTool(),
         OwnerSignInTool(),
         PeopleListTool(),

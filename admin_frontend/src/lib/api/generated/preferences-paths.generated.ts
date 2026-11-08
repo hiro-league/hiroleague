@@ -3,6 +3,9 @@
 
 /** Every valid dotted preference path (keys of the GET /preferences/schema field map). */
 export type PreferencePath =
+  | 'ai.local_servers'
+  | 'ai.profiles'
+  | 'ai.uses'
   | 'chat.cite_sources'
   | 'chat.instructions'
   | 'chat.max_messages'

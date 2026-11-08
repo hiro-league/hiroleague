@@ -44,8 +44,27 @@ class PairedExtension(BaseModel):
     public_key: str
     paired_at: datetime
     last_seen: datetime | None = None
-    # What the extension last said about itself (version, description, offers).
+    # What the extension last said about itself (version, description, offers, uses).
     info: dict[str, Any] = Field(default_factory=dict)
+    # Phase 7a: the use ids it declared before its uses last changed (the Uses page marks
+    # a use "new" when it isn't in this list).
+    uses_before: list[str] = Field(default_factory=list)
+
+    def declared_uses(self) -> list[dict[str, Any]]:
+        """The AI uses it last declared (ExtensionUse dicts: id, name, pictures, sound, json)."""
+        return declared_uses(self.info)
+
+
+def declared_uses(info: dict[str, Any]) -> list[dict[str, Any]]:
+    """The ``uses`` list of an extension's info dict, keeping only well-formed entries."""
+    raw = info.get("uses")
+    if not isinstance(raw, list):
+        return []
+    return [u for u in raw if isinstance(u, dict) and isinstance(u.get("id"), str) and u["id"]]
+
+
+def _use_ids(info: dict[str, Any]) -> list[str]:
+    return [u["id"] for u in declared_uses(info)]
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +120,7 @@ def _row_to_extension(row: sqlite3.Row) -> PairedExtension:
         paired_at=datetime.fromisoformat(row["paired_at"]),
         last_seen=datetime.fromisoformat(row["last_seen"]) if row["last_seen"] else None,
         info=json.loads(row["info"] or "{}"),
+        uses_before=json.loads(row["uses_before"] or "[]"),
     )
 
 
@@ -170,10 +190,23 @@ def touch_paired_extension(workspace_path: Path, extension_id: str, *, info: dic
                 (utc_iso(datetime.now(UTC)), extension_id),
             )
         else:
+            # Phase 7a: when the declared uses change, keep the previous ids so the Uses page
+            # can mark the new ones; an unchanged list keeps the earlier "before" list.
+            row = conn.execute("SELECT info FROM extensions WHERE extension_id = ?", (extension_id,)).fetchone()
+            try:
+                old_ids = _use_ids(json.loads(row[0] or "{}")) if row is not None else []
+            except json.JSONDecodeError:
+                old_ids = []
+            new_ids = _use_ids(info)
             conn.execute(
                 "UPDATE extensions SET last_seen = ?, info = ?, name = ? WHERE extension_id = ?",
                 (utc_iso(datetime.now(UTC)), json.dumps(info), str(info.get("name") or ""), extension_id),
             )
+            if sorted(old_ids) != sorted(new_ids):
+                conn.execute(
+                    "UPDATE extensions SET uses_before = ? WHERE extension_id = ?",
+                    (json.dumps(old_ids), extension_id),
+                )
         conn.commit()
 
 

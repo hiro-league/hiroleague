@@ -316,6 +316,35 @@ export type Size = string | null;
 export type StylePrefix = string;
 export type StyleSuffix = string;
 export type Seed = number | null;
+export type Name = string;
+/**
+ * Catalog id, provider:model
+ */
+export type Model1 = string;
+export type Thinking1 = ("off" | "minimal" | "low" | "medium" | "high") | null;
+export type Temperature1 = number | null;
+export type MaxTokens1 = number | null;
+/**
+ * Local models only
+ */
+export type NumCtx1 = number | null;
+/**
+ * Appended to every question
+ */
+export type Instructions = string;
+/**
+ * USD a day (API models)
+ */
+export type MaxCostDay = number | null;
+/**
+ * Asks an hour (plan and local models)
+ */
+export type MaxPerHour = number | null;
+export type AtOnce = number;
+export type Fallback = string | null;
+export type UnloadIdleMin = number;
+export type Context = number;
+export type Batch = number;
 
 /**
  * Root preferences object persisted as preferences.json.
@@ -330,6 +359,7 @@ export interface WorkspacePreferences {
   chat: ChatPreferences;
   tuning_profiles: TuningProfiles;
   image_profiles: ImageProfiles;
+  ai: AiPreferences;
 }
 /**
  * Which catalog models to use when the workspace has credentials for them.
@@ -645,4 +675,45 @@ export interface ImageProfile {
   style_prefix: StylePrefix;
   style_suffix: StyleSuffix;
   seed: Seed;
+}
+/**
+ * ``prefs.ai``: the profiles and which profile each extension use asks.
+ */
+export interface AiPreferences {
+  profiles: Profiles;
+  uses: Uses;
+  local_servers: LocalServers;
+}
+export interface Profiles {
+  [k: string]: AiProfile;
+}
+/**
+ * One AI profile (see the module notes).
+ */
+export interface AiProfile {
+  label: Name;
+  model: Model1;
+  thinking: Thinking1;
+  temperature: Temperature1;
+  max_tokens: MaxTokens1;
+  num_ctx: NumCtx1;
+  instructions: Instructions;
+  max_cost_day: MaxCostDay;
+  max_per_hour: MaxPerHour;
+  at_once: AtOnce;
+  fallback: Fallback;
+}
+export interface Uses {
+  [k: string]: string | null;
+}
+export interface LocalServers {
+  [k: string]: LocalServerSettings;
+}
+/**
+ * How the core loads models on a local server (Part B, ported from HomeHiro's ModelSetup).
+ */
+export interface LocalServerSettings {
+  unload_idle_min: UnloadIdleMin;
+  context: Context;
+  batch: Batch;
 }

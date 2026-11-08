@@ -118,16 +118,36 @@ providers:
       embedding: ollama:nomic-embed-text
     metadata_updated_at: "2026-11-06"
 
+  # Un-hidden for Phase 7a (AI profiles): the models the server reports are offered as
+  # lm_studio:<name> without catalog rows (domain/discovered_models.py).
   - id: lm_studio
     display_name: LM Studio (local)
     hosting: local
-    hidden: true
     credential_env_keys: []
     default_base_url: http://localhost:1234
     docs_url: https://lmstudio.ai/docs
     recommended_models:
       chat: lm_studio:local-model
-    metadata_updated_at: "2026-03-27"
+    metadata_updated_at: "2026-11-08"
+
+  # Plan tools (Phase 7a Part B): command-line AI tools signed in with the owner's own plan. One
+  # question per run, no function tools (tool_calling: false), so only AI profiles offer them; their
+  # models are read from the tool itself (services/plans/models.py). Signed in on the AI tabs.
+  - id: claude_code
+    display_name: Claude Code (your Claude plan)
+    hosting: plan
+    tool_calling: false
+    credential_env_keys: []
+    docs_url: https://code.claude.com/docs
+    metadata_updated_at: "2026-11-08"
+
+  - id: codex
+    display_name: Codex (your ChatGPT plan)
+    hosting: plan
+    tool_calling: false
+    credential_env_keys: []
+    docs_url: https://developers.openai.com/codex
+    metadata_updated_at: "2026-11-08"
 
   - id: jan
     display_name: Jan (local)

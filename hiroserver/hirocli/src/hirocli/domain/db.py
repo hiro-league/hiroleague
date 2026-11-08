@@ -85,7 +85,8 @@ _DDL = [
         public_key    TEXT NOT NULL,
         paired_at     TEXT NOT NULL,
         last_seen     TEXT,
-        info          TEXT NOT NULL DEFAULT '{}'
+        info          TEXT NOT NULL DEFAULT '{}',
+        uses_before   TEXT NOT NULL DEFAULT '[]'
     )
     """,
     # The family (the plan's Phase 6): one list, owned by the core; extensions (HomeHiro)
@@ -109,6 +110,31 @@ _DDL = [
         password_hash  TEXT,
         created_at     TEXT NOT NULL DEFAULT '',
         updated_at     TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    # Phase 7a: what each AI profile asked, per clock hour (UTC hour start) — enough for its
+    # max_cost_day / max_per_hour limits. Kept AI_USAGE_KEEP_DAYS (services/ai_ask/usage.py).
+    """
+    CREATE TABLE IF NOT EXISTS ai_usage (
+        profile_id  TEXT NOT NULL,
+        hour        TEXT NOT NULL,
+        asks        INTEGER NOT NULL DEFAULT 0,
+        cost        REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (profile_id, hour)
+    )
+    """,
+    # Phase 7a: the models a local server (LM Studio / Ollama) last reported, so AI profiles can
+    # point at them without catalog rows and still read while the PC is off.
+    """
+    CREATE TABLE IF NOT EXISTS local_models (
+        provider_id  TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        display_name TEXT NOT NULL DEFAULT '',
+        vision       INTEGER NOT NULL DEFAULT 0,
+        reasoning    INTEGER NOT NULL DEFAULT 0,
+        loaded       INTEGER NOT NULL DEFAULT 0,
+        seen_at      TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (provider_id, name)
     )
     """,
     # Admin sign-in sessions: only a hash of each cookie's token is kept.
@@ -159,6 +185,16 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("extensions", "paired_at",  "TEXT NOT NULL DEFAULT ''"),
     ("extensions", "last_seen",  "TEXT"),
     ("extensions", "info",       "TEXT NOT NULL DEFAULT '{}'"),
+    # Phase 7a: the use ids the extension declared before its last change (Uses page: "new").
+    ("extensions", "uses_before", "TEXT NOT NULL DEFAULT '[]'"),
+    # ai_usage, local_models (Phase 7a)
+    ("ai_usage", "asks", "INTEGER NOT NULL DEFAULT 0"),
+    ("ai_usage", "cost", "REAL NOT NULL DEFAULT 0"),
+    ("local_models", "display_name", "TEXT NOT NULL DEFAULT ''"),
+    ("local_models", "vision",       "INTEGER NOT NULL DEFAULT 0"),
+    ("local_models", "reasoning",    "INTEGER NOT NULL DEFAULT 0"),
+    ("local_models", "loaded",       "INTEGER NOT NULL DEFAULT 0"),
+    ("local_models", "seen_at",      "TEXT NOT NULL DEFAULT ''"),
     # roles, people, admin_sessions (Phase 6)
     ("roles", "name",     "TEXT NOT NULL DEFAULT ''"),
     ("roles", "built_in", "INTEGER NOT NULL DEFAULT 0"),

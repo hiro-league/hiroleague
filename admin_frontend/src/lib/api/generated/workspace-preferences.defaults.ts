@@ -258,5 +258,10 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
       "style_suffix": "",
       "seed": null
     }
+  },
+  "ai": {
+    "profiles": {},
+    "uses": {},
+    "local_servers": {}
   }
 } as WorkspacePreferences;

@@ -1053,6 +1053,27 @@
     "title": "Image Profiles",
     "preferencesSaveSkip": true
   },
+  "ai.profiles": {
+    "path": "ai.profiles",
+    "nullable": false,
+    "type": "object",
+    "title": "Profiles",
+    "preferencesSaveSkip": true
+  },
+  "ai.uses": {
+    "path": "ai.uses",
+    "nullable": false,
+    "type": "object",
+    "title": "Uses",
+    "preferencesSaveSkip": true
+  },
+  "ai.local_servers": {
+    "path": "ai.local_servers",
+    "nullable": false,
+    "type": "object",
+    "title": "Local Servers",
+    "preferencesSaveSkip": true
+  },
   "knowledge.default_embedding_model_locked": {
     "path": "knowledge.default_embedding_model_locked",
     "type": "boolean",

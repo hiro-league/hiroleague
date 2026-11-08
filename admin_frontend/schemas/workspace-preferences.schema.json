@@ -1,5 +1,194 @@
 {
   "$defs": {
+    "AiPreferences": {
+      "description": "``prefs.ai``: the profiles and which profile each extension use asks.",
+      "properties": {
+        "profiles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AiProfile"
+          },
+          "preferencesSaveSkip": true,
+          "title": "Profiles",
+          "type": "object"
+        },
+        "uses": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferencesSaveSkip": true,
+          "title": "Uses",
+          "type": "object"
+        },
+        "local_servers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LocalServerSettings"
+          },
+          "preferencesSaveSkip": true,
+          "title": "Local Servers",
+          "type": "object"
+        }
+      },
+      "title": "AiPreferences",
+      "type": "object",
+      "required": [
+        "profiles",
+        "uses",
+        "local_servers"
+      ]
+    },
+    "AiProfile": {
+      "description": "One AI profile (see the module notes).",
+      "properties": {
+        "label": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "model": {
+          "description": "Catalog id, provider:model",
+          "minLength": 3,
+          "title": "Model",
+          "type": "string"
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinking"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "maximum": 2.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "num_ctx": {
+          "anyOf": [
+            {
+              "minimum": 256,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Local models only",
+          "title": "Num Ctx"
+        },
+        "instructions": {
+          "default": "",
+          "description": "Appended to every question",
+          "maxLength": 8000,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "max_cost_day": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "USD a day (API models)",
+          "title": "Max Cost Day"
+        },
+        "max_per_hour": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Asks an hour (plan and local models)",
+          "title": "Max Per Hour"
+        },
+        "at_once": {
+          "default": 1,
+          "maximum": 4,
+          "minimum": 1,
+          "title": "At Once",
+          "type": "integer"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        }
+      },
+      "required": [
+        "label",
+        "model",
+        "thinking",
+        "temperature",
+        "max_tokens",
+        "num_ctx",
+        "instructions",
+        "max_cost_day",
+        "max_per_hour",
+        "at_once",
+        "fallback"
+      ],
+      "title": "AiProfile",
+      "type": "object"
+    },
     "AnswerPromptProfile": {
       "description": "A named mem-eval answer-prompt recipe \u2014 the answer analog of ``ImageProfile`` / tuning\nprofiles. A run picks which profile's instruction block the memory-eval recall leg uses\n(``eval_judge.answer_from_context`` places it in the user message ahead of the question +\nrecalled elements). Memory-track only \u2014 the knowledge track answers with the production\npipeline, so it has no answer-prompt library.\n\nNo structured-output contract applies (unlike the judge): the answer step is plain free-text\ngeneration. The one soft convention \u2014 the decline phrase \"No information available.\" \u2014 stays\nEMBEDDED in each profile body (the abstain label detector + the judge key on it); an author\nediting a duplicated profile is responsible for keeping it. Blank ``prompt`` \u21d2 the runtime\nfalls back to ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT`` (see ``resolve_answer_prompt``).",
       "properties": {
@@ -1005,6 +1194,39 @@
         "default_image_profile"
       ]
     },
+    "LocalServerSettings": {
+      "description": "How the core loads models on a local server (Part B, ported from HomeHiro's ModelSetup).",
+      "properties": {
+        "unload_idle_min": {
+          "default": 60,
+          "maximum": 1440,
+          "minimum": 1,
+          "title": "Unload Idle Min",
+          "type": "integer"
+        },
+        "context": {
+          "default": 16384,
+          "maximum": 262144,
+          "minimum": 2048,
+          "title": "Context",
+          "type": "integer"
+        },
+        "batch": {
+          "default": 2048,
+          "maximum": 16384,
+          "minimum": 64,
+          "title": "Batch",
+          "type": "integer"
+        }
+      },
+      "title": "LocalServerSettings",
+      "type": "object",
+      "required": [
+        "unload_idle_min",
+        "context",
+        "batch"
+      ]
+    },
     "MediaPreferences": {
       "properties": {
         "input": {
@@ -1463,6 +1685,10 @@
       "preferencesSaveSkip": true,
       "title": "Image Profiles",
       "type": "object"
+    },
+    "ai": {
+      "$ref": "#/$defs/AiPreferences",
+      "preferencesSaveSkip": true
     }
   },
   "title": "WorkspacePreferences",
@@ -1476,6 +1702,7 @@
     "graph",
     "chat",
     "tuning_profiles",
-    "image_profiles"
+    "image_profiles",
+    "ai"
   ]
 }
