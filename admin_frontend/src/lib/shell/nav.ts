@@ -13,6 +13,8 @@ export const navItems: NavItem[] = [
   { group: 'Core', label: 'Dashboard', path: '/', icon: 'grid' },
   { group: 'Core', label: 'Server', path: '/server/', icon: 'server' },
   { group: 'Core', label: 'Extensions', path: '/extensions/', icon: 'puzzle' },
+  // Phase 6: the family list, its roles and admin sign-ins.
+  { group: 'Core', label: 'People', path: '/people/', icon: 'users' },
   { group: 'Communication', label: 'Channels & Devices', path: '/channels-devices/', icon: 'cpu' },
   { group: 'Communication', label: 'Characters', path: '/characters/', icon: 'user' },
   { group: 'Communication', label: 'Chat channels', path: '/chats/', icon: 'message' },

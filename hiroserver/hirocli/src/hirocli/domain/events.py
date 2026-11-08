@@ -38,6 +38,8 @@ class DomainEventType:
     CHANNEL_CHANGED = "channel.changed"
     PREFERENCES_SAVED = "preferences.saved"
     PROVIDERS_CHANGED = "providers.changed"
+    # The family list or its roles changed (Phase 6): extensions are told to read it again.
+    PEOPLE_CHANGED = "people.changed"
 
 
 @dataclass(frozen=True)

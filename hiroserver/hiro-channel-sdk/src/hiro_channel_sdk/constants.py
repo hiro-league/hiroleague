@@ -109,18 +109,41 @@ WHATSAPP_ERROR_FAILED: str = "whatsapp_failed"                # WhatsApp refused
 #                    (Home: who is where), as plain JSON with names, built live when asked (never
 #                    stored). The core's agent tool hands it to Hiro as it is; the shape is the
 #                    extension's own.
-#   notify           extension → core, {to: [{name, number}], medium, text, style}
-#                    → {"results": [{name, number, sent, error?}]}. Hiro tells people something:
+#   notify           extension → core, {to: [{person}], medium, text, style}
+#                    → {"results": [{person, name, sent, error?}]}. Hiro tells people something:
 #                    style "exact" sends `text` as it is, "character" has Hiro's character write it
 #                    in its own voice from `text`. Hiro's own preferences decide text or a voice
-#                    note. medium: NOTIFY_MEDIUM_WHATSAPP only for now; number = digits with the
-#                    country code. Extensions only; a failed person doesn't stop the others.
+#                    note. medium: NOTIFY_MEDIUM_WHATSAPP only for now. Since Phase 6 `person` is a
+#                    person id from the core's family list (people.list); the core finds their
+#                    number. Extensions only; a failed person doesn't stop the others.
 METHOD_EXTENSION_STATE: str = "extension.state"
 METHOD_NOTIFY: str = "notify"
 NOTIFY_MEDIUM_WHATSAPP: str = "whatsapp"
 NOTIFY_STYLE_EXACT: str = "exact"
 NOTIFY_STYLE_CHARACTER: str = "character"
 NOTIFY_MAX_RECIPIENTS: int = 10
+
+# Phase 6: the family lives in the core.
+#   people.list      extension → core, {} → {"people": [{person_id, name, calls_them, whatsapp,
+#                    role_id}], "roles": [{role_id, name, built_in}]}. whatsapp = digits with the
+#                    country code ("" = none); calls_them "" = their name. What a role may do inside
+#                    an extension is the extension's own.
+#   people.add       extension → core, {name, role_id, calls_them?, whatsapp?} → {"person": {...}}
+#   people.update    extension → core, {person_id, name?, role_id?, calls_them?, whatsapp?}
+#                    → {"person": {...}}; a field left out stays as it is.
+#   roles.add        extension → core, {name} → {"role": {...}}
+#   roles.rename     extension → core, {role_id, name} → {"role": {...}}
+#   roles.remove     extension → core, {role_id} → {} (refused while someone has it)
+#   people.changed   core → every connected extension, an event with {}: read people.list again.
+#                    Events aren't queued: an extension also reads the list when it connects.
+#   A refused change answers error code "invalid_params" with the reason for people.
+METHOD_PEOPLE_LIST: str = "people.list"
+METHOD_PEOPLE_ADD: str = "people.add"
+METHOD_PEOPLE_UPDATE: str = "people.update"
+METHOD_ROLES_ADD: str = "roles.add"
+METHOD_ROLES_RENAME: str = "roles.rename"
+METHOD_ROLES_REMOVE: str = "roles.remove"
+EVENT_PEOPLE_CHANGED: str = "people.changed"
 
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0

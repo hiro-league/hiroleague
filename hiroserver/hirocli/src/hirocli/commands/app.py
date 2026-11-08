@@ -12,6 +12,7 @@ from .character import register as register_character_commands
 from .device import register as register_device_commands
 from .extension import register as register_extension_commands
 from .logs import register as register_logs_commands
+from .people import register as register_people_commands
 from .knowledge import register as register_knowledge_commands
 from ..domain.features import feature_active
 from .metrics import register as register_metrics_commands
@@ -70,6 +71,11 @@ extension_app = typer.Typer(
     help="Pair and manage extensions (programs such as HomeHiro that connect on their own).",
     add_completion=False,
 )
+people_app = typer.Typer(
+    name="people",
+    help="The family list, its roles, and admin sign-ins.",
+    add_completion=False,
+)
 character_app = typer.Typer(
     name="character",
     help="Manage characters (personas, prompts, photos).",
@@ -120,6 +126,7 @@ app.add_typer(channel_app, name="channel")
 app.add_typer(character_app, name="character")
 app.add_typer(device_app, name="device")
 app.add_typer(extension_app, name="extension")
+app.add_typer(people_app, name="people")
 app.add_typer(logs_app, name="logs")
 # Feature-gated: when Knowledge is hidden, its CLI group is neither mounted nor
 # populated, so `hiro knowledge ...` doesn't exist (not in --help, not runnable).
@@ -140,6 +147,7 @@ register_channel_commands(channel_app, console)
 register_character_commands(character_app, console)
 register_device_commands(device_app, console)
 register_extension_commands(extension_app, console)
+register_people_commands(people_app, console)
 register_logs_commands(logs_app, console)
 if feature_active("knowledge"):
     register_knowledge_commands(knowledge_app, console)

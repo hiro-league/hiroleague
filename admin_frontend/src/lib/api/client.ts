@@ -1,6 +1,7 @@
 import { base } from '$app/paths';
 import { PREF_KEYS } from '$lib/preferences/keys';
 import { signalServerMaybeUnavailable } from '$lib/runtime/server-stale-signal';
+import { signalSignedOut } from '$lib/runtime/sign-in-signal';
 
 export type ApiResponse<T> = {
   ok: boolean;
@@ -99,6 +100,10 @@ export async function apiRequest<T>(
   }
 
   if (!response.ok || !payload.ok) {
+    // Phase 6: the admin has its own sign-in; a 401 outside /auth/ means the session is gone.
+    if (response.status === 401 && !path.startsWith('/auth/')) {
+      signalSignedOut();
+    }
     if (response.status >= 500) {
       maybeMarkServerStale(path);
     }

@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from hirocli.domain.features import feature_active
+from hirocli.admin_svelte.routes.auth import auth_router
 from hirocli.admin_svelte.routes.catalog import catalog_router
 from hirocli.admin_svelte.routes.channels import channels_router
 from hirocli.admin_svelte.routes.characters import characters_router
@@ -27,12 +28,15 @@ from hirocli.admin_svelte.routes.knowledge import knowledge_router, knowledge_sh
 from hirocli.admin_svelte.routes.logs import logs_router
 from hirocli.admin_svelte.routes.memory import memory_router
 from hirocli.admin_svelte.routes.metrics import metrics_router
+from hirocli.admin_svelte.routes.people import people_router
 from hirocli.admin_svelte.routes.preferences import preferences_router
 from hirocli.admin_svelte.routes.providers import providers_router
 from hirocli.admin_svelte.routes.runtime import runtime_router
 from hirocli.admin_svelte.routes.workspaces import workspaces_router
 
 api_router = APIRouter(prefix="/api", tags=["hiro-admin"])
+# The admin's own sign-in (Phase 6); every other route needs it (middleware in admin/run.py).
+api_router.include_router(auth_router)
 api_router.include_router(workspaces_router)
 # Feature-gated: the gateway (Hiro Gate relay) is remote-device connectivity only.
 # Hidden for first public builds, its admin API is unmounted (Server "Gateways" tab
@@ -77,6 +81,8 @@ if feature_active("devices"):
 # Extensions (HomeHiro first): pairing codes, the paired list with live status,
 # removal, the listen address and the core's test call. Always mounted.
 api_router.include_router(extensions_router)
+# The family list, its roles and admin sign-ins (Phase 6). Always mounted.
+api_router.include_router(people_router)
 api_router.include_router(logs_router)
 # Feature-gated: metrics_router is exclusive to the Metrics feature (only the Server-page Metrics
 # subtab calls /metrics/*), so the whole router is gated — no shared-endpoint split needed.

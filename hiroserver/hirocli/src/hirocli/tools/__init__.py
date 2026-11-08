@@ -76,6 +76,17 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ExtensionStateTool": ".extension_state",
     # notify (Phase 5)
     "NotifyTool": ".notify",
+    # people (Phase 6)
+    "OwnerSignInTool": ".people",
+    "PeopleListTool": ".people",
+    "PersonAddTool": ".people",
+    "PersonRemoveTool": ".people",
+    "PersonSignInRemoveTool": ".people",
+    "PersonSignInTool": ".people",
+    "PersonUpdateTool": ".people",
+    "RoleAddTool": ".people",
+    "RoleRemoveTool": ".people",
+    "RoleRenameTool": ".people",
     # files
     "FilesHeadTool": ".files",
     # gateway
@@ -194,6 +205,18 @@ def all_tools() -> list[Tool]:
     from .extension import ExtensionAddressTool, ExtensionAddTool, ExtensionListTool, ExtensionRemoveTool
     from .extension_state import ExtensionStateTool
     from .notify import NotifyTool
+    from .people import (
+        OwnerSignInTool,
+        PeopleListTool,
+        PersonAddTool,
+        PersonRemoveTool,
+        PersonSignInRemoveTool,
+        PersonSignInTool,
+        PersonUpdateTool,
+        RoleAddTool,
+        RoleRemoveTool,
+        RoleRenameTool,
+    )
     from .files import FilesHeadTool
     from .gateway import (
         GatewaySetupTool,
@@ -277,6 +300,16 @@ def all_tools() -> list[Tool]:
         ExtensionAddressTool(),
         ExtensionStateTool(),
         NotifyTool(),
+        OwnerSignInTool(),
+        PeopleListTool(),
+        PersonAddTool(),
+        PersonRemoveTool(),
+        PersonSignInRemoveTool(),
+        PersonSignInTool(),
+        PersonUpdateTool(),
+        RoleAddTool(),
+        RoleRemoveTool(),
+        RoleRenameTool(),
         FilesHeadTool(),
         ChannelListTool(),
         ChannelInstallTool(),
@@ -393,6 +426,18 @@ if TYPE_CHECKING:  # pragma: no cover
     )
     from .extension_state import ExtensionStateTool  # noqa: F401
     from .notify import NotifyTool  # noqa: F401
+    from .people import (  # noqa: F401
+        OwnerSignInTool,
+        PeopleListTool,
+        PersonAddTool,
+        PersonRemoveTool,
+        PersonSignInRemoveTool,
+        PersonSignInTool,
+        PersonUpdateTool,
+        RoleAddTool,
+        RoleRemoveTool,
+        RoleRenameTool,
+    )
     from .files import FilesHeadTool  # noqa: F401
     from .gateway import (  # noqa: F401
         GatewaySetupTool,

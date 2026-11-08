@@ -19,6 +19,7 @@ from hiro_channel_sdk import ExtensionRequestError
 from hirocli.domain.channel_config import ChannelConfig, save_channel_config
 from hirocli.domain.conversation_channel import resolve_default_channel
 from hirocli.domain.message_store import list_messages
+from hirocli.domain.people import add_person
 from hirocli.runtime.channel_manager import ChannelCallError
 from hirocli.runtime.notify import handle_notify
 from hirocli.runtime.request_handler import RequestRefused
@@ -76,14 +77,18 @@ def _bodies(workspace: Path) -> list[str]:
     return [row["body"] for row in rows]
 
 
-def _params(style: str = "exact", *people: tuple[str, str]) -> dict[str, Any]:
-    to = [{"name": n, "number": num} for n, num in (people or (("Sara", SARA),))]
+def _params(workspace: Path, style: str = "exact", *people: tuple[str, str]) -> dict[str, Any]:
+    """Phase 6: recipients are people in the family list (added here), not names and numbers."""
+    to = [
+        {"person": add_person(workspace, name=n, role_id="adult", whatsapp=num).person_id}
+        for n, num in (people or (("Sara", SARA),))
+    ]
     return {"to": to, "medium": "whatsapp", "text": "Joe just got home", "style": style}
 
 
 def test_exact_goes_as_given_and_only_the_owners_copy_is_kept(workspace: Path) -> None:
     channels, agent = FakeChannels(), FakeAgent()
-    params = _params("exact", ("Sara", SARA), ("Michel", f"+{OWNER}"))
+    params = _params(workspace, "exact", ("Sara", SARA), ("Michel", f"+{OWNER}"))
     answer = asyncio.run(handle_notify(params, _ctx(workspace, channels, agent)))
     assert [c["text"] for c in channels.calls] == ["Joe just got home", "Joe just got home"]
     assert [c["to"] for c in channels.calls] == [SARA, OWNER]
@@ -95,7 +100,7 @@ def test_exact_goes_as_given_and_only_the_owners_copy_is_kept(workspace: Path) -
 
 def test_character_writes_it_in_the_owners_conversation_character(workspace: Path) -> None:
     channels, agent = FakeChannels(), FakeAgent()
-    asyncio.run(handle_notify(_params("character", ("Michel", OWNER)), _ctx(workspace, channels, agent)))
+    asyncio.run(handle_notify(_params(workspace, "character", ("Michel", OWNER)), _ctx(workspace, channels, agent)))
     channel_id, instruction = agent.asked[0]
     assert channel_id == int(resolve_default_channel(workspace).id)
     assert "Joe just got home" in instruction and "Michel" in instruction
@@ -105,13 +110,13 @@ def test_character_writes_it_in_the_owners_conversation_character(workspace: Pat
 
 def test_someone_without_a_conversation_gets_the_default_character(workspace: Path) -> None:
     agent = FakeAgent()
-    asyncio.run(handle_notify(_params("character"), _ctx(workspace, FakeChannels(), agent)))
+    asyncio.run(handle_notify(_params(workspace, "character"), _ctx(workspace, FakeChannels(), agent)))
     assert agent.asked[0][0] is None
 
 
 def test_one_failing_doesnt_stop_the_others(workspace: Path) -> None:
     channels = FakeChannels(fail_for={SARA})
-    answer = asyncio.run(handle_notify(_params("exact", ("Sara", SARA), ("Michel", OWNER)), _ctx(workspace, channels, FakeAgent())))
+    answer = asyncio.run(handle_notify(_params(workspace, "exact", ("Sara", SARA), ("Michel", OWNER)), _ctx(workspace, channels, FakeAgent())))
     sara, michel = answer["results"]
     assert sara["sent"] is False and "refused" in sara["error"]
     assert michel["sent"] is True
@@ -119,30 +124,51 @@ def test_one_failing_doesnt_stop_the_others(workspace: Path) -> None:
 
 def test_the_character_failing_is_a_failed_send_not_a_crash(workspace: Path) -> None:
     channels = FakeChannels()
-    answer = asyncio.run(handle_notify(_params("character"), _ctx(workspace, channels, FakeAgent(fail=True))))
+    answer = asyncio.run(handle_notify(_params(workspace, "character"), _ctx(workspace, channels, FakeAgent(fail=True))))
     assert answer["results"][0]["sent"] is False
     assert "couldn't write" in answer["results"][0]["error"]
     assert channels.calls == []
 
 
 def test_whatsapp_not_running_is_said_per_person(workspace: Path) -> None:
-    answer = asyncio.run(handle_notify(_params(), _ctx(workspace, None, FakeAgent())))
-    assert answer["results"][0] == {"name": "Sara", "number": SARA, "sent": False, "error": "WhatsApp isn't running in HiroLeague"}
+    params = _params(workspace)
+    answer = asyncio.run(handle_notify(params, _ctx(workspace, None, FakeAgent())))
+    assert answer["results"][0] == {"person": params["to"][0]["person"], "name": "Sara", "sent": False,
+                                    "error": "WhatsApp isn't running in HiroLeague"}
+
+
+def test_someone_without_a_number_is_said_per_person(workspace: Path) -> None:
+    channels = FakeChannels()
+    nour = add_person(workspace, name="Nour", role_id="kid").person_id
+    answer = asyncio.run(handle_notify({"to": [{"person": nour}], "text": "x"}, _ctx(workspace, channels, FakeAgent())))
+    assert answer["results"][0]["sent"] is False and "no WhatsApp number" in answer["results"][0]["error"]
+    assert channels.calls == []
+
+
+def test_hiro_calls_them_by_their_nickname(workspace: Path) -> None:
+    agent = FakeAgent()
+    yoyo = add_person(workspace, name="Youssef", calls_them="Yoyo", role_id="kid", whatsapp=SARA).person_id
+    asyncio.run(handle_notify({"to": [{"person": yoyo}], "text": "x", "style": "character"},
+                              _ctx(workspace, FakeChannels(), agent)))
+    assert "Yoyo" in agent.asked[0][1]
 
 
 @pytest.mark.parametrize(
     "params",
     [
         {"to": [], "text": "x"},
-        {"to": [{"name": "Sara"}], "text": "x"},
-        {"to": [{"name": "Sara", "number": SARA}], "text": "  "},
-        {"to": [{"name": "Sara", "number": SARA}], "text": "x", "style": "loud"},
-        {"to": [{"name": "Sara", "number": SARA}], "text": "x", "medium": "sms"},
-        {"to": [{"name": str(i), "number": SARA} for i in range(11)], "text": "x"},
+        {"to": [{"name": "Sara", "number": SARA}], "text": "x"},
+        {"to": [{"person": "nobody"}], "text": "x"},
+        {"to": [{"person": "SARA"}], "text": "  "},
+        {"to": [{"person": "SARA"}], "text": "x", "style": "loud"},
+        {"to": [{"person": "SARA"}], "text": "x", "medium": "sms"},
+        {"to": [{"person": "SARA"} for i in range(11)], "text": "x"},
     ],
 )
 def test_bad_requests_are_refused_before_anything_is_sent(workspace: Path, params: dict[str, Any]) -> None:
     channels = FakeChannels()
+    sara = add_person(workspace, name="Sara", role_id="adult", whatsapp=SARA).person_id
+    params = {**params, "to": [{"person": sara} if item.get("person") == "SARA" else item for item in params["to"]]}
     with pytest.raises(RequestRefused) as refused:
         asyncio.run(handle_notify(params, _ctx(workspace, channels, FakeAgent())))
     assert refused.value.code == "invalid_params"

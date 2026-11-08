@@ -88,6 +88,38 @@ _DDL = [
         info          TEXT NOT NULL DEFAULT '{}'
     )
     """,
+    # The family (the plan's Phase 6): one list, owned by the core; extensions (HomeHiro)
+    # read it. sign_in/password_hash are set only for people who use the admin.
+    """
+    CREATE TABLE IF NOT EXISTS roles (
+        role_id     TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        built_in    INTEGER NOT NULL DEFAULT 0,
+        position    INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS people (
+        person_id      TEXT PRIMARY KEY,
+        name           TEXT NOT NULL,
+        calls_them     TEXT NOT NULL DEFAULT '',
+        whatsapp       TEXT NOT NULL DEFAULT '',
+        role_id        TEXT NOT NULL,
+        sign_in        TEXT,
+        password_hash  TEXT,
+        created_at     TEXT NOT NULL DEFAULT '',
+        updated_at     TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    # Admin sign-in sessions: only a hash of each cookie's token is kept.
+    """
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+        token_hash  TEXT PRIMARY KEY,
+        person_id   TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT NOT NULL
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------
@@ -127,6 +159,21 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("extensions", "paired_at",  "TEXT NOT NULL DEFAULT ''"),
     ("extensions", "last_seen",  "TEXT"),
     ("extensions", "info",       "TEXT NOT NULL DEFAULT '{}'"),
+    # roles, people, admin_sessions (Phase 6)
+    ("roles", "name",     "TEXT NOT NULL DEFAULT ''"),
+    ("roles", "built_in", "INTEGER NOT NULL DEFAULT 0"),
+    ("roles", "position", "INTEGER NOT NULL DEFAULT 0"),
+    ("people", "name",          "TEXT NOT NULL DEFAULT ''"),
+    ("people", "calls_them",    "TEXT NOT NULL DEFAULT ''"),
+    ("people", "whatsapp",      "TEXT NOT NULL DEFAULT ''"),
+    ("people", "role_id",       "TEXT NOT NULL DEFAULT ''"),
+    ("people", "sign_in",       "TEXT"),
+    ("people", "password_hash", "TEXT"),
+    ("people", "created_at",    "TEXT NOT NULL DEFAULT ''"),
+    ("people", "updated_at",    "TEXT NOT NULL DEFAULT ''"),
+    ("admin_sessions", "person_id",  "TEXT NOT NULL DEFAULT ''"),
+    ("admin_sessions", "created_at", "TEXT NOT NULL DEFAULT ''"),
+    ("admin_sessions", "expires_at", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 

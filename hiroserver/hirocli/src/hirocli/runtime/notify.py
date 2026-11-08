@@ -16,7 +16,9 @@ gets a voice note), which a notification has nothing to answer.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import (
@@ -29,12 +31,12 @@ from hiro_channel_sdk.constants import (
 )
 from hiro_commons.log import Logger
 
+from ..domain.people import get_person
 from .channel_manager import ChannelCallError
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import (
     SEND_TIMEOUT_S,
     WHATSAPP_CHANNEL,
-    digits,
     owner_number,
     record_for_owner,
     sender_label,
@@ -59,14 +61,15 @@ _WRITE_INSTRUCTION = (
 
 @dataclass
 class Recipient:
-    name: str
-    number: str  # digits with the country code
+    person_id: str
+    name: str  # what Hiro calls them
+    number: str  # digits with the country code, "" = they have none
 
 
 @dataclass
 class NotifyResult:
+    person: str
     name: str
-    number: str
     sent: bool
     error: str | None = None
 
@@ -75,20 +78,25 @@ class NotifyInvalid(ValueError):
     """The request can't be carried out as asked (nothing sent)."""
 
 
-def parse_recipients(raw: Any) -> list[Recipient]:
-    """``[{name, number}, ...]`` → recipients; raises NotifyInvalid."""
+def parse_recipients(raw: Any, workspace_path: Path) -> list[Recipient]:
+    """``[{person}, ...]`` → recipients from the family list; raises NotifyInvalid.
+
+    Phase 6: a recipient is a person in the core's family list; the core finds their
+    number (it used to be given a name and a number).
+    """
     if not isinstance(raw, list) or not raw:
-        raise NotifyInvalid("Who to tell is missing: a list of {name, number}")
+        raise NotifyInvalid("Who to tell is missing: a list of {person}")
     if len(raw) > NOTIFY_MAX_RECIPIENTS:
         raise NotifyInvalid(f"At most {NOTIFY_MAX_RECIPIENTS} people at a time")
     out = []
     for item in raw:
-        if not isinstance(item, dict):
-            raise NotifyInvalid("Each person is {name, number}")
-        number = digits(str(item.get("number") or ""))
-        if not number:
-            raise NotifyInvalid(f"{item.get('name') or 'Someone'} has no number (digits with the country code)")
-        out.append(Recipient(name=str(item.get("name") or "").strip() or number, number=number))
+        person_id = str(item.get("person") or "") if isinstance(item, dict) else ""
+        if not person_id:
+            raise NotifyInvalid("Each recipient is {person}: a person id from the family list")
+        person = get_person(workspace_path, person_id)
+        if person is None:
+            raise NotifyInvalid(f"Nobody with id {person_id} is in the family list")
+        out.append(Recipient(person_id=person.person_id, name=person.hiro_calls_them, number=person.whatsapp))
     return out
 
 
@@ -137,6 +145,10 @@ async def notify(
     for who in recipients:
         is_owner = bool(owner) and who.number == owner
         label = "the owner" if is_owner else who.name
+        if not who.number:
+            log.warning(f"⚠️ Notify not sent — {label} · for {asked_by}", error="no WhatsApp number")
+            results.append(NotifyResult(who.person_id, who.name, False, f"{who.name} has no WhatsApp number"))
+            continue
         try:
             body = await _body(server_ctx, who, text.strip(), style, is_owner)
             channels = server_ctx.channel_manager
@@ -148,23 +160,23 @@ async def notify(
         except ChannelCallError as exc:
             reason = "WhatsApp isn't running in HiroLeague" if exc.reason == "not_running" else str(exc)
             log.warning(f"⚠️ Notify not sent — {label} · for {asked_by}", error=reason, style=style)
-            results.append(NotifyResult(who.name, who.number, False, reason))
+            results.append(NotifyResult(who.person_id, who.name, False, reason))
             continue
         except Exception as exc:  # the character couldn't write it (no model, the LLM failed)
             log.error(f"❌ Notify not sent — {label} · for {asked_by}", error=str(exc), style=style, exc_info=True)
-            results.append(NotifyResult(who.name, who.number, False, f"Hiro couldn't write it: {exc}"))
+            results.append(NotifyResult(who.person_id, who.name, False, f"Hiro couldn't write it: {exc}"))
             continue
         log.info(f"⬆️ Notify sent — {label} · for {asked_by}", style=style, medium=medium, chars=len(body))
         if is_owner:
             await record_for_owner(server_ctx, {"text": body}, asked_by)
-        results.append(NotifyResult(who.name, who.number, True))
+        results.append(NotifyResult(who.person_id, who.name, True))
     return results
 
 
 async def handle_notify(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     """The ``notify`` extension request (contract in hiro_channel_sdk.constants)."""
     try:
-        recipients = parse_recipients(params.get("to"))
+        recipients = await asyncio.to_thread(parse_recipients, params.get("to"), Path(ctx.server_ctx.workspace_path))
         results = await notify(
             ctx.server_ctx,
             recipients,

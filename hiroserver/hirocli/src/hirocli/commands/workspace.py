@@ -277,6 +277,21 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
                 console,
             )
 
+        # Phase 6: the admin has its own sign-in; setup sets the owner's when nobody has one yet.
+        from ..domain.people import anyone_signs_in
+
+        if not anyone_signs_in(Path(result.workspace_path)):
+            if use_interactive_credentials:
+                from .people import set_owner_interactive
+
+                console.print("\n[bold]The admin's sign-in[/bold] (the owner's; add the others in the admin)")
+                set_owner_interactive(console, workspace=result.workspace)
+            else:
+                console.print(
+                    "\nNobody can sign in to the admin yet: run "
+                    f"[bold]hiro people owner --workspace {result.workspace}[/bold] in a terminal."
+                )
+
         if result.server_started:
             console.print("\n[green]Server started.[/green]")
         else:

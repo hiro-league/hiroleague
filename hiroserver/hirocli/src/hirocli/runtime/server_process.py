@@ -244,6 +244,10 @@ async def _main(
 
     # --- Wire communication + channel stacks ---
     comm_manager, channel_manager, resource_change_broadcaster, extension_manager = _wire_runtime(ctx)
+    # Phase 6: extensions are told when the family list or its roles change.
+    from hirocli.runtime.people_for_extensions import watch_people_changes
+
+    stop_watching_people = watch_people_changes(extension_manager, workspace_path)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
@@ -316,6 +320,7 @@ async def _main(
         pass
     finally:
         resource_change_broadcaster.close()
+        stop_watching_people()
         if ctx.knowledge_manager is not None:
             await ctx.knowledge_manager.close()
         ctx.preference_reactor.close()

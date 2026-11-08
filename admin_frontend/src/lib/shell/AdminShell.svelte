@@ -12,6 +12,7 @@
     Image,
     KeyRound,
     List,
+    LogOut,
     Menu,
     MessageSquare,
     MessagesSquare,
@@ -23,6 +24,7 @@
     Settings,
     Sun,
     User,
+    Users,
     Workflow
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
@@ -44,6 +46,7 @@
   import { globalToast } from '$lib/ui/global-toast.svelte';
   import ServerStartingBanner from '$lib/runtime/ServerStartingBanner.svelte';
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
+  import { adminSession } from '$lib/runtime/admin-session.svelte';
 
   let {
     activePath = 'dashboard',
@@ -98,6 +101,7 @@
     server: Server,
     settings: Settings,
     user: User,
+    users: Users,
     workflow: Workflow
   };
 
@@ -332,6 +336,16 @@
           {:else}
             <Moon size={17} />
           {/if}
+        </Button>
+        <!-- Phase 6: who is signed in to the admin, and signing out. -->
+        <Button
+          variant="outline"
+          aria-label="Sign out"
+          title={adminSession.person ? `Signed in as ${adminSession.person.sign_in}. Sign out` : 'Sign out'}
+          onclick={() => void adminSession.signOut()}
+        >
+          <span class="hidden max-w-32 truncate sm:inline">{adminSession.person?.name ?? ''}</span>
+          <LogOut size={16} />
         </Button>
       </div>
     </header>

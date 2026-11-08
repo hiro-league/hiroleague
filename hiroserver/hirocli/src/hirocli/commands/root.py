@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -98,6 +99,7 @@ def register(app: typer.Typer, console: Console) -> None:
             # exit, so there is nothing to advertise there).
             if result.admin_port and not foreground:
                 _announce_admin_ui(console, result.admin_port)
+                _hint_owner_sign_in(console, result.workspace)
 
     @app.command()
     def stop(
@@ -360,6 +362,24 @@ def register(app: typer.Typer, console: Console) -> None:
             "  [cyan]uv tool uninstall hirocli[/cyan]                  (workspace dev, uv tool)\n"
             "  [cyan]uv tool uninstall hiro-channel-devices hirogate[/cyan]  (workspace dev, also remove plugin/gateway)\n"
         )
+
+
+def _hint_owner_sign_in(console: Console, workspace: str | None) -> None:
+    """Phase 6: the admin asks for a sign-in; say how to set the first one when there is none."""
+    try:
+        from ..domain.people import anyone_signs_in
+        from ..domain.workspace import resolve_workspace
+
+        entry, _ = resolve_workspace(workspace)
+        if anyone_signs_in(Path(entry.path)):
+            return
+    except Exception as exc:  # a hint only: never fail `hiro start` over it
+        log.warning("Couldn't check the admin sign-in", error=str(exc))
+        return
+    console.print(
+        "[yellow]Nobody can sign in to the admin yet.[/yellow] Set the owner's sign-in with "
+        f"[bold]hiro people owner{f' --workspace {workspace}' if workspace else ''}[/bold]."
+    )
 
 
 def _print_admin_ready_panel(console: Console, admin_port: int) -> None:

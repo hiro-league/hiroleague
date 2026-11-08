@@ -2,7 +2,7 @@
 
 The operation lives in runtime/notify.py; this Tool is its CLI/HTTP face, and the
 ``notify`` extension request calls the same function. Not offered to the agent by
-default (it sends WhatsApp messages to any number given).
+default (it sends WhatsApp messages). Since Phase 6 it tells people in the family list.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from .base import Tool, ToolParam
 
 @dataclass
 class NotifyToolResult:
-    results: list[dict[str, Any]] = field(default_factory=list)  # {name, number, sent, error?} per person
+    results: list[dict[str, Any]] = field(default_factory=list)  # {person, name, sent, error?} per person
 
 
 class NotifyTool(Tool):
@@ -32,7 +32,7 @@ class NotifyTool(Tool):
         "Hiro's character in its own words (style character). Requires the running server."
     )
     params = {
-        "to": ToolParam(list, "People to tell: a list of {name, number}, number with the country code"),
+        "to": ToolParam(list, "People to tell, from the family list (people_list): their ids or names"),
         "text": ToolParam(str, "What to tell them"),
         "style": ToolParam(str, "exact (as given, default) or character (the character writes it)", required=False),
         "medium": ToolParam(str, "whatsapp (the only one for now)", required=False),
@@ -52,14 +52,22 @@ class NotifyTool(Tool):
         style: str | None = None,
         medium: str | None = None,
     ) -> NotifyToolResult:
+        import asyncio
+        from pathlib import Path
+
         from ..runtime.notify import notify, parse_recipients
+        from .people import find_person
 
         rt = getattr(self, "_runtime", None)
         if rt is None:
             raise RuntimeError("notify has no runtime context — register tools with ToolRegistry(runtime=…).")
+        server_ctx = rt.comm_manager.ctx
+        workspace_path = Path(server_ctx.workspace_path)
+        # Names or ids → people in the family list (a name that matches nobody is refused).
+        wanted = [{"person": await asyncio.to_thread(find_person, workspace_path, str(who))} for who in to]
         results = await notify(
-            rt.comm_manager.ctx,
-            parse_recipients(to),
+            server_ctx,
+            await asyncio.to_thread(parse_recipients, wanted, workspace_path),
             medium=medium or NOTIFY_MEDIUM_WHATSAPP,
             text=text,
             style=style or NOTIFY_STYLE_EXACT,

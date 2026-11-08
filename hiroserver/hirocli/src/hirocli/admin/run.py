@@ -69,12 +69,15 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     """Start the Svelte admin UI and shut it down when stop_event fires."""
     from hirocli.admin.context import set_runtime_context
     from hirocli.admin_svelte.api import include_admin_svelte_api
+    from hirocli.admin_svelte.routes.auth import RequireSignIn
     from hirocli.admin_svelte.static_server import mount_admin_svelte_static
 
     set_runtime_context(build_admin_context(ctx))
 
     admin_app = FastAPI(title="Hiro Admin")
     admin_app.state.ctx = ctx
+    # Phase 6: the admin has its own sign-in; /api needs a signed-in session (but /api/auth/*).
+    admin_app.add_middleware(RequireSignIn, ctx=ctx)
     include_admin_svelte_api(admin_app)
 
     # Dev "external UI" mode (HIRO_ADMIN_UI_EXTERNAL=1, set by dev-sync-fast.sh --external-ui):
