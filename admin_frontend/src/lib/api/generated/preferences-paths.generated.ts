@@ -126,4 +126,7 @@ export type PreferencePath =
   | 'memory.search.enabled'
   | 'memory.user_name'
   | 'tuning_profiles'
-  | 'version';
+  | 'version'
+  | 'voice.clip_cache_mb'
+  | 'voice.profiles'
+  | 'voice.uses';

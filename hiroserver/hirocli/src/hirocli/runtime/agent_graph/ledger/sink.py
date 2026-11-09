@@ -12,6 +12,7 @@ from typing import Any, Iterable
 from hiro_commons.log import Logger
 
 from ....domain.model_catalog import get_model_catalog
+from ....services.ai_usage.from_ledger import count_ledger_row
 from .context import current_run, current_substep
 from .helpers import blank_zero_float, format_cost, preview, row_kind, slug, to_float
 from .identity import resolve_ledger_identity
@@ -134,6 +135,8 @@ class LedgerSink:
     def write_rows(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             priced = price_row(row, self.catalog) if row_kind(row) == "node" else row
+            # Phase 7b: each priced call of Hiro's own jobs is counted in the core's AI usage.
+            count_ledger_row(self.workspace_path, priced)
             accumulator = current_run.get()
             if accumulator is not None:
                 accumulator.fold_row(priced)

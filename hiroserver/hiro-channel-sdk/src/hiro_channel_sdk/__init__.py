@@ -37,6 +37,7 @@ from .extension import (
     ExtensionCredentials,
     ExtensionInfo,
     ExtensionUse,
+    ExtensionVoiceUse,
     ExtensionOffers,
     ExtensionRequestError,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "ExtensionCredentials",
     "ExtensionInfo",
     "ExtensionUse",
+    "ExtensionVoiceUse",
     "ExtensionOffers",
     "ExtensionRequestError",
 ]

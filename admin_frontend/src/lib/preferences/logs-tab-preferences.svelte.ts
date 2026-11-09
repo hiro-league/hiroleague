@@ -10,7 +10,7 @@
 import { PREF_KEYS, type LogsPrimaryTabPreference } from './keys';
 import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
-const ALLOWED: readonly LogsPrimaryTabPreference[] = ['logs', 'runs'] as const;
+const ALLOWED: readonly LogsPrimaryTabPreference[] = ['logs', 'runs', 'usage'] as const; // usage: Phase 7b AI usage
 
 export type LogsTabPreferences = TabPreferences<LogsPrimaryTabPreference>;
 

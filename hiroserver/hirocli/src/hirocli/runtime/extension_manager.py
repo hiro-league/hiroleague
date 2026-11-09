@@ -353,6 +353,8 @@ class ExtensionManager:
                         "name": "HiroLeague",
                         "version": __version__,
                         "workspace": self._ctx.workspace_name,
+                        # Phase 7b: the admin's web port, for an extension's links into the core's admin.
+                        "admin_port": self._ctx.config.admin_port,
                     },
                 }
             )

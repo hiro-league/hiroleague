@@ -33,6 +33,8 @@ from ..tools.conversation import (
 from ..tools.files import FilesHeadTool
 from ..tools.policy import PolicyGetTool
 from .ai_for_extensions import AI_REQUEST_HANDLERS
+from .voice_for_extensions import VOICE_REQUEST_HANDLERS
+from .uses_for_extensions import USES_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
 from .people_for_extensions import PEOPLE_REQUEST_HANDLERS
@@ -301,6 +303,8 @@ async def handle_core_info(params: dict[str, Any], ctx: RequestContext) -> dict[
         "name": "HiroLeague",
         "version": __version__,
         "workspace": ctx.server_ctx.workspace_name,
+        # Phase 7b: the admin's web port, so an extension can link to the core's admin (its Edit links).
+        "admin_port": ctx.server_ctx.config.admin_port,
     }
 
 
@@ -323,6 +327,8 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *PEOPLE_REQUEST_HANDLERS,
     # Phase 7a: extensions ask the core's AI on its AI profiles (extensions only).
     *AI_REQUEST_HANDLERS,
+    *VOICE_REQUEST_HANDLERS,  # Phase 7b: voice.speak / voice.profiles
+    *USES_REQUEST_HANDLERS,  # Phase 7b: ai.uses.set / voice.uses.set (an extension picks its own uses' profiles)
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

@@ -18,12 +18,18 @@ from hirocli.services.ai_ask import AskError, AskRequest, register_plan_tool
 from hirocli.services.ai_ask import providers as providers_mod
 from hirocli.services.ai_ask import runner as runner_mod
 from hirocli.services.ai_ask.runner import AskRunner
-from hirocli.services.ai_ask.usage import ProfileUsage, profile_usage, record_ask, why_limited
+from hirocli.services.ai_ask.usage import why_limited
+from hirocli.services.ai_usage.store import ProfileUsage, UsageCall, profile_usage, read_rows, record_strict
 from hirocli.services.plans.kinds import PLAN_KINDS, Answered
 from hirocli.services.plans.provider import PlanToolProvider
 
 GEMINI = "google:gemini-3.8-flash"
 SCHEMA = {"type": "object", "properties": {"seen": {"type": "boolean"}}, "required": ["seen"]}
+
+
+def _spent(path: Path, profile_id: str, cost: float | None, now: datetime | None = None) -> None:
+    """One answered ask of ``profile_id`` in AI usage (Phase 7b: ``ai_calls``)."""
+    record_strict(path, UsageCall(kind="question", source="home", use="ask", profile_id=profile_id, cost=cost or 0.0), now)
 
 
 class FakeStore:
@@ -137,13 +143,13 @@ def test_a_failing_profile_passes_to_its_fallback_and_says_so(tmp_path: Path, ch
 def test_over_budget_moves_on_and_every_profile_over_budget_is_budget(tmp_path: Path, chats: dict[str, FakeChat]) -> None:
     chats[GEMINI] = FakeChat()
     chats["ollama:gemma4:e4b"] = FakeChat()
-    record_ask(tmp_path, "a", 0.50)
+    _spent(tmp_path, "a", 0.50)
     prefs = _prefs({"a": {"model": GEMINI, "max_cost_day": 0.25, "fallback": "b"}, "b": {"model": "ollama:gemma4:e4b"}})
     answer = _ask(AskRunner(tmp_path), prefs, profile_id="a")
     assert answer.profile_id == "b"
     assert [t["status"] for t in answer.tries] == ["skipped", "ok"] and "$0.25 for today" in answer.notes[0]
 
-    record_ask(tmp_path, "b", None)
+    _spent(tmp_path, "b", None)
     capped = _prefs(
         {"a": {"model": GEMINI, "max_cost_day": 0.25, "fallback": "b"}, "b": {"model": "ollama:gemma4:e4b", "max_per_hour": 2}}
     )
@@ -236,10 +242,10 @@ def test_a_busy_plan_tool_answers_busy_to_an_app_and_plan_tools_not_set_up_fall_
 
 def test_usage_counts_per_hour_and_day_and_limits_read_them(tmp_path: Path) -> None:
     now = datetime.now(UTC)
-    record_ask(tmp_path, "p", 0.10, now=now)
-    record_ask(tmp_path, "p", 0.05, now=now)
-    record_ask(tmp_path, "p", None, now=now - timedelta(days=3))
-    record_ask(tmp_path, "other", 1.0, now=now)
+    _spent(tmp_path, "p", 0.10, now=now)
+    _spent(tmp_path, "p", 0.05, now=now)
+    _spent(tmp_path, "p", None, now=now - timedelta(days=3))
+    _spent(tmp_path, "other", 1.0, now=now)
     seen = profile_usage(tmp_path, "p", now=now)
     # Three days ago isn't today; another profile's asks don't count.
     assert (seen.asks_this_hour, seen.asks_today) == (2, 2)
@@ -267,3 +273,39 @@ def test_try_it_on_a_draft_profile_answers_and_is_never_counted(tmp_path: Path, 
     )
     assert (answer.profile_id, answer.profile_name) == (DRAFT_PROFILE_ID, "New camera profile")
     assert profile_usage(tmp_path, DRAFT_PROFILE_ID).asks_today == 0
+
+
+# ── Phase 7b: what an ask leaves in AI usage ────────────────────────────────────────────────────
+
+
+def test_an_answered_ask_is_counted_with_its_source_use_person_and_label(tmp_path: Path, chats: dict[str, FakeChat]) -> None:
+    chats[GEMINI] = FakeChat()
+    prefs = _prefs({"camera": {"model": GEMINI}}, {"home:ask": "camera"})
+    _ask(AskRunner(tmp_path), prefs, use="home:ask", person_id="michel", label="Front door")
+
+    (row,) = read_rows(tmp_path, datetime.now(UTC) - timedelta(hours=2), datetime.now(UTC) + timedelta(hours=1))
+    assert (row["kind"], row["source"], row["use_id"], row["profile_id"], row["profile_name"]) == (
+        "question", "home", "ask", "camera", "Camera",
+    )
+    assert (row["provider"], row["model"], row["billing"], row["person_id"], row["label"], row["result"]) == (
+        "google", "gemini-3.8-flash", "api", "michel", "Front door", "ok",
+    )
+    assert (row["requests"], row["tokens_in"], row["tokens_out"]) == (1, 100, 20)
+    assert row["cost"] == pytest.approx(100 * 0.75 / 1e6 + 20 * 3.75 / 1e6)
+
+
+def test_a_fallback_answer_is_fell_back_and_an_unanswered_ask_is_failed(tmp_path: Path, chats: dict[str, FakeChat]) -> None:
+    chats[GEMINI] = FakeChat(fail=RuntimeError("503 overloaded"))
+    chats["lm_studio:qwen3-vl-8b"] = FakeChat('{"seen": false}')
+    prefs = _prefs({"a": {"model": GEMINI, "fallback": "b"}, "b": {"model": "lm_studio:qwen3-vl-8b"}, "c": {"model": GEMINI}})
+    runner = AskRunner(tmp_path)
+    _ask(runner, prefs, profile_id="a")
+    with pytest.raises(AskError):
+        _ask(runner, prefs, profile_id="c")
+
+    rows = read_rows(tmp_path, datetime.now(UTC) - timedelta(hours=2), datetime.now(UTC) + timedelta(hours=1))
+    got = sorted((r["profile_id"], r["billing"], r["result"], r["source"], r["use_id"]) for r in rows)
+    # Try it (no use) is the core's own: source hiro, use try_it.
+    assert got == [("b", "local", "fell back", "hiro", "try_it"), ("c", "api", "failed", "hiro", "try_it")]
+    # A failed ask never spends a profile's limits.
+    assert profile_usage(tmp_path, "c").asks_today == 0

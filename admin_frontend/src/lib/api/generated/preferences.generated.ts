@@ -345,6 +345,16 @@ export type Fallback = string | null;
 export type UnloadIdleMin = number;
 export type Context = number;
 export type Batch = number;
+export type Label3 = string;
+export type Model2 = string;
+export type Voice1 = string;
+export type VoiceLabel = string;
+export type Style = string;
+export type Speed = number;
+/**
+ * Clips Hiro and the extensions had spoken, kept so the same words in the same voice are not paid for again. Once full, the oldest go first. 0 keeps none.
+ */
+export type KeepSpokenClipsUpToMB = number;
 
 /**
  * Root preferences object persisted as preferences.json.
@@ -360,6 +370,7 @@ export interface WorkspacePreferences {
   tuning_profiles: TuningProfiles;
   image_profiles: ImageProfiles;
   ai: AiPreferences;
+  voice: VoicePreferences;
 }
 /**
  * Which catalog models to use when the workspace has credentials for them.
@@ -716,4 +727,29 @@ export interface LocalServerSettings {
   unload_idle_min: UnloadIdleMin;
   context: Context;
   batch: Batch;
+}
+/**
+ * ``prefs.voice``: the voice profiles, which profile each speech use speaks with, and the clip cache.
+ */
+export interface VoicePreferences {
+  profiles: Profiles1;
+  uses: Uses1;
+  clip_cache_mb: KeepSpokenClipsUpToMB;
+}
+export interface Profiles1 {
+  [k: string]: VoiceProfile;
+}
+/**
+ * One voice profile (module notes).
+ */
+export interface VoiceProfile {
+  label: Label3;
+  model: Model2;
+  voice: Voice1;
+  voice_label: VoiceLabel;
+  style: Style;
+  speed: Speed;
+}
+export interface Uses1 {
+  [k: string]: string | null;
 }

@@ -21,6 +21,7 @@ from hiro_commons.log import Logger
 
 from ..domain.credential_store import CredentialStore
 from ..domain.extensions import get_paired_extension
+from ..domain.people import get_person
 from ..domain.workspace import workspace_id_for_path
 from ..services.ai_ask import AskError, extension_use_map, get_ask_runner, profile_rows
 from ..services.ai_ask.params import ask_request_from_params
@@ -51,6 +52,9 @@ async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str
     use_key = f"{name}:{use.strip()}"
     try:
         request = ask_request_from_params(params, use_key=use_key, who=name)
+        # Phase 7b: a person the core doesn't know would file the ask's usage under nobody.
+        if request.person_id and await asyncio.to_thread(get_person, ctx.workspace_path, request.person_id) is None:
+            raise AskError(AI_ERROR_INVALID, f"There's no person {request.person_id!r} in the family list.")
         answer = await get_ask_runner(ctx.workspace_path).ask(request, prefs=ctx.server_ctx.preferences.current)
     except AskError as exc:
         raise RequestRefused(exc.code, exc.message) from exc

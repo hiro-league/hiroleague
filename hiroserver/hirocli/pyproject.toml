@@ -51,6 +51,9 @@ dependencies = [
     # through other packages.
     "httpx>=0.28",
     "lameenc>=1.8.2",
+    # Phase 7b voices: OGG/Opus clips (voice notes, the camera speakers) are encoded in-process with
+    # PyAV, whose wheels bundle ffmpeg and libopus (no ffmpeg binary on the machine).
+    "av>=19",
     "langchain>=1.4",
     "langgraph>=1.2",
     "langgraph-checkpoint-sqlite>=2.0",

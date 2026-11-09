@@ -15,6 +15,9 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import AiProfileEditorDialog from './AiProfileEditorDialog.svelte';
+  import DefaultProfileRows from '$lib/mockups/DefaultProfileRows.svelte';
+  import { MOCK_DEFAULT_PROFILES, PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
+  import SourceFilter, { type SourceOption } from '$lib/mockups/SourceFilter.svelte';
   import type { AiController } from './ai-controller.svelte';
   import {
     budgetLabel,
@@ -30,6 +33,28 @@
 
   const GRID = 'minmax(180px,1.1fr) minmax(200px,1.3fr) 90px minmax(210px,1.2fr) minmax(180px,1fr) 330px';
   const KIND_BADGE = { api: 'outline', local: 'secondary', plan: 'default' } as const;
+  // Phase 7b mockup: show the profiles of one source at a time — Hiro (its jobs' default profiles),
+  // each extension (the profiles its uses ask with, and their fallbacks), or the unused ones for cleanup.
+  let source = $state('all');
+  /** The extensions whose uses ask with this profile, directly or as a fallback further down the chain. */
+  function sourcesOf(id: string, seen = new Set<string>()): Set<string> {
+    if (seen.has(id)) return new Set();
+    seen.add(id);
+    const out = new Set(ai.uses.filter((u) => u.profileId === id).map((u) => u.extension));
+    for (const p of ai.profiles) if (p.fallbackId === id) for (const s of sourcesOf(p.id, seen)) out.add(s);
+    return out;
+  }
+  const extensions = $derived(ai.useGroups.map((g) => g.extension));
+  const unused = $derived(ai.profiles.filter((p) => !ai.usedBy(p.id).length));
+  const sourceOptions = $derived<SourceOption[]>([
+    { id: 'all', label: 'All', count: ai.profiles.length + MOCK_DEFAULT_PROFILES.length },
+    { id: 'Hiro', label: 'Hiro', count: MOCK_DEFAULT_PROFILES.length },
+    ...extensions.map((e) => ({ id: e, label: e, count: ai.profiles.filter((p) => sourcesOf(p.id).has(e)).length })),
+    { id: 'unused', label: 'Unused', count: unused.length }
+  ]);
+  const shownProfiles = $derived(
+    source === 'all' ? ai.profiles : source === 'unused' ? unused : ai.profiles.filter((p) => sourcesOf(p.id).has(source))
+  );
   const deleting = $derived(ai.deletingId ? ai.profiles.find((p) => p.id === ai.deletingId) : undefined);
 </script>
 
@@ -42,14 +67,18 @@
         asks instead when it can't answer. Uses point at a profile.
       </p>
     </div>
-    <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Phase 7b mockup: Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
+      {#if PHASE7B_MOCKUP}<SourceFilter options={sourceOptions} value={source} onchange={(id) => (source = id)} />{/if}
+      <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
+    </div>
   </div>
 
   {#if ai.profilesLoading && ai.profiles.length === 0}
     <InlineLoading label="Loading AI profiles…" />
   {:else if ai.profilesError}
     <InlineDestructiveAlert title="Could not load AI profiles" message={ai.profilesError} />
-  {:else if ai.profiles.length === 0}
+  {:else if ai.profiles.length === 0 && !PHASE7B_MOCKUP}
     <InlineEmptyState message="No AI profiles yet." hint="Make one with New profile." />
   {:else}
     <AdminTableShell layout="grid" minWidth={1260} gridColumns={GRID}>
@@ -62,7 +91,7 @@
         <span class="text-right">Actions</span>
       {/snippet}
       {#snippet body()}
-        {#each ai.profiles as profile (profile.id)}
+        {#each shownProfiles as profile (profile.id)}
           {@const found = ai.modelOf(profile)}
           <!-- The server's list says where the profile runs and whether it can answer now. -->
           {@const kind = profile.server?.kind ?? found.provider?.kind ?? 'api'}
@@ -71,7 +100,10 @@
           {@const chain = chainLabel(ai.profiles, fallbackChain(ai.profiles, profile.id))}
           <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
             <span class="grid content-start gap-1">
-              <span class="font-sans text-sm font-semibold">{profile.name}</span>
+              <span class="flex items-center gap-2">
+                <span class="font-sans text-sm font-semibold">{profile.name}</span>
+                {#if !ai.usedBy(profile.id).length}<Badge variant="outline">Unused</Badge>{/if}
+              </span>
               {#if ai.usedBy(profile.id).length}
                 <span class="text-xs text-muted-foreground">Used by {ai.usedBy(profile.id).join(', ')}</span>
               {/if}
@@ -113,6 +145,8 @@
             </span>
           </div>
         {/each}
+        <!-- Phase 7b mockup: the default profiles of Hiro's jobs (under All and Hiro). -->
+        {#if PHASE7B_MOCKUP && (source === 'all' || source === 'Hiro')}<DefaultProfileRows grid={GRID} onedit={ai.previewProfile} />{/if}
       {/snippet}
     </AdminTableShell>
   {/if}

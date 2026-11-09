@@ -115,7 +115,7 @@ class GenerateImageTool(Tool):
             size=resolved.size,
             seed=resolved.seed,
         )
-        return _to_tool_result(result, resolved, final_prompt)
+        return _to_tool_result(workspace_path, result, resolved, final_prompt)
 
     async def execute_async(self, **kwargs: Any) -> GenerateImageResult:
         """Async path (HTTP /invoke, agent) — no thread hop for the HTTP call."""
@@ -140,7 +140,7 @@ class GenerateImageTool(Tool):
             size=resolved.size,
             seed=resolved.seed,
         )
-        return _to_tool_result(result, resolved, final_prompt)
+        return _to_tool_result(workspace_path, result, resolved, final_prompt)
 
 
 def _prepare(
@@ -188,11 +188,28 @@ def _prepare(
     return service, resolved, compose_image_prompt(resolved, prompt)
 
 
-def _to_tool_result(result, resolved, final_prompt: str) -> GenerateImageResult:
+def _to_tool_result(workspace_path: Path, result, resolved, final_prompt: str) -> GenerateImageResult:
     from ..domain.model_catalog import get_model_catalog
+    from ..services.ai_usage import HIRO_SOURCE, UsageCall, record
 
     estimate = get_model_catalog().estimate_image_gen_cost(
         model_id=resolved.model_id, steps=result.steps,
+    )
+    # Phase 7b: every image made is counted in the core's AI usage (record never raises).
+    provider, _, model = resolved.model_id.partition(":")
+    record(
+        workspace_path,
+        UsageCall(
+            kind="image",
+            source=HIRO_SOURCE,
+            use="image_generation",
+            profile_id=resolved.profile_id or "",  # an image profile; profile_usage reads questions only
+            profile_name=resolved.profile_id or "",
+            provider=provider,
+            model=model,
+            ms=int(result.elapsed_ms or 0),
+            cost=float(estimate.estimated_total or 0.0) if estimate.pricing_available else 0.0,
+        ),
     )
     return GenerateImageResult(
         image_base64=base64.b64encode(result.image_bytes).decode("ascii"),

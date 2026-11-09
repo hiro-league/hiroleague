@@ -1642,6 +1642,99 @@
         "label",
         "locked"
       ]
+    },
+    "VoicePreferences": {
+      "description": "``prefs.voice``: the voice profiles, which profile each speech use speaks with, and the clip cache.",
+      "properties": {
+        "profiles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/VoiceProfile"
+          },
+          "preferencesSaveSkip": true,
+          "title": "Profiles",
+          "type": "object"
+        },
+        "uses": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferencesSaveSkip": true,
+          "title": "Uses",
+          "type": "object"
+        },
+        "clip_cache_mb": {
+          "default": 200,
+          "description": "Clips Hiro and the extensions had spoken, kept so the same words in the same voice are not paid for again. Once full, the oldest go first. 0 keeps none.",
+          "maximum": 5000,
+          "minimum": 0,
+          "title": "Keep spoken clips up to (MB)",
+          "type": "integer"
+        }
+      },
+      "title": "VoicePreferences",
+      "type": "object",
+      "required": [
+        "profiles",
+        "uses",
+        "clip_cache_mb"
+      ]
+    },
+    "VoiceProfile": {
+      "description": "One voice profile (module notes).",
+      "properties": {
+        "label": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "voice": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Voice",
+          "type": "string"
+        },
+        "voice_label": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Voice Label",
+          "type": "string"
+        },
+        "style": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Style",
+          "type": "string"
+        },
+        "speed": {
+          "default": 1.0,
+          "maximum": 4.0,
+          "minimum": 0.25,
+          "title": "Speed",
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "model",
+        "voice",
+        "voice_label",
+        "style",
+        "speed"
+      ],
+      "title": "VoiceProfile",
+      "type": "object"
     }
   },
   "description": "Root preferences object persisted as preferences.json.",
@@ -1689,6 +1782,9 @@
     "ai": {
       "$ref": "#/$defs/AiPreferences",
       "preferencesSaveSkip": true
+    },
+    "voice": {
+      "$ref": "#/$defs/VoicePreferences"
     }
   },
   "title": "WorkspacePreferences",
@@ -1703,6 +1799,7 @@
     "chat",
     "tuning_profiles",
     "image_profiles",
-    "ai"
+    "ai",
+    "voice"
   ]
 }

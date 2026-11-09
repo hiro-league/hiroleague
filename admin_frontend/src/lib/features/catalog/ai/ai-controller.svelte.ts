@@ -342,6 +342,11 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     if (found) openEditor(copy(found), false);
   }
 
+  /** Phase 7b mockup: open the editor on a made-up profile (a job's default); its Save is disabled. */
+  function previewProfile(p: AiProfile) {
+    openEditor(copy(p), false);
+  }
+
   function duplicateProfile(id: string) {
     const found = profiles.find((p) => p.id === id);
     if (!found) return;
@@ -877,6 +882,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     usedBy,
     newProfile,
     editProfile,
+    previewProfile,
     duplicateProfile,
     closeEditor,
     setDraftModel,

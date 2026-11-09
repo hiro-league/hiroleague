@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 
 from .ai import register as register_ai_commands
+from .voice import register as register_voice_commands
 from .ai_plans import register as register_ai_plan_commands
 from .channel import register as register_channel_commands
 from .character import register as register_character_commands
@@ -76,6 +77,11 @@ extension_app = typer.Typer(
 ai_app = typer.Typer(
     name="ai",
     help="AI profiles: list, try, and which profile each extension use asks (Phase 7a).",
+    add_completion=False,
+)
+voice_app = typer.Typer(
+    name="voice",
+    help="Voice profiles, Gemini's voices, voice uses and the spoken-clip cache (Phase 7b).",
     add_completion=False,
 )
 ai_uses_app = typer.Typer(
@@ -153,6 +159,7 @@ ai_app.add_typer(ai_uses_app, name="uses")
 ai_app.add_typer(ai_plan_app, name="plan")
 ai_app.add_typer(ai_local_app, name="local")
 app.add_typer(ai_app, name="ai")
+app.add_typer(voice_app, name="voice")
 app.add_typer(logs_app, name="logs")
 # Feature-gated: when Knowledge is hidden, its CLI group is neither mounted nor
 # populated, so `hiro knowledge ...` doesn't exist (not in --help, not runnable).
@@ -175,6 +182,7 @@ register_device_commands(device_app, console)
 register_extension_commands(extension_app, console)
 register_people_commands(people_app, console)
 register_ai_commands(ai_app, ai_uses_app, console)
+register_voice_commands(voice_app, console)
 register_ai_plan_commands(ai_plan_app, ai_local_app, console)
 register_logs_commands(logs_app, console)
 if feature_active("knowledge"):

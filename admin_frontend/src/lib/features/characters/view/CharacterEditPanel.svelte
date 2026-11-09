@@ -3,6 +3,7 @@
   import CharacterProfileSection from '$lib/features/characters/sections/CharacterProfileSection.svelte';
   import CharacterPreferredModelsSection from '$lib/features/characters/sections/CharacterPreferredModelsSection.svelte';
   import CharacterTtsSettingsSection from '$lib/features/characters/sections/CharacterTtsSettingsSection.svelte';
+  import { PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
   import CharacterPromptsSection from '$lib/features/characters/sections/CharacterPromptsSection.svelte';
   import CharacterExtrasSection from '$lib/features/characters/sections/CharacterExtrasSection.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
@@ -99,6 +100,8 @@
           markDirty={formApi.markDirty}
         />
 
+        <!-- Phase 7b mockup: voice and style now live in the voice recipes listed above. -->
+        {#if !PHASE7B_MOCKUP}
         <CharacterTtsSettingsSection
           form={formApi.form}
           catalogTtsProviders={ctrl.catalogTtsProviders}
@@ -108,6 +111,7 @@
           onPickVoicePreset={(pid, vid) => ctrl.setTtsVoicePreset(pid, vid)}
           markDirty={formApi.markDirty}
         />
+        {/if}
 
         <CharacterPromptsSection form={formApi.form} markDirty={formApi.markDirty} />
 

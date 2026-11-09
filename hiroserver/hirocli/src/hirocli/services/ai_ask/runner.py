@@ -12,7 +12,10 @@
   ``busy`` at once — never passed to the fallback (a busy plan must not turn into paid calls);
 - runs at most ``at_once`` asks per profile together (an in-process semaphore), and one ask at a
   time per local server (they share the PC's GPU);
-- counts each answered ask and its cost per profile and hour (``usage.record_ask``).
+- counts every ask in the core's AI usage (Phase 7b, ``ai_usage``): an answered one for the profile
+  that answered (``ok``, or ``fell back`` when an earlier profile was passed over), an unanswered one
+  as ``failed`` for the use's profile; with the person and label the asker sent. Busy and Try it on a
+  draft aren't counted.
 
 With nothing left it raises ``AskError``: ``budget`` when limits stopped every profile and none
 failed, else ``failed`` with what each one said. The answer mirrors HomeHiro's ``Asked`` (plus
@@ -23,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +42,7 @@ from hiro_commons.log import Logger
 from ...domain.credential_store import CredentialStore
 from ...domain.preferences import AI_MAX_FALLBACKS, AiProfile, LocalServerSettings, WorkspacePreferences
 from ...domain.workspace import workspace_id_for_path
+from ..ai_usage import HIRO_SOURCE, UsageCall, profile_usage, record_async
 from . import local_servers, usage
 from .errors import AskError, ProviderFailed
 from .providers import ChatModelProvider, ProviderCall, ProviderResult, answer_on_plan, elapsed_ms
@@ -69,6 +73,18 @@ class AskRequest:
     timeout: float | None = None
     wait: bool = True
     who: str = ""  # who asks, for the log ("home", "admin")
+    # Phase 7b: what AI usage files the ask under — the person it is for (a person id) and a free label.
+    person_id: str = ""
+    label: str = ""
+
+    @property
+    def source(self) -> str:
+        """The extension that asks (``home`` of ``home:ask``); the core itself for Try it."""
+        return self.use.partition(":")[0] if self.use else HIRO_SOURCE
+
+    @property
+    def use_id(self) -> str:
+        return self.use.partition(":")[2] if self.use else "try_it"
 
 
 @dataclass
@@ -114,6 +130,7 @@ def _try(pid: str, target: AskTarget | None, status: str, error: str | None, ms:
         "profile_id": pid,
         "provider": target.provider_id if target else "",
         "model": target.model_name if target else "",
+        "billing": target.kind if target else "",  # Phase 7b: an unanswered ask is counted under its first try's payer
         "status": status,
         "ms": ms,
     }
@@ -172,6 +189,13 @@ class AskRunner:
 
         message = "Not asked: " + ("; ".join(walk.notes) or "no profile could answer")
         code = AI_ERROR_BUDGET if walk.limited and not walk.failed else AI_ERROR_FAILED
+        if pid != DRAFT_PROFILE_ID:
+            first = walk.tries[0] if walk.tries else {}
+            failed = _usage_call(
+                request, pid, profiles[pid], first.get("provider", ""), first.get("model", ""), first.get("billing", ""), "failed"
+            )
+            # The time every profile tried took (as HomeHiro's usage counted it).
+            await record_async(self._workspace_path, replace(failed, ms=_tries_ms(walk)))
         log.warning(
             f"⚠️ AI ask not answered — {request.who or 'someone'} · {request.use or pid} · {code}",
             notes=walk.notes,
@@ -202,11 +226,11 @@ class AskRunner:
             return None
         if pid != DRAFT_PROFILE_ID:
             try:
-                seen_usage = await asyncio.to_thread(usage.profile_usage, self._workspace_path, pid)
+                seen_usage = await asyncio.to_thread(profile_usage, self._workspace_path, pid)
             except Exception as exc:  # a limit we can't read must not stop the ask; it's logged
                 log.error(f"❌ AI usage unreadable — {label}", error=str(exc), exc_info=True)
-                seen_usage = usage.ProfileUsage(0, 0.0, 0)
-            why = usage.why_limited(profile, target.kind, seen_usage)
+                seen_usage = None
+            why = usage.why_limited(profile, target.kind, seen_usage) if seen_usage is not None else None
             if why:
                 walk.limited = True
                 walk.skip(pid, target, why, label=label)
@@ -254,10 +278,25 @@ class AskRunner:
             raise AskError(AI_ERROR_BUSY, exc.message, notes=walk.notes, tries=walk.tries) from exc
         ms = elapsed_ms(started)
         if pid != DRAFT_PROFILE_ID:
-            try:
-                await asyncio.to_thread(usage.record_ask, self._workspace_path, pid, result.cost)
-            except Exception as exc:  # the answer counts more than its count
-                log.error(f"❌ AI ask not counted — {label}", error=str(exc), exc_info=True)
+            # Answered after passing over earlier profiles = "fell back" (record_async never raises).
+            call = _usage_call(
+                request, pid, profile, target.provider_id, result.model or target.model_name, target.kind,
+                "fell back" if walk.tries else "ok",
+            )
+            await record_async(
+                self._workspace_path,
+                replace(
+                    call,
+                    tokens_in=result.tokens_in,
+                    tokens_out=result.tokens_out,
+                    # Its own time plus the profiles passed over before it (as HomeHiro's usage counted it).
+                    ms=ms + _tries_ms(walk),
+                    cost=result.cost or 0.0,
+                    estimate=result.estimate or 0.0,
+                    # Answered at $0 for want of a price (an API model without one, a plan without an estimate).
+                    unpriced=_unpriced(target.kind, result.cost, result.estimate),
+                ),
+            )
         walk.tries.append(_try(pid, target, "ok", None, ms))
         log.info(
             f"✅ AI ask answered — {request.who or 'someone'} · {request.use or 'try'} · {label}",
@@ -320,6 +359,37 @@ class AskRunner:
         if slot is None:
             slot = self._profile_slots[key] = asyncio.Semaphore(at_once)
         return slot
+
+
+def _tries_ms(walk: _Walk) -> int:
+    return sum(int(t.get("ms") or 0) for t in walk.tries)
+
+
+def _unpriced(billing: str, cost: float | None, estimate: float | None) -> int:
+    """1 when an answer went without a price: an API model with no cost, a plan with no estimate (local is free)."""
+    if billing == "api":
+        return int(cost is None)
+    if billing == "plan":
+        return int(estimate is None)
+    return 0
+
+
+def _usage_call(
+    request: AskRequest, pid: str, profile: AiProfile, provider: str, model: str, billing: str, result: str
+) -> UsageCall:
+    return UsageCall(
+        kind="question",
+        source=request.source,
+        use=request.use_id,
+        profile_id=pid,
+        profile_name=profile.label,
+        provider=provider,
+        model=model,
+        billing=billing if billing in ("api", "plan", "local") else "api",
+        person_id=request.person_id,
+        label=request.label,
+        result=result,
+    )
 
 
 def _check_request(request: AskRequest) -> None:

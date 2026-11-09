@@ -32,12 +32,16 @@
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import PrefFieldRenderer from './PrefFieldRenderer.svelte';
   import GraphEvalContextToggles from '$lib/features/preferences/sections/graph-engine/GraphEvalContextToggles.svelte';
+  import AiProfileField from '$lib/mockups/AiProfileField.svelte';
+  import SpokenClipsStats from '$lib/features/preferences/sections/SpokenClipsStats.svelte';
+  import { jobByModelPath, PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
 
   let { ctrl, spec }: { ctrl: PreferencesController; spec: PrefFieldSpec } = $props();
 
   // String key → bespoke field component. The typed record makes a missing/typo key a compile error.
   const CUSTOM_FIELDS: Record<CustomFieldKey, Component<{ ctrl: PreferencesController }>> = {
-    graphEvalContextToggles: GraphEvalContextToggles
+    graphEvalContextToggles: GraphEvalContextToggles,
+    spokenClipsStats: SpokenClipsStats // Phase 7b: what the spoken-clip cache holds and saved
   };
 
   const HEADING_CLASS =
@@ -47,7 +51,17 @@
   const draft = $derived(ctrl.draft as WorkspacePreferences);
 </script>
 
-{#if spec.kind === 'number'}
+<!-- Phase 7b mockup: a job's model + tuning preset become one AI profile; the default voice becomes a
+     voice recipe; the standalone tuning preset picker goes. -->
+{#if PHASE7B_MOCKUP && spec.kind === 'modelProfile' && jobByModelPath(spec.modelPath)}
+  <AiProfileField job={jobByModelPath(spec.modelPath)} heading={spec.heading} />
+{:else if PHASE7B_MOCKUP && spec.kind === 'model' && jobByModelPath(spec.path)}
+  <AiProfileField job={jobByModelPath(spec.path)} />
+{:else if PHASE7B_MOCKUP && spec.kind === 'model' && spec.path === 'llm.default_tts'}
+  <AiProfileField voice />
+{:else if PHASE7B_MOCKUP && spec.kind === 'tuningProfile'}
+  <!-- gone in 7b: the chat job's AI profile carries its settings -->
+{:else if spec.kind === 'number'}
   <PrefNumberField {ctrl} path={spec.path} disabled={spec.disabledWhen?.(draft) ?? false} />
 {:else if spec.kind === 'text'}
   <PrefTextField

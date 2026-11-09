@@ -12,6 +12,7 @@ from .errors import AskError
 from .runner import AskRequest
 
 MAX_PICTURES = 60  # the most a use may declare (StudyHiro's study reviews)
+MAX_LABEL = 80  # Phase 7b: a free label AI usage files the ask under (a camera, a task)
 
 
 def decode_b64(value: Any, what: str) -> bytes:
@@ -57,6 +58,13 @@ def ask_request_from_params(params: dict[str, Any], *, use_key: str | None, who:
     profile = params.get("profile")
     if profile is not None and not isinstance(profile, str):
         raise AskError(AI_ERROR_INVALID, "profile must be a profile id.")
+    # Phase 7b: who the ask is for (a person id; the caller checks it exists) and a free label, for AI usage.
+    person = params.get("person")
+    if person is not None and not isinstance(person, str):
+        raise AskError(AI_ERROR_INVALID, "person must be a person id.")
+    label = params.get("label")
+    if label is not None and (not isinstance(label, str) or len(label.strip()) > MAX_LABEL):
+        raise AskError(AI_ERROR_INVALID, f"label must be text of at most {MAX_LABEL} characters.")
     return AskRequest(
         prompt=prompt,
         use=use_key,
@@ -71,4 +79,6 @@ def ask_request_from_params(params: dict[str, Any], *, use_key: str | None, who:
         timeout=float(timeout) if timeout is not None else None,
         wait=bool(params.get("wait", True)),
         who=who,
+        person_id=(person or "").strip(),
+        label=(label or "").strip(),
     )

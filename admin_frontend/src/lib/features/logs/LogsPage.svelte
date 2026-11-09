@@ -19,6 +19,7 @@
   import GraphRunsSubtabNav from '$lib/features/graph-runs/GraphRunsSubtabNav.svelte';
   import { createGraphRunsPageController } from '$lib/features/graph-runs/state/graph-runs-controller.svelte';
   import { LOGS_TAB_DESCRIPTORS } from './shared/logs-page-config';
+  import AiUsagePanel from '$lib/features/ai-usage/AiUsagePanel.svelte';
 
   // Logs feed (first tab) — controller + filter prefs owned here so the shared
   // header chrome (folder button, counts, collapse chevron) can read them.
@@ -34,7 +35,8 @@
   const runsCtrl = createGraphRunsPageController(notify);
 
   const isRunsTab = $derived(tabPrefs.activeTab === 'runs');
-  const pageTitle = $derived(isRunsTab ? 'Graph runs' : 'Logs');
+  const isUsageTab = $derived(tabPrefs.activeTab === 'usage'); // Phase 7b: AI usage
+  const pageTitle = $derived(isRunsTab ? 'Graph runs' : isUsageTab ? 'AI usage' : 'Logs');
 
   onMount(() => {
     tabPrefs.initialize();
@@ -59,7 +61,7 @@
   wrapperClass={ADMIN_PAGE_MAX_W_WIDE}
 >
   {#snippet titleAdornment()}
-    {#if !isRunsTab}
+    {#if !isRunsTab && !isUsageTab}
       <button
         class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
         type="button"
@@ -81,6 +83,10 @@
     {#if isRunsTab}
       <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
         Recent agent turns with aggregate cost, latency, and drill-down timelines.
+      </p>
+    {:else if isUsageTab}
+      <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
+        What every paid AI call costs (questions, speech, transcription, images, embeddings): the extensions' and Hiro's own jobs, by the hour.
       </p>
     {:else}
       <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
@@ -187,6 +193,8 @@
       onCloseEvalRow={runsCtrl.closeEvalRow}
       onOpenRetrievalLoop={(row) => void runsCtrl.openRetrievalLoopForNode(row)}
     />
+  {:else if isUsageTab}
+    <AiUsagePanel />
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />
   {/if}

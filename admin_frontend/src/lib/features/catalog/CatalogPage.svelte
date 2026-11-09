@@ -7,8 +7,7 @@
   import ModelsFilterBar from '$lib/features/catalog/browse/ModelsFilterBar.svelte';
   import ModelsTab from '$lib/features/catalog/browse/ModelsTab.svelte';
   import ProvidersTab from '$lib/features/catalog/browse/ProvidersTab.svelte';
-  import AiProfilesTab from '$lib/features/catalog/ai/AiProfilesTab.svelte';
-  import AiUsesTab from '$lib/features/catalog/ai/AiUsesTab.svelte';
+  import ProfilesTab, { type ProfilesSub } from './ProfilesTab.svelte';
   import LocalServerDialog from '$lib/features/catalog/ai/LocalServerDialog.svelte';
   import LocalServerProviderRows from '$lib/features/catalog/ai/LocalServerProviderRows.svelte';
   import PlanProviderRows from '$lib/features/catalog/ai/PlanProviderRows.svelte';
@@ -29,9 +28,12 @@
     // Providers tab merges the former Active + Catalog provider tabs into one list.
     { id: 'providers', label: 'Providers', kind: 'pane' },
     { id: 'models', label: 'Models', kind: 'pane' },
-    { id: 'profiles', label: 'AI profiles', kind: 'pane' },
-    { id: 'uses', label: 'Uses', kind: 'pane' }
+    // Phase 7b mockup: one Profiles tab; its sub-tabs (AI profiles, voice profiles,
+    // uses) are `?tab=` values of their own, so the top strip marks Profiles for any of them.
+    { id: 'profiles', label: 'Profiles', kind: 'pane' }
   ];
+  const PROFILES_SUBS: readonly CatalogTabPreference[] = ['profiles', 'voices', 'uses'];
+  const inProfiles = $derived(PROFILES_SUBS.includes(ctrl.activeTab));
 
   // Local servers (LM Studio, Ollama) and, once read, plan tools (Claude Code, Codex) draw their own
   // rows with live status; the table skips the catalog's rows for them.
@@ -49,7 +51,7 @@
     <AdminTabStrip
       ariaLabel="Providers and models sections"
       tabs={tabDescriptors}
-      active={ctrl.activeTab}
+      active={inProfiles ? 'profiles' : ctrl.activeTab}
       onSelect={(id) => void ctrl.switchTab(id)}
     />
   {/snippet}
@@ -59,10 +61,15 @@
       <ModelsFilterBar {ctrl} />
     </AdminPageStickyToolbar>
     <ModelsTab {ctrl} />
-  {:else if ctrl.activeTab === 'profiles'}
-    <AiProfilesTab {ai} />
-  {:else if ctrl.activeTab === 'uses'}
-    <AiUsesTab {ai} />
+  {:else if inProfiles}
+    <ProfilesTab
+      {ai}
+      active={ctrl.activeTab as ProfilesSub}
+      onSelect={(id) => void ctrl.switchTab(id)}
+      catalogModels={ctrl.models ?? []}
+      catalogProviders={ctrl.providers ?? []}
+      activeProviderIds={ctrl.configuredWorkspaceProviderIds}
+    />
   {:else}
     <!-- Phase 7a: the local servers' rows and the plan tools' rows, with their dialogs. -->
     <ProvidersTab {ctrl} {replacedProviderIds}>

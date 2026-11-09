@@ -158,6 +158,31 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
         if not dry_run:
             console.print("[dim]Sign Claude Code / Codex in again here: hiro ai plan sign-in <tool>.[/dim]")
 
+    @ai_app.command("import-homehiro-usage")
+    def ai_import_homehiro_usage(
+        db_path: Path = typer.Argument(..., help="A copy of HomeHiro's homehiro.db."),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Only show what would be added."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Phase 7b: add HomeHiro's LLM usage history to the core's AI usage (once; safe to run again)."""
+        from ..services.ai_usage.import_homehiro import UsageImportError
+        from ..tools.ai import AiUsageImportHomeHiroTool
+
+        log.info("hiro ai import-homehiro-usage", dry_run=dry_run)
+        try:
+            r = AiUsageImportHomeHiroTool().execute(db_path=str(db_path), dry_run=dry_run, workspace=workspace)
+        except (WorkspaceError, UsageImportError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        verb = "Would add" if dry_run else "Added"
+        span = f" ({r.first_hour} to {r.last_hour}, UTC hours)" if r.first_hour else ""
+        console.print(
+            f"[bold]{verb}[/bold] {r.imported} of HomeHiro's {r.rows} usage rows{span}: "
+            f"{r.requests} requests, {_cost(r.cost)}."
+        )
+        for note in r.notes:
+            console.print(f"[yellow]note:[/yellow] {note}")
+
     @uses_app.command("list")
     def uses_list(
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),

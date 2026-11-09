@@ -60,6 +60,13 @@ from .models_knowledge import (
     KnowledgeRewritePreferences,
 )
 from .models_llm import LLMPreferences
+from .models_voice import (
+    VOICE_PROFILE_ID,
+    VOICE_PROVIDERS,
+    VoicePreferences,
+    VoiceProfile,
+    check_voice_model_id,
+)
 from .models_media import (
     MediaPreferences,
     ModalityFlags,
@@ -113,6 +120,11 @@ __all__ = [
     # AI asks (Phase 7a)
     "AI_LOCAL_SERVER_KINDS",
     "AI_MAX_FALLBACKS",
+    "VOICE_PROFILE_ID",
+    "VOICE_PROVIDERS",
+    "VoicePreferences",
+    "VoiceProfile",
+    "check_voice_model_id",
     "AI_PLAN_PROVIDERS",
     "AiPreferences",
     "AiProfile",
@@ -159,6 +171,9 @@ class WorkspacePreferences(BaseModel):
         save_skip=True,
         default_factory=AiPreferences,
     )
+    # Phase 7b: voice profiles, which profile each extension speech use speaks with (the Catalog's
+    # Profiles tab edits both), and the spoken-clip cache size (Preferences → General → Spoken clips).
+    voice: VoicePreferences = Field(default_factory=VoicePreferences)
 
     @model_validator(mode="after")
     def _validate_tuning_profiles(self) -> "WorkspacePreferences":

@@ -41,6 +41,8 @@ from .agent_graph import (
     ChatGraphConfig,
 )
 from .agent_graph.ledger import RunAccumulator, current_run
+from ..domain.people import find_by_number
+from ..services.ai_usage.from_ledger import usage_person
 from .agent_graph.tracing import langsmith_run_id
 from .comm_log import (
     LOG_IN,
@@ -522,6 +524,8 @@ class AgentManager:
             else None
         )
         run_token = current_run.set(accumulator) if accumulator is not None else None
+        # Phase 7b: AI usage files this turn's calls under the family member who wrote (WhatsApp number).
+        person_token = usage_person.set(await _sender_person(self._ctx.workspace_path, routing_metadata))
         t0 = time.perf_counter()
         try:
             async for stream_mode, chunk in compiled.astream(
@@ -593,6 +597,7 @@ class AgentManager:
                 accumulator.sink.evict_run(ledger_run_id)
             if run_token is not None:
                 current_run.reset(run_token)
+            usage_person.reset(person_token)
             self._comm.graph_subscriber.end_run(msg.routing.id)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             log.fineinfo(
@@ -1207,3 +1212,19 @@ async def _close_memory_service(service: "MemoryService | None") -> None:
     result = close()
     if inspect.isawaitable(result):
         await result
+
+
+async def _sender_person(workspace_path: Any, routing_metadata: dict[str, Any]) -> str:
+    """The person id of a WhatsApp sender in the family list (``sender_number``), else "" (Phase 7b: AI usage).
+
+    Only for counting: whose conversation and memory a turn uses is Phase 10's matching.
+    """
+    number = str(routing_metadata.get("sender_number") or "")
+    if not number:
+        return ""
+    try:
+        person = await asyncio.to_thread(find_by_number, workspace_path, number)
+    except Exception as exc:  # the count goes without a person; the turn goes on
+        log.warning("⚠️ AI usage — sender's person unreadable", error=str(exc))
+        return ""
+    return person.person_id if person else ""

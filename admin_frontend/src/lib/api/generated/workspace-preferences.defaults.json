@@ -259,5 +259,10 @@
     "profiles": {},
     "uses": {},
     "local_servers": {}
+  },
+  "voice": {
+    "profiles": {},
+    "uses": {},
+    "clip_cache_mb": 200
   }
 }

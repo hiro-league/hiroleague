@@ -58,6 +58,19 @@ export const MODELS_MANIFEST: PrefTabManifest = {
         }
       ]
     },
+    // Phase 7b: the spoken-clip cache (from HomeHiro's TTS settings): its size, and what it holds and saved.
+    {
+      kind: 'card',
+      id: 'spokenClips',
+      title: 'Spoken clips',
+      description: 'Clips the extensions had spoken (an alert, a Speak node), kept so the same words in the same voice are not paid for again.',
+      bodyId: 'preferences-section-spoken-clips',
+      collapsible: true,
+      body: [
+        { kind: 'number', path: 'voice.clip_cache_mb' },
+        { kind: 'custom', component: 'spokenClipsStats', paths: [] }
+      ]
+    },
     {
       kind: 'card',
       id: 'modelsModalities',

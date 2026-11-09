@@ -73,7 +73,8 @@ function makeDraft(): WorkspacePreferences {
     tuning_profiles: {},
     image_profiles: {},
     // Phase 7a: AI profiles + uses (edited by the Catalog's AI tabs, never by the Preferences page).
-    ai: { profiles: {}, uses: {}, local_servers: {} }
+    ai: { profiles: {}, uses: {}, local_servers: {} },
+    voice: { profiles: {}, uses: {}, clip_cache_mb: 200 }
   };
 }
 

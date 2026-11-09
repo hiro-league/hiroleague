@@ -12,7 +12,9 @@ extension use asks (``ai.uses``):
 - ``local_server_check`` — LM Studio / Ollama: up or down, their models (loaded, loaded by the core) and
   settings; the list is kept so profiles can point at ``lm_studio:<name>`` / ``ollama:<name>``;
 - ``local_server_set`` — a server's address and how the core loads its models (idle unload, context, batch);
-- ``ai_import_homehiro`` — HomeHiro's LLM profiles, defaults and servers, once (contract section 7).
+- ``ai_import_homehiro`` — HomeHiro's LLM profiles, defaults and servers, once (contract section 7);
+- ``ai_usage`` (Phase 7b) — every paid AI call per hour over a range, named for the AI usage page;
+- ``ai_usage_import_homehiro`` (Phase 7b) — HomeHiro's LLM usage history, once (safe to run again).
 
 The plan tools (Claude Code / Codex) have their own: tools/ai_plans.py.
 
@@ -85,6 +87,11 @@ class AiProfilesListResult:
 
 
 @dataclass
+class AiUsageResult:
+    rows: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
 class AiTryResult:
     ok: bool
     answer: dict[str, Any] | None = None  # the ai.ask answer shape
@@ -146,6 +153,20 @@ class AiImportResult:
     from_ids: dict[str, str] = field(default_factory=dict)
     uses: dict[str, str] = field(default_factory=dict)
     servers: dict[str, str] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    written: bool = False
+    dry_run: bool = False
+
+
+@dataclass
+class AiUsageImportResult:
+    rows: int = 0
+    imported: int = 0
+    requests: int = 0
+    cost: float = 0.0
+    first_hour: str | None = None
+    last_hour: str | None = None
+    cutoff: str | None = None
     notes: list[str] = field(default_factory=list)
     written: bool = False
     dry_run: bool = False
@@ -255,6 +276,39 @@ def _parse_schema(schema: str | dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("schema must be a JSON schema object")
     return value
+
+
+class AiUsageTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "ai_usage"
+    description = (
+        "Every paid AI call the core made (questions, speech, transcription, images, embeddings), per hour, "
+        "between two moments: kind, source, use, AI profile, provider, model, who pays, person, label, result, "
+        "with calls, tokens, time, cost and estimate"
+    )
+    params = {
+        "start": ToolParam(str, "From (ISO date-time, e.g. 2026-11-02T00:00:00+02:00)"),
+        "end": ToolParam(str, "Up to, not including (ISO date-time)"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, start: str, end: str, workspace: str | None = None) -> AiUsageResult:
+        from ..services.ai_usage.view import page_rows
+
+        _wid, path = _workspace(workspace)
+        try:
+            since, until = _moment(start), _moment(end)
+        except ValueError as exc:
+            raise ValueError(f"start and end must be ISO date-times: {exc}") from exc
+        if until <= since:
+            raise ValueError("end must come after start.")
+        return AiUsageResult(rows=page_rows(path, _prefs(path), since, until))
+
+
+def _moment(value: str) -> datetime:
+    at = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    # A moment without a zone is the server's local time.
+    return at if at.tzinfo else at.astimezone()
 
 
 class AiUsesListTool(Tool):
@@ -508,3 +562,32 @@ class AiImportHomeHiroTool(Tool):
                 servers=list(plan.servers),
             )
         return AiImportResult(**plan.to_dict(), dry_run=bool(dry_run))
+
+
+class AiUsageImportHomeHiroTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "ai_usage_import_homehiro"
+    description = (
+        "Add HomeHiro's LLM usage history (a copy of homehiro.db, its llmtotal rows) to the core's AI usage under "
+        "the source home — only the hours before the core counted Home itself, so running it again adds nothing. "
+        "dry_run shows what it would add."
+    )
+    params = {
+        "db_path": ToolParam(str, "Path to a copy of HomeHiro's homehiro.db"),
+        "dry_run": ToolParam(bool, "Only show what would be added", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, db_path: str, dry_run: bool = False, workspace: str | None = None) -> AiUsageImportResult:
+        from ..services.ai_usage.import_homehiro import import_usage
+
+        _wid, path = _workspace(workspace)
+        done = import_usage(path, _prefs(path), Path(db_path).expanduser(), dry_run=bool(dry_run))
+        if done.written:
+            log.info(
+                f"✅ HomeHiro AI usage imported — {done.imported} rows, {done.requests} requests",
+                cost=round(done.cost, 4),
+                first_hour=done.first_hour,
+                last_hour=done.last_hour,
+            )
+        return AiUsageImportResult(**done.to_dict(), dry_run=bool(dry_run))

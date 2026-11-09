@@ -145,6 +145,8 @@ METHOD_ROLES_RENAME: str = "roles.rename"
 METHOD_ROLES_REMOVE: str = "roles.remove"
 EVENT_PEOPLE_CHANGED: str = "people.changed"
 
+# core.info answers {name, version, workspace, admin_port}: admin_port (Phase 7b) is the core's admin web port, so
+# an extension can link to the admin (its own setting may say the address people reach it at, e.g. behind a proxy).
 # Phase 7a: the core answers questions (docs/phase7a-ai-asks-design.md in hiroleague).
 #   ai.ask       extension → core, {use, profile?, prompt, pictures?: [base64 JPEG], picture_labels?,
 #                sound?: {b64, mime}, schema?, detail?, local_only?, timeout?, wait?}
@@ -160,6 +162,26 @@ AI_ERROR_BUDGET: str = "budget"          # every profile in the chain is over it
 AI_ERROR_BUSY: str = "busy"              # wait=false and the plan tool is already answering as many as allowed
 AI_ERROR_FAILED: str = "failed"          # every profile tried failed (the message says why)
 AI_ERROR_INVALID: str = "invalid"        # the ask itself is wrong (no prompt, bad picture, bad schema)
+
+# Phase 7b: the core speaks (voice profiles; hiroleague services/voice).
+#   voice.speak     extension → core, {text, use? | profile?, person?, label?}
+#                   → {ogg_b64, seconds, waveform_b64, cached, cost, profile_id, profile_name, provider,
+#                   model, voice}. `use` is the extension's own voice use id (ExtensionInfo.voice_uses);
+#                   the core speaks with the profile picked for "<extension>:<use>", or `profile` (an
+#                   alert's or a Speak node's own pick). OGG/Opus, mono 48 kHz: ready for a WhatsApp voice
+#                   note or a speaker. The same words in the same voice come from the core's clip cache.
+#   voice.profiles  extension → core, {} → {"profiles": [{id, name, line}], "uses": {use id: profile id | None}}.
+#   Errors (the response's error code): no_profile, invalid, failed.
+METHOD_VOICE_SPEAK: str = "voice.speak"
+# Phase 7b: an extension picks the profile one of its own declared uses asks with (saved in the core's
+# ai.uses / voice.uses; profiles are edited only in the core's admin).
+#   ai.uses.set / voice.uses.set  extension → core, {use, profile: id | null} → {use, profile}. Error: invalid.
+METHOD_AI_USES_SET: str = "ai.uses.set"
+METHOD_VOICE_USES_SET: str = "voice.uses.set"
+METHOD_VOICE_PROFILES: str = "voice.profiles"
+VOICE_ERROR_NO_PROFILE: str = "no_profile"  # no profile given and none picked for the use
+VOICE_ERROR_INVALID: str = "invalid"        # the request itself is wrong (no text, too long, unknown person)
+VOICE_ERROR_FAILED: str = "failed"          # the provider failed (the message says why)
 
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0

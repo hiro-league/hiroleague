@@ -112,17 +112,36 @@ _DDL = [
         updated_at     TEXT NOT NULL DEFAULT ''
     )
     """,
-    # Phase 7a: what each AI profile asked, per clock hour (UTC hour start) — enough for its
-    # max_cost_day / max_per_hour limits. Kept AI_USAGE_KEEP_DAYS (services/ai_ask/usage.py).
+    # Phase 7b: every paid AI call, per clock hour (UTC hour start) × kind, source, use, profile,
+    # provider, model, billing, person, label and result — the AI usage page and each AI profile's
+    # limits read it; kept for good (services/ai_usage/store.py). It replaces 7a's ai_usage
+    # (profile × hour only), dropped here: no migration (initial development).
+    "DROP TABLE IF EXISTS ai_usage",
     """
-    CREATE TABLE IF NOT EXISTS ai_usage (
-        profile_id  TEXT NOT NULL,
-        hour        TEXT NOT NULL,
-        asks        INTEGER NOT NULL DEFAULT 0,
-        cost        REAL NOT NULL DEFAULT 0,
-        PRIMARY KEY (profile_id, hour)
+    CREATE TABLE IF NOT EXISTS ai_calls (
+        hour          TEXT NOT NULL,
+        kind          TEXT NOT NULL,
+        source        TEXT NOT NULL,
+        use_id        TEXT NOT NULL DEFAULT '',
+        profile_id    TEXT NOT NULL DEFAULT '',
+        provider      TEXT NOT NULL DEFAULT '',
+        model         TEXT NOT NULL DEFAULT '',
+        billing       TEXT NOT NULL DEFAULT 'api',
+        person_id     TEXT NOT NULL DEFAULT '',
+        label         TEXT NOT NULL DEFAULT '',
+        result        TEXT NOT NULL DEFAULT 'ok',
+        profile_name  TEXT NOT NULL DEFAULT '',
+        requests      INTEGER NOT NULL DEFAULT 0,
+        tokens_in     INTEGER NOT NULL DEFAULT 0,
+        tokens_out    INTEGER NOT NULL DEFAULT 0,
+        ms            INTEGER NOT NULL DEFAULT 0,
+        cost          REAL NOT NULL DEFAULT 0,
+        estimate      REAL NOT NULL DEFAULT 0,
+        unpriced      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (hour, kind, source, use_id, profile_id, provider, model, billing, person_id, label, result)
     )
     """,
+    "CREATE INDEX IF NOT EXISTS ai_calls_profile_hour ON ai_calls (profile_id, hour)",
     # Phase 7a: the models a local server (LM Studio / Ollama) last reported, so AI profiles can
     # point at them without catalog rows and still read while the PC is off.
     """
@@ -187,9 +206,9 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("extensions", "info",       "TEXT NOT NULL DEFAULT '{}'"),
     # Phase 7a: the use ids the extension declared before its last change (Uses page: "new").
     ("extensions", "uses_before", "TEXT NOT NULL DEFAULT '[]'"),
-    # ai_usage, local_models (Phase 7a)
-    ("ai_usage", "asks", "INTEGER NOT NULL DEFAULT 0"),
-    ("ai_usage", "cost", "REAL NOT NULL DEFAULT 0"),
+    # ai_calls (Phase 7b): answered calls counted at $0 for want of a price
+    ("ai_calls", "unpriced", "INTEGER NOT NULL DEFAULT 0"),
+    # local_models (Phase 7a); 7a's ai_usage is dropped (Phase 7b: ai_calls)
     ("local_models", "display_name", "TEXT NOT NULL DEFAULT ''"),
     ("local_models", "vision",       "INTEGER NOT NULL DEFAULT 0"),
     ("local_models", "reasoning",    "INTEGER NOT NULL DEFAULT 0"),

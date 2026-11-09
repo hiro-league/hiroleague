@@ -1074,6 +1074,30 @@
     "title": "Local Servers",
     "preferencesSaveSkip": true
   },
+  "voice.profiles": {
+    "path": "voice.profiles",
+    "nullable": false,
+    "type": "object",
+    "title": "Profiles",
+    "preferencesSaveSkip": true
+  },
+  "voice.uses": {
+    "path": "voice.uses",
+    "nullable": false,
+    "type": "object",
+    "title": "Uses",
+    "preferencesSaveSkip": true
+  },
+  "voice.clip_cache_mb": {
+    "path": "voice.clip_cache_mb",
+    "nullable": false,
+    "type": "integer",
+    "default": 200,
+    "title": "Keep spoken clips up to (MB)",
+    "description": "Clips Hiro and the extensions had spoken, kept so the same words in the same voice are not paid for again. Once full, the oldest go first. 0 keeps none.",
+    "min": 0,
+    "max": 5000
+  },
   "knowledge.default_embedding_model_locked": {
     "path": "knowledge.default_embedding_model_locked",
     "type": "boolean",

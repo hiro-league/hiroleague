@@ -263,5 +263,10 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "profiles": {},
     "uses": {},
     "local_servers": {}
+  },
+  "voice": {
+    "profiles": {},
+    "uses": {},
+    "clip_cache_mb": 200
   }
 } as WorkspacePreferences;

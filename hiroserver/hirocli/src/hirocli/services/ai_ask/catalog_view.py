@@ -17,7 +17,7 @@ from ...domain.credential_store import CredentialStore
 from ...domain.extensions import PairedExtension, list_paired_extensions
 from ...domain.preferences import AiProfile, WorkspacePreferences, ai_fallback_chain
 from .targets import resolve_target
-from .usage import ProfileUsage, profile_usage
+from ..ai_usage.store import ProfileUsage, profile_usage
 
 
 def budget_hint(profile: AiProfile, kind: str) -> str:

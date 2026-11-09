@@ -393,6 +393,10 @@ class WhatsAppChannel(ChannelPlugin):
         # every text turn.
         if self._audio_out and inbound.get("audio_b64"):
             metadata["request_voice_reply"] = True
+        # Phase 7b: the sender's number (digits), so the core can file the turn's AI usage under the
+        # family member it belongs to (people.whatsapp).
+        if sender_number := _normalize_number(inbound.get("sender_pn", "")):
+            metadata["sender_number"] = sender_number
         # Owner's own number → route to the General/Hiro thread, not a per-sender one.
         if self._owner_number and _normalize_number(inbound.get("sender_pn", "")) == self._owner_number:
             metadata["route_to_default"] = True

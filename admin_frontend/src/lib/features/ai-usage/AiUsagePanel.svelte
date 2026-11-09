@@ -1,0 +1,145 @@
+<script lang="ts">
+  // Logs → AI usage (Phase 7b). What every paid AI call adds up to — the extensions' asks (ai.ask)
+  // and Hiro's own jobs — counted by the core per hour and kept for good (`/ai/usage`). Group by one
+  // dimension, filter on any of the others; a table row picked keeps only it. Each call's own
+  // details stay with whoever asked (Home's AI requests log; Graph runs for Hiro).
+  import { X } from '@lucide/svelte';
+  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
+  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import { cn } from '$lib/utils';
+  import AiUsageChart from './AiUsageChart.svelte';
+  import AiUsageRangePicker from './AiUsageRangePicker.svelte';
+  import AiUsageTable from './AiUsageTable.svelte';
+  import AiUsageTiles from './AiUsageTiles.svelte';
+  import { AiUsagePage } from './ai-usage-page.svelte';
+  import {
+    DIMENSIONS,
+    METRICS,
+    PERIODS,
+    previousLabel,
+    STEPS,
+    type Dimension,
+    type Metric,
+    type Period,
+    type Step
+  } from './ai-usage';
+
+  const pg = new AiUsagePage();
+  // Load the days shown (and the span before) whenever they change; filters and grouping don't load.
+  $effect(() => {
+    void pg.range;
+    void pg.load();
+  });
+
+  const groupOptions = DIMENSIONS.map((d) => ({ value: d.value, label: d.label }));
+  const pill = (on: boolean) =>
+    cn(
+      'rounded-md px-2.5 py-1 font-sans text-xs font-medium transition-colors',
+      on ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+    );
+
+  // The filter dropdown checks every value when nothing is filtered ("all"); the page keeps [] for "everything".
+  const checked = (d: Dimension) => {
+    const f = pg.filters[d] ?? [];
+    return f.length ? f : pg.options[d].map((o) => o.value);
+  };
+  const onFilter = (d: Dimension, values: string[]) =>
+    pg.setFilter(d, values.length === pg.options[d].length ? [] : values);
+</script>
+
+<div class="flex min-w-0 flex-col gap-4">
+  <AdminPageStickyToolbar>
+    <div class="grid gap-3">
+      <AdminFilterBar class="items-center">
+        <!-- The days shown: ‹ › step the picked range itself; the period buttons are shortcuts. -->
+        <AiUsageRangePicker span={pg.span} now={pg.now} canLater={pg.canLater} onpick={pg.setSpan} onshift={pg.shift} />
+        <span class="inline-flex gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Period">
+          {#each PERIODS as p (p.value)}
+            <button type="button" class={pill(pg.period === p.value)} onclick={() => pg.setPeriod(p.value as Period)}
+              >{p.label}</button
+            >
+          {/each}
+        </span>
+
+        <AdminFilterBarSelect
+          label="Group by"
+          layout="inline"
+          value={pg.groupBy}
+          options={groupOptions}
+          clearable={false}
+          onValueChange={(v) => (pg.groupBy = v as Dimension)}
+        />
+      </AdminFilterBar>
+
+      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
+        <span class="font-sans text-xs font-semibold text-muted-foreground">Only</span>
+        {#each DIMENSIONS as d (d.value)}
+          <MultiSelectFilter
+            label={d.label}
+            options={pg.options[d.value].map((o) => ({ value: o.value, label: o.value, count: o.count }))}
+            selected={checked(d.value)}
+            onSelectedChange={(v) => onFilter(d.value, v)}
+            searchPlaceholder="Search {d.label.toLowerCase()}…"
+            class={(pg.filters[d.value]?.length ?? 0) > 0 ? 'border-primary/60 bg-primary/10' : ''}
+          />
+        {/each}
+        {#if pg.activeFilters.length}
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1 rounded-md px-2 font-sans text-xs text-muted-foreground hover:bg-accent"
+            onclick={pg.clearFilters}><X size={13} /> Clear filters</button
+          >
+        {/if}
+      </div>
+    </div>
+  </AdminPageStickyToolbar>
+
+  {#if pg.error}
+    <InlineDestructiveAlert message={pg.error} />
+  {:else if pg.loading && !pg.all.length}
+    <InlineLoading label="Reading AI usage…" />
+  {/if}
+
+  <AiUsageTiles now={pg.totals} before={pg.before} compared={previousLabel(pg.span, pg.now)} />
+
+  <!-- The chart's own controls (bar size, what the bars measure) sit with the chart. -->
+  <div class="grid gap-3 rounded-md border bg-card p-4 shadow-sm">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <span class="inline-flex items-center gap-2">
+        <span class="inline-flex gap-1 rounded-lg border bg-background p-1" role="group" aria-label="Measure">
+          {#each METRICS as m (m.value)}
+            <button type="button" class={pill(pg.metric === m.value)} onclick={() => (pg.metric = m.value as Metric)}
+              >{m.label}</button
+            >
+          {/each}
+        </span>
+        {#if pg.metric === 'cost'}
+          <FieldHelp text="Cost here is what was billed plus what your plans' questions would cost on an API key (an estimate)." label="About cost" />
+        {/if}
+      </span>
+      {#if pg.steps.length > 1}
+        <span class="inline-flex gap-1 rounded-lg border bg-background p-1" role="group" aria-label="Bars">
+          {#each STEPS.filter((s) => pg.steps.includes(s.value)) as s (s.value)}
+            <button type="button" class={pill(pg.step === s.value)} onclick={() => (pg.stepPicked = s.value as Step)}
+              >{s.label}</button
+            >
+          {/each}
+        </span>
+      {/if}
+    </div>
+    <AiUsageChart data={pg.bars} range={pg.range} metric={pg.metric} now={pg.now} />
+  </div>
+
+  <AiUsageTable groups={pg.groups} groupBy={pg.groupBy} keys={pg.bars.keys} onpick={pg.pick} />
+
+  <p class="font-sans text-xs text-muted-foreground">
+    Counted by the core for every paid AI call it makes — questions, speech, transcription, images and embeddings — for the extensions and Hiro's own jobs, by the hour, kept for
+    good. Labels are what an extension names a question (Home sends the camera or the task). A question's own details stay
+    with whoever asked: Home's AI requests log, or Graph runs for Hiro. Pick a row to see only it.
+  </p>
+</div>

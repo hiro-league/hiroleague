@@ -196,7 +196,8 @@
     <Dialog.Footer>
       <Button variant="outline" onclick={() => ai.closeEditor()}>Cancel</Button>
       <Button
-        disabled={ai.saving || !d.name.trim() || !d.model || !!ai.draftCheck.message}
+        disabled={ai.saving || !d.name.trim() || !d.model || !!ai.draftCheck.message || d.id.startsWith('job-')}
+        title={d.id.startsWith('job-') ? 'Mockup: not saved' : undefined}
         onclick={() => void ai.saveProfile()}
       >
         {ai.saving ? 'Saving…' : 'Save'}

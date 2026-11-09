@@ -27,6 +27,7 @@ from hirocli.runtime.preferences_runtime import PreferencePathError
 from hirocli.tools.ai import (
     AiProfilesListTool,
     AiTryTool,
+    AiUsageTool,
     AiUsesForgetTool,
     AiUsesListTool,
     AiUsesSetTool,
@@ -113,6 +114,18 @@ async def ai_try(body: AiTryBody, workspace_id: SelectedWorkspaceIdDep) -> dict[
             workspace=workspace_id,
         )
     except (WorkspaceError, ValueError) as exc:
+        return envelope_failure(str(exc))
+    return _ok(asdict(result))
+
+
+@ai_router.get("/ai/usage")
+async def ai_usage(workspace_id: SelectedWorkspaceIdDep, start: str, end: str) -> dict[str, Any]:
+    """Phase 7b: Logs → AI usage — every paid AI call per hour in [start, end) (ISO date-times)."""
+    if _workspace_path(workspace_id) is None:
+        return envelope_failure("No workspace selected.")
+    try:
+        result = await run_in_threadpool(AiUsageTool().execute, start=start, end=end, workspace=workspace_id)
+    except (WorkspaceError, ValueError, OSError) as exc:
         return envelope_failure(str(exc))
     return _ok(asdict(result))
 

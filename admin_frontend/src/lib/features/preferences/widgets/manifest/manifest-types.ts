@@ -37,7 +37,7 @@ export type PrefOptionsSource =
   | ((draft: WorkspacePreferences) => PrefSelectOption[]);
 
 /** Bespoke FIELD blocks rendered inside a data-driven card (resolved by the field-renderer registry). */
-export type CustomFieldKey = 'graphEvalContextToggles';
+export type CustomFieldKey = 'graphEvalContextToggles' | 'spokenClipsStats'; // spokenClipsStats: Phase 7b clip cache
 
 export type PrefFieldSpec =
   | { kind: 'number'; path: PreferencePath; disabledWhen?: (d: WorkspacePreferences) => boolean }

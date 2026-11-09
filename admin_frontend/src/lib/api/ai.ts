@@ -4,6 +4,7 @@
  * (`ai.profiles.<id>`, like `image_profiles`); these routes read them with today's use and
  * readiness, Try one, and manage `ai.uses`. Contract: `docs/phase7a-ai-asks-design.md`.
  */
+import type { UsageRow } from '$lib/features/ai-usage/ai-usage';
 import { apiRequest, type ApiResponse } from './client';
 import type { AiProfile as AiProfilePrefs } from './generated/preferences.generated';
 
@@ -120,6 +121,12 @@ export async function tryAiProfile(body: {
 }): Promise<ApiResponse<AiTryPayload>> {
   // A real ask (plan tools and local models can take minutes): well past the default 20 s.
   return apiRequest<AiTryPayload>('/ai/try', { method: 'POST', body, timeoutMs: 300_000 });
+}
+
+/** Phase 7b: Logs → AI usage — every paid AI call per hour in [start, end) (`UsageRow`s, named). */
+export async function fetchAiUsage(start: number, end: number): Promise<ApiResponse<{ rows: UsageRow[] }>> {
+  const q = new URLSearchParams({ start: new Date(start).toISOString(), end: new Date(end).toISOString() });
+  return apiRequest<{ rows: UsageRow[] }>(`/ai/usage?${q}`, { timeoutMs: 60_000 });
 }
 
 export async function listAiUses(): Promise<ApiResponse<AiUsesPayload>> {

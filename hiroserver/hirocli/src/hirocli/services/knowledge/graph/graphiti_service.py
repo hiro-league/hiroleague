@@ -23,6 +23,7 @@ import asyncio
 import copy
 import datetime as dt
 import time
+from functools import partial
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -46,12 +47,14 @@ from hirocli.domain.preferences import (
     resolve_graphiti_extraction_model,
     resolve_graphiti_small_model,
 )
+from hirocli.services.ai_usage.from_ledger import count_graph_llm_usage
 from hirocli.services.knowledge.constants import KUZU_DB_FILENAME
 
 from . import kuzu_registry
 from .graphiti_adapters import (
     GraphitiEmbedderClient,
     GraphitiLLMClient,
+    GraphitiLLMUsage,
     GraphitiModelSpec,
     HiroRerankerCrossEncoder,
     UsageSink,
@@ -73,7 +76,7 @@ from .group_scope import (
 )
 from .graphiti_search import GraphitiExpansion
 from .graphiti_search import search_chunk_ids as _search_chunk_ids
-from .ingest_ledger import record_episode_embed, record_episode_llm_usage
+from .ingest_ledger import current_ingest_episode, record_episode_embed, record_episode_llm_usage
 from .ledger_tracer import LedgerTracer, record_rerank_usage
 
 if TYPE_CHECKING:
@@ -336,6 +339,20 @@ def _distinct_group_ids(rows: Any) -> list[str]:
             out.append(str(gid))
     return out
 
+
+
+def _graph_usage_sink(workspace_path: Path, observe: bool) -> UsageSink:
+    """The graph LLM client's usage hook (Phase 7b): inside an ingest episode with observability on, the
+    episode's ledger row carries the call (and AI usage counts that row); otherwise AI usage counts the
+    call itself, so the observability tier never hides what the graph costs."""
+    return partial(_on_graph_usage, workspace_path, observe)
+
+
+def _on_graph_usage(workspace_path: Path, observe: bool, usage: GraphitiLLMUsage) -> None:
+    if observe and current_ingest_episode.get() is not None:
+        record_episode_llm_usage(usage)
+        return
+    count_graph_llm_usage(workspace_path, usage)
 
 class GraphitiMemoryService:
     """Owns the Graphiti client + its embedded Kuzu driver for one workspace.
@@ -1009,7 +1026,9 @@ class GraphitiMemoryService:
             # Route per-call usage into the active ingest episode (no-op outside
             # ingest, so retrieval/memory paths are unaffected). An explicit
             # ``on_usage`` still overrides for callers that want their own sink.
-            on_usage=(on_usage or record_episode_llm_usage) if observe else None,
+            # Phase 7b: AI usage counts every graph LLM call whatever the observability tier (it is
+            # tracing detail, not counting); see _graph_usage_sink.
+            on_usage=on_usage or _graph_usage_sink(workspace_path, observe),
         )
         embedder = GraphitiEmbedderClient(
             backend, on_embed=record_episode_embed if observe else None

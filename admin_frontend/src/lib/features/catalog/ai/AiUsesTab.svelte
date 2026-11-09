@@ -21,8 +21,21 @@
   import type { AiController } from './ai-controller.svelte';
   import { chainLabel, fallbackChain, needsMismatch } from './ai-profile-rules';
   import type { AiUse } from './ai-types';
+  import HiroUsesMock from '$lib/mockups/HiroUsesMock.svelte';
+  import VoiceUsesTable from '$lib/features/catalog/voice/VoiceUsesTable.svelte';
+  import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
+  import SourceFilter from '$lib/mockups/SourceFilter.svelte';
+  import { MOCK_JOBS, PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
 
-  let { ai }: { ai: AiController } = $props();
+  let { ai, voice }: { ai: AiController; voice: VoiceController } = $props();
+
+  // A filter per source: each extension that declared uses (and, with the step 5 mockup on, Hiro's jobs first).
+  let source = $state(PHASE7B_MOCKUP ? 'Hiro' : '');
+  const sourceTabs = $derived([
+    ...(PHASE7B_MOCKUP ? [{ id: 'Hiro', label: 'Hiro', count: MOCK_JOBS.length }] : []),
+    ...ai.useGroups.map((g) => ({ id: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
+  ]);
+  const activeSource = $derived(sourceTabs.some((t) => t.id === source) ? source : (sourceTabs[0]?.id ?? ''));
 
   const GRID = 'minmax(200px,1.1fr) minmax(170px,0.9fr) minmax(200px,1fr) minmax(240px,1.4fr)';
 
@@ -41,12 +54,21 @@
 </script>
 
 <SectionCard class="grid gap-4">
-  <div>
-    <h3 class={ADMIN_SECTION_HEADING_LG}>Uses</h3>
-    <p class="font-sans text-sm text-muted-foreground">
-      Each extension says what it asks an AI for. Pick the profile each one asks with.
-    </p>
+  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div>
+      <h3 class={ADMIN_SECTION_HEADING_LG}>Uses</h3>
+      <p class="font-sans text-sm text-muted-foreground">
+        What Hiro and each extension ask an AI for, and what speaks. Pick the profile each one uses.
+      </p>
+    </div>
+    <!-- Phase 7b mockup: one source at a time — Hiro's own jobs, then each extension. The same pills as
+         the profile lists (Uses is itself a sub-tab of Profiles, so no second tab strip). -->
+    <SourceFilter options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
   </div>
+
+  {#if activeSource === 'Hiro'}
+    <HiroUsesMock source="Hiro" extraProfiles={ai.profiles.map((p) => ({ id: p.id, name: p.name }))} />
+  {:else}
 
   {#if ai.usesLoading && ai.useGroups.length === 0}
     <InlineLoading label="Loading uses…" />
@@ -56,7 +78,7 @@
     <InlineEmptyState message="No extension has declared uses yet." hint="Pair an extension on the Extensions page." />
   {/if}
 
-  {#each ai.useGroups as group (group.extension)}
+  {#each ai.useGroups.filter((g) => g.extension === activeSource) as group (group.extension)}
     {@const rows = ai.uses.filter((u) => u.extension === group.extension)}
     {@const offered = rows.filter((u) => u.status !== 'removed').length}
     {@const refreshing = ai.refreshingExtensions[group.extension]}
@@ -147,5 +169,8 @@
         {/snippet}
       </AdminTableShell>
     </div>
+      <!-- Phase 7b: the extension's speaking (voice uses), real. -->
+      <VoiceUsesTable {voice} extension={group.extension} />
   {/each}
+  {/if}
 </SectionCard>

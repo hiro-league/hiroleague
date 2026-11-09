@@ -6,6 +6,8 @@
   import CharacterResolvedBlock from '$lib/features/characters/sections/CharacterResolvedBlock.svelte';
   import OrderedModelPicker from '$lib/components/ui/ordered-model-picker/OrderedModelPicker.svelte';
   import CharacterSectionCard from '$lib/features/characters/sections/CharacterSectionCard.svelte';
+  import OrderedRecipeList from '$lib/mockups/OrderedRecipeList.svelte';
+  import { PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
   import {
     characterSectionTitleClass,
     characterSectionHintClass
@@ -74,12 +76,12 @@
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0 flex-1">
         {#if isLlm}
-          <h4 class={characterSectionTitleClass}>Preferred LLM models</h4>
+          <h4 class={characterSectionTitleClass}>{PHASE7B_MOCKUP ? 'AI profiles' : 'Preferred LLM models'}</h4>
           <p class={characterSectionHintClass}>
             Select preferred LLM model for this character. You can select multiple fallbacks in order.
           </p>
         {:else}
-          <h4 class={characterSectionTitleClass}>Preferred voice models (TTS)</h4>
+          <h4 class={characterSectionTitleClass}>{PHASE7B_MOCKUP ? 'Voices' : 'Preferred voice models (TTS)'}</h4>
           <p class={characterSectionHintClass}>
             Select preferred TTS model for this character. You can select multiple fallbacks in order.
           </p>
@@ -110,7 +112,10 @@
       </div>
     </div>
   {/snippet}
-  {#if isLlm}
+  {#if PHASE7B_MOCKUP}
+    <!-- Phase 7b mockup: AI profiles / voice recipes in order, instead of models + a tuning preset. -->
+    <OrderedRecipeList voice={!isLlm} />
+  {:else if isLlm}
     <OrderedModelPicker
       variant="llm"
       bind:selectedIds={form.llm_models}

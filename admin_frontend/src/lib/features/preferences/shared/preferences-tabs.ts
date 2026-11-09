@@ -1,3 +1,4 @@
+import { PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
 import { GRAPH_ENGINE_MANIFEST } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
 import { EVAL_MANIFEST } from '$lib/features/preferences/sections/eval/eval-manifest';
 import { AGENT_MANIFEST } from '$lib/features/preferences/sections/agent-manifest';
@@ -136,6 +137,7 @@ const TAB_FEATURE = new Map<PreferenceTabId, FeatureId>(
 
 /** True when a preference tab should be shown (untagged tabs are always active). */
 export function isPreferenceTabActive(tabId: PreferenceTabId): boolean {
+  if (PHASE7B_MOCKUP && tabId === 'tuning-profiles') return false; // Phase 7b mockup: presets become AI profiles
   const feature = TAB_FEATURE.get(tabId);
   return !feature || isFeatureActive(feature);
 }
@@ -159,6 +161,8 @@ export const VISIBLE_PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] =
 const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'llm', tab: 'models' },
   { prefix: 'media', tab: 'models' },
+  // Phase 7b: the spoken-clip cache size (General → Spoken clips); voice.profiles / voice.uses are the Catalog's.
+  { prefix: 'voice.clip_cache_mb', tab: 'models' },
   { prefix: 'memory', tab: 'agent' },
   // The chat retrieval-agent config is memory-engine-specific (not general chat), so it renders on
   // the shared Memory (graph-engine) tab, not the Agent tab — a longer-prefix override of `memory`.

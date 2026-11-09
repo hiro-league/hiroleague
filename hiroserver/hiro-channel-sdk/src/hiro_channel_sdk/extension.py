@@ -112,6 +112,14 @@ class ExtensionUse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ExtensionVoiceUse(BaseModel):
+    """One thing the extension asks the core to say aloud (Phase 7b): the core's admin points each voice use
+    at a voice profile (``voice.uses["<extension>:<id>"]``)."""
+
+    id: str
+    name: str
+
+
 class ExtensionInfo(BaseModel):
     """Self-description an extension sends when it signs in (and answers to extension.info)."""
 
@@ -121,6 +129,8 @@ class ExtensionInfo(BaseModel):
     offers: ExtensionOffers = Field(default_factory=ExtensionOffers)
     # What it asks the core's AI for (Phase 7a); the core keeps the last list it was given.
     uses: list[ExtensionUse] = Field(default_factory=list)
+    # What it asks the core to say aloud (Phase 7b: voice.speak), each pointed at a voice profile.
+    voice_uses: list[ExtensionVoiceUse] = Field(default_factory=list)
 
 
 class ExtensionRequestError(Exception):
