@@ -145,6 +145,16 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS ai_calls_profile_hour ON ai_calls (profile_id, hour)",
     # Phase 7a: the models a local server (LM Studio / Ollama) last reported, so AI profiles can
     # point at them without catalog rows and still read while the PC is off.
+    # Each app's LAN name (docs/site-names-design.md): claimed from its address setting, published and proxied by the
+    # core (runtime/site_names.py). One per extension.
+    """
+    CREATE TABLE IF NOT EXISTS site_names (
+        name          TEXT PRIMARY KEY,
+        extension_id  TEXT NOT NULL,
+        port          INTEGER NOT NULL,
+        claimed_at    TEXT NOT NULL DEFAULT ''
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS local_models (
         provider_id  TEXT NOT NULL,
@@ -215,6 +225,10 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("local_models", "reasoning",    "INTEGER NOT NULL DEFAULT 0"),
     ("local_models", "loaded",       "INTEGER NOT NULL DEFAULT 0"),
     ("local_models", "seen_at",      "TEXT NOT NULL DEFAULT ''"),
+    # site_names (each app's LAN name)
+    ("site_names", "extension_id", "TEXT NOT NULL DEFAULT ''"),
+    ("site_names", "port",         "INTEGER NOT NULL DEFAULT 0"),
+    ("site_names", "claimed_at",   "TEXT NOT NULL DEFAULT ''"),
     # roles, people, admin_sessions (Phase 6)
     ("roles", "name",     "TEXT NOT NULL DEFAULT ''"),
     ("roles", "built_in", "INTEGER NOT NULL DEFAULT 0"),

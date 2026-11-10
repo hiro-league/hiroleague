@@ -247,6 +247,10 @@ async def _main(
     from hirocli.runtime.people_for_extensions import watch_people_changes
 
     stop_watching_people = watch_people_changes(extension_manager, workspace_path)
+    # Apps' LAN names: claimed by extensions, published (mDNS) and proxied (Caddy) by the core.
+    from hirocli.runtime.site_names import SiteNames
+
+    ctx.site_names = SiteNames(ctx)
     http_app.state.channel_info_provider = channel_manager.get_channel_info
     metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
 
@@ -294,6 +298,7 @@ async def _main(
         run_http_server(ctx),
         channel_manager.run(),
         extension_manager.run(),
+        ctx.site_names.run(),
         comm_manager.serve(),
         agent_manager.serve(),
         knowledge_manager.serve(),

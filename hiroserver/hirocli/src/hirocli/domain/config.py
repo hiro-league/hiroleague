@@ -64,6 +64,14 @@ class Config(BaseModel):
     # None = the workspace slot's extension port, derived from plugin_port (see
     # effective_extension_port), so existing workspaces need no re-setup.
     extension_port: int | None = None
+    # Apps' LAN names (docs/site-names-design.md), set with `hiro extension names`. Empty ip = this machine isn't
+    # set up for names: claims are kept, nothing is published. site_names_caddy_file is the file the core writes (Caddy
+    # imports it); site_names_caddy_main the hand-written Caddyfile (its names are taken); site_names_caddy_reload the
+    # command that makes Caddy read the file again (e.g. ["docker", "restart", "caddy"]).
+    site_names_ip: str = ""
+    site_names_caddy_file: str = ""
+    site_names_caddy_main: str = ""
+    site_names_caddy_reload: list[str] = Field(default_factory=list)
     master_key_file: str = MASTER_KEY_FILENAME
     pairing_code_length: int = DEFAULT_PAIRING_CODE_LENGTH
     pairing_code_ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS

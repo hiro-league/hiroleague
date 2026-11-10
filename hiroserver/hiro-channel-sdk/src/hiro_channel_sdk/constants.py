@@ -214,6 +214,18 @@ AUTH_CODE_SECONDS: int = 60
 METHOD_EXTENSIONS_LIST: str = "extensions.list"
 CORE_REPO: str = "hiroleague"
 
+# An app's LAN name, set up by the core (docs/site-names-design.md in hiroleague). The extension's address setting
+# claims a name; the core checks it is free, publishes it on the LAN (mDNS) and points the web proxy at the port the
+# extension listens on, then the extension declares http://<name> as its site (offers.shows).
+#   sites.claim   extension -> core, {name, port} -> {name, url, published, proxied, note}. name: "<label>.hiro.local"
+#                 or "<label>.local" (letters, digits, dashes). One name per extension: a new claim drops its old one.
+#                 published / proxied say whether the mDNS name and the proxy entry are live (False on a core whose
+#                 machine isn't set up for names: the claim is kept, note says why). Errors: invalid, taken.
+METHOD_SITES_CLAIM: str = "sites.claim"
+SITES_ERROR_INVALID: str = "invalid"
+SITES_ERROR_TAKEN: str = "taken"
+SITES_DOMAIN: str = "hiro.local"  # an app's name is <label>.hiro.local, or a one-word <label>.local
+
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0
 # Largest frame on the extension socket, both ends. An AI ask (ai.ask, Phase 7a) carries up to 60

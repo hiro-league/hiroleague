@@ -136,3 +136,33 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             console.print(f"[yellow]{result.note}[/yellow]")
         if result.restart_required:
             console.print("[cyan]Restart the server for the new address to take effect.[/cyan]")
+
+    @extension_app.command("names")
+    def extension_names(
+        ip: Optional[str] = typer.Option(None, "--ip", help="LAN address apps' names point at ('' = names off)."),
+        caddy_file: Optional[str] = typer.Option(None, "--caddy-file", help="File the core writes for Caddy."),
+        caddy_main: Optional[str] = typer.Option(None, "--caddy-main", help="The hand-written Caddyfile."),
+        caddy_reload: Optional[str] = typer.Option(None, "--caddy-reload", help="Command that reloads Caddy."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Show or set how apps' LAN names are set up on this machine, and the names apps claimed."""
+        from ..tools.extension import ExtensionNamesTool
+
+        log.info("hiro extension names", ip=ip, caddy_file=caddy_file)
+        try:
+            result = ExtensionNamesTool().execute(
+                ip=ip, caddy_file=caddy_file, caddy_main=caddy_main, caddy_reload=caddy_reload, workspace=workspace
+            )
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        console.print(f"  names point at : [bold]{result.ip or '(off)'}[/bold]")
+        console.print(f"  Caddy file     : {result.caddy_file or '(none)'}")
+        console.print(f"  hand-written   : {result.caddy_main or '(none)'}")
+        console.print(f"  reload Caddy   : {' '.join(result.caddy_reload) or '(none)'}")
+        for n in result.names:
+            console.print(f"  [green]{n['name']}[/green] → 127.0.0.1:{n['port']}  [dim]{n['extension_id']}[/dim]")
+        if not result.names:
+            console.print("  [dim]No app has claimed a name yet.[/dim]")
+        if result.restart_required:
+            console.print("[cyan]Restart the server for the change to take effect.[/cyan]")

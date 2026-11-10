@@ -87,6 +87,8 @@ class ServerContext:
     # Set by the composition root; lets admin routes list connected extensions,
     # run the test call and disconnect a removed one.
     extension_manager: "ExtensionManager | None" = field(default=None, init=False)
+    # Apps' LAN names: claims, mDNS publishing and the Caddy file (runtime/site_names.py).
+    site_names: Any = field(default=None, init=False)
     # Set by the composition root; lets an extension's WhatsApp send to the owner
     # land in Hiro's own thread too, so Hiro knows it when the owner replies.
     agent_manager: "AgentManager | None" = field(default=None, init=False)

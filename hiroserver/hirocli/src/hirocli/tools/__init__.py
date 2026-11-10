@@ -102,6 +102,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "PlanUpdateTool": ".ai_plans",
     "ExtensionAddTool": ".extension",
     "ExtensionAddressTool": ".extension",
+    "ExtensionNamesTool": ".extension",
     "ExtensionListTool": ".extension",
     "ExtensionRemoveTool": ".extension",
     "ExtensionStateTool": ".extension_state",
@@ -262,7 +263,13 @@ def all_tools() -> list[Tool]:
         MessageSendTool,
     )
     from .device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
-    from .extension import ExtensionAddressTool, ExtensionAddTool, ExtensionListTool, ExtensionRemoveTool
+    from .extension import (
+        ExtensionAddressTool,
+        ExtensionAddTool,
+        ExtensionListTool,
+        ExtensionNamesTool,
+        ExtensionRemoveTool,
+    )
     from .extension_state import ExtensionStateTool
     from .notify import NotifyTool
     from .people import (
@@ -359,6 +366,7 @@ def all_tools() -> list[Tool]:
         ExtensionListTool(),
         ExtensionRemoveTool(),
         ExtensionAddressTool(),
+        ExtensionNamesTool(),
         ExtensionStateTool(),
         AiProfilesListTool(),
         AiProfileRestoreDefaultTool(),
@@ -512,6 +520,7 @@ if TYPE_CHECKING:  # pragma: no cover
         ExtensionAddressTool,
         ExtensionAddTool,
         ExtensionListTool,
+        ExtensionNamesTool,
         ExtensionRemoveTool,
     )
     from .extension_state import ExtensionStateTool  # noqa: F401
