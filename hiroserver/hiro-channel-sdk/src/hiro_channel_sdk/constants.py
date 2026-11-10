@@ -139,6 +139,8 @@ NOTIFY_MAX_RECIPIENTS: int = 10
 #   roles.import_rights extension → core, {roles: {role_id: {rights: [...], says?: str}}} → {"imported": [role_id]}:
 #                    once, an extension's own grants from before Phase 9a; only fills roles the core has no rights
 #                    for in this extension yet (and an empty ``says``), never overwrites what the admin set.
+#                    Or {copy_from: "<another extension's name>"} (Phase 9b): an app taking features over from another
+#                    gets, for each role with none here yet, its rights there in the features this app declares.
 #   people.changed   core → every connected extension, an event with {}: read people.list again.
 #                    Events aren't queued: an extension also reads the list when it connects.
 #   A refused change answers error code "invalid_params" with the reason for people.
@@ -219,6 +221,18 @@ AUTH_CODE_SECONDS: int = 60
 #                     its ExtensionInfo.repo ("" = not said). Extensions only.
 METHOD_EXTENSIONS_LIST: str = "extensions.list"
 CORE_REPO: str = "hiroleague"
+
+# Phase 9b: extensions ask each other, through the core (never directly).
+#   An extension offers what it answers in ExtensionInfo.offers: `knows` (questions) and `can_do` (actions), each
+#   {"method": "<its request method>", "name": "...", "says": "..."}, and answers them with register_request().
+#   extensions.ask  extension -> core, {to: "<extension name>", method, params?, timeout?} -> the asked extension's
+#                   answer as it is. The core passes it on only when `to` is connected and offers `method`; the
+#                   asked extension gets params plus ASKED_BY ("<asker's name>"). Errors: not_connected (to isn't
+#                   connected), not_offered (to doesn't offer method), timeout, and the asked extension's own errors.
+METHOD_EXTENSIONS_ASK: str = "extensions.ask"
+ASKED_BY: str = "_asked_by"  # added to the params the asked extension gets: who asked
+ASK_ERROR_NOT_OFFERED: str = "not_offered"
+ASK_TIMEOUT_MAX_SECONDS: float = 60.0
 
 # An app's LAN name, set up by the core (docs/site-names-design.md in hiroleague). The extension's address setting
 # claims a name; the core checks it is free, publishes it on the LAN (mDNS) and points the web proxy at the port the

@@ -28,7 +28,7 @@ from hiro_channel_sdk.constants import (
 )
 from hiro_commons.log import Logger
 
-from ..domain.access import import_rights, roles_for_extension
+from ..domain.access import copy_rights, import_rights, roles_for_extension
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from ..domain.people import (
     PeopleError,
@@ -140,10 +140,16 @@ async def handle_roles_remove(params: dict[str, Any], ctx: RequestContext) -> di
 
 async def handle_roles_import_rights(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     """Phase 9a: once, the extension's own grants from before; fills only roles with none there yet."""
+    name = await _caller_name(ctx)
+    copy_from = str(params.get("copy_from") or "").strip()
+    if copy_from:
+        # Phase 9b: an app taking features over from another copies each role's rights in them, once.
+        filled = await _change(ctx, f"rights copied for {name} from {copy_from}",
+                               lambda: copy_rights(_workspace(ctx), name, copy_from))
+        return {"imported": filled}
     roles = params.get("roles")
     if not isinstance(roles, dict):
-        raise RequestRefused("invalid_params", "roles must be {role_id: {rights: [...], says?: str}}")
-    name = await _caller_name(ctx)
+        raise RequestRefused("invalid_params", "roles must be {role_id: {rights: [...], says?: str}}, or copy_from")
     filled = await _change(ctx, f"rights imported for {name}", lambda: import_rights(_workspace(ctx), name, roles))
     return {"imported": filled}
 

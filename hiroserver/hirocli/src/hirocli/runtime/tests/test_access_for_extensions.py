@@ -69,6 +69,21 @@ def test_people_list_carries_the_callers_rights_and_says(tmp_path: Path) -> None
     assert roles["owner"]["rights"] == ["streams.see", "streams.edit", "streams.delete"]
 
 
+def test_an_app_taking_features_over_copies_each_roles_rights_once(tmp_path: Path) -> None:
+    """Phase 9b: NetHiro takes System health from Home; each role keeps exactly what it had there."""
+    add_paired_extension(tmp_path, name="home", public_key="k", info=INFO)
+    net = add_paired_extension(tmp_path, name="net", public_key="k2", info={"name": "net", "features": [
+        {"id": "streams", "name": "Streams", "rights": [{"id": "see", "name": "See"}, {"id": "delete", "name": "Delete"}]}]})
+    set_rights(tmp_path, "adult", "home", ["streams.see", "streams.edit", "streams.delete", "myroom.use"])
+    set_rights(tmp_path, "kid", "net", ["streams.see"])  # already set there: kept
+    ctx = SimpleNamespace(server_ctx=SimpleNamespace(workspace_path=tmp_path, extension_manager=None), workspace_path=tmp_path,
+                          msg=SimpleNamespace(routing=SimpleNamespace(sender_id=net.extension_id)))
+    assert asyncio.run(handle_roles_import_rights({"copy_from": "home"}, ctx)) == {"imported": ["adult"]}
+    assert get_role(tmp_path, "adult").rights["net"] == ["streams.see", "streams.delete"]
+    assert get_role(tmp_path, "kid").rights["net"] == ["streams.see"]
+    assert asyncio.run(handle_roles_import_rights({"copy_from": "home"}, ctx)) == {"imported": []}
+
+
 def test_import_fills_only_roles_without_rights_there(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     set_rights(tmp_path, "adult", "home", ["streams.see"])

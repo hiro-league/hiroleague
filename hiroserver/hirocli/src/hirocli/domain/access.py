@@ -126,6 +126,24 @@ def import_rights(workspace_path: Path, source: str, roles: dict[str, Any]) -> l
     return filled
 
 
+def copy_rights(workspace_path: Path, source: str, copy_from: str) -> list[str]:
+    """Once, for an app that takes over features from another (Phase 9b: NetHiro takes System health from Home):
+    every role with no rights in ``source`` yet gets the ones it has in ``copy_from`` for the features ``source``
+    declares (same feature and right ids), so nobody gains or loses anything. Never overwrites what the admin set;
+    the copied keys stay under ``copy_from`` too (dropped from view once that app stops declaring them). Returns the
+    role ids filled."""
+    if copy_from == source or copy_from == CORE_SOURCE:
+        raise PeopleError("Rights are copied from another app.")
+    features = source_features(workspace_path, source)
+    filled: list[str] = []
+    for role in list_roles(workspace_path):
+        if role.role_id == OWNER_ROLE or source in role.rights:
+            continue
+        set_role_rights(workspace_path, role.role_id, source, normalize(features, role.rights.get(copy_from, [])))
+        filled.append(role.role_id)
+    return filled
+
+
 def roles_for_extension(workspace_path: Path, source: str) -> list[dict[str, Any]]:
     """Every role as one extension sees it: its rights there, not the other extensions'."""
     try:

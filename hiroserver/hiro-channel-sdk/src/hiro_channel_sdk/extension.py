@@ -60,6 +60,7 @@ from .constants import (
     MESSAGE_TYPE_REQUEST,
     MESSAGE_TYPE_RESPONSE,
     METHOD_EXTENSION_INFO,
+    METHOD_EXTENSIONS_ASK,
     RECONNECT_BACKOFF_BASE,
     RECONNECT_BACKOFF_MAX,
 )
@@ -507,6 +508,24 @@ class ExtensionClient:
             raise ExtensionRequestError("not_connected", "connection closed") from exc
         finally:
             self._pending.pop(msg.request_id or "", None)
+
+    async def ask(
+        self,
+        to: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float = EXTENSION_REQUEST_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Phase 9b: ask another extension (by its name) through the core; it must offer ``method`` in its
+        ``offers.knows`` / ``offers.can_do``. Returns its answer or raises ExtensionRequestError (not_connected,
+        not_offered, timeout, or the asked extension's own error)."""
+        # The core waits up to `timeout` for the asked extension; this side waits a little longer for the core.
+        return await self.request(
+            METHOD_EXTENSIONS_ASK,
+            {"to": to, "method": method, "params": params or {}, "timeout": timeout},
+            timeout=timeout + 5.0,
+        )
 
     async def send_event(self, event_type: str, data: dict[str, Any] | None = None) -> bool:
         """Tell the core something; False when not connected (events aren't queued)."""
