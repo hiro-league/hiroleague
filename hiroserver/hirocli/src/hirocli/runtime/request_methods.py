@@ -14,7 +14,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any, Final
 
-from hiro_channel_sdk.constants import METHOD_CORE_INFO
+from hiro_channel_sdk.constants import CORE_REPO, METHOD_CORE_INFO
 from hiro_commons.log import Logger
 
 from ..domain.blob_store import (
@@ -35,6 +35,7 @@ from ..tools.policy import PolicyGetTool
 from .ai_for_extensions import AI_REQUEST_HANDLERS
 from .voice_for_extensions import VOICE_REQUEST_HANDLERS
 from .sign_in_for_extensions import SIGN_IN_REQUEST_HANDLERS
+from .extensions_for_extensions import EXTENSIONS_REQUEST_HANDLERS
 from .uses_for_extensions import USES_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
@@ -306,6 +307,8 @@ async def handle_core_info(params: dict[str, Any], ctx: RequestContext) -> dict[
         "workspace": ctx.server_ctx.workspace_name,
         # Phase 7b: the admin's web port, so an extension can link to the core's admin (its Edit links).
         "admin_port": ctx.server_ctx.config.admin_port,
+        # The core's own repo (the code reports keep a report for it, as for each extension's).
+        "repo": CORE_REPO,
     }
 
 
@@ -331,6 +334,7 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *VOICE_REQUEST_HANDLERS,  # Phase 7b: voice.speak / voice.profiles
     *USES_REQUEST_HANDLERS,  # Phase 7b: ai.uses.set / voice.uses.set (an extension picks its own uses' profiles)
     *SIGN_IN_REQUEST_HANDLERS,  # Phase 8: auth.code (an extension redeems the one-time sign-in code)
+    *EXTENSIONS_REQUEST_HANDLERS,  # extensions.list: every paired extension and its repo (the code reports)
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

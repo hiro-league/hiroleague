@@ -145,7 +145,7 @@ METHOD_ROLES_RENAME: str = "roles.rename"
 METHOD_ROLES_REMOVE: str = "roles.remove"
 EVENT_PEOPLE_CHANGED: str = "people.changed"
 
-# core.info answers {name, version, workspace, admin_port}: admin_port (Phase 7b) is the core's admin web port, so
+# core.info answers {name, version, workspace, admin_port, repo}: admin_port (Phase 7b) is the core's admin web port, so
 # an extension can link to the admin (its own setting may say the address people reach it at, e.g. behind a proxy).
 # Phase 7a: the core answers questions (docs/phase7a-ai-asks-design.md in hiroleague).
 #   ai.ask       extension → core, {use, profile?, prompt, pictures?: [base64 JPEG], picture_labels?,
@@ -205,6 +205,14 @@ SIGN_IN_ERROR_FAILED: str = "failed"
 OFFER_KIND_SIGN_IN: str = "sign_in"
 OFFER_KIND_SITE: str = "site"
 AUTH_CODE_SECONDS: int = 60
+
+# The code reports keep a report for the core and each extension, from each one's repo (hiro-code-reports' R4).
+#   core.info         also answers {repo}: the core's own repo, CORE_REPO.
+#   extensions.list   extension -> core, {} -> {"extensions": [{extension_id, name, version, description, repo,
+#                     connected}]}: every paired extension, as it last described itself (live while connected), repo
+#                     its ExtensionInfo.repo ("" = not said). Extensions only.
+METHOD_EXTENSIONS_LIST: str = "extensions.list"
+CORE_REPO: str = "hiroleague"
 
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0

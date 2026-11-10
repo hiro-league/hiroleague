@@ -36,6 +36,7 @@ from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
 
 from hiro_channel_sdk.constants import (
+    CORE_REPO,
     CORE_SENDER_ID,
     EXTENSION_AUTH_TIMEOUT_SECONDS,
     EXTENSION_CHANNEL,
@@ -355,6 +356,7 @@ class ExtensionManager:
                         "workspace": self._ctx.workspace_name,
                         # Phase 7b: the admin's web port, for an extension's links into the core's admin.
                         "admin_port": self._ctx.config.admin_port,
+                        "repo": CORE_REPO,  # as core.info answers
                     },
                 }
             )
