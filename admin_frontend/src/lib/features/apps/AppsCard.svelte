@@ -5,13 +5,13 @@
    * sign-in lets you in. Nothing shows when no extension declares a site.
    */
   import { onMount } from 'svelte';
-  import { AppWindow, ExternalLink, House } from '@lucide/svelte';
+  import { AppWindow, ChartColumn, ExternalLink, House } from '@lucide/svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { listApps, type AppSite } from '$lib/api/auth';
 
   // The icons extensions may name (offers.shows "icon"); anything else gets a plain app icon.
-  const ICONS = { house: House } as const;
+  const ICONS = { house: House, chart: ChartColumn } as const; // chart: the code reports
 
   let apps = $state<AppSite[]>([]);
   let loaded = $state(false);
