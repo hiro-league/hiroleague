@@ -36,8 +36,9 @@ export async function signIn(signInName: string, password: string) {
   });
 }
 
+/** `then`: where the browser goes next to be signed out of the apps' sites too (Phase 8); null = nowhere. */
 export async function signOut() {
-  return apiRequest<null>('/auth/sign-out', { method: 'POST' });
+  return apiRequest<{ then: string | null }>('/auth/sign-out', { method: 'POST' });
 }
 
 export async function listApps() {

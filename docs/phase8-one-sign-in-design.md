@@ -18,7 +18,7 @@ data: HomeHiro's users' My room picks are carried over (step 3).
 | HiroLeague's settings | One switch per role, "can open HiroLeague's settings": Owner on (always), Adult and Kid off by default. Anyone else signed in sees only the dashboard's Apps card |
 | Apps card | Each extension declares its site (title, icon, address, roles that see it) in `offers.shows`; HiroLeague's dashboard shows them, each opening in a new tab |
 | Sessions | 90 days, HiroLeague and HomeHiro |
-| Signing out of both | **Open** — proposed: signing out anywhere signs that browser out of both |
+| Signing out of both | **Yes** (decided 2026-11-10): signing out anywhere signs that browser out of HiroLeague and every connected app's site |
 | Later | Sign in with Google, passkeys; rights per function (Phase 10) |
 
 ## The flows
@@ -84,8 +84,10 @@ person isn't linked to a core person waits, as today.
 - **Apps card:** `offers.shows` entry `{"kind": "site", "title": "Home", "icon": "house", "url": "http://home.hiro.local", "roles": []}`
   (`roles: []` = every role). `GET /api/apps` lists the ones the caller's role sees, with online/offline.
 - **Sessions:** `SESSION_DAYS = 90`; cookie `SameSite=Lax`.
-- **Sign-out of both (if agreed):** `GET /sign-out?next=` ends the core session; an extension's Sign out goes
-  through it.
+- **Signing out of both:** the admin's Sign out (`POST /api/auth/sign-out`) answers `then`: a browser address that
+  passes through each online app's `<site>/api/auth/signout?next=…` (ending that browser's session there) and lands on
+  `/sign-in`. An app's Sign out ends its own session, then sends the browser to `GET /api/auth/sign-out?for=<app>`, which
+  ends the core's (and any other app's) and shows `/sign-in?for=<app>`. An app goes on only to the core's own address.
 
 ## HomeHiro
 

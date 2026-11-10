@@ -55,7 +55,12 @@ function createAdminSession() {
 
   async function signOut() {
     try {
-      await apiSignOut();
+      // Phase 8: signing out here signs this browser out of the apps' sites too (HomeHiro), passing through them.
+      const then = (await apiSignOut()).data?.then;
+      if (then) {
+        window.location.assign(then);
+        return;
+      }
     } finally {
       person = null;
       canOpenSettings = false;

@@ -217,15 +217,43 @@ async def sign_in(body: SignInBody, request: Request) -> JSONResponse:
     return response
 
 
-@auth_router.post("/auth/sign-out")
-async def sign_out(request: Request) -> JSONResponse:
-    name = cookie_name(request)
+async def _end_this_session(request: Request) -> None:
     person = await signed_in_person(request)
-    await run_in_threadpool(end_session, _workspace_path(request), request.cookies.get(name))
+    await run_in_threadpool(end_session, _workspace_path(request), request.cookies.get(cookie_name(request)))
     if person is not None:
         log.info(f"Admin signed out — {person.name}", sign_in=person.sign_in)
-    response = JSONResponse({"ok": True, "error": None, "data": None})
-    response.delete_cookie(name, path="/")
+
+
+async def _through_the_apps(request: Request, end_url: str, skip: str = "") -> str | None:
+    """Phase 8, signing out of both: a browser address that passes through each connected app's site (ending this
+    browser's session there, ``<site>/api/auth/signout?next=…``) and lands on ``end_url``; None when there is none.
+    ``skip`` is the app that asked, already signed out."""
+    sites = await run_in_threadpool(list_sites, _manager(request), _workspace_path(request))
+    url = None
+    for site in reversed([s for s in sites if s.online and skip not in (s.extension, s.extension_id)]):
+        url = f"{site.url}/api/auth/signout?{urlencode({'next': url or end_url})}"
+    return url
+
+
+@auth_router.post("/auth/sign-out")
+async def sign_out(request: Request) -> JSONResponse:
+    await _end_this_session(request)
+    # Phase 8: signing out of HiroLeague signs this browser out of the apps' sites too; the page goes there next.
+    then = await _through_the_apps(request, f"{_origin(request)}/sign-in")
+    response = JSONResponse({"ok": True, "error": None, "data": {"then": then}})
+    response.delete_cookie(cookie_name(request), path="/")
+    return response
+
+
+@auth_router.get("/auth/sign-out")
+async def sign_out_from_an_app(request: Request) -> RedirectResponse:
+    """Phase 8: an app's Sign out (?for=<app>, already signed out there) ends this browser's HiroLeague session and
+    any other app's, then shows the sign-in page, which goes back to that app after the next sign-in."""
+    for_extension = request.query_params.get("for", "")
+    await _end_this_session(request)
+    end = f"{_origin(request)}/sign-in" + (f"?{urlencode({'for': for_extension})}" if for_extension else "")
+    response = RedirectResponse(await _through_the_apps(request, end, skip=for_extension) or end, status_code=303)
+    response.delete_cookie(cookie_name(request), path="/")
     return response
 
 

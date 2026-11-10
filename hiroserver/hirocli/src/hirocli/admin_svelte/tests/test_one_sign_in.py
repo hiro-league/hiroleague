@@ -188,3 +188,19 @@ def _run(coro: Any) -> Any:
     import asyncio
 
     return asyncio.run(coro)
+
+
+def test_signing_out_here_passes_through_the_apps(family: dict[str, Any]) -> None:
+    client = family["client"]
+    _sign_in(client, "michel", "correct horse")
+    then = client.post("/api/auth/sign-out").json()["data"]["then"]
+    assert then == "http://homehiro.local/api/auth/signout?next=http%3A%2F%2Ftestserver%2Fsign-in"
+    assert client.get("/api/auth/me").json()["data"]["signed_in"] is False
+
+
+def test_an_apps_sign_out_ends_the_session_here_and_comes_back_to_sign_in(family: dict[str, Any]) -> None:
+    client = family["client"]
+    _sign_in(client, "michel", "correct horse")
+    r = client.get("/api/auth/sign-out", params={"for": "home"})
+    assert r.status_code == 303 and r.headers["location"] == "http://testserver/sign-in?for=home"  # home skipped
+    assert client.get("/api/auth/me").json()["data"]["signed_in"] is False
