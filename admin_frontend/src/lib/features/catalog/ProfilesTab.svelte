@@ -18,7 +18,7 @@
    */
   import { onMount } from 'svelte';
   import { page } from '$app/state';
-  import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
+  import type { CatalogProviderRow } from '$lib/api/catalog';
   import type { VoiceProfileRow } from '$lib/api/voice';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import AiProfilesTab from '$lib/features/catalog/ai/AiProfilesTab.svelte';
@@ -32,14 +32,12 @@
     ai,
     active,
     onSelect,
-    catalogModels,
     catalogProviders,
     activeProviderIds
   }: {
     ai: AiController;
     active: ProfilesSub;
     onSelect: (id: ProfilesSub) => void;
-    catalogModels: CatalogModelRow[];
     catalogProviders: CatalogProviderRow[];
     activeProviderIds: Set<string>;
   } = $props();
@@ -110,7 +108,6 @@
   profile={voiceEditing}
   copyOf={voiceCopyOf}
   ctrl={voice}
-  {catalogModels}
   {catalogProviders}
   {activeProviderIds}
 />

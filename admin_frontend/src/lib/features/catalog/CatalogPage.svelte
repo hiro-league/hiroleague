@@ -66,7 +66,6 @@
       {ai}
       active={ctrl.activeTab as ProfilesSub}
       onSelect={(id) => void ctrl.switchTab(id)}
-      catalogModels={ctrl.models ?? []}
       catalogProviders={ctrl.providers ?? []}
       activeProviderIds={ctrl.configuredWorkspaceProviderIds}
     />

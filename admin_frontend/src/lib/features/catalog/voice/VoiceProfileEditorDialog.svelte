@@ -7,7 +7,7 @@
    * right. A profile whose designed voice Google no longer has says so. Designing a voice happens inside
    * the Voice section (My voices), as in HomeHiro. Saved through the preferences API (`voice.profiles`).
    */
-  import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
+  import type { CatalogProviderRow } from '$lib/api/catalog';
   import { Copy, Trash2, TriangleAlert } from '@lucide/svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import Badge from '$lib/components/ui/badge.svelte';
@@ -28,7 +28,6 @@
     profile,
     copyOf = null,
     ctrl,
-    catalogModels,
     catalogProviders,
     activeProviderIds,
     onsaved
@@ -38,7 +37,6 @@
     /** A new profile starting as a copy of this one (Duplicate). */
     copyOf?: VoiceProfileRow | null;
     ctrl: VoiceController;
-    catalogModels: CatalogModelRow[];
     catalogProviders: CatalogProviderRow[];
     activeProviderIds: Set<string>;
     onsaved?: (id: string) => void;
@@ -52,7 +50,6 @@
     style: '',
     speed: 1
   };
-  const speechModels = $derived(catalogModels.filter((m) => m.model_kind === 'tts' && /^(google|openai):/.test(m.id)));
   let d = $state<VoiceProfileFields>({ ...NEW });
   let base = $state('');
   // The saved profile being edited; null for a new one (or after Duplicate, which saves a new profile).
@@ -82,7 +79,11 @@
   const current = $derived(ctrl.profiles.find((p) => p.id === editingId) ?? null);
   // The saved voice is gone at Google (designed voices expire after a year) and wasn't changed yet.
   const voiceGone = $derived(current?.voice_ok === false && d.voice === current.voice);
-  const usedBy = $derived(current?.used_by.map(ctrl.useLabel) ?? []);
+  // Hiro's own voice (`voice.hiro_profile`) counts as a use too, as in the list; without it the editor said
+  // "Nothing uses this profile yet" for Hiro's voice.
+  const usedBy = $derived(
+    current ? [...(ctrl.hiroProfile === current.id ? ["Hiro's voice"] : []), ...current.used_by.map(ctrl.useLabel)] : []
+  );
 
   async function save() {
     saving = true;
@@ -131,8 +132,8 @@
             label="Speech model"
             hint="The model that speaks. Gemini 3.8 Flash TTS: best, 130 languages. Flash-Lite: cheaper, 101 languages."
             selectedId={d.model}
-            catalogModels={speechModels}
-            catalogLoaded={catalogModels.length > 0}
+            catalogModels={ctrl.speechModels}
+            catalogLoaded={ctrl.speechModelsLoaded}
             catalogAllProviders={catalogProviders}
             workspaceActiveProvidersResolved
             workspaceActiveProviderIds={activeProviderIds}

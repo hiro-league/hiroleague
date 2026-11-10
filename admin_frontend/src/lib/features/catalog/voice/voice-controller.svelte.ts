@@ -9,6 +9,7 @@
  * Uses tab's "Speaking" row picks it; deleting the profile it names clears it too (the server refuses a
  * field naming a missing voice profile).
  */
+import { listCatalogModels, type CatalogModelRow } from '$lib/api/catalog';
 import { listPeople, type Person } from '$lib/api/people';
 import { getPreferences, patchPreferences } from '$lib/api/preferences';
 import {
@@ -54,17 +55,27 @@ export class VoiceController {
   error = $state<string | null>(null);
   /** Phase 7b step 5: the voice profile Hiro speaks its replies with (null = none). */
   hiroProfile = $state<string | null>(null);
+  /** The catalog's speech models (Google and OpenAI) for the editor's model picker. Loaded here, like the AI
+   *  controller's chat models: the Catalog page's own model list only loads on its Models tab and follows that
+   *  tab's filters, so the picker was empty when the page opened on Profiles. */
+  speechModels = $state<CatalogModelRow[]>([]);
+  speechModelsLoaded = $state(false);
 
   load = async () => {
     this.loading = true;
-    const [profiles, catalog, uses, people, prefs] = await Promise.all([
+    const [profiles, catalog, uses, people, prefs, speech] = await Promise.all([
       listVoiceProfiles(),
       getVoiceCatalog(),
       listVoiceUses(),
       listPeople(),
       // Hiro's voice lives in preferences; a failed read leaves it as it was (not "none").
-      getPreferences().catch(() => null)
+      getPreferences().catch(() => null),
+      // Speech models for the picker; a failed read keeps the last list.
+      listCatalogModels({ model_kind: 'tts' }).catch(() => null)
     ]);
+    if (speech?.ok && speech.data)
+      this.speechModels = speech.data.models.filter((m) => m.model_kind === 'tts' && /^(google|openai):/.test(m.id));
+    this.speechModelsLoaded = true;
     if (prefs?.ok && prefs.data) this.hiroProfile = prefs.data.preferences.voice?.hiro_profile ?? null;
     this.loading = false;
     this.error = !profiles.ok ? (profiles.error ?? 'Voice profiles could not be read.') : null;
