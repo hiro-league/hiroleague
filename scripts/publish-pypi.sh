@@ -272,7 +272,7 @@ echo "==> Auth: token loaded from ${token_source} (${#token} chars, prefix '${to
 # uploaded from code that fails its checks. Every mode runs it, --dry-run too.
 echo ""
 echo "==> Running the repo's check (scripts/check.sh)"
-if ! "${REPO_ROOT}/scripts/check.sh"; then
+if ! "${REPO_ROOT}/scripts/check.sh" --all; then
     echo "error: the check failed (above): nothing was built or published" >&2
     exit 2
 fi

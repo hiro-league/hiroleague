@@ -1,9 +1,9 @@
 @AGENTS.md
 
-# Building and releasing
+# Building, testing and deploying
 
-The standard every Hiro repo follows (one check command, `./scripts/check.sh`; a release runs it first), in the sibling
-hiro-docs repo:
+Our process for testing, committing, pushing, deploying and releasing (the one check command, `./scripts/check.sh`;
+commit, push, deploy in that order). Follow it in every task. It is in the sibling hiro-docs repo:
 
 @../hiro-docs/standards/building-and-releasing.md
 

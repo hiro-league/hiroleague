@@ -11,7 +11,8 @@
     "check:prefs-types": "node scripts/check-preferences-types.mjs",
     "gen:features": "node scripts/gen-features-registry.mjs",
     "check:features": "node scripts/check-features-registry.mjs",
-    "check": "npm run check:prefs-types && npm run check:features && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "npm run check:prefs-types && npm run check:features && npm run check:svelte",
+    "check:svelte": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "node scripts/run-vitest.mjs run",
     "package:python": "npm run build"
   },
